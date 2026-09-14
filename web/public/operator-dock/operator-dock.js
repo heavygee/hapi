@@ -55,6 +55,105 @@
   // #154 / #209 / #212: keep draw clear of Cancel/Send only — not the FAB pad.
   // #271: markup has no Cancel/Send foot — draw uses the full viewport.
   var markupOpening = false;
+  // #161/#286/#287 — mirrors lib/dock-privilege.ts + lib/dock-visibility.ts. Keep in sync.
+  var LEGACY_EXECUTE_UNTIL = '2026-09-30';
+  var REPORT_REVEALED_KEY = 'hapiInlineReportRevealed';
+  var USER_HIDDEN_KEY = 'hapiInlineDockHidden';
+  var REPORT_KNOCK_PARAM = 'feedback';
+  var REPORT_KNOCK_PATHS = ['/feedback', '/report'];
+  var CSRF_HEADER = 'X-Dock-Report-Csrf';
+  /** Resolved once per boot by init(); everything else reads it. */
+  var surface = null;
+  // #293: a transcription attempt that actually failed. Capability checks are a
+  // prediction; this is evidence, and it outranks them for the rest of the session.
+  var voiceProvenFailed = false;
+  var voiceNoticeShown = false;
+
+  function utcDateOnly() {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  /**
+   * Capability from the host. `privilege` is authoritative; the fallbacks exist only so a
+   * pre-#161 host config does not silently go dark before the legacy sunset.
+   */
+  function resolveDockPrivilege(om) {
+    var p = om && typeof om.privilege === 'string' ? om.privilege.trim() : '';
+    if (p === 'off' || p === 'report' || p === 'execute') return p;
+    var reportUrl = om && typeof om.reportUrl === 'string' ? om.reportUrl.trim() : '';
+    if (reportUrl) return 'report';
+    if (om && om.enabled === true) return utcDateOnly() <= LEGACY_EXECUTE_UNTIL ? 'execute' : 'off';
+    return 'off';
+  }
+
+  function normalizeVisibility(raw) {
+    var v = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+    if (v === 'public' || v === 'on' || v === 'all') return 'public';
+    if (v === 'knock' || v === 'feedback') return 'knock';
+    return 'hidden';
+  }
+
+  function isReportKnockPath(pathname) {
+    var norm = String(pathname || '/').trim() || '/';
+    if (norm !== '/') norm = norm.replace(/\/+$/, '') || '/';
+    return REPORT_KNOCK_PATHS.indexOf(norm.toLowerCase()) >= 0;
+  }
+
+  /** `/feedback` (or `?feedback`) — reveal only. There is never a credential in this URL. */
+  function parseReportKnock(search, pathname) {
+    var raw = String(search || '').replace(/^\?/, '');
+    var params = new URLSearchParams(raw);
+    var pathKnock = isReportKnockPath(pathname || '/');
+    var cleanedPathname = pathKnock ? '/' : (String(pathname || '/').trim() || '/');
+    if (!pathKnock && cleanedPathname !== '/') cleanedPathname = cleanedPathname.replace(/\/+$/, '') || '/';
+    var hasParam = params.has(REPORT_KNOCK_PARAM);
+    if (hasParam) params.delete(REPORT_KNOCK_PARAM);
+    return {
+      consumed: pathKnock || hasParam,
+      cleanedSearch: params.toString(),
+      cleanedPathname: cleanedPathname,
+      pathKnock: pathKnock,
+    };
+  }
+
+  function readLocalFlag(key) {
+    try { return (localStorage.getItem(key) || '').trim() === '1'; } catch (e) { return false; }
+  }
+  function writeLocalFlag(key, on) {
+    try { if (on) localStorage.setItem(key, '1'); else localStorage.removeItem(key); } catch (e) {}
+  }
+  function isReportRevealed() { return readLocalFlag(REPORT_REVEALED_KEY); }
+  function setReportRevealed(on) { writeLocalFlag(REPORT_REVEALED_KEY, on); }
+  function isUserHidden() { return readLocalFlag(USER_HIDDEN_KEY); }
+  function setUserHidden(on) { writeLocalFlag(USER_HIDDEN_KEY, on); }
+
+  /**
+   * Site visibility × privilege × this device. Mirrors resolveDockSurface in lib/dock-visibility.ts.
+   * Discoverability only — the host still enforces both pipes server-side.
+   */
+  function resolveDockSurface(input) {
+    function off(reason) { return { surface: 'off', show: false, setup: false, revealReport: false, reason: reason }; }
+    if (input.privilege === 'off') return off('privilege-off');
+    var knocked = input.executeKnock || input.reportKnock;
+    if (input.userHidden && !knocked) return off('user-hidden');
+    if (input.privilege === 'execute') {
+      if (input.hasExecuteCreds) return { surface: 'execute', show: true, setup: false, revealReport: false, reason: 'execute' };
+      if (input.executeKnock) return { surface: 'execute', show: true, setup: false, revealReport: false, reason: 'execute-knock' };
+      // Entitled but not unlocked — fall through so an operator can still file an issue (#161 Q4).
+    }
+    if (!input.reportConfigured) return off('report-not-configured');
+    if (input.visibility === 'public') return { surface: 'report', show: true, setup: false, revealReport: false, reason: 'report-public' };
+    if (input.reportRevealed) return { surface: 'report', show: true, setup: false, revealReport: false, reason: 'report-revealed' };
+    if (input.reportKnock) {
+      if (input.visibility === 'knock') return { surface: 'report', show: true, setup: false, revealReport: true, reason: 'report-knock' };
+      return { surface: 'report', show: false, setup: true, revealReport: false, reason: 'report-setup' };
+    }
+    return { surface: 'report', show: false, setup: false, revealReport: false, reason: 'report-not-revealed' };
+  }
+
+  function dockSurface() { return (surface && surface.surface) || 'off'; }
+  function isReportSurface() { return dockSurface() === 'report'; }
+  function isExecuteSurface() { return dockSurface() === 'execute'; }
 
   function $(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
   /** Strip Quest/clipboard footguns before ByteString checks (#206). */
@@ -1675,24 +1774,35 @@
 
   function openOverlay(shotDataUrl) {
     // #133: never open a draw-only black overlay when capture produced nothing.
-    if (!shotDataUrl) {
+    // #288/#293: text-first is the exception — the typed words are the payload and
+    // the screenshot is a bonus, so a failed capture must not swallow the message.
+    // Without this an operator with no voice AND no screenshot has no way in at all.
+    if (!shotDataUrl && !isTextFirst()) {
       toast('Screenshot capture failed — nothing to annotate', 'err');
       return;
     }
     overlay = $('div', 'opdock-overlay');
     var stage = $('div', 'opdock-stage');
     // background screenshot
-    shotImg = new Image();
-    shotImg.src = shotDataUrl;
-    shotImg.className = 'opdock-shot';
-    stage.appendChild(shotImg);
-    // draw layer
-    drawCanvas = $('canvas', 'opdock-draw');
-    stage.appendChild(drawCanvas);
+    shotImg = null;
+    if (shotDataUrl) {
+      shotImg = new Image();
+      shotImg.src = shotDataUrl;
+      shotImg.className = 'opdock-shot';
+      stage.appendChild(shotImg);
+    }
+    // draw layer — pointless without a backdrop to annotate, so report-without-
+    // a-shot gets the composer alone rather than a canvas over the live page.
+    drawCanvas = null;
+    if (shotDataUrl) {
+      drawCanvas = $('canvas', 'opdock-draw');
+      stage.appendChild(drawCanvas);
+    }
     overlay.appendChild(stage);
 
     // toolbar
     var bar = $('div', 'opdock-toolbar');
+    if (!drawCanvas) bar.style.display = 'none';
     COLORS.forEach(function (c) {
       var sw = $('button', 'opdock-swatch'); sw.style.background = c;
       if (c === penColor) sw.classList.add('opdock-swatch--on');
@@ -1702,7 +1812,30 @@
     var undo = $('button', 'opdock-tool', '↶ Undo'); undo.addEventListener('click', function () { strokes.pop(); redraw(); });
     var clear = $('button', 'opdock-tool', '✕ Clear'); clear.addEventListener('click', function () { strokes = []; redraw(); });
     bar.appendChild(undo); bar.appendChild(clear);
+    // #293: markup needs a visible, WORDED way to finish. #271 removed the foot
+    // and left only the mic icon flipping to a paper plane, which the first
+    // external user did not read as "Send" — he drew, found no exit, and stopped.
+    // The toolbar is the right home: it already floats clear of the draw surface,
+    // so this costs no drawable area (which is what #271 was actually protecting).
+    // Text-first overlays get their Send on the composer instead — one, not two.
+    if (!isTextFirst()) {
+      var sendTool = $('button', 'opdock-tool opdock-tool--send', 'Send ▶');
+      sendTool.type = 'button';
+      sendTool.setAttribute('title', 'Send this markup (and anything you have said) to the agent');
+      sendTool.addEventListener('click', function (e) {
+        e.preventDefault(); e.stopPropagation();
+        submitOverlay();
+      });
+      bar.appendChild(sendTool);
+    }
     overlay.appendChild(bar);
+
+    // #288/#293: a typed composer whenever the mic is not a route to words —
+    // always in report, and in execute when this browser/host cannot transcribe.
+    // Voice-capable execute stays draw-only (#271): there the mic IS Send.
+    overlay._reportTitle = null;
+    overlay._reportNotes = null;
+    if (isTextFirst()) overlay.appendChild(buildComposerFoot(overlay));
 
     // #271: Markup is DRAW-ONLY — no Cancel/Send foot (they ate drawable area + hid under
     // the transcript). Send = mic again while recording; Cancel = H (discard markup + audio).
@@ -1759,8 +1892,9 @@
   function sizeCanvas() {
     if (!drawCanvas) return;
     var dpr = Math.min(window.devicePixelRatio || 1, 2);
-    // #271: full viewport — no Cancel/Send foot to clear.
-    var w = window.innerWidth, h = Math.max(0, window.innerHeight);
+    // #271: execute markup is full viewport — no Cancel/Send foot to clear.
+    // #288: report mode has a typed composer foot; keep the draw surface above it.
+    var w = window.innerWidth, h = Math.max(0, window.innerHeight - reportFootClearPx());
     drawCanvas.style.width = w + 'px'; drawCanvas.style.height = h + 'px';
     drawCanvas.width = Math.round(w * dpr); drawCanvas.height = Math.round(h * dpr);
     drawCtx = drawCanvas.getContext('2d'); drawCtx.scale(dpr, dpr);
@@ -1781,6 +1915,7 @@
   }
 
   function attachDrawing() {
+    if (!drawCanvas) return;
     function pt(e) { var r = drawCanvas.getBoundingClientRect(); var t = e.touches ? e.touches[0] : e; return { x: t.clientX - r.left, y: t.clientY - r.top }; }
     function down(e) { e.preventDefault(); curStroke = { color: penColor, width: penWidth, pts: [pt(e)] }; strokes.push(curStroke); }
     function move(e) { if (!curStroke) return; e.preventDefault(); curStroke.pts.push(pt(e)); redraw(); }
@@ -1843,7 +1978,159 @@
     return out.toDataURL('image/jpeg', 0.9).split(',')[1];
   }
 
+  /** Height the typed composer steals from the draw surface (0 when there is none). */
+  function reportFootClearPx() {
+    if (!overlay || !isTextFirst()) return 0;
+    var foot = overlay.querySelector('.opdock-report-foot');
+    if (!foot) return 0;
+    var h = foot.offsetHeight || 0;
+    // Guard against a pre-layout 0 so the first sizeCanvas does not draw under the composer.
+    return Math.min(Math.max(h, 180), Math.round(window.innerHeight * 0.6));
+  }
+
+  /**
+   * Typed composer (#288 report, #293 execute-without-voice).
+   *
+   * Report files a GitHub issue; execute sends the typed text to the session
+   * exactly as a transcript would. The title field is report-only — a HAPI
+   * message has no title, and an unused box invites people to fill it in.
+   */
+  function buildComposerFoot(host) {
+    var report = isReportSurface();
+    var foot = $('div', 'opdock-foot opdock-report-foot');
+    var titleInp = null;
+    if (report) {
+      titleInp = document.createElement('input');
+      titleInp.type = 'text';
+      titleInp.className = 'opdock-report-title';
+      titleInp.maxLength = 120;
+      titleInp.setAttribute('aria-label', 'Issue title');
+      titleInp.placeholder = 'Title (optional)';
+      foot.appendChild(titleInp);
+    }
+    var notesTa = document.createElement('textarea');
+    notesTa.className = 'opdock-report-notes';
+    notesTa.setAttribute('rows', '3');
+    notesTa.setAttribute('aria-label', report ? 'What should change?' : 'What should the agent do?');
+    notesTa.placeholder = report
+      ? 'What should change? Draw on the screenshot, then type here.'
+      : 'What should the agent do? Draw on the screenshot, then type here.';
+    host._reportTitle = titleInp;
+    host._reportNotes = notesTa;
+    foot.appendChild(notesTa);
+    var actions = $('div', 'opdock-actions');
+    var cancel = $('button', 'opdock-btn2 opdock-cancel', 'Cancel');
+    cancel.type = 'button';
+    cancel.addEventListener('click', function (e) {
+      e.preventDefault(); e.stopPropagation();
+      closeOverlay();
+    });
+    var send = $('button', 'opdock-btn2 opdock-send', report ? 'File issue ▶' : 'Send ▶');
+    send.type = 'button';
+    send.addEventListener('click', function (e) {
+      e.preventDefault(); e.stopPropagation();
+      submitOverlay();
+    });
+    actions.appendChild(cancel);
+    actions.appendChild(send);
+    foot.appendChild(actions);
+    // Composer must not paint strokes when the operator taps into a field.
+    foot.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
+    return foot;
+  }
+
+  /**
+   * The one Send path for the markup overlay, whatever triggered it — toolbar
+   * button, composer button, or the mic tapped a second time. Before #293 the
+   * only affordance was the mic icon flipping to a paper plane, which Ian read
+   * as "no way to finish" and abandoned.
+   */
+  function submitOverlay() {
+    if (isReportSurface()) {
+      doReportSend(
+        overlay && overlay._reportTitle ? overlay._reportTitle.value : '',
+        overlay && overlay._reportNotes ? overlay._reportNotes.value : ''
+      );
+      return;
+    }
+    // #166: a live recording must flush through STT before we send anything.
+    if (recording) { finishRecording(); return; }
+    var typed = overlay && overlay._reportNotes ? overlay._reportNotes.value : '';
+    var spoken = (liveTranscript || '').trim();
+    doSend([spoken, String(typed || '').trim()].filter(Boolean).join('\n\n'));
+  }
+
+  /** Flatten screenshot + strokes to a PNG Blob. PNG (not JPEG) is what GitHub attach takes. */
+  function flattenReportPng() {
+    if (!shotIsUsable(shotImg)) return Promise.resolve(null);
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var out = document.createElement('canvas');
+    out.width = Math.round(window.innerWidth * dpr);
+    out.height = Math.round(window.innerHeight * dpr);
+    var ctx = out.getContext('2d');
+    ctx.drawImage(shotImg, 0, 0, out.width, out.height);
+    // Draw canvas is shorter than the viewport in report mode (composer foot) — paste 1:1.
+    if (drawCanvas) ctx.drawImage(drawCanvas, 0, 0);
+    return new Promise(function (resolve) {
+      out.toBlob(function (blob) { resolve(blob || null); }, 'image/png');
+    });
+  }
+
+  /**
+   * Report send. Same-origin POST to the host's report route — never `/hapi/*`, never a gate
+   * secret, never STT. The host holds the GitHub credential and does the issue create.
+   */
+  function doReportSend(title, notes) {
+    if (!isReportSurface()) return;
+    var url = cfg && cfg.reportUrl;
+    if (!url || !isRelativeSameOriginPath(url)) {
+      toast('Report URL missing or not same-origin', 'err');
+      return;
+    }
+    var text = String(notes || '').trim();
+    var heading = String(title || '').trim();
+    if (!text && !heading) {
+      toast('Add a title or a note before filing', 'err');
+      return;
+    }
+    setBtnState('sending');
+    (shotImg ? waitForShotReady(shotImg) : Promise.resolve(false)).then(function () {
+      return flattenReportPng();
+    }).then(function (blob) {
+      var fd = new FormData();
+      fd.append('title', heading || text.split('\n')[0].slice(0, 120));
+      fd.append('notes', text);
+      // #288: a text-only report is valid — the host accepts a missing screenshot.
+      if (blob) fd.append('screenshot', blob, 'operator-screenshot.png');
+      var headers = {};
+      if (cfg.reportCsrf) headers[CSRF_HEADER] = cfg.reportCsrf;
+      return fetch(url, {
+        method: 'POST',
+        body: fd,
+        credentials: 'same-origin',
+        headers: headers,
+      });
+    }).then(function (res) {
+      if (!res) { setBtnState('overlay'); return; }
+      if (!res.ok) {
+        return res.json().catch(function () { return {}; }).then(function (d) {
+          toast('Report failed ' + res.status + (d && d.error ? ': ' + d.error : ''), 'err');
+          setBtnState('overlay');
+        });
+      }
+      return res.json().catch(function () { return {}; }).then(function (d) {
+        toast((d && d.issueUrl) ? ('Filed ' + d.issueUrl) : 'Issue filed', 'ok');
+        closeOverlay();
+      });
+    }).catch(function (e) {
+      toast('Report failed: ' + ((e && e.message) || e), 'err');
+      setBtnState('overlay');
+    });
+  }
+
   function doSend(transcript) {
+    // Last line before the HAPI pipe. Report has its own destination (doReportSend).
+    if (refuseNonExecute('doSend')) return;
     var secret = ensureSecret(); if (!secret) return;
     // #133: await decode/load; never upload a fake #111 + strokes JPEG.
     waitForShotReady(shotImg).then(function (ready) {
@@ -1899,6 +2186,7 @@
   }
 
   function doSendFromShot(transcript, shotDataUrl) {
+    if (refuseNonExecute('doSendFromShot')) return;
     var secret = ensureSecret(); if (!secret) { setBtnState('idle'); return; }
     resolveTargetSession(secret).then(function (session) {
     if (!session) {
@@ -2351,7 +2639,21 @@
     }
   }
 
+  /**
+   * #161 security: every route into the execute pipe funnels through these sinks.
+   * Guarding only the UI entry points (`toggleMic`) left the exported host-bridge
+   * APIs — `openWithShot`, `setListening`, `finishRecording` — able to record and
+   * send from a report surface, which would reach `/hapi` with the gate secret.
+   * Guard the sink so a future export cannot reopen the hole by omission.
+   */
+  function refuseNonExecute(what) {
+    if (isExecuteSurface()) return false;
+    try { console.warn('[hapi-inline] ' + what + ' refused: not an execute surface'); } catch (e) {}
+    return true;
+  }
+
   function startRecording(providedShot) {
+    if (refuseNonExecute('startRecording')) return false;
     if (!ensureRoutableBeforeRecord()) return false;
     var status = voiceStatus({
       hasSR: !!(window.SpeechRecognition || window.webkitSpeechRecognition),
@@ -2423,6 +2725,7 @@
   }
 
   function finishRecording() {
+    if (refuseNonExecute('finishRecording')) { recording = false; return; }
     if (!recording) return;
     var fromMarkup = !!overlay;
     recording = false;
@@ -2438,7 +2741,19 @@
       // #271: markup+mic send may have strokes with no speech (draw-only then tap mic twice).
       // Voice-only still requires speech.
       if (!trimmed && !fromMarkup) {
-        toast('No speech captured — tap mic, talk, tap again (use HTTPS Tailscale if this keeps failing)', 'err');
+        // #293: name the actual cause. The old copy blamed the transport for every
+        // empty result, which sent the first external user hunting a connectivity
+        // problem he did not have — his browser simply has no speech recognition
+        // and his hub has no transcription service. (The guard in
+        // operator-dock-stturl.test.ts greps this whole function for that red
+        // herring, so do not reintroduce the word here, comment or copy.)
+        var cap = voiceCapability();
+        if (!cap.usable) {
+          voiceProvenFailed = true;
+          toast(cap.text + ' Use markup and type instead.', 'err');
+        } else {
+          toast('No speech captured — tap mic, talk, then tap Send.', 'err');
+        }
         setBtnState(fromMarkup ? 'markup' : 'idle');
         refreshChromeAffordances();
         return;
@@ -2454,8 +2769,12 @@
     if (!cfg.sttUrl) {
       stopMediaCapture(true);
       hideRecordLabel();
-      toast('Voice transcription is not configured on this host — no whisper fallback', 'err');
+      // #293: remember it. Every later markup opens with the typed composer
+      // rather than making the operator rediscover this one recording at a time.
+      voiceProvenFailed = true;
+      toast('No speech recognition in this browser and no transcription on this host — use markup and type instead.', 'err');
       setBtnState(fromMarkup ? 'markup' : 'idle');
+      refreshChromeAffordances();
       return;
     }
     showRecordLabel('⏳ Transcribing on server…');
@@ -2464,20 +2783,37 @@
       .then(done)
       .catch(function (e) {
         hideRecordLabel();
-        toast('Transcribe failed: ' + (e && e.message || e), 'err');
+        // #293: the host advertised transcription and it did not work. Treat that
+        // as proof, not a blip — the next markup offers typing.
+        voiceProvenFailed = true;
+        toast('Transcription failed on this host (' + ((e && e.message) || e) + ') — use markup and type instead.', 'err');
         setBtnState(fromMarkup ? 'markup' : 'idle');
+        refreshChromeAffordances();
       });
   }
 
   function toggleMic(providedShot) {
+    // #288: STT is an execute privilege. Report never opens a mic (and hosts must 403 /api/stt).
+    if (!isExecuteSurface()) { toast('Voice is for execute mode — report files a typed issue', 'err'); return 'blocked'; }
     // Tap = voice. If markup is open, keep drawings and record on top.
     if (isGateLocked()) { openSecretSheet({ reason: 'rejected' }); return 'blocked'; }
+    // #293: refuse up front with the real reason rather than recording into the void.
+    if (!recording) {
+      var cap = voiceCapability();
+      if (!cap.usable) {
+        toast(cap.text + ' Use markup and type instead.', 'err');
+        if (!overlay) beginMarkup(providedShot || null);
+        return 'blocked';
+      }
+    }
     if (recording) { finishRecording(); return 'stopped'; }
     return startRecording(providedShot || null) ? 'started' : 'blocked';
   }
 
   function beginMarkup(providedShot) {
-    if (isGateLocked()) { openSecretSheet({ reason: 'rejected' }); return; }
+    if (dockSurface() === 'off') return;
+    // Report must never open the execute secret sheet (#161 kill criterion).
+    if (isExecuteSurface() && isGateLocked()) { openSecretSheet({ reason: 'rejected' }); return; }
     if (overlay) return;
     // #154: serialize capture — Quest triple-taps otherwise race and look "dead".
     if (markupOpening) return;
@@ -2491,14 +2827,20 @@
     setBtnState('markup');
     captureScreenshot().then(function (next) {
       markupOpening = false;
-      if (!next) {
+      if (!next && !isTextFirst()) {
         toast('Screenshot capture failed — nothing to annotate', 'err');
         setBtnState('idle');
         return;
       }
+      if (!next) toast('No screenshot — you can still type below', 'info');
       openOverlay(next);
     }).catch(function () {
       markupOpening = false;
+      if (isTextFirst()) {
+        toast('No screenshot — you can still type below', 'info');
+        openOverlay(null);
+        return;
+      }
       setBtnState('idle');
       toast('Screenshot capture failed — nothing to annotate', 'err');
     });
@@ -2523,19 +2865,76 @@
     refreshRecordLabel();
   }
 
-  /** True when tap-record can produce a transcript (native host, Web Speech, or whisper path). */
-  function voiceIsUsable() {
+  /**
+   * #293 — can tap-record actually produce a transcript, and if not, WHY.
+   *
+   * The old `voiceIsUsable()` answered only "can we capture audio", so a browser
+   * with MediaRecorder but no recognition and no whisper host reported `listen`,
+   * let the operator talk into the void, and only admitted the truth after the
+   * recording failed. Ian Stevenson (first external user) hit exactly that and
+   * read the failure as a Tailscale problem.
+   *
+   * Capability is knowable at unlock. Surface it there.
+   */
+  function voiceCapability() {
     var hasSR = false;
     try {
       hasSR = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
     } catch (e) {}
-    var status = voiceStatus({
-      hasSR: hasSR,
-      hasNative: hasNativeHost(),
-      secure: !!window.isSecureContext,
-      hasMedia: canMediaRecorder(),
-    });
-    return status.mode === 'listen';
+    if (hasNativeHost()) return { usable: true, reason: 'native' };
+    if (!window.isSecureContext) {
+      return {
+        usable: false,
+        reason: 'insecure-context',
+        // The one case where the HTTPS/Tailscale advice is actually the cause.
+        text: 'Voice needs HTTPS — open this page over its HTTPS (Tailscale) URL.',
+      };
+    }
+    if (hasSR) return { usable: true, reason: 'web-speech' };
+    if (canMediaRecorder() && cfg && cfg.sttUrl) return { usable: true, reason: 'whisper' };
+    if (canMediaRecorder()) {
+      return {
+        usable: false,
+        reason: 'no-transcription',
+        // Records fine; nothing anywhere can turn it into words.
+        text: 'This browser has no speech recognition and this host has no transcription service, so voice cannot work here.',
+      };
+    }
+    return {
+      usable: false,
+      reason: 'no-recognition',
+      text: 'This browser cannot record or recognise speech, so voice is unavailable here.',
+    };
+  }
+
+  /** Kept for the published test surface; prefer voiceCapability() for new code. */
+  function voiceIsUsable() {
+    return voiceCapability().usable;
+  }
+
+  /**
+   * #293 — tell the operator ONCE, at unlock, that voice cannot work here and
+   * what to do instead. The capability was always knowable at init; before this
+   * the only way to learn it was to record something and have it fail.
+   */
+  function announceVoiceCapability() {
+    if (voiceNoticeShown || !isExecuteSurface()) return;
+    var cap = voiceCapability();
+    if (cap.usable) return;
+    voiceNoticeShown = true;
+    toast(cap.text + ' Markup opens a text box instead.', 'info');
+  }
+
+  /**
+   * #293 — when the mic is not a route to words, typing is. True for report
+   * (which never has a mic) and for execute on a host/browser that cannot
+   * transcribe, including after a whisper attempt has actually failed.
+   */
+  function isTextFirst() {
+    if (isReportSurface()) return true;
+    if (!isExecuteSurface()) return false;
+    if (voiceProvenFailed) return true;
+    return !voiceCapability().usable;
   }
 
   function micIconSvg() {
@@ -2865,11 +3264,79 @@
     if (tool === 'markup') { beginMarkup(null); return; }
     // Sheets still fold the fan — picker/settings recreate their own chrome.
     if (tool === 'settings') { closeCluster(); openSettingsSheet(); return; }
-    if (tool === 'sessions') { closeCluster(); openSessionPicker(); return; }
+    if (tool === 'sessions') {
+      // Report has no HAPI session at all.
+      if (!isExecuteSurface()) { closeCluster(); return; }
+      closeCluster(); openSessionPicker(); return;
+    }
   }
+  /**
+   * #287 — "hide this for me" on every surface. Local preference, not a permission: it only
+   * stops chrome rendering on this device. Re-entry is `/feedback` or `/opmic`, so nobody is
+   * trapped by a tap they cannot undo.
+   */
+  function appendHideControl(sheet) {
+    sheet.appendChild($('h3', null, 'This device'));
+    var reentry = isReportSurface()
+      ? ((cfg && cfg.reportKnockPath) || '/feedback')
+      : '/opmic';
+    sheet.appendChild($('div', 'opdock-session-meta',
+      'Hiding affects this browser only. Bring it back with ' + reentry + '.'));
+    var hideBtn = $('button', 'opdock-btn2 opdock-secondary', 'Hide on this device');
+    hideBtn.type = 'button';
+    hideBtn.addEventListener('click', function () {
+      setUserHidden(true);
+      closeToolSheet();
+      hideDockChrome();
+      toast('Hidden on this device — visit ' + reentry + ' to bring it back', 'ok');
+    });
+    sheet.appendChild(hideBtn);
+  }
+
+  /** Tear the dock out of the page for #287 without reloading the host app. */
+  function hideDockChrome() {
+    closeToolSheet();
+    closeCluster();
+    if (overlay) closeOverlay();
+    if (dock) {
+      forgetTopLayer(dock);
+      dock.remove();
+      dock = null;
+    }
+    ready = false;
+  }
+
+  function openReportSettingsSheet() {
+    toolSheet = $('div', 'opdock-sheet');
+    toolSheetStage = 'settings';
+    toolSheet.appendChild($('h3', null, 'Feedback'));
+    toolSheet.appendChild($('div', 'opdock-session-meta',
+      'Draw on the page, type what should change, and it files a GitHub issue. '
+      + 'No microphone, and nothing is sent to an agent.'));
+    appendHideControl(toolSheet);
+    toolSheet.appendChild($('h3', null, 'About'));
+    var aboutRow = $('button', 'opdock-session-row');
+    aboutRow.type = 'button';
+    var aboutBody = $('div');
+    aboutBody.appendChild($('div', 'opdock-row-title', 'About hapi-inline'));
+    aboutBody.appendChild($('div', 'opdock-session-meta', 'Version ' + currentDockVersion()));
+    aboutRow.appendChild(aboutBody);
+    aboutRow.addEventListener('click', function () { openAboutSheet(); });
+    toolSheet.appendChild(aboutRow);
+    var actions = $('div', 'opdock-actions');
+    var doneBtn = $('button', 'opdock-btn2 opdock-send', 'Done');
+    doneBtn.type = 'button';
+    doneBtn.addEventListener('click', function () { closeToolSheet(); });
+    actions.appendChild(doneBtn);
+    toolSheet.appendChild(actions);
+    dock.appendChild(toolSheet);
+  }
+
   function openSettingsSheet() {
     closeToolSheet();
     if (!dock) return;
+    // Report settings must never render routing, spawn, hub, or the gate credential field.
+    if (isReportSurface()) { openReportSettingsSheet(); return; }
     toolSheet = $('div', 'opdock-sheet');
     toolSheetStage = 'settings';
     // #249/#251: reopen once when operator prefs newly unlock spawn-per-send.
@@ -3157,6 +3624,7 @@
     toolSheet.appendChild(secBtn);
     toolSheet.appendChild($('div', 'opdock-session-meta',
       'Probes your hub — keep an explicit save for this one'));
+    appendHideControl(toolSheet);
     // #139/#251: Done alone in the footer (primary dismiss).
     var actions = $('div', 'opdock-actions');
     var doneBtn = $('button', 'opdock-btn2 opdock-send', 'Done');
@@ -3398,15 +3866,25 @@
   function applyIdleIcon(btn) {
     if (!btn) return;
     btn.innerHTML = hubIconSvg();
-    btn.setAttribute('aria-label', 'Operator tools');
-    btn.setAttribute('title', 'Open operator tools (mic, markup, sessions, settings). Click to toggle. Long-press markup shortcut. While recording: H cancels, mic sends.');
+    var report = isReportSurface();
+    btn.setAttribute('aria-label', report ? 'Feedback' : 'Operator tools');
+    btn.setAttribute('title', report
+      ? 'Send feedback: mark up this page and file a GitHub issue. Click to toggle. Settings can hide it on this device.'
+      : 'Open operator tools (mic, markup, sessions, settings). Click to toggle. Long-press markup shortcut. While recording: H cancels, mic sends.');
     btn.setAttribute('aria-expanded', dock && dock.classList.contains('opdock--cluster-open') ? 'true' : 'false');
   }
 
   function render() {
     dock = $('div', 'opdock');
     var cluster = $('div', 'opdock-cluster');
-    ['settings', 'markup', 'sessions', 'mic'].forEach(function (tool) {
+    // The fan must not advertise what it cannot do. Report has no mic and no
+    // session list. #293: execute on a browser/host that cannot transcribe has
+    // no mic either — offering one is how the first external user spent his
+    // session talking into something that was never going to answer.
+    var tools = isReportSurface()
+      ? ['settings', 'markup']
+      : (isTextFirst() ? ['settings', 'markup', 'sessions'] : ['settings', 'markup', 'sessions', 'mic']);
+    tools.forEach(function (tool) {
       var sat = $('button', 'opdock-sat');
       sat.setAttribute('data-tool', tool);
       sat.setAttribute('aria-label', tool);
@@ -3451,9 +3929,44 @@
     }
     ready = true;
     refreshVersionTrailUi();
+    announceVoiceCapability();
     // #124: native host ≠ hide mic sat. AndroidOperator is a bridge (STT / PixelCopy),
     // not chrome ownership. Native FAB may be hub (QAR openCluster) or mic (Jessica).
     // Hosts that own mic chrome call hideButton() (or CSS-hide the sat).
+  }
+
+  /**
+   * #286 `hidden` + `/feedback`: an off-by-default site asks before turning anything on, so a
+   * shared link cannot silently flip chrome on for whoever clicks it.
+   */
+  function openReportSetupPanel() {
+    var card = $('div', 'opdock-setup');
+    card.appendChild($('h3', null, 'Feedback'));
+    card.appendChild($('div', 'opdock-session-meta',
+      'This site keeps the feedback button off by default. Turn it on for this browser? '
+      + 'It lets you mark up the page and file a GitHub issue. It never talks to an agent.'));
+    var actions = $('div', 'opdock-actions');
+    var no = $('button', 'opdock-btn2 opdock-secondary', 'Not now');
+    no.type = 'button';
+    no.addEventListener('click', function () {
+      forgetTopLayer(card);
+      card.remove();
+    });
+    var yes = $('button', 'opdock-btn2 opdock-send', 'Turn on');
+    yes.type = 'button';
+    yes.addEventListener('click', function () {
+      setReportRevealed(true);
+      forgetTopLayer(card);
+      card.remove();
+      surface = { surface: 'report', show: true, setup: false, revealReport: false, reason: 'report-revealed' };
+      if (!ready) render();
+      toast('Feedback on for this browser — Settings can hide it again', 'ok');
+    });
+    actions.appendChild(no);
+    actions.appendChild(yes);
+    card.appendChild(actions);
+    document.body.appendChild(card);
+    mountAsTopLayer(card);
   }
 
   function init(options) {
@@ -3500,6 +4013,66 @@
         if (!cfg.build) cfg.build = om.build || null;
         if (om.appId && cfg.appId === 'unknown-app') cfg.appId = om.appId;
 
+        // #161/#286: capability from the host, discoverability from ini + this device.
+        cfg.privilege = resolveDockPrivilege(om);
+        cfg.visibility = normalizeVisibility(om.visibility);
+        cfg.reportKnockPath = (typeof om.reportKnockPath === 'string' && om.reportKnockPath.trim())
+          ? om.reportKnockPath.trim()
+          : '/feedback';
+        cfg.reportUrl = (typeof om.reportUrl === 'string' && isRelativeSameOriginPath(om.reportUrl))
+          ? om.reportUrl
+          : null;
+        if (om.reportUrl && !cfg.reportUrl) {
+          toast('HAPI inline report disabled: reportUrl must be same-origin relative', 'err');
+        }
+        cfg.reportCsrf = (typeof om.reportCsrf === 'string' && om.reportCsrf.trim()) ? om.reportCsrf.trim() : '';
+
+        var unlock = parseUnlockQuery(location.search, location.pathname);
+        var knock = parseReportKnock(
+          unlock.consumed ? ('?' + unlock.cleanedSearch) : location.search,
+          unlock.consumed ? unlock.cleanedPathname : location.pathname
+        );
+        if (unlock.consumed || knock.consumed) {
+          stripUnlockFromUrl(
+            knock.consumed ? knock.cleanedSearch : unlock.cleanedSearch,
+            knock.consumed ? knock.cleanedPathname : unlock.cleanedPathname
+          );
+        }
+        if (unlock.rejectedCredentialInQuery) {
+          toast('Ignored insecure ?opmic credential in URL. Use /opmic or ?opmic=1 and paste in the dock sheet.', 'err');
+        }
+        // Visibility vs auth: installed native host IS the visibility knock (?opmic / /opmic optional).
+        // Auth: in-dock sheet (Quest prompt fails). Never soft-lock by returning before render.
+        var nativePresent = hasNativeHost();
+        var needsBrowserHubSetup = cfg.mode === MODE_BROWSER_HUB && !hasValidHubOrigin();
+        var userHidden = isUserHidden();
+        surface = resolveDockSurface({
+          visibility: cfg.visibility,
+          privilege: cfg.privilege,
+          reportConfigured: !!cfg.reportUrl,
+          // The native host bridge IS the visibility knock (#124). `needsBrowserHubSetup`
+          // is deliberately NOT here: #291 closed exactly that hole — an unconfigured
+          // hub is a host problem, not a reason to show a public visitor the dock.
+          hasExecuteCreds: !!getSecret() || nativePresent,
+          executeKnock: !!unlock.shouldPrompt,
+          reportKnock: !!knock.consumed,
+          reportRevealed: isReportRevealed(),
+          userHidden: userHidden,
+        });
+        // A knock this load clears a stale hide so #287 cannot trap anyone.
+        if (userHidden && (unlock.shouldPrompt || knock.consumed)) setUserHidden(false);
+        if (surface.revealReport) setReportRevealed(true);
+        if (surface.setup) { openReportSetupPanel(); return; }
+        if (!surface.show) return;
+
+        if (isReportSurface()) {
+          // Report never touches /hapi or STT — do not validate or keep either.
+          cfg.sttUrl = null;
+          cfg.session = null;
+          render();
+          return;
+        }
+
         if (cfg.mode === MODE_BROWSER_HUB) {
           // hub + stt already synced above
         } else {
@@ -3513,16 +4086,6 @@
           }
         }
 
-        var unlock = parseUnlockQuery(location.search, location.pathname);
-        if (unlock.consumed) stripUnlockFromUrl(unlock.cleanedSearch, unlock.cleanedPathname);
-        if (unlock.rejectedCredentialInQuery) {
-          toast('Ignored insecure ?opmic credential in URL. Use /opmic or ?opmic=1 and paste in the dock sheet.', 'err');
-        }
-        // Visibility vs auth: installed native host IS the visibility knock (?opmic / /opmic optional).
-        // Auth: in-dock sheet (Quest prompt fails). Never soft-lock by returning before render.
-        var nativePresent = hasNativeHost();
-        var needsBrowserHubSetup = cfg.mode === MODE_BROWSER_HUB && !hasValidHubOrigin();
-        if (!getSecret() && !nativePresent && !unlock.shouldPrompt) return;
         render();
         if (!getSecret() || needsBrowserHubSetup) {
           // #155 / #219: unlock without credential or hub — hide H / block tools until probe-OK save.
@@ -3548,8 +4111,22 @@
 
   window.HapiInline = {
     init: init,
-    _version: '0.14.1', // x-release-please-version
+    _version: '0.15.0', // x-release-please-version
     openCluster: function () { return openCluster(); },
+    /** #287 — host Settings can offer the same hide/show the dock sheet does. */
+    hideForThisUser: function () { setUserHidden(true); hideDockChrome(); },
+    showForThisUser: function () {
+      setUserHidden(false);
+      if (ready) return;
+      // Re-run the boot decision: when the hide was applied at load, `surface` is already `off`.
+      init({ appId: cfg && cfg.appId, configUrl: cfg && cfg.configUrl, navProvider: cfg && cfg.navProvider });
+    },
+    isHiddenForThisUser: function () { return isUserHidden(); },
+    surface: function () { return dockSurface(); },
+    _resolveDockPrivilege: resolveDockPrivilege,
+    _resolveDockSurface: resolveDockSurface,
+    _parseReportKnock: parseReportKnock,
+    _normalizeVisibility: normalizeVisibility,
     _stripRawJsonForDisplay: stripRawJsonForDisplay,
     _summarizeContextJson: summarizeContextJson,
     _voiceStatus: voiceStatus,
@@ -3557,26 +4134,44 @@
     _resolveSttUrl: resolveSttUrl,
     _resolveSttAuth: resolveSttAuth,
     _voiceIsUsable: voiceIsUsable,
+    _voiceCapability: voiceCapability,
+    _isTextFirst: isTextFirst,
     _extractMessage: extractMessage,
     isReady: function () { return ready; },
     isRecording: function () { return !!recording; },
     toggleMic: function (dataUrl) { return toggleMic(dataUrl || null); },
-    finishRecording: finishRecording,
+    // #161 security: the native-host bridge (AndroidOperator) drives these. Every
+    // one of them is an execute entry point, so every one checks the surface —
+    // the sinks check again, because a host calling in is not a trusted caller.
+    finishRecording: function () {
+      if (!isExecuteSurface()) return;
+      finishRecording();
+    },
     beginMarkup: function (dataUrl) { beginMarkup(dataUrl || null); },
     openWithShot: function (dataUrl) {
-      if (!ready) return false;
+      if (!ready || !isExecuteSurface()) return false;
       // Tap = voice. Markup stays open if present (annotated send on stop).
       if (recording) { finishRecording(); return true; }
       return !!startRecording(dataUrl || null);
     },
-    appendTranscript: appendTranscript,
-    setTranscript: setTranscript,
+    appendTranscript: function (text) {
+      if (!isExecuteSurface()) return;
+      appendTranscript(text);
+    },
+    setTranscript: function (text) {
+      if (!isExecuteSurface()) return;
+      setTranscript(text);
+    },
     setInterim: function (text) {
+      if (!isExecuteSurface()) return;
       liveInterim = text || '';
       setInterim(text);
       refreshRecordLabel();
     },
     setListening: function (on) {
+      // Flipping `recording` from outside is how a report surface reached doSend:
+      // set listening, feed a transcript, finish. Not any more.
+      if (!isExecuteSurface()) return;
       if (on) {
         recording = true;
         setBtnState('recording');

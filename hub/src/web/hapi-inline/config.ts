@@ -3,7 +3,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { parseSpawnYolo, type HapiInlineHostConfig } from './routes'
 
-const PINNED_TAG = 'v0.14.1'
+const PINNED_TAG = 'v0.15.0'
 const DEFAULT_PROJECT = '/home/heavygee/coding/hapi'
 
 function env(name: string): string {
