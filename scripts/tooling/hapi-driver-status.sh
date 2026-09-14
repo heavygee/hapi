@@ -189,6 +189,40 @@ render_human() {
     return 0
 }
 
+# Quiet path: exit codes only. Do NOT call sessions-health / `hapi --version`.
+# Agents preflight with --quiet constantly; the old render_human >/dev/null path
+# spawned bun `src/index.ts --version` (via hapi-from-active) with no timeout and
+# left multi-hour 800%+ CPU pegs when that probe hung (2026-09-14 oos-linux).
+quiet_exit() {
+    # shellcheck source=lib/driver-status.sh
+    source "$(dirname "$(readlink -f "$0")")/lib/driver-status.sh"
+    # shellcheck source=lib/driver-remat-hold.sh
+    source "$LIB_DIR/driver-remat-hold.sh"
+    driver_status_init
+    driver_status_refresh_active
+
+    if driver_remat_hold_active; then
+        return 76
+    fi
+
+    local rebuild_state switch_state rebuild_pid switch_pid
+    rebuild_state="$(jq -r '.rebuild.state // "?"' "$STATUS_FILE")"
+    switch_state="$(jq -r '.switch.state // "?"' "$STATUS_FILE")"
+    rebuild_pid="$(jq -r '.rebuild.pid // empty' "$STATUS_FILE")"
+    switch_pid="$(jq -r '.switch.pid // empty' "$STATUS_FILE")"
+
+    local busy=0 stale=0
+    if [[ "$rebuild_state" == "running" ]]; then
+        if pid_alive "$rebuild_pid"; then busy=1; else stale=1; fi
+    fi
+    if [[ "$switch_state" == "running" ]]; then
+        if pid_alive "$switch_pid"; then busy=1; else stale=1; fi
+    fi
+    (( busy )) && return 75
+    (( stale )) && return 2
+    return 0
+}
+
 case "$MODE" in
     json)
         # shellcheck source=lib/driver-status.sh
@@ -198,7 +232,7 @@ case "$MODE" in
         cat "$STATUS_FILE"
         ;;
     quiet)
-        render_human >/dev/null
+        quiet_exit
         exit $?
         ;;
     watch)

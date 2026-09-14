@@ -78,9 +78,18 @@ if git -C "$PRIMARY" rev-parse upstream/main >/dev/null 2>&1; then
     read -r fork_behind fork_ahead < <(git -C "$PRIMARY" rev-list --left-right --count upstream/main...main 2>/dev/null || echo "0 0")
 fi
 
+# WORKING count: optional. Default off — GET /api/kitchen-status polls this often,
+# and sessions-health is multi-second; nesting it here stacked load on oos-linux
+# (2026-09-14). Set HAPI_KITCHEN_WORKING=1 to enable a timed probe.
 working="?"
-ws="$(bash "$SCRIPT_DIR/hapi-driver-status.sh" 2>/dev/null | grep -oE 'WORKING=[0-9]+' | head -1 || true)"
-[[ -n "$ws" ]] && working="${ws#WORKING=}"
+if [[ "${HAPI_KITCHEN_WORKING:-0}" == "1" ]]; then
+    health="${HAPI_SESSIONS_HEALTH:-$PRIMARY/scripts/hapi-sessions-health.sh}"
+    if [[ -x "$health" ]]; then
+        ws="$(timeout 20 "$health" --json 2>/dev/null \
+            | jq -r '[.sessions[]? | select(.status == "WORKING")] | length' 2>/dev/null || true)"
+        [[ -n "$ws" && "$ws" != "null" ]] && working="$ws"
+    fi
+fi
 
 lease_holder=""
 if [[ -f "$HOME/.hapi/remat-lease.json" ]]; then

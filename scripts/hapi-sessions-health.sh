@@ -1017,9 +1017,15 @@ def get_optional(url, auth=True):
     except Exception:
         return None
 
-def sh_cmd(*args):
+def sh_cmd(*args, timeout=30):
     try:
-        return subprocess.check_output(list(args), text=True, stderr=subprocess.DEVNULL).strip()
+        return subprocess.check_output(
+            list(args),
+            text=True,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            timeout=timeout,
+        ).strip()
     except Exception:
         return None
 
@@ -1072,9 +1078,20 @@ def collect_build_info():
     git_commit = sh_cmd('git', '-C', str(repo), 'rev-parse', '--short', 'HEAD')
     git_branch = sh_cmd('git', '-C', str(repo), 'branch', '--show-current')
     git_dirty = bool(sh_cmd('git', '-C', str(repo), 'status', '--porcelain'))
-    cli_raw = sh_cmd('hapi', '--version')
-    cli_version = cli_raw.replace('hapi version:', '').strip() if cli_raw else None
-    bun_version = sh_cmd('bun', '--version')
+    # Prefer package.json over spawning `hapi --version` (hapi-from-active →
+    # `bun run src/index.ts --version` can peg CPU for hours with no timeout).
+    cli_version = None
+    for pkg in (repo / 'cli' / 'package.json', repo / 'package.json'):
+        try:
+            cli_version = json.loads(pkg.read_text()).get('version')
+            if cli_version:
+                break
+        except Exception:
+            pass
+    if not cli_version:
+        cli_raw = sh_cmd('hapi', '--version', timeout=5)
+        cli_version = cli_raw.replace('hapi version:', '').strip() if cli_raw else None
+    bun_version = sh_cmd('bun', '--version', timeout=5)
     hub_unit = systemd_unit('hapi-hub.service')
     runner_unit = systemd_unit('hapi-runner.service')
     dist_bundle, dist_path = read_dist_bundle()
