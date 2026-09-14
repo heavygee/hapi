@@ -3830,20 +3830,9 @@
     pushEntry();
     return entries.slice(0, 16);
   }
-  var BUNDLED_CHANGELOG_FALLBACK = [
-    '## [0.12.22]',
-    '### Bug Fixes',
-    '- dock: H/mic hittable over full-bleed markup',
-    '## [0.12.21]',
-    '### Bug Fixes',
-    '- dock: recording interaction — mic sends, H cancels',
-    '## [0.12.20]',
-    '### Bug Fixes',
-    '- dock: adopt chrome into host :modal',
-    '## [0.12.19]',
-    '### Bug Fixes',
-    '- dock: popover must not collapse FAB to 0×0',
-  ].join('\n');
+  /* BEGIN GENERATED bundled-changelog */
+  var BUNDLED_CHANGELOG_FALLBACK = "## [0.15.3](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.2...v0.15.3) (2026-09-14)\n\n\n### Bug Fixes\n\n* **dock:** keep whisper mic on insecure LAN when sttUrl set ([#304](https://github.com/Heavygee-Projects/hapi-inline/issues/304)) ([1568b31](https://github.com/Heavygee-Projects/hapi-inline/commit/1568b3129264ec0eb083eb161164a717955f97b3)), closes [#302](https://github.com/Heavygee-Projects/hapi-inline/issues/302)\n\n## [0.15.2](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.1...v0.15.2) (2026-09-14)\n\n\n### Documentation\n\n* align routingMode default with [#241](https://github.com/Heavygee-Projects/hapi-inline/issues/241) conditional pick/pin ([#299](https://github.com/Heavygee-Projects/hapi-inline/issues/299)) ([9e153c3](https://github.com/Heavygee-Projects/hapi-inline/commit/9e153c37aa4ce9f258320975072d5987e4c889ba)), closes [#297](https://github.com/Heavygee-Projects/hapi-inline/issues/297)\n\n## [0.15.1](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.0...v0.15.1) (2026-09-14)\n\n\n### Bug Fixes\n\n* **dock:** hub-scoped credentials and proactive JWT refresh ([#295](https://github.com/Heavygee-Projects/hapi-inline/issues/295)) ([236988c](https://github.com/Heavygee-Projects/hapi-inline/commit/236988cfd6577e0476940647cf9791c59a48f571))\n\n## [0.15.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.14.1...v0.15.0) (2026-09-14)\n\n\n### Features\n\n* dock site visibility, report-to-GitHub pipe, and per-user hide ([#289](https://github.com/Heavygee-Projects/hapi-inline/issues/289)) ([fb679c2](https://github.com/Heavygee-Projects/hapi-inline/commit/fb679c2cdcdfbe8a526527e2d137c5cb1c06b631))\n\n## [0.14.1](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.14.0...v0.14.1) (2026-09-14)\n\n\n### Bug Fixes\n\n* **dock:** require knock before browser-hub setup sheet ([#291](https://github.com/Heavygee-Projects/hapi-inline/issues/291)) ([aa5b2c4](https://github.com/Heavygee-Projects/hapi-inline/commit/aa5b2c4b52c7a36213a50b4ad78ca2a0407ba48b))\n\n## [0.14.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.13.0...v0.14.0) (2026-09-13)\n\n\n### Features\n\n* **android:** Compose operator dock web-dock parity ([#238](https://github.com/Heavygee-Projects/hapi-inline/issues/238)) ([b980192](https://github.com/Heavygee-Projects/hapi-inline/commit/b980192da1525ed22aba26ed073c9bf26b20b49d))\n\n## [0.13.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.12.23...v0.13.0) (2026-09-13)\n\n\n### Features\n\n* add dock About + changelog unseen trail ([#283](https://github.com/Heavygee-Projects/hapi-inline/issues/283)) ([ed76592](https://github.com/Heavygee-Projects/hapi-inline/commit/ed76592a2a20dcd74208ee1200ac216256d8f227))\n\n## [0.12.23](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.12.22...v0.12.23) (2026-09-13)\n\n\n### Bug Fixes\n\n* restart replies polling after follow-up send ([#281](https://github.com/Heavygee-Projects/hapi-inline/issues/281)) ([93e13a0](https://github.com/Heavygee-Projects/hapi-inline/commit/93e13a053472e221628f2306facb40f79992dd67)), closes [#229](https://github.com/Heavygee-Projects/hapi-inline/issues/229)\n\n## [0.12.22](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.12.21...v0.12.22) (2026-09-11)\n\n\n### Bug Fixes\n\n* **dock:** H/mic hittable over full-bleed markup ([#276](https://github.com/Heavygee-Projects/hapi-inline/issues/276)) ([#277](https://github.com/Heavygee-Projects/hapi-inline/issues/277)) ([58d4438](https://github.com/Heavygee-Projects/hapi-inline/commit/58d443874823d7b637c691382958df102f634dfc))\n\n## [0.12.21](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.12.20...v0.12.21) (2026-09-11)\n\n\n### Bug Fixes\n\n* **dock:** recording interaction — mic sends, H cancels ([#271](https://github.com/Heavygee-Projects/hapi-inline/issues/271)) ([#274](https://github.com/Heavygee-Projects/hapi-inline/issues/274)) ([b863273](https://github.com/Heavygee-Projects/hapi-inline/commit/b86327312858b837668b0f1e50429181a5bf151c))\n\n## [0.12.20](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.12.19...v0.12.20) (2026-09-11)\n\n\n### Bug Fixes\n\n* **dock:** adopt chrome into host :modal for [#254](https://github.com/Heavygee-Projects/hapi-inline/issues/254)/[#268](https://github.com/Heavygee-Projects/hapi-inline/issues/268) ([#269](https://github.com/Heavygee-Projects/hapi-inline/issues/269)) ([354ebf0](https://github.com/Heavygee-Projects/hapi-inline/commit/354ebf0e1b11d487b959177818b3389b4d6f69e5))\n\n## [0.12.19](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.12.18...v0.12.19) (2026-09-11)\n\n\n### Bug Fixes\n\n* **dock:** popover must not collapse FAB to 0×0 ([#264](https://github.com/Heavygee-Projects/hapi-inline/issues/264)) ([#265](https://github.com/Heavygee-Projects/hapi-inline/issues/265)) ([c628e28](https://github.com/Heavygee-Projects/hapi-inline/commit/c628e284519c035c7099165e62e2b72073660504))\n\n## [0.12.18](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.12.17...v0.12.18) (2026-09-11)\n\n\n### Bug Fixes\n\n* **dock:** name session on replies panel ([#259](https://github.com/Heavygee-Projects/hapi-inline/issues/259)) ([#261](https://github.com/Heavygee-Projects/hapi-inline/issues/261)) ([f781132](https://github.com/Heavygee-Projects/hapi-inline/commit/f781132877140ed1fa495c3adfe618d804a15a71))\n* **dock:** operator spawn agent/yolo + hub-default omit ([#260](https://github.com/Heavygee-Projects/hapi-inline/issues/260)) ([#262](https://github.com/Heavygee-Projects/hapi-inline/issues/262)) ([c9bb8bb](https://github.com/Heavygee-Projects/hapi-inline/commit/c9bb8bb410515f0cb18903ce2c5b55b5bb729d05))\n\n## [0.12.17](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.12.16...v0.12.17) (2026-09-11)\n\n\n### Bug Fixes\n\n* **dock:** warn when Popover API missing ([#254](https://github.com/Heavygee-Projects/hapi-inline/issues/254) follow-up) ([#257](https://github.com/Heavygee-Projects/hapi-inline/issues/257)) ([acf09c4](https://github.com/Heavygee-Projects/hapi-inline/commit/acf09c4499a83d616489880e4d0b755a510f4748))\n\n## [0.12.16](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.12.15...v0.12.16) (2026-09-11)\n\n\n### Bug Fixes\n\n* **dock:** top-layer popover vs host showModal ([#254](https://github.com/Heavygee-Projects/hapi-inline/issues/254)) ([#255](https://github.com/Heavygee-Projects/hapi-inline/issues/255)) ([6e47182](https://github.com/Heavygee-Projects/hapi-inline/commit/6e47182b367367972254a420f644a908ff4b377a))\n\n## [0.12.15](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.12.14...v0.12.15) (2026-09-11)\n\n\n### Bug Fixes\n\n* **dock:** autosave hub/spawn prefs; Done + credential only ([#251](https://github.com/Heavygee-Projects/hapi-inline/issues/251)) ([#252](https://github.com/Heavygee-Projects/hapi-inline/issues/252)) ([d3e7ab6](https://github.com/Heavygee-Projects/hapi-inline/commit/d3e7ab6c5506773c60795a674254cb27e2e6d4da))\n";
+  /* END GENERATED bundled-changelog */
   function loadBundledChangelog() {
     if (bundledChangelogPromise) return bundledChangelogPromise;
     var url = (cfg && cfg.changelogUrl) ? String(cfg.changelogUrl) : '/CHANGELOG.md';
@@ -3855,10 +3844,10 @@
       return res.text();
     }).then(function (raw) {
       var parsed = parseBundledChangelog(raw);
-      if (parsed.length) return parsed;
-      return parseBundledChangelog(BUNDLED_CHANGELOG_FALLBACK);
+      if (parsed.length) return { entries: parsed, source: 'host' };
+      return { entries: parseBundledChangelog(BUNDLED_CHANGELOG_FALLBACK), source: 'embedded' };
     }).catch(function () {
-      return parseBundledChangelog(BUNDLED_CHANGELOG_FALLBACK);
+      return { entries: parseBundledChangelog(BUNDLED_CHANGELOG_FALLBACK), source: 'embedded' };
     });
     return bundledChangelogPromise;
   }
@@ -3940,9 +3929,10 @@
     // Opening changelog marks the current version as seen.
     markCurrentVersionSeen();
     toolSheet.appendChild($('h3', null, 'Changelog'));
-    toolSheet.appendChild($('div', 'opdock-session-meta', 'Bundled release notes from package CHANGELOG.md'));
+    var sourceMeta = $('div', 'opdock-session-meta', 'Loading release notes…');
+    toolSheet.appendChild(sourceMeta);
     var list = $('div', 'opdock-changelog');
-    list.appendChild($('div', 'opdock-session-meta', 'Loading bundled release notes…'));
+    list.appendChild($('div', 'opdock-session-meta', 'Loading…'));
     toolSheet.appendChild(list);
     var actions = $('div', 'opdock-actions');
     var backBtn = $('button', 'opdock-btn2 opdock-secondary', 'Back');
@@ -3957,11 +3947,17 @@
     toolSheet.appendChild(actions);
     dock.appendChild(toolSheet);
     refreshVersionTrailUi();
-    loadBundledChangelog().then(function (entries) {
+    loadBundledChangelog().then(function (result) {
       if (!toolSheet || !list.isConnected) return;
+      var source = result && result.source;
+      var entries = result && result.entries ? result.entries : [];
+      sourceMeta.textContent = source === 'host'
+        ? 'Release notes from host CHANGELOG.md'
+        : 'Embedded notes from this dock tag (host CHANGELOG.md not served)';
       renderChangelogList(list, entries);
     }).catch(function () {
       if (!toolSheet || !list.isConnected) return;
+      sourceMeta.textContent = 'Could not load release notes.';
       list.textContent = '';
       list.appendChild($('div', 'opdock-session-meta', 'Could not load bundled release notes.'));
     });
@@ -4178,6 +4174,11 @@
         }
         if (!cfg.build) cfg.build = om.build || null;
         if (om.appId && cfg.appId === 'unknown-app') cfg.appId = om.appId;
+        if (typeof om.changelogUrl === 'string' && isRelativeSameOriginPath(om.changelogUrl)) {
+          cfg.changelogUrl = om.changelogUrl;
+        } else if (cfg.changelogUrl && !isRelativeSameOriginPath(cfg.changelogUrl)) {
+          cfg.changelogUrl = null;
+        }
 
         // #161/#286: capability from the host, discoverability from ini + this device.
         cfg.privilege = resolveDockPrivilege(om);
@@ -4277,7 +4278,7 @@
 
   window.HapiInline = {
     init: init,
-    _version: '0.15.3', // x-release-please-version
+    _version: '0.15.4', // x-release-please-version
     openCluster: function () { return openCluster(); },
     /** #287 — host Settings can offer the same hide/show the dock sheet does. */
     hideForThisUser: function () { setUserHidden(true); hideDockChrome(); },
