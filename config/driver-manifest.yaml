@@ -812,7 +812,7 @@ layers:
   # Thin soup tip on live driver/integration. Worktree: hapi-inline-web (feat) + hapi-inline-soup (tip).
   # Knock /opmic. Composed /hapi/operator/sessions. Do not allow-list raw GET /api/sessions.
   
-  # Tip: 4ba0ff2a0 (driver/hapi-inline-operator-dock) — pin v0.14.1 (#290 knock; re-thin after dogfood bump)
+  # Tip: 7a2d40499 (driver/hapi-inline-operator-dock) — pin v0.15.0 (re-thin after dogfood bump)
   - branch: driver/hapi-inline-operator-dock
 
   # heavygee/hapi#121 — operator-hold chip pulse (🛑 needs_operator / babysit.hold).
