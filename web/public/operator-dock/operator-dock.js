@@ -3522,7 +3522,7 @@
         // Auth: in-dock sheet (Quest prompt fails). Never soft-lock by returning before render.
         var nativePresent = hasNativeHost();
         var needsBrowserHubSetup = cfg.mode === MODE_BROWSER_HUB && !hasValidHubOrigin();
-        if (!getSecret() && !nativePresent && !unlock.shouldPrompt && !needsBrowserHubSetup) return;
+        if (!getSecret() && !nativePresent && !unlock.shouldPrompt) return;
         render();
         if (!getSecret() || needsBrowserHubSetup) {
           // #155 / #219: unlock without credential or hub — hide H / block tools until probe-OK save.
@@ -3548,7 +3548,7 @@
 
   window.HapiInline = {
     init: init,
-    _version: '0.13.0', // x-release-please-version
+    _version: '0.14.1', // x-release-please-version
     openCluster: function () { return openCluster(); },
     _stripRawJsonForDisplay: stripRawJsonForDisplay,
     _summarizeContextJson: summarizeContextJson,
