@@ -1383,9 +1383,24 @@
     return !!(cfg && cfg.sttUrl) && !(transcript || '').trim() && !!hasAudio;
   }
 
-  function canMediaRecorder() {
+  /** MediaRecorder + getUserMedia present (no secure-context gate). */
+  function hasMediaRecorderApis() {
     try {
-      return !!(window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
+      return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
+    } catch (e) { return false; }
+  }
+
+  /**
+   * True when we will attempt MediaRecorder capture.
+   * Hosts that publish sttUrl (Jessica Quest LAN HTTP) must not hard-fail solely on
+   * !isSecureContext — whisper can still POST audio (#302). Web-speech-only installs
+   * keep the secure-context gate so we do not record into the void on plain HTTP.
+   */
+  function canMediaRecorder() {
+    if (!hasMediaRecorderApis()) return false;
+    if (cfg && cfg.sttUrl) return true;
+    try {
+      return !!window.isSecureContext;
     } catch (e) { return false; }
   }
 
@@ -3022,16 +3037,19 @@
       hasSR = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
     } catch (e) {}
     if (hasNativeHost()) return { usable: true, reason: 'native' };
+    // Prefer web-speech on secure origins when available (unchanged from #293).
+    if (window.isSecureContext && hasSR) return { usable: true, reason: 'web-speech' };
+    // Host-published STT: offer whisper even on insecure LAN HTTP (Quest Gallery, #302).
+    // canMediaRecorder() already skips the secure-context gate when cfg.sttUrl is set.
+    if (canMediaRecorder() && cfg && cfg.sttUrl) return { usable: true, reason: 'whisper' };
     if (!window.isSecureContext) {
       return {
         usable: false,
         reason: 'insecure-context',
-        // The one case where the HTTPS/Tailscale advice is actually the cause.
+        // Web-speech-only path: HTTPS/Tailscale advice is actually the cause.
         text: 'Voice needs HTTPS — open this page over its HTTPS (Tailscale) URL.',
       };
     }
-    if (hasSR) return { usable: true, reason: 'web-speech' };
-    if (canMediaRecorder() && cfg && cfg.sttUrl) return { usable: true, reason: 'whisper' };
     if (canMediaRecorder()) {
       return {
         usable: false,
@@ -4259,7 +4277,7 @@
 
   window.HapiInline = {
     init: init,
-    _version: '0.15.2', // x-release-please-version
+    _version: '0.15.3', // x-release-please-version
     openCluster: function () { return openCluster(); },
     /** #287 — host Settings can offer the same hide/show the dock sheet does. */
     hideForThisUser: function () { setUserHidden(true); hideDockChrome(); },
