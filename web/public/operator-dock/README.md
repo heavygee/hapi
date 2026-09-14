@@ -1,13 +1,13 @@
 # Vendored hapi-inline operator dock
 
-Pinned tag: **v0.15.0**  
-Source: https://github.com/heavygee/hapi-inline/releases/tag/v0.15.0
+Pinned tag: **v0.15.1**  
+Source: https://github.com/heavygee/hapi-inline/releases/tag/v0.15.1
 
 Files here (`operator-dock.js`, `operator-dock.css`, `vendor/html2canvas.min.js`) are a byte copy of that release. Do not edit them in this repo.
 
-SHA-1 (v0.15.0):
+SHA-1 (v0.15.1):
 
-- `operator-dock.js` — `9d610ec64aebaa8f764caaa1a90a139bfc41b73d`
+- `operator-dock.js` — `00ac690cb39351d9c640526a71e134fcfe0c849a`
 - `operator-dock.css` — `da241c835235a30fd04f15c81eb77179f8387adb`
 - `vendor/html2canvas.min.js` — `00dac05dbfa83704e76c420a6ab3fbcc7ada6303` (html2canvas-pro 2.3.5; same path)
 
@@ -15,6 +15,7 @@ Host wiring (not this folder):
 
 - `hapi-boot.js` — HAPI web init (`appId: hapi-web`, `configUrl: /hapi/config`, `getHubJwt` for #176).
 - `hub/src/web/hapi-inline/` — `PINNED_TAG` must match this README. Allow-list: POST `messages` / `upload` / `abort`. `sttUrl: '/api/stt'`, `sttAuth: 'hub-jwt'`. `web/index.html` loads dock with `?v=<pin>`.
+- v0.15.1 — #228 credential parity.
 
 Re-vendor: copy `web/` from the next release-please tag. Drop any local dock fork.
 

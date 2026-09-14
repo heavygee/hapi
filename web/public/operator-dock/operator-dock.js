@@ -30,8 +30,14 @@
 (function () {
   'use strict';
 
+  // Hub-scoped credential storage (#228). Legacy globals migrate on read.
+  // Keep in sync with lib/operator-credential-store.ts.
+  var ACCESS_TOKEN_PREFIX = 'hapiInlineAccessToken::';
   var SECRET_KEY = 'hapiInlineSecret';
   var LEGACY_SECRET_KEY = 'operatorMicSecret';
+  var PENDING_CREDENTIAL_SCOPE = '__pending__';
+  var JWT_REFRESH_THROTTLE_MS = 15000;
+  var JWT_PROACTIVE_REFRESH_BEFORE_MS = 60000;
   var SECRET_HEADER = 'X-Hapi-Inline-Secret';
   var LEGACY_SECRET_HEADER = 'X-Operator-Mic-Secret';
   var MODE_PROXY = 'proxy';
@@ -68,6 +74,10 @@
   // prediction; this is evidence, and it outranks them for the rest of the session.
   var voiceProvenFailed = false;
   var voiceNoticeShown = false;
+  // #228: in-flight JWT mint keyed by credential (do not hand B A's JWT).
+  var _jwtRefreshInFlight = null; // { cred: string, promise: Promise }
+  var _jwtLastRefreshAttemptMs = 0;
+  var _jwtProactiveTimer = null;
 
   function utcDateOnly() {
     return new Date().toISOString().slice(0, 10);
@@ -190,14 +200,50 @@
     while (hex.length < 4) hex = '0' + hex;
     return 'Gate secret has invalid characters (U+' + hex + ') — re-paste as plain ASCII';
   }
+  function accessTokenStorageKey(hubOrigin) {
+    return ACCESS_TOKEN_PREFIX + String(hubOrigin || '').trim().replace(/\/+$/, '');
+  }
+  function credentialScope() {
+    if (cfg && cfg.mode === MODE_BROWSER_HUB) {
+      var hub = syncEffectiveHubOrigin();
+      return hub || PENDING_CREDENTIAL_SCOPE;
+    }
+    try {
+      if (typeof location !== 'undefined' && location.origin) return location.origin;
+    } catch (e) {}
+    return 'proxy:same-origin';
+  }
+  function clearLegacyCredentialGlobals() {
+    try {
+      localStorage.removeItem(SECRET_KEY);
+      localStorage.removeItem(LEGACY_SECRET_KEY);
+    } catch (e) {}
+  }
   function getSecret() {
     try {
+      var scope = credentialScope();
+      var scoped = normalizeGateSecret(localStorage.getItem(accessTokenStorageKey(scope)) || '');
+      if (scoped) {
+        if (gateSecretByteStringError(scoped)) {
+          setSecret('');
+          return '';
+        }
+        // #228 pass 2: clear leftovers on every scoped hit (no cross-hub migrate later).
+        clearLegacyCredentialGlobals();
+        return scoped;
+      }
+      if (hasOtherScopedCredential(scope)) {
+        clearLegacyCredentialGlobals();
+        return '';
+      }
       var next = normalizeGateSecret(localStorage.getItem(SECRET_KEY) || '');
       if (next) {
         if (gateSecretByteStringError(next)) {
           setSecret('');
           return '';
         }
+        localStorage.setItem(accessTokenStorageKey(scope), next);
+        clearLegacyCredentialGlobals();
         return next;
       }
       var legacy = normalizeGateSecret(localStorage.getItem(LEGACY_SECRET_KEY) || '');
@@ -206,18 +252,49 @@
           setSecret('');
           return '';
         }
+        localStorage.setItem(accessTokenStorageKey(scope), legacy);
+        clearLegacyCredentialGlobals();
         return legacy;
       }
       return '';
     } catch (e) { return ''; }
   }
+  function hasOtherScopedCredential(scope) {
+    try {
+      var current = String(scope || '').trim().replace(/\/+$/, '');
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (!k || k.indexOf(ACCESS_TOKEN_PREFIX) !== 0) continue;
+        var other = k.slice(ACCESS_TOKEN_PREFIX.length);
+        if (other === current) continue;
+        if (normalizeGateSecret(localStorage.getItem(k) || '')) return true;
+      }
+    } catch (e) {}
+    return false;
+  }
   function setSecret(v) {
     try {
+      var scope = credentialScope();
       var n = normalizeGateSecret(v == null ? '' : v);
-      if (n && !gateSecretByteStringError(n)) localStorage.setItem(SECRET_KEY, n);
-      else localStorage.removeItem(SECRET_KEY);
-      // TODO(2027-02-01): remove legacy storage key compatibility.
-      localStorage.removeItem(LEGACY_SECRET_KEY);
+      var key = accessTokenStorageKey(scope);
+      if (n && !gateSecretByteStringError(n)) localStorage.setItem(key, n);
+      else localStorage.removeItem(key);
+      clearLegacyCredentialGlobals();
+    } catch (e) {}
+  }
+  function migratePendingCredentialToHub(hub) {
+    var scope = String(hub || '').trim().replace(/\/+$/, '');
+    if (!scope) return;
+    try {
+      var pendingKey = accessTokenStorageKey(PENDING_CREDENTIAL_SCOPE);
+      var pending = normalizeGateSecret(localStorage.getItem(pendingKey) || '');
+      if (!pending) return;
+      var dest = accessTokenStorageKey(scope);
+      if (!normalizeGateSecret(localStorage.getItem(dest) || '')) {
+        localStorage.setItem(dest, pending);
+      }
+      localStorage.removeItem(pendingKey);
+      clearLegacyCredentialGlobals();
     } catch (e) {}
   }
 
@@ -1444,6 +1521,7 @@
     }
     if (btn) btn.disabled = true;
     setHubOriginOverride(hub);
+    migratePendingCredentialToHub(hub);
     syncEffectiveHubOrigin();
     if (btn) btn.disabled = false;
     if (labelEl) labelEl.textContent = 'Calling: ' + hubOriginDisplayLabel();
@@ -1489,9 +1567,50 @@
     }
   }
 
+  function decodeJwtExpMs(token) {
+    var parts = String(token || '').split('.');
+    if (parts.length < 2) return null;
+    var payloadRaw = b64urlToUtf8(parts[1]);
+    if (!payloadRaw) return null;
+    try {
+      var payload = JSON.parse(payloadRaw);
+      if (!payload || typeof payload.exp !== 'number' || !isFinite(payload.exp)) return null;
+      return payload.exp * 1000;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function needsJwtRefresh(token, minTtlMs, force) {
+    if (force) return true;
+    var nowMs = Date.now();
+    var expMs = token ? decodeJwtExpMs(token) : null;
+    var ttlMs = expMs != null ? expMs - nowMs : null;
+    if (ttlMs !== null && ttlMs > minTtlMs) return false;
+    var needsRefreshForTtl = ttlMs !== null && ttlMs <= minTtlMs;
+    if (!needsRefreshForTtl && nowMs - _jwtLastRefreshAttemptMs < JWT_REFRESH_THROTTLE_MS) return false;
+    return true;
+  }
+
+  function scheduleProactiveJwtRefresh(credential) {
+    if (_jwtProactiveTimer) {
+      clearTimeout(_jwtProactiveTimer);
+      _jwtProactiveTimer = null;
+    }
+    if (!cfg || cfg.mode !== MODE_BROWSER_HUB || !credential || looksLikeJwt(credential)) return;
+    var expMs = cfg._jwt ? decodeJwtExpMs(cfg._jwt) : null;
+    if (!expMs) return;
+    var delay = Math.max(0, expMs - JWT_PROACTIVE_REFRESH_BEFORE_MS - Date.now());
+    _jwtProactiveTimer = setTimeout(function () {
+      _jwtProactiveTimer = null;
+      getBrowserHubJwt(credential, true, JWT_PROACTIVE_REFRESH_BEFORE_MS).catch(function () {});
+    }, delay);
+  }
+
   function mintBrowserHubJwt(credential) {
     syncEffectiveHubOrigin();
     var accessToken = credential.indexOf(':') === -1 ? (credential + ':default') : credential;
+    _jwtLastRefreshAttemptMs = Date.now();
     return fetch(joinUrl(cfg.hapiProxy, '/api/auth'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1502,20 +1621,41 @@
         if (!res.ok || !body || !body.token) return Promise.reject(new Error('hub auth failed'));
         cfg._jwt = String(body.token);
         cfg._jwtFrom = credential;
+        scheduleProactiveJwtRefresh(credential);
         return cfg._jwt;
       });
     });
   }
 
-  function getBrowserHubJwt(credential, forceRefresh) {
+  function getBrowserHubJwt(credential, forceRefresh, minTtlMs) {
     if (!credential) return Promise.reject(new Error('credential required'));
     if (looksLikeJwt(credential)) {
       cfg._jwt = credential;
       cfg._jwtFrom = '__jwt__';
       return Promise.resolve(cfg._jwt);
     }
-    if (!forceRefresh && cfg._jwt && cfg._jwtFrom === credential) return Promise.resolve(cfg._jwt);
-    return mintBrowserHubJwt(credential);
+    var floor = typeof minTtlMs === 'number' ? minTtlMs : 0;
+    var cached = (!forceRefresh && cfg._jwt && cfg._jwtFrom === credential) ? cfg._jwt : null;
+    if (cached && !needsJwtRefresh(cached, floor, !!forceRefresh)) {
+      return Promise.resolve(cached);
+    }
+    if (_jwtRefreshInFlight && _jwtRefreshInFlight.cred === credential) {
+      return _jwtRefreshInFlight.promise;
+    }
+    var promise = mintBrowserHubJwt(credential).finally(function () {
+      if (_jwtRefreshInFlight && _jwtRefreshInFlight.promise === promise) {
+        _jwtRefreshInFlight = null;
+      }
+    });
+    _jwtRefreshInFlight = { cred: credential, promise: promise };
+    return promise;
+  }
+
+  function refreshBrowserHubJwtIfStale() {
+    if (!cfg || cfg.mode !== MODE_BROWSER_HUB) return;
+    var cred = getSecret();
+    if (!cred || looksLikeJwt(cred)) return;
+    getBrowserHubJwt(cred, false, JWT_PROACTIVE_REFRESH_BEFORE_MS).catch(function () {});
   }
 
   function getSttJwt() {
@@ -3930,6 +4070,14 @@
     ready = true;
     refreshVersionTrailUi();
     announceVoiceCapability();
+    // #228: HAPI useAuth parity — refresh JWT when the tab becomes active.
+    if (cfg.mode === MODE_BROWSER_HUB && !document.documentElement._opdockJwtFocusBound) {
+      document.documentElement._opdockJwtFocusBound = true;
+      window.addEventListener('focus', refreshBrowserHubJwtIfStale);
+      document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'visible') refreshBrowserHubJwtIfStale();
+      });
+    }
     // #124: native host ≠ hide mic sat. AndroidOperator is a bridge (STT / PixelCopy),
     // not chrome ownership. Native FAB may be hub (QAR openCluster) or mic (Jessica).
     // Hosts that own mic chrome call hideButton() (or CSS-hide the sat).
@@ -4111,7 +4259,7 @@
 
   window.HapiInline = {
     init: init,
-    _version: '0.15.0', // x-release-please-version
+    _version: '0.15.1', // x-release-please-version
     openCluster: function () { return openCluster(); },
     /** #287 — host Settings can offer the same hide/show the dock sheet does. */
     hideForThisUser: function () { setUserHidden(true); hideDockChrome(); },
