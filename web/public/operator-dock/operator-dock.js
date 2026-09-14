@@ -4259,7 +4259,7 @@
 
   window.HapiInline = {
     init: init,
-    _version: '0.15.1', // x-release-please-version
+    _version: '0.15.2', // x-release-please-version
     openCluster: function () { return openCluster(); },
     /** #287 — host Settings can offer the same hide/show the dock sheet does. */
     hideForThisUser: function () { setUserHidden(true); hideDockChrome(); },
