@@ -8,27 +8,22 @@
  * we install a transient, repo-local rule for the lifetime of a session and
  * remove it on teardown.
  *
- * The rule asks the agent to end each response with a one-line machine-readable
- * status summary that this workspace's session tracking records. The line shape
- * mirrors `AGENT_NOTIFY_CONTRACT_INLINE_PREFIX` in `shared/src/overseerEvents.ts`.
- *
- * Concurrent sessions sharing a cwd use a shared restore sidecar + refcount so
- * the first overlay to arrive preserves the true pre-HAPI file, and only the
- * last cleanup restores it (earlier cleanups must not clobber an active peer
- * or permanently install another session's generated rule).
+ * Concurrent sessions sharing a cwd share ownership state under HAPI_HOME (not
+ * inside the workspace) with live PIDs so: (1) only the last live owner restores
+ * the pre-HAPI file, (2) crashed owners are reaped on the next install, and
+ * (3) `git add -A` cannot stage bookkeeping sidecars.
  *
  * All fs work is fail-open — a missing rule must never crash a session.
  */
 
+import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, rmdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { homedir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { logger } from '@/ui/logger';
+import { isProcessAlive } from '@/utils/process';
 
 const RULE_FILENAME = 'hapi-session.mdc';
-/** Shared restore of the pre-HAPI file (user or tracked), keyed next to the rule. */
-const RESTORE_SUFFIX = '.hapi-restore';
-/** Active HAPI overlay count for this cwd; last decrement restores. */
-const REFS_SUFFIX = '.hapi-refs';
 
 /**
  * Hidden marker identifying files this overlay owns. Lets us distinguish a
@@ -52,6 +47,19 @@ export interface InstallCursorNotifyRuleOverlayOptions {
     /** Optional agent id to bake into the example line. */
     agentId?: string | null;
 }
+
+type OverlayOwner = {
+    /** Unique per install (same PID can own multiple overlays in tests / nested launches). */
+    id: string;
+    pid: number;
+};
+
+type OverlayOwnershipState = {
+    cwd: string;
+    owners: OverlayOwner[];
+    /** Pre-HAPI rule bytes, or null when the rule did not exist before first install. */
+    restore: string | null;
+};
 
 /**
  * Build the `.mdc` rule content. `alwaysApply: true` so cursor-agent applies it
@@ -137,11 +145,14 @@ export function buildNotifyRuleContent(opts: { project?: string | null; agentId?
 export function installCursorNotifyRuleOverlay(
     opts: InstallCursorNotifyRuleOverlayOptions
 ): CursorNotifyRuleOverlay {
-    const cursorDir = join(opts.cwd, '.cursor');
+    const absCwd = resolve(opts.cwd);
+    const cursorDir = join(absCwd, '.cursor');
     const rulesDir = join(cursorDir, 'rules');
     const rulePath = join(rulesDir, RULE_FILENAME);
-    const restorePath = `${rulePath}${RESTORE_SUFFIX}`;
-    const refsPath = `${rulePath}${REFS_SUFFIX}`;
+    const stateDir = getOverlayStateDir(absCwd);
+    const statePath = join(stateDir, 'state.json');
+    const ownerId = randomUUID();
+    const pid = process.pid;
 
     // Dirs we create so cleanup can prune exactly what we added (deepest first).
     const createdDirs: string[] = [];
@@ -157,22 +168,32 @@ export function installCursorNotifyRuleOverlay(
             mkdirSync(rulesDir, { recursive: true });
             createdDirs.push(rulesDir);
         }
+        if (!existsSync(stateDir)) {
+            mkdirSync(stateDir, { recursive: true });
+        }
 
-        // First overlay in this cwd captures the true pre-HAPI bytes once.
-        if (!existsSync(restorePath) && existsSync(rulePath)) {
-            const existing = safeRead(rulePath);
-            if (existing !== null) {
-                writeFileSync(restorePath, existing, 'utf-8');
+        let state = reapOwners(readOwnershipState(statePath, absCwd));
+        if (state.owners.length === 0) {
+            // First install, or all previous owners died. Keep any existing restore
+            // snapshot; only capture from disk when we have never snapshotted.
+            if (state.restore === null) {
+                state = {
+                    cwd: absCwd,
+                    owners: [],
+                    restore: existsSync(rulePath) ? safeRead(rulePath) : null
+                };
+            } else {
+                state = { ...state, owners: [] };
             }
         }
 
-        const refs = readRefs(refsPath) + 1;
-        writeFileSync(refsPath, String(refs), 'utf-8');
+        state.owners.push({ id: ownerId, pid });
+        writeOwnershipState(statePath, state);
         writeFileSync(rulePath, buildNotifyRuleContent(opts), 'utf-8');
         installed = true;
-        // File-only (debug) so journal/dogfood can prove the alwaysApply rule
-        // landed before cursor-agent spawn without spamming the TUI.
-        logger.debug(`[cursor-notify-rule] installed alwaysApply rule at ${rulePath} (refs=${refs})`);
+        logger.debug(
+            `[cursor-notify-rule] installed alwaysApply rule at ${rulePath} (owners=${state.owners.length})`
+        );
     } catch (error) {
         logger.debug('[cursor-notify-rule] install failed', error);
     }
@@ -182,27 +203,23 @@ export function installCursorNotifyRuleOverlay(
         cleaned = true;
         if (!installed) return;
         try {
-            const remaining = Math.max(0, readRefs(refsPath) - 1);
-            if (remaining > 0) {
-                // Peer overlay still active — leave the live rule alone.
-                writeFileSync(refsPath, String(remaining), 'utf-8');
+            let state = reapOwners(readOwnershipState(statePath, absCwd));
+            state.owners = state.owners.filter((owner) => owner.id !== ownerId);
+            if (state.owners.length > 0) {
+                writeOwnershipState(statePath, state);
                 return;
             }
 
-            // Last overlay out: restore pre-HAPI file or delete what we created.
-            if (existsSync(restorePath)) {
-                const restore = safeRead(restorePath);
-                if (restore !== null) {
-                    writeFileSync(rulePath, restore, 'utf-8');
-                }
-                rmSync(restorePath, { force: true });
+            // Last live owner: restore pre-HAPI bytes or delete generated rule.
+            if (state.restore !== null) {
+                writeFileSync(rulePath, state.restore, 'utf-8');
             } else if (existsSync(rulePath)) {
                 const current = safeRead(rulePath);
                 if (current === null || current.includes(HAPI_SESSION_RULE_SENTINEL)) {
                     rmSync(rulePath, { force: true });
                 }
             }
-            rmSync(refsPath, { force: true });
+            rmSync(stateDir, { recursive: true, force: true });
 
             for (const dir of [...createdDirs].reverse()) {
                 if (isEmptyDir(dir)) {
@@ -217,11 +234,57 @@ export function installCursorNotifyRuleOverlay(
     return { rulePath, cleanup };
 }
 
-function readRefs(path: string): number {
+function getHapiHomeDir(): string {
+    const fromEnv = process.env.HAPI_HOME?.trim();
+    if (fromEnv) return fromEnv.replace(/^~/, homedir());
+    return join(homedir(), '.hapi');
+}
+
+function getOverlayStateDir(absCwd: string): string {
+    const hash = createHash('sha256').update(absCwd).digest('hex').slice(0, 24);
+    return join(getHapiHomeDir(), 'cursor-notify-overlays', hash);
+}
+
+function readOwnershipState(path: string, absCwd: string): OverlayOwnershipState {
     const raw = safeRead(path);
-    if (raw === null) return 0;
-    const n = Number.parseInt(raw.trim(), 10);
-    return Number.isFinite(n) && n > 0 ? n : 0;
+    if (!raw) {
+        return { cwd: absCwd, owners: [], restore: null };
+    }
+    try {
+        const parsed = JSON.parse(raw) as Partial<OverlayOwnershipState>;
+        const owners: OverlayOwner[] = [];
+        if (Array.isArray(parsed.owners)) {
+            for (const entry of parsed.owners) {
+                if (
+                    entry
+                    && typeof entry === 'object'
+                    && typeof (entry as OverlayOwner).id === 'string'
+                    && typeof (entry as OverlayOwner).pid === 'number'
+                    && Number.isFinite((entry as OverlayOwner).pid)
+                ) {
+                    owners.push({ id: (entry as OverlayOwner).id, pid: (entry as OverlayOwner).pid });
+                }
+            }
+        }
+        return {
+            cwd: absCwd,
+            owners,
+            restore: typeof parsed.restore === 'string' ? parsed.restore : null
+        };
+    } catch {
+        return { cwd: absCwd, owners: [], restore: null };
+    }
+}
+
+function writeOwnershipState(path: string, state: OverlayOwnershipState): void {
+    writeFileSync(path, JSON.stringify(state), 'utf-8');
+}
+
+function reapOwners(state: OverlayOwnershipState): OverlayOwnershipState {
+    return {
+        ...state,
+        owners: state.owners.filter((owner) => isProcessAlive(owner.pid))
+    };
 }
 
 function safeRead(path: string): string | null {

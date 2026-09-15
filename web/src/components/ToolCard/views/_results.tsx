@@ -776,6 +776,8 @@ function AgentIdPill(props: { label: string; value: string }) {
 const CodexAgentResultView: ToolViewComponent = (props: ToolViewProps) => {
     const { name, state, result, input } = props.block.tool
     const showDetails = props.surface === 'dialog'
+    const { showAgentContract } = useShowAgentContract()
+    const visibleText = (text: string) => (showAgentContract ? text : stripAgentContract(text))
 
     if (result === undefined || result === null) {
         return <ResultStatusPill text={getCodexAgentActivity(input) ?? placeholderForState(state)} />
@@ -783,9 +785,10 @@ const CodexAgentResultView: ToolViewComponent = (props: ToolViewProps) => {
 
     if (state === 'error') {
         const text = extractTextFromResult(result)
+        const display = text ? visibleText(text) : null
         return (
             <div className="text-sm text-red-600">
-                {text?.trim() ? text : 'Agent tool failed'}
+                {display?.trim() ? display : 'Agent tool failed'}
             </div>
         )
     }
@@ -833,7 +836,7 @@ const CodexAgentResultView: ToolViewComponent = (props: ToolViewProps) => {
                                     </div>
                                     {status.text ? (
                                         <div className="text-sm text-[var(--app-fg)]">
-                                            {renderText(status.text, { mode: 'auto', collapseLongContent: props.surface === 'inline', surface: props.surface })}
+                                            {renderText(visibleText(status.text), { mode: 'auto', collapseLongContent: props.surface === 'inline', surface: props.surface })}
                                         </div>
                                     ) : null}
                                 </div>
@@ -859,7 +862,7 @@ const CodexAgentResultView: ToolViewComponent = (props: ToolViewProps) => {
                     </div>
                     {showDetails && parsed.text ? (
                         <div className="text-sm text-[var(--app-fg)]">
-                            {renderText(parsed.text, { mode: 'auto', collapseLongContent: props.surface === 'inline', surface: props.surface })}
+                            {renderText(visibleText(parsed.text), { mode: 'auto', collapseLongContent: props.surface === 'inline', surface: props.surface })}
                         </div>
                     ) : null}
                     {showDetails ? <RawJsonDevOnly value={result} surface={props.surface} /> : null}
@@ -876,7 +879,7 @@ const CodexAgentResultView: ToolViewComponent = (props: ToolViewProps) => {
 
         return (
             <>
-                {renderText(text, { mode: 'auto', collapseLongContent: props.surface === 'inline', surface: props.surface })}
+                {renderText(visibleText(text), { mode: 'auto', collapseLongContent: props.surface === 'inline', surface: props.surface })}
                 {typeof result === 'object' ? <RawJsonDevOnly value={result} surface={props.surface} /> : null}
             </>
         )

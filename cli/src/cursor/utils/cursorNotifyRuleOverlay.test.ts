@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -48,16 +48,37 @@ describe('buildNotifyRuleContent', () => {
 
 describe('installCursorNotifyRuleOverlay', () => {
     let cwd: string;
+    let hapiHome: string;
+    let previousHapiHome: string | undefined;
 
     beforeEach(() => {
         cwd = mkdtempSync(join(tmpdir(), 'hapi-notify-rule-'));
+        hapiHome = mkdtempSync(join(tmpdir(), 'hapi-home-'));
+        previousHapiHome = process.env.HAPI_HOME;
+        process.env.HAPI_HOME = hapiHome;
     });
 
     afterEach(() => {
         rmSync(cwd, { recursive: true, force: true });
+        rmSync(hapiHome, { recursive: true, force: true });
+        if (previousHapiHome === undefined) {
+            delete process.env.HAPI_HOME;
+        } else {
+            process.env.HAPI_HOME = previousHapiHome;
+        }
     });
 
     const rulePathOf = (root: string) => join(root, '.cursor', 'rules', 'hapi-session.mdc');
+
+    it('keeps ownership state outside the workspace', () => {
+        mkdirSync(join(cwd, '.cursor', 'rules'), { recursive: true });
+        writeFileSync(rulePathOf(cwd), '# tracked\n', 'utf-8');
+        const overlay = installCursorNotifyRuleOverlay({ cwd });
+        expect(existsSync(join(cwd, '.cursor', 'rules', 'hapi-session.mdc.hapi-refs'))).toBe(false);
+        expect(existsSync(join(cwd, '.cursor', 'rules', 'hapi-session.mdc.hapi-restore'))).toBe(false);
+        expect(readdirSync(hapiHome).length).toBeGreaterThan(0);
+        overlay.cleanup();
+    });
 
     it('writes the rule file and reports its path', () => {
         const overlay = installCursorNotifyRuleOverlay({ cwd });
