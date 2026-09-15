@@ -45,6 +45,7 @@ export type PingPeerSessionSummary = {
         path?: string | null
         lifecycleState?: string | null
         piSessionId?: string
+        agentSessionId?: string
         summary?: { text?: string } | null
     } | null
 }
@@ -163,6 +164,82 @@ function authHeaders(jwt: string): Record<string, string> {
     })
 }
 
+function readAgentSessionId(session: PingPeerSessionSummary): string {
+    const raw = session.metadata?.agentSessionId
+    return typeof raw === 'string' ? raw.trim() : ''
+}
+
+function sortPeersActiveThenUpdated(sessions: PingPeerSessionSummary[]): PingPeerSessionSummary[] {
+    return [...sessions].sort((a, b) => {
+        const aActive = a.active ? 0 : 1
+        const bActive = b.active ? 0 : 1
+        if (aActive !== bActive) {
+            return aActive - bActive
+        }
+        return (b.updatedAt ?? 0) - (a.updatedAt ?? 0)
+    })
+}
+
+function formatPeerResolveHint(session: PingPeerSessionSummary): string {
+    const name = session.metadata?.name?.trim() || resolvePeerSessionLabel(session)
+    const agentSessionId = readAgentSessionId(session)
+    const hubShort = session.id.slice(0, 8)
+    const agentPart = agentSessionId
+        ? ` agentSessionId=${agentSessionId.length > 12 ? `${agentSessionId.slice(0, 12)}…` : agentSessionId}`
+        : ''
+    return `name="${name}" hubId=${hubShort}…${agentPart}`
+}
+
+function throwPeerResolveNotFound(trimmed: string, sessions: PingPeerSessionSummary[]): never {
+    const sample = sessions.slice(0, 3).map(formatPeerResolveHint).join('; ')
+    const hint = sample ? ` Sample: ${sample}.` : ''
+    throw new PingPeerError(
+        'not_found',
+        `no session matching '${trimmed}'. Try a longer hub id prefix or agentSessionId prefix.${hint}`
+    )
+}
+
+function throwPeerResolveAmbiguous(
+    trimmed: string,
+    matches: PingPeerSessionSummary[],
+    kind: string
+): never {
+    const sample = matches.slice(0, 5).map(formatPeerResolveHint).join('; ')
+    throw new PingPeerError(
+        'ambiguous',
+        `'${trimmed}' matches ${matches.length} sessions by ${kind} (${sample}${matches.length > 5 ? '; …' : ''}); use a longer prefix`
+    )
+}
+
+function pickBestPeerMatch(
+    matches: PingPeerSessionSummary[],
+    trimmed: string,
+    kind: string
+): PingPeerSessionSummary {
+    if (matches.length === 0) {
+        throw new PingPeerError('not_found', `no session matching '${trimmed}'`)
+    }
+    if (matches.length === 1) {
+        return matches[0]!
+    }
+    const sorted = sortPeersActiveThenUpdated(matches)
+    const top = sorted[0]!
+    const tied = sorted.filter(
+        (session) =>
+            session.active === top.active
+            && (session.updatedAt ?? 0) === (top.updatedAt ?? 0)
+    )
+    if (tied.length > 1) {
+        throwPeerResolveAmbiguous(trimmed, tied, kind)
+    }
+    return top
+}
+
+/**
+ * Resolve a peer session by hub id prefix or durable `metadata.agentSessionId`.
+ * Hub ids are ephemeral; agentSessionId survives hub-row churn (#1203).
+ * POST/resume always use the resolved hub `id` (current row).
+ */
 export function resolveSessionByPrefix(
     sessions: PingPeerSessionSummary[],
     prefix: string
@@ -172,23 +249,43 @@ export function resolveSessionByPrefix(
         throw new PingPeerError('bad_args', 'session id prefix is required')
     }
 
-    const exact = sessions.filter((session) => session.id === trimmed)
-    if (exact.length === 1) {
-        return exact[0]!
+    const exactHub = sessions.filter((session) => session.id === trimmed)
+    if (exactHub.length === 1) {
+        return exactHub[0]!
     }
 
-    const matches = sessions.filter((session) => session.id.startsWith(trimmed))
-    if (matches.length === 0) {
-        throw new PingPeerError('not_found', `no session matching prefix '${trimmed}'`)
+    const hubPrefixMatches = sessions.filter((session) => session.id.startsWith(trimmed))
+    if (hubPrefixMatches.length === 1) {
+        return hubPrefixMatches[0]!
     }
-    if (matches.length > 1) {
-        const sample = matches.slice(0, 5).map((session) => session.id.slice(0, 8)).join(', ')
-        throw new PingPeerError(
-            'ambiguous',
-            `prefix '${trimmed}' matches ${matches.length} sessions (${sample}${matches.length > 5 ? ', ...' : ''}); use a longer prefix`
-        )
+    if (hubPrefixMatches.length > 1) {
+        throwPeerResolveAmbiguous(trimmed, hubPrefixMatches, 'hub id prefix')
     }
-    return matches[0]!
+
+    const needleLower = trimmed.toLowerCase()
+    const agentExact = sessions.filter(
+        (session) => readAgentSessionId(session).toLowerCase() === needleLower
+    )
+    if (agentExact.length > 0) {
+        return pickBestPeerMatch(agentExact, trimmed, 'agentSessionId')
+    }
+
+    const agentPrefixMatches = sessions.filter((session) =>
+        readAgentSessionId(session).toLowerCase().startsWith(needleLower)
+    )
+    if (agentPrefixMatches.length > 0) {
+        return pickBestPeerMatch(agentPrefixMatches, trimmed, 'agentSessionId prefix')
+    }
+
+    // Overseer `resolve` substring parity for agentSessionId when prefix is too short.
+    const agentContainsMatches = sessions.filter((session) =>
+        readAgentSessionId(session).toLowerCase().includes(needleLower)
+    )
+    if (agentContainsMatches.length > 0) {
+        return pickBestPeerMatch(agentContainsMatches, trimmed, 'agentSessionId')
+    }
+
+    throwPeerResolveNotFound(trimmed, sessions)
 }
 
 async function listSessions(
