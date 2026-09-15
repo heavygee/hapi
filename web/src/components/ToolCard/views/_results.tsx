@@ -7,6 +7,7 @@ import { ChecklistList, extractTodoChecklist } from '@/components/ToolCard/check
 import { basename, resolveDisplayPath } from '@/utils/path'
 import { getInputStringAny } from '@/lib/toolInputUtils'
 import { useShowAgentContract } from '@/hooks/useShowAgentContract'
+import { isSubagentToolName } from '@/chat/subagentTool'
 import {
     getCodexAgentActivity,
     getCodexAgentTargets,
@@ -997,6 +998,11 @@ export const toolResultViewRegistry: Record<string, ToolViewComponent> = {
 export function getToolResultViewComponent(toolName: string): ToolViewComponent {
     if (toolName.startsWith('mcp__')) {
         return GenericResultView
+    }
+    // Claude Task/Agent (and Task:*/Agent:* variants) share MarkdownResultView so
+    // show-contract stripping applies to every subagent final response.
+    if (isSubagentToolName(toolName)) {
+        return MarkdownResultView
     }
     return toolResultViewRegistry[toolName] ?? GenericResultView
 }

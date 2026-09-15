@@ -12,11 +12,12 @@
  * status summary that this workspace's session tracking records. The line shape
  * mirrors `AGENT_NOTIFY_CONTRACT_INLINE_PREFIX` in `shared/src/overseerEvents.ts`.
  *
- * Non-clobbering discipline (mirrors how a config overlay behaves): if anything
- * already exists at the same path (user rule, tracked repo copy, or a prior HAPI
- * overlay), we back up its contents and restore them on cleanup. Only a file we
- * created this session (no prior content) is removed on teardown. All fs work is
- * fail-open — a missing rule must never crash a session.
+ * Concurrent sessions sharing a cwd use a shared restore sidecar + refcount so
+ * the first overlay to arrive preserves the true pre-HAPI file, and only the
+ * last cleanup restores it (earlier cleanups must not clobber an active peer
+ * or permanently install another session's generated rule).
+ *
+ * All fs work is fail-open — a missing rule must never crash a session.
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, rmdirSync, writeFileSync } from 'node:fs';
@@ -24,11 +25,15 @@ import { join } from 'node:path';
 import { logger } from '@/ui/logger';
 
 const RULE_FILENAME = 'hapi-session.mdc';
+/** Shared restore of the pre-HAPI file (user or tracked), keyed next to the rule. */
+const RESTORE_SUFFIX = '.hapi-restore';
+/** Active HAPI overlay count for this cwd; last decrement restores. */
+const REFS_SUFFIX = '.hapi-refs';
 
 /**
  * Hidden marker identifying files this overlay owns. Lets us distinguish a
  * user's pre-existing rule (back up + restore) from one written by another HAPI
- * session sharing the cwd (safe to overwrite / remove).
+ * session sharing the cwd.
  */
 export const HAPI_SESSION_RULE_SENTINEL = '<!-- hapi:session-summary-rule -->';
 
@@ -52,6 +57,9 @@ export interface InstallCursorNotifyRuleOverlayOptions {
  * Build the `.mdc` rule content. `alwaysApply: true` so cursor-agent applies it
  * to every turn without the agent having to opt in. Kept deliberately benign and
  * functional: it reads as ordinary session-tracking config, not surveillance.
+ *
+ * Includes the operator-facing identity / @-mention section so managed Cursor
+ * ACP sessions see the same phone/FCM rules as the tracked repo copy.
  */
 export function buildNotifyRuleContent(opts: { project?: string | null; agentId?: string | null } = {}): string {
     const project = sanitizeToken(opts.project) ?? '<project>';
@@ -86,6 +94,36 @@ export function buildNotifyRuleContent(opts: { project?: string | null; agentId?
         '  what you did. Use process/worklog language only when there was no question',
         '  (e.g. shipped a PR, waiting on CI).',
         '- Keep it as the very last line of every response.',
+        '',
+        '## Operator-facing session identity (mandatory)',
+        '',
+        'Phone, voice, and notify surfaces show `action` / `summary` with **no**',
+        'sidebar. Bare session hashes (`6ce7f124`, `sid8`, UUID prefixes) are',
+        '**forbidden** in `action`, `summary`, chat replies to the operator, and',
+        'peer pings the operator will hear/read.',
+        '',
+        '### In HAPI chat / peer pings (chip affordance)',
+        '',
+        'Whenever you mention another agent/session to the operator (or in text the',
+        'operator will open in HAPI), use the **session @-mention wire format** so the',
+        'UI renders the same `@Name` chip as composer autocomplete / peer-delivery',
+        'sender chips (click, hover tooltip, navigate):',
+        '',
+        '```markdown',
+        '[upstream issue/pr discovery](/sessions/<full-session-id>)',
+        '```',
+        '',
+        'That is how the rich composer serializes `@` picks (`composerSegments.ts`).',
+        'Do **not** substitute bare names, bare `/sessions/<id>`, or `"Name" (id)`',
+        'prose when a chip is possible.',
+        '',
+        'Bad: `6ce7f124` / `session 6ce7f124` / plain `upstream issue/pr discovery`',
+        'Good: `[upstream issue/pr discovery](/sessions/6ce7f124-6240-4479-8dad-f2e27eb880a1)`',
+        '',
+        '### In `AGENT_NOTIFY_SUMMARY` action/summary (voice / FCM)',
+        '',
+        'Chips do not render on TTS. Use the **display name as spoken words** (still',
+        'never a naked hash). Prefer the same title string the chip would show.',
         ''
     ].join('\n');
 }
@@ -102,12 +140,13 @@ export function installCursorNotifyRuleOverlay(
     const cursorDir = join(opts.cwd, '.cursor');
     const rulesDir = join(cursorDir, 'rules');
     const rulePath = join(rulesDir, RULE_FILENAME);
+    const restorePath = `${rulePath}${RESTORE_SUFFIX}`;
+    const refsPath = `${rulePath}${REFS_SUFFIX}`;
 
     // Dirs we create so cleanup can prune exactly what we added (deepest first).
     const createdDirs: string[] = [];
-    // Verbatim contents of a user's pre-existing file, restored on cleanup.
-    let preExistingContent: string | null = null;
     let cleaned = false;
+    let installed = false;
 
     try {
         if (!existsSync(cursorDir)) {
@@ -119,20 +158,21 @@ export function installCursorNotifyRuleOverlay(
             createdDirs.push(rulesDir);
         }
 
-        if (existsSync(rulePath)) {
+        // First overlay in this cwd captures the true pre-HAPI bytes once.
+        if (!existsSync(restorePath) && existsSync(rulePath)) {
             const existing = safeRead(rulePath);
-            // Always preserve whatever was on disk (user rule, tracked repo copy,
-            // or a prior HAPI overlay). Cleanup restores it instead of deleting,
-            // so ending a session cannot dirty a checkout that ships the rule.
             if (existing !== null) {
-                preExistingContent = existing;
+                writeFileSync(restorePath, existing, 'utf-8');
             }
         }
 
+        const refs = readRefs(refsPath) + 1;
+        writeFileSync(refsPath, String(refs), 'utf-8');
         writeFileSync(rulePath, buildNotifyRuleContent(opts), 'utf-8');
+        installed = true;
         // File-only (debug) so journal/dogfood can prove the alwaysApply rule
         // landed before cursor-agent spawn without spamming the TUI.
-        logger.debug(`[cursor-notify-rule] installed alwaysApply rule at ${rulePath}`);
+        logger.debug(`[cursor-notify-rule] installed alwaysApply rule at ${rulePath} (refs=${refs})`);
     } catch (error) {
         logger.debug('[cursor-notify-rule] install failed', error);
     }
@@ -140,24 +180,30 @@ export function installCursorNotifyRuleOverlay(
     const cleanup = (): void => {
         if (cleaned) return;
         cleaned = true;
+        if (!installed) return;
         try {
-            if (preExistingContent !== null) {
-                // Restore the prior file exactly as it was.
-                writeFileSync(rulePath, preExistingContent, 'utf-8');
+            const remaining = Math.max(0, readRefs(refsPath) - 1);
+            if (remaining > 0) {
+                // Peer overlay still active — leave the live rule alone.
+                writeFileSync(refsPath, String(remaining), 'utf-8');
                 return;
             }
 
-            // Only remove the file if we created it this session (nothing to
-            // restore) and it is still ours (a user may have replaced it
-            // mid-session; never delete their content).
-            if (existsSync(rulePath)) {
+            // Last overlay out: restore pre-HAPI file or delete what we created.
+            if (existsSync(restorePath)) {
+                const restore = safeRead(restorePath);
+                if (restore !== null) {
+                    writeFileSync(rulePath, restore, 'utf-8');
+                }
+                rmSync(restorePath, { force: true });
+            } else if (existsSync(rulePath)) {
                 const current = safeRead(rulePath);
                 if (current === null || current.includes(HAPI_SESSION_RULE_SENTINEL)) {
                     rmSync(rulePath, { force: true });
                 }
             }
+            rmSync(refsPath, { force: true });
 
-            // Prune dirs we created, deepest first, only while empty.
             for (const dir of [...createdDirs].reverse()) {
                 if (isEmptyDir(dir)) {
                     rmdirSync(dir);
@@ -169,6 +215,13 @@ export function installCursorNotifyRuleOverlay(
     };
 
     return { rulePath, cleanup };
+}
+
+function readRefs(path: string): number {
+    const raw = safeRead(path);
+    if (raw === null) return 0;
+    const n = Number.parseInt(raw.trim(), 10);
+    return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
 function safeRead(path: string): string | null {

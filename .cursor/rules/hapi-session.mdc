@@ -9,20 +9,20 @@ End every response with a single machine-readable status line so this
 workspace's session tracking can record progress. Put it on its own final
 line, after all other content, with no code fences or backticks:
 
-AGENT_NOTIFY_SUMMARY {"version":1,"agent":"<agent-id>","project":"hapi","status":"done","action":"next step here","summary":"spoken answer or outcome"}
+AGENT_NOTIFY_SUMMARY {"version":1,"agent":"agent-id","project":"hapi","status":"done|blocked|needs_review|needs_decision|failed|stalled","action":"<=12 words","summary":"spoken answer or outcome"}
 
 When nothing remains, omit the action key entirely (example):
-AGENT_NOTIFY_SUMMARY {"version":1,"agent":"<agent-id>","project":"hapi","status":"done","summary":"spoken answer or outcome"}
+AGENT_NOTIFY_SUMMARY {"version":1,"agent":"agent-id","project":"hapi","status":"done","summary":"spoken answer or outcome"}
 
 Guidance:
 - status: pick the closest value; use "blocked" if unsure.
 - action: only when status is "done" and follow-up remains; 12 words or fewer.
-  This field drives phone/voice TTS when present. Never emit "action":"" —
+  Omit the action key when nothing remains. Never emit "action":"" —
   Cursor drops a quote and breaks JSON.
-- summary: operator-facing one spoken sentence (also phone/FCM body). If the
-  operator asked a question this turn, answer that question here — do not
-  describe what you did. Use process/worklog language only when there was no
-  question (e.g. shipped a PR, waiting on CI). Same human-language bar as action.
+- summary: operator-facing one spoken sentence (phone/FCM). If the operator
+  asked a question this turn, answer that question here — do not describe
+  what you did. Use process/worklog language only when there was no question
+  (e.g. shipped a PR, waiting on CI).
 - Keep it as the very last line of every response.
 
 ## Operator-facing session identity (mandatory)

@@ -20,6 +20,8 @@ describe('buildNotifyRuleContent', () => {
         expect(content.toLowerCase()).not.toContain('what this turn did');
         expect(content).toContain('Never emit "action":""');
         expect(content).toContain('omit the action key entirely');
+        expect(content).toContain('## Operator-facing session identity');
+        expect(content).toContain('[upstream issue/pr discovery](/sessions/<full-session-id>)');
     });
 
     it('bakes in project and agent id when provided', () => {
@@ -103,18 +105,36 @@ describe('installCursorNotifyRuleOverlay', () => {
         expect(existsSync(join(cwd, '.cursor', 'mcp.json'))).toBe(true);
     });
 
-    it('restores a pre-existing sentinel-bearing file (tracked repo or prior overlay)', () => {
+    it('restores a pre-existing tracked/user file after overlay cleanup', () => {
         const rulePath = rulePathOf(cwd);
         mkdirSync(join(cwd, '.cursor', 'rules'), { recursive: true });
-        const prior = buildNotifyRuleContent({ project: 'tracked-repo' });
+        const prior = '# tracked repo rule\nalwaysApply: false\n';
         writeFileSync(rulePath, prior, 'utf-8');
 
         const overlay = installCursorNotifyRuleOverlay({ cwd, project: 'session' });
         expect(readFileSync(rulePath, 'utf-8')).toContain('"project":"session"');
 
         overlay.cleanup();
-        // Must restore, not delete — otherwise a checkout that ships the rule goes dirty.
         expect(readFileSync(rulePath, 'utf-8')).toBe(prior);
+    });
+
+    it('last concurrent cleanup restores the original, not the peer overlay', () => {
+        const rulePath = rulePathOf(cwd);
+        mkdirSync(join(cwd, '.cursor', 'rules'), { recursive: true });
+        const tracked = buildNotifyRuleContent({ project: 'tracked-repo', agentId: 'repo' });
+        writeFileSync(rulePath, tracked, 'utf-8');
+
+        const first = installCursorNotifyRuleOverlay({ cwd, project: 'older', agentId: 'a' });
+        const second = installCursorNotifyRuleOverlay({ cwd, project: 'newer', agentId: 'b' });
+        expect(readFileSync(rulePath, 'utf-8')).toContain('"project":"newer"');
+
+        // Older session exits first — must not restore tracked yet (peer still live)
+        // and must not leave tracked clobbered by the older generated snapshot.
+        first.cleanup();
+        expect(readFileSync(rulePath, 'utf-8')).toContain('"project":"newer"');
+
+        second.cleanup();
+        expect(readFileSync(rulePath, 'utf-8')).toBe(tracked);
     });
 
     it('never deletes a user file that replaced ours mid-session', () => {
