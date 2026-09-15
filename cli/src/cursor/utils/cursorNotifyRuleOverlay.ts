@@ -17,13 +17,25 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, rmdirSync, writeFileSync } from 'node:fs';
+import {
+    closeSync,
+    existsSync,
+    mkdirSync,
+    openSync,
+    readFileSync,
+    readdirSync,
+    rmSync,
+    rmdirSync,
+    unlinkSync,
+    writeFileSync
+} from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { logger } from '@/ui/logger';
 import { isProcessAlive } from '@/utils/process';
 
 const RULE_FILENAME = 'hapi-session.mdc';
+const OWNERSHIP_LOCK_TIMEOUT_MS = 5_000;
 
 /**
  * Hidden marker identifying files this overlay owns. Lets us distinguish a
@@ -57,7 +69,12 @@ type OverlayOwner = {
 type OverlayOwnershipState = {
     cwd: string;
     owners: OverlayOwner[];
-    /** Pre-HAPI rule bytes, or null when the rule did not exist before first install. */
+    /**
+     * True once we have snapshotted the pre-HAPI rule state for this cwd.
+     * Distinguishes "never captured" from "captured as absent" (`restore: null`).
+     */
+    snapshotTaken: boolean;
+    /** Pre-HAPI rule bytes when `snapshotTaken`; null means no file existed. */
     restore: string | null;
 };
 
@@ -151,12 +168,16 @@ export function installCursorNotifyRuleOverlay(
     const rulePath = join(rulesDir, RULE_FILENAME);
     const stateDir = getOverlayStateDir(absCwd);
     const statePath = join(stateDir, 'state.json');
+    const lockPath = join(stateDir, 'state.lock');
     const ownerId = randomUUID();
     const pid = process.pid;
 
     // Dirs we create so cleanup can prune exactly what we added (deepest first).
     const createdDirs: string[] = [];
     let cleaned = false;
+    /** Owner row written to HAPI_HOME state (even if the workspace rule write fails). */
+    let registered = false;
+    /** Workspace rule successfully overwritten with generated content. */
     let installed = false;
 
     try {
@@ -172,28 +193,30 @@ export function installCursorNotifyRuleOverlay(
             mkdirSync(stateDir, { recursive: true });
         }
 
-        let state = reapOwners(readOwnershipState(statePath, absCwd));
-        if (state.owners.length === 0) {
-            // First install, or all previous owners died. Keep any existing restore
-            // snapshot; only capture from disk when we have never snapshotted.
-            if (state.restore === null) {
+        withOwnershipLock(lockPath, () => {
+            let state = reapOwners(readOwnershipState(statePath, absCwd));
+            if (state.owners.length === 0 && !state.snapshotTaken) {
+                // First install (or recovered empty state): capture pre-HAPI bytes,
+                // including an explicit "file was absent" snapshot.
                 state = {
                     cwd: absCwd,
                     owners: [],
+                    snapshotTaken: true,
                     restore: existsSync(rulePath) ? safeRead(rulePath) : null
                 };
-            } else {
+            } else if (state.owners.length === 0) {
+                // Crash recovery: keep the prior snapshot (including restore:null).
                 state = { ...state, owners: [] };
             }
-        }
 
-        state.owners.push({ id: ownerId, pid });
-        writeOwnershipState(statePath, state);
+            state.owners.push({ id: ownerId, pid });
+            writeOwnershipState(statePath, state);
+            registered = true;
+        });
+
         writeFileSync(rulePath, buildNotifyRuleContent(opts), 'utf-8');
         installed = true;
-        logger.debug(
-            `[cursor-notify-rule] installed alwaysApply rule at ${rulePath} (owners=${state.owners.length})`
-        );
+        logger.debug(`[cursor-notify-rule] installed alwaysApply rule at ${rulePath}`);
     } catch (error) {
         logger.debug('[cursor-notify-rule] install failed', error);
     }
@@ -201,25 +224,39 @@ export function installCursorNotifyRuleOverlay(
     const cleanup = (): void => {
         if (cleaned) return;
         cleaned = true;
-        if (!installed) return;
+        if (!registered) return;
         try {
-            let state = reapOwners(readOwnershipState(statePath, absCwd));
-            state.owners = state.owners.filter((owner) => owner.id !== ownerId);
-            if (state.owners.length > 0) {
-                writeOwnershipState(statePath, state);
-                return;
-            }
-
-            // Last live owner: restore pre-HAPI bytes or delete generated rule.
-            if (state.restore !== null) {
-                writeFileSync(rulePath, state.restore, 'utf-8');
-            } else if (existsSync(rulePath)) {
-                const current = safeRead(rulePath);
-                if (current === null || current.includes(HAPI_SESSION_RULE_SENTINEL)) {
-                    rmSync(rulePath, { force: true });
+            let clearStateDir = false;
+            withOwnershipLock(lockPath, () => {
+                let state = reapOwners(readOwnershipState(statePath, absCwd));
+                state.owners = state.owners.filter((owner) => owner.id !== ownerId);
+                if (state.owners.length > 0) {
+                    writeOwnershipState(statePath, state);
+                    return;
                 }
+
+                // Last live owner. Only mutate the workspace rule if we wrote it
+                // and it is still HAPI-owned (sentinel present). Mid-session user
+                // replacements without the sentinel are left alone.
+                if (installed) {
+                    const current = existsSync(rulePath) ? safeRead(rulePath) : null;
+                    const stillOurs = current === null || current.includes(HAPI_SESSION_RULE_SENTINEL);
+                    if (stillOurs) {
+                        if (state.snapshotTaken && state.restore !== null) {
+                            writeFileSync(rulePath, state.restore, 'utf-8');
+                        } else if (state.snapshotTaken && state.restore === null) {
+                            if (existsSync(rulePath)) {
+                                rmSync(rulePath, { force: true });
+                            }
+                        }
+                    }
+                }
+
+                clearStateDir = true;
+            });
+            if (clearStateDir) {
+                rmSync(stateDir, { recursive: true, force: true });
             }
-            rmSync(stateDir, { recursive: true, force: true });
 
             for (const dir of [...createdDirs].reverse()) {
                 if (isEmptyDir(dir)) {
@@ -236,7 +273,10 @@ export function installCursorNotifyRuleOverlay(
 
 function getHapiHomeDir(): string {
     const fromEnv = process.env.HAPI_HOME?.trim();
-    if (fromEnv) return fromEnv.replace(/^~/, homedir());
+    if (fromEnv) {
+        const expanded = fromEnv.replace(/^~(?=$|[/\\])/, homedir());
+        return isAbsolute(expanded) ? expanded : resolve(expanded);
+    }
     return join(homedir(), '.hapi');
 }
 
@@ -245,10 +285,14 @@ function getOverlayStateDir(absCwd: string): string {
     return join(getHapiHomeDir(), 'cursor-notify-overlays', hash);
 }
 
+function emptyOwnershipState(absCwd: string): OverlayOwnershipState {
+    return { cwd: absCwd, owners: [], snapshotTaken: false, restore: null };
+}
+
 function readOwnershipState(path: string, absCwd: string): OverlayOwnershipState {
     const raw = safeRead(path);
     if (!raw) {
-        return { cwd: absCwd, owners: [], restore: null };
+        return emptyOwnershipState(absCwd);
     }
     try {
         const parsed = JSON.parse(raw) as Partial<OverlayOwnershipState>;
@@ -266,13 +310,17 @@ function readOwnershipState(path: string, absCwd: string): OverlayOwnershipState
                 }
             }
         }
+        const snapshotTaken = parsed.snapshotTaken === true
+            || typeof parsed.restore === 'string'
+            || owners.length > 0;
         return {
             cwd: absCwd,
             owners,
+            snapshotTaken,
             restore: typeof parsed.restore === 'string' ? parsed.restore : null
         };
     } catch {
-        return { cwd: absCwd, owners: [], restore: null };
+        return emptyOwnershipState(absCwd);
     }
 }
 
@@ -285,6 +333,37 @@ function reapOwners(state: OverlayOwnershipState): OverlayOwnershipState {
         ...state,
         owners: state.owners.filter((owner) => isProcessAlive(owner.pid))
     };
+}
+
+function withOwnershipLock(lockPath: string, fn: () => void): void {
+    const started = Date.now();
+    while (true) {
+        try {
+            const fd = openSync(lockPath, 'wx');
+            try {
+                fn();
+            } finally {
+                closeSync(fd);
+                try {
+                    unlinkSync(lockPath);
+                } catch {
+                    // ignore
+                }
+            }
+            return;
+        } catch (error) {
+            if (Date.now() - started >= OWNERSHIP_LOCK_TIMEOUT_MS) {
+                throw error;
+            }
+            sleepSync(20);
+        }
+    }
+}
+
+function sleepSync(ms: number): void {
+    const sab = new SharedArrayBuffer(4);
+    const ia = new Int32Array(sab);
+    Atomics.wait(ia, 0, 0, ms);
 }
 
 function safeRead(path: string): string | null {
