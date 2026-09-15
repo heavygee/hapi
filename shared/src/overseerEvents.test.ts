@@ -16,7 +16,9 @@ import {
     OVERSEER_EVENT_TYPES,
     HAPI_EVENTS_BEGIN,
     HAPI_EVENTS_END,
-    stripAgentContract
+    stripAgentContract,
+    usableNotifyAction,
+    usableNotifyToken
 } from './overseerEvents'
 import { extractNotifySummary } from './messages'
 
@@ -31,6 +33,8 @@ describe('overseerEvents mapping', () => {
         expect(deriveAttentionCandidate('blocked')).toBe(1)
         expect(deriveAttentionCandidate('done', '')).toBe(0)
         expect(deriveAttentionCandidate('done', 'Merge PR')).toBe(1)
+        expect(deriveAttentionCandidate('done', 'none')).toBe(0)
+        expect(deriveAttentionCandidate('done', '<=12 words')).toBe(0)
         expect(deriveAttentionCandidate('needs_decision')).toBe(1)
     })
 
@@ -62,6 +66,31 @@ describe('overseerEvents mapping', () => {
         expect(identity.flavor).toBe('codex')
     })
 
+    test('usableNotifyToken rejects angle-bracket prompt examples', () => {
+        expect(usableNotifyToken('<project>')).toBeNull()
+        expect(usableNotifyToken('<agent-id>')).toBeNull()
+        expect(usableNotifyToken('  <project>  ')).toBeNull()
+        expect(usableNotifyToken('hapi')).toBe('hapi')
+        expect(usableNotifyToken('')).toBeNull()
+    })
+
+    test('usableNotifyAction rejects sentinels', () => {
+        expect(usableNotifyAction('none')).toBeNull()
+        expect(usableNotifyAction('<=12 words')).toBeNull()
+        expect(usableNotifyAction('N/A')).toBeNull()
+        expect(usableNotifyAction('Merge PR')).toBe('Merge PR')
+    })
+
+    test('buildOverseerSessionIdentity ignores placeholder notify.project', () => {
+        const identity = buildOverseerSessionIdentity({
+            id: 'sess-1',
+            flavor: 'claude',
+            metadata: { path: '/coding/hapi/worktrees/overseer-summary-emit' },
+            notifyProject: '<project>'
+        })
+        expect(identity.project).toBe('overseer-summary-emit')
+    })
+
     test('mergeEventPayloadWithSession embeds session snapshot', () => {
         const json = mergeEventPayloadWithSession(
             { notify_summary: { summary: 'ok' } },
@@ -84,6 +113,8 @@ describe('overseerEvents mapping', () => {
 
     test('deriveSessionProject uses path basename', () => {
         expect(deriveSessionProject({ path: '/coding/hapi' })).toBe('hapi')
+        expect(deriveSessionProject({ path: 'C:\\repo\\hapi' })).toBe('hapi')
+        expect(deriveSessionProject({ path: 'C:/repo/hapi' })).toBe('hapi')
     })
 
     test('extractHttpUrls strips trailing punctuation and dedupes', () => {

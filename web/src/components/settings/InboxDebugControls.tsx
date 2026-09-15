@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useAppContext } from '@/lib/app-context'
 import type { InboxOperatorAction } from '@hapi/protocol'
+import { formatAbsoluteDateTime, formatRelativeTime } from '@/lib/relative-time'
+import { useTranslation } from '@/lib/use-translation'
 
 export type InboxItemRow = {
     id: number
@@ -23,12 +25,9 @@ type InboxItemsResponse = {
     items: InboxItemRow[]
 }
 
-function formatTs(ts: number): string {
-    return new Date(ts).toLocaleString()
-}
-
 export function InboxDebugControls() {
     const { api } = useAppContext()
+    const { t } = useTranslation()
     const [open, setOpen] = useState(false)
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
@@ -107,38 +106,44 @@ export function InboxDebugControls() {
                             <p className="p-3 text-xs text-[var(--app-hint)]">No inbox items yet.</p>
                         ) : (
                             <ul className="divide-y divide-[var(--app-divider)]">
-                                {items.map((item) => (
-                                    <li key={item.id} className="px-2 py-2 text-[11px] leading-snug">
-                                        <div className="flex flex-wrap items-center gap-1">
-                                            <span className="font-mono text-[var(--app-hint)]">#{item.id}</span>
-                                            <span className="rounded bg-[var(--app-subtle-bg)] px-1 py-0.5 font-medium uppercase tracking-wide text-[var(--app-fg)]">
-                                                {item.category}
-                                            </span>
-                                            <span className="text-[var(--app-hint)]">{formatTs(item.createdAt)}</span>
-                                        </div>
-                                        <p className="mt-1 font-medium text-[var(--app-fg)]">{item.title}</p>
-                                        <p className="mt-0.5 text-[var(--app-fg)]">{item.summary}</p>
-                                        {item.reasonForPriority ? (
-                                            <p className="mt-0.5 text-[var(--app-hint)]">{item.reasonForPriority}</p>
-                                        ) : null}
-                                        {item.suggestedAction ? (
-                                            <p className="mt-0.5 text-[var(--app-hint)]">Next: {item.suggestedAction}</p>
-                                        ) : null}
-                                        <div className="mt-1 flex flex-wrap gap-1">
-                                            {(['open', 'snooze', 'done', 'dismiss'] as const).map((action) => (
-                                                <button
-                                                    key={action}
-                                                    type="button"
-                                                    disabled={loading}
-                                                    onClick={() => void runAction(item.id, action)}
-                                                    className="rounded border border-[var(--app-border)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] disabled:opacity-50"
-                                                >
-                                                    {action}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    </li>
-                                ))}
+                                {items.map((item) => {
+                                    const relative = formatRelativeTime(item.createdAt, t) ?? ''
+                                    const absolute = formatAbsoluteDateTime(item.createdAt) ?? undefined
+                                    return (
+                                        <li key={item.id} className="px-2 py-2 text-[11px] leading-snug">
+                                            <div className="flex flex-wrap items-center gap-1">
+                                                <span className="font-mono text-[var(--app-hint)]">#{item.id}</span>
+                                                <span className="rounded bg-[var(--app-subtle-bg)] px-1 py-0.5 font-medium uppercase tracking-wide text-[var(--app-fg)]">
+                                                    {item.category}
+                                                </span>
+                                                <span className="text-[var(--app-hint)]" title={absolute}>
+                                                    {relative}
+                                                </span>
+                                            </div>
+                                            <p className="mt-1 font-medium text-[var(--app-fg)]">{item.title}</p>
+                                            <p className="mt-0.5 text-[var(--app-fg)]">{item.summary}</p>
+                                            {item.reasonForPriority ? (
+                                                <p className="mt-0.5 text-[var(--app-hint)]">{item.reasonForPriority}</p>
+                                            ) : null}
+                                            {item.suggestedAction ? (
+                                                <p className="mt-0.5 text-[var(--app-hint)]">Next: {item.suggestedAction}</p>
+                                            ) : null}
+                                            <div className="mt-1 flex flex-wrap gap-1">
+                                                {(['open', 'snooze', 'done', 'dismiss'] as const).map((action) => (
+                                                    <button
+                                                        key={action}
+                                                        type="button"
+                                                        disabled={loading}
+                                                        onClick={() => void runAction(item.id, action)}
+                                                        className="rounded border border-[var(--app-border)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] disabled:opacity-50"
+                                                    >
+                                                        {action}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </li>
+                                    )
+                                })}
                             </ul>
                         )}
                     </div>

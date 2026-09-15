@@ -6,6 +6,7 @@
  */
 
 import { trimIdent } from '@/utils/trimIdent';
+import { withSessionSummaryInstruction } from '@/modules/common/sessionSummaryInstruction';
 
 /**
  * Title instruction for Codex to call the hapi MCP tool.
@@ -22,6 +23,8 @@ export const TITLE_INSTRUCTION = trimIdent(`
 `);
 
 /**
- * The system prompt to inject via developer_instructions in local mode.
+ * Developer instructions for Codex app-server / remote (HAPI-rendered).
+ * Local native Codex CLI uses TITLE_INSTRUCTION only so the notify line
+ * does not print in the TUI.
  */
-export const codexSystemPrompt = TITLE_INSTRUCTION;
+export const codexSystemPrompt = withSessionSummaryInstruction(TITLE_INSTRUCTION);

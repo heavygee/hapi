@@ -6,6 +6,7 @@ import {
     isActiveInboxStatus,
     mapEventTypeToInboxCategory,
     mapOperatorActionToStatus,
+    usableNotifyAction,
     type InboxOperatorAction
 } from '@hapi/protocol'
 import type { StoredSystemEvent } from './events'
@@ -335,11 +336,11 @@ function extractSuggestedAction(payloadJson: string | null): string | null {
     if (!payloadJson) return null
     try {
         const payload = JSON.parse(payloadJson) as { suggested_action?: unknown; notify_summary?: { action?: unknown } }
-        if (typeof payload.suggested_action === 'string' && payload.suggested_action.trim()) {
-            return payload.suggested_action.trim()
+        if (typeof payload.suggested_action === 'string') {
+            return usableNotifyAction(payload.suggested_action)
         }
-        if (typeof payload.notify_summary?.action === 'string' && payload.notify_summary.action.trim()) {
-            return payload.notify_summary.action.trim()
+        if (typeof payload.notify_summary?.action === 'string') {
+            return usableNotifyAction(payload.notify_summary.action)
         }
     } catch {
         return null

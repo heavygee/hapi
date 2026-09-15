@@ -33,8 +33,8 @@ function agentText(message: string) {
     }
 }
 
-describe('OverseerEventRecorder turn fallback', () => {
-    it('synthesizes a session-log-only progress event when no summary line', () => {
+describe('OverseerEventRecorder — no hub text synth', () => {
+    it('does not synthesize from assistant text without AGENT_NOTIFY_SUMMARY', () => {
         const store = new Store(':memory:')
         const recorder = new OverseerEventRecorder(store.events, store.inbox)
         const session = store.sessions.getOrCreateSession('cur', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
@@ -46,22 +46,12 @@ describe('OverseerEventRecorder turn fallback', () => {
             Date.now()
         )
 
-        expect(event).not.toBeNull()
-        expect(event?.eventType).toBe('progress')
-        expect(event?.attentionCandidate).toBe(0)
-        expect(event?.operatorActionRequired).toBe(0)
-        expect(event?.summary).toBe('Refactored the parser and added tests.')
-        expect(event?.provenance).toContain('hub-synthesized')
-
-        const payload = JSON.parse(event!.payloadJson!) as { synthesized?: boolean }
-        expect(payload.synthesized).toBe(true)
-
-        // Session log gets it; the attention inbox stays empty.
-        expect(store.events.count()).toBe(1)
+        expect(event).toBeNull()
+        expect(store.events.count()).toBe(0)
         expect(store.inbox.count()).toBe(0)
     })
 
-    it('does not synthesize when a real AGENT_NOTIFY_SUMMARY is present', () => {
+    it('still records a real AGENT_NOTIFY_SUMMARY', () => {
         const store = new Store(':memory:')
         const recorder = new OverseerEventRecorder(store.events, store.inbox)
         const session = store.sessions.getOrCreateSession('cur2', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
@@ -78,7 +68,7 @@ describe('OverseerEventRecorder turn fallback', () => {
         expect(store.events.count()).toBe(1)
     })
 
-    it('does not synthesize when the summary line is malformed (validation_error wins)', () => {
+    it('still records malformed notify as validation_error', () => {
         const store = new Store(':memory:')
         const recorder = new OverseerEventRecorder(store.events, store.inbox)
         const session = store.sessions.getOrCreateSession('cur3', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
@@ -92,35 +82,6 @@ describe('OverseerEventRecorder turn fallback', () => {
 
         expect(event?.eventType).toBe('validation_error')
         expect(store.events.list({ eventType: 'progress' })).toHaveLength(0)
-    })
-
-    it('is idempotent for a redelivered message id', () => {
-        const store = new Store(':memory:')
-        const recorder = new OverseerEventRecorder(store.events, store.inbox)
-        const session = store.sessions.getOrCreateSession('cur4', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
-        const snapshot = toSessionSnapshot(makeSession(session.id, 'cursor'), session.tag)
-
-        recorder.onAgentMessage(snapshot, 'msg-dup', agentText('Progress update.'), Date.now())
-        recorder.onAgentMessage(snapshot, 'msg-dup', agentText('Progress update.'), Date.now())
-
-        expect(store.events.list({ eventType: 'progress' })).toHaveLength(1)
-    })
-
-    it('caps a long first line with an ellipsis', () => {
-        const store = new Store(':memory:')
-        const recorder = new OverseerEventRecorder(store.events, store.inbox)
-        const session = store.sessions.getOrCreateSession('cur5', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
-
-        const longLine = 'x'.repeat(500)
-        const event = recorder.onAgentMessage(
-            toSessionSnapshot(makeSession(session.id, 'cursor'), session.tag),
-            'msg-long',
-            agentText(longLine),
-            Date.now()
-        )
-
-        expect(event?.summary?.length).toBe(200)
-        expect(event?.summary?.endsWith('\u2026')).toBe(true)
     })
 
     it('ignores user messages', () => {
@@ -137,6 +98,17 @@ describe('OverseerEventRecorder turn fallback', () => {
         )
 
         expect(event).toBeNull()
-        expect(store.events.list({ eventType: 'progress' })).toHaveLength(0)
+        expect(store.events.count()).toBe(0)
+    })
+
+    it('does not synth mid-turn ACP text flushes (multiple messages, no notify)', () => {
+        const store = new Store(':memory:')
+        const recorder = new OverseerEventRecorder(store.events, store.inbox)
+        const live = store.sessions.getOrCreateSession('cur7', { flavor: 'cursor', path: '/tmp', host: 'local' }, null, 'default')
+        const snapshot = toSessionSnapshot(makeSession(live.id, 'cursor'), live.tag)
+
+        expect(recorder.onAgentMessage(snapshot, 'msg-mid-1', agentText('Pulling the last hour of events.'), Date.now())).toBeNull()
+        expect(recorder.onAgentMessage(snapshot, 'msg-mid-2', agentText('Found something important.'), Date.now())).toBeNull()
+        expect(store.events.count()).toBe(0)
     })
 })

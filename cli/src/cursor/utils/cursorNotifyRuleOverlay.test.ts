@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import {
     buildNotifyRuleContent,
     HAPI_SESSION_RULE_SENTINEL,
@@ -15,6 +15,13 @@ describe('buildNotifyRuleContent', () => {
         expect(content).toContain(HAPI_SESSION_RULE_SENTINEL);
         expect(content).toContain('AGENT_NOTIFY_SUMMARY {"version":1,');
         expect(content).toContain('"status":"done|blocked|needs_review|needs_decision|failed|stalled"');
+        expect(content.toLowerCase()).toContain('omit the action key');
+        expect(content.toLowerCase()).toContain('asked a question');
+        expect(content.toLowerCase()).not.toContain('what this turn did');
+        expect(content).toContain('Never emit "action":""');
+        expect(content).toContain('omit the action key entirely');
+        expect(content).toContain('## Operator-facing session identity');
+        expect(content).toContain('[upstream issue/pr discovery](/sessions/<full-session-id>)');
     });
 
     it('bakes in project and agent id when provided', () => {
@@ -41,16 +48,37 @@ describe('buildNotifyRuleContent', () => {
 
 describe('installCursorNotifyRuleOverlay', () => {
     let cwd: string;
+    let hapiHome: string;
+    let previousHapiHome: string | undefined;
 
     beforeEach(() => {
         cwd = mkdtempSync(join(tmpdir(), 'hapi-notify-rule-'));
+        hapiHome = mkdtempSync(join(tmpdir(), 'hapi-home-'));
+        previousHapiHome = process.env.HAPI_HOME;
+        process.env.HAPI_HOME = hapiHome;
     });
 
     afterEach(() => {
         rmSync(cwd, { recursive: true, force: true });
+        rmSync(hapiHome, { recursive: true, force: true });
+        if (previousHapiHome === undefined) {
+            delete process.env.HAPI_HOME;
+        } else {
+            process.env.HAPI_HOME = previousHapiHome;
+        }
     });
 
     const rulePathOf = (root: string) => join(root, '.cursor', 'rules', 'hapi-session.mdc');
+
+    it('keeps ownership state outside the workspace', () => {
+        mkdirSync(join(cwd, '.cursor', 'rules'), { recursive: true });
+        writeFileSync(rulePathOf(cwd), '# tracked\n', 'utf-8');
+        const overlay = installCursorNotifyRuleOverlay({ cwd });
+        expect(existsSync(join(cwd, '.cursor', 'rules', 'hapi-session.mdc.hapi-refs'))).toBe(false);
+        expect(existsSync(join(cwd, '.cursor', 'rules', 'hapi-session.mdc.hapi-restore'))).toBe(false);
+        expect(readdirSync(hapiHome).length).toBeGreaterThan(0);
+        overlay.cleanup();
+    });
 
     it('writes the rule file and reports its path', () => {
         const overlay = installCursorNotifyRuleOverlay({ cwd });
@@ -98,15 +126,84 @@ describe('installCursorNotifyRuleOverlay', () => {
         expect(existsSync(join(cwd, '.cursor', 'mcp.json'))).toBe(true);
     });
 
-    it('treats a sentinel-bearing file (prior/concurrent session) as ours, not a backup', () => {
+    it('restores a pre-existing tracked/user file after overlay cleanup', () => {
         const rulePath = rulePathOf(cwd);
         mkdirSync(join(cwd, '.cursor', 'rules'), { recursive: true });
-        writeFileSync(rulePath, buildNotifyRuleContent({ project: 'stale' }), 'utf-8');
+        const prior = '# tracked repo rule\nalwaysApply: false\n';
+        writeFileSync(rulePath, prior, 'utf-8');
 
-        const overlay = installCursorNotifyRuleOverlay({ cwd });
+        const overlay = installCursorNotifyRuleOverlay({ cwd, project: 'session' });
+        expect(readFileSync(rulePath, 'utf-8')).toContain('"project":"session"');
+
         overlay.cleanup();
-        // removed, not "restored" — the sentinel file was ours
+        expect(readFileSync(rulePath, 'utf-8')).toBe(prior);
+    });
+
+    it('last concurrent cleanup restores the original, not the peer overlay', () => {
+        const rulePath = rulePathOf(cwd);
+        mkdirSync(join(cwd, '.cursor', 'rules'), { recursive: true });
+        const tracked = buildNotifyRuleContent({ project: 'tracked-repo', agentId: 'repo' });
+        writeFileSync(rulePath, tracked, 'utf-8');
+
+        const first = installCursorNotifyRuleOverlay({ cwd, project: 'older', agentId: 'a' });
+        const second = installCursorNotifyRuleOverlay({ cwd, project: 'newer', agentId: 'b' });
+        expect(readFileSync(rulePath, 'utf-8')).toContain('"project":"newer"');
+
+        // Older session exits first — must not restore tracked yet (peer still live)
+        // and must not leave tracked clobbered by the older generated snapshot.
+        first.cleanup();
+        expect(readFileSync(rulePath, 'utf-8')).toContain('"project":"newer"');
+
+        second.cleanup();
+        expect(readFileSync(rulePath, 'utf-8')).toBe(tracked);
+    });
+
+    it('deletes generated rule after crash recovery when no prior file existed', () => {
+        const rulePath = rulePathOf(cwd);
+        installCursorNotifyRuleOverlay({ cwd, project: 'crash' });
+        expect(existsSync(rulePath)).toBe(true);
+
+        // Simulate crash: drop ownership without cleanup, leave generated rule on disk.
+        const overlayRoot = join(hapiHome, 'cursor-notify-overlays');
+        const stateDirName = readdirSync(overlayRoot)[0];
+        expect(stateDirName).toBeTruthy();
+        const statePath = join(overlayRoot, stateDirName!, 'state.json');
+        const state = JSON.parse(readFileSync(statePath, 'utf-8')) as {
+            owners: Array<{ id: string; pid: number }>
+            snapshotTaken: boolean
+            restore: string | null
+        };
+        expect(state.snapshotTaken).toBe(true);
+        expect(state.restore).toBeNull();
+        state.owners = [{ id: 'dead', pid: 2_147_483_646 }];
+        writeFileSync(statePath, JSON.stringify(state));
+
+        const recovered = installCursorNotifyRuleOverlay({ cwd, project: 'after' });
+        recovered.cleanup();
         expect(existsSync(rulePath)).toBe(false);
+    });
+
+    it('preserves mid-session user replacement without sentinel', () => {
+        const rulePath = rulePathOf(cwd);
+        mkdirSync(join(cwd, '.cursor', 'rules'), { recursive: true });
+        writeFileSync(rulePath, '# prior\n', 'utf-8');
+        const overlay = installCursorNotifyRuleOverlay({ cwd, project: 'sess' });
+        const userReplacement = '# user replaced mid-session\n';
+        writeFileSync(rulePath, userReplacement, 'utf-8');
+        overlay.cleanup();
+        expect(readFileSync(rulePath, 'utf-8')).toBe(userReplacement);
+    });
+
+    it('resolves relative HAPI_HOME to an absolute path', () => {
+        const relName = `hapi-overlay-home-${Date.now()}`;
+        process.env.HAPI_HOME = relName;
+        const absHome = resolve(relName);
+        mkdirSync(join(cwd, '.cursor', 'rules'), { recursive: true });
+        writeFileSync(rulePathOf(cwd), '# tracked\n', 'utf-8');
+        const overlay = installCursorNotifyRuleOverlay({ cwd });
+        expect(existsSync(join(absHome, 'cursor-notify-overlays'))).toBe(true);
+        overlay.cleanup();
+        rmSync(absHome, { recursive: true, force: true });
     });
 
     it('never deletes a user file that replaced ours mid-session', () => {

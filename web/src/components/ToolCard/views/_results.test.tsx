@@ -155,10 +155,12 @@ describe('getToolResultViewComponent registry', () => {
         expect(getToolResultViewComponent('wait_agent')).toBe(getToolResultViewComponent('spawn_agent'))
     })
 
-    it('Agent falls back to GenericResultView (no dedicated view — view layer must not filter content)', () => {
-        const agentView = getToolResultViewComponent('Agent')
-        const genericView = getToolResultViewComponent('SomeUnknownTool')
-        expect(agentView).toBe(genericView)
+    it('routes Task/Agent subagent names through MarkdownResultView for contract strip', () => {
+        const taskView = getToolResultViewComponent('Task')
+        expect(getToolResultViewComponent('Agent')).toBe(taskView)
+        expect(getToolResultViewComponent('Agent:explore')).toBe(taskView)
+        expect(getToolResultViewComponent('Task:worker')).toBe(taskView)
+        expect(getToolResultViewComponent('SomeUnknownTool')).not.toBe(taskView)
     })
 })
 

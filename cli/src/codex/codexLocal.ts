@@ -6,7 +6,7 @@ import {
     buildSessionStartHookConfigArgs,
     buildModelReasoningEffortConfigArgs
 } from './utils/codexMcpConfig';
-import { codexSystemPrompt } from './utils/systemPrompt';
+import { TITLE_INSTRUCTION } from './utils/systemPrompt';
 import type { ReasoningEffort } from './appServerTypes';
 import { resolveCodexCommand } from './utils/codexExecutable';
 import type { McpServersConfig } from './utils/buildHapiMcpBridge';
@@ -74,7 +74,7 @@ export async function codexLocal(opts: {
     }
 
     // Add developer instructions (system prompt)
-    args.push(...buildDeveloperInstructionsArg(codexSystemPrompt));
+    args.push(...buildDeveloperInstructionsArg(TITLE_INSTRUCTION));
 
     if (opts.codexArgs) {
         const safeArgs = filterResumeSubcommand(opts.codexArgs);

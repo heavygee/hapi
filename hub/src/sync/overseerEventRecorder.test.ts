@@ -98,6 +98,33 @@ describe('OverseerEventRecorder', () => {
         expect(event?.attentionCandidate).toBe(0)
     })
 
+    it('drops sentinel notify actions from suggested_action and inbox', () => {
+        const store = new Store(':memory:')
+        const recorder = new OverseerEventRecorder(store.events, store.inbox)
+        const session = store.sessions.getOrCreateSession('test-sentinel', { flavor: 'claude', path: '/tmp', host: 'local' }, null, 'default')
+
+        const event = recorder.onAgentMessage(
+            toSessionSnapshot(makeSession(session.id, 'claude'), session.tag),
+            'msg-sentinel',
+            {
+                role: 'agent',
+                content: {
+                    type: 'codex',
+                    data: {
+                        type: 'message',
+                        message: 'AGENT_NOTIFY_SUMMARY {"version":1,"status":"blocked","action":"none","summary":"Stuck"}'
+                    }
+                }
+            },
+            Date.now()
+        )
+
+        expect(event?.attentionCandidate).toBe(1)
+        const payload = JSON.parse(event!.payloadJson!) as { suggested_action: string | null }
+        expect(payload.suggested_action).toBeNull()
+        expect(store.inbox.list({ activeOnly: true })[0]?.suggestedAction).toBeNull()
+    })
+
     it('does not persist hub-inferred stale silence (derive live; no Session Log noise)', () => {
         const store = new Store(':memory:')
         const recorder = new OverseerEventRecorder(store.events, store.inbox)
@@ -183,6 +210,48 @@ describe('OverseerEventRecorder', () => {
         expect(payload.session.project).toBe('hapi')
         expect(payload.session.flavor).toBe('codex')
         expect(payload.session.id).toBe(stored.id)
+    })
+
+    it('ignores placeholder notify.project and keeps path-derived project', () => {
+        const store = new Store(':memory:')
+        const recorder = new OverseerEventRecorder(store.events, store.inbox)
+        const stored = store.sessions.getOrCreateSession(
+            'placeholder',
+            { flavor: 'claude', path: '/coding/hapi/worktrees/overseer-summary-emit', host: 'local' },
+            null,
+            'default'
+        )
+        const live = makeSession(stored.id, 'claude', {
+            metadata: {
+                flavor: 'claude',
+                path: '/coding/hapi/worktrees/overseer-summary-emit',
+                host: 'local'
+            }
+        })
+        const content = {
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'message',
+                    message: 'AGENT_NOTIFY_SUMMARY {"version":1,"agent":"<agent-id>","project":"<project>","status":"done","action":"","summary":"Turn done"}'
+                }
+            }
+        }
+
+        const event = recorder.onAgentMessage(
+            toSessionSnapshot(live, stored.tag),
+            'msg-placeholder',
+            content,
+            Date.now()
+        )
+
+        const payload = JSON.parse(event!.payloadJson!) as {
+            session: { project: string | null }
+        }
+        expect(payload.session.project).toBe('overseer-summary-emit')
+        expect(event?.tags).not.toContain('project:<project>')
+        expect(event?.tags).not.toContain('agent:<agent-id>')
     })
 
     it('titles inbox items from payload.session.name after session delete', () => {

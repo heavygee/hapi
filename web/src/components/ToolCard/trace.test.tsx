@@ -32,6 +32,10 @@ vi.mock('@/components/CodeBlock', () => ({
     CodeBlock: ({ code }: { code: string }) => <pre data-testid="code-block">{code}</pre>,
 }))
 
+vi.mock('@/components/MarkdownRenderer', () => ({
+    MarkdownRenderer: (props: { content: string }) => <div data-testid="md">{props.content}</div>,
+}))
+
 // safeStringify from @hapi/protocol
 vi.mock('@hapi/protocol', async (importOriginal) => {
     const actual = await importOriginal<typeof import('@hapi/protocol')>()
@@ -352,6 +356,26 @@ describe('TraceSection', () => {
         fireEvent.click(childButtons[0])
         expect(container.textContent).toContain('Input')
         expect(container.textContent).toContain('Result')
+    })
+
+    it('strips AGENT_NOTIFY_SUMMARY from nested CodexAgent text', () => {
+        const block: ToolCallBlock = {
+            ...makeCodexAgentBlock([], 'completed'),
+            children: [{
+                kind: 'agent-text',
+                id: 'txt-1',
+                localId: null,
+                createdAt: 0,
+                text: 'Child done.\n\nAGENT_NOTIFY_SUMMARY {"version":1,"status":"done","action":"","summary":"nested"}',
+            }],
+        }
+        const { container } = render(<TraceSection block={block} metadata={null} />)
+        const messageBtn = Array.from(container.querySelectorAll('button'))
+            .find((button) => button.textContent?.includes('Message'))
+        expect(messageBtn).toBeTruthy()
+        fireEvent.click(messageBtn!)
+        expect(container.textContent).toContain('Child done.')
+        expect(container.textContent).not.toContain('AGENT_NOTIFY_SUMMARY')
     })
 
     // Agent tool name — same Trace UX as Task

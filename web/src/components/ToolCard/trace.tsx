@@ -3,7 +3,8 @@
  * Placed between Input and Result sections.
  */
 import { useState } from 'react'
-import { isObject, safeStringify } from '@hapi/protocol'
+import { useShowAgentContract } from '@/hooks/useShowAgentContract'
+import { isObject, safeStringify, stripAgentContract } from '@hapi/protocol'
 import type { ChatBlock, ToolCallBlock } from '@/chat/types'
 import type { SessionMetadataSummary } from '@/types/api'
 import { getToolFullViewComponent } from '@/components/ToolCard/views/_all'
@@ -188,6 +189,7 @@ type TraceChildListProps = {
 
 function TraceChildList({ items, metadata, mode }: TraceChildListProps) {
     const [expandedId, setExpandedId] = useState<string | null>(null)
+    const { showAgentContract } = useShowAgentContract()
 
     return (
         <div className={mode === 'session'
@@ -202,6 +204,7 @@ function TraceChildList({ items, metadata, mode }: TraceChildListProps) {
                     expanded={expandedId === child.id}
                     onToggle={() => setExpandedId((prev) => (prev === child.id ? null : child.id))}
                     mode={mode}
+                    showAgentContract={showAgentContract}
                 />
             ))}
         </div>
@@ -218,9 +221,10 @@ type TraceChildRowProps = {
     expanded: boolean
     onToggle?: () => void
     mode: 'trace' | 'session'
+    showAgentContract: boolean
 }
 
-function TraceChildRow({ child, metadata, expanded, onToggle, mode }: TraceChildRowProps) {
+function TraceChildRow({ child, metadata, expanded, onToggle, mode, showAgentContract }: TraceChildRowProps) {
     const { t } = useTranslation()
     const isSessionMode = mode === 'session'
     const rowClassName = isSessionMode
@@ -238,7 +242,8 @@ function TraceChildRow({ child, metadata, expanded, onToggle, mode }: TraceChild
 
     if (child.kind === 'agent-text' || child.kind === 'agent-reasoning') {
         const label = child.kind === 'agent-reasoning' ? 'Reasoning' : 'Message'
-        const preview = child.text.trim().split('\n')[0] ?? ''
+        const text = showAgentContract ? child.text : stripAgentContract(child.text)
+        const preview = text.trim().split('\n')[0] ?? ''
 
         return (
             <div className={rowClassName}>
@@ -254,7 +259,7 @@ function TraceChildRow({ child, metadata, expanded, onToggle, mode }: TraceChild
                 </button>
                 {expanded && (
                     <div className={detailClassName}>
-                        <MarkdownRenderer content={child.text} />
+                        <MarkdownRenderer content={text} />
                     </div>
                 )}
             </div>
