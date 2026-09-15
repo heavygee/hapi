@@ -98,7 +98,7 @@ Discipline (mandatory, same shape a config overlay would use):
   first); `cleanup()` in the launcher's `cleanup()`.
 - Canonical line shape mirrors `AGENT_NOTIFY_CONTRACT_INLINE_PREFIX`
   (`shared/src/overseerEvents.ts`):
-  `AGENT_NOTIFY_SUMMARY {"version":1,"agent":"<agent-id>","project":"<project>","status":"done|blocked|needs_review|needs_decision|failed|stalled","action":"<=12 words","summary":"one-line triage"}`
+  `AGENT_NOTIFY_SUMMARY {"version":1,"agent":"<agent-id>","project":"<project>","status":"done|blocked|needs_review|needs_decision|failed|stalled","action":"<=12 words","summary":"spoken answer or outcome"}`
 
 ### Piece 2 — Hub deterministic backstop — REMOVED
 

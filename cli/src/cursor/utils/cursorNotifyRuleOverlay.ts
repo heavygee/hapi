@@ -56,7 +56,7 @@ export interface InstallCursorNotifyRuleOverlayOptions {
 export function buildNotifyRuleContent(opts: { project?: string | null; agentId?: string | null } = {}): string {
     const project = sanitizeToken(opts.project) ?? '<project>';
     const agentId = sanitizeToken(opts.agentId) ?? '<agent-id>';
-    const exampleLine = `AGENT_NOTIFY_SUMMARY {"version":1,"agent":"${agentId}","project":"${project}","status":"done|blocked|needs_review|needs_decision|failed|stalled","action":"<=12 words","summary":"one-line triage"}`;
+    const exampleLine = `AGENT_NOTIFY_SUMMARY {"version":1,"agent":"${agentId}","project":"${project}","status":"done|blocked|needs_review|needs_decision|failed|stalled","action":"<=12 words","summary":"spoken answer or outcome"}`;
 
     return [
         '---',
@@ -76,7 +76,10 @@ export function buildNotifyRuleContent(opts: { project?: string | null; agentId?
         '- status: pick the closest value; use "blocked" if unsure.',
         '- action: concrete next step when status is "done" and follow-up remains;',
         '  12 words or fewer. Omit action (empty) when nothing remains.',
-        '- summary: one-line triage of what this turn did.',
+        '- summary: operator-facing one spoken sentence (phone/FCM). If the operator',
+        '  asked a question this turn, answer that question here — do not describe',
+        '  what you did. Use process/worklog language only when there was no question',
+        '  (e.g. shipped a PR, waiting on CI).',
         '- Keep it as the very last line of every response.',
         ''
     ].join('\n');
