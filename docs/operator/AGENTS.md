@@ -54,6 +54,8 @@ Prefer progressive loading: **[feature-work-lifecycle.md](../tooling/feature-wor
 
 The operator often hears `AGENT_NOTIFY_SUMMARY.action` (TTS) and reads `summary` on phone FCM **without** the session sidebar. A line like `6ce7f124 not current WORKING` is worse than useless.
 
+**`summary` is the answer, not a worklog.** If the operator asked a question this turn, `summary` must **answer that question** in one spoken sentence (what they need on a headset). Process phrasing (“Clarified X”, “Investigated Y”) is only for turns with no question (e.g. shipped a PR, waiting on CI). Contract copy lives in `cli/src/cursor/utils/cursorNotifyRuleOverlay.ts` and `.cursor/rules/hapi-session.mdc`.
+
 **In HAPI chat and peer pings the operator opens:** use the session **@-mention wire format** so the UI paints the same `@Name` chip as composer autocomplete and peer-delivery sender chips (click-through, hover tooltip, navigate):
 
 ```markdown
