@@ -1,11 +1,12 @@
 import type { ToolViewComponent, ToolViewProps } from '@/components/ToolCard/views/_all'
 import type { ReactNode } from 'react'
-import { isObject, safeStringify } from '@hapi/protocol'
+import { isObject, safeStringify, stripAgentContract } from '@hapi/protocol'
 import { CodeBlock } from '@/components/CodeBlock'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
 import { ChecklistList, extractTodoChecklist } from '@/components/ToolCard/checklist'
 import { basename, resolveDisplayPath } from '@/utils/path'
 import { getInputStringAny } from '@/lib/toolInputUtils'
+import { useShowAgentContract } from '@/hooks/useShowAgentContract'
 import {
     getCodexAgentActivity,
     getCodexAgentTargets,
@@ -522,12 +523,16 @@ const CodexBashResultView: ToolViewComponent = (props: ToolViewProps) => {
 
 const MarkdownResultView: ToolViewComponent = (props: ToolViewProps) => {
     const result = props.block.tool.result
+    const { showAgentContract } = useShowAgentContract()
 
     if (result === undefined || result === null) {
         return <ResultStatusPill text={placeholderForState(props.block.tool.state)} />
     }
 
-    const text = extractTextFromResult(result)
+    const rawText = extractTextFromResult(result)
+    const text = rawText
+        ? (showAgentContract ? rawText : stripAgentContract(rawText))
+        : null
     if (text) {
         return (
             <>

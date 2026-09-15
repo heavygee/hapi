@@ -12,11 +12,11 @@
  * status summary that this workspace's session tracking records. The line shape
  * mirrors `AGENT_NOTIFY_CONTRACT_INLINE_PREFIX` in `shared/src/overseerEvents.ts`.
  *
- * Non-clobbering discipline (mirrors how a config overlay behaves): if the user
- * already has a file at the same path we back up its contents and restore them on
- * cleanup; a file that already carries our sentinel is one of ours (a prior or
- * concurrent session in the same cwd), so we never treat it as user content. All
- * fs work is fail-open — a missing rule must never crash a session.
+ * Non-clobbering discipline (mirrors how a config overlay behaves): if anything
+ * already exists at the same path (user rule, tracked repo copy, or a prior HAPI
+ * overlay), we back up its contents and restore them on cleanup. Only a file we
+ * created this session (no prior content) is removed on teardown. All fs work is
+ * fail-open — a missing rule must never crash a session.
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, rmdirSync, writeFileSync } from 'node:fs';
@@ -57,6 +57,7 @@ export function buildNotifyRuleContent(opts: { project?: string | null; agentId?
     const project = sanitizeToken(opts.project) ?? '<project>';
     const agentId = sanitizeToken(opts.agentId) ?? '<agent-id>';
     const exampleLine = `AGENT_NOTIFY_SUMMARY {"version":1,"agent":"${agentId}","project":"${project}","status":"done|blocked|needs_review|needs_decision|failed|stalled","action":"<=12 words","summary":"spoken answer or outcome"}`;
+    const exampleNoAction = `AGENT_NOTIFY_SUMMARY {"version":1,"agent":"${agentId}","project":"${project}","status":"done","summary":"spoken answer or outcome"}`;
 
     return [
         '---',
@@ -72,10 +73,14 @@ export function buildNotifyRuleContent(opts: { project?: string | null; agentId?
         '',
         exampleLine,
         '',
+        'When nothing remains, omit the action key entirely (example):',
+        exampleNoAction,
+        '',
         'Guidance:',
         '- status: pick the closest value; use "blocked" if unsure.',
-        '- action: concrete next step when status is "done" and follow-up remains;',
-        '  12 words or fewer. Omit action (empty) when nothing remains.',
+        '- action: only when status is "done" and follow-up remains; 12 words or fewer.',
+        '  Omit the action key when nothing remains. Never emit "action":"" —',
+        '  Cursor drops a quote and breaks JSON.',
         '- summary: operator-facing one spoken sentence (phone/FCM). If the operator',
         '  asked a question this turn, answer that question here — do not describe',
         '  what you did. Use process/worklog language only when there was no question',
@@ -116,9 +121,10 @@ export function installCursorNotifyRuleOverlay(
 
         if (existsSync(rulePath)) {
             const existing = safeRead(rulePath);
-            // A file that already carries our sentinel belongs to HAPI (prior or
-            // concurrent session) — do not treat it as user content to preserve.
-            if (existing !== null && !existing.includes(HAPI_SESSION_RULE_SENTINEL)) {
+            // Always preserve whatever was on disk (user rule, tracked repo copy,
+            // or a prior HAPI overlay). Cleanup restores it instead of deleting,
+            // so ending a session cannot dirty a checkout that ships the rule.
+            if (existing !== null) {
                 preExistingContent = existing;
             }
         }
@@ -136,13 +142,14 @@ export function installCursorNotifyRuleOverlay(
         cleaned = true;
         try {
             if (preExistingContent !== null) {
-                // Restore the user's file exactly as it was.
+                // Restore the prior file exactly as it was.
                 writeFileSync(rulePath, preExistingContent, 'utf-8');
                 return;
             }
 
-            // Only remove the file if it is still ours (a user may have replaced
-            // it mid-session; never delete their content).
+            // Only remove the file if we created it this session (nothing to
+            // restore) and it is still ours (a user may have replaced it
+            // mid-session; never delete their content).
             if (existsSync(rulePath)) {
                 const current = safeRead(rulePath);
                 if (current === null || current.includes(HAPI_SESSION_RULE_SENTINEL)) {

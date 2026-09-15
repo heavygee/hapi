@@ -18,6 +18,8 @@ describe('buildNotifyRuleContent', () => {
         expect(content.toLowerCase()).toContain('omit action');
         expect(content.toLowerCase()).toContain('asked a question');
         expect(content.toLowerCase()).not.toContain('what this turn did');
+        expect(content).toContain('Never emit "action":""');
+        expect(content).toContain('omit the action key entirely');
     });
 
     it('bakes in project and agent id when provided', () => {
@@ -101,15 +103,18 @@ describe('installCursorNotifyRuleOverlay', () => {
         expect(existsSync(join(cwd, '.cursor', 'mcp.json'))).toBe(true);
     });
 
-    it('treats a sentinel-bearing file (prior/concurrent session) as ours, not a backup', () => {
+    it('restores a pre-existing sentinel-bearing file (tracked repo or prior overlay)', () => {
         const rulePath = rulePathOf(cwd);
         mkdirSync(join(cwd, '.cursor', 'rules'), { recursive: true });
-        writeFileSync(rulePath, buildNotifyRuleContent({ project: 'stale' }), 'utf-8');
+        const prior = buildNotifyRuleContent({ project: 'tracked-repo' });
+        writeFileSync(rulePath, prior, 'utf-8');
 
-        const overlay = installCursorNotifyRuleOverlay({ cwd });
+        const overlay = installCursorNotifyRuleOverlay({ cwd, project: 'session' });
+        expect(readFileSync(rulePath, 'utf-8')).toContain('"project":"session"');
+
         overlay.cleanup();
-        // removed, not "restored" — the sentinel file was ours
-        expect(existsSync(rulePath)).toBe(false);
+        // Must restore, not delete — otherwise a checkout that ships the rule goes dirty.
+        expect(readFileSync(rulePath, 'utf-8')).toBe(prior);
     });
 
     it('never deletes a user file that replaced ours mid-session', () => {

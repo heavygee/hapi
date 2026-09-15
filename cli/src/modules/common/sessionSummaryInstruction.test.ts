@@ -33,6 +33,7 @@ describe('sessionSummaryInstruction', () => {
         expect(body.toLowerCase()).toContain('omit action')
         expect(body.toLowerCase()).toContain('asked a')
         expect(body.toLowerCase()).not.toContain('what this turn did')
+        expect(body).toContain('never emit "action":""')
         expect(SESSION_SUMMARY_CONTRACT_LINE).toContain('spoken answer or outcome')
     })
 
