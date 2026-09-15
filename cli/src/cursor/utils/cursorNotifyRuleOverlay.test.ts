@@ -15,7 +15,7 @@ describe('buildNotifyRuleContent', () => {
         expect(content).toContain(HAPI_SESSION_RULE_SENTINEL);
         expect(content).toContain('AGENT_NOTIFY_SUMMARY {"version":1,');
         expect(content).toContain('"status":"done|blocked|needs_review|needs_decision|failed|stalled"');
-        expect(content.toLowerCase()).toContain('omit action');
+        expect(content.toLowerCase()).toContain('omit the action key');
         expect(content.toLowerCase()).toContain('asked a question');
         expect(content.toLowerCase()).not.toContain('what this turn did');
         expect(content).toContain('Never emit "action":""');

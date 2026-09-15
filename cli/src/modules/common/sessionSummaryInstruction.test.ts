@@ -30,7 +30,7 @@ describe('sessionSummaryInstruction', () => {
         expect(body).not.toContain('<agent-id>')
         expect(SESSION_SUMMARY_CONTRACT_LINE).not.toContain('"agent"')
         expect(SESSION_SUMMARY_CONTRACT_LINE).not.toContain('"project"')
-        expect(body.toLowerCase()).toContain('omit action')
+        expect(body.toLowerCase()).toContain('omit the action key')
         expect(body.toLowerCase()).toContain('asked a')
         expect(body.toLowerCase()).not.toContain('what this turn did')
         expect(body).toContain('never emit "action":""')
