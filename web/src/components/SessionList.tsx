@@ -234,7 +234,8 @@ type MachineGroup = {
 }
 
 function usesWindowsSeparators(path: string): boolean {
-    return /^[A-Za-z]:[\\/]/.test(path) || /^\\\\/.test(path)
+    // Drive paths, plus UNC with either \\SERVER or //SERVER spelling.
+    return /^[A-Za-z]:[\\/]/.test(path) || /^[\\/]{2}[^\\/]/.test(path)
 }
 
 function stripTrailingSeparators(path: string): string {

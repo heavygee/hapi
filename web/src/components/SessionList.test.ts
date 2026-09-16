@@ -1015,4 +1015,40 @@ describe('groupSessionsByDirectory symlink coalesce', () => {
         expect(groups).toHaveLength(1)
         expect(groups[0]?.sessions.map((s) => s.id).sort()).toEqual(['lower', 'upper'])
     })
+
+    it('groups UNC roots that differ only by slash style', () => {
+        const backslash = makeSession({
+            id: 'bs',
+            updatedAt: 2,
+            metadata: {
+                machineId: 'machine-win',
+                path: '\\\\SERVER\\Share\\coding\\hapi',
+                worktree: {
+                    basePath: '\\\\SERVER\\Share\\coding\\hapi',
+                    branch: 'main',
+                    name: 'main',
+                    worktreePath: '\\\\SERVER\\Share\\coding\\hapi',
+                },
+            },
+        })
+        const forward = makeSession({
+            id: 'fs',
+            updatedAt: 1,
+            metadata: {
+                machineId: 'machine-win',
+                path: '//SERVER/Share/coding/hapi/worktrees/feat',
+                worktree: {
+                    basePath: '\\\\SERVER\\Share\\coding\\hapi',
+                    branch: 'feat',
+                    name: 'feat',
+                    worktreePath: '\\\\SERVER\\Share\\coding\\hapi\\worktrees\\feat',
+                },
+            },
+        })
+
+        expect(resolveSessionGroupDirectory(forward.metadata ?? {})).toBe('//SERVER/Share/coding/hapi')
+        const groups = groupSessionsByDirectory([backslash, forward])
+        expect(groups).toHaveLength(1)
+        expect(groups[0]?.sessions.map((s) => s.id).sort()).toEqual(['bs', 'fs'])
+    })
 })
