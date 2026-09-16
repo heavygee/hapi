@@ -43,6 +43,7 @@ import { formatSessionHeaderTimestamp } from '@/lib/sessionHeaderTimestamp'
 import { getShareTurnReasoningLabel, selectShareTurnMetadata } from '@/lib/shareTurnMetadata'
 import { queryKeys } from '@/lib/query-keys'
 import { useMinuteTick } from '@/hooks/useMinuteTick'
+import { useTransientScrollbar } from '@/hooks/useTransientScrollbar'
 import { matchesSearchQuery } from '@hapi/protocol'
 
 type ScrollAnchor = {
