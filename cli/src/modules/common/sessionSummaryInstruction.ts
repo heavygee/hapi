@@ -46,7 +46,7 @@ export function isSessionSummaryContractEnabled(
  * real tokens per cwd; other flavors omit the fields.
  */
 export const SESSION_SUMMARY_CONTRACT_LINE =
-    'AGENT_NOTIFY_SUMMARY {"version":1,"status":"done|blocked|needs_review|needs_decision|failed|stalled","action":"<=12 words","summary":"one-line triage"}'
+    'AGENT_NOTIFY_SUMMARY {"version":1,"status":"done|blocked|needs_review|needs_decision|failed|stalled","action":"<=12 words","summary":"spoken answer or outcome"}'
 
 /**
  * Body appended to flavor system / developer instructions when enabled.
@@ -62,9 +62,11 @@ export function buildSessionSummaryInstruction(): string {
         'Use the language used by the user in the current conversation for the',
         'human-readable "action" and "summary" values.',
         'Use status "blocked" if unsure. When status is "done" and follow-up remains,',
-        'keep action to 12 words or fewer. Omit the action key when nothing remains —',
-        'never emit "action":"" (Cursor drops a quote and breaks JSON).',
-        'Omit agent and project fields.',
+        'keep action to 12 words or fewer. Omit the action key when nothing remains;',
+        'never emit "action":"" (breaks JSON parsers).',
+        'Summary is one spoken sentence for phone/voice: if the operator asked a',
+        'question this turn, answer it — do not worklog your steps. Process language',
+        'only when there was no question. Omit agent and project fields.',
     ].join('\n')
 }
 

@@ -1,11 +1,13 @@
 import type { ToolViewComponent, ToolViewProps } from '@/components/ToolCard/views/_all'
 import type { ReactNode } from 'react'
-import { isObject, safeStringify } from '@hapi/protocol'
+import { isObject, safeStringify, stripAgentContract } from '@hapi/protocol'
 import { CodeBlock } from '@/components/CodeBlock'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
 import { ChecklistList, extractTodoChecklist } from '@/components/ToolCard/checklist'
 import { basename, resolveDisplayPath } from '@/utils/path'
 import { getInputStringAny } from '@/lib/toolInputUtils'
+import { useShowAgentContract } from '@/hooks/useShowAgentContract'
+import { isSubagentToolName } from '@/chat/subagentTool'
 import {
     getCodexAgentActivity,
     getCodexAgentTargets,
@@ -564,12 +566,16 @@ const CodexBashResultView: ToolViewComponent = (props: ToolViewProps) => {
 
 const MarkdownResultView: ToolViewComponent = (props: ToolViewProps) => {
     const result = props.block.tool.result
+    const { showAgentContract } = useShowAgentContract()
 
     if (result === undefined || result === null) {
         return <ResultStatusPill text={placeholderForState(props.block.tool.state)} />
     }
 
-    const text = extractTextFromResult(result)
+    const rawText = extractTextFromResult(result)
+    const text = rawText
+        ? (showAgentContract ? rawText : stripAgentContract(rawText))
+        : null
     if (text) {
         return (
             <>
@@ -812,6 +818,8 @@ function AgentIdPill(props: { label: string; value: string }) {
 const CodexAgentResultView: ToolViewComponent = (props: ToolViewProps) => {
     const { name, state, result, input } = props.block.tool
     const showDetails = props.surface === 'dialog'
+    const { showAgentContract } = useShowAgentContract()
+    const visibleText = (text: string) => (showAgentContract ? text : stripAgentContract(text))
 
     if (result === undefined || result === null) {
         return <ResultStatusPill text={getCodexAgentActivity(input) ?? placeholderForState(state)} />
@@ -819,9 +827,10 @@ const CodexAgentResultView: ToolViewComponent = (props: ToolViewProps) => {
 
     if (state === 'error') {
         const text = extractTextFromResult(result)
+        const display = text ? visibleText(text) : null
         return (
             <div className="text-sm text-red-600">
-                {text?.trim() ? text : 'Agent tool failed'}
+                {display?.trim() ? display : 'Agent tool failed'}
             </div>
         )
     }
@@ -870,7 +879,7 @@ const CodexAgentResultView: ToolViewComponent = (props: ToolViewProps) => {
                                     </div>
                                     {status.text ? (
                                         <div className="text-sm text-[var(--app-fg)]">
-                                            {renderText(status.text, { mode: 'auto', collapseLongContent: props.surface === 'inline', surface: props.surface })}
+                                            {renderText(visibleText(status.text), { mode: 'auto', collapseLongContent: props.surface === 'inline', surface: props.surface })}
                                         </div>
                                     ) : null}
                                 </div>
@@ -896,7 +905,7 @@ const CodexAgentResultView: ToolViewComponent = (props: ToolViewProps) => {
                     </div>
                     {showDetails && parsed.text ? (
                         <div className="text-sm text-[var(--app-fg)]">
-                            {renderText(parsed.text, { mode: 'auto', collapseLongContent: props.surface === 'inline', surface: props.surface })}
+                            {renderText(visibleText(parsed.text), { mode: 'auto', collapseLongContent: props.surface === 'inline', surface: props.surface })}
                         </div>
                     ) : null}
                     {showDetails ? <RawJsonDevOnly value={result} surface={props.surface} /> : null}
@@ -946,7 +955,7 @@ const CodexAgentResultView: ToolViewComponent = (props: ToolViewProps) => {
 
         return (
             <>
-                {renderText(text, { mode: 'auto', collapseLongContent: props.surface === 'inline', surface: props.surface })}
+                {renderText(visibleText(text), { mode: 'auto', collapseLongContent: props.surface === 'inline', surface: props.surface })}
                 {typeof result === 'object' ? <RawJsonDevOnly value={result} surface={props.surface} /> : null}
             </>
         )
@@ -1073,6 +1082,11 @@ export const toolResultViewRegistry: Record<string, ToolViewComponent> = {
 export function getToolResultViewComponent(toolName: string): ToolViewComponent {
     if (toolName.startsWith('mcp__')) {
         return GenericResultView
+    }
+    // Claude Task/Agent (and Task:*/Agent:* variants) share MarkdownResultView so
+    // show-contract stripping applies to every subagent final response.
+    if (isSubagentToolName(toolName)) {
+        return MarkdownResultView
     }
     return toolResultViewRegistry[toolName] ?? GenericResultView
 }

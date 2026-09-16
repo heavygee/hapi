@@ -15,7 +15,7 @@ export type NotifySummaryStatus = typeof NOTIFY_SUMMARY_STATUSES[number]
 /** Inline prefix injected for non-Cursor flavors on outbound user messages (#20). */
 export const AGENT_NOTIFY_CONTRACT_INLINE_PREFIX = [
     'End every response with one machine-parseable line (no backticks):',
-    'AGENT_NOTIFY_SUMMARY {"version":1,"agent":"<agent-id>","project":"<project>","status":"done|blocked|needs_review|needs_decision|failed|stalled","action":"<=12 words","summary":"one-line triage"}',
+    'AGENT_NOTIFY_SUMMARY {"version":1,"agent":"<agent-id>","project":"<project>","status":"done|blocked|needs_review|needs_decision|failed|stalled","action":"<=12 words","summary":"spoken answer or outcome"}',
     'Use blocked if unsure. action must be concrete when status is done and follow-up is needed.',
     '',
     '---',
