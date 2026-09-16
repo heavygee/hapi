@@ -24,6 +24,7 @@
         "./schemas": "./src/schemas.ts",
         "./sessionCitation": "./src/sessionCitation.ts",
         "./sessionExport": "./src/sessionExport.ts",
+        "./sessionLifecycle": "./src/sessionLifecycle.ts",
         "./types": "./src/types.ts",
         "./runPrEmojiBatch": "./src/runPrEmojiBatch.ts",
         "./attachGithubPrRef": "./src/attachGithubPrRef.ts",

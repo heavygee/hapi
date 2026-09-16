@@ -841,6 +841,7 @@ export function HappyThread(props: {
     const appliedMessagesVersion = runtimeExtras?.messagesVersion ?? props.messagesVersion
     const appliedHistoryVersion = runtimeExtras?.historyVersion ?? props.historyVersion
     const viewportRef = useRef<HTMLDivElement | null>(null)
+    useTransientScrollbar(viewportRef, 'right')
     const contentRef = useRef<HTMLDivElement | null>(null)
     const [pullToLoadState, setPullToLoadState] = useState<PullToLoadState>('idle')
     const [searchTargetRetryVersion, setSearchTargetRetryVersion] = useState(0)
@@ -2490,7 +2491,7 @@ export function HappyThread(props: {
                 >
                     <div
                         ref={viewportRef}
-                        className="app-scroll-y chat-scroll-y min-h-0 flex-1 overflow-x-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--app-link)]"
+                        className="app-scroll-y chat-scroll-y scrollbar-auto-hide min-h-0 flex-1 overflow-x-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--app-link)]"
                         tabIndex={0}
                     >
                         <div ref={contentRef} className="chat-scroll-content mx-auto w-full max-w-content min-w-0 p-3">
