@@ -7,7 +7,7 @@
  * - No E2E encryption; data is stored as JSON in SQLite
  */
 
-import { isKnownFlavor, isSteeringSupportedForSession, type LocalResumeTarget, type ResumableSession, type SessionEndReason } from '@hapi/protocol'
+import { isKnownFlavor, isLiveLifecycleState, isSteeringSupportedForSession, type LocalResumeTarget, type ResumableSession, type SessionEndReason } from '@hapi/protocol'
 import {
     cliBinaryUpdatedOnDisk,
     isMachineCapabilitySkewed,
@@ -372,6 +372,46 @@ export class SyncEngine {
         return this.sessionCache.resolveSessionAccess(sessionId, namespace)
     }
 
+    /** Follow job-owner redirects after merge/dedup (tiann/hapi#1404 cold review). */
+    resolveAttachedJobSessionId(sessionId: string, namespace: string): string {
+        return this.sessionCache.resolveAttachedJobSessionId(sessionId, namespace)
+    }
+
+    /** Follow dual-running same-key remaps after merge (tiann/hapi#1404). */
+    resolveAttachedJobKey(
+        requestedSessionId: string,
+        ownerSessionId: string,
+        jobKey: string,
+        namespace: string
+    ): string {
+        return this.sessionCache.resolveAttachedJobKey(
+            requestedSessionId,
+            ownerSessionId,
+            jobKey,
+            namespace
+        )
+    }
+
+    /**
+     * PUT path: follow existing remaps, or allocate one when a redirected late
+     * registration would overwrite a different running generation.
+     */
+    resolveAttachedJobKeyForUpsert(
+        requestedSessionId: string,
+        ownerSessionId: string,
+        jobKey: string,
+        namespace: string,
+        incomingRunId: string | undefined
+    ): string {
+        return this.sessionCache.resolveAttachedJobKeyForUpsert(
+            requestedSessionId,
+            ownerSessionId,
+            jobKey,
+            namespace,
+            incomingRunId
+        )
+    }
+
     getActiveSessions(): Session[] {
         return this.sessionCache.getActiveSessions()
     }
@@ -620,6 +660,16 @@ export class SyncEngine {
     }
 
     /**
+     * tiann/hapi#1820: any message on the wire is agent progress, whichever
+     * side authored it. Separate from `recordSessionActivity`, which also
+     * bumps `updatedAt` and is deliberately restricted to human turns so the
+     * session list keeps ordering by human interaction.
+     */
+    recordAgentProgress(sessionId: string, at: number): void {
+        this.sessionCache.recordAgentProgress(sessionId, at)
+    }
+
+    /**
      * tiann/hapi#893 (scratchlist v2). Read-side: list entries for a
      * session. Auth / namespace check is the route layer's job (via
      * `requireSessionFromParam`); by the time we get here the caller
@@ -772,6 +822,124 @@ export class SyncEngine {
             this.sessionCache.emitScratchlistChanged(sessionId, Date.now())
         }
         return removed
+    }
+
+    listSessionJobs(sessionId: string) {
+        return this.store.sessionJobs.list(sessionId).map((job) => ({
+            key: job.key,
+            label: job.label,
+            status: job.status,
+            ...(job.done !== undefined ? { done: job.done } : {}),
+            ...(job.total !== undefined ? { total: job.total } : {}),
+            ...(job.remaining !== undefined ? { remaining: job.remaining } : {}),
+            ...(job.unit !== undefined ? { unit: job.unit } : {}),
+            ...(job.detail !== undefined ? { detail: job.detail } : {}),
+            ...(job.runId !== undefined ? { runId: job.runId } : {}),
+            heartbeatAt: job.heartbeatAt,
+            startedAt: job.startedAt,
+            updatedAt: job.updatedAt
+        }))
+    }
+
+    getPrimaryAttachedJob(sessionId: string) {
+        return this.store.sessionJobs.getPrimaryRunning(sessionId)
+    }
+
+    getPrimaryAttachedJobsBySessionIds(sessionIds: string[]) {
+        return this.store.sessionJobs.getPrimaryRunningBySessionIds(sessionIds)
+    }
+
+    /** Move outliving jobs + redirects onto another session (pre-delete). */
+    transferAttachedJobs(fromSessionId: string, toSessionId: string, namespace: string): void {
+        this.sessionCache.transferAttachedJobs(fromSessionId, toSessionId, namespace)
+    }
+
+    /** Shared REST/SSE watermark allocator for attachedJob patches. */
+    allocateAttachedJobVersion(sessionId: string): number {
+        return this.sessionCache.allocateAttachedJobVersion(sessionId)
+    }
+
+    upsertSessionJob(
+        sessionId: string,
+        jobKey: string,
+        body: import('@hapi/protocol').AttachedJobUpsert
+    ):
+        | { outcome: 'upserted'; job: import('@hapi/protocol').AttachedJob }
+        | { outcome: 'session-not-found' } {
+        const result = this.store.sessionJobs.upsert(sessionId, jobKey, body)
+        if (result.outcome === 'session-not-found') {
+            return result
+        }
+        const primary = this.store.sessionJobs.getPrimaryRunning(sessionId)
+        this.sessionCache.emitAttachedJobChanged(sessionId, primary)
+        const job = result.job
+        return {
+            outcome: 'upserted',
+            job: {
+                key: job.key,
+                label: job.label,
+                status: job.status,
+                ...(job.done !== undefined ? { done: job.done } : {}),
+                ...(job.total !== undefined ? { total: job.total } : {}),
+                ...(job.remaining !== undefined ? { remaining: job.remaining } : {}),
+                ...(job.unit !== undefined ? { unit: job.unit } : {}),
+                ...(job.detail !== undefined ? { detail: job.detail } : {}),
+                ...(job.runId !== undefined ? { runId: job.runId } : {}),
+                heartbeatAt: job.heartbeatAt,
+                startedAt: job.startedAt,
+                updatedAt: job.updatedAt
+            }
+        }
+    }
+
+    patchSessionJob(
+        sessionId: string,
+        jobKey: string,
+        patch: import('@hapi/protocol').AttachedJobPatch
+    ):
+        | { outcome: 'patched'; job: import('@hapi/protocol').AttachedJob }
+        | { outcome: 'not-found' }
+        | { outcome: 'run-mismatch' } {
+        const result = this.store.sessionJobs.patch(sessionId, jobKey, patch)
+        if (result.outcome !== 'patched') {
+            return result
+        }
+        const updated = result.job
+        const primary = this.store.sessionJobs.getPrimaryRunning(sessionId)
+        this.sessionCache.emitAttachedJobChanged(sessionId, primary)
+        return {
+            outcome: 'patched',
+            job: {
+                key: updated.key,
+                label: updated.label,
+                status: updated.status,
+                ...(updated.done !== undefined ? { done: updated.done } : {}),
+                ...(updated.total !== undefined ? { total: updated.total } : {}),
+                ...(updated.remaining !== undefined ? { remaining: updated.remaining } : {}),
+                ...(updated.unit !== undefined ? { unit: updated.unit } : {}),
+                ...(updated.detail !== undefined ? { detail: updated.detail } : {}),
+                ...(updated.runId !== undefined ? { runId: updated.runId } : {}),
+                heartbeatAt: updated.heartbeatAt,
+                startedAt: updated.startedAt,
+                updatedAt: updated.updatedAt
+            }
+        }
+    }
+
+    deleteSessionJob(
+        sessionId: string,
+        jobKey: string,
+        expectedRunId?: string
+    ):
+        | { outcome: 'deleted' }
+        | { outcome: 'not-found' }
+        | { outcome: 'run-mismatch' } {
+        const result = this.store.sessionJobs.delete(sessionId, jobKey, expectedRunId)
+        if (result.outcome === 'deleted') {
+            const primary = this.store.sessionJobs.getPrimaryRunning(sessionId)
+            this.sessionCache.emitAttachedJobChanged(sessionId, primary)
+        }
+        return result
     }
 
     private async withScratchlistUploadLock<T>(
@@ -947,6 +1115,10 @@ export class SyncEngine {
             this.triggerDedupIfNeeded(session.id)
         }
         this.machineCache.expireInactive?.()
+        // tiann/hapi#1820: `activeAt` expiry above only catches sessions whose
+        // socket went quiet. Keepalive-only zombies keep `activeAt` fresh
+        // forever, so reconcile their agent-health signal separately.
+        this.sessionCache.reconcileKeepaliveIdle()
         // Piggybacked on the inactivity tick; not a logical part of expireInactive
         // but shares its 5s cadence (avoids a second timer).
         this.messageService.releaseMatureScheduledMessages(Date.now(), this.historyActionsInFlight)
@@ -1772,11 +1944,13 @@ export class SyncEngine {
             // running forever and any downstream code that filters by
             // lifecycleState (not the cache active flag) would keep
             // treating archived ACP sessions as live.
+            // tiann/hapi#1820: 'idle' is the same stale-live case as 'running'
+            // once the row is inactive, so clear it the same way.
             const oldLifecycle = typeof latest.metadata.lifecycleState === 'string' ? latest.metadata.lifecycleState : undefined
             const nextMetadata: typeof latest.metadata = {
                 ...latest.metadata,
                 cursorSessionProtocol: 'acp' as const,
-                ...(oldLifecycle === 'running' ? { lifecycleState: 'archived' as const } : {})
+                ...(isLiveLifecycleState(oldLifecycle) ? { lifecycleState: 'archived' as const } : {})
             }
             // Drop the migration-in-progress flag in the same write (see
             // header comment). Safe whether or not it was set.
@@ -2325,6 +2499,10 @@ export class SyncEngine {
             this.persistClearOperationState(sessionId, namespace, operation, message)
             return { type: 'error', message, code: 'replacement_link_failed' }
         }
+        // Move outliving jobs before writing supersededBySessionId. resolveAttachedJobSessionId
+        // follows that link; without a transfer, heartbeats on the retained source id hit the
+        // empty replacement while the meter row stays frozen on the archived source.
+        this.transferAttachedJobs(sessionId, replacementSessionId, namespace)
         if (!this.persistClearReplacement(sessionId, namespace, replacementSessionId, operation)) {
             const message = 'Fresh OpenCode session started but the archived source could not be linked'
             this.persistClearOperationState(sessionId, namespace, operation, message)

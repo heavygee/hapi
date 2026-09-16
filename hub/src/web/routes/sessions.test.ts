@@ -71,6 +71,8 @@ function createApp(session: Session, opts?: {
     rewindConversation?: SyncEngine['rewindConversation']
     suggestSessionTitle?: SyncEngine['suggestSessionTitle']
     updateSessionSummary?: SyncEngine['updateSessionSummary']
+    getPrimaryAttachedJobsBySessionIds?: SyncEngine['getPrimaryAttachedJobsBySessionIds']
+    allocateAttachedJobVersion?: SyncEngine['allocateAttachedJobVersion']
     setSessionPinned?: (sessionId: string, pinned: boolean) => void
     setSessionPinMode?: (sessionId: string, mode: 'none' | 'project' | 'global') => void
 }) {
@@ -168,7 +170,9 @@ function createApp(session: Session, opts?: {
         implementCodexPlan: opts?.implementCodexPlan,
         rewindConversation: opts?.rewindConversation ?? (async () => ({ type: 'success' })),
         suggestSessionTitle: opts?.suggestSessionTitle ?? (async () => 'Generated title'),
-        updateSessionSummary: opts?.updateSessionSummary ?? (async () => {})
+        updateSessionSummary: opts?.updateSessionSummary ?? (async () => {}),
+        getPrimaryAttachedJobsBySessionIds: opts?.getPrimaryAttachedJobsBySessionIds ?? (() => new Map()),
+        allocateAttachedJobVersion: opts?.allocateAttachedJobVersion ?? (() => Date.now())
     } as Partial<SyncEngine>
 
     const app = new Hono<WebAppEnv>()
@@ -1416,6 +1420,32 @@ describe('sessions routes', () => {
             expect(await response.json()).toEqual({ ok: true })
         })
 
+        // tiann/hapi#1820: 'idle' is a live lifecycle. Once a keepalive-only
+        // session finally loses its socket it must stay archivable, exactly
+        // like a stale 'running' row — comparing against the 'running'
+        // literal here would strand it behind a 409.
+        it('archives an inactive session left in the keepalive-idle lifecycle', async () => {
+            const calls: string[] = []
+            const session = createSession({
+                active: false,
+                metadata: {
+                    path: '/tmp/project',
+                    host: 'localhost',
+                    flavor: 'cursor',
+                    lifecycleState: 'idle'
+                }
+            })
+            const { app } = createApp(session, {
+                archiveSession: async (sessionId: string) => { calls.push(sessionId) }
+            })
+
+            const response = await app.request('/api/sessions/session-1/archive', { method: 'POST' })
+
+            expect(response.status).toBe(200)
+            expect(await response.json()).toEqual({ ok: true })
+            expect(calls).toEqual(['session-1'])
+        })
+
         it('returns 2xx and skips archiveSession when the row is already archived (idempotent)', async () => {
             let called = false
             const session = createSession({
@@ -1629,6 +1659,8 @@ describe('sessions routes', () => {
                 return new Map(ids.map((id) => [id, 0]))
             },
             getNextScheduledAtBySessionIds: (_ids: string[]) => new Map<string, number>(),
+            getPrimaryAttachedJobsBySessionIds: () => new Map(),
+            allocateAttachedJobVersion: () => Date.now(),
             resolveSessionAccess: () => ({ ok: false, reason: 'not-found' as const })
         } as unknown as Partial<SyncEngine>
 
@@ -1661,6 +1693,8 @@ describe('sessions routes', () => {
             getSessionsByNamespace: () => sessions,
             getFutureScheduledMessageCounts: (ids: string[]) => new Map(ids.map((id) => [id, 0])),
             getNextScheduledAtBySessionIds: (_ids: string[]) => new Map<string, number>(),
+            getPrimaryAttachedJobsBySessionIds: () => new Map(),
+            allocateAttachedJobVersion: () => Date.now(),
             resolveSessionAccess: () => ({ ok: false, reason: 'not-found' as const })
         } as unknown as Partial<SyncEngine>
 
@@ -1675,6 +1709,60 @@ describe('sessions routes', () => {
         expect(response.status).toBe(200)
         const body = await response.json() as { sessions: Array<{ id: string }> }
         expect(body.sessions.map((s) => s.id)).toEqual(['new-inactive'])
+    })
+
+    it('allocates attachedJob watermark before reading jobs (SSE race)', async () => {
+        const session = createSession({ id: 'session-watermark' })
+        const callOrder: string[] = []
+        let watermark = 0
+        const runningJob = {
+            key: 'beets',
+            label: 'beets',
+            status: 'running' as const,
+            remaining: 3,
+            heartbeatAt: 1,
+            startedAt: 1,
+            updatedAt: 1
+        }
+        let primary: typeof runningJob | null = runningJob
+        const engine = {
+            getSessionsByNamespace: () => [session],
+            getFutureScheduledMessageCounts: (ids: string[]) => new Map(ids.map((id) => [id, 0])),
+            getNextScheduledAtBySessionIds: (_ids: string[]) => new Map<string, number>(),
+            allocateAttachedJobVersion: (id: string) => {
+                expect(id).toBe(session.id)
+                callOrder.push('allocate')
+                watermark += 1
+                return watermark
+            },
+            getPrimaryAttachedJobsBySessionIds: (ids: string[]) => {
+                callOrder.push('read')
+                // Concurrent terminal mutation in the old read→allocate gap:
+                // SSE would allocate the next watermark with the cleared job.
+                primary = null
+                watermark += 1
+                return new Map(ids.map((id) => [id, primary]))
+            },
+            resolveSessionAccess: () => ({ ok: true as const, sessionId: session.id, session })
+        } as unknown as Partial<SyncEngine>
+
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createSessionsRoutes(() => engine as SyncEngine))
+
+        const response = await app.request('/api/sessions')
+        expect(response.status).toBe(200)
+        expect(callOrder).toEqual(['allocate', 'read'])
+        const body = await response.json() as {
+            sessions: Array<{ id: string; attachedJob: unknown; attachedJobUpdatedAt: number }>
+        }
+        const row = body.sessions.find((s) => s.id === session.id)
+        expect(row?.attachedJobUpdatedAt).toBe(1)
+        // Snapshot watermark must stay behind the concurrent SSE emit so useSSE applies it.
+        expect(row?.attachedJobUpdatedAt).toBeLessThan(watermark)
     })
 
 })
