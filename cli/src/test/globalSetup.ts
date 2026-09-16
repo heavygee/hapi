@@ -71,10 +71,14 @@ export async function setup() {
         writeFileSync(stubClaudePath, '#!/bin/sh\nexec sleep 300\n', { mode: 0o755 })
     }
 
-    // Inherit the host env so Bun can resolve workspace packages, then override
-    // anything that would point the ephemeral test hub at production credentials.
+    // Minimal env whitelist so production credentials never reach the test hub.
+    // The hub child also carries HAPI_TEST_MARKER so reapTestOwnedProcesses can
+    // find leaked hub PIDs even when the parent ChildProcess handle is lost.
     const hubEnv: NodeJS.ProcessEnv = {
-        ...process.env,
+        PATH: process.env.PATH,
+        HOME: process.env.HOME,
+        ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}),
+        ...(process.env.BUN_INSTALL ? { BUN_INSTALL: process.env.BUN_INSTALL } : {}),
         HAPI_HOME: tmpHome,
         DB_PATH: join(tmpHome, 'hapi.db'),
         HAPI_LISTEN_PORT: String(port),
@@ -85,16 +89,6 @@ export async function setup() {
         SERVERCHAN_NOTIFICATION: 'false',
         [TEST_OWNED_MARKER_KEY]: tmpHome,
     }
-    for (const key of [
-        'TELEGRAM_BOT_TOKEN',
-        'SERVERCHAN_SENDKEY',
-        'ELEVENLABS_API_KEY',
-        'HAPI_API_URL',
-        'HAPI_SESSION_ID',
-        'HAPI_INLINE_SECRET',
-    ]) {
-        delete hubEnv[key]
-    }
 
     // Write config so setupFile.ts can inject env vars into each test worker
     writeFileSync(TEST_CONFIG_FILE, JSON.stringify({ port, token, tmpHome, bunExec, stubClaudePath }))
@@ -102,7 +96,7 @@ export async function setup() {
     const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../..')
     const hubEntry = join(repoRoot, 'hub/src/index.ts')
 
-    hubProcess = spawn(bunExec, [hubEntry], {
+    hubProcess = spawn(bunExec, ['run', hubEntry], {
         env: hubEnv,
         cwd: repoRoot,
         stdio: 'ignore',
