@@ -93,12 +93,13 @@ export async function setup() {
     // Write config so setupFile.ts can inject env vars into each test worker
     writeFileSync(TEST_CONFIG_FILE, JSON.stringify({ port, token, tmpHome, bunExec, stubClaudePath }))
 
-    const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../..')
-    const hubEntry = join(repoRoot, 'hub/src/index.ts')
+    const hubEntry = join(
+        dirname(fileURLToPath(import.meta.url)),
+        '../../../hub/src/index.ts'
+    )
 
     hubProcess = spawn(bunExec, ['run', hubEntry], {
         env: hubEnv,
-        cwd: repoRoot,
         stdio: 'ignore',
     })
 
