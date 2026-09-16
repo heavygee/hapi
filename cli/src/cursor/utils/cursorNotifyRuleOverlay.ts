@@ -299,14 +299,22 @@ export function installCursorNotifyRuleOverlay(
 }
 
 function shouldPreserveTrackedSessionRule(cwd: string, existing: string | null): boolean {
-    if (existing !== null && existing.includes(TRACKED_IDENTITY_MARKER)) {
-        return true;
-    }
     const probe = spawnSync('git', ['-C', cwd, 'ls-files', '--error-unmatch', RULE_RELPATH], {
         encoding: 'utf-8',
         stdio: ['ignore', 'ignore', 'ignore']
     });
-    return probe.status === 0;
+    if (probe.status === 0) {
+        return true;
+    }
+    // Generated overlays also carry the identity section — sentinel distinguishes ours.
+    if (
+        existing !== null
+        && existing.includes(TRACKED_IDENTITY_MARKER)
+        && !existing.includes(HAPI_SESSION_RULE_SENTINEL)
+    ) {
+        return true;
+    }
+    return false;
 }
 
 function getHapiHomeDir(): string {
