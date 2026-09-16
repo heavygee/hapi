@@ -396,7 +396,8 @@ describe('message tail synchronization', () => {
             oldestPositionSeq: 40,
             newestPositionAt: 40_000,
             newestPositionSeq: 40,
-            epoch: 3
+            epoch: 3,
+            requiresLatestReset: false
         }))
 
         expect(getMessageWindowState(id).messages.map((message) => message.id)).toEqual(['cached'])
@@ -444,7 +445,8 @@ describe('message tail synchronization', () => {
             oldestPositionSeq: 40,
             newestPositionAt: 4_000,
             newestPositionSeq: 40,
-            epoch: 3
+            epoch: 3,
+            requiresLatestReset: false
         }))
 
         activateMessageWindow(id)
@@ -473,7 +475,8 @@ describe('message tail synchronization', () => {
             oldestPositionSeq: 40,
             newestPositionAt: 40_000,
             newestPositionSeq: 40,
-            epoch: 3
+            epoch: 3,
+            requiresLatestReset: false
         }))
 
         activateMessageWindow(id)
@@ -524,7 +527,8 @@ describe('message tail synchronization', () => {
             oldestPositionSeq: 40,
             newestPositionAt: 40_000,
             newestPositionSeq: 40,
-            epoch: 3
+            epoch: 3,
+            requiresLatestReset: false
         }))
 
         activateMessageWindow(id)
@@ -552,7 +556,8 @@ describe('message tail synchronization', () => {
             oldestPositionSeq: 40,
             newestPositionAt: 40_000,
             newestPositionSeq: 40,
-            epoch: 3
+            epoch: 3,
+            requiresLatestReset: false
         }))
 
         activateMessageWindow(id)
