@@ -651,10 +651,13 @@ Observed 2026-07-25: soup rebuild went green at `10:10:30Z` but the hub stayed 1
 Proxmox accumulated months of hardening; oos cutover missed most of it. **Do not copy the whole proxmox stack** - cutover/artifact drop-ins are anti-primary. Install the Tier-1 package instead:
 
 ```bash
-sudo bash scripts/tooling/install-hapi-primary-hub-tier1.sh
+sudo bash scripts/tooling/install-hapi-systemd-units.sh --profile primary-soup
+bash scripts/tooling/verify-hapi-systemd-units.sh
 # then (or --restart):
 hapi-restart-hub
 ```
+
+Canon: [`systemd-install.md`](./systemd-install.md). Drop-ins only (base units already present): `install-hapi-primary-hub-tier1.sh`.
 
 | Piece | Effect |
 |-------|--------|

@@ -258,7 +258,9 @@ launchctl unload ~/Library/LaunchAgents/com.hapi.runner.plist
 <details>
 <summary>Linux: systemd</summary>
 
-Create user-level systemd services for automatic startup.
+**heavygee/hapi pet installs:** prefer `install-hapi-pet.sh --with-systemd` or `scripts/tooling/install-hapi-systemd-units.sh --profile user-pet` — canonical units with `KillMode=process`. See [`docs/tooling/systemd-install.md`](../tooling/systemd-install.md).
+
+Manual user-level systemd services (equivalent to the `user-pet` profile):
 
 **Hub** (`~/.config/systemd/user/hapi-hub.service`):
 

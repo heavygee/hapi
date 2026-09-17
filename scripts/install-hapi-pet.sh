@@ -14,6 +14,7 @@
 #
 # Usage:
 #   HAPI_ARTIFACT_URL=<url-or-path-to-hapi-binary> bash install-hapi-pet.sh
+#   bash install-hapi-pet.sh --with-systemd   # also install user systemd units
 #
 # See docs/plans/2026-09-04-fleet-vm-swap-strategy.md §6 for the full history of what
 # this script encodes and why each step exists — every step here was a real bug found
@@ -29,6 +30,18 @@ INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 NVM_VERSION="v0.39.7"
 NODE_MIN_MAJOR=22
 STOP_TIMEOUT_SECS=15
+WITH_SYSTEMD=0
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+for arg in "$@"; do
+    case "$arg" in
+        --with-systemd) WITH_SYSTEMD=1 ;;
+        -h|--help)
+            sed -n '2,22p' "$0" | sed 's/^# \?//'
+            exit 0
+            ;;
+    esac
+done
 
 log()  { printf '==> %s\n' "$1"; }
 fail() { printf 'ERROR: %s\n' "$1" >&2; exit 1; }
@@ -139,6 +152,14 @@ if ! kill -0 "$RUNNER_PID" 2>/dev/null; then
     fail "runner exited immediately — check $HAPI_HOME/logs/runner.log"
 fi
 log "Runner started, restricted to $HAPI_WORKSPACE."
+
+if [[ "$WITH_SYSTEMD" -eq 1 ]]; then
+    log "Installing user systemd units (KillMode=process, Restart=always)"
+    HAPI_WORKSPACE="$HAPI_WORKSPACE" HAPI_HOME="$HAPI_HOME" INSTALL_DIR="$INSTALL_DIR" \
+        bash "$SCRIPT_DIR/tooling/install-hapi-systemd-units.sh" --profile user-pet --enable
+    log "systemd user units enabled — stop the nohup processes above if you want systemd to own the fleet:"
+    log "  kill $RUNNER_PID  # then: systemctl --user status hapi-hub hapi-runner"
+fi
 
 # --- 8. Node.js (via nvm, no sudo needed) + Claude Code CLI ---
 # Deliberately does NOT pre-check the existing Node version and skip nvm on "looks new

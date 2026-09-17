@@ -4,6 +4,9 @@
 # Install the Tier-1 primary-hub / soup-host hardening package on this machine.
 # Idempotent. Safe to re-run. Does NOT install cutover/artifact drop-ins.
 #
+# Base hub/runner units: install-hapi-systemd-units.sh (runs Tier-1 for system profiles).
+# This script alone only installs drop-ins + watchdog when base units already exist.
+#
 # Installs:
 #   - runner: 10-resilience.conf (Restart=always, KillMode=process,
 #     HAPI_DISABLE_VERSION_HANDOFF=1, ExecStartPre=runner stop)

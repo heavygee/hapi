@@ -26,14 +26,15 @@ Orchestration scripts live in **`~/coding/lockhouse-janus`** (SSH, ZFS, tailnet)
 
 When standing up another **in-scope primary hub** (or re-hardening oos after cutover drift), do **not** rsync proxmox's full systemd tree. Homelab carries **anti-primary** drop-ins (cutover / forbidden / soup-artifact) that demote the *old* hub - copying them onto the active hub is a footgun, not hardening.
 
-**Tier-1 install (idempotent):**
+**Canonical systemd + Tier-1 (idempotent):**
 
 ```bash
-sudo bash ~/coding/hapi/scripts/tooling/install-hapi-primary-hub-tier1.sh
+sudo bash ~/coding/hapi/scripts/tooling/install-hapi-systemd-units.sh --profile primary-soup
+bash ~/coding/hapi/scripts/tooling/verify-hapi-systemd-units.sh
 hapi-restart-hub   # or pass --restart to the installer
 ```
 
-Covers: KillMode=process, Restart=always + burst limits, `HAPI_DISABLE_VERSION_HANDOFF=1`, hub OOMScore=-1000, runner OOMScore=0, runner liveness watchdog timer, sudoers/wrapper so watchdog can restart the runner without unlocking hub stop. Details + kill-criteria: [`driver-soup.md`](./driver-soup.md) § Tier-1 primary-hub package.
+Installs repo-owned base units (not hand-edited drift) then Tier-1 drop-ins. Covers: KillMode=process, Restart=always + burst limits, `HAPI_DISABLE_VERSION_HANDOFF=1`, hub OOMScore=-1000, runner OOMScore=0, runner liveness watchdog timer, sudoers/wrapper so watchdog can restart the runner without unlocking hub stop. Fleet VMs use `--profile fleet-binary`. Details: [`systemd-install.md`](./systemd-install.md), kill-criteria in [`driver-soup.md`](./driver-soup.md) § Tier-1 primary-hub package.
 
 ### Never copy to primary (anti-primary / footgun)
 

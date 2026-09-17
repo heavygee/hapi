@@ -1,0 +1,18 @@
+[Unit]
+Description=HAPI Runner (@HOST_LABEL@)
+After=network-online.target hapi-hub.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+KillMode=process
+Environment=HAPI_HOME=@HAPI_HOME@
+Environment=PATH=@HAPI_PATH@
+Environment=HAPI_RUNNER_SUPERVISED=1
+Environment=HAPI_DISABLE_VERSION_HANDOFF=1
+ExecStart=@HAPI_BIN@ runner start-sync @WORKSPACE_ROOT_ARGS@
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
