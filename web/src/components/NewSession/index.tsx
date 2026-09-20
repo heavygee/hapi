@@ -319,11 +319,12 @@ export function NewSession(props: {
         seededFromHubRef.current = true
         const seeded = seedNewSessionFromPeerSpawnDefaults(hubPeerSpawnDefaults)
         const { hasStickyAgent, hasStickyYolo } = initialStickyPreferences
-        // If the operator already edited permission/Yolo, do not swap the
+        // If the operator already edited permission/Yolo/model, do not swap the
         // agent — agent-change effects would wipe the restrictive choice.
         const applyHubAgent = !hasStickyAgent
             && !editedAgentRef.current
             && !editedPermissionRef.current
+            && !editedModelRef.current
         if (applyHubAgent) {
             setAgent(seeded.agent)
         }

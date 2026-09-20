@@ -1707,6 +1707,61 @@ describe('NewSession launch preferences', () => {
         })
     })
 
+    it('keeps an explicit Claude model when hub settings resolve late with Codex', async () => {
+        localStorage.clear()
+        let resolveSettings!: (value: unknown) => void
+        const deferred = new Promise((resolve) => {
+            resolveSettings = resolve
+        })
+        const slowApi = {
+            getHubSettings: vi.fn(() => deferred)
+        } as unknown as ApiClient
+        mocks.spawnSession.mockResolvedValue({ type: 'success', sessionId: 'session-1' })
+
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        render(
+            <QueryClientProvider client={client}>
+                <NewSession
+                    api={slowApi}
+                    machines={[machine]}
+                    initialMachineId="machine-1"
+                    initialDirectory="C:\\repo"
+                    onSuccess={mocks.onSuccess}
+                    onCancel={() => {}}
+                />
+            </QueryClientProvider>
+        )
+
+        expect(screen.getByDisplayValue('claude')).toBeChecked()
+        fireEvent.click(screen.getByTestId('model'))
+        expect(screen.getByTestId('model')).toHaveTextContent(mocks.nextModelValue)
+
+        await act(async () => {
+            resolveSettings({
+                sessionSummaryContract: false,
+                sessionSummaryInChat: false,
+                peerSpawnDefaults: {
+                    agent: 'codex',
+                    permissionMode: 'read-only',
+                    models: { codex: 'gpt-5' }
+                }
+            })
+            await deferred
+        })
+
+        await waitFor(() => {
+            expect(screen.getByDisplayValue('claude')).toBeChecked()
+            expect(screen.getByTestId('model')).toHaveTextContent(mocks.nextModelValue)
+        })
+        await waitFor(() => expect(screen.getByTestId('create')).toBeEnabled())
+        fireEvent.click(screen.getByTestId('create'))
+        await waitFor(() => expect(mocks.onSuccess).toHaveBeenCalledWith('session-1'))
+        expect(mocks.spawnSession).toHaveBeenCalledWith(expect.objectContaining({
+            agent: 'claude',
+            model: mocks.nextModelValue
+        }))
+    })
+
     it('keeps an explicit OpenCode Default when hub settings resolve late', async () => {
         localStorage.clear()
         mocks.opencodeModels = [
