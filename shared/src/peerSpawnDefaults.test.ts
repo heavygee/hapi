@@ -27,6 +27,14 @@ describe('resolvePermissionModeForFlavor', () => {
     it('remaps resolved Claude bypassPermissions to cursor yolo', () => {
         expect(resolvePermissionModeForFlavor('bypassPermissions', 'cursor')).toBe('yolo')
     })
+
+    it('remaps Kimi safe-yolo onto Codex yolo (launchable auto-approval)', () => {
+        expect(resolvePermissionModeForFlavor('safe-yolo', 'codex')).toBe('yolo')
+    })
+
+    it('falls back to AGY request-review instead of Claude default', () => {
+        expect(resolvePermissionModeForFlavor('default', 'agy')).toBe('request-review')
+    })
 })
 
 describe('mergePeerSpawnDefaults', () => {

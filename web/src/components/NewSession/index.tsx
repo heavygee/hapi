@@ -129,6 +129,8 @@ export function NewSession(props: {
     // late getHubSettings resolve does not re-run the effect and wipe edits.
     const hubPermissionModeRef = useRef(hubPeerSpawnDefaults?.permissionMode)
     hubPermissionModeRef.current = hubPeerSpawnDefaults?.permissionMode
+    const hubModelsRef = useRef(hubPeerSpawnDefaults?.models)
+    hubModelsRef.current = hubPeerSpawnDefaults?.models
 
     const [machineId, setMachineId] = useState<string | null>(props.initialMachineId ?? null)
     const [directory, setDirectory] = useState(props.initialDirectory ?? '')
@@ -316,7 +318,11 @@ export function NewSession(props: {
         const seeded = seedNewSessionFromPeerSpawnDefaults(hubPeerSpawnDefaults)
         const { hasStickyAgent, hasStickyYolo } = initialStickyPreferences
         if (!hasStickyAgent && !editedAgentRef.current) {
-            setAgent(seeded.agent)
+            // If the operator already edited permission/Yolo, do not swap the
+            // agent — agent-change effects would wipe the restrictive choice.
+            if (!editedPermissionRef.current) {
+                setAgent(seeded.agent)
+            }
             if (!editedPermissionRef.current) {
                 if (usesSharedPermissionModeState(seeded.agent)) {
                     setNativePermissionMode(seeded.permissionMode)
@@ -333,7 +339,7 @@ export function NewSession(props: {
                     }
                 }
             }
-            if (!editedModelRef.current && seeded.model) {
+            if (!editedModelRef.current && seeded.model && !editedPermissionRef.current) {
                 setModel(seeded.model)
                 if (seeded.agent === 'cursor') {
                     setCursorSelectedBase(seeded.model)
@@ -959,8 +965,18 @@ export function NewSession(props: {
             hubPermissionModeRef.current
         )
 
-        setModel(agent === 'opencode' ? 'auto' : preferred.model)
-        setCursorSelectedBase(preferred.cursorSelectedBase)
+        const hubModel = hubModelsRef.current?.[agent]?.trim()
+        const nextModel = agent === 'opencode'
+            ? 'auto'
+            : preferred.model !== 'auto'
+                ? preferred.model
+                : (hubModel || preferred.model)
+        setModel(nextModel)
+        setCursorSelectedBase(
+            preferred.cursorSelectedBase !== 'auto'
+                ? preferred.cursorSelectedBase
+                : (agent === 'cursor' && hubModel ? hubModel : preferred.cursorSelectedBase)
+        )
         setEffort(preferred.effort)
         setModelReasoningEffort(preferred.modelReasoningEffort)
         if (usesSharedPermissionMode) {

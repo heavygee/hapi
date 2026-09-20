@@ -145,9 +145,11 @@ See `src/ui/doctor.ts`.
 
 Codex sessions keep the MCP servers configured in the user's Codex
 `config.toml`. HAPI adds its own `hapi` bridge without replacing other user
-servers. Runner-spawned Codex sessions copy only `config.toml` into their
-temporary `CODEX_HOME`, so MCP settings are preserved while authentication
-state remains isolated. The `hapi` server name is reserved by HAPI.
+servers. When a runner spawn supplies a Codex auth token, it copies only
+`config.toml` into a temporary `CODEX_HOME` and writes the supplied `auth.json`,
+preserving MCP settings without copying unrelated authentication state.
+Without a supplied token, Codex uses the runner's normal Codex home/auth.
+The `hapi` server name is reserved by HAPI.
 
 On Windows, known package-manager shims (`uvx`, `npx`, `npm`, `pnpm`, `yarn`,
 `bunx`, and `.cmd`/`.bat` commands) use a short-lived HAPI stdio compatibility

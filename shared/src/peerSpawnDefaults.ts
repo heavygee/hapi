@@ -2,7 +2,7 @@ import { z } from 'zod'
 import {
     AgentFlavorSchema,
     CREATABLE_AGENT_FLAVORS,
-    isPermissionModeAllowedForFlavor,
+    getLaunchPermissionModesForFlavor,
     type AgentFlavor,
     type PermissionMode
 } from './modes'
@@ -51,26 +51,37 @@ const YOLO_EQUIVALENTS: readonly PermissionMode[] = [
     'bypassPermissions'
 ]
 
-/** Map a cross-flavor permission intent (e.g. yolo) to a mode the flavor supports. */
+/** Map a cross-flavor permission intent (e.g. yolo) to a *launchable* mode. */
 export function resolvePermissionModeForFlavor(
     mode: PermissionMode,
     flavor: AgentFlavor
 ): PermissionMode {
-    if (isPermissionModeAllowedForFlavor(mode, flavor)) {
+    const launchModes = getLaunchPermissionModesForFlavor(flavor)
+    if (launchModes.includes(mode)) {
         return mode
     }
-    // Remap any auto-approval equivalent (yolo / bypassPermissions / always-proceed /
-    // safe-yolo) onto a mode the target flavor supports — hub GET returns the
-    // already-resolved Claude mode, so agent overrides must not fall through to default.
+    // Remap any auto-approval equivalent onto a launchable mode for the target
+    // flavor — hub GET returns already-resolved Claude bypassPermissions, and
+    // Kimi safe-yolo must not inherit onto Codex (launch catalog excludes it).
     if (mode === 'safe-yolo' || (YOLO_EQUIVALENTS as readonly PermissionMode[]).includes(mode)) {
         const equivalent = YOLO_EQUIVALENTS.find((candidate) =>
-            isPermissionModeAllowedForFlavor(candidate, flavor)
+            launchModes.includes(candidate)
         )
         if (equivalent) {
             return equivalent
         }
     }
-    return 'default'
+    if (launchModes.length === 0) {
+        // Pi/DSH: caller must omit permissionMode on the wire.
+        return 'default'
+    }
+    if (flavor === 'agy' && launchModes.includes('request-review')) {
+        return 'request-review'
+    }
+    if (launchModes.includes('default')) {
+        return 'default'
+    }
+    return launchModes[0]!
 }
 
 export function mergePeerSpawnDefaults(
