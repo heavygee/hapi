@@ -212,7 +212,8 @@ hapi tick doctor                   # timers enabled? last journal? watermark age
 
 1. Copy nearest template from `hapi tick templates` (overseer-ntfy, issue-spawn, api-watermark).
 2. Edit `config/ticks.yaml` entry (or repo-local `ticks.yaml` symlinked).
-3. `hapi tick validate foo && sudo hapi tick install foo`.
+3. `hapi tick validate foo && hapi tick install foo`  
+   (installer self-escalates; avoid `sudo hapi …` — sudo `secure_path` often misses `~/.local/bin`).
 4. `journalctl -u hapi-tick-foo` + `hapi tick doctor`.
 
 Installer generates `hapi-tick-<name>.{service,timer}` with:

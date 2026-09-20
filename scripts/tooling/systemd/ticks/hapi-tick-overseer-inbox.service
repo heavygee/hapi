@@ -20,8 +20,8 @@ Environment="HAPI_HOST=http://127.0.0.1:3006"
 Environment="HAPI_HOME=/var/lib/hapi"
 Environment="NO_COLOR=1"
 WorkingDirectory=/home/heavygee/coding/hapi
-ExecStartPre=/usr/bin/mkdir -p /home/heavygee/.local/state/hapi /home/heavygee/.local/state/hapi
-ExecStart=/usr/bin/flock -w 60 /home/heavygee/.local/state/hapi/overseer-watch.lock /home/heavygee/coding/hapi/scripts/tooling/hapi-overseer-watch-tick.sh
+ExecStartPre=/usr/bin/mkdir -p "/home/heavygee/.local/state/hapi" "/home/heavygee/.local/state/hapi"
+ExecStart=/usr/bin/flock -w 60 "/home/heavygee/.local/state/hapi/overseer-watch.lock" "/home/heavygee/coding/hapi/scripts/tooling/hapi-overseer-watch-tick.sh"
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=hapi-tick-overseer-inbox

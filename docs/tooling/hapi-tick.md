@@ -48,7 +48,8 @@ v1 seeded ticks:
 ## Install / migrate
 
 1. `hapi tick validate overseer-inbox`
-2. `sudo hapi tick install overseer-inbox --run-now`  
+2. `hapi tick install overseer-inbox --run-now`  
+   (self-escalates via sudo for unit install; do **not** prefix with `sudo hapi …` — sudo `secure_path` often omits `~/.local/bin/hapi`.)  
    Installs `hapi-tick-overseer-inbox.{service,timer}` **alongside** the legacy `hapi-overseer-watch.*` units (belt-and-braces). Both share the same watermark + flock path.
 3. `hapi tick doctor overseer-inbox` — expect HEALTHY; journal should show the existing tick script.
 4. After equivalence is proven, disable the legacy timer:
@@ -69,6 +70,7 @@ v1 is **per-host**. Registry `host:` is an install guard (`--force` to override)
 `scripts/tooling/tick-templates/`:
 
 - `inbox-ntfy.yaml`
+- `inbox-ping-peer.yaml` (+ `inbox-ping.md` escalation message)
 - `issue-spawn.yaml`
 - `issue-triage-spawn.md` (security boilerplate for spawn messages)
 
