@@ -1,19 +1,19 @@
-# hapi poll registry (v1)
+# hapi tick registry (v1)
 #
 # Declarative bare pollers: systemd timer → zero-token probe → on_change only.
 # Canon: docs/plans/2026-09-18-scheduled-agent-tasks-design.md
-# Runbook: docs/tooling/hapi-poll.md
+# Runbook: docs/tooling/hapi-tick.md
 #
-# Estate-specific paths belong HERE (entries), not in the hapi-poll tool itself.
-# Install is host-local: `hapi poll install <name>` on the machine named in `host:`.
+# Estate-specific paths belong HERE (entries), not in the hapi-tick tool itself.
+# Install is host-local: `hapi tick install <name>` on the machine named in `host:`.
 
 version: 1
 
-polls:
+ticks:
   - name: overseer-inbox
     host: oos-linux
     template: inbox-ntfy
-    description: Overseer inbox ERROR/BLOCKED poll — ntfy on new items past watermark
+    description: Overseer inbox ERROR/BLOCKED tick — ntfy on new items past watermark
     cadence: "OnCalendar=*:8,38"
     randomized_delay_sec: 90
     probe:
@@ -37,7 +37,7 @@ polls:
     conditions:
       - /home/heavygee/.hapi/settings.json
     # Live unit today is hapi-overseer-watch.{service,timer}. Generated name:
-    # hapi-poll-overseer-inbox. Keep both until cutover is proven.
+    # hapi-tick-overseer-inbox. Keep both until cutover is proven.
 
   - name: producer-issue-poll
     host: oos-linux
@@ -56,7 +56,7 @@ polls:
           dir: /work/coding/lockhouse-janus
           name_template: "issue-triage-#{number}"
           agent: claude
-          message_template: file://scripts/tooling/poll-templates/issue-triage-spawn.md
+          message_template: file://scripts/tooling/tick-templates/issue-triage-spawn.md
     lock:
       path: "/home/heavygee/.cache/producer-issue-poll.lock"
     working_directory: /work/coding/lockhouse-janus

@@ -1,6 +1,6 @@
 # Template: inbox-ntfy
 # Shape: overseer inbox watch — bare probe + max-id watermark + ntfy on change.
-# Copy into config/polls.yaml and adjust paths/host/cadence.
+# Copy into config/ticks.yaml and adjust paths/host/cadence.
 #
 # Probe owns change detection + ntfy (on_change here is documentation for
 # validate/doctor; v1 does not re-dispatch actions from the generator).
