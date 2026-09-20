@@ -36,6 +36,11 @@ hapi_tick_seen_add "$s" "12"
 check seen_has 'hapi_tick_seen_has "$s" "12"'
 check seen_missing '! hapi_tick_seen_has "$s" "99"'
 check seen_unique '[[ "$(wc -l < "$s" | tr -d " ")" == "1" ]]'
+hapi_tick_seen_add "$s" "issueX1"
+check seen_literal_dot '! hapi_tick_seen_has "$s" "issue.1"'
+hapi_tick_seen_add "$s" "issue.1"
+check seen_literal_add 'hapi_tick_seen_has "$s" "issue.1"'
+check seen_literal_keep 'hapi_tick_seen_has "$s" "issueX1"'
 
 t="$TMP/ts.json"
 # Seed at 1000 with id "a" already seen — only b,c at 2000 are new.

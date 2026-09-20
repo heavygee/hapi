@@ -238,20 +238,34 @@ validate_one() {
     if [[ ! -d "$parent" ]]; then
         err "$name: WARN state parent missing (will create on run): $parent"
         warnings=$((warnings + 1))
-    elif [[ ! -w "$parent" ]]; then
-        die "$name: state parent not writable: $parent"
+    else
+        # Writability must match the service account, not the validating caller.
+        local writable=0
+        if [[ "$(id -un)" == "$user" ]]; then
+            [[ -w "$parent" ]] && writable=1
+        elif sudo -n -u "$user" -H -- test -w "$parent" 2>/dev/null; then
+            writable=1
+        fi
+        if [[ "$writable" -ne 1 ]]; then
+            die "$name: state parent not writable by user '$user': $parent"
+        fi
     fi
 
-    # Token-cost lint: flag agent CLI invocations regardless of escalation terms elsewhere.
+    # Token-cost lint: flag agent CLIs and HAPI wake commands in the probe path.
     local on_len
     on_len="$(printf '%s' "$on_change" | jq 'length')"
+    local wakes_agent=0
     if grep -Eiq '^[[:space:]]*(exec[[:space:]]+)?(claude|cursor|codex)([[:space:]|&;]|$)' "$script" \
-        || grep -Eiq '^[[:space:]]*[^#]*[/[:space:]](claude|cursor|codex)([[:space:]|&;]|$)' "$script"; then
+        || grep -Eiq '^[[:space:]]*[^#]*[/[:space:]](claude|cursor|codex)([[:space:]|&;]|$)' "$script" \
+        || grep -Eiq '(^|[[:space:]/`"'\''])(hapi[[:space:]]+(spawn-peer|ping-peer)|hapi-spawn-peer|hapi-ping-peer)([[:space:]|&;]|$)' "$script"; then
+        wakes_agent=1
+    fi
+    if [[ "$wakes_agent" -eq 1 ]]; then
         if [[ "$on_len" -eq 0 ]]; then
-            err "$name: WARN probe invokes an agent CLI and on_change is empty — mechanical polls must not burn tokens"
+            err "$name: WARN probe invokes an agent wake (CLI / spawn-peer / ping-peer) and on_change is empty — mechanical polls must not burn tokens"
             warnings=$((warnings + 1))
         else
-            err "$name: WARN probe invokes an agent CLI in-tick — prefer moving agent wake to on_change only"
+            err "$name: WARN probe invokes an agent wake in-tick — prefer moving agent wake to on_change only"
             warnings=$((warnings + 1))
         fi
     fi
@@ -497,15 +511,18 @@ cmd_run() {
     json="$(registry_json "$name")"
     script="$(tick_field "$json" '.probe.script')"
     user="$(resolve_tick_user "$json")"
-    me="$(id -un)"
-    # Match the installed service: run the probe as the registry user, not the caller.
-    if [[ "$me" != "$user" ]]; then
-        err "re-executing as user '$user' (caller was '$me')…"
-        exec sudo -u "$user" -E -- "$0" run "$name"
-    fi
     home_dir="$(getent passwd "$user" | cut -d: -f6)"
     [[ -n "$home_dir" ]] || die "no home directory for user '$user'"
-    workdir="$(tick_field "$json" '.working_directory' "")"
+    me="$(id -un)"
+    # Match the installed service: run the probe as the registry user with that
+    # account's HOME (sudo -E alone can retain the caller's HOME).
+    if [[ "$me" != "$user" ]]; then
+        err "re-executing as user '$user' (caller was '$me')…"
+        exec sudo -u "$user" -H -E -- env HOME="$home_dir" USER="$user" -- "$0" run "$name"
+    fi
+    export HOME="$home_dir"
+    export USER="$user"
+    workdir="$(tick_field "$json" '.working_directory' "$home_dir")"
     lock="$(expand_user_path "$(tick_field "$json" '.lock.path' "")" "$user")"
     if [[ -z "$lock" ]]; then
         lock="$home_dir/.local/state/hapi/tick-${name}.lock"
@@ -516,12 +533,13 @@ cmd_run() {
         [[ -n "$key" ]] || continue
         export "$key=$val"
     done < <(printf '%s' "$json" | jq -r '.env // {} | to_entries[] | "\(.key)\t\(.value)"')
-    if [[ -n "$workdir" && "$workdir" != null ]]; then
-        if [[ ! -d "$workdir" ]]; then
-            die "working_directory not found: $workdir"
-        fi
-        cd "$workdir" || die "cannot cd to working_directory: $workdir"
+    if [[ -z "$workdir" || "$workdir" == null ]]; then
+        workdir="$home_dir"
     fi
+    if [[ ! -d "$workdir" ]]; then
+        die "working_directory not found: $workdir"
+    fi
+    cd "$workdir" || die "cannot cd to working_directory: $workdir"
     echo "hapi-tick: running $script (flock $lock)"
     /usr/bin/flock -w 60 "$lock" "$script"
 }

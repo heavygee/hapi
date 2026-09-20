@@ -92,7 +92,8 @@ hapi_tick_seen_has() {
     f="$(hapi_tick_expand_path "$1")"
     id="${2:?id required}"
     [[ -f "$f" ]] || return 1
-    grep -qx -- "$id" "$f"
+    # Fixed-string: IDs are opaque (may contain BRE metacharacters like .).
+    grep -Fxq -- "$id" "$f"
 }
 
 hapi_tick_seen_add() {
