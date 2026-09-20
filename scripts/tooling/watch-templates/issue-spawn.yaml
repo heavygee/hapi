@@ -1,0 +1,28 @@
+# Template: issue-spawn
+# Shape: producer-issue-poll — bare gh poll + seen-set + spawn_peer on new issues.
+# Copy into config/watches.yaml and adjust paths/repo/filters inside the probe script.
+#
+# Probe owns spawn_peer (on_change documents the escalation lane for validate).
+
+name: example-issue-poll
+host: REPLACE_HOSTNAME
+template: issue-spawn
+description: Example issue poll (spawn_peer per new issue)
+cadence: "OnCalendar=*:3,23,43"
+randomized_delay_sec: 90
+probe:
+  type: shell
+  script: /path/to/poll-issues.sh
+state:
+  path: "~/.cache/example-issue-poll-seen.txt"
+  strategy: seen-set
+on_change:
+  - spawn_peer:
+      dir: /path/to/repo
+      name_template: "issue-triage-#{number}"
+      agent: claude
+      message_template: file://scripts/tooling/watch-templates/issue-triage-spawn.md
+lock:
+  path: "~/.cache/example-issue-poll.lock"
+working_directory: /path/to/repo
+user: REPLACE_USER

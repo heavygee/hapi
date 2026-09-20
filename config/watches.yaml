@@ -1,0 +1,64 @@
+# hapi watch registry (v1)
+#
+# Declarative bare pollers: systemd timer → zero-token probe → on_change only.
+# Canon: docs/plans/2026-09-18-scheduled-agent-tasks-design.md
+# Runbook: docs/tooling/hapi-watch.md
+#
+# Estate-specific paths belong HERE (entries), not in the hapi-watch tool itself.
+# Install is host-local: `hapi watch install <name>` on the machine named in `host:`.
+
+version: 1
+
+watches:
+  - name: overseer-inbox
+    host: oos-linux
+    template: inbox-ntfy
+    description: Overseer inbox ERROR/BLOCKED watch — ntfy on new items past watermark
+    cadence: "OnCalendar=*:8,38"
+    randomized_delay_sec: 90
+    probe:
+      type: shell
+      script: /home/heavygee/coding/hapi/scripts/tooling/hapi-overseer-watch-tick.sh
+    state:
+      path: "/home/heavygee/.local/state/hapi/overseer-watch-watermark.json"
+      strategy: max-id
+    on_change:
+      - ntfy:
+          topic: hapi-overseer
+          priority: 4
+    lock:
+      path: "/home/heavygee/.local/state/hapi/overseer-watch.lock"
+    working_directory: /home/heavygee/coding/hapi
+    user: heavygee
+    env:
+      HAPI_HOST: http://127.0.0.1:3006
+      HAPI_HOME: /var/lib/hapi
+      NO_COLOR: "1"
+    conditions:
+      - /home/heavygee/.hapi/settings.json
+    # Live unit today is hapi-overseer-watch.{service,timer}. Generated name:
+    # hapi-watch-overseer-inbox. Keep both until cutover is proven.
+
+  - name: producer-issue-poll
+    host: oos-linux
+    template: issue-spawn
+    description: lockhouse/producer new-issue poll — spawn_peer per unseen non-gc issue
+    cadence: "OnCalendar=*:3,23,43"
+    randomized_delay_sec: 90
+    probe:
+      type: shell
+      script: /work/coding/lockhouse-janus/scripts/poll-producer-issues.sh
+    state:
+      path: "/home/heavygee/.cache/producer-issue-poll-seen.txt"
+      strategy: seen-set
+    on_change:
+      - spawn_peer:
+          dir: /work/coding/lockhouse-janus
+          name_template: "issue-triage-#{number}"
+          agent: claude
+          message_template: file://scripts/tooling/watch-templates/issue-triage-spawn.md
+    lock:
+      path: "/home/heavygee/.cache/producer-issue-poll.lock"
+    working_directory: /work/coding/lockhouse-janus
+    user: heavygee
+    # Live unit today is hapi-producer-issue-poll.{service,timer}.

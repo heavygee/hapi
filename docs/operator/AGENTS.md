@@ -13,6 +13,7 @@ Prefer progressive loading: **[feature-work-lifecycle.md](../tooling/feature-wor
 | When | Do | Detail |
 |------|----|--------|
 | Any local feature / soup / peer work | Read lifecycle first | [`feature-work-lifecycle.md`](../tooling/feature-work-lifecycle.md) (sole workflow) |
+| Mechanical poll / standing bare timer (not CronCreate) | **`hapi watch`** — registry + systemd generator; zero tokens on quiet ticks | [`hapi-watch.md`](../tooling/hapi-watch.md); taxonomy [`2026-09-18-scheduled-agent-tasks-design.md`](../plans/2026-09-18-scheduled-agent-tasks-design.md) |
 | Ready to open an upstream PR? | **Stop** unless `:3006` dogfood already passed (or operator waived in chat) | Soup-promote → operator click-test → **then** `hapi-pr-create`. Never `gh pr create` → `tiann/hapi` first. Premature open → convert to **draft** and remat. |
 | Message another HAPI session | **PATH tooling only** + **identify yourself** (see § Peer message identity) | `hapi-ping-peer …` / `hapi ping-peer …`; open with `From: /sessions/<your-id>` (auto-stamped when `HAPI_SESSION_ID` is set) |
 | Peer close-the-loop / status | **Spawn parent only** — never CC Meta PR watcher | § quieter Meta (2026-08-10); intake §0 + spawn-peer skill |

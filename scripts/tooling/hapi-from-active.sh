@@ -19,6 +19,13 @@ if [[ "${1:-}" == "hold-ack" ]]; then
     exec "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/hapi-hold-ack.sh" "$@"
 fi
 
+# Fork-only: `hapi watch` — declarative bare pollers (systemd + zero-token probes).
+# Canon: docs/plans/2026-09-18-scheduled-agent-tasks-design.md
+if [[ "${1:-}" == "watch" ]]; then
+    shift
+    exec "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/hapi-watch.sh" "$@"
+fi
+
 BUN="${BUN:-$HOME/.bun/bin/bun}"
 ACTIVE_LINK="${HAPI_ACTIVE_LINK:-$HOME/coding/hapi/active}"
 
