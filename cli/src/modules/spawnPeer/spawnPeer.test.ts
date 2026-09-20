@@ -943,6 +943,87 @@ it('resolves relative directory against cwd (MCP session working directory)', as
         expect(messageGets).toBeGreaterThan(1)
     })
 
+    it('finds the remit on an older messages page instead of archiving', async () => {
+        const messageGets: Array<Record<string, unknown> | undefined> = []
+        const http = createHttpMock({
+            post: (url) => {
+                if (url.endsWith('/api/auth')) {
+                    return { status: 200, data: { token: 'jwt' } }
+                }
+                if (url.endsWith(`/api/machines/${MACHINE_ID}/spawn`)) {
+                    return { status: 200, data: { type: 'success', sessionId: SESSION_ID } }
+                }
+                if (url.endsWith(`/api/sessions/${SESSION_ID}/messages`)) {
+                    return { status: 200, data: { ok: true } }
+                }
+                if (url.endsWith(`/api/sessions/${SESSION_ID}/archive`)) {
+                    throw new Error('must not archive when remit is on an older page')
+                }
+                throw new Error(`unexpected POST ${url}`)
+            },
+            get: (url, config) => {
+                if (url.endsWith(`/api/sessions/${SESSION_ID}`)) {
+                    return {
+                        status: 200,
+                        data: {
+                            session: {
+                                id: SESSION_ID,
+                                active: true,
+                                metadata: { name: 'Busy child', flavor: 'claude' }
+                            }
+                        }
+                    }
+                }
+                if (url.includes(`/api/sessions/${SESSION_ID}/messages`)) {
+                    messageGets.push(config?.params)
+                    if (!config?.params?.beforeAt) {
+                        return {
+                            status: 200,
+                            data: {
+                                messages: [userMessageRow('later assistant chatter')],
+                                page: {
+                                    hasMore: true,
+                                    nextBeforeAt: 1_700_000_000_000,
+                                    nextBeforeSeq: 10
+                                }
+                            }
+                        }
+                    }
+                    expect(config.params).toMatchObject({
+                        beforeAt: 1_700_000_000_000,
+                        beforeSeq: 10,
+                        limit: 50
+                    })
+                    return {
+                        status: 200,
+                        data: {
+                            messages: [userMessageRow('do the work')],
+                            page: { hasMore: false }
+                        }
+                    }
+                }
+                throw new Error(`unexpected GET ${url}`)
+            }
+        })
+
+        const result = await spawnPeer({
+            directory: '/tmp/project',
+            message: 'do the work',
+            machineId: MACHINE_ID,
+            accessToken: 'tok',
+            apiUrl: 'http://hub.test',
+            waitActiveSecs: 10,
+            http: http as never,
+            now: () => nowMs,
+            sleep: async (ms) => {
+                nowMs += ms
+            }
+        })
+
+        expect(result.sessionId).toBe(SESSION_ID)
+        expect(messageGets.length).toBeGreaterThanOrEqual(2)
+    })
+
     it('fails closed when spawn+send succeed but the session still has no user message', async () => {
         const http = createHttpMock({
             post: (url) => {

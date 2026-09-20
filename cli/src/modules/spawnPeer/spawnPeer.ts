@@ -241,30 +241,63 @@ async function sessionHasRemit(
     if (!needle) {
         return false
     }
-    let response: { status: number; data?: { messages?: unknown } }
-    try {
-        response = await http.get(
-            `${apiUrl}/api/sessions/${encodeURIComponent(sessionId)}/messages`,
-            {
-                headers: authHeaders(jwt),
-                params: { limit: 50 },
-                timeout: 20_000,
-                validateStatus: () => true
+    // Paginate oldest-ward: a busy child can push the remit off the latest
+    // 50-row page before verification runs. Cap pages so a broken cursor cannot
+    // loop forever (50 × 40 = 2000 messages).
+    const pageLimit = 50
+    const maxPages = 40
+    let beforeAt: number | undefined
+    let beforeSeq: number | undefined
+    for (let pageIndex = 0; pageIndex < maxPages; pageIndex++) {
+        let response: {
+            status: number
+            data?: {
+                messages?: unknown
+                page?: {
+                    hasMore?: unknown
+                    nextBeforeAt?: unknown
+                    nextBeforeSeq?: unknown
+                }
             }
-        )
-    } catch {
-        return false
-    }
-    if (response.status < 200 || response.status >= 300) {
-        return false
-    }
-    const rows = Array.isArray(response.data?.messages) ? response.data.messages : []
-    for (const row of rows) {
-        if (!isObject(row)) continue
-        const snippet = extractInspectMessageSnippet(row.content)
-        if (snippet?.role === 'user' && snippet.text.includes(needle)) {
-            return true
         }
+        try {
+            response = await http.get(
+                `${apiUrl}/api/sessions/${encodeURIComponent(sessionId)}/messages`,
+                {
+                    headers: authHeaders(jwt),
+                    params: {
+                        limit: pageLimit,
+                        ...(beforeAt !== undefined && beforeSeq !== undefined
+                            ? { beforeAt, beforeSeq }
+                            : {})
+                    },
+                    timeout: 20_000,
+                    validateStatus: () => true
+                }
+            )
+        } catch {
+            return false
+        }
+        if (response.status < 200 || response.status >= 300) {
+            return false
+        }
+        const rows = Array.isArray(response.data?.messages) ? response.data.messages : []
+        for (const row of rows) {
+            if (!isObject(row)) continue
+            const snippet = extractInspectMessageSnippet(row.content)
+            if (snippet?.role === 'user' && snippet.text.includes(needle)) {
+                return true
+            }
+        }
+        const page = response.data?.page
+        const hasMore = page?.hasMore === true
+        const nextBeforeAt = typeof page?.nextBeforeAt === 'number' ? page.nextBeforeAt : null
+        const nextBeforeSeq = typeof page?.nextBeforeSeq === 'number' ? page.nextBeforeSeq : null
+        if (!hasMore || nextBeforeAt === null || nextBeforeSeq === null) {
+            return false
+        }
+        beforeAt = nextBeforeAt
+        beforeSeq = nextBeforeSeq
     }
     return false
 }

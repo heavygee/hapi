@@ -19,7 +19,7 @@ export type { PeerSpawnDefaults, ResolvedPeerSpawnDefaults }
  */
 export function applyPeerSpawnModelsPatch(
     existing: PeerSpawnDefaults['models'] | undefined,
-    patch: PeerSpawnDefaults['models']
+    patch: NonNullable<PeerSpawnDefaults['models']>
 ): PeerSpawnDefaults['models'] | undefined {
     const allowed = new Set<string>(CREATABLE_AGENT_FLAVORS)
     const next: NonNullable<PeerSpawnDefaults['models']> = { ...(existing ?? {}) }
