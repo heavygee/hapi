@@ -1707,6 +1707,65 @@ describe('NewSession launch preferences', () => {
         })
     })
 
+    it('keeps an explicit OpenCode Default when hub settings resolve late', async () => {
+        localStorage.clear()
+        mocks.opencodeModels = [
+            { modelId: 'provider/hub-model', name: 'Hub' },
+            { modelId: 'provider/current', name: 'Current' }
+        ]
+        mocks.opencodeCurrentModelId = 'provider/current'
+        mocks.spawnSession.mockResolvedValue({ type: 'success', sessionId: 'session-1' })
+        let resolveSettings!: (value: unknown) => void
+        const deferred = new Promise((resolve) => {
+            resolveSettings = resolve
+        })
+        const slowApi = {
+            getHubSettings: vi.fn(() => deferred)
+        } as unknown as ApiClient
+
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        render(
+            <QueryClientProvider client={client}>
+                <NewSession
+                    api={slowApi}
+                    machines={[machine]}
+                    initialMachineId="machine-1"
+                    initialDirectory="C:\\repo"
+                    onSuccess={mocks.onSuccess}
+                    onCancel={() => {}}
+                />
+            </QueryClientProvider>
+        )
+
+        fireEvent.click(screen.getByDisplayValue('opencode'))
+        fireEvent.click(screen.getByTestId('opencode-model-default'))
+        expect(screen.getByTestId('opencode-model')).toHaveTextContent('default')
+
+        await act(async () => {
+            resolveSettings({
+                sessionSummaryContract: false,
+                sessionSummaryInChat: false,
+                peerSpawnDefaults: {
+                    agent: 'opencode',
+                    permissionMode: 'default',
+                    models: { opencode: 'provider/hub-model' }
+                }
+            })
+            await deferred
+        })
+
+        await waitFor(() => {
+            expect(screen.getByTestId('opencode-model')).toHaveTextContent('default')
+        })
+        await waitFor(() => expect(screen.getByTestId('create')).toBeEnabled())
+        fireEvent.click(screen.getByTestId('create'))
+        await waitFor(() => expect(mocks.onSuccess).toHaveBeenCalledWith('session-1'))
+        expect(mocks.spawnSession).toHaveBeenCalledWith(expect.objectContaining({
+            agent: 'opencode',
+            model: undefined
+        }))
+    })
+
     it('seeds AGY spawn model from hub when no launch preference exists', async () => {
         localStorage.clear()
         mocks.agyModels = [

@@ -146,7 +146,8 @@ export default function SettingsGeneralPage() {
                                             defaultValue={currentModel}
                                             onBlur={(event) => {
                                                 const model = event.target.value.trim()
-                                                if (!model || model === currentModel) return
+                                                if (model === currentModel) return
+                                                // Empty string is the clear sentinel for this flavor override.
                                                 updatePeerSpawnDefaults({
                                                     ...peerDefaults,
                                                     models: {

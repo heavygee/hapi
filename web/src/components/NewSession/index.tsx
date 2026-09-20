@@ -2014,6 +2014,7 @@ export function NewSession(props: {
                     availableModels={agyModelsState.availableModels}
                     selectedModel={agySelectedModel}
                     onModelChange={(modelId) => {
+                        editedModelRef.current = true
                         agyModelPickedByUserRef.current = modelId !== null
                         setAgySelectedModel(modelId)
                     }}
@@ -2028,7 +2029,10 @@ export function NewSession(props: {
                     availableModels={opencodeModelsState.availableModels}
                     currentModelId={opencodeModelsState.currentModelId}
                     selectedModel={opencodeSelectedModel}
-                    onModelChange={setOpencodeSelectedModel}
+                    onModelChange={(modelId) => {
+                        editedModelRef.current = true
+                        setOpencodeSelectedModel(modelId)
+                    }}
                     onRetry={opencodeModelsState.refetch}
                 />
             ) : (

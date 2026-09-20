@@ -8,8 +8,9 @@ import {
 } from './modes'
 import { PermissionModeSchema } from './schemas'
 
-/** Per-flavor model id overrides for peer spawn (e.g. claude: sonnet, cursor: auto). */
-export const PeerSpawnModelsSchema = z.record(z.string(), z.string().trim().min(1))
+/** Per-flavor model id overrides for peer spawn (e.g. claude: sonnet, cursor: auto).
+ * Empty string is a patch sentinel meaning “clear this flavor’s override”. */
+export const PeerSpawnModelsSchema = z.record(z.string(), z.string())
 
 export type PeerSpawnModels = z.infer<typeof PeerSpawnModelsSchema>
 
@@ -87,9 +88,16 @@ export function resolvePermissionModeForFlavor(
 export function mergePeerSpawnDefaults(
     stored?: PeerSpawnDefaults | null
 ): ResolvedPeerSpawnDefaults {
+    const storedModels: PeerSpawnModels = {}
+    for (const [flavor, model] of Object.entries(stored?.models ?? {})) {
+        const trimmed = model.trim()
+        if (trimmed) {
+            storedModels[flavor] = trimmed
+        }
+    }
     const models: PeerSpawnModels = {
         ...STOCK_PEER_SPAWN_DEFAULTS.models,
-        ...stored?.models
+        ...storedModels
     }
     const agent = stored?.agent ?? STOCK_PEER_SPAWN_DEFAULTS.agent
     const rawPermissionMode = stored?.permissionMode ?? STOCK_PEER_SPAWN_DEFAULTS.permissionMode
