@@ -163,11 +163,15 @@ hapi_tick_timestamp_ids_diff() {
         (if ($all_ts | length) > 0 then ($all_ts | max) else $st.last_seen_timestamp end) as $resp_max |
         # Never regress: clamp to at least the stored watermark.
         (if $resp_max > $st.last_seen_timestamp then $resp_max else $st.last_seen_timestamp end) as $max_ts |
-        (if $max_ts == $st.last_seen_timestamp and $resp_max <= $st.last_seen_timestamp then
+        (
+          if $resp_max < $st.last_seen_timestamp then
             $st.last_seen_ids
-         else
+          elif $resp_max == $st.last_seen_timestamp then
+            (($st.last_seen_ids) + ($all | map(select(.["@timestamp"] == $max_ts) | ._document_id)) | unique)
+          else
             ($all | map(select(.["@timestamp"] == $max_ts) | ._document_id))
-         end) as $ids_at_max |
+          end
+        ) as $ids_at_max |
         {
           new_events: $new,
           new_state: { last_seen_timestamp: $max_ts, last_seen_ids: $ids_at_max }

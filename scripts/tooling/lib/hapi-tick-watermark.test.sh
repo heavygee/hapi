@@ -76,5 +76,20 @@ check ts_no_regress_ts '[[ "$(printf "%s" "$diff_old" | jq ".new_state.last_seen
 check ts_no_regress_ids '[[ "$(printf "%s" "$diff_old" | jq -c ".new_state.last_seen_ids")" == "[\"keep\"]" ]]'
 check ts_no_new_when_older '[[ "$(printf "%s" "$diff_old" | jq ".new_events | length")" == "0" ]]'
 
+
+# Same timestamp, previously unseen id → new_events + merged last_seen_ids
+t3="$TMP/ts3.json"
+hapi_tick_timestamp_ids_write "$t3" 2000 '["b"]'
+events_same="$TMP/events_same.json"
+cat > "$events_same" <<'JSON'
+[
+  {"@timestamp": 2000, "_document_id": "b"},
+  {"@timestamp": 2000, "_document_id": "c"}
+]
+JSON
+diff_same="$(hapi_tick_timestamp_ids_diff "$t3" "$events_same")"
+check ts_merge_same_ts_new '[[ "$(printf "%s" "$diff_same" | jq ".new_events | length")" == "1" ]]'
+check ts_merge_same_ts_ids '[[ "$(printf "%s" "$diff_same" | jq -c ".new_state.last_seen_ids | sort")" == "[\"b\",\"c\"]" ]]'
+
 echo "hapi-tick-watermark.test.sh: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]]

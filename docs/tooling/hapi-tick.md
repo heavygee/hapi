@@ -15,6 +15,11 @@ Standing rule: **no agent turns for mechanical polling.** Recurring judgment-fre
 
 Do **not** replace `hapi-meta-daily` with a watch — that is judgment-gated PR classify.
 
+## Prerequisites
+
+- `python3-yaml` **or** bun + repo `node_modules/yaml` (cli dependency) for registry parsing
+- `jq`, systemd; sudo for install
+
 ## CLI
 
 ```bash

@@ -51,14 +51,11 @@ hostname_short() {
 # Emit JSON for one tick (or all) via python+yaml.
 registry_json() {
     local name="${1:-}"
-    python3 - "$REGISTRY" "$name" <<'PY'
-import json, sys, os
+    # Prefer PyYAML; fall back to bun + repo `yaml` package (cli dep).
+    if python3 -c 'import yaml' 2>/dev/null; then
+        python3 - "$REGISTRY" "$name" <<'PY'
+import json, sys, yaml
 path, name = sys.argv[1], sys.argv[2]
-try:
-    import yaml
-except ImportError:
-    sys.stderr.write("hapi-tick: PyYAML required (python3 -c 'import yaml')\n")
-    sys.exit(3)
 with open(path) as f:
     doc = yaml.safe_load(f) or {}
 ticks = doc.get("ticks") or []
@@ -71,6 +68,42 @@ if name:
 else:
     json.dump({"version": doc.get("version", 1), "ticks": ticks}, sys.stdout)
 PY
+        return
+    fi
+    local bun="${BUN:-$HOME/.bun/bin/bun}"
+    local root_mods="$REPO_ROOT/node_modules/yaml"
+    local active_link="${HAPI_ACTIVE_LINK:-$HOME/coding/hapi/active}"
+    local active_root=""
+    if [[ -L "$active_link" || -d "$active_link" ]]; then
+        active_root="$(readlink -f "$active_link")"
+    fi
+    if [[ -x "$bun" ]] && { [[ -d "$root_mods" ]] || [[ -d "$active_root/node_modules/yaml" ]]; }; then
+        local cwd="$REPO_ROOT"
+        [[ -d "$root_mods" ]] || cwd="$active_root"
+        (
+            cd "$cwd"
+            "$bun" -e '
+import { readFileSync } from "fs";
+import YAML from "yaml";
+const path = Bun.argv[2];
+const name = Bun.argv[3] || "";
+const doc = YAML.parse(readFileSync(path, "utf8")) || {};
+const ticks = doc.ticks || [];
+if (name) {
+  const hit = ticks.find((w) => w && w.name === name);
+  if (!hit) {
+    console.error("hapi-tick: unknown tick '\''" + name + "'\'' in " + path);
+    process.exit(1);
+  }
+  process.stdout.write(JSON.stringify(hit));
+} else {
+  process.stdout.write(JSON.stringify({ version: doc.version ?? 1, ticks }));
+}
+' "$REGISTRY" "$name"
+        )
+        return
+    fi
+    die "YAML parser missing — install python3-yaml, or ensure bun + node_modules/yaml"
 }
 
 tick_field() {
@@ -141,8 +174,7 @@ validate_one() {
         die "$name: probe script not found: $script"
     fi
     if [[ ! -x "$script" ]]; then
-        err "$name: WARN probe script not executable: $script"
-        warnings=$((warnings + 1))
+        die "$name: probe script not executable: $script"
     fi
     local parent
     parent="$(dirname "$state_path")"
@@ -153,13 +185,16 @@ validate_one() {
         die "$name: state parent not writable: $parent"
     fi
 
-    # Token-cost lint: flag agent CLIs in the probe path when on_change is empty.
+    # Token-cost lint: flag agent CLI invocations regardless of escalation terms elsewhere.
     local on_len
     on_len="$(printf '%s' "$on_change" | jq 'length')"
-    if grep -Eiq '(^|[^[:alnum:]_-])(claude|cursor|codex)([^[:alnum:]_-]|$)' "$script" \
-        && ! grep -Eiq 'spawn-peer|spawn_peer|ping-peer|ping_peer|ntfy' "$script"; then
+    if grep -Eiq '^[[:space:]]*(exec[[:space:]]+)?(claude|cursor|codex)([[:space:]|&;]|$)' "$script" \
+        || grep -Eiq '^[[:space:]]*[^#]*[/[:space:]](claude|cursor|codex)([[:space:]|&;]|$)' "$script"; then
         if [[ "$on_len" -eq 0 ]]; then
-            err "$name: WARN probe mentions an agent CLI and on_change is empty — mechanical polls must not burn tokens"
+            err "$name: WARN probe invokes an agent CLI and on_change is empty — mechanical polls must not burn tokens"
+            warnings=$((warnings + 1))
+        else
+            err "$name: WARN probe invokes an agent CLI in-tick — prefer moving agent wake to on_change only"
             warnings=$((warnings + 1))
         fi
     fi
@@ -245,7 +280,7 @@ generate_units() {
         echo "[Service]"
         echo "Type=oneshot"
         echo "User=$user"
-        echo "Group=$user"
+        # Omit Group= — systemd uses the account primary group (may differ from username).
         echo "Nice=10"
         echo "Environment=HOME=$home_dir"
         echo "Environment=USER=$user"
@@ -291,12 +326,13 @@ generate_units() {
 }
 
 cmd_install() {
-    local name="" force=0 run_now=0 dry=0
+    local name="" force=0 run_now=0 dry=0 skip_generate=0
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --force) force=1 ;;
             --run-now) run_now=1 ;;
             --dry-run) dry=1 ;;
+            --skip-generate) skip_generate=1 ;;
             -h|--help) usage; return 0 ;;
             -*) die "unknown flag: $1" ;;
             *)
@@ -319,9 +355,15 @@ cmd_install() {
     fi
 
     local files
-    files="$(generate_units "$name")"
-    echo "hapi-tick: generated:"
-    echo "$files" | sed 's/^/  /'
+    # Generate git-tracked units as the invoking user so sudo never leaves
+    # root-owned files in the checkout.
+    if [[ "$skip_generate" -ne 1 ]]; then
+        files="$(generate_units "$name")"
+        echo "hapi-tick: generated:"
+        echo "$files" | sed 's/^/  /'
+    else
+        echo "hapi-tick: using pre-generated units in $UNIT_OUT_DIR"
+    fi
 
     if [[ "$dry" -eq 1 ]]; then
         echo "hapi-tick: dry-run — not installing to /etc/systemd/system"
@@ -330,7 +372,7 @@ cmd_install() {
 
     if [[ "$(id -u)" -ne 0 ]]; then
         err "re-executing under sudo to install systemd units…"
-        local -a sudo_args=(sudo -E -- "$0" install "$name")
+        local -a sudo_args=(sudo -E -- "$0" install "$name" --skip-generate)
         [[ "$force" -eq 1 ]] && sudo_args+=(--force)
         [[ "$run_now" -eq 1 ]] && sudo_args+=(--run-now)
         exec "${sudo_args[@]}"
@@ -435,14 +477,20 @@ doctor_one() {
     fi
 
     if systemctl cat "${prefix}.timer" >/dev/null 2>&1; then
-        local enabled active
+        local enabled active svc_failed
         enabled="$(systemctl is-enabled "${prefix}.timer" 2>/dev/null || echo unknown)"
         active="$(systemctl is-active "${prefix}.timer" 2>/dev/null || echo unknown)"
+        svc_failed="$(systemctl is-failed "${prefix}.service" 2>/dev/null || true)"
+        svc_failed="${svc_failed:-unknown}"
         echo "timer: ${prefix}.timer  enabled=$enabled  active=$active"
+        echo "service: ${prefix}.service  is-failed=$svc_failed"
         systemctl list-timers "${prefix}.timer" --all --no-pager 2>/dev/null | tail -n +1 | head -5 || true
         echo "recent journal:"
         journalctl -u "${prefix}.service" -n 5 --no-pager 2>/dev/null | sed 's/^/  /' || echo "  (no journal)"
         if [[ "$enabled" != "enabled" || "$active" != "active" ]]; then
+            healthy=0
+        fi
+        if [[ "$svc_failed" == "failed" ]]; then
             healthy=0
         fi
     else

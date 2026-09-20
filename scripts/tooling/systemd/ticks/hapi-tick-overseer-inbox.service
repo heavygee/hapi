@@ -12,7 +12,6 @@ ConditionPathExists=/home/heavygee/.hapi/settings.json
 [Service]
 Type=oneshot
 User=heavygee
-Group=heavygee
 Nice=10
 Environment=HOME=/home/heavygee
 Environment=USER=heavygee
