@@ -239,9 +239,13 @@ export function resolvePreferredLaunchSettings(
     const permissionMode = usesSharedPermissionMode
         ? preferredPermissionMode && availablePermissionModes.includes(preferredPermissionMode)
             ? preferredPermissionMode
-            : legacyYoloBridgeMode && availablePermissionModes.includes(legacyYoloBridgeMode)
-                ? legacyYoloBridgeMode
-                : hubMode ?? 'default'
+            : preferredPermissionMode !== undefined
+                // Explicit saved mode that left the launch catalog → Default,
+                // never hub yolo (would upgrade sandboxed → unrestricted).
+                ? 'default'
+                : legacyYoloBridgeMode && availablePermissionModes.includes(legacyYoloBridgeMode)
+                    ? legacyYoloBridgeMode
+                    : hubMode ?? 'default'
         : undefined
 
     return {

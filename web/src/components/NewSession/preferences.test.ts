@@ -290,6 +290,16 @@ describe('NewSession preferences', () => {
             .toBe('yolo')
     })
 
+    it('falls back to Default for an unsupported saved mode instead of hub yolo', () => {
+        expect(resolvePreferredLaunchSettings('codex', {
+            model: 'auto',
+            cursorSelectedBase: 'auto',
+            effort: 'auto',
+            modelReasoningEffort: 'default',
+            permissionMode: 'safe-yolo'
+        }, null, 'yolo').permissionMode).toBe('default')
+    })
+
     it.each([
         ['kimi', 'safe-yolo'],
         ['opencode', 'plan']

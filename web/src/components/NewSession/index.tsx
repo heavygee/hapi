@@ -343,12 +343,11 @@ export function NewSession(props: {
             : null
         if (!editedPermissionRef.current && !savedLaunch?.permissionMode) {
             if (
-                hasStickyYolo
+                legacyYoloBridge?.agent === targetAgent
                 && usesSharedPermissionModeState(targetAgent)
                 && LEGACY_YOLO_BRIDGE_AGENTS.includes(targetAgent)
             ) {
-                const stickyYolo = loadPreferredYoloMode()
-                const bridged = stickyYolo
+                const bridged = legacyYoloBridge.enabled
                     ? resolveHapiYoloPermissionMode(targetAgent)
                     : 'default'
                 if (bridged) {
@@ -385,7 +384,7 @@ export function NewSession(props: {
         if (!hasStickyYolo && !editedPermissionRef.current) {
             setYoloMode(isYoloStylePermissionMode(remappedPermission))
         }
-    }, [agent, hubPeerSpawnDefaults, initialStickyPreferences, machineId])
+    }, [agent, hubPeerSpawnDefaults, initialStickyPreferences, legacyYoloBridge, machineId])
 
     useEffect(() => {
         if (props.machines.length === 0) return

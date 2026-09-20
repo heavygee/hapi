@@ -1759,6 +1759,56 @@ describe('NewSession launch preferences', () => {
         }))
     })
 
+    it('does not apply Cursor YOLO migration after switching agent before hub settings', async () => {
+        localStorage.clear()
+        savePreferredAgent('cursor')
+        savePreferredYoloMode(true)
+        let resolveSettings!: (value: unknown) => void
+        const deferred = new Promise((resolve) => {
+            resolveSettings = resolve
+        })
+        const slowApi = {
+            getHubSettings: vi.fn(() => deferred)
+        } as unknown as ApiClient
+
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        render(
+            <QueryClientProvider client={client}>
+                <NewSession
+                    api={slowApi}
+                    machines={[machine]}
+                    initialMachineId="machine-1"
+                    initialDirectory="C:\\repo"
+                    onSuccess={mocks.onSuccess}
+                    onCancel={() => {}}
+                />
+            </QueryClientProvider>
+        )
+
+        fireEvent.click(screen.getByDisplayValue('codex'))
+        await waitFor(() => expect(screen.getByDisplayValue('codex')).toBeChecked())
+        expect(screen.getByTestId('permission-mode')).toHaveTextContent('default')
+
+        await act(async () => {
+            resolveSettings({
+                sessionSummaryContract: false,
+                sessionSummaryInChat: false,
+                peerSpawnDefaults: {
+                    agent: 'codex',
+                    permissionMode: 'read-only',
+                    models: {}
+                }
+            })
+            await deferred
+        })
+
+        await waitFor(() => {
+            expect(screen.getByDisplayValue('codex')).toBeChecked()
+            // Hub read-only — not Cursor sticky YOLO → yolo
+            expect(screen.getByTestId('permission-mode')).toHaveTextContent('read-only')
+        })
+    })
+
     it('keeps an explicit Claude model when hub settings resolve late with Codex', async () => {
         localStorage.clear()
         let resolveSettings!: (value: unknown) => void
