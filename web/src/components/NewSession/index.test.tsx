@@ -1578,4 +1578,186 @@ describe('NewSession launch preferences', () => {
             permissionMode: 'plan'
         }))
     })
+
+    it('applies delayed hub permission with a sticky agent and no launch prefs', async () => {
+        localStorage.clear()
+        savePreferredAgent('codex')
+        let resolveSettings!: (value: unknown) => void
+        const deferred = new Promise((resolve) => {
+            resolveSettings = resolve
+        })
+        const slowApi = {
+            getHubSettings: vi.fn(() => deferred)
+        } as unknown as ApiClient
+
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        render(
+            <QueryClientProvider client={client}>
+                <NewSession
+                    api={slowApi}
+                    machines={[machine]}
+                    initialMachineId="machine-1"
+                    initialDirectory="C:\\repo"
+                    onSuccess={mocks.onSuccess}
+                    onCancel={() => {}}
+                />
+            </QueryClientProvider>
+        )
+
+        expect(screen.getByTestId('permission-mode')).toHaveTextContent('default')
+
+        await act(async () => {
+            resolveSettings({
+                sessionSummaryContract: false,
+                sessionSummaryInChat: false,
+                peerSpawnDefaults: {
+                    agent: 'claude',
+                    permissionMode: 'read-only',
+                    models: { claude: 'sonnet' }
+                }
+            })
+            await deferred
+        })
+
+        await waitFor(() => {
+            expect(screen.getByTestId('permission-mode')).toHaveTextContent('read-only')
+        })
+        expect(screen.getByDisplayValue('codex')).toBeChecked()
+    })
+
+    it('preserves a saved Default model over a cached hub model', async () => {
+        localStorage.clear()
+        savePreferredAgent('claude')
+        savePreferredLaunchSettings('machine-1', 'claude', {
+            model: 'auto',
+            cursorSelectedBase: 'auto',
+            effort: 'auto',
+            modelReasoningEffort: 'default',
+            permissionMode: 'default'
+        })
+        mocks.spawnSession.mockResolvedValue({ type: 'success', sessionId: 'session-1' })
+
+        renderWithQuery(
+            <NewSession
+                api={api}
+                machines={[machine]}
+                initialMachineId="machine-1"
+                initialDirectory="C:\\repo"
+                onSuccess={mocks.onSuccess}
+                onCancel={() => {}}
+            />
+        )
+
+        await waitFor(() => {
+            expect(screen.getByTestId('model')).toHaveTextContent('auto')
+        })
+        await waitFor(() => expect(screen.getByTestId('create')).toBeEnabled())
+        fireEvent.click(screen.getByTestId('create'))
+        await waitFor(() => expect(mocks.onSuccess).toHaveBeenCalledWith('session-1'))
+        expect(mocks.spawnSession).toHaveBeenCalledWith(expect.objectContaining({
+            agent: 'claude'
+        }))
+        expect(mocks.spawnSession.mock.calls[0]![0].model).toBeUndefined()
+    })
+
+    it('seeds OpenCode model state from hub when no launch preference exists', async () => {
+        localStorage.clear()
+        mocks.opencodeModels = [
+            { modelId: 'provider/hub-model', name: 'Hub' },
+            { modelId: 'provider/current', name: 'Current' }
+        ]
+        mocks.opencodeCurrentModelId = 'provider/current'
+        const hubApi = {
+            getHubSettings: vi.fn().mockResolvedValue({
+                sessionSummaryContract: false,
+                sessionSummaryInChat: false,
+                peerSpawnDefaults: {
+                    agent: 'opencode',
+                    permissionMode: 'default',
+                    models: { opencode: 'provider/hub-model' }
+                }
+            })
+        } as unknown as ApiClient
+
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        client.setQueryData(queryKeys.hubSettings, {
+            sessionSummaryContract: false,
+            sessionSummaryInChat: false,
+            peerSpawnDefaults: {
+                agent: 'opencode',
+                permissionMode: 'default',
+                models: { opencode: 'provider/hub-model' }
+            }
+        })
+        render(
+            <QueryClientProvider client={client}>
+                <NewSession
+                    api={hubApi}
+                    machines={[machine]}
+                    initialMachineId="machine-1"
+                    initialDirectory="C:\\repo"
+                    onSuccess={mocks.onSuccess}
+                    onCancel={() => {}}
+                />
+            </QueryClientProvider>
+        )
+
+        await waitFor(() => {
+            expect(screen.getByTestId('opencode-model')).toHaveTextContent('provider/hub-model')
+        })
+    })
+
+    it('seeds AGY spawn model from hub when no launch preference exists', async () => {
+        localStorage.clear()
+        mocks.agyModels = [
+            { modelId: 'hub-agy-model', name: 'Hub AGY' },
+            { modelId: 'gemini-3.6-flash-low', name: 'Gemini 3.6 Flash (Low)' }
+        ]
+        mocks.spawnSession.mockResolvedValue({ type: 'success', sessionId: 'session-1' })
+        const hubApi = {
+            getHubSettings: vi.fn().mockResolvedValue({
+                sessionSummaryContract: false,
+                sessionSummaryInChat: false,
+                peerSpawnDefaults: {
+                    agent: 'agy',
+                    permissionMode: 'default',
+                    models: { agy: 'hub-agy-model' }
+                }
+            })
+        } as unknown as ApiClient
+
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        client.setQueryData(queryKeys.hubSettings, {
+            sessionSummaryContract: false,
+            sessionSummaryInChat: false,
+            peerSpawnDefaults: {
+                agent: 'agy',
+                permissionMode: 'default',
+                models: { agy: 'hub-agy-model' }
+            }
+        })
+        render(
+            <QueryClientProvider client={client}>
+                <NewSession
+                    api={hubApi}
+                    machines={[machine]}
+                    initialMachineId="machine-1"
+                    initialDirectory="C:\\repo"
+                    onSuccess={mocks.onSuccess}
+                    onCancel={() => {}}
+                />
+            </QueryClientProvider>
+        )
+
+        await waitFor(() => {
+            expect(screen.getByTestId('agy-model')).toHaveTextContent('hub-agy-model')
+        })
+        await waitFor(() => expect(screen.getByTestId('create')).toBeEnabled())
+        fireEvent.click(screen.getByTestId('create'))
+        await waitFor(() => expect(mocks.onSuccess).toHaveBeenCalledWith('session-1'))
+        expect(mocks.spawnSession).toHaveBeenCalledWith(expect.objectContaining({
+            agent: 'agy',
+            model: 'hub-agy-model'
+        }))
+    })
 })

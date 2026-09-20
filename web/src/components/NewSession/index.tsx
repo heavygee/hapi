@@ -75,6 +75,7 @@ import {
     seedNewSessionFromPeerSpawnDefaults,
     isYoloStylePermissionMode,
 } from './preferences'
+import { resolvePermissionModeForFlavor } from '@hapi/protocol/peerSpawnDefaults'
 import { SessionTypeSelector } from './SessionTypeSelector'
 import { PermissionField } from './PermissionField'
 import { usesNativePermissionSelect, usesSharedPermissionModeState } from '@/lib/codexFamilyPermissionAgents'
@@ -310,6 +311,7 @@ export function NewSession(props: {
     // Sticky New Session localStorage agent wins when present (last-used UI);
     // peer spawn / machine spawn always resolve hub server-side.
     // Browse-draft restore wins; explicit form edits after seed are not overwritten.
+    // A sticky agent must not suppress hub defaults for unset permission/model.
     useEffect(() => {
         if (seededFromHubRef.current || restoredFromBrowseRef.current || !hubPeerSpawnDefaults) {
             return
@@ -317,39 +319,55 @@ export function NewSession(props: {
         seededFromHubRef.current = true
         const seeded = seedNewSessionFromPeerSpawnDefaults(hubPeerSpawnDefaults)
         const { hasStickyAgent, hasStickyYolo } = initialStickyPreferences
-        if (!hasStickyAgent && !editedAgentRef.current) {
-            // If the operator already edited permission/Yolo, do not swap the
-            // agent — agent-change effects would wipe the restrictive choice.
-            if (!editedPermissionRef.current) {
-                setAgent(seeded.agent)
-            }
-            if (!editedPermissionRef.current) {
-                if (usesSharedPermissionModeState(seeded.agent)) {
-                    setNativePermissionMode(seeded.permissionMode)
-                } else if (seeded.agent === 'grok') {
-                    if (
-                        seeded.permissionMode === 'default'
-                        || seeded.permissionMode === 'auto'
-                        || seeded.permissionMode === 'plan'
-                        || seeded.permissionMode === 'bypassPermissions'
-                    ) {
-                        setGrokPermissionMode(seeded.permissionMode)
-                    } else if (isYoloStylePermissionMode(seeded.permissionMode)) {
-                        setGrokPermissionMode('bypassPermissions')
-                    }
+        // If the operator already edited permission/Yolo, do not swap the
+        // agent — agent-change effects would wipe the restrictive choice.
+        const applyHubAgent = !hasStickyAgent
+            && !editedAgentRef.current
+            && !editedPermissionRef.current
+        if (applyHubAgent) {
+            setAgent(seeded.agent)
+        }
+        const targetAgent: AgentType = applyHubAgent ? seeded.agent : agent
+        const remappedPermission = resolvePermissionModeForFlavor(
+            hubPeerSpawnDefaults.permissionMode,
+            targetAgent
+        )
+        const savedLaunch = machineId
+            ? loadPreferredLaunchSettings(machineId, targetAgent)
+            : null
+        if (!editedPermissionRef.current && !savedLaunch?.permissionMode) {
+            if (usesSharedPermissionModeState(targetAgent)) {
+                setNativePermissionMode(remappedPermission)
+            } else if (targetAgent === 'grok') {
+                if (
+                    remappedPermission === 'default'
+                    || remappedPermission === 'auto'
+                    || remappedPermission === 'plan'
+                    || remappedPermission === 'bypassPermissions'
+                ) {
+                    setGrokPermissionMode(remappedPermission)
+                } else if (isYoloStylePermissionMode(remappedPermission)) {
+                    setGrokPermissionMode('bypassPermissions')
                 }
             }
-            if (!editedModelRef.current && seeded.model && !editedPermissionRef.current) {
-                setModel(seeded.model)
-                if (seeded.agent === 'cursor') {
-                    setCursorSelectedBase(seeded.model)
+        }
+        const hubModelForTarget = hubPeerSpawnDefaults.models[targetAgent]?.trim()
+        if (!editedModelRef.current && !savedLaunch?.model && hubModelForTarget) {
+            if (targetAgent === 'opencode') {
+                setOpencodeSelectedModel(hubModelForTarget)
+            } else if (targetAgent === 'agy') {
+                setAgySelectedModel(hubModelForTarget)
+            } else {
+                setModel(hubModelForTarget)
+                if (targetAgent === 'cursor') {
+                    setCursorSelectedBase(hubModelForTarget)
                 }
             }
         }
         if (!hasStickyYolo && !editedPermissionRef.current) {
-            setYoloMode(seeded.yoloMode)
+            setYoloMode(isYoloStylePermissionMode(remappedPermission))
         }
-    }, [hubPeerSpawnDefaults, initialStickyPreferences])
+    }, [agent, hubPeerSpawnDefaults, initialStickyPreferences, machineId])
 
     useEffect(() => {
         if (props.machines.length === 0) return
@@ -958,24 +976,29 @@ export function NewSession(props: {
             return
         }
 
+        const savedLaunch = loadPreferredLaunchSettings(machineId, agent)
         const preferred = resolvePreferredLaunchSettings(
             agent,
-            loadPreferredLaunchSettings(machineId, agent),
+            savedLaunch,
             legacyYoloAgent === agent,
             hubPermissionModeRef.current
         )
 
         const hubModel = hubModelsRef.current?.[agent]?.trim()
+        // Explicit saved `auto` is native Default — do not replace with hub model.
+        // Absent saved model may still inherit the hub flavor model.
         const nextModel = agent === 'opencode'
             ? 'auto'
-            : preferred.model !== 'auto'
+            : savedLaunch?.model !== undefined
                 ? preferred.model
                 : (hubModel || preferred.model)
         setModel(nextModel)
         setCursorSelectedBase(
             preferred.cursorSelectedBase !== 'auto'
                 ? preferred.cursorSelectedBase
-                : (agent === 'cursor' && hubModel ? hubModel : preferred.cursorSelectedBase)
+                : savedLaunch?.cursorSelectedBase !== undefined
+                    ? preferred.cursorSelectedBase
+                    : (agent === 'cursor' && hubModel ? hubModel : preferred.cursorSelectedBase)
         )
         setEffort(preferred.effort)
         setModelReasoningEffort(preferred.modelReasoningEffort)
@@ -995,13 +1018,31 @@ export function NewSession(props: {
                 setGrokPermissionMode('bypassPermissions')
             }
         }
-        setOpencodeSelectedModel(
-            agent === 'opencode' && preferred.model !== 'auto' ? preferred.model : null
-        )
+        // Flavor-specific selectors own the spawn model for OpenCode / AGY.
+        // Prefer a concrete saved model, else hub, else native Default (null).
+        if (agent === 'opencode') {
+            if (savedLaunch?.model !== undefined && savedLaunch.model !== 'auto') {
+                setOpencodeSelectedModel(savedLaunch.model)
+            } else if (savedLaunch?.model === 'auto') {
+                setOpencodeSelectedModel(null)
+            } else {
+                setOpencodeSelectedModel(hubModel || null)
+            }
+        } else {
+            setOpencodeSelectedModel(null)
+        }
         agyModelPickedByUserRef.current = false
-        setAgySelectedModel(
-            agent === 'agy' && preferred.model !== 'auto' ? preferred.model : null
-        )
+        if (agent === 'agy') {
+            if (savedLaunch?.model !== undefined && savedLaunch.model !== 'auto') {
+                setAgySelectedModel(savedLaunch.model)
+            } else if (savedLaunch?.model === 'auto') {
+                setAgySelectedModel(null)
+            } else {
+                setAgySelectedModel(hubModel || null)
+            }
+        } else {
+            setAgySelectedModel(null)
+        }
     }, [agent, legacyYoloAgent, machineId, usesSharedPermissionMode])
 
     useEffect(() => {
