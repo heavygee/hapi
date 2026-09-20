@@ -1376,4 +1376,91 @@ describe('NewSession launch preferences', () => {
             model: 'opencode-go/deepseek-v4-pro',
         }))
     })
+
+    it('seeds Codex hub defaults on a fresh browser before sticky keys are written', async () => {
+        localStorage.clear()
+        let resolveSettings!: (value: unknown) => void
+        const deferred = new Promise((resolve) => {
+            resolveSettings = resolve
+        })
+        const slowApi = {
+            getHubSettings: vi.fn(() => deferred)
+        } as unknown as ApiClient
+
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        render(
+            <QueryClientProvider client={client}>
+                <NewSession
+                    api={slowApi}
+                    machines={[machine]}
+                    initialMachineId="machine-1"
+                    initialDirectory="C:\\repo"
+                    onSuccess={mocks.onSuccess}
+                    onCancel={() => {}}
+                />
+            </QueryClientProvider>
+        )
+
+        await act(async () => {
+            resolveSettings({
+                sessionSummaryContract: false,
+                sessionSummaryInChat: false,
+                peerSpawnDefaults: {
+                    agent: 'codex',
+                    permissionMode: 'read-only',
+                    models: { codex: 'gpt-5' }
+                }
+            })
+            await deferred
+        })
+
+        await waitFor(() => {
+            expect(screen.getByTestId('permission-mode')).toHaveTextContent('read-only')
+        })
+    })
+
+    it('keeps a Plan pick when hub settings resolve after the edit', async () => {
+        localStorage.clear()
+        let resolveSettings!: (value: unknown) => void
+        const deferred = new Promise((resolve) => {
+            resolveSettings = resolve
+        })
+        const slowApi = {
+            getHubSettings: vi.fn(() => deferred)
+        } as unknown as ApiClient
+
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        render(
+            <QueryClientProvider client={client}>
+                <NewSession
+                    api={slowApi}
+                    machines={[machine]}
+                    initialMachineId="machine-1"
+                    initialDirectory="C:\\repo"
+                    onSuccess={mocks.onSuccess}
+                    onCancel={() => {}}
+                />
+            </QueryClientProvider>
+        )
+
+        fireEvent.click(screen.getByTestId('permission-mode-plan'))
+        expect(screen.getByTestId('permission-mode')).toHaveTextContent('plan')
+
+        await act(async () => {
+            resolveSettings({
+                sessionSummaryContract: false,
+                sessionSummaryInChat: false,
+                peerSpawnDefaults: {
+                    agent: 'claude',
+                    permissionMode: 'bypassPermissions',
+                    models: { claude: 'sonnet' }
+                }
+            })
+            await deferred
+        })
+
+        await waitFor(() => {
+            expect(screen.getByTestId('permission-mode')).toHaveTextContent('plan')
+        })
+    })
 })

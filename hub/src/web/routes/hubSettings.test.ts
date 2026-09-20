@@ -121,6 +121,18 @@ describe('GET/PUT /api/hub-settings', () => {
         expect(response.status).toBe(400)
     })
 
+    it('rejects retired gemini as peer spawn default agent', async () => {
+        const { app } = await createApp()
+        const response = await app.request('/api/hub-settings', {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+                peerSpawnDefaults: { agent: 'gemini' }
+            })
+        })
+        expect(response.status).toBe(400)
+    })
+
     it('rejects empty body', async () => {
         const { app } = await createApp()
         const response = await app.request('/api/hub-settings', {

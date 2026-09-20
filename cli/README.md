@@ -250,7 +250,7 @@ From the repo root:
 ```bash
 bun install
 bun run build:cli
-bun run build:cli:exe
+bun run --cwd cli build:exe
 ```
 
 For an all-in-one binary that also embeds the web app:

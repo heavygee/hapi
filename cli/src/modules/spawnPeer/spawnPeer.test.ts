@@ -11,6 +11,15 @@ type MockResponse = {
     data: unknown
 }
 
+const SESSION_ID = 'cccccccc-1111-1111-1111-111111111111'
+const MACHINE_ID = 'machine-abc'
+
+const STOCK_RESOLVED_HUB_DEFAULTS = {
+    agent: 'claude' as const,
+    permissionMode: 'bypassPermissions' as const,
+    models: { claude: 'sonnet' }
+}
+
 function createHttpMock(handlers: {
     post?: (url: string, body?: unknown) => MockResponse | Promise<MockResponse>
     get?: (url: string, config?: { params?: Record<string, unknown> }) => MockResponse | Promise<MockResponse>
@@ -24,10 +33,34 @@ function createHttpMock(handlers: {
             return handlers.post(url, body)
         }),
         get: vi.fn(async (url: string, config?: { params?: Record<string, unknown> }) => {
-            if (!handlers.get) {
-                throw new Error(`unexpected GET ${url}`)
+            if (handlers.get) {
+                try {
+                    return await handlers.get(url, config)
+                } catch (error) {
+                    if (typeof url === 'string' && url.endsWith('/api/hub-settings')) {
+                        return {
+                            status: 200,
+                            data: {
+                                sessionSummaryContract: false,
+                                sessionSummaryInChat: false,
+                                peerSpawnDefaults: STOCK_RESOLVED_HUB_DEFAULTS
+                            }
+                        }
+                    }
+                    throw error
+                }
             }
-            return handlers.get(url, config)
+            if (typeof url === 'string' && url.endsWith('/api/hub-settings')) {
+                return {
+                    status: 200,
+                    data: {
+                        sessionSummaryContract: false,
+                        sessionSummaryInChat: false,
+                        peerSpawnDefaults: STOCK_RESOLVED_HUB_DEFAULTS
+                    }
+                }
+            }
+            throw new Error(`unexpected GET ${url}`)
         }),
         patch: vi.fn(async (url: string, body?: unknown) => {
             if (!handlers.patch) {
@@ -37,10 +70,6 @@ function createHttpMock(handlers: {
         })
     }
 }
-
-const SESSION_ID = 'cccccccc-1111-1111-1111-111111111111'
-const MACHINE_ID = 'machine-abc'
-
 function userMessageRow(text: string) {
     return {
         id: 'msg-1',
@@ -79,6 +108,9 @@ describe('spawnPeer', () => {
     it('rejects a permissionMode the selected agent does not support before spawn', async () => {
         const http = createHttpMock({
             post: (url) => {
+                if (url.endsWith('/api/auth')) {
+                    return { status: 200, data: { token: 'jwt' } }
+                }
                 throw new Error(`spawn must not run; unexpected POST ${url}`)
             }
         })
@@ -91,15 +123,146 @@ describe('spawnPeer', () => {
             machineId: MACHINE_ID,
             accessToken: 'tok',
             apiUrl: 'http://hub.test',
-            http: http as never
+            http: http as never,
+            hubPeerSpawnDefaults: null
         })).rejects.toMatchObject({ code: 'bad_args' })
 
-        expect(http.post).not.toHaveBeenCalled()
+        expect(http.post).toHaveBeenCalledTimes(1)
     })
 
-    it('rejects a Claude-illegal permissionMode when agent is omitted (hub default)', async () => {
+    it('accepts read-only when agent is omitted and hub default is Codex', async () => {
+        let spawnedBody: Record<string, unknown> | undefined
+        const http = createHttpMock({
+            post: (url, body) => {
+                if (url.endsWith('/api/auth')) {
+                    return { status: 200, data: { token: 'jwt' } }
+                }
+                if (url.endsWith(`/api/machines/${MACHINE_ID}/spawn`)) {
+                    spawnedBody = body as Record<string, unknown>
+                    return { status: 200, data: { type: 'success', sessionId: SESSION_ID } }
+                }
+                if (url.endsWith(`/api/sessions/${SESSION_ID}/messages`)) {
+                    return { status: 200, data: { ok: true } }
+                }
+                throw new Error(`unexpected POST ${url}`)
+            },
+            get: (url) => {
+                if (url.endsWith('/api/hub-settings')) {
+                    return {
+                        status: 200,
+                        data: {
+                            peerSpawnDefaults: {
+                                agent: 'codex',
+                                permissionMode: 'yolo',
+                                models: {}
+                            }
+                        }
+                    }
+                }
+                if (url.includes(`/api/sessions/${SESSION_ID}/messages`)) {
+                    return { status: 200, data: { messages: [userMessageRow('do the work')] } }
+                }
+                if (url.includes('/api/sessions')) {
+                    return {
+                        status: 200,
+                        data: {
+                            sessions: [{ id: SESSION_ID, active: true, metadata: { flavor: 'codex' } }],
+                            session: { id: SESSION_ID, active: true, metadata: { flavor: 'codex' } }
+                        }
+                    }
+                }
+                throw new Error(`unexpected GET ${url}`)
+            }
+        })
+
+        await spawnPeer({
+            directory: '/tmp/project',
+            message: 'do the work',
+            permissionMode: 'read-only',
+            machineId: MACHINE_ID,
+            accessToken: 'tok',
+            apiUrl: 'http://hub.test',
+            http: http as never
+        })
+
+        expect(spawnedBody).toMatchObject({
+            agent: 'codex',
+            permissionMode: 'read-only'
+        })
+    })
+
+    it('rejects plan when agent is omitted and hub default is Codex', async () => {
         const http = createHttpMock({
             post: (url) => {
+                if (url.endsWith('/api/auth')) {
+                    return { status: 200, data: { token: 'jwt' } }
+                }
+                throw new Error(`spawn must not run; unexpected POST ${url}`)
+            },
+            get: (url) => {
+                if (url.endsWith('/api/hub-settings')) {
+                    return {
+                        status: 200,
+                        data: {
+                            peerSpawnDefaults: {
+                                agent: 'codex',
+                                permissionMode: 'yolo',
+                                models: {}
+                            }
+                        }
+                    }
+                }
+                throw new Error(`unexpected GET ${url}`)
+            }
+        })
+
+        await expect(spawnPeer({
+            directory: '/tmp/project',
+            message: 'do the work',
+            permissionMode: 'plan',
+            machineId: MACHINE_ID,
+            accessToken: 'tok',
+            apiUrl: 'http://hub.test',
+            http: http as never
+        })).rejects.toMatchObject({ code: 'bad_args' })
+    })
+
+    it('aborts when hub spawn defaults cannot be loaded', async () => {
+        const http = createHttpMock({
+            post: (url) => {
+                if (url.endsWith('/api/auth')) {
+                    return { status: 200, data: { token: 'jwt' } }
+                }
+                throw new Error(`spawn must not run; unexpected POST ${url}`)
+            },
+            get: (url) => {
+                if (url.endsWith('/api/hub-settings')) {
+                    return { status: 500, data: { error: 'boom' } }
+                }
+                throw new Error(`unexpected GET ${url}`)
+            }
+        })
+
+        await expect(spawnPeer({
+            directory: '/tmp/project',
+            message: 'do the work',
+            machineId: MACHINE_ID,
+            accessToken: 'tok',
+            apiUrl: 'http://hub.test',
+            http: http as never
+        })).rejects.toMatchObject({
+            code: 'spawn_failed',
+            message: expect.stringMatching(/hub spawn defaults/i)
+        })
+        expect(http.post).toHaveBeenCalledTimes(1)
+    })
+
+    it('rejects a Claude-illegal permissionMode when agent is omitted (hub default Claude)', async () => {
+        const http = createHttpMock({
+            post: (url) => {
+                if (url.endsWith('/api/auth')) {
+                    return { status: 200, data: { token: 'jwt' } }
+                }
                 throw new Error(`spawn must not run; unexpected POST ${url}`)
             }
         })
@@ -111,10 +274,15 @@ describe('spawnPeer', () => {
             machineId: MACHINE_ID,
             accessToken: 'tok',
             apiUrl: 'http://hub.test',
-            http: http as never
+            http: http as never,
+            hubPeerSpawnDefaults: {
+                agent: 'claude',
+                permissionMode: 'bypassPermissions',
+                models: { claude: 'sonnet' }
+            }
         })).rejects.toMatchObject({ code: 'bad_args' })
 
-        expect(http.post).not.toHaveBeenCalled()
+        expect(http.post).toHaveBeenCalledTimes(1)
     })
 
     it('rejects a name longer than the hub rename max before spawn', async () => {

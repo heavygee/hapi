@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import {
+    PeerSpawnDefaultsSchema,
     STOCK_PEER_SPAWN_DEFAULTS,
     mergePeerSpawnDefaults,
     resolvePeerSpawnConfig,
@@ -17,6 +18,14 @@ describe('resolvePermissionModeForFlavor', () => {
 
     it('keeps explicit bypassPermissions for claude', () => {
         expect(resolvePermissionModeForFlavor('bypassPermissions', 'claude')).toBe('bypassPermissions')
+    })
+
+    it('remaps resolved Claude bypassPermissions to codex yolo', () => {
+        expect(resolvePermissionModeForFlavor('bypassPermissions', 'codex')).toBe('yolo')
+    })
+
+    it('remaps resolved Claude bypassPermissions to cursor yolo', () => {
+        expect(resolvePermissionModeForFlavor('bypassPermissions', 'cursor')).toBe('yolo')
     })
 })
 
@@ -88,6 +97,16 @@ describe('resolvePeerSpawnConfig', () => {
         })
     })
 
+    it('preserves auto-approval when hub returns resolved Claude bypassPermissions and agent overrides to codex', () => {
+        expect(resolvePeerSpawnConfig(
+            { agent: 'codex' },
+            mergePeerSpawnDefaults(null)
+        )).toEqual({
+            agent: 'codex',
+            permissionMode: 'yolo'
+        })
+    })
+
     it('forwards explicit effort', () => {
         expect(resolvePeerSpawnConfig({ effort: 'high' })).toEqual({
             agent: 'claude',
@@ -95,5 +114,15 @@ describe('resolvePeerSpawnConfig', () => {
             model: 'sonnet',
             effort: 'high'
         })
+    })
+})
+
+describe('PeerSpawnDefaultsSchema', () => {
+    it('rejects retired gemini as a spawn default agent', () => {
+        expect(PeerSpawnDefaultsSchema.safeParse({ agent: 'gemini' }).success).toBe(false)
+    })
+
+    it('accepts creatable agents', () => {
+        expect(PeerSpawnDefaultsSchema.safeParse({ agent: 'codex' }).success).toBe(true)
     })
 })

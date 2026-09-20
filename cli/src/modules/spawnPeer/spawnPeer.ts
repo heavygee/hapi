@@ -23,7 +23,9 @@ import {
 } from '@hapi/protocol/modes'
 import {
     resolvePeerSpawnConfig,
-    type PeerSpawnDefaults
+    ResolvedPeerSpawnDefaultsSchema,
+    type PeerSpawnDefaults,
+    type ResolvedPeerSpawnDefaults
 } from '@hapi/protocol/peerSpawnDefaults'
 import { configuration } from '@/configuration'
 import { getAuthToken } from '@/api/auth'
@@ -170,7 +172,7 @@ async function fetchHubPeerSpawnDefaults(
     apiUrl: string,
     jwt: string,
     http: AxiosInstance
-): Promise<PeerSpawnDefaults | null> {
+): Promise<ResolvedPeerSpawnDefaults> {
     try {
         const response = await http.get(`${apiUrl}/api/hub-settings`, {
             headers: authHeaders(jwt),
@@ -178,13 +180,16 @@ async function fetchHubPeerSpawnDefaults(
             validateStatus: () => true
         })
         if (response.status < 200 || response.status >= 300) {
-            return null
+            throw new SpawnPeerError('spawn_failed', 'Cannot load hub spawn defaults')
         }
-        const peerSpawnDefaults = (response.data as { peerSpawnDefaults?: PeerSpawnDefaults } | undefined)
-            ?.peerSpawnDefaults
-        return peerSpawnDefaults ?? null
-    } catch {
-        return null
+        return ResolvedPeerSpawnDefaultsSchema.parse(
+            (response.data as { peerSpawnDefaults?: unknown } | undefined)?.peerSpawnDefaults
+        )
+    } catch (error) {
+        if (error instanceof SpawnPeerError) {
+            throw error
+        }
+        throw new SpawnPeerError('spawn_failed', 'Cannot load valid hub spawn defaults')
     }
 }
 
@@ -285,13 +290,6 @@ export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerRes
     if (options.agent && !(CREATABLE_AGENT_FLAVORS as readonly string[]).includes(options.agent)) {
         throw new SpawnPeerError('bad_args', `unsupported agent: ${options.agent}`)
     }
-    const previewAgent = options.agent ?? 'claude'
-    if (options.permissionMode && !isPermissionModeAllowedForFlavor(options.permissionMode, previewAgent)) {
-        throw new SpawnPeerError(
-            'bad_args',
-            `permission mode ${options.permissionMode} is not supported by ${previewAgent}`
-        )
-    }
 
     const waitActiveSecs = options.waitActiveSecs ?? DEFAULT_WAIT_ACTIVE_SECS
     if (!Number.isFinite(waitActiveSecs) || waitActiveSecs <= 0) {
@@ -329,6 +327,18 @@ export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerRes
         model: options.model,
         effort: options.effort
     }, hubDefaults)
+
+    // Validate explicit permission against the resolved agent (hub default when
+    // agent is omitted) — not a Claude preview before settings load.
+    if (
+        options.permissionMode
+        && !isPermissionModeAllowedForFlavor(options.permissionMode, resolved.agent)
+    ) {
+        throw new SpawnPeerError(
+            'bad_args',
+            `permission mode ${options.permissionMode} is not supported by ${resolved.agent}`
+        )
+    }
 
     const spawnBody: Record<string, unknown> = {
         directory,

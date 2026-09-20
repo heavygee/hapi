@@ -111,6 +111,25 @@ export function NewSession(props: {
     })
     const hubPeerSpawnDefaults = hubSettingsQuery.data?.peerSpawnDefaults
     const seededFromHubRef = useRef(false)
+    // Snapshot sticky localStorage keys before mount effects call
+    // savePreferredAgent / savePreferredYoloMode (those write keys even on a
+    // fresh browser, which would permanently skip hub seeding).
+    const [initialStickyPreferences] = useState(() => {
+        try {
+            return {
+                hasStickyAgent: localStorage.getItem('hapi:newSession:agent') !== null,
+                hasStickyYolo: localStorage.getItem('hapi:newSession:yolo') !== null
+            }
+        } catch {
+            return { hasStickyAgent: false, hasStickyYolo: false }
+        }
+    })
+    // Hub permission mode for preferred-launch restore — read via ref so a
+    // late getHubSettings resolve does not re-run the effect and wipe edits.
+    const hubPermissionModeRef = useRef(hubPeerSpawnDefaults?.permissionMode)
+    hubPermissionModeRef.current = hubPeerSpawnDefaults?.permissionMode
+    const nativePermissionModeRef = useRef<PermissionMode>('default')
+    const grokPermissionModeRef = useRef<GrokPermissionMode>('default')
 
     const [machineId, setMachineId] = useState<string | null>(props.initialMachineId ?? null)
     const [directory, setDirectory] = useState(props.initialDirectory ?? '')
@@ -137,6 +156,8 @@ export function NewSession(props: {
     const [yoloMode, setYoloMode] = useState(loadPreferredYoloMode)
     const [nativePermissionMode, setNativePermissionMode] = useState<PermissionMode>('default')
     const [grokPermissionMode, setGrokPermissionMode] = useState<GrokPermissionMode>('default')
+    nativePermissionModeRef.current = nativePermissionMode
+    grokPermissionModeRef.current = grokPermissionMode
     const [sessionType, setSessionType] = useState<SessionType>('simple')
     const [worktreeName, setWorktreeName] = useState('')
     const [directoryCreationConfirmed, setDirectoryCreationConfirmed] = useState(false)
@@ -289,28 +310,28 @@ export function NewSession(props: {
         }
         seededFromHubRef.current = true
         const seeded = seedNewSessionFromPeerSpawnDefaults(hubPeerSpawnDefaults)
-        let hasStickyAgent = false
-        let hasStickyYolo = false
-        try {
-            hasStickyAgent = localStorage.getItem('hapi:newSession:agent') !== null
-            hasStickyYolo = localStorage.getItem('hapi:newSession:yolo') !== null
-        } catch {
-            // Ignore storage errors
-        }
+        const { hasStickyAgent, hasStickyYolo } = initialStickyPreferences
+        // Permission still at mount default ⇒ safe to seed. If the operator
+        // already picked Plan/etc. while getHubSettings was in flight, keep it.
+        const permissionStillAtMountDefault =
+            nativePermissionModeRef.current === 'default'
+            && grokPermissionModeRef.current === 'default'
         if (!hasStickyAgent) {
             setAgent(seeded.agent)
-            if (usesSharedPermissionModeState(seeded.agent)) {
-                setNativePermissionMode(seeded.permissionMode)
-            } else if (seeded.agent === 'grok') {
-                if (
-                    seeded.permissionMode === 'default'
-                    || seeded.permissionMode === 'auto'
-                    || seeded.permissionMode === 'plan'
-                    || seeded.permissionMode === 'bypassPermissions'
-                ) {
-                    setGrokPermissionMode(seeded.permissionMode)
-                } else if (isYoloStylePermissionMode(seeded.permissionMode)) {
-                    setGrokPermissionMode('bypassPermissions')
+            if (permissionStillAtMountDefault) {
+                if (usesSharedPermissionModeState(seeded.agent)) {
+                    setNativePermissionMode(seeded.permissionMode)
+                } else if (seeded.agent === 'grok') {
+                    if (
+                        seeded.permissionMode === 'default'
+                        || seeded.permissionMode === 'auto'
+                        || seeded.permissionMode === 'plan'
+                        || seeded.permissionMode === 'bypassPermissions'
+                    ) {
+                        setGrokPermissionMode(seeded.permissionMode)
+                    } else if (isYoloStylePermissionMode(seeded.permissionMode)) {
+                        setGrokPermissionMode('bypassPermissions')
+                    }
                 }
             }
             if (seeded.model) {
@@ -323,7 +344,7 @@ export function NewSession(props: {
         if (!hasStickyYolo) {
             setYoloMode(seeded.yoloMode)
         }
-    }, [hubPeerSpawnDefaults])
+    }, [hubPeerSpawnDefaults, initialStickyPreferences])
 
     useEffect(() => {
         if (props.machines.length === 0) return
@@ -936,7 +957,7 @@ export function NewSession(props: {
             agent,
             loadPreferredLaunchSettings(machineId, agent),
             legacyYoloAgent === agent,
-            hubPeerSpawnDefaults?.permissionMode
+            hubPermissionModeRef.current
         )
 
         setModel(agent === 'opencode' ? 'auto' : preferred.model)
@@ -953,7 +974,7 @@ export function NewSession(props: {
         setAgySelectedModel(
             agent === 'agy' && preferred.model !== 'auto' ? preferred.model : null
         )
-    }, [agent, legacyYoloAgent, machineId, hubPeerSpawnDefaults?.permissionMode, usesSharedPermissionMode])
+    }, [agent, legacyYoloAgent, machineId, usesSharedPermissionMode])
 
     useEffect(() => {
         if (

@@ -1,5 +1,11 @@
 import { z } from 'zod'
-import { AgentFlavorSchema, isPermissionModeAllowedForFlavor, type AgentFlavor, type PermissionMode } from './modes'
+import {
+    AgentFlavorSchema,
+    CREATABLE_AGENT_FLAVORS,
+    isPermissionModeAllowedForFlavor,
+    type AgentFlavor,
+    type PermissionMode
+} from './modes'
 import { PermissionModeSchema } from './schemas'
 
 /** Per-flavor model id overrides for peer spawn (e.g. claude: sonnet, cursor: auto). */
@@ -7,9 +13,15 @@ export const PeerSpawnModelsSchema = z.record(z.string(), z.string().trim().min(
 
 export type PeerSpawnModels = z.infer<typeof PeerSpawnModelsSchema>
 
+/** New-session / spawn defaults only accept creatable flavors (not retired gemini). */
+const CreatableAgentFlavorSchema = AgentFlavorSchema.refine(
+    (agent): agent is AgentFlavor => (CREATABLE_AGENT_FLAVORS as readonly string[]).includes(agent),
+    { message: 'Agent flavor is not creatable' }
+)
+
 /** Hub-persisted peer spawn defaults (partial; unset fields fall back to stock). */
 export const PeerSpawnDefaultsSchema = z.object({
-    agent: AgentFlavorSchema.optional(),
+    agent: CreatableAgentFlavorSchema.optional(),
     permissionMode: PermissionModeSchema.optional(),
     models: PeerSpawnModelsSchema.optional()
 })
@@ -18,11 +30,10 @@ export type PeerSpawnDefaults = z.infer<typeof PeerSpawnDefaultsSchema>
 
 /** Fully resolved peer spawn defaults returned by GET /api/hub-settings. */
 export const ResolvedPeerSpawnDefaultsSchema = z.object({
-    agent: AgentFlavorSchema,
+    agent: CreatableAgentFlavorSchema,
     permissionMode: PermissionModeSchema,
     models: PeerSpawnModelsSchema
 })
-
 export type ResolvedPeerSpawnDefaults = z.infer<typeof ResolvedPeerSpawnDefaultsSchema>
 
 /** Stock product defaults when hub settings omit peerSpawnDefaults. */
@@ -48,7 +59,10 @@ export function resolvePermissionModeForFlavor(
     if (isPermissionModeAllowedForFlavor(mode, flavor)) {
         return mode
     }
-    if (mode === 'yolo' || mode === 'safe-yolo') {
+    // Remap any auto-approval equivalent (yolo / bypassPermissions / always-proceed /
+    // safe-yolo) onto a mode the target flavor supports — hub GET returns the
+    // already-resolved Claude mode, so agent overrides must not fall through to default.
+    if (mode === 'safe-yolo' || (YOLO_EQUIVALENTS as readonly PermissionMode[]).includes(mode)) {
         const equivalent = YOLO_EQUIVALENTS.find((candidate) =>
             isPermissionModeAllowedForFlavor(candidate, flavor)
         )

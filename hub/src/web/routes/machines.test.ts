@@ -260,6 +260,91 @@ describe('machines routes', () => {
         expect(capturedPermissionMode).toBe('default')
     })
 
+    it('preserves explicit yolo boolean when permissionMode is omitted', async () => {
+        const machine = createMachine()
+        let capturedYolo: boolean | undefined
+        let capturedPermissionMode: string | undefined
+        const engine = {
+            getMachine: () => machine,
+            getMachineByNamespace: () => machine,
+            spawnSession: async (
+                _machineId: string,
+                _directory: string,
+                _agent?: string,
+                _model?: string,
+                _modelReasoningEffort?: string,
+                yolo?: boolean,
+                _sessionType?: string,
+                _worktreeName?: string,
+                _resumeSessionId?: string,
+                _effort?: string,
+                permissionMode?: string
+            ) => {
+                capturedYolo = yolo
+                capturedPermissionMode = permissionMode
+                return { type: 'success' as const, sessionId: 'session-1' }
+            }
+        } as Partial<SyncEngine>
+
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createMachinesRoutes(() => engine as SyncEngine, {
+            getPeerSpawnDefaults: () => ({
+                agent: 'claude',
+                permissionMode: 'yolo',
+                models: { claude: 'sonnet' }
+            })
+        }))
+
+        for (const yolo of [false, true] as const) {
+            const response = await app.request('/api/machines/machine-1/spawn', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                    directory: '/tmp/project',
+                    agent: 'claude',
+                    yolo
+                })
+            })
+            expect(response.status).toBe(200)
+            expect(capturedYolo).toBe(yolo)
+            expect(capturedPermissionMode).toBeUndefined()
+        }
+    })
+
+    it('returns 500 when hub spawn defaults cannot be loaded', async () => {
+        const machine = createMachine()
+        const engine = {
+            getMachine: () => machine,
+            getMachineByNamespace: () => machine,
+            spawnSession: () => { throw new Error('must not spawn') }
+        } as Partial<SyncEngine>
+
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createMachinesRoutes(() => engine as SyncEngine, {
+            getPeerSpawnDefaults: () => {
+                throw new Error('settings unreadable')
+            }
+        }))
+
+        const response = await app.request('/api/machines/machine-1/spawn', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ directory: '/tmp/project' })
+        })
+        expect(response.status).toBe(500)
+        expect(await response.json()).toMatchObject({
+            code: 'hub_spawn_defaults_unavailable'
+        })
+    })
+
     it('returns Codex models for an online machine', async () => {
         const machine = createMachine()
         const engine = {

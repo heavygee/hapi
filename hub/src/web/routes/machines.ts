@@ -46,11 +46,9 @@ async function loadPeerSpawnDefaultsForSpawn(
         return await options.getPeerSpawnDefaults()
     }
     if (options?.dataDir) {
-        try {
-            return await readPeerSpawnDefaults(options.dataDir)
-        } catch {
-            return null
-        }
+        // Do not swallow read failures into stock yolo — that would override
+        // operator-configured restrictive defaults on a transient I/O error.
+        return await readPeerSpawnDefaults(options.dataDir)
     }
     return null
 }
@@ -151,13 +149,27 @@ export function createMachinesRoutes(
 
         // Apply hub peerSpawnDefaults when agent / permissionMode / model are omitted
         // so scavenger/raw machine spawn matches Settings → General → Agents (and stock yolo).
-        const hubDefaults = await loadPeerSpawnDefaultsForSpawn(options)
+        let hubDefaults: PeerSpawnDefaults | ResolvedPeerSpawnDefaults | null
+        try {
+            hubDefaults = await loadPeerSpawnDefaultsForSpawn(options)
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Cannot load hub spawn defaults'
+            return c.json({ error: message, code: 'hub_spawn_defaults_unavailable' as const }, 500)
+        }
         const resolved = resolvePeerSpawnConfig({
             ...(parsed.data.agent !== undefined ? { agent: parsed.data.agent } : {}),
             ...(parsed.data.permissionMode !== undefined ? { permissionMode: parsed.data.permissionMode } : {}),
             ...(parsed.data.model !== undefined ? { model: parsed.data.model } : {}),
             ...(parsed.data.effort !== undefined ? { effort: parsed.data.effort } : {})
         }, hubDefaults)
+
+        // When the caller supplies an explicit yolo boolean without a native
+        // permissionMode, preserve the runner's boolean path — injecting a hub
+        // mode would override yolo:false (runner prioritizes permissionMode).
+        const permissionModeForSpawn =
+            parsed.data.permissionMode === undefined && parsed.data.yolo !== undefined
+                ? undefined
+                : resolved.permissionMode
 
         const result = await engine.spawnSession(
             machineId,
@@ -170,7 +182,7 @@ export function createMachinesRoutes(
             parsed.data.worktreeName,
             undefined, // resumeSessionId
             resolved.effort ?? parsed.data.effort,
-            resolved.permissionMode,
+            permissionModeForSpawn,
             parsed.data.serviceTier,
             undefined,
             parsed.data.collaborationMode,
