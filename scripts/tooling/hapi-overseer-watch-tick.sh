@@ -11,12 +11,8 @@
 #   real system cron (see systemd/hapi-overseer-watch.timer) — zero agentic
 #   token cost, same as hapi-meta-daily.sh's own pattern.
 #
-# WHAT IT DOES:
-#   Queries the overseer inbox for new/surfaced ERROR/BLOCKED items, diffs
-#   against a persisted watermark, and ntfy-alerts only on genuinely new
-#   items past the watermark. Watermark only ever advances (max(current,new)),
-#   never regresses — an item can drop out of the filtered view after being
-#   dispositioned without that meaning it's safe to re-notify on a lower id.
+# Watermark helpers: scripts/tooling/lib/hapi-watch-watermark.sh (max-id).
+# Registry: config/watches.yaml → overseer-inbox (hapi watch).
 #
 # Usage:
 #   hapi-overseer-watch-tick.sh
@@ -28,17 +24,22 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+# shellcheck source=lib/hapi-watch-watermark.sh
+source "$SCRIPT_DIR/lib/hapi-watch-watermark.sh"
+
 CALL_BIN="$SCRIPT_DIR/hapi-overseer-call.sh"
 WATERMARK_FILE="${HAPI_OVERSEER_WATCH_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/hapi/overseer-watch-watermark.json}"
 
-mkdir -p "$(dirname "$WATERMARK_FILE")"
-[ -f "$WATERMARK_FILE" ] || echo '{"lastMaxId": 0}' > "$WATERMARK_FILE"
+hapi_watch_ensure_parent "$WATERMARK_FILE"
+if [[ ! -f "$WATERMARK_FILE" ]]; then
+    hapi_watch_max_id_write "$WATERMARK_FILE" 0
+fi
 
 # NOTE: query_inbox's `category` arg takes a single STRING, not an array, so the
 # category filter is applied client-side below rather than server-side. (An array
 # here is rejected with "expected string, received array".)
 RESULT="$("$CALL_BIN" tool query_inbox '{"statuses":["new","surfaced"],"limit":200}')"
-LAST_MAX="$(jq -r '.lastMaxId' "$WATERMARK_FILE")"
+LAST_MAX="$(hapi_watch_max_id_read "$WATERMARK_FILE")"
 
 WATCHED_CATEGORIES='["ERROR","BLOCKED"]'
 NEW_ITEMS="$(echo "$RESULT" | jq --argjson last "$LAST_MAX" --argjson cats "$WATCHED_CATEGORIES" \
@@ -46,16 +47,15 @@ NEW_ITEMS="$(echo "$RESULT" | jq --argjson last "$LAST_MAX" --argjson cats "$WAT
 NEW_COUNT="$(echo "$NEW_ITEMS" | jq 'length')"
 CURRENT_MAX="$(echo "$RESULT" | jq --argjson cats "$WATCHED_CATEGORIES" \
     '[.result.items[]? | select(.category as $c | $cats | index($c)) | .id] | max // 0')"
-ADVANCE_TO=$(( CURRENT_MAX > LAST_MAX ? CURRENT_MAX : LAST_MAX ))
 
 if [ "$NEW_COUNT" -gt 0 ]; then
     SUMMARY="$(echo "$NEW_ITEMS" | jq -r '[.[:2][] | "\(.category): \(.title)"] | join(", ")')"
     MESSAGE="$NEW_COUNT new: $SUMMARY"
     MESSAGE="${MESSAGE:0:200}"
     "$CALL_BIN" ntfy "$MESSAGE" 4 "HAPI Overseer" >/dev/null
+    ADVANCE_TO="$(hapi_watch_max_id_advance "$WATERMARK_FILE" "$CURRENT_MAX")"
     echo "hapi-overseer-watch-tick: alerted on $NEW_COUNT new item(s), watermark $LAST_MAX -> $ADVANCE_TO"
 else
+    ADVANCE_TO="$(hapi_watch_max_id_advance "$WATERMARK_FILE" "$CURRENT_MAX")"
     echo "hapi-overseer-watch-tick: nothing new, watermark held at $ADVANCE_TO"
 fi
-
-jq -n --argjson id "$ADVANCE_TO" '{lastMaxId: $id}' > "$WATERMARK_FILE"
