@@ -59,6 +59,11 @@ path, name = sys.argv[1], sys.argv[2]
 with open(path) as f:
     doc = yaml.safe_load(f) or {}
 ticks = doc.get("ticks") or []
+names = [w.get("name") for w in ticks if w.get("name")]
+dups = sorted({n for n in names if names.count(n) > 1})
+if dups:
+    sys.stderr.write("hapi-tick: duplicate tick name(s): " + ", ".join(dups) + "\n")
+    sys.exit(1)
 if name:
     matches = [w for w in ticks if w.get("name") == name]
     if not matches:
@@ -85,10 +90,16 @@ PY
             "$bun" -e '
 import { readFileSync } from "fs";
 import YAML from "yaml";
-const path = Bun.argv[2];
-const name = Bun.argv[3] || "";
+const path = Bun.argv[1];
+const name = Bun.argv[2] || "";
 const doc = YAML.parse(readFileSync(path, "utf8")) || {};
 const ticks = doc.ticks || [];
+const names = ticks.map((w) => w && w.name).filter(Boolean);
+const dups = [...new Set(names.filter((n) => names.filter((x) => x === n).length > 1))];
+if (dups.length) {
+  console.error("hapi-tick: duplicate tick name(s): " + dups.join(", "));
+  process.exit(1);
+}
 if (name) {
   const hit = ticks.find((w) => w && w.name === name);
   if (!hit) {
@@ -130,18 +141,17 @@ calendar_from_cadence() {
 
 cmd_list() {
     [[ -f "$REGISTRY" ]] || die "registry missing: $REGISTRY"
-    python3 - "$REGISTRY" <<'PY'
-import sys, yaml
-doc = yaml.safe_load(open(sys.argv[1])) or {}
-ticks = doc.get("ticks") or []
-if not ticks:
-    print("(no ticks)")
-    raise SystemExit(0)
-print(f"{'NAME':<28} {'HOST':<16} {'STRATEGY':<14} CADENCE")
-for w in ticks:
-    st = (w.get("state") or {}).get("strategy", "?")
-    print(f"{w.get('name','?'):<28} {w.get('host','?'):<16} {st:<14} {w.get('cadence','?')}")
-PY
+    local payload
+    payload="$(registry_json)"
+    if [[ "$(printf '%s' "$payload" | jq '.ticks | length')" -eq 0 ]]; then
+        echo "(no ticks)"
+        return 0
+    fi
+    printf '%-28s %-16s %-14s %s\n' NAME HOST STRATEGY CADENCE
+    printf '%s' "$payload" | jq -r '.ticks[] | [(.name // "?"), (.host // "?"), (.state.strategy // "?"), (.cadence // "?")] | @tsv' \
+        | while IFS=$'\t' read -r n h s c; do
+            printf '%-28s %-16s %-14s %s\n' "$n" "$h" "$s" "$c"
+        done
 }
 
 cmd_templates() {
@@ -202,6 +212,22 @@ validate_one() {
     if grep -Eiq '^[[:space:]]*(claude[[:space:]]+.*)?(CronCreate|ScheduleWakeup)[[:space:](]' "$script"; then
         err "$name: WARN probe invokes CronCreate/ScheduleWakeup — wrong lane for mechanical polls"
         warnings=$((warnings + 1))
+    fi
+
+    local cadence cal
+    cadence="$(tick_field "$json" '.cadence')"
+    [[ -n "$cadence" && "$cadence" != null ]] || die "$name: cadence required (e.g. OnCalendar=*:8,38)"
+    cal="$(calendar_from_cadence "$cadence")"
+    [[ -n "$cal" ]] || die "$name: cadence produced empty OnCalendar value"
+    if command -v systemd-analyze >/dev/null 2>&1; then
+        local tmp_timer
+        tmp_timer="$(mktemp --suffix=.timer)"
+        printf '[Timer]\nOnCalendar=%s\n' "$cal" >"$tmp_timer"
+        if ! systemd-analyze verify "$tmp_timer" >/dev/null 2>&1; then
+            rm -f "$tmp_timer"
+            die "$name: cadence not accepted by systemd-analyze: $cadence"
+        fi
+        rm -f "$tmp_timer"
     fi
 
     local here
@@ -430,8 +456,11 @@ cmd_run() {
         [[ -n "$key" ]] || continue
         export "$key=$val"
     done < <(printf '%s' "$json" | jq -r '.env // {} | to_entries[] | "\(.key)\t\(.value)"')
-    if [[ -n "$workdir" && -d "$workdir" ]]; then
-        cd "$workdir"
+    if [[ -n "$workdir" && "$workdir" != null ]]; then
+        if [[ ! -d "$workdir" ]]; then
+            die "working_directory not found: $workdir"
+        fi
+        cd "$workdir" || die "cannot cd to working_directory: $workdir"
     fi
     echo "hapi-tick: running $script (flock $lock)"
     /usr/bin/flock -w 60 "$lock" "$script"
