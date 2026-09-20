@@ -1,6 +1,6 @@
 # Scheduled agent tasks — investigation & design (fork-only)
 
-**Status:** design signed off; v1 implementation in progress (see `docs/tooling/hapi-watch.md`, issue #153).  
+**Status:** design signed off; v1 as **`hapi tick`** (renamed from working title `hapi tick` to avoid collision with the HAPI Wear/watch app and hapi-monitor). See `docs/tooling/hapi-tick.md`, issue #153.  
 **Date:** 2026-09-18  
 **Parent remit:** [Overseer stand-in](/sessions/44f6aed0-b86d-4d26-916c-12c2c9ee2af8)
 
@@ -10,7 +10,7 @@
 
 **Codify the estate’s existing “bare poller” pattern as a first-class HAPI affordance — do not add a new hub cron or agent-scheduler.**
 
-Name it **`hapi watch`** (working title). It is a **declarative registry + code generator** for the pattern already proven in `hapi-overseer-watch-tick.sh`, `poll-producer-issues.sh`, and `poll-hapi-exec-gc-issues.sh`:
+Name it **`hapi tick`** (product name). It is a **declarative registry + code generator** for the pattern already proven in `hapi-overseer-watch-tick.sh`, `poll-producer-issues.sh`, and `poll-hapi-exec-gc-issues.sh`:
 
 1. **systemd timer** fires on cadence (host-local, durable).
 2. **Bare probe script** (bash/python, zero LLM) queries an external source.
@@ -21,7 +21,7 @@ Judgment work that genuinely needs an LLM every tick stays in a separate lane (`
 
 The piece worth making first-class is not “scheduling” alone — it is the **escalation boundary**: cheap non-LLM detection → `spawn-peer` / `ping-peer` / `ntfy` only when there is a signal ([Antevorta setup](/sessions/32fa0937-a84c-4090-b54c-c82a5fceabe2)). Primary template for that shape: **trailer-job inbox watch** ([OpenACP polls deploy](/sessions/c88c8925-1276-4ba3-9ba4-eb72fcacc7c8) shape **A**).
 
-**Strongest objection:** a registry in the HAPI repo does not magically place timers on janus/proxmox/oos — v1 still needs a per-host install step (`hapi watch install --host oos-linux`), and without that the capability looks “first-class” in docs but remains hand-rolled on each machine. Mitigation: v1 ships with one canonical installer path and documents host placement explicitly; defer remote orchestration to v2.
+**Strongest objection:** a registry in the HAPI repo does not magically place timers on janus/proxmox/oos — v1 still needs a per-host install step (`hapi tick install --host oos-linux`), and without that the capability looks “first-class” in docs but remains hand-rolled on each machine. Mitigation: v1 ships with one canonical installer path and documents host placement explicitly; defer remote orchestration to v2.
 
 ---
 
@@ -60,9 +60,9 @@ Token cost must scale with **actual work**, not polling frequency. Producer poll
 **Recurring but session-bounded until a condition:** e.g. “check this PR’s CI every 5min until green, then stop.” Neither mechanism self-terminates cleanly today:
 
 - `CronCreate` → manual `CronDelete` when done.
-- systemd timer → explicit exit-condition / self-disable in script, or operator `hapi watch uninstall`.
+- systemd timer → explicit exit-condition / self-disable in script, or operator `hapi tick uninstall`.
 
-**Proposal:** v1 documents the gap; v1.5 adds `until:` / `max_ticks` / `exit_when` on watch spec, or a **`hapi watch run --until <expr>`** wrapper for session-scoped babysits (still durable unit, but probe script calls `systemctl disable` on success). Do not conflate this with mechanical standing pollers.
+**Proposal:** v1 documents the gap; v1.5 adds `until:` / `max_ticks` / `exit_when` on watch spec, or a **`hapi tick run --until <expr>`** wrapper for session-scoped babysits (still durable unit, but probe script calls `systemctl disable` on success). Do not conflate this with mechanical standing pollers.
 
 ---
 
@@ -188,34 +188,34 @@ on_change:
 |---|---|
 | Hub-owned cron registry | **Reject v1** — couples scheduling to hub uptime; cross-host placement awkward; duplicates systemd |
 | `CronCreate` in product CLI | **Reject** — wrong cost model; not durable |
-| **`hapi watch` subcommand + repo-local YAML registry** | **Accept v1** — matches how `hapi-meta-daily` and overseer timers already work |
+| **`hapi tick` subcommand + repo-local YAML registry** | **Accept v1** — matches how `hapi-meta-daily` and overseer timers already work |
 | Generated systemd units per watch | **Accept** — same as `install-hapi-overseer-watch-timer.sh` |
 
-**Registry location (proposal):** `config/watches.yaml` (fork-only, git-tracked definitions) + generated units under `scripts/tooling/systemd/watches/` (or co-located in each repo for repo-specific pollers like lockhouse-janus).
+**Registry location (proposal):** `config/ticks.yaml` (fork-only, git-tracked definitions) + generated units under `scripts/tooling/systemd/ticks/` (or co-located in each repo for repo-specific pollers like lockhouse-janus).
 
 **CLI surface (proposal):**
 
 ```bash
-hapi watch list
-hapi watch validate <name>          # lint probe exists, state path writable, no forbidden patterns
-hapi watch install <name> [--host]  # sudo: install/enable timer on THIS machine
-hapi watch uninstall <name>
-hapi watch run <name>               # one-shot tick (operator/debug)
-hapi watch doctor                   # timers enabled? last journal? watermark age?
+hapi tick list
+hapi tick validate <name>          # lint probe exists, state path writable, no forbidden patterns
+hapi tick install <name> [--host]  # sudo: install/enable timer on THIS machine
+hapi tick uninstall <name>
+hapi tick run <name>               # one-shot tick (operator/debug)
+hapi tick doctor                   # timers enabled? last journal? watermark age?
 ```
 
-`hapi watch new` (interactive scaffold) is v1.1 — v1 can ship templates copied from overseer + producer poll.
+`hapi tick new` (interactive scaffold) is v1.1 — v1 can ship templates copied from overseer + producer poll.
 
 ---
 
 ## Creating a watch without hand-writing systemd
 
-1. Copy nearest template from `hapi watch templates` (overseer-ntfy, issue-spawn, api-watermark).
-2. Edit `config/watches.yaml` entry (or repo-local `watches.yaml` symlinked).
-3. `hapi watch validate foo && sudo hapi watch install foo`.
-4. `journalctl -u hapi-watch-foo` + `hapi watch doctor`.
+1. Copy nearest template from `hapi tick templates` (overseer-ntfy, issue-spawn, api-watermark).
+2. Edit `config/ticks.yaml` entry (or repo-local `ticks.yaml` symlinked).
+3. `hapi tick validate foo && sudo hapi tick install foo`.
+4. `journalctl -u hapi-tick-foo` + `hapi tick doctor`.
 
-Installer generates `hapi-watch-<name>.{service,timer}` with:
+Installer generates `hapi-tick-<name>.{service,timer}` with:
 
 - `Type=oneshot`, `User=heavygee`, `flock` guard,
 - `PATH` pinning `~/.local/bin/hapi`,
@@ -226,9 +226,9 @@ Installer generates `hapi-watch-<name>.{service,timer}` with:
 
 ## Enforcing the token-cost distinction (not just documenting)
 
-1. **`hapi watch validate`** — static analysis flags probes that invoke `claude`, `cursor`, `hapi spawn-peer` inside the tick path without a `on_change` gate (allow spawn in probe only when preceded by cheap diff — prefer moving spawn to `on_change` block).
+1. **`hapi tick validate`** — static analysis flags probes that invoke `claude`, `cursor`, `hapi spawn-peer` inside the tick path without a `on_change` gate (allow spawn in probe only when preceded by cheap diff — prefer moving spawn to `on_change` block).
 2. **CLI guard on new schedules:** if an agent tries `hapi schedule create --probe …` without `--lane judgment`, refuse with the three-lane menu (mechanical / judgment / cloud).
-3. **Skill + AGENTS index row:** “mechanical poll → `hapi watch`; in-session reminder → `CronCreate`; deliver message later → HAPI scheduled message.”
+3. **Skill + AGENTS index row:** “mechanical poll → `hapi tick`; in-session reminder → `CronCreate`; deliver message later → HAPI scheduled message.”
 4. **Optional v2:** hub lint when `CronCreate` tool use is detected in a session whose title matches `watch-*` — heavy, defer.
 
 Do **not** block `CronCreate` at the Claude tool layer (upstream/flavor-owned); enforce at HAPI fork docs + scaffolding defaults.
@@ -237,7 +237,7 @@ Do **not** block `CronCreate` at the Claude tool layer (upstream/flavor-owned); 
 
 ## Cross-machine placement
 
-Timers are **always host-local**. Registry field `host:` is documentation + install guard (`hapi watch install` warns when `host != $(hostname)` unless `--force`).
+Timers are **always host-local**. Registry field `host:` is documentation + install guard (`hapi tick install` warns when `host != $(hostname)` unless `--force`).
 
 | Watch | Typical host |
 |---|---|
@@ -247,7 +247,7 @@ Timers are **always host-local**. Registry field `host:` is documentation + inst
 | Movie night | oos-linux |
 | Trailer-job inbox watch | oos-linux (SSH to proxmox) |
 
-v2: `hapi watch install --remote janus` via existing estate SSH patterns — out of v1 scope.
+v2: `hapi tick install --remote janus` via existing estate SSH patterns — out of v1 scope.
 
 ---
 
@@ -256,9 +256,9 @@ v2: `hapi watch install --remote janus` via existing estate SSH patterns — out
 **Ship:**
 
 1. **Taxonomy doc** (this file) linked from `docs/operator/AGENTS.md` high-signal index.
-2. **`config/watches.yaml`** with two migrated entries: `overseer-inbox`, `producer-issue-poll` (pointing at existing scripts — no probe rewrite).
-3. **`hapi watch {list,validate,install,run,doctor}`** — thin wrapper around existing install scripts + unit generator.
-4. **Shared watermark helpers** (`scripts/tooling/lib/hapi-watch-watermark.sh`): `max-id`, `seen-set`, `timestamp-ids` — extracted from overseer + PAT poller logic.
+2. **`config/ticks.yaml`** with two migrated entries: `overseer-inbox`, `producer-issue-poll` (pointing at existing scripts — no probe rewrite).
+3. **`hapi tick {list,validate,install,run,doctor}`** — thin wrapper around existing install scripts + unit generator.
+4. **Shared watermark helpers** (`scripts/tooling/lib/hapi-tick-watermark.sh`): `max-id`, `seen-set`, `timestamp-ids` — extracted from overseer + PAT poller logic.
 5. **Templates:** `issue-spawn` (producer poll), `inbox-ntfy` (overseer), `inbox-ping-peer` (trailer-job shape A).
 6. **Escalation pack:** shared `templates/*-spawn.md` / `*-ping.md` with security boilerplate (externally-authored content warning — already copied by hand in producer poll).
 
@@ -289,7 +289,7 @@ v2: `hapi watch install --remote janus` via existing estate SSH patterns — out
 
 ## Open questions for operator sign-off
 
-1. **Name:** `hapi watch` vs `hapi poller` vs `hapi poll` — “watch” matches overseer language; “poll” matches lockhouse scripts.
+1. **Name:** **Decided: `hapi tick`** (was working title `hapi watch`; renamed to avoid collision with the HAPI Wear/watch app and hapi-monitor).
 2. **Registry split:** all watches in HAPI fork vs repo-local YAML per project (lockhouse-janus owns producer poll file today).
 3. **GHA pollers:** first-class `probe.type: workflow` or stay out of HAPI (PAT mint is fine in GHA only).
 4. **Issue tracking:** fork issue before implementation (required by product-code guard).
@@ -300,4 +300,4 @@ v2: `hapi watch install --remote janus` via existing estate SSH patterns — out
 
 ## Next step (post-approval)
 
-File fork issue → worktree → implement v1 CLI + migrate two existing watches → `docs/tooling/hapi-watch.md` operator runbook → link from AGENTS high-signal index. No upstream PR (fork-only surface).
+File fork issue → worktree → implement v1 CLI + migrate two existing watches → `docs/tooling/hapi-tick.md` operator runbook → link from AGENTS high-signal index. No upstream PR (fork-only surface).
