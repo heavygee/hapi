@@ -351,8 +351,12 @@ export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerRes
     const spawnBody: Record<string, unknown> = {
         directory,
         sessionType,
-        agent: resolved.agent,
-        permissionMode: resolved.permissionMode
+        agent: resolved.agent
+    }
+    // Pi/DSH have empty launch-permission catalogs — omit permissionMode so the
+    // machine route does not 400 invalid_permission_mode on inherited default.
+    if (getLaunchPermissionModesForFlavor(resolved.agent).length > 0) {
+        spawnBody.permissionMode = resolved.permissionMode
     }
     if (options.worktreeName) {
         spawnBody.worktreeName = options.worktreeName

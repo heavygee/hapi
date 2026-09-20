@@ -340,7 +340,7 @@ export function NewSession(props: {
                 }
             }
         }
-        if (!hasStickyYolo) {
+        if (!hasStickyYolo && !editedPermissionRef.current) {
             setYoloMode(seeded.yoloMode)
         }
     }, [hubPeerSpawnDefaults, initialStickyPreferences])

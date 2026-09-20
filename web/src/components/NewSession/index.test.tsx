@@ -235,6 +235,9 @@ vi.mock('./PermissionField', () => ({
             <button type="button" data-testid="permission-mode-default" onClick={() => props.onNativeChange('default')}>
                 {props.nativeValue}
             </button>
+            <button type="button" data-testid="yolo-toggle" onClick={() => props.onYoloToggle(!props.yoloMode)}>
+                {props.yoloMode ? 'yolo-on' : 'yolo-off'}
+            </button>
         </>
     )
 }))
@@ -1466,5 +1469,64 @@ describe('NewSession launch preferences', () => {
         await waitFor(() => {
             expect(screen.getByTestId('permission-mode')).toHaveTextContent('default')
         })
+    })
+
+    it('keeps an explicit Yolo-off choice when hub settings resolve late', async () => {
+        localStorage.clear()
+        let resolveSettings!: (value: unknown) => void
+        const deferred = new Promise((resolve) => {
+            resolveSettings = resolve
+        })
+        const slowApi = {
+            getHubSettings: vi.fn(() => deferred)
+        } as unknown as ApiClient
+
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        render(
+            <QueryClientProvider client={client}>
+                <NewSession
+                    api={slowApi}
+                    machines={[machine]}
+                    initialMachineId="machine-1"
+                    initialDirectory="C:\\repo"
+                    onSuccess={mocks.onSuccess}
+                    onCancel={() => {}}
+                />
+            </QueryClientProvider>
+        )
+
+        // Cursor uses the boolean Yolo toggle (not native permission select).
+        const cursorRadio = screen.getByDisplayValue('cursor')
+        fireEvent.click(cursorRadio)
+        expect(screen.getByTestId('yolo-toggle')).toHaveTextContent('yolo-on')
+        fireEvent.click(screen.getByTestId('yolo-toggle'))
+        expect(screen.getByTestId('yolo-toggle')).toHaveTextContent('yolo-off')
+
+        await act(async () => {
+            resolveSettings({
+                sessionSummaryContract: false,
+                sessionSummaryInChat: false,
+                peerSpawnDefaults: {
+                    agent: 'claude',
+                    permissionMode: 'bypassPermissions',
+                    models: { claude: 'sonnet' }
+                }
+            })
+            await deferred
+        })
+
+        await waitFor(() => {
+            expect(screen.getByTestId('yolo-toggle')).toHaveTextContent('yolo-off')
+        })
+
+        act(() => {
+            mocks.spawnSession.mockImplementation(async () => ({ type: 'success', sessionId: 'session-1' }))
+        })
+        fireEvent.click(screen.getByTestId('create'))
+        await waitFor(() => expect(mocks.onSuccess).toHaveBeenCalledWith('session-1'))
+        expect(mocks.spawnSession).toHaveBeenCalledWith(expect.objectContaining({
+            agent: 'cursor',
+            yolo: false
+        }))
     })
 })

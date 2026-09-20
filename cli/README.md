@@ -31,7 +31,7 @@ Choose a supported coding agent from your terminal and control its sessions remo
 - `hapi codex resume <sessionId>` - Resume existing Codex session.
 - `hapi cursor` - Start Cursor Agent mode. See `src/cursor/runCursor.ts`.
   Supports `hapi cursor resume <chatId>`, `hapi cursor --continue`, `--mode plan|ask`, `--yolo`, `--model`.
-  Local and remote modes supported; remote uses `agent -p` with stream-json.
+  Local and remote modes supported; new remote sessions use `agent acp`. Pre-ACP sessions retain the legacy `agent -p` stream-json resume path.
 - `hapi grok` - Start Grok Build mode. See `src/grok/runGrok.ts`.
 - `hapi copilot` - Start GitHub Copilot mode.
 - `hapi kimi` - Start Kimi mode.
@@ -227,6 +227,14 @@ controls for DSH.
 
   Explicit other session (prefix or full uuid) still works; that path may list sessions.
 
+## Session lifecycle invariants
+
+When changing agent bootstrap, handoff, or shared-session plumbing:
+
+- Handoff-capable integrations use `local` (terminal) and `remote` (web-controlled) ownership modes. Codex instead supports concurrent clients without ownership switching; see [Codex shared sessions](../docs/guide/codex-shared-sessions.md).
+- Ordinary wrappers export `HAPI_SESSION_ID` after bootstrap. Shared Codex uses a per-root MCP bridge and `shell_environment_policy.set.HAPI_SESSION_ID`; never put one root's ID into the shared app-server environment. Implementation: `src/codex/shared/root.ts`, `src/codex/shared/runtime.ts`.
+- Gemini remains a historical wire flavor, not a launchable integration. Use the [supported-agent guide](../docs/guide/agents.md) for the launchable set.
+
 ## Storage
 
 Data is stored in `~/.hapi/` (or `$HAPI_HOME`):
@@ -249,8 +257,8 @@ From the repo root:
 
 ```bash
 bun install
-bun run build:cli
-bun run --cwd cli build:exe
+bun run build:cli                 # Type-check the CLI; no executable output
+bun run --cwd cli build:exe       # Host-platform executable in cli/dist-exe/<target>/
 ```
 
 For an all-in-one binary that also embeds the web app:

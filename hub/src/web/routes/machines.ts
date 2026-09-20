@@ -182,10 +182,13 @@ export function createMachinesRoutes(
         // When the caller supplies an explicit yolo boolean without a native
         // permissionMode, preserve the runner's boolean path — injecting a hub
         // mode would override yolo:false (runner prioritizes permissionMode).
+        // Flavors with an empty launch catalog (pi/dsh) must omit permissionMode.
         const permissionModeForSpawn =
             parsed.data.permissionMode === undefined && parsed.data.yolo !== undefined
                 ? undefined
-                : resolved.permissionMode
+                : getLaunchPermissionModesForFlavor(resolved.agent).length === 0
+                    ? undefined
+                    : resolved.permissionMode
 
         const result = await engine.spawnSession(
             machineId,

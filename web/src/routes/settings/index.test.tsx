@@ -61,6 +61,8 @@ vi.mock('@hapi/protocol', () => ({
         { mode: 'bypassPermissions', label: 'bypassPermissions' },
         { mode: 'default', label: 'default' },
     ],
+    getLaunchPermissionModesForFlavor: () => ['bypassPermissions', 'default'] as const,
+    getPermissionModeLabel: (mode: string) => mode,
 }))
 
 vi.mock('@/hooks/useTheme', () => ({
