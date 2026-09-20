@@ -9,21 +9,29 @@
 # Extracted from hapi-overseer-watch-tick.sh + lockhouse pat-mint-alert-poll.sh.
 # Source from probe scripts; do not invent new semantics.
 
-# Expand leading ~/ (literal tilde — never rely on bash tilde-expansion of unquoted ~).
+# Expand leading ~/ for a given user (default: current $USER / $HOME).
+# When install runs under sudo, pass the registry service user so paths land
+# under that account's home — not /root.
 hapi_tick_expand_path() {
-    local p="${1:-}"
+    local p="${1:-}" user="${2:-}" home
     # Trim accidental whitespace
     p="${p#"${p%%[![:space:]]*}"}"
     p="${p%"${p##*[![:space:]]}"}"
+    if [[ -n "$user" ]]; then
+        home="$(getent passwd "$user" | cut -d: -f6)"
+        [[ -n "$home" ]] || home="/home/$user"
+    else
+        home="${HOME}"
+    fi
     case "$p" in
         "~")
-            p="${HOME}"
+            p="$home"
             ;;
         "~/"*)
-            p="${HOME}/${p:2}"
+            p="$home/${p:2}"
             ;;
         \$HOME/*)
-            p="${HOME}/${p#\$HOME/}"
+            p="$home/${p#\$HOME/}"
             ;;
     esac
     printf '%s\n' "$p"
@@ -152,8 +160,14 @@ hapi_tick_timestamp_ids_diff() {
           | sort_by(.["@timestamp"])
         ) as $new |
         ($all | map(.["@timestamp"])) as $all_ts |
-        (if ($all_ts | length) > 0 then ($all_ts | max) else $st.last_seen_timestamp end) as $max_ts |
-        ($all | map(select(.["@timestamp"] == $max_ts) | ._document_id)) as $ids_at_max |
+        (if ($all_ts | length) > 0 then ($all_ts | max) else $st.last_seen_timestamp end) as $resp_max |
+        # Never regress: clamp to at least the stored watermark.
+        (if $resp_max > $st.last_seen_timestamp then $resp_max else $st.last_seen_timestamp end) as $max_ts |
+        (if $max_ts == $st.last_seen_timestamp and $resp_max <= $st.last_seen_timestamp then
+            $st.last_seen_ids
+         else
+            ($all | map(select(.["@timestamp"] == $max_ts) | ._document_id))
+         end) as $ids_at_max |
         {
           new_events: $new,
           new_state: { last_seen_timestamp: $max_ts, last_seen_ids: $ids_at_max }

@@ -40,7 +40,8 @@ usage() {
 
 # Expand ~ in a path string (also used inside generated units as literal $HOME paths).
 expand_user_path() {
-    hapi_tick_expand_path "$1"
+    # $2 = optional passwd username (for sudo install expanding ~/ for service user)
+    hapi_tick_expand_path "$1" "${2:-}"
 }
 
 hostname_short() {
@@ -203,11 +204,11 @@ generate_units() {
     delay="$(tick_field "$json" '.randomized_delay_sec' '90')"
     user="$(tick_field "$json" '.user' "${USER:-heavygee}")"
     workdir="$(tick_field "$json" '.working_directory' "/home/$user")"
-    lock="$(expand_user_path "$(tick_field "$json" '.lock.path' "")")"
+    lock="$(expand_user_path "$(tick_field "$json" '.lock.path' "")" "$user")"
     if [[ -z "$lock" ]]; then
         lock="/home/$user/.local/state/hapi/tick-${name}.lock"
     fi
-    state_path="$(expand_user_path "$(tick_field "$json" '.state.path')")"
+    state_path="$(expand_user_path "$(tick_field "$json" '.state.path')" "$user")"
     desc="$(tick_field "$json" '.description' "HAPI tick: $name")"
     # Prefer the primary-mirror registry path in unit Documentation= when generating
     # from a worktree (install paths in ticks.yaml already point at runtime scripts).
@@ -252,8 +253,11 @@ generate_units() {
         local key val
         while IFS=$'\t' read -r key val; do
             [[ -n "$key" ]] || continue
-            # Escape nothing exotic; values are operator-authored registry strings.
-            echo "Environment=$key=$val"
+            # Quote full KEY=value so whitespace survives systemd parsing.
+            # Escape backslash and double-quote inside the value.
+            val="${val//\\/\\\\}"
+            val="${val//\"/\\\"}"
+            echo "Environment=\"$key=$val\""
         done < <(printf '%s' "$json" | jq -r '.env // {} | to_entries[] | "\(.key)\t\(.value)"')
         echo "WorkingDirectory=$workdir"
         echo "ExecStartPre=/usr/bin/mkdir -p $(dirname "$lock") $(dirname "$state_path")"
@@ -326,8 +330,10 @@ cmd_install() {
 
     if [[ "$(id -u)" -ne 0 ]]; then
         err "re-executing under sudo to install systemd units…"
-        exec sudo -E -- "$0" install "$name" \
-            ${force:+--force} ${run_now:+--run-now}
+        local -a sudo_args=(sudo -E -- "$0" install "$name")
+        [[ "$force" -eq 1 ]] && sudo_args+=(--force)
+        [[ "$run_now" -eq 1 ]] && sudo_args+=(--run-now)
+        exec "${sudo_args[@]}"
     fi
 
     local prefix svc timer
@@ -356,6 +362,7 @@ cmd_uninstall() {
     if [[ "$(id -u)" -ne 0 ]]; then
         exec sudo -E -- "$0" uninstall "$name"
     fi
+    systemctl stop "${prefix}.service" 2>/dev/null || true
     systemctl disable --now "${prefix}.timer" 2>/dev/null || true
     rm -f "/etc/systemd/system/${prefix}.service" "/etc/systemd/system/${prefix}.timer"
     systemctl daemon-reload
@@ -366,21 +373,31 @@ cmd_run() {
     local name="${1:-}"
     [[ -n "$name" ]] || die "usage: hapi tick run <name>"
     validate_one "$name" >/dev/null
-    local json script lock
+    local json script lock workdir user key val
     json="$(registry_json "$name")"
     script="$(tick_field "$json" '.probe.script')"
-    lock="$(expand_user_path "$(tick_field "$json" '.lock.path' "")")"
+    user="$(tick_field "$json" '.user' "${USER:-}")"
+    workdir="$(tick_field "$json" '.working_directory' "")"
+    lock="$(expand_user_path "$(tick_field "$json" '.lock.path' "")" "$user")"
     if [[ -z "$lock" ]]; then
-        lock="$(expand_user_path ~/.local/state/hapi/tick-${name}.lock)"
+        lock="$(expand_user_path ~/.local/state/hapi/tick-${name}.lock "$user")"
     fi
     mkdir -p "$(dirname "$lock")"
+    # Apply registry env so one-shot matches the generated unit.
+    while IFS=$'\t' read -r key val; do
+        [[ -n "$key" ]] || continue
+        export "$key=$val"
+    done < <(printf '%s' "$json" | jq -r '.env // {} | to_entries[] | "\(.key)\t\(.value)"')
+    if [[ -n "$workdir" && -d "$workdir" ]]; then
+        cd "$workdir"
+    fi
     echo "hapi-tick: running $script (flock $lock)"
     /usr/bin/flock -w 60 "$lock" "$script"
 }
 
 doctor_one() {
     local name="$1"
-    local json prefix script state_path strategy host
+    local json prefix script state_path strategy host healthy=1
     json="$(registry_json "$name")"
     prefix="$(unit_prefix "$name")"
     script="$(tick_field "$json" '.probe.script')"
@@ -390,7 +407,12 @@ doctor_one() {
 
     echo "=== $name ==="
     echo "host(registry): $host  this: $(hostname_short)"
-    echo "probe: $script  exists=$([[ -f $script ]] && echo yes || echo NO)"
+    if [[ -f "$script" ]]; then
+        echo "probe: $script  exists=yes"
+    else
+        echo "probe: $script  exists=NO"
+        healthy=0
+    fi
     echo "state($strategy): $state_path"
 
     if [[ -f "$state_path" ]]; then
@@ -412,7 +434,6 @@ doctor_one() {
         echo "  (state file missing)"
     fi
 
-    local healthy=1
     if systemctl cat "${prefix}.timer" >/dev/null 2>&1; then
         local enabled active
         enabled="$(systemctl is-enabled "${prefix}.timer" 2>/dev/null || echo unknown)"

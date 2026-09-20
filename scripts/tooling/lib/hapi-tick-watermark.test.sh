@@ -57,5 +57,24 @@ diff2="$(hapi_tick_timestamp_ids_diff "$t" "$events")"
 new_count2="$(printf '%s' "$diff2" | jq '.new_events | length')"
 check ts_idempotent '[[ "$new_count2" == "0" ]]'
 
+
+# Expand for a named user (not current HOME) — sudo-install safety.
+check expand_for_user '[[ "$(hapi_tick_expand_path "~/.cache/x" "heavygee")" == "/home/heavygee/.cache/x" ]]'
+
+# Older-only response must not regress stored timestamp/ids.
+t2="$TMP/ts2.json"
+hapi_tick_timestamp_ids_write "$t2" 5000 '["keep"]'
+events_old="$TMP/events_old.json"
+cat > "$events_old" <<'JSON'
+[
+  {"@timestamp": 1000, "_document_id": "old1"},
+  {"@timestamp": 2000, "_document_id": "old2"}
+]
+JSON
+diff_old="$(hapi_tick_timestamp_ids_diff "$t2" "$events_old")"
+check ts_no_regress_ts '[[ "$(printf "%s" "$diff_old" | jq ".new_state.last_seen_timestamp")" == "5000" ]]'
+check ts_no_regress_ids '[[ "$(printf "%s" "$diff_old" | jq -c ".new_state.last_seen_ids")" == "[\"keep\"]" ]]'
+check ts_no_new_when_older '[[ "$(printf "%s" "$diff_old" | jq ".new_events | length")" == "0" ]]'
+
 echo "hapi-tick-watermark.test.sh: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]]
