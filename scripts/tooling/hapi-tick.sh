@@ -44,6 +44,30 @@ expand_user_path() {
     hapi_tick_expand_path "$1" "${2:-}"
 }
 
+# Prefer registry `.user`. When omitted: SUDO_USER under sudo, else invoking USER.
+# Never default to root — sudo install must not emit User=root for mechanical probes.
+resolve_tick_user() {
+    local json="$1"
+    local u
+    u="$(tick_field "$json" '.user' "")"
+    if [[ -n "$u" && "$u" != null ]]; then
+        printf '%s\n' "$u"
+        return
+    fi
+    if [[ "$(id -u)" -eq 0 ]]; then
+        if [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != "root" ]]; then
+            printf '%s\n' "$SUDO_USER"
+            return
+        fi
+        die "tick user required under sudo (set .user in registry)"
+    fi
+    if [[ -n "${USER:-}" && "$USER" != "root" ]]; then
+        printf '%s\n' "$USER"
+        return
+    fi
+    die "tick user required (set .user in registry)"
+}
+
 hostname_short() {
     hostname -s 2>/dev/null || hostname
 }
@@ -166,11 +190,13 @@ cmd_templates() {
 
 validate_one() {
     local name="$1"
-    local json script strategy state_path host on_change warnings=0
+    local json script strategy state_path host on_change user warnings=0
     json="$(registry_json "$name")"
+    user="$(resolve_tick_user "$json")"
     script="$(tick_field "$json" '.probe.script')"
     strategy="$(tick_field "$json" '.state.strategy')"
-    state_path="$(expand_user_path "$(tick_field "$json" '.state.path')")"
+    # Expand ~/ against the service user (same as generate_units), not the caller.
+    state_path="$(expand_user_path "$(tick_field "$json" '.state.path')" "$user")"
     host="$(tick_field "$json" '.host')"
     on_change="$(printf '%s' "$json" | jq -c '.on_change // []')"
 
@@ -263,7 +289,7 @@ generate_units() {
     script="$(tick_field "$json" '.probe.script')"
     calendar="$(calendar_from_cadence "$(tick_field "$json" '.cadence')")"
     delay="$(tick_field "$json" '.randomized_delay_sec' '90')"
-    user="$(tick_field "$json" '.user' "${USER:-heavygee}")"
+    user="$(resolve_tick_user "$json")"
     workdir="$(tick_field "$json" '.working_directory' "/home/$user")"
     lock="$(expand_user_path "$(tick_field "$json" '.lock.path' "")" "$user")"
     if [[ -z "$lock" ]]; then
@@ -444,7 +470,7 @@ cmd_run() {
     local json script lock workdir user key val
     json="$(registry_json "$name")"
     script="$(tick_field "$json" '.probe.script')"
-    user="$(tick_field "$json" '.user' "${USER:-}")"
+    user="$(resolve_tick_user "$json")"
     workdir="$(tick_field "$json" '.working_directory' "")"
     lock="$(expand_user_path "$(tick_field "$json" '.lock.path' "")" "$user")"
     if [[ -z "$lock" ]]; then
@@ -468,22 +494,36 @@ cmd_run() {
 
 doctor_one() {
     local name="$1"
-    local json prefix script state_path strategy host healthy=1
+    local json prefix script state_path strategy host user healthy=1
     json="$(registry_json "$name")"
+    user="$(resolve_tick_user "$json")"
     prefix="$(unit_prefix "$name")"
     script="$(tick_field "$json" '.probe.script')"
-    state_path="$(expand_user_path "$(tick_field "$json" '.state.path')")"
+    state_path="$(expand_user_path "$(tick_field "$json" '.state.path')" "$user")"
     strategy="$(tick_field "$json" '.state.strategy')"
     host="$(tick_field "$json" '.host')"
 
     echo "=== $name ==="
     echo "host(registry): $host  this: $(hostname_short)"
+    echo "user: $user"
     if [[ -f "$script" ]]; then
         echo "probe: $script  exists=yes"
     else
         echo "probe: $script  exists=NO"
         healthy=0
     fi
+    # Every ConditionPathExists (probe + registry conditions) — missing paths
+    # skip the oneshot without failing the unit, so doctor must catch them.
+    local cond
+    while IFS= read -r cond; do
+        [[ -n "$cond" && "$cond" != null ]] || continue
+        if [[ -e "$cond" ]]; then
+            echo "condition: $cond  exists=yes"
+        else
+            echo "condition: $cond  exists=NO"
+            healthy=0
+        fi
+    done < <(printf '%s' "$json" | jq -r '.conditions[]? // empty')
     echo "state($strategy): $state_path"
 
     if [[ -f "$state_path" ]]; then
