@@ -13,7 +13,7 @@ Prefer progressive loading: **[feature-work-lifecycle.md](../tooling/feature-wor
 | When | Do | Detail |
 |------|----|--------|
 | Any local feature / soup / peer work | Read lifecycle first | [`feature-work-lifecycle.md`](../tooling/feature-work-lifecycle.md) (sole workflow) |
-| Mechanical poll / standing bare timer (not CronCreate) | **`hapi tick`** — registry + systemd generator; zero tokens on quiet ticks | [`hapi-tick.md`](../tooling/hapi-tick.md); taxonomy [`2026-09-18-scheduled-agent-tasks-design.md`](../plans/2026-09-18-scheduled-agent-tasks-design.md) |
+| Mechanical poll / standing bare timer (not CronCreate) | **`hapi poll`** — registry + systemd generator; zero tokens on quiet ticks | [`hapi-poll.md`](../tooling/hapi-poll.md); taxonomy [`2026-09-18-scheduled-agent-tasks-design.md`](../plans/2026-09-18-scheduled-agent-tasks-design.md) |
 | Ready to open an upstream PR? | **Stop** unless `:3006` dogfood already passed (or operator waived in chat) | Soup-promote → operator click-test → **then** `hapi-pr-create`. Never `gh pr create` → `tiann/hapi` first. Premature open → convert to **draft** and remat. |
 | Message another HAPI session | **PATH tooling only** + **identify yourself** (see § Peer message identity) | `hapi-ping-peer …` / `hapi ping-peer …`; open with `From: /sessions/<your-id>` (auto-stamped when `HAPI_SESSION_ID` is set) |
 | Peer close-the-loop / status | **Spawn parent only** — never CC Meta PR watcher | § quieter Meta (2026-08-10); intake §0 + spawn-peer skill |
@@ -338,7 +338,7 @@ ElevenLabs ConvAI today: handoff OK, readback weak, payment, no mode machine. Ta
 
 **Full workflow, mermaid, and agent permission matrix:** [`feature-work-lifecycle.md`](../tooling/feature-work-lifecycle.md) — **only place that defines this.**
 
-**Forbidden agent tool-calls** (stack path change — kills sessions): `hapi-use-worktree`, `hapi-use-driver`, `hapi-driver-rebuild --activate`, `hapi-tick-activate-driver` from tool shells.
+**Forbidden agent tool-calls** (stack path change — kills sessions): `hapi-use-worktree`, `hapi-use-driver`, `hapi-driver-rebuild --activate`, `hapi-poll-activate-driver` from tool shells.
 
 **Allowed for soup dogfood when already on driver:** see lifecycle § Agent permission matrix — summary: `hapi-driver-rebuild --build-web [--verify]`, `hapi-verify-web-dist`, **`hapi-restart-hub`** (hub/cli). Not `hapi-use-driver`.
 

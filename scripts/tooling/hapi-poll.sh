@@ -1,37 +1,37 @@
 #!/usr/bin/env bash
-# hapi-tick — declarative registry + systemd generator for bare (zero-token) pollers.
+# hapi-poll — declarative registry + systemd generator for bare (zero-token) pollers.
 #
 # Canon: docs/plans/2026-09-18-scheduled-agent-tasks-design.md
-# Runbook: docs/tooling/hapi-tick.md
+# Runbook: docs/tooling/hapi-poll.md
 #
 # Mechanical polls stay in bare scripts. This tool does NOT route through CronCreate
 # or a hub cron table. Agents wake only via on_change (ntfy / spawn_peer / ping_peer)
 # inside those probe scripts.
 #
 # Usage:
-#   hapi tick list
-#   hapi tick validate [name]
-#   hapi tick install <name> [--force] [--run-now] [--dry-run]
-#   hapi tick uninstall <name>
-#   hapi tick run <name>
-#   hapi tick doctor [name]
-#   hapi tick templates
+#   hapi poll list
+#   hapi poll validate [name]
+#   hapi poll install <name> [--force] [--run-now] [--dry-run]
+#   hapi poll uninstall <name>
+#   hapi poll run <name>
+#   hapi poll doctor [name]
+#   hapi poll templates
 #
-# Also: hapi-tick <subcommand> …  (PATH wrapper)
+# Also: hapi-poll <subcommand> …  (PATH wrapper)
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-REGISTRY="${HAPI_TICKS_YAML:-$REPO_ROOT/config/ticks.yaml}"
-TEMPLATES_DIR="$SCRIPT_DIR/tick-templates"
-UNIT_OUT_DIR="$SCRIPT_DIR/systemd/ticks"
-WATERMARK_LIB="$SCRIPT_DIR/lib/hapi-tick-watermark.sh"
+REGISTRY="${HAPI_POLLS_YAML:-$REPO_ROOT/config/polls.yaml}"
+TEMPLATES_DIR="$SCRIPT_DIR/poll-templates"
+UNIT_OUT_DIR="$SCRIPT_DIR/systemd/polls"
+WATERMARK_LIB="$SCRIPT_DIR/lib/hapi-poll-watermark.sh"
 
-# shellcheck source=lib/hapi-tick-watermark.sh
+# shellcheck source=lib/hapi-poll-watermark.sh
 source "$WATERMARK_LIB"
 
-err() { echo "hapi-tick: $*" >&2; }
+err() { echo "hapi-poll: $*" >&2; }
 die() { err "$*"; exit 2; }
 
 usage() {
@@ -40,14 +40,14 @@ usage() {
 
 # Expand ~ in a path string (also used inside generated units as literal $HOME paths).
 expand_user_path() {
-    hapi_tick_expand_path "$1"
+    hapi_poll_expand_path "$1"
 }
 
 hostname_short() {
     hostname -s 2>/dev/null || hostname
 }
 
-# Emit JSON for one watch (or all) via python+yaml.
+# Emit JSON for one poll (or all) via python+yaml.
 registry_json() {
     local name="${1:-}"
     python3 - "$REGISTRY" "$name" <<'PY'
@@ -56,23 +56,23 @@ path, name = sys.argv[1], sys.argv[2]
 try:
     import yaml
 except ImportError:
-    sys.stderr.write("hapi-tick: PyYAML required (python3 -c 'import yaml')\n")
+    sys.stderr.write("hapi-poll: PyYAML required (python3 -c 'import yaml')\n")
     sys.exit(3)
 with open(path) as f:
     doc = yaml.safe_load(f) or {}
-ticks = doc.get("ticks") or []
+polls = doc.get("polls") or []
 if name:
-    matches = [w for w in ticks if w.get("name") == name]
+    matches = [w for w in polls if w.get("name") == name]
     if not matches:
-        sys.stderr.write(f"hapi-tick: unknown tick '{name}' in {path}\n")
+        sys.stderr.write(f"hapi-poll: unknown poll '{name}' in {path}\n")
         sys.exit(1)
     json.dump(matches[0], sys.stdout)
 else:
-    json.dump({"version": doc.get("version", 1), "ticks": ticks}, sys.stdout)
+    json.dump({"version": doc.get("version", 1), "polls": polls}, sys.stdout)
 PY
 }
 
-tick_field() {
+poll_field() {
     local json="$1" field="$2" default="${3:-}"
     printf '%s' "$json" | jq -r --arg d "$default" "
         ($field) as \$v |
@@ -82,7 +82,7 @@ tick_field() {
 
 unit_prefix() {
     local name="$1"
-    printf 'hapi-tick-%s' "$name"
+    printf 'hapi-poll-%s' "$name"
 }
 
 calendar_from_cadence() {
@@ -99,12 +99,12 @@ cmd_list() {
     python3 - "$REGISTRY" <<'PY'
 import sys, yaml
 doc = yaml.safe_load(open(sys.argv[1])) or {}
-ticks = doc.get("ticks") or []
-if not ticks:
-    print("(no ticks)")
+polls = doc.get("polls") or []
+if not polls:
+    print("(no polls)")
     raise SystemExit(0)
 print(f"{'NAME':<28} {'HOST':<16} {'STRATEGY':<14} CADENCE")
-for w in ticks:
+for w in polls:
     st = (w.get("state") or {}).get("strategy", "?")
     print(f"{w.get('name','?'):<28} {w.get('host','?'):<16} {st:<14} {w.get('cadence','?')}")
 PY
@@ -124,10 +124,10 @@ validate_one() {
     local name="$1"
     local json script strategy state_path host on_change warnings=0
     json="$(registry_json "$name")"
-    script="$(tick_field "$json" '.probe.script')"
-    strategy="$(tick_field "$json" '.state.strategy')"
-    state_path="$(expand_user_path "$(tick_field "$json" '.state.path')")"
-    host="$(tick_field "$json" '.host')"
+    script="$(poll_field "$json" '.probe.script')"
+    strategy="$(poll_field "$json" '.state.strategy')"
+    state_path="$(expand_user_path "$(poll_field "$json" '.state.path')")"
+    host="$(poll_field "$json" '.host')"
     on_change="$(printf '%s' "$json" | jq -c '.on_change // []')"
 
     [[ -n "$script" && "$script" != null ]] || die "$name: probe.script required"
@@ -174,7 +174,7 @@ validate_one() {
         err "$name: NOTE registry host='$host' but this machine is '$here' (install will warn unless --force)"
     fi
 
-    echo "hapi-tick: validate ok — $name (warnings=$warnings)"
+    echo "hapi-poll: validate ok — $name (warnings=$warnings)"
     return 0
 }
 
@@ -186,7 +186,7 @@ cmd_validate() {
         return 0
     fi
     local names
-    names="$(registry_json | jq -r '.ticks[].name')"
+    names="$(registry_json | jq -r '.polls[].name')"
     local n
     for n in $names; do
         validate_one "$n"
@@ -198,22 +198,22 @@ generate_units() {
     local json prefix script calendar delay user workdir lock state_path desc doc_registry
     json="$(registry_json "$name")"
     prefix="$(unit_prefix "$name")"
-    script="$(tick_field "$json" '.probe.script')"
-    calendar="$(calendar_from_cadence "$(tick_field "$json" '.cadence')")"
-    delay="$(tick_field "$json" '.randomized_delay_sec' '90')"
-    user="$(tick_field "$json" '.user' "${USER:-heavygee}")"
-    workdir="$(tick_field "$json" '.working_directory' "/home/$user")"
-    lock="$(expand_user_path "$(tick_field "$json" '.lock.path' "")")"
+    script="$(poll_field "$json" '.probe.script')"
+    calendar="$(calendar_from_cadence "$(poll_field "$json" '.cadence')")"
+    delay="$(poll_field "$json" '.randomized_delay_sec' '90')"
+    user="$(poll_field "$json" '.user' "${USER:-heavygee}")"
+    workdir="$(poll_field "$json" '.working_directory' "/home/$user")"
+    lock="$(expand_user_path "$(poll_field "$json" '.lock.path' "")")"
     if [[ -z "$lock" ]]; then
-        lock="/home/$user/.local/state/hapi/tick-${name}.lock"
+        lock="/home/$user/.local/state/hapi/poll-${name}.lock"
     fi
-    state_path="$(expand_user_path "$(tick_field "$json" '.state.path')")"
-    desc="$(tick_field "$json" '.description' "HAPI tick: $name")"
+    state_path="$(expand_user_path "$(poll_field "$json" '.state.path')")"
+    desc="$(poll_field "$json" '.description' "HAPI poll: $name")"
     # Prefer the primary-mirror registry path in unit Documentation= when generating
-    # from a worktree (install paths in ticks.yaml already point at runtime scripts).
+    # from a worktree (install paths in polls.yaml already point at runtime scripts).
     doc_registry="$REGISTRY"
     if [[ "$REPO_ROOT" == */worktrees/* ]]; then
-        doc_registry="${HAPI_MIRROR_ROOT:-$HOME/coding/hapi}/config/ticks.yaml"
+        doc_registry="${HAPI_MIRROR_ROOT:-$HOME/coding/hapi}/config/polls.yaml"
     fi
 
     mkdir -p "$UNIT_OUT_DIR"
@@ -225,8 +225,8 @@ generate_units() {
     [[ -n "$home_dir" ]] || home_dir="/home/$user"
 
     {
-        echo "# Generated by hapi-tick from $REGISTRY"
-        echo "# Do not hand-edit; re-run: hapi tick install $name"
+        echo "# Generated by hapi-poll from $REGISTRY"
+        echo "# Do not hand-edit; re-run: hapi poll install $name"
         echo
         echo "[Unit]"
         echo "Description=$desc"
@@ -264,8 +264,8 @@ generate_units() {
     } > "$service_file"
 
     {
-        echo "# Generated by hapi-tick from $REGISTRY"
-        echo "# Do not hand-edit; re-run: hapi tick install $name"
+        echo "# Generated by hapi-poll from $REGISTRY"
+        echo "# Do not hand-edit; re-run: hapi poll install $name"
         echo
         echo "[Unit]"
         echo "Description=$desc (timer)"
@@ -302,13 +302,13 @@ cmd_install() {
         esac
         shift
     done
-    [[ -n "$name" ]] || die "usage: hapi tick install <name> [--force] [--run-now] [--dry-run]"
+    [[ -n "$name" ]] || die "usage: hapi poll install <name> [--force] [--run-now] [--dry-run]"
 
     validate_one "$name" >/dev/null
 
     local json host here
     json="$(registry_json "$name")"
-    host="$(tick_field "$json" '.host')"
+    host="$(poll_field "$json" '.host')"
     here="$(hostname_short)"
     if [[ -n "$host" && "$host" != "$here" && "$host" != "$(hostname)" && "$force" -ne 1 ]]; then
         die "registry host='$host' != this machine '$here' (pass --force to install anyway)"
@@ -316,11 +316,11 @@ cmd_install() {
 
     local files
     files="$(generate_units "$name")"
-    echo "hapi-tick: generated:"
+    echo "hapi-poll: generated:"
     echo "$files" | sed 's/^/  /'
 
     if [[ "$dry" -eq 1 ]]; then
-        echo "hapi-tick: dry-run — not installing to /etc/systemd/system"
+        echo "hapi-poll: dry-run — not installing to /etc/systemd/system"
         return 0
     fi
 
@@ -338,11 +338,11 @@ cmd_install() {
     install -m 0644 "$timer" "/etc/systemd/system/${prefix}.timer"
     systemctl daemon-reload
     systemctl enable --now "${prefix}.timer"
-    echo "hapi-tick: installed ${prefix}.timer"
+    echo "hapi-poll: installed ${prefix}.timer"
     systemctl list-timers "${prefix}*" --all --no-pager || true
 
     if [[ "$run_now" -eq 1 ]]; then
-        echo "hapi-tick: starting one tick now…"
+        echo "hapi-poll: starting one tick now…"
         systemctl start "${prefix}.service"
         systemctl --no-pager --full status "${prefix}.service" | head -40 || true
     fi
@@ -350,7 +350,7 @@ cmd_install() {
 
 cmd_uninstall() {
     local name="${1:-}"
-    [[ -n "$name" ]] || die "usage: hapi tick uninstall <name>"
+    [[ -n "$name" ]] || die "usage: hapi poll uninstall <name>"
     local prefix
     prefix="$(unit_prefix "$name")"
     if [[ "$(id -u)" -ne 0 ]]; then
@@ -359,22 +359,22 @@ cmd_uninstall() {
     systemctl disable --now "${prefix}.timer" 2>/dev/null || true
     rm -f "/etc/systemd/system/${prefix}.service" "/etc/systemd/system/${prefix}.timer"
     systemctl daemon-reload
-    echo "hapi-tick: uninstalled $prefix"
+    echo "hapi-poll: uninstalled $prefix"
 }
 
 cmd_run() {
     local name="${1:-}"
-    [[ -n "$name" ]] || die "usage: hapi tick run <name>"
+    [[ -n "$name" ]] || die "usage: hapi poll run <name>"
     validate_one "$name" >/dev/null
     local json script lock
     json="$(registry_json "$name")"
-    script="$(tick_field "$json" '.probe.script')"
-    lock="$(expand_user_path "$(tick_field "$json" '.lock.path' "")")"
+    script="$(poll_field "$json" '.probe.script')"
+    lock="$(expand_user_path "$(poll_field "$json" '.lock.path' "")")"
     if [[ -z "$lock" ]]; then
-        lock="$(expand_user_path ~/.local/state/hapi/tick-${name}.lock)"
+        lock="$(expand_user_path ~/.local/state/hapi/poll-${name}.lock)"
     fi
     mkdir -p "$(dirname "$lock")"
-    echo "hapi-tick: running $script (flock $lock)"
+    echo "hapi-poll: running $script (flock $lock)"
     /usr/bin/flock -w 60 "$lock" "$script"
 }
 
@@ -383,10 +383,10 @@ doctor_one() {
     local json prefix script state_path strategy host
     json="$(registry_json "$name")"
     prefix="$(unit_prefix "$name")"
-    script="$(tick_field "$json" '.probe.script')"
-    state_path="$(expand_user_path "$(tick_field "$json" '.state.path')")"
-    strategy="$(tick_field "$json" '.state.strategy')"
-    host="$(tick_field "$json" '.host')"
+    script="$(poll_field "$json" '.probe.script')"
+    state_path="$(expand_user_path "$(poll_field "$json" '.state.path')")"
+    strategy="$(poll_field "$json" '.state.strategy')"
+    host="$(poll_field "$json" '.host')"
 
     echo "=== $name ==="
     echo "host(registry): $host  this: $(hostname_short)"
@@ -396,13 +396,13 @@ doctor_one() {
     if [[ -f "$state_path" ]]; then
         case "$strategy" in
             max-id)
-                echo "  lastMaxId=$(hapi_tick_max_id_read "$state_path")  mtime=$(date -u -r "$state_path" +%FT%TZ 2>/dev/null || stat -c %y "$state_path")"
+                echo "  lastMaxId=$(hapi_poll_max_id_read "$state_path")  mtime=$(date -u -r "$state_path" +%FT%TZ 2>/dev/null || stat -c %y "$state_path")"
                 ;;
             seen-set)
                 echo "  seen_count=$(wc -l < "$state_path" | tr -d ' ')  mtime=$(date -u -r "$state_path" +%FT%TZ 2>/dev/null || true)"
                 ;;
             timestamp-ids)
-                echo "  $(hapi_tick_timestamp_ids_read "$state_path")"
+                echo "  $(hapi_poll_timestamp_ids_read "$state_path")"
                 ;;
             *)
                 ls -l "$state_path" || true
@@ -458,7 +458,7 @@ cmd_doctor() {
         return $rc
     fi
     local n
-    for n in $(registry_json | jq -r '.ticks[].name'); do
+    for n in $(registry_json | jq -r '.polls[].name'); do
         doctor_one "$n" || rc=1
         echo
     done
