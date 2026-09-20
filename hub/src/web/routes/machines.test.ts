@@ -315,7 +315,42 @@ describe('machines routes', () => {
         }
     })
 
-    it('returns 500 when hub spawn defaults cannot be loaded', async () => {
+    
+    it('rejects incompatible explicit permissionMode for the resolved agent', async () => {
+        const machine = createMachine()
+        const engine = {
+            getMachine: () => machine,
+            getMachineByNamespace: () => machine,
+            spawnSession: () => { throw new Error('must not spawn') }
+        } as Partial<SyncEngine>
+
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createMachinesRoutes(() => engine as SyncEngine, {
+            getPeerSpawnDefaults: () => ({
+                agent: 'claude',
+                permissionMode: 'yolo',
+                models: { claude: 'sonnet' }
+            })
+        }))
+
+        const response = await app.request('/api/machines/machine-1/spawn', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+                directory: '/tmp/project',
+                agent: 'claude',
+                permissionMode: 'read-only'
+            })
+        })
+        expect(response.status).toBe(400)
+        expect(await response.json()).toMatchObject({ code: 'invalid_permission_mode' })
+    })
+
+it('returns 500 when hub spawn defaults cannot be loaded', async () => {
         const machine = createMachine()
         const engine = {
             getMachine: () => machine,

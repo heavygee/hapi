@@ -103,6 +103,15 @@ export function loadPreferredYoloMode(): boolean {
     }
 }
 
+/** True only when the operator previously persisted a Yolo preference. */
+export function hasSavedPreferredYoloMode(): boolean {
+    try {
+        return localStorage.getItem(YOLO_STORAGE_KEY) !== null
+    } catch {
+        return false
+    }
+}
+
 export function savePreferredYoloMode(enabled: boolean): void {
     try {
         localStorage.setItem(YOLO_STORAGE_KEY, enabled ? 'true' : 'false')

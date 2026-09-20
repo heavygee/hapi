@@ -383,6 +383,7 @@ function createHapiMcpServer(
         try {
             const result = await spawnPeer({
                 directory: args.directory,
+                cwd: skillLookup?.workingDirectory,
                 message: args.message,
                 name: args.name,
                 agent: args.agent as Parameters<typeof spawnPeer>[0]['agent'],

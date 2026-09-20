@@ -257,6 +257,53 @@ describe('spawnPeer', () => {
         expect(http.post).toHaveBeenCalledTimes(1)
     })
 
+    it('resolves relative directory against cwd (MCP session working directory)', async () => {
+        let spawnedBody: Record<string, unknown> | undefined
+        const http = createHttpMock({
+            post: (url, body) => {
+                if (url.endsWith('/api/auth')) {
+                    return { status: 200, data: { token: 'jwt' } }
+                }
+                if (url.endsWith(`/api/machines/${MACHINE_ID}/spawn`)) {
+                    spawnedBody = body as Record<string, unknown>
+                    return { status: 200, data: { type: 'success', sessionId: SESSION_ID } }
+                }
+                if (url.endsWith(`/api/sessions/${SESSION_ID}/messages`)) {
+                    return { status: 200, data: { ok: true } }
+                }
+                throw new Error(`unexpected POST ${url}`)
+            },
+            get: (url) => {
+                if (url.includes(`/api/sessions/${SESSION_ID}/messages`)) {
+                    return { status: 200, data: { messages: [userMessageRow('do the work')] } }
+                }
+                if (url.includes('/api/sessions')) {
+                    return {
+                        status: 200,
+                        data: {
+                            sessions: [{ id: SESSION_ID, active: true, metadata: { flavor: 'claude' } }],
+                            session: { id: SESSION_ID, active: true, metadata: { flavor: 'claude' } }
+                        }
+                    }
+                }
+                throw new Error(`unexpected GET ${url}`)
+            }
+        })
+
+        await spawnPeer({
+            directory: '.',
+            cwd: '/repo-b',
+            message: 'do the work',
+            machineId: MACHINE_ID,
+            accessToken: 'tok',
+            apiUrl: 'http://hub.test',
+            http: http as never,
+            hubPeerSpawnDefaults: null
+        })
+
+        expect(spawnedBody?.directory).toBe('/repo-b')
+    })
+
     it('rejects a Claude-illegal permissionMode when agent is omitted (hub default Claude)', async () => {
         const http = createHttpMock({
             post: (url) => {

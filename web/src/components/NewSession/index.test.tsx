@@ -232,6 +232,9 @@ vi.mock('./PermissionField', () => ({
             <button type="button" data-testid="permission-mode-plan" onClick={() => props.onNativeChange('plan')}>
                 {props.nativeValue}
             </button>
+            <button type="button" data-testid="permission-mode-default" onClick={() => props.onNativeChange('default')}>
+                {props.nativeValue}
+            </button>
         </>
     )
 }))
@@ -1419,7 +1422,7 @@ describe('NewSession launch preferences', () => {
         })
     })
 
-    it('keeps a Plan pick when hub settings resolve after the edit', async () => {
+    it('keeps an explicit Default permission when hub settings resolve after the edit', async () => {
         localStorage.clear()
         let resolveSettings!: (value: unknown) => void
         const deferred = new Promise((resolve) => {
@@ -1443,8 +1446,9 @@ describe('NewSession launch preferences', () => {
             </QueryClientProvider>
         )
 
-        fireEvent.click(screen.getByTestId('permission-mode-plan'))
-        expect(screen.getByTestId('permission-mode')).toHaveTextContent('plan')
+        // Explicit Default (same value as mount default) must still count as an edit.
+        fireEvent.click(screen.getByTestId('permission-mode-default'))
+        expect(screen.getByTestId('permission-mode')).toHaveTextContent('default')
 
         await act(async () => {
             resolveSettings({
@@ -1460,7 +1464,7 @@ describe('NewSession launch preferences', () => {
         })
 
         await waitFor(() => {
-            expect(screen.getByTestId('permission-mode')).toHaveTextContent('plan')
+            expect(screen.getByTestId('permission-mode')).toHaveTextContent('default')
         })
     })
 })

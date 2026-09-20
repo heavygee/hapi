@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
     CREATABLE_AGENT_FLAVORS,
-    getPermissionModeOptionsForFlavor,
+    getLaunchPermissionModesForFlavor,
+    getPermissionModeLabel,
     type AgentFlavor,
     type PermissionMode
 } from '@hapi/protocol'
@@ -60,9 +61,9 @@ export default function SettingsGeneralPage() {
 
     const peerDefaults = hubSettingsQuery.data?.peerSpawnDefaults
     const agentOptions = CREATABLE_AGENT_FLAVORS.map((value) => ({ value, label: value }))
-    const permissionOptions = getPermissionModeOptionsForFlavor(peerDefaults?.agent).map((option) => ({
-        value: option.mode,
-        label: option.label
+    const permissionOptions = getLaunchPermissionModesForFlavor(peerDefaults?.agent).map((mode) => ({
+        value: mode,
+        label: getPermissionModeLabel(mode)
     }))
 
     function updatePeerSpawnDefaults(next: ResolvedPeerSpawnDefaults) {

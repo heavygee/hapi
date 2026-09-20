@@ -8,9 +8,11 @@ import {
 } from '@hapi/protocol'
 import {
     resolvePeerSpawnConfig,
+    STOCK_PEER_SPAWN_DEFAULTS,
     type PeerSpawnDefaults,
     type ResolvedPeerSpawnDefaults
 } from '@hapi/protocol/peerSpawnDefaults'
+import { getLaunchPermissionModesForFlavor } from '@hapi/protocol/modes'
 import { Hono } from 'hono'
 import { RPC_TARGET_MISSING_ERROR_CODE } from '@hapi/protocol/rpcMethods'
 import { readPeerSpawnDefaults } from '../../config/peerSpawnDefaults'
@@ -156,6 +158,20 @@ export function createMachinesRoutes(
             const message = error instanceof Error ? error.message : 'Cannot load hub spawn defaults'
             return c.json({ error: message, code: 'hub_spawn_defaults_unavailable' as const }, 500)
         }
+
+        const effectiveAgent = parsed.data.agent
+            ?? hubDefaults?.agent
+            ?? STOCK_PEER_SPAWN_DEFAULTS.agent
+        if (
+            parsed.data.permissionMode !== undefined
+            && !getLaunchPermissionModesForFlavor(effectiveAgent).includes(parsed.data.permissionMode)
+        ) {
+            return c.json({
+                error: `permission mode ${parsed.data.permissionMode} is not supported by ${effectiveAgent}`,
+                code: 'invalid_permission_mode' as const
+            }, 400)
+        }
+
         const resolved = resolvePeerSpawnConfig({
             ...(parsed.data.agent !== undefined ? { agent: parsed.data.agent } : {}),
             ...(parsed.data.permissionMode !== undefined ? { permissionMode: parsed.data.permissionMode } : {}),

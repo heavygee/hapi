@@ -17,7 +17,7 @@ import axios, { type AxiosInstance } from 'axios'
 import { isObject, SESSION_NAME_MAX_LENGTH } from '@hapi/protocol'
 import {
     CREATABLE_AGENT_FLAVORS,
-    isPermissionModeAllowedForFlavor,
+    getLaunchPermissionModesForFlavor,
     type AgentFlavor,
     type PermissionMode
 } from '@hapi/protocol/modes'
@@ -74,6 +74,11 @@ export type SpawnPeerOptions = {
     accessToken?: string
     /** Skip hub settings fetch (tests). */
     hubPeerSpawnDefaults?: PeerSpawnDefaults | null
+    /**
+     * Base directory for relative `directory` paths (MCP session cwd).
+     * Absolute directories are unchanged. Defaults to process.cwd().
+     */
+    cwd?: string
     http?: AxiosInstance
     sleep?: (ms: number) => Promise<void>
     now?: () => number
@@ -272,7 +277,10 @@ export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerRes
     }
     // Runner RPC resolves relative paths against the long-lived runner cwd
     // (`hapi runner start`), not the calling CLI/MCP process. Anchor here.
-    const directory = resolvePath(rawDirectory)
+    // MCP callers pass cwd=session workingDirectory so "." is the session tree.
+    const directory = options.cwd
+        ? resolvePath(options.cwd, rawDirectory)
+        : resolvePath(rawDirectory)
     if (!message.trim()) {
         throw new SpawnPeerError(
             'bad_args',
@@ -332,7 +340,7 @@ export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerRes
     // agent is omitted) — not a Claude preview before settings load.
     if (
         options.permissionMode
-        && !isPermissionModeAllowedForFlavor(options.permissionMode, resolved.agent)
+        && !getLaunchPermissionModesForFlavor(resolved.agent).includes(options.permissionMode)
     ) {
         throw new SpawnPeerError(
             'bad_args',

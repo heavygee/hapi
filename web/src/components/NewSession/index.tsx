@@ -67,6 +67,7 @@ import {
     loadPreferredAgent,
     loadPreferredLaunchSettings,
     loadPreferredYoloMode,
+    hasSavedPreferredYoloMode,
     resolvePreferredLaunchSettings,
     savePreferredAgent,
     savePreferredLaunchSettings,
@@ -128,8 +129,6 @@ export function NewSession(props: {
     // late getHubSettings resolve does not re-run the effect and wipe edits.
     const hubPermissionModeRef = useRef(hubPeerSpawnDefaults?.permissionMode)
     hubPermissionModeRef.current = hubPeerSpawnDefaults?.permissionMode
-    const nativePermissionModeRef = useRef<PermissionMode>('default')
-    const grokPermissionModeRef = useRef<GrokPermissionMode>('default')
 
     const [machineId, setMachineId] = useState<string | null>(props.initialMachineId ?? null)
     const [directory, setDirectory] = useState(props.initialDirectory ?? '')
@@ -141,10 +140,17 @@ export function NewSession(props: {
     // runs on every agent change (below), so reading loadPreferredAgent()
     // again later would always equal the current agent and make the
     // legacyYoloAgent === agent gate at the restore effect below vacuous.
+    // Only treat a *saved* Yolo key as legacy — absent key is stock UI default,
+    // not an override that should beat hub peerSpawnDefaults.
     const [legacyYoloAgent] = useState(
-        () => (loadPreferredYoloMode() ? loadPreferredAgent() : null)
+        () => (hasSavedPreferredYoloMode() && loadPreferredYoloMode()
+            ? loadPreferredAgent()
+            : null)
     )
     const [model, setModel] = useState('auto')
+    const editedPermissionRef = useRef(false)
+    const editedAgentRef = useRef(false)
+    const editedModelRef = useRef(false)
     const [cursorSelectedBase, setCursorSelectedBase] = useState('auto')
     const pendingCursorBaseRef = useRef<string | null>(null)
     const [effort, setEffort] = useState<LaunchEffort>('auto')
@@ -156,8 +162,6 @@ export function NewSession(props: {
     const [yoloMode, setYoloMode] = useState(loadPreferredYoloMode)
     const [nativePermissionMode, setNativePermissionMode] = useState<PermissionMode>('default')
     const [grokPermissionMode, setGrokPermissionMode] = useState<GrokPermissionMode>('default')
-    nativePermissionModeRef.current = nativePermissionMode
-    grokPermissionModeRef.current = grokPermissionMode
     const [sessionType, setSessionType] = useState<SessionType>('simple')
     const [worktreeName, setWorktreeName] = useState('')
     const [directoryCreationConfirmed, setDirectoryCreationConfirmed] = useState(false)
@@ -311,14 +315,9 @@ export function NewSession(props: {
         seededFromHubRef.current = true
         const seeded = seedNewSessionFromPeerSpawnDefaults(hubPeerSpawnDefaults)
         const { hasStickyAgent, hasStickyYolo } = initialStickyPreferences
-        // Permission still at mount default ⇒ safe to seed. If the operator
-        // already picked Plan/etc. while getHubSettings was in flight, keep it.
-        const permissionStillAtMountDefault =
-            nativePermissionModeRef.current === 'default'
-            && grokPermissionModeRef.current === 'default'
-        if (!hasStickyAgent) {
+        if (!hasStickyAgent && !editedAgentRef.current) {
             setAgent(seeded.agent)
-            if (permissionStillAtMountDefault) {
+            if (!editedPermissionRef.current) {
                 if (usesSharedPermissionModeState(seeded.agent)) {
                     setNativePermissionMode(seeded.permissionMode)
                 } else if (seeded.agent === 'grok') {
@@ -334,7 +333,7 @@ export function NewSession(props: {
                     }
                 }
             }
-            if (seeded.model) {
+            if (!editedModelRef.current && seeded.model) {
                 setModel(seeded.model)
                 if (seeded.agent === 'cursor') {
                     setCursorSelectedBase(seeded.model)
@@ -1441,6 +1440,7 @@ export function NewSession(props: {
 
     const handleAgentChange = useCallback((newAgent: AgentType) => {
         preserveRestoredDraftRef.current = false
+        editedAgentRef.current = true
         setAgent(newAgent)
     }, [])
 
@@ -1464,6 +1464,7 @@ export function NewSession(props: {
     }, [getRecentPaths])
 
     const handleCursorBaseChange = useCallback((baseKey: string) => {
+        editedModelRef.current = true
         if (baseKey === 'auto') {
             pendingCursorBaseRef.current = null
             setCursorSelectedBase('auto')
@@ -1977,6 +1978,7 @@ export function NewSession(props: {
                                     handleCursorBaseChange(value)
                                     return
                                 }
+                                editedModelRef.current = true
                                 setModel(value)
                                 setCursorSelectedBase(
                                     value === 'auto' ? 'auto' : resolveCursorBaseFromWire(value, cursorPicker.catalog)
@@ -2041,7 +2043,10 @@ export function NewSession(props: {
                                         : agent === 'pi' && piModelsState.error
                                             ? `${t('newSession.model.loadFailed')}: ${piModelsState.error}`
                                     : null}
-                        onModelChange={setModel}
+                        onModelChange={(value) => {
+                            editedModelRef.current = true
+                            setModel(value)
+                        }}
                     />
                 )
             )}
@@ -2066,13 +2071,17 @@ export function NewSession(props: {
                 autoPermissionModeSupported={agent === 'grok' ? grokModelsState.autoPermissionModeSupported : null}
                 isDisabled={isFormDisabled}
                 onNativeChange={(mode) => {
+                    editedPermissionRef.current = true
                     if (agent === 'grok') {
                         setGrokPermissionMode(mode as GrokPermissionMode)
                     } else {
                         setNativePermissionMode(mode)
                     }
                 }}
-                onYoloToggle={setYoloMode}
+                onYoloToggle={(value) => {
+                    editedPermissionRef.current = true
+                    setYoloMode(value)
+                }}
             />
             <CollaborationModeSelector
                 agent={agent}
