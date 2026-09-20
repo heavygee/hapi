@@ -982,6 +982,19 @@ export function NewSession(props: {
         if (usesSharedPermissionMode) {
             setNativePermissionMode(preferred.permissionMode ?? 'default')
         }
+        if (agent === 'grok' && !editedPermissionRef.current) {
+            const hubMode = hubPermissionModeRef.current
+            if (
+                hubMode === 'default'
+                || hubMode === 'auto'
+                || hubMode === 'plan'
+                || hubMode === 'bypassPermissions'
+            ) {
+                setGrokPermissionMode(hubMode)
+            } else if (hubMode && isYoloStylePermissionMode(hubMode)) {
+                setGrokPermissionMode('bypassPermissions')
+            }
+        }
         setOpencodeSelectedModel(
             agent === 'opencode' && preferred.model !== 'auto' ? preferred.model : null
         )

@@ -1471,7 +1471,7 @@ describe('NewSession launch preferences', () => {
         })
     })
 
-    it('keeps an explicit Yolo-off choice when hub settings resolve late', async () => {
+    it('keeps Cursor Plan when hub settings resolve late with a different agent default', async () => {
         localStorage.clear()
         let resolveSettings!: (value: unknown) => void
         const deferred = new Promise((resolve) => {
@@ -1495,28 +1495,25 @@ describe('NewSession launch preferences', () => {
             </QueryClientProvider>
         )
 
-        // Cursor uses the boolean Yolo toggle (not native permission select).
-        const cursorRadio = screen.getByDisplayValue('cursor')
-        fireEvent.click(cursorRadio)
-        expect(screen.getByTestId('yolo-toggle')).toHaveTextContent('yolo-on')
-        fireEvent.click(screen.getByTestId('yolo-toggle'))
-        expect(screen.getByTestId('yolo-toggle')).toHaveTextContent('yolo-off')
+        fireEvent.click(screen.getByDisplayValue('cursor'))
+        fireEvent.click(screen.getByTestId('permission-mode-plan'))
+        expect(screen.getByTestId('permission-mode')).toHaveTextContent('plan')
 
         await act(async () => {
             resolveSettings({
                 sessionSummaryContract: false,
                 sessionSummaryInChat: false,
                 peerSpawnDefaults: {
-                    agent: 'claude',
-                    permissionMode: 'bypassPermissions',
-                    models: { claude: 'sonnet' }
+                    agent: 'codex',
+                    permissionMode: 'yolo',
+                    models: { codex: 'gpt-5' }
                 }
             })
             await deferred
         })
 
         await waitFor(() => {
-            expect(screen.getByTestId('yolo-toggle')).toHaveTextContent('yolo-off')
+            expect(screen.getByTestId('permission-mode')).toHaveTextContent('plan')
         })
 
         act(() => {
@@ -1526,7 +1523,59 @@ describe('NewSession launch preferences', () => {
         await waitFor(() => expect(mocks.onSuccess).toHaveBeenCalledWith('session-1'))
         expect(mocks.spawnSession).toHaveBeenCalledWith(expect.objectContaining({
             agent: 'cursor',
-            yolo: false
+            permissionMode: 'plan'
+        }))
+    })
+
+    it('seeds Grok Plan from delayed hub defaults after agent initialization', async () => {
+        localStorage.clear()
+        let resolveSettings!: (value: unknown) => void
+        const deferred = new Promise((resolve) => {
+            resolveSettings = resolve
+        })
+        const slowApi = {
+            getHubSettings: vi.fn(() => deferred)
+        } as unknown as ApiClient
+
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        render(
+            <QueryClientProvider client={client}>
+                <NewSession
+                    api={slowApi}
+                    machines={[machine]}
+                    initialMachineId="machine-1"
+                    initialDirectory="C:\\repo"
+                    onSuccess={mocks.onSuccess}
+                    onCancel={() => {}}
+                />
+            </QueryClientProvider>
+        )
+
+        await act(async () => {
+            resolveSettings({
+                sessionSummaryContract: false,
+                sessionSummaryInChat: false,
+                peerSpawnDefaults: {
+                    agent: 'grok',
+                    permissionMode: 'plan',
+                    models: {}
+                }
+            })
+            await deferred
+        })
+
+        await waitFor(() => {
+            expect(screen.getByTestId('permission-mode')).toHaveTextContent('plan')
+        })
+
+        act(() => {
+            mocks.spawnSession.mockImplementation(async () => ({ type: 'success', sessionId: 'session-1' }))
+        })
+        fireEvent.click(screen.getByTestId('create'))
+        await waitFor(() => expect(mocks.onSuccess).toHaveBeenCalledWith('session-1'))
+        expect(mocks.spawnSession).toHaveBeenCalledWith(expect.objectContaining({
+            agent: 'grok',
+            permissionMode: 'plan'
         }))
     })
 })
