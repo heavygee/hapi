@@ -350,7 +350,50 @@ describe('machines routes', () => {
         expect(await response.json()).toMatchObject({ code: 'invalid_permission_mode' })
     })
 
-it('returns 500 when hub spawn defaults cannot be loaded', async () => {
+
+    it('does not inject hub model when agent is explicit and model omitted', async () => {
+        const machine = createMachine()
+        let capturedModel: string | undefined
+        const engine = {
+            getMachine: () => machine,
+            getMachineByNamespace: () => machine,
+            spawnSession: async (
+                _machineId: string,
+                _directory: string,
+                _agent?: string,
+                model?: string
+            ) => {
+                capturedModel = model
+                return { type: 'success' as const, sessionId: 'session-1' }
+            }
+        } as Partial<SyncEngine>
+
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createMachinesRoutes(() => engine as SyncEngine, {
+            getPeerSpawnDefaults: () => ({
+                agent: 'opencode',
+                permissionMode: 'default',
+                models: { opencode: 'provider/hub-model' }
+            })
+        }))
+
+        const response = await app.request('/api/machines/machine-1/spawn', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+                directory: '/tmp/project',
+                agent: 'opencode'
+            })
+        })
+        expect(response.status).toBe(200)
+        expect(capturedModel).toBeUndefined()
+    })
+
+    it('returns 500 when hub spawn defaults cannot be loaded', async () => {
         const machine = createMachine()
         const engine = {
             getMachine: () => machine,

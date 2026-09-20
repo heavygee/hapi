@@ -190,17 +190,31 @@ export function createMachinesRoutes(
                     ? undefined
                     : resolved.permissionMode
 
+        // Apply hub model only when the caller omitted agent+model (full defaults
+        // path). An explicit agent with model omitted means native Default —
+        // do not inject the hub model for that flavor.
+        const modelForSpawn = parsed.data.model !== undefined
+            ? parsed.data.model
+            : parsed.data.agent === undefined
+                ? resolved.model
+                : undefined
+        const effortForSpawn = parsed.data.effort !== undefined
+            ? parsed.data.effort
+            : parsed.data.agent === undefined
+                ? resolved.effort
+                : undefined
+
         const result = await engine.spawnSession(
             machineId,
             parsed.data.directory,
             resolved.agent,
-            resolved.model ?? parsed.data.model,
+            modelForSpawn,
             parsed.data.modelReasoningEffort,
             parsed.data.yolo,
             parsed.data.sessionType,
             parsed.data.worktreeName,
             undefined, // resumeSessionId
-            resolved.effort ?? parsed.data.effort,
+            effortForSpawn,
             permissionModeForSpawn,
             parsed.data.serviceTier,
             undefined,

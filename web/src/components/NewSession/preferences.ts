@@ -3,9 +3,13 @@ import {
     getLaunchPermissionModesForFlavor,
     getPermissionModesForFlavor,
     resolveHapiYoloPermissionMode,
+    type AgentFlavor,
     type PermissionMode
 } from '@hapi/protocol'
-import type { ResolvedPeerSpawnDefaults } from '@hapi/protocol/peerSpawnDefaults'
+import {
+    resolvePermissionModeForFlavor,
+    type ResolvedPeerSpawnDefaults
+} from '@hapi/protocol/peerSpawnDefaults'
 import {
     CLAUDE_EFFORT_OPTIONS,
     CODEX_REASONING_EFFORT_OPTIONS,
@@ -219,8 +223,13 @@ export function resolvePreferredLaunchSettings(
         ? resolveHapiYoloPermissionMode(agent)
         : null
     const hubMode = hubPermissionMode
-        && availablePermissionModes.includes(hubPermissionMode)
-        ? hubPermissionMode
+        ? (() => {
+            const mapped = resolvePermissionModeForFlavor(
+                hubPermissionMode,
+                agent as AgentFlavor
+            )
+            return availablePermissionModes.includes(mapped) ? mapped : undefined
+        })()
         : undefined
     const permissionMode = usesSharedPermissionMode
         ? preferredPermissionMode && availablePermissionModes.includes(preferredPermissionMode)

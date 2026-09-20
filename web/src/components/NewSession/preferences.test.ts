@@ -276,6 +276,13 @@ describe('NewSession preferences', () => {
         })
     })
 
+    it('maps hub yolo through resolvePermissionModeForFlavor before seeding', () => {
+        expect(resolvePreferredLaunchSettings('claude', null, false, 'yolo').permissionMode)
+            .toBe('bypassPermissions')
+        expect(resolvePreferredLaunchSettings('cursor', null, false, 'yolo').permissionMode)
+            .toBe('yolo')
+    })
+
     it.each([
         ['kimi', 'safe-yolo'],
         ['opencode', 'plan']
