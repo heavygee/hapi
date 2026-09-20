@@ -188,7 +188,7 @@ function resolvePreferredOptionValue(
 export function resolvePreferredLaunchSettings(
     agent: AgentType,
     preferred: PreferredLaunchSettings | null,
-    legacyYolo = false,
+    legacyYolo: boolean | null = false,
     hubPermissionMode?: PermissionMode
 ): PreferredLaunchSettings {
     const preferredModel = preferred?.model ?? 'auto'
@@ -218,9 +218,14 @@ export function resolvePreferredLaunchSettings(
     const usesSharedPermissionMode = usesSharedPermissionModeState(agent)
     const availablePermissionModes = getLaunchPermissionModesForFlavor(agent)
     const preferredPermissionMode = preferred?.permissionMode
-    // A removed explicit mode falls back to Default, never to a stale YOLO toggle.
-    const legacyYoloBridgeMode = preferredPermissionMode === undefined && legacyYolo && LEGACY_YOLO_BRIDGE_AGENTS.includes(agent)
-        ? resolveHapiYoloPermissionMode(agent)
+    // Migrate a saved HAPI YOLO toggle into the native select (true → yolo-equivalent,
+    // false → Default). Absent key leaves hub/stock defaults in place.
+    const legacyYoloBridgeMode = preferredPermissionMode === undefined
+        && legacyYolo !== null
+        && LEGACY_YOLO_BRIDGE_AGENTS.includes(agent)
+        ? (legacyYolo
+            ? resolveHapiYoloPermissionMode(agent)
+            : 'default')
         : null
     const hubMode = hubPermissionMode
         ? (() => {

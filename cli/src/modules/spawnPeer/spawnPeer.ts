@@ -398,7 +398,11 @@ export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerRes
         spawnBody.model = resolved.model
     }
     if (resolved.effort) {
-        spawnBody.effort = resolved.effort
+        if (resolved.agent === 'codex' || resolved.agent === 'opencode') {
+            spawnBody.modelReasoningEffort = resolved.effort
+        } else {
+            spawnBody.effort = resolved.effort
+        }
     }
 
     onProgress?.(`spawning agent=${resolved.agent} permission=${resolved.permissionMode} type=${sessionType} dir=${directory}`)

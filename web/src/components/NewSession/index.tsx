@@ -2,7 +2,13 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, ty
 import { useQuery } from '@tanstack/react-query'
 import type { ApiClient } from '@/api/client'
 import type { CodexDuplicateSessionGroup, CodexLocalSessionSummary, Machine, PiLocalSessionSummary } from '@/types/api'
-import type { CodexCollaborationMode, GrokPermissionMode, PermissionMode, CopilotAgentMode } from '@hapi/protocol'
+import {
+    type CodexCollaborationMode,
+    type GrokPermissionMode,
+    type PermissionMode,
+    type CopilotAgentMode,
+    resolveHapiYoloPermissionMode
+} from '@hapi/protocol'
 import { codexModelAdvertisesFastTier } from '@/components/AssistantChat/codexFastMode'
 import { usePlatform } from '@/hooks/usePlatform'
 import { useMachinePathsExists } from '@/hooks/useMachinePathsExists'
@@ -78,7 +84,7 @@ import {
 import { resolvePermissionModeForFlavor } from '@hapi/protocol/peerSpawnDefaults'
 import { SessionTypeSelector } from './SessionTypeSelector'
 import { PermissionField } from './PermissionField'
-import { usesNativePermissionSelect, usesSharedPermissionModeState } from '@/lib/codexFamilyPermissionAgents'
+import { usesNativePermissionSelect, usesSharedPermissionModeState, LEGACY_YOLO_BRIDGE_AGENTS } from '@/lib/codexFamilyPermissionAgents'
 import { CodexSessionSyncDialog } from '@/components/CodexSessionSyncDialog'
 import { PiSessionImportDialog } from '@/components/PiSessionImportDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -138,18 +144,17 @@ export function NewSession(props: {
     const [suppressSuggestions, setSuppressSuggestions] = useState(false)
     const [isDirectoryFocused, setIsDirectoryFocused] = useState(false)
     const [agent, setAgent] = useState<AgentType>(loadPreferredAgent)
-    // Snapshot taken once at mount, before any savePreferredAgent() call this
-    // component makes can overwrite the stored agent. savePreferredAgent()
-    // runs on every agent change (below), so reading loadPreferredAgent()
-    // again later would always equal the current agent and make the
-    // legacyYoloAgent === agent gate at the restore effect below vacuous.
-    // Only treat a *saved* Yolo key as legacy — absent key is stock UI default,
-    // not an override that should beat hub peerSpawnDefaults.
-    const [legacyYoloAgent] = useState(
-        () => (hasSavedPreferredYoloMode() && loadPreferredYoloMode()
-            ? loadPreferredAgent()
-            : null)
-    )
+    // Snapshot a saved HAPI YOLO toggle for bridge flavors (incl. Cursor after
+    // native-select move). null = no sticky key; true/false = migrate into native mode.
+    const [legacyYoloBridge] = useState(() => {
+        if (!hasSavedPreferredYoloMode()) {
+            return null
+        }
+        return {
+            agent: loadPreferredAgent(),
+            enabled: loadPreferredYoloMode()
+        }
+    })
     const [model, setModel] = useState('auto')
     const editedPermissionRef = useRef(false)
     const editedAgentRef = useRef(false)
@@ -337,7 +342,19 @@ export function NewSession(props: {
             ? loadPreferredLaunchSettings(machineId, targetAgent)
             : null
         if (!editedPermissionRef.current && !savedLaunch?.permissionMode) {
-            if (usesSharedPermissionModeState(targetAgent)) {
+            if (
+                hasStickyYolo
+                && usesSharedPermissionModeState(targetAgent)
+                && LEGACY_YOLO_BRIDGE_AGENTS.includes(targetAgent)
+            ) {
+                const stickyYolo = loadPreferredYoloMode()
+                const bridged = stickyYolo
+                    ? resolveHapiYoloPermissionMode(targetAgent)
+                    : 'default'
+                if (bridged) {
+                    setNativePermissionMode(bridged)
+                }
+            } else if (usesSharedPermissionModeState(targetAgent)) {
                 setNativePermissionMode(remappedPermission)
             } else if (targetAgent === 'grok') {
                 if (
@@ -981,7 +998,7 @@ export function NewSession(props: {
         const preferred = resolvePreferredLaunchSettings(
             agent,
             savedLaunch,
-            legacyYoloAgent === agent,
+            legacyYoloBridge?.agent === agent ? legacyYoloBridge.enabled : null,
             hubPermissionModeRef.current
         )
 
@@ -1044,7 +1061,7 @@ export function NewSession(props: {
         } else {
             setAgySelectedModel(null)
         }
-    }, [agent, legacyYoloAgent, machineId, usesSharedPermissionMode])
+    }, [agent, legacyYoloBridge, machineId, usesSharedPermissionMode])
 
     useEffect(() => {
         if (

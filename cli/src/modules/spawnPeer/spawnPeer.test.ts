@@ -1278,6 +1278,63 @@ it('resolves relative directory against cwd (MCP session working directory)', as
         })
     })
 
+    it('maps Codex and OpenCode effort overrides to modelReasoningEffort', async () => {
+        let spawnedBody: Record<string, unknown> | undefined
+        const http = createHttpMock({
+            post: (url, body) => {
+                if (url.endsWith('/api/auth')) {
+                    return { status: 200, data: { token: 'jwt' } }
+                }
+                if (url.endsWith(`/api/machines/${MACHINE_ID}/spawn`)) {
+                    spawnedBody = body as Record<string, unknown>
+                    return { status: 200, data: { type: 'success', sessionId: SESSION_ID } }
+                }
+                if (url.endsWith(`/api/sessions/${SESSION_ID}/messages`)) {
+                    return { status: 200, data: { ok: true } }
+                }
+                throw new Error(`unexpected POST ${url}`)
+            },
+            get: (url) => {
+                if (url.endsWith(`/api/sessions/${SESSION_ID}`)) {
+                    return {
+                        status: 200,
+                        data: {
+                            session: {
+                                id: SESSION_ID,
+                                active: true,
+                                metadata: { name: 'Named', flavor: 'codex' }
+                            }
+                        }
+                    }
+                }
+                if (url.includes(`/api/sessions/${SESSION_ID}/messages`)) {
+                    return {
+                        status: 200,
+                        data: { messages: [userMessageRow('brief')] }
+                    }
+                }
+                throw new Error(`unexpected GET ${url}`)
+            }
+        })
+
+        await spawnPeer({
+            directory: '/tmp/project',
+            message: 'brief',
+            agent: 'codex',
+            effort: 'high',
+            machineId: MACHINE_ID,
+            accessToken: 'tok',
+            apiUrl: 'http://hub.test',
+            http: http as never
+        })
+
+        expect(spawnedBody).toMatchObject({
+            agent: 'codex',
+            modelReasoningEffort: 'high'
+        })
+        expect(spawnedBody).not.toHaveProperty('effort')
+    })
+
     it('passes an explicit permissionMode and does not clone yolo', async () => {
         let spawnedBody: Record<string, unknown> | undefined
         const http = createHttpMock({

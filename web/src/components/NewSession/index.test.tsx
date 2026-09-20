@@ -1707,6 +1707,58 @@ describe('NewSession launch preferences', () => {
         })
     })
 
+    it('migrates Cursor YOLO=false over hub yolo into native Default', async () => {
+        localStorage.clear()
+        savePreferredAgent('cursor')
+        savePreferredYoloMode(false)
+        mocks.spawnSession.mockResolvedValue({ type: 'success', sessionId: 'session-1' })
+        const hubApi = {
+            getHubSettings: vi.fn().mockResolvedValue({
+                sessionSummaryContract: false,
+                sessionSummaryInChat: false,
+                peerSpawnDefaults: {
+                    agent: 'cursor',
+                    permissionMode: 'yolo',
+                    models: {}
+                }
+            })
+        } as unknown as ApiClient
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        client.setQueryData(queryKeys.hubSettings, {
+            sessionSummaryContract: false,
+            sessionSummaryInChat: false,
+            peerSpawnDefaults: {
+                agent: 'cursor',
+                permissionMode: 'yolo',
+                models: {}
+            }
+        })
+        render(
+            <QueryClientProvider client={client}>
+                <NewSession
+                    api={hubApi}
+                    machines={[machine]}
+                    initialMachineId="machine-1"
+                    initialDirectory="C:\\repo"
+                    onSuccess={mocks.onSuccess}
+                    onCancel={() => {}}
+                />
+            </QueryClientProvider>
+        )
+
+        await waitFor(() => {
+            expect(screen.getByDisplayValue('cursor')).toBeChecked()
+            expect(screen.getByTestId('permission-mode')).toHaveTextContent('default')
+        })
+        await waitFor(() => expect(screen.getByTestId('create')).toBeEnabled())
+        fireEvent.click(screen.getByTestId('create'))
+        await waitFor(() => expect(mocks.onSuccess).toHaveBeenCalledWith('session-1'))
+        expect(mocks.spawnSession).toHaveBeenCalledWith(expect.objectContaining({
+            agent: 'cursor',
+            permissionMode: 'default'
+        }))
+    })
+
     it('keeps an explicit Claude model when hub settings resolve late with Codex', async () => {
         localStorage.clear()
         let resolveSettings!: (value: unknown) => void
