@@ -251,6 +251,25 @@ validate_one() {
         fi
     fi
 
+    # working_directory must exist and be usable by the service user (matches unit).
+    local home_dir workdir
+    home_dir="$(getent passwd "$user" | cut -d: -f6)"
+    [[ -n "$home_dir" ]] || die "$name: no home directory for user '$user'"
+    workdir="$(tick_field "$json" '.working_directory' "$home_dir")"
+    [[ -n "$workdir" && "$workdir" != null ]] || workdir="$home_dir"
+    if [[ ! -d "$workdir" ]]; then
+        die "$name: working_directory not found: $workdir"
+    fi
+    local workdir_ok=0
+    if [[ "$(id -un)" == "$user" ]]; then
+        [[ -x "$workdir" ]] && workdir_ok=1
+    elif sudo -n -u "$user" -H -- test -x "$workdir" 2>/dev/null; then
+        workdir_ok=1
+    fi
+    if [[ "$workdir_ok" -ne 1 ]]; then
+        die "$name: working_directory not accessible by user '$user': $workdir"
+    fi
+
     # Token-cost lint: flag agent CLIs and HAPI wake commands in the probe path.
     local on_len
     on_len="$(printf '%s' "$on_change" | jq 'length')"
@@ -275,11 +294,13 @@ validate_one() {
         warnings=$((warnings + 1))
     fi
 
-    local cadence cal
+    local cadence cal delay
     cadence="$(tick_field "$json" '.cadence')"
     [[ -n "$cadence" && "$cadence" != null ]] || die "$name: cadence required (e.g. OnCalendar=*:8,38)"
     cal="$(calendar_from_cadence "$cadence")"
     [[ -n "$cal" ]] || die "$name: cadence produced empty OnCalendar value"
+    delay="$(tick_field "$json" '.randomized_delay_sec' '90')"
+    [[ -n "$delay" && "$delay" != null ]] || die "$name: randomized_delay_sec required"
     if command -v systemd-analyze >/dev/null 2>&1; then
         local tmp_timer
         tmp_timer="$(mktemp --suffix=.timer)"
@@ -289,11 +310,15 @@ validate_one() {
             die "$name: cadence not accepted by systemd-analyze: $cadence"
         fi
         rm -f "$tmp_timer"
+        if ! systemd-analyze timespan "$delay" >/dev/null 2>&1; then
+            die "$name: randomized_delay_sec not accepted by systemd-analyze timespan: $delay"
+        fi
     fi
 
+    [[ -n "$host" && "$host" != null ]] || die "$name: host required (per-machine install guard)"
     local here
     here="$(hostname_short)"
-    if [[ -n "$host" && "$host" != "$here" && "$host" != "$(hostname)" ]]; then
+    if [[ "$host" != "$here" && "$host" != "$(hostname)" ]]; then
         err "$name: NOTE registry host='$host' but this machine is '$here' (install will warn unless --force)"
     fi
 
@@ -527,7 +552,10 @@ cmd_run() {
     if [[ -z "$lock" ]]; then
         lock="$home_dir/.local/state/hapi/tick-${name}.lock"
     fi
-    mkdir -p "$(dirname "$lock")"
+    local state_path
+    state_path="$(expand_user_path "$(tick_field "$json" '.state.path')" "$user")"
+    # Match ExecStartPre: create both lock and state parents before the probe.
+    mkdir -p "$(dirname "$lock")" "$(dirname "$state_path")"
     # Apply registry env so one-shot matches the generated unit.
     while IFS=$'\t' read -r key val; do
         [[ -n "$key" ]] || continue
@@ -598,20 +626,27 @@ doctor_one() {
     fi
 
     if systemctl cat "${prefix}.timer" >/dev/null 2>&1; then
-        local enabled active svc_failed
+        local enabled active svc_failed svc_loaded
         enabled="$(systemctl is-enabled "${prefix}.timer" 2>/dev/null || echo unknown)"
         active="$(systemctl is-active "${prefix}.timer" 2>/dev/null || echo unknown)"
         svc_failed="$(systemctl is-failed "${prefix}.service" 2>/dev/null || true)"
         svc_failed="${svc_failed:-unknown}"
+        if systemctl cat "${prefix}.service" >/dev/null 2>&1; then
+            svc_loaded=yes
+        else
+            svc_loaded=NO
+            healthy=0
+        fi
         echo "timer: ${prefix}.timer  enabled=$enabled  active=$active"
-        echo "service: ${prefix}.service  is-failed=$svc_failed"
+        echo "service: ${prefix}.service  loaded=$svc_loaded  is-failed=$svc_failed"
         systemctl list-timers "${prefix}.timer" --all --no-pager 2>/dev/null | tail -n +1 | head -5 || true
         echo "recent journal:"
         journalctl -u "${prefix}.service" -n 5 --no-pager 2>/dev/null | sed 's/^/  /' || echo "  (no journal)"
         if [[ "$enabled" != "enabled" || "$active" != "active" ]]; then
             healthy=0
         fi
-        if [[ "$svc_failed" == "failed" ]]; then
+        # is-failed only reports "failed"; unknown/missing is not healthy either.
+        if [[ "$svc_failed" == "failed" || "$svc_failed" == "unknown" ]]; then
             healthy=0
         fi
     else
