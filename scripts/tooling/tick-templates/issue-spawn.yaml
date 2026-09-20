@@ -1,6 +1,6 @@
 # Template: issue-spawn
 # Shape: producer-issue-poll — bare gh poll + seen-set + spawn_peer on new issues.
-# Copy into config/polls.yaml and adjust paths/repo/filters inside the probe script.
+# Copy into config/ticks.yaml and adjust paths/repo/filters inside the probe script.
 #
 # Probe owns spawn_peer (on_change documents the escalation lane for validate).
 
@@ -21,7 +21,7 @@ on_change:
       dir: /path/to/repo
       name_template: "issue-triage-#{number}"
       agent: claude
-      message_template: file://scripts/tooling/poll-templates/issue-triage-spawn.md
+      message_template: file://scripts/tooling/tick-templates/issue-triage-spawn.md
 lock:
   path: "~/.cache/example-issue-poll.lock"
 working_directory: /path/to/repo
