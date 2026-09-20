@@ -1,4 +1,4 @@
-# hapi tick — declarative bare pollers
+# hapi poll — declarative bare pollers
 
 **Canon:** [scheduled-agent-tasks design](../plans/2026-09-18-scheduled-agent-tasks-design.md)
 
@@ -8,7 +8,7 @@ Standing rule: **no agent turns for mechanical polling.** Recurring judgment-fre
 
 | Lane | Mechanism | When |
 |------|-----------|------|
-| **Mechanical** | `hapi tick` → systemd timer → bare script | Diff / watermark / inbox / issue list — zero tokens on quiet ticks |
+| **Mechanical** | `hapi poll` → systemd timer → bare script | Diff / watermark / inbox / issue list — zero tokens on quiet ticks |
 | **Judgment (session)** | Claude `CronCreate` / `ScheduleWakeup` | Bounded mid-task one-shots inside a live session (~7d, dies with session) |
 | **Judgment (hub)** | HAPI `scheduledAt` user message | Wake this session with text at T |
 | **Not a scheduler** | `hapi job` / `session_job` | Progress meter only |
@@ -18,34 +18,34 @@ Do **not** replace `hapi-meta-daily` with a watch — that is judgment-gated PR 
 ## CLI
 
 ```bash
-hapi tick list
-hapi tick validate [name]
-hapi tick install <name> [--force] [--run-now] [--dry-run]
-hapi tick uninstall <name>
-hapi tick run <name>          # one-shot tick (flock + probe)
-hapi tick doctor [name]
-hapi tick templates
+hapi poll list
+hapi poll validate [name]
+hapi poll install <name> [--force] [--run-now] [--dry-run]
+hapi poll uninstall <name>
+hapi poll run <name>          # one-shot tick (flock + probe)
+hapi poll doctor [name]
+hapi poll templates
 ```
 
-`hapi tick` is intercepted by `hapi-from-active` (fork PATH). Equivalent: `hapi-tick` / `scripts/tooling/hapi-tick.sh`.
+`hapi poll` is intercepted by `hapi-from-active` (fork PATH). Equivalent: `hapi-poll` / `scripts/tooling/hapi-poll.sh`.
 
 ## Registry
 
-`config/ticks.yaml` — estate-specific paths live in **entries**, not in the tool.
+`config/polls.yaml` — estate-specific paths live in **entries**, not in the tool.
 
-v1 seeded watches:
+v1 seeded polls:
 
-| Name | Probe | Strategy | Action (in probe) |
+| Poll | Probe | Strategy | Action (in probe) |
 |------|-------|----------|-------------------|
 | `overseer-inbox` | `hapi-overseer-watch-tick.sh` | max-id | ntfy |
 | `producer-issue-poll` | lockhouse-janus `poll-producer-issues.sh` | seen-set | spawn-peer |
 
 ## Install / migrate
 
-1. `hapi tick validate overseer-inbox`
-2. `sudo hapi tick install overseer-inbox --run-now`  
-   Installs `hapi-tick-overseer-inbox.{service,timer}` **alongside** the legacy `hapi-overseer-watch.*` units (belt-and-braces). Both share the same watermark + flock path.
-3. `hapi tick doctor overseer-inbox` — expect HEALTHY; journal should show the existing tick script.
+1. `hapi poll validate overseer-inbox`
+2. `sudo hapi poll install overseer-inbox --run-now`  
+   Installs `hapi-poll-overseer-inbox.{service,timer}` **alongside** the legacy `hapi-overseer-watch.*` units (belt-and-braces). Both share the same watermark + flock path.
+3. `hapi poll doctor overseer-inbox` — expect HEALTHY; journal should show the existing tick script.
 4. After equivalence is proven, disable the legacy timer:
    `sudo bash scripts/tooling/install-hapi-overseer-watch-timer.sh --disable`
 
@@ -53,7 +53,7 @@ v1 is **per-host**. Registry `host:` is an install guard (`--force` to override)
 
 ## Watermark helpers
 
-`scripts/tooling/lib/hapi-tick-watermark.sh`:
+`scripts/tooling/lib/hapi-poll-watermark.sh`:
 
 - `max-id` — `{lastMaxId}` (overseer)
 - `seen-set` — one id per line (producer poll)
@@ -61,7 +61,7 @@ v1 is **per-host**. Registry `host:` is an install guard (`--force` to override)
 
 ## Templates
 
-`scripts/tooling/tick-templates/`:
+`scripts/tooling/poll-templates/`:
 
 - `inbox-ntfy.yaml`
 - `issue-spawn.yaml`

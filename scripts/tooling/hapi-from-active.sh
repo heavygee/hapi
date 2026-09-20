@@ -19,11 +19,11 @@ if [[ "${1:-}" == "hold-ack" ]]; then
     exec "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/hapi-hold-ack.sh" "$@"
 fi
 
-# Fork-only: `hapi tick` — declarative bare pollers (systemd + zero-token probes).
+# Fork-only: `hapi poll` — declarative bare pollers (systemd + zero-token probes).
 # Canon: docs/plans/2026-09-18-scheduled-agent-tasks-design.md
-if [[ "${1:-}" == "tick" ]]; then
+if [[ "${1:-}" == "poll" ]]; then
     shift
-    exec "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/hapi-tick.sh" "$@"
+    exec "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/hapi-poll.sh" "$@"
 fi
 
 BUN="${BUN:-$HOME/.bun/bin/bun}"
