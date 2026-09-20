@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactElement } from 'react'
 import type { ApiClient } from '@/api/client'
 import type { Machine, PiModelSummary } from '@/types/api'
+import { queryKeys } from '@/lib/query-keys'
 import { saveNewSessionFormDraft } from './newSessionFormDraft'
 import {
     loadPreferredLaunchSettings,
@@ -292,9 +293,11 @@ const api = {
     getHubSettings: vi.fn().mockResolvedValue({
         sessionSummaryContract: false,
         sessionSummaryInChat: false,
+        // Neutral defaults so launch-preference tests control New Session via UI /
+        // sticky localStorage (bypassPermissions here would seed YOLO and skew asserts).
         peerSpawnDefaults: {
             agent: 'claude',
-            permissionMode: 'bypassPermissions',
+            permissionMode: 'default',
             models: { claude: 'sonnet' }
         }
     })
@@ -302,6 +305,17 @@ const api = {
 
 function renderWithQuery(ui: ReactElement) {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    // Pre-seed hub settings so useQuery is warm on first paint — a late resolve
+    // re-runs the preferred-launch effect and can wipe an in-test model pick.
+    client.setQueryData(queryKeys.hubSettings, {
+        sessionSummaryContract: false,
+        sessionSummaryInChat: false,
+        peerSpawnDefaults: {
+            agent: 'claude',
+            permissionMode: 'default',
+            models: { claude: 'sonnet' }
+        }
+    })
     const wrap = (node: ReactElement) => (
         <QueryClientProvider client={client}>{node}</QueryClientProvider>
     )
@@ -732,7 +746,7 @@ describe('NewSession launch preferences', () => {
         // change while the form is open. A model the user chose is theirs to
         // keep — unlike a restored one, which the two tests above drop.
         savePreferredAgent('agy')
-        const view = render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        const view = renderWithQuery(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
 
         fireEvent.click(screen.getByTestId('agy-model'))
         await waitFor(() => expect(screen.getByTestId('agy-model')).toHaveTextContent('gemini-3.6-flash-low'))
@@ -776,7 +790,7 @@ describe('NewSession launch preferences', () => {
     it('lets Claude create with a chosen permission mode instead of the global YOLO toggle', async () => {
         savePreferredAgent('claude')
         mocks.spawnSession.mockResolvedValue({ type: 'success', sessionId: 'claude-session' })
-        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        renderWithQuery(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
 
         fireEvent.click(screen.getByTestId('permission-mode-plan'))
         fireEvent.click(screen.getByTestId('create'))
@@ -792,7 +806,7 @@ describe('NewSession launch preferences', () => {
     it('does not carry a permission mode picked under another flavor into the Claude spawn payload', async () => {
         savePreferredAgent('codex')
         mocks.spawnSession.mockResolvedValue({ type: 'success', sessionId: 'claude-session' })
-        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        renderWithQuery(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
 
         // Starts as codex; picking the mocked native-select button sets the
         // shared nativePermissionMode state to 'yolo', a value 'claude' does
@@ -814,7 +828,7 @@ describe('NewSession launch preferences', () => {
         savePreferredAgent('claude')
         savePreferredYoloMode(true)
 
-        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        renderWithQuery(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
 
         await waitFor(() => {
             expect(screen.getByTestId('permission-mode')).toHaveTextContent('bypassPermissions')
@@ -829,7 +843,7 @@ describe('NewSession launch preferences', () => {
         savePreferredAgent('cursor')
         savePreferredYoloMode(true)
 
-        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        renderWithQuery(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
 
         await waitFor(() => expect(screen.getByDisplayValue('cursor')).toBeChecked())
         fireEvent.click(screen.getByDisplayValue('claude'))
@@ -857,7 +871,7 @@ describe('NewSession launch preferences', () => {
     it('uses the probed current model variants for an explicit OpenCode Default selection', async () => {
         savePreferredAgent('opencode')
         mocks.opencodeVariants = { 'provider/current': ['low', 'high'] }
-        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        renderWithQuery(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
 
         fireEvent.click(screen.getByTestId('opencode-model-default'))
         await waitFor(() => expect(screen.getByTestId('opencode-variants')).toHaveTextContent('low,high'))
@@ -867,7 +881,7 @@ describe('NewSession launch preferences', () => {
     it('waits for OpenCode variants before launching a non-default effort', async () => {
         savePreferredAgent('opencode')
         mocks.opencodeVariantsLoading = true
-        const view = render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        const view = renderWithQuery(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
 
         fireEvent.click(screen.getByTestId('reasoning'))
         expect(screen.getByTestId('create')).toBeDisabled()
@@ -881,7 +895,7 @@ describe('NewSession launch preferences', () => {
     it('does not probe OpenCode variants until the working directory is verified', () => {
         savePreferredAgent('opencode')
         mocks.directoryExists = undefined
-        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        renderWithQuery(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
 
         expect(mocks.opencodeVariantsEnabled).toBe(false)
     })
