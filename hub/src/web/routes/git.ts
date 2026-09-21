@@ -38,11 +38,14 @@ function parseBooleanParam(value: string | undefined): boolean | undefined {
     return undefined
 }
 
-async function runRpc<T>(fn: () => Promise<T>): Promise<T | { success: false; error: string }> {
+async function runRpc<T>(
+    fn: () => Promise<T>,
+    options?: { rethrowTargetMissing?: boolean }
+): Promise<T | { success: false; error: string }> {
     try {
         return await fn()
     } catch (error) {
-        if (error instanceof RpcTargetMissingError) {
+        if (options?.rethrowTargetMissing && error instanceof RpcTargetMissingError) {
             throw error
         }
         return { success: false, error: error instanceof Error ? error.message : String(error) }
@@ -143,7 +146,7 @@ export function createGitRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
                 cwd: sessionPath,
                 filePath: parsed.data.path,
                 staged
-            }))
+            }), { rethrowTargetMissing: true })
             return c.json(result)
         } catch (error) {
             if (error instanceof RpcTargetMissingError) {
@@ -175,7 +178,10 @@ export function createGitRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
         }
 
         try {
-            const result = await runRpc(() => engine.readSessionFile(sessionResult.sessionId, parsed.data.path))
+            const result = await runRpc(
+                () => engine.readSessionFile(sessionResult.sessionId, parsed.data.path),
+                { rethrowTargetMissing: true }
+            )
             return c.json(result)
         } catch (error) {
             if (error instanceof RpcTargetMissingError) {

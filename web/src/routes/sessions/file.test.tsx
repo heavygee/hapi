@@ -10,9 +10,16 @@ import FilePage from './file'
 
 const goBackMock = vi.fn()
 const copyMock = vi.hoisted(() => vi.fn())
+const navigateMock = vi.hoisted(() => vi.fn())
 const reopenSessionMock = vi.hoisted(() => vi.fn())
 const readSessionFileMock = vi.hoisted(() => vi.fn())
 const getGitDiffFileMock = vi.hoisted(() => vi.fn())
+const cursorStatusMock = vi.hoisted(() => ({
+    status: { onDisk: true as boolean | undefined },
+    isApplicable: true,
+    error: null as string | null,
+    isLoading: false,
+}))
 
 const sampleMarkdown = '# Heading\n\n| Col A | Col B |\n| --- | --- |\n| one | two |'
 const filePath = 'docs/README.md'
@@ -23,6 +30,7 @@ const fileModified = 1_784_175_060_000
 
 vi.mock('@tanstack/react-router', () => ({
     useParams: () => ({ sessionId: 'session-1' }),
+    useNavigate: () => navigateMock,
     useSearch: () => ({
         path: encodedPath,
         staged: undefined,
@@ -48,11 +56,7 @@ vi.mock('@/hooks/queries/useSession', () => ({
 }))
 
 vi.mock('@/hooks/queries/useCursorChatStoreStatus', () => ({
-    useCursorChatStoreStatus: () => ({
-        status: { onDisk: true },
-        error: null,
-        isLoading: false,
-    }),
+    useCursorChatStoreStatus: () => cursorStatusMock,
 }))
 
 vi.mock('@/hooks/mutations/useSessionActions', () => ({
@@ -121,6 +125,10 @@ describe('FilePage markdown preview', () => {
             modified: fileModified,
         })
         reopenSessionMock.mockResolvedValue({ ok: true, sessionId: 'session-1', resumed: true })
+        cursorStatusMock.status = { onDisk: true }
+        cursorStatusMock.isApplicable = true
+        cursorStatusMock.error = null
+        cursorStatusMock.isLoading = false
     })
 
     it('renders markdown preview by default and toggles to source', async () => {
@@ -157,6 +165,32 @@ describe('FilePage markdown preview', () => {
         })
     })
 
+    it('uses the shared code-wrap preference for the source preview', async () => {
+        window.localStorage.setItem('hapi-code-wrap', '1')
+        renderWithProviders()
+
+        await waitFor(() => {
+            expect(screen.getByTestId('markdown-preview')).toBeInTheDocument()
+        })
+        fireEvent.click(screen.getByRole('button', { name: 'Source' }))
+
+        await waitFor(() => {
+            expect(screen.getByRole('code')).toHaveTextContent('# Heading')
+        })
+        const sourceCode = screen.getByRole('code')
+        const sourcePre = sourceCode.closest('pre')
+        const wrapToggle = screen.getByRole('button', { pressed: true })
+
+        expect(wrapToggle).toBeInTheDocument()
+        expect(sourcePre).toHaveStyle({ whiteSpace: 'pre-wrap', wordBreak: 'break-word' })
+
+        fireEvent.click(wrapToggle)
+
+        expect(screen.getByRole('button', { pressed: false })).toBeInTheDocument()
+        expect(sourcePre).toHaveStyle({ whiteSpace: 'pre' })
+        expect(window.localStorage.getItem('hapi-code-wrap')).toBeNull()
+    })
+
     it('preserves the file preview scroll position across route remounts', async () => {
         const firstRender = renderWithProviders()
 
@@ -191,6 +225,10 @@ describe('FilePage offline session', () => {
         getGitDiffFileMock.mockRejectedValue(rpcError)
         readSessionFileMock.mockRejectedValue(rpcError)
         reopenSessionMock.mockResolvedValue({ ok: true, sessionId: 'session-1', resumed: true })
+        cursorStatusMock.status = { onDisk: true }
+        cursorStatusMock.isApplicable = true
+        cursorStatusMock.error = null
+        cursorStatusMock.isLoading = false
     })
 
     it('shows friendly offline copy and reopen affordance instead of raw RPC errors', async () => {
@@ -224,5 +262,34 @@ describe('FilePage offline session', () => {
             expect(reopenSessionMock).toHaveBeenCalled()
             expect(readSessionFileMock).toHaveBeenCalledTimes(2)
         })
+    })
+
+    it('navigates to the replacement session when reopen returns a new id', async () => {
+        reopenSessionMock.mockResolvedValue({ ok: true, sessionId: 'session-2', resumed: true })
+        renderWithProviders()
+
+        await waitFor(() => {
+            expect(screen.getByRole('button', { name: 'Reopen session' })).toBeInTheDocument()
+        })
+        fireEvent.click(screen.getByRole('button', { name: 'Reopen session' }))
+
+        await waitFor(() => {
+            expect(navigateMock).toHaveBeenCalledWith(expect.objectContaining({
+                to: '/sessions/$sessionId/file',
+                params: { sessionId: 'session-2' },
+                replace: true,
+            }))
+        })
+    })
+
+    it('does not show the Cursor checking state when the probe is not applicable', async () => {
+        cursorStatusMock.isApplicable = false
+        cursorStatusMock.status = { onDisk: undefined }
+        renderWithProviders()
+
+        await waitFor(() => {
+            expect(screen.getByRole('button', { name: 'Reopen session' })).toBeInTheDocument()
+        })
+        expect(screen.queryByText(/Checking whether Cursor chat data/i)).toBeNull()
     })
 })

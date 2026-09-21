@@ -346,4 +346,21 @@ describe('session file routes', () => {
             code: 'rpc_target_missing'
         })
     })
+
+    it('keeps the 200 envelope for other git routes when the RPC target is missing', async () => {
+        const engine = {
+            resolveSessionAccess: () => ({ ok: true as const, sessionId: 'session-1', session }),
+            getGitStatus: async () => {
+                throw new RpcTargetMissingError('git-status', 'handler-not-registered')
+            }
+        } as unknown as Partial<SyncEngine>
+
+        const response = await buildApp(engine).request('/api/sessions/session-1/git-status')
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({
+            success: false,
+            error: 'RPC handler not registered: git-status'
+        })
+    })
 })

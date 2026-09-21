@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useParams, useSearch } from '@tanstack/react-router'
+import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import type { GitCommandResponse } from '@/types/api'
 import { FileIcon } from '@/components/FileIcon'
-import { CopyIcon, CheckIcon } from '@/components/icons'
+import { CopyIcon, CheckIcon, WrapIcon } from '@/components/icons'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useAppContext } from '@/lib/app-context'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
@@ -26,10 +26,12 @@ import {
     type MarkdownPreviewMode,
 } from '@/lib/file-markdown-preview'
 import { downloadBase64File } from '@/lib/file-download'
+import { useCodeWrap } from '@/hooks/useCodeWrap'
 import { catchRpcTargetMissing, hasRpcTargetMissingResponse } from '@/lib/rpc-target-missing'
 import { formatReopenError } from '@/lib/reopenError'
 import { inactiveSessionCanResume, resolveCursorReopenGate } from '@/lib/sessionResume'
 import { retargetSharePendingTransfer } from '@/lib/sharePendingState'
+import { PRESERVE_SESSION_SIDEBAR_SCROLL } from '@/lib/sessionNavigation'
 
 const MAX_COPYABLE_FILE_BYTES = 1_000_000
 const FILE_SCROLL_KEY_PREFIX = 'hapi-file-scroll-'
@@ -152,8 +154,17 @@ function FileContentHeader(props: {
     label: string
     copied: boolean
     copyLabel: string
-    onCopy: () => void
+    onCopy?: () => void
+    codeWrap?: boolean
+    wrapEnableLabel?: string
+    wrapDisableLabel?: string
+    onToggleWrap?: () => void
 }) {
+    const showWrapToggle = props.onToggleWrap !== undefined
+        && props.wrapEnableLabel !== undefined
+        && props.wrapDisableLabel !== undefined
+    const wrapLabel = props.codeWrap ? props.wrapDisableLabel : props.wrapEnableLabel
+
     return (
         <div
             data-hapi-file-content-header="true"
@@ -162,15 +173,34 @@ function FileContentHeader(props: {
             <div className="min-w-0 flex-1 truncate font-mono text-[11px] uppercase tracking-[0.08em] text-[var(--app-code-header-fg)]">
                 {props.label}
             </div>
-            <button
-                type="button"
-                onClick={props.onCopy}
-                className="shrink-0 rounded-md p-1 text-[var(--app-code-header-fg)] transition-colors hover:bg-[var(--app-code-copy-hover-bg)] hover:text-[var(--app-fg)]"
-                title={props.copyLabel}
-                aria-label={props.copyLabel}
-            >
-                {props.copied ? <CheckIcon className="h-3.5 w-3.5" /> : <CopyIcon className="h-3.5 w-3.5" />}
-            </button>
+            <div className="flex shrink-0 items-center gap-1">
+                {showWrapToggle ? (
+                    <button
+                        type="button"
+                        data-hapi-code-wrap-toggle="true"
+                        data-hapi-wrap-enable-label={props.wrapEnableLabel}
+                        data-hapi-wrap-disable-label={props.wrapDisableLabel}
+                        onClick={props.onToggleWrap}
+                        className={`rounded-md p-1 transition-colors hover:bg-[var(--app-code-copy-hover-bg)] hover:text-[var(--app-fg)] ${props.codeWrap ? 'text-[var(--app-fg)]' : 'text-[var(--app-code-header-fg)]'}`}
+                        title={wrapLabel}
+                        aria-label={wrapLabel}
+                        aria-pressed={props.codeWrap}
+                    >
+                        <WrapIcon className="h-3.5 w-3.5" />
+                    </button>
+                ) : null}
+                {props.onCopy ? (
+                    <button
+                        type="button"
+                        onClick={props.onCopy}
+                        className="rounded-md p-1 text-[var(--app-code-header-fg)] transition-colors hover:bg-[var(--app-code-copy-hover-bg)] hover:text-[var(--app-fg)]"
+                        title={props.copyLabel}
+                        aria-label={props.copyLabel}
+                    >
+                        {props.copied ? <CheckIcon className="h-3.5 w-3.5" /> : <CopyIcon className="h-3.5 w-3.5" />}
+                    </button>
+                ) : null}
+            </div>
         </div>
     )
 }
@@ -218,6 +248,7 @@ export default function FilePage() {
     const { copied: pathCopied, copy: copyPath } = useCopyToClipboard()
     const { copied: contentCopied, copy: copyContent } = useCopyToClipboard()
     const goBack = useAppGoBack()
+    const navigate = useNavigate()
     const { sessionId } = useParams({ from: '/sessions/$sessionId/file' })
     const search = useSearch({ from: '/sessions/$sessionId/file' })
     const encodedPath = typeof search.path === 'string' ? search.path : ''
@@ -259,11 +290,12 @@ export default function FilePage() {
 
     const {
         status: cursorChatStoreStatus,
+        isApplicable: cursorChatStoreApplicable,
         error: cursorChatStoreError,
         isLoading: cursorChatStoreLoading,
     } = useCursorChatStoreStatus({ api, session })
     const cursorReopenGate = resolveCursorReopenGate({
-        applicable: session?.metadata?.flavor === 'cursor',
+        applicable: cursorChatStoreApplicable,
         onDisk: cursorChatStoreStatus?.onDisk,
         error: cursorChatStoreError,
         isLoading: cursorChatStoreLoading,
@@ -292,12 +324,26 @@ export default function FilePage() {
             const result = await reopenSession()
             if (result.sessionId && result.sessionId !== sessionId) {
                 retargetSharePendingTransfer(sessionId, result.sessionId)
+                await navigate({
+                    to: '/sessions/$sessionId/file',
+                    params: { sessionId: result.sessionId },
+                    search: {
+                        path: encodedPath,
+                        ...(staged !== undefined ? { staged } : {}),
+                        ...(search.tab ? { tab: search.tab } : {}),
+                        ...(search.query ? { query: search.query } : {}),
+                        ...(search.origin ? { origin: search.origin } : {}),
+                    },
+                    replace: true,
+                    ...PRESERVE_SESSION_SIDEBAR_SCROLL,
+                })
+                return
             }
             await invalidateFileQueries()
         } catch (error) {
             setReopenError(formatReopenError(error))
         }
-    }, [canReopen, invalidateFileQueries, reopenDisabledReason, reopenSession, sessionId])
+    }, [canReopen, encodedPath, invalidateFileQueries, navigate, reopenDisabledReason, reopenSession, search.origin, search.query, search.tab, sessionId, staged])
 
     const prevSessionActiveRef = useRef(session?.active)
     useEffect(() => {
@@ -345,6 +391,7 @@ export default function FilePage() {
     const canDownload = fileContentResult?.success === true && Boolean(fileContentResult.content)
 
     const [displayMode, setDisplayMode] = useState<'diff' | 'file'>('diff')
+    const { codeWrap, setCodeWrap } = useCodeWrap()
     const fileScrollRef = useRef<HTMLDivElement>(null)
     const restoredScrollKeyRef = useRef<string | null>(null)
     const fileScrollKey = useMemo(
@@ -577,15 +624,23 @@ export default function FilePage() {
                                         data-hapi-file-source-preview="true"
                                         className="min-w-0 max-w-full overflow-hidden rounded-md bg-[var(--app-code-bg)]"
                                     >
-                                        {canCopyContent ? (
-                                            <FileContentHeader
-                                                label={language ?? 'text'}
-                                                copied={contentCopied}
-                                                copyLabel={t('file.page.copyContent')}
-                                                onCopy={() => copyContent(decodedContent)}
-                                            />
-                                        ) : null}
-                                        <pre className="shiki m-0 overflow-auto bg-[var(--app-code-bg)] p-3 text-xs font-mono">
+                                        <FileContentHeader
+                                            label={language ?? 'text'}
+                                            copied={contentCopied}
+                                            copyLabel={t('file.page.copyContent')}
+                                            onCopy={canCopyContent ? () => copyContent(decodedContent) : undefined}
+                                            codeWrap={codeWrap}
+                                            wrapEnableLabel={t('code.wrap.enable')}
+                                            wrapDisableLabel={t('code.wrap.disable')}
+                                            onToggleWrap={() => setCodeWrap(!codeWrap)}
+                                        />
+                                        <pre
+                                            className={`shiki m-0 overflow-y-auto bg-[var(--app-code-bg)] p-3 text-xs font-mono ${codeWrap ? 'overflow-x-hidden' : 'overflow-x-auto'}`}
+                                            style={{
+                                                whiteSpace: codeWrap ? 'pre-wrap' : 'pre',
+                                                ...(codeWrap ? { wordBreak: 'break-word' as const } : {})
+                                            }}
+                                        >
                                             <code>{highlighted ?? decodedContent}</code>
                                         </pre>
                                     </div>
