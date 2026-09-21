@@ -70,8 +70,17 @@ resolve_tick_user() {
     printf '%s\n' "$u"
 }
 
-# Escape $ and % for systemd unit values (ConditionPathExists, etc.).
-systemd_escape_path() {
+# Escape % for systemd path condition values (ConditionPathExists, etc.).
+# Do NOT double $ here — that escaping is Exec*-only; $$ in a condition does
+# not match a literal $ in the filesystem path (verified via systemd-analyze).
+systemd_escape_condition_path() {
+    local s="$1"
+    s="${s//%/%%}"
+    printf '%s' "$s"
+}
+
+# Escape $ and % for systemd Exec* arguments.
+systemd_escape_exec_path() {
     local s="$1"
     s="${s//\$/\$\$}"
     s="${s//%/%%}"
@@ -82,30 +91,56 @@ systemd_escape_path() {
 # systemd unit-file escapes: $$ for literal $, %% for literal % (not shell \$).
 systemd_quote_arg() {
     local s
-    s="$(systemd_escape_path "$1")"
+    s="$(systemd_escape_exec_path "$1")"
     s="${s//\\/\\\\}"
     s="${s//\"/\\\"}"
     printf '"%s"' "$s"
+}
+
+# True when the current process identity matches the configured tick user.
+# Compare by UID so numeric User= values (e.g. 1000) match id -u.
+same_tick_user() {
+    local user="$1"
+    local me_uid user_uid
+    me_uid="$(id -u)"
+    user_uid="$(id -u "$user" 2>/dev/null)" || return 1
+    [[ "$me_uid" -eq "$user_uid" ]]
+}
+
+# Cache sudo credentials for $user when validate must run cross-user checks.
+# Distinguishes "need a password prompt" from later permission failures.
+ensure_as_user_sudo() {
+    local user="$1"
+    if same_tick_user "$user" || [[ "$(id -u)" -eq 0 ]]; then
+        return 0
+    fi
+    if sudo -n -u "$user" -H -- true >/dev/null 2>&1; then
+        return 0
+    fi
+    err "sudo required to validate as service user '$user'…"
+    sudo -u "$user" -H -- true \
+        || die "cannot sudo as user '$user' (needed to validate tick permissions)"
 }
 
 # Run test(1) as the service user (matches generated User=).
 as_user_test() {
     local user="$1"
     shift
-    if [[ "$(id -un)" == "$user" ]]; then
+    if same_tick_user "$user"; then
         test "$@"
     else
         sudo -n -u "$user" -H -- test "$@"
     fi
 }
 
-# True if $user can create $dir (nearest existing ancestor must be writable).
+# True if $user can create $dir (nearest existing ancestor must be writable
+# and searchable — mkdir needs traverse/execute on the parent).
 as_user_can_mkdir() {
     local user="$1" dir="$2" cur="$2"
     while [[ "$cur" != "/" && ! -d "$cur" ]]; do
         cur="$(dirname "$cur")"
     done
-    as_user_test "$user" -w "$cur"
+    as_user_test "$user" -w "$cur" && as_user_test "$user" -x "$cur"
 }
 
 # Safe unit/file identifier: letters, digits, underscore, hyphen; no /, @, dots.
@@ -277,6 +312,9 @@ validate_one() {
     assert_tick_name "$name"
     json="$(registry_json "$name")"
     user="$(resolve_tick_user "$json")"
+    # Elevate (interactive once) before cross-user -n checks so a missing
+    # sudo cache is not misreported as an inaccessible probe/state/workdir.
+    ensure_as_user_sudo "$user"
     script="$(tick_field "$json" '.probe.script')"
     strategy="$(tick_field "$json" '.state.strategy')"
     local raw_state_path
@@ -460,11 +498,11 @@ generate_units() {
         echo "Documentation=file://$doc_registry"
         echo "After=network-online.target"
         echo "Wants=network-online.target"
-        echo "ConditionPathExists=$(systemd_escape_path "$script")"
+        echo "ConditionPathExists=$(systemd_escape_condition_path "$script")"
         local cond
         while IFS= read -r cond; do
             [[ -n "$cond" && "$cond" != null ]] || continue
-            echo "ConditionPathExists=$(systemd_escape_path "$cond")"
+            echo "ConditionPathExists=$(systemd_escape_condition_path "$cond")"
         done < <(printf '%s' "$json" | jq -r '.conditions[]? // empty')
 
         echo
@@ -610,18 +648,22 @@ cmd_run() {
     local name="${1:-}"
     [[ -n "$name" ]] || die "usage: hapi tick run <name>"
     validate_one "$name" >/dev/null
-    local json script lock workdir user me home_dir state_path unit_path
+    local json script lock workdir user home_dir state_path unit_path bun_exe
     json="$(registry_json "$name")"
     script="$(tick_field "$json" '.probe.script')"
     user="$(resolve_tick_user "$json")"
     home_dir="$(getent passwd "$user" | cut -d: -f6)"
     [[ -n "$home_dir" ]] || die "no home directory for user '$user'"
     unit_path="$home_dir/.local/bin:/usr/local/bin:/usr/bin:/bin"
-    me="$(id -un)"
+    # Resolve Bun from the caller's PATH before the clean-env re-exec so
+    # mise/asdf installs survive the fixed unit PATH.
+    bun_exe=""
+    bun_exe="$(resolve_bun)" || bun_exe="${BUN:-}"
     # Match the installed service: drop to registry user with a clean env
-    # (do not preserve caller secrets/PATH via sudo -E).
-    if [[ "$me" != "$user" ]]; then
-        err "re-executing as user '$user' (caller was '$me')…"
+    # (do not preserve caller secrets/PATH via sudo -E). Compare by UID so
+    # numeric .user values do not re-exec forever.
+    if ! same_tick_user "$user"; then
+        err "re-executing as user '$user' (caller was '$(id -un)' uid=$(id -u))…"
         local -a reexec_env=(
             "HOME=$home_dir"
             "USER=$user"
@@ -631,7 +673,7 @@ cmd_run() {
         [[ -n "${HAPI_TICKS_YAML:-}" ]] && reexec_env+=("HAPI_TICKS_YAML=$HAPI_TICKS_YAML")
         [[ -n "${HAPI_MIRROR_ROOT:-}" ]] && reexec_env+=("HAPI_MIRROR_ROOT=$HAPI_MIRROR_ROOT")
         [[ -n "${HAPI_ACTIVE_LINK:-}" ]] && reexec_env+=("HAPI_ACTIVE_LINK=$HAPI_ACTIVE_LINK")
-        [[ -n "${BUN:-}" ]] && reexec_env+=("BUN=$BUN")
+        [[ -n "$bun_exe" ]] && reexec_env+=("BUN=$bun_exe")
         exec sudo -u "$user" -H -- env -i "${reexec_env[@]}" "$(readlink -f "$0")" run "$name"
     fi
 

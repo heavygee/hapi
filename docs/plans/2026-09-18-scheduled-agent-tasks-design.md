@@ -144,7 +144,8 @@ on_change:
       agent: claude
       message_template: file://templates/issue-triage-spawn.md
   - ntfy: { topic: hapi-overseer, priority: 4 }   # optional human lane
-lock: flock                        # optional; path derived from name
+# lock omitted → path derived from name (~/.local/state/hapi/tick-<name>.lock)
+# explicit: lock: { path: ~/.local/state/hapi/tick-producer-issue-poll.lock }
 # until: { expr: "no_new_items_for 24h" }          # v1.5 middle case
 ```
 
