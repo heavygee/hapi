@@ -16,8 +16,8 @@ Environment=HOME=/home/heavygee
 Environment=USER=heavygee
 Environment=PATH=/home/heavygee/.local/bin:/usr/local/bin:/usr/bin:/bin
 WorkingDirectory=/work/coding/lockhouse-janus
-ExecStartPre=/usr/bin/mkdir -p /home/heavygee/.cache /home/heavygee/.cache
-ExecStart=/usr/bin/flock -w 60 /home/heavygee/.cache/producer-issue-poll.lock /work/coding/lockhouse-janus/scripts/poll-producer-issues.sh
+ExecStartPre=/usr/bin/mkdir -p "/home/heavygee/.cache" "/home/heavygee/.cache"
+ExecStart=/usr/bin/flock -w 60 "/home/heavygee/.cache/producer-issue-poll.lock" "/work/coding/lockhouse-janus/scripts/poll-producer-issues.sh"
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=hapi-tick-producer-issue-poll

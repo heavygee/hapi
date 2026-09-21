@@ -70,13 +70,42 @@ resolve_tick_user() {
     printf '%s\n' "$u"
 }
 
-# Quote a single systemd Exec* argument (paths may contain whitespace).
-systemd_quote_arg() {
+# Escape $ and % for systemd unit values (ConditionPathExists, etc.).
+systemd_escape_path() {
     local s="$1"
+    s="${s//\$/\$\$}"
+    s="${s//%/%%}"
+    printf '%s' "$s"
+}
+
+# Quote a single systemd Exec* argument (paths may contain whitespace).
+# systemd unit-file escapes: $$ for literal $, %% for literal % (not shell \$).
+systemd_quote_arg() {
+    local s
+    s="$(systemd_escape_path "$1")"
     s="${s//\\/\\\\}"
     s="${s//\"/\\\"}"
-    s="${s//\$/\\\$}"
     printf '"%s"' "$s"
+}
+
+# Run test(1) as the service user (matches generated User=).
+as_user_test() {
+    local user="$1"
+    shift
+    if [[ "$(id -un)" == "$user" ]]; then
+        test "$@"
+    else
+        sudo -n -u "$user" -H -- test "$@"
+    fi
+}
+
+# True if $user can create $dir (nearest existing ancestor must be writable).
+as_user_can_mkdir() {
+    local user="$1" dir="$2" cur="$2"
+    while [[ "$cur" != "/" && ! -d "$cur" ]]; do
+        cur="$(dirname "$cur")"
+    done
+    as_user_test "$user" -w "$cur"
 }
 
 # Safe unit/file identifier: letters, digits, underscore, hyphen; no /, @, dots.
@@ -86,6 +115,39 @@ assert_tick_name() {
     if [[ ! "$name" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]]; then
         die "invalid tick name '$name' (use [A-Za-z0-9_-], start with alphanumeric; no / or @)"
     fi
+}
+
+# Emit KEY=value lines for registry .env (JSON-safe; rejects tab/newline values).
+# Prints nothing if env empty. Dies on control characters in values.
+registry_env_assignments() {
+    local json="$1" name="${2:-tick}"
+    if printf '%s' "$json" | jq -e '
+        (.env // {}) | to_entries[]
+        | select((.value | tostring) | test("[\t\n\r]"))
+    ' >/dev/null 2>&1; then
+        die "$name: env values must not contain tab/newline (use a file path instead)"
+    fi
+    printf '%s' "$json" | jq -r '
+        (.env // {}) | to_entries[]
+        | "\(.key)=\(.value | tostring)"
+    '
+}
+
+# Resolve bun executable: BUN override, then PATH, then ~/.bun/bin.
+resolve_bun() {
+    if [[ -n "${BUN:-}" && -x "$BUN" ]]; then
+        printf '%s\n' "$BUN"
+        return 0
+    fi
+    if command -v bun >/dev/null 2>&1; then
+        command -v bun
+        return 0
+    fi
+    if [[ -x "${HOME}/.bun/bin/bun" ]]; then
+        printf '%s\n' "${HOME}/.bun/bin/bun"
+        return 0
+    fi
+    return 1
 }
 
 hostname_short() {
@@ -119,14 +181,15 @@ else:
 PY
         return
     fi
-    local bun="${BUN:-$HOME/.bun/bin/bun}"
+    local bun
+    bun="$(resolve_bun)" || bun=""
     local root_mods="$REPO_ROOT/node_modules/yaml"
     local active_link="${HAPI_ACTIVE_LINK:-$HOME/coding/hapi/active}"
     local active_root=""
     if [[ -L "$active_link" || -d "$active_link" ]]; then
         active_root="$(readlink -f "$active_link")"
     fi
-    if [[ -x "$bun" ]] && { [[ -d "$root_mods" ]] || [[ -d "$active_root/node_modules/yaml" ]]; }; then
+    if [[ -n "$bun" && -x "$bun" ]] && { [[ -d "$root_mods" ]] || [[ -d "$active_root/node_modules/yaml" ]]; }; then
         local cwd="$REPO_ROOT"
         [[ -d "$root_mods" ]] || cwd="$active_root"
         (
@@ -230,45 +293,52 @@ validate_one() {
     if [[ ! -f "$script" ]]; then
         die "$name: probe script not found: $script"
     fi
-    if [[ ! -x "$script" ]]; then
-        die "$name: probe script not executable: $script"
+    if ! as_user_test "$user" -x "$script"; then
+        die "$name: probe script not executable by user '$user': $script"
     fi
-    local parent
-    parent="$(dirname "$state_path")"
-    if [[ ! -d "$parent" ]]; then
-        err "$name: WARN state parent missing (will create on run): $parent"
-        warnings=$((warnings + 1))
-    else
-        # Writability must match the service account, not the validating caller.
-        local writable=0
-        if [[ "$(id -un)" == "$user" ]]; then
-            [[ -w "$parent" ]] && writable=1
-        elif sudo -n -u "$user" -H -- test -w "$parent" 2>/dev/null; then
-            writable=1
+
+    local home_dir workdir lock state_parent lock_parent
+    home_dir="$(getent passwd "$user" | cut -d: -f6)"
+    [[ -n "$home_dir" ]] || die "$name: no home directory for user '$user'"
+    lock="$(expand_user_path "$(tick_field "$json" '.lock.path' "")" "$user")"
+    if [[ -z "$lock" ]]; then
+        lock="$home_dir/.local/state/hapi/tick-${name}.lock"
+    fi
+    state_parent="$(dirname "$state_path")"
+    lock_parent="$(dirname "$lock")"
+    if [[ -d "$state_parent" ]]; then
+        if ! as_user_test "$user" -w "$state_parent"; then
+            die "$name: state parent not writable by user '$user': $state_parent"
         fi
-        if [[ "$writable" -ne 1 ]]; then
-            die "$name: state parent not writable by user '$user': $parent"
+    else
+        if ! as_user_can_mkdir "$user" "$state_parent"; then
+            die "$name: user '$user' cannot create state parent: $state_parent"
+        fi
+        err "$name: WARN state parent missing (will create on run): $state_parent"
+        warnings=$((warnings + 1))
+    fi
+    if [[ -d "$lock_parent" ]]; then
+        if ! as_user_test "$user" -w "$lock_parent"; then
+            die "$name: lock parent not writable by user '$user': $lock_parent"
+        fi
+    else
+        if ! as_user_can_mkdir "$user" "$lock_parent"; then
+            die "$name: user '$user' cannot create lock parent: $lock_parent"
         fi
     fi
 
     # working_directory must exist and be usable by the service user (matches unit).
-    local home_dir workdir
-    home_dir="$(getent passwd "$user" | cut -d: -f6)"
-    [[ -n "$home_dir" ]] || die "$name: no home directory for user '$user'"
     workdir="$(tick_field "$json" '.working_directory' "$home_dir")"
     [[ -n "$workdir" && "$workdir" != null ]] || workdir="$home_dir"
     if [[ ! -d "$workdir" ]]; then
         die "$name: working_directory not found: $workdir"
     fi
-    local workdir_ok=0
-    if [[ "$(id -un)" == "$user" ]]; then
-        [[ -x "$workdir" ]] && workdir_ok=1
-    elif sudo -n -u "$user" -H -- test -x "$workdir" 2>/dev/null; then
-        workdir_ok=1
-    fi
-    if [[ "$workdir_ok" -ne 1 ]]; then
+    if ! as_user_test "$user" -x "$workdir"; then
         die "$name: working_directory not accessible by user '$user': $workdir"
     fi
+
+    # Reject env values that would corrupt TSV/assignment serialization.
+    registry_env_assignments "$json" "$name" >/dev/null
 
     # Token-cost lint: flag agent CLIs and HAPI wake commands in the probe path.
     local on_len
@@ -386,11 +456,11 @@ generate_units() {
         echo "Documentation=file://$doc_registry"
         echo "After=network-online.target"
         echo "Wants=network-online.target"
-        echo "ConditionPathExists=$script"
+        echo "ConditionPathExists=$(systemd_escape_path "$script")"
         local cond
         while IFS= read -r cond; do
             [[ -n "$cond" && "$cond" != null ]] || continue
-            echo "ConditionPathExists=$cond"
+            echo "ConditionPathExists=$(systemd_escape_path "$cond")"
         done < <(printf '%s' "$json" | jq -r '.conditions[]? // empty')
 
         echo
@@ -402,15 +472,16 @@ generate_units() {
         echo "Environment=HOME=$home_dir"
         echo "Environment=USER=$user"
         echo "Environment=PATH=$home_dir/.local/bin:/usr/local/bin:/usr/bin:/bin"
-        local key val
-        while IFS=$'\t' read -r key val; do
-            [[ -n "$key" ]] || continue
+        local assignment key val
+        while IFS= read -r assignment; do
+            [[ -n "$assignment" ]] || continue
+            key="${assignment%%=*}"
+            val="${assignment#*=}"
             # Quote full KEY=value so whitespace survives systemd parsing.
-            # Escape backslash and double-quote inside the value.
             val="${val//\\/\\\\}"
             val="${val//\"/\\\"}"
             echo "Environment=\"$key=$val\""
-        done < <(printf '%s' "$json" | jq -r '.env // {} | to_entries[] | "\(.key)\t\(.value)"')
+        done < <(registry_env_assignments "$json" "$name")
         echo "WorkingDirectory=$workdir"
         echo "ExecStartPre=/usr/bin/mkdir -p $lock_dir_q $state_dir_q"
         echo "ExecStart=/usr/bin/flock -w 60 $lock_q $script_q"
@@ -532,35 +603,38 @@ cmd_run() {
     local name="${1:-}"
     [[ -n "$name" ]] || die "usage: hapi tick run <name>"
     validate_one "$name" >/dev/null
-    local json script lock workdir user key val me home_dir
+    local json script lock workdir user me home_dir state_path unit_path
     json="$(registry_json "$name")"
     script="$(tick_field "$json" '.probe.script')"
     user="$(resolve_tick_user "$json")"
     home_dir="$(getent passwd "$user" | cut -d: -f6)"
     [[ -n "$home_dir" ]] || die "no home directory for user '$user'"
+    unit_path="$home_dir/.local/bin:/usr/local/bin:/usr/bin:/bin"
     me="$(id -un)"
-    # Match the installed service: run the probe as the registry user with that
-    # account's HOME (sudo -E alone can retain the caller's HOME).
+    # Match the installed service: drop to registry user with a clean env
+    # (do not preserve caller secrets/PATH via sudo -E).
     if [[ "$me" != "$user" ]]; then
         err "re-executing as user '$user' (caller was '$me')…"
-        exec sudo -u "$user" -H -E -- env HOME="$home_dir" USER="$user" -- "$0" run "$name"
+        local -a reexec_env=(
+            "HOME=$home_dir"
+            "USER=$user"
+            "PATH=$unit_path"
+            "LANG=${LANG:-C.UTF-8}"
+        )
+        [[ -n "${HAPI_TICKS_YAML:-}" ]] && reexec_env+=("HAPI_TICKS_YAML=$HAPI_TICKS_YAML")
+        [[ -n "${HAPI_MIRROR_ROOT:-}" ]] && reexec_env+=("HAPI_MIRROR_ROOT=$HAPI_MIRROR_ROOT")
+        [[ -n "${HAPI_ACTIVE_LINK:-}" ]] && reexec_env+=("HAPI_ACTIVE_LINK=$HAPI_ACTIVE_LINK")
+        [[ -n "${BUN:-}" ]] && reexec_env+=("BUN=$BUN")
+        exec sudo -u "$user" -H -- env -i "${reexec_env[@]}" "$(readlink -f "$0")" run "$name"
     fi
-    export HOME="$home_dir"
-    export USER="$user"
     workdir="$(tick_field "$json" '.working_directory' "$home_dir")"
     lock="$(expand_user_path "$(tick_field "$json" '.lock.path' "")" "$user")"
     if [[ -z "$lock" ]]; then
         lock="$home_dir/.local/state/hapi/tick-${name}.lock"
     fi
-    local state_path
     state_path="$(expand_user_path "$(tick_field "$json" '.state.path')" "$user")"
     # Match ExecStartPre: create both lock and state parents before the probe.
     mkdir -p "$(dirname "$lock")" "$(dirname "$state_path")"
-    # Apply registry env so one-shot matches the generated unit.
-    while IFS=$'\t' read -r key val; do
-        [[ -n "$key" ]] || continue
-        export "$key=$val"
-    done < <(printf '%s' "$json" | jq -r '.env // {} | to_entries[] | "\(.key)\t\(.value)"')
     if [[ -z "$workdir" || "$workdir" == null ]]; then
         workdir="$home_dir"
     fi
@@ -568,8 +642,22 @@ cmd_run() {
         die "working_directory not found: $workdir"
     fi
     cd "$workdir" || die "cannot cd to working_directory: $workdir"
+
+    # Clean environment matching the generated unit (HOME/USER/PATH + registry env).
+    local -a probe_env=(
+        "HOME=$home_dir"
+        "USER=$user"
+        "PATH=$unit_path"
+        "LANG=${LANG:-C.UTF-8}"
+    )
+    local assignment
+    while IFS= read -r assignment; do
+        [[ -n "$assignment" ]] || continue
+        probe_env+=("$assignment")
+    done < <(registry_env_assignments "$json" "$name")
+
     echo "hapi-tick: running $script (flock $lock)"
-    /usr/bin/flock -w 60 "$lock" "$script"
+    env -i "${probe_env[@]}" /usr/bin/flock -w 60 "$lock" "$script"
 }
 
 doctor_one() {
@@ -649,6 +737,30 @@ doctor_one() {
         if [[ "$svc_failed" == "failed" || "$svc_failed" == "unknown" ]]; then
             healthy=0
         fi
+        # Detect registry vs installed-unit drift (operator changed yaml without reinstall).
+        local drift_dir expected_svc expected_timer
+        drift_dir="$(mktemp -d)"
+        local saved_out="$UNIT_OUT_DIR"
+        UNIT_OUT_DIR="$drift_dir"
+        generate_units "$name" >/dev/null
+        UNIT_OUT_DIR="$saved_out"
+        expected_svc="$drift_dir/${prefix}.service"
+        expected_timer="$drift_dir/${prefix}.timer"
+        local installed_svc_norm expected_svc_norm
+        installed_svc_norm="$(systemctl cat "${prefix}.service" 2>/dev/null | grep -E '^(User|Environment|WorkingDirectory|ExecStart|ExecStartPre|ConditionPathExists)=' | sort || true)"
+        expected_svc_norm="$(grep -E '^(User|Environment|WorkingDirectory|ExecStart|ExecStartPre|ConditionPathExists)=' "$expected_svc" | sort || true)"
+        if [[ "$installed_svc_norm" != "$expected_svc_norm" ]]; then
+            echo "drift: installed ${prefix}.service differs from registry — re-run: hapi tick install $name"
+            healthy=0
+        fi
+        local installed_timer_norm expected_timer_norm
+        installed_timer_norm="$(systemctl cat "${prefix}.timer" 2>/dev/null | grep -E '^(OnCalendar|RandomizedDelaySec|Unit)=' | sort || true)"
+        expected_timer_norm="$(grep -E '^(OnCalendar|RandomizedDelaySec|Unit)=' "$expected_timer" | sort || true)"
+        if [[ "$installed_timer_norm" != "$expected_timer_norm" ]]; then
+            echo "drift: installed ${prefix}.timer differs from registry — re-run: hapi tick install $name"
+            healthy=0
+        fi
+        rm -rf "$drift_dir"
     else
         echo "timer: ${prefix}.timer  NOT INSTALLED"
         # Legacy units (pre-migration) — informative only.
