@@ -1,7 +1,14 @@
 import { existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 const GUARD_REL = join('scripts', 'tooling', 'hapi-production-mutation-guard.sh');
+
+function isPathUnder(root: string, child: string): boolean {
+    const normalizedRoot = resolve(root);
+    const normalizedChild = resolve(child);
+    return normalizedChild === normalizedRoot
+        || normalizedChild.startsWith(`${normalizedRoot}/`);
+}
 
 /**
  * Resolve hapi repo root when session cwd is mirror, driver, or a worktree.
@@ -9,8 +16,12 @@ const GUARD_REL = join('scripts', 'tooling', 'hapi-production-mutation-guard.sh'
  */
 export function resolveHapiToolingRoot(workingDirectory: string): string | null {
     const envPrimary = process.env.HAPI_PRIMARY?.trim();
-    if (envPrimary && existsSync(join(envPrimary, GUARD_REL))) {
-        return envPrimary;
+    if (
+        envPrimary
+        && isPathUnder(envPrimary, workingDirectory)
+        && existsSync(join(envPrimary, GUARD_REL))
+    ) {
+        return resolve(envPrimary);
     }
 
     let dir = workingDirectory;
