@@ -242,12 +242,6 @@
   cursor: pointer; padding: 0;
 }
 .opdock-swatch--on { border-color: #fff; transform: scale(1.15); }
-.opdock-tool {
-  border: none; cursor: pointer;
-  background: rgba(255, 255, 255, 0.12); color: #f5f5f5;
-  font-size: 13px; padding: 6px 10px; border-radius: 8px;
-}
-.opdock-tool:hover { background: rgba(255, 255, 255, 0.22); }
 
 /* #271: foot Cancel/Send removed from markup; .opdock-btn2 remains for sheets (Done, etc.). */
 .opdock-interim { min-height: 16px; color: #a5b4fc; font-size: 13px; font-style: italic; }
@@ -681,18 +675,3 @@
   color: #a78bfa;
 }
 
-/* #293 — explicit, WORDED Send in the markup toolbar. The mic icon flipping to
-   a paper plane (#271) is legible once you know it; the first external user
-   drew on the page, found no way to finish, and stopped. Lives in the toolbar
-   rather than a foot so it costs no drawable area — which is what #271 was
-   actually protecting. */
-.opdock-tool--send {
-  background: #6b21a8;
-  color: #fff;
-  font-weight: 600;
-  /* Toolbar is a shrink-to-fit centred pill, so this just sits after Clear with
-     the shared gap. A separator margin keeps it from reading as a third tool. */
-  margin-left: 4px;
-  min-height: 32px;
-}
-.opdock-tool--send:hover { background: #7c3aed; }
