@@ -67,6 +67,10 @@ resolve_tick_user() {
     if ! getent passwd "$u" >/dev/null 2>&1; then
         die "unknown tick user '$u' (not in passwd/NSS)"
     fi
+    # Canonicalize to the passwd account name so sudo -u works (numeric UIDs
+    # need '#UID' form; systemd accepts either, sudo 1.9 rejects bare digits).
+    u="$(getent passwd "$u" | cut -d: -f1)"
+    [[ -n "$u" ]] || die "tick user resolved to empty account name"
     printf '%s\n' "$u"
 }
 
@@ -152,8 +156,9 @@ assert_tick_name() {
     fi
 }
 
-# Emit KEY=value lines for registry .env (JSON-safe; rejects tab/newline values).
-# Prints nothing if env empty. Dies on control characters in values.
+# Emit KEY=value lines for registry .env (JSON-safe; rejects tab/newline values
+# and invalid systemd environment variable names).
+# Prints nothing if env empty. Dies on control characters / bad keys.
 registry_env_assignments() {
     local json="$1" name="${2:-tick}"
     if printf '%s' "$json" | jq -e '
@@ -161,6 +166,18 @@ registry_env_assignments() {
         | select((.value | tostring) | test("[\t\n\r]"))
     ' >/dev/null 2>&1; then
         die "$name: env values must not contain tab/newline (use a file path instead)"
+    fi
+    # systemd Environment= names: [A-Za-z_][A-Za-z0-9_]* (no hyphens).
+    if printf '%s' "$json" | jq -e '
+        (.env // {}) | keys[]
+        | select(test("^[A-Za-z_][A-Za-z0-9_]*$") | not)
+    ' >/dev/null 2>&1; then
+        local bad
+        bad="$(printf '%s' "$json" | jq -r '
+            (.env // {}) | keys[]
+            | select(test("^[A-Za-z_][A-Za-z0-9_]*$") | not)
+        ' | paste -sd, -)"
+        die "$name: invalid env key(s) for systemd Environment=: $bad (use [A-Za-z_][A-Za-z0-9_]*)"
     fi
     printf '%s' "$json" | jq -r '
         (.env // {}) | to_entries[]
@@ -349,8 +366,8 @@ validate_one() {
     state_parent="$(dirname "$state_path")"
     lock_parent="$(dirname "$lock")"
     if [[ -d "$state_parent" ]]; then
-        if ! as_user_test "$user" -w "$state_parent"; then
-            die "$name: state parent not writable by user '$user': $state_parent"
+        if ! as_user_test "$user" -w "$state_parent" || ! as_user_test "$user" -x "$state_parent"; then
+            die "$name: state parent not writable+searchable by user '$user': $state_parent"
         fi
     else
         if ! as_user_can_mkdir "$user" "$state_parent"; then
@@ -360,8 +377,8 @@ validate_one() {
         warnings=$((warnings + 1))
     fi
     if [[ -d "$lock_parent" ]]; then
-        if ! as_user_test "$user" -w "$lock_parent"; then
-            die "$name: lock parent not writable by user '$user': $lock_parent"
+        if ! as_user_test "$user" -w "$lock_parent" || ! as_user_test "$user" -x "$lock_parent"; then
+            die "$name: lock parent not writable+searchable by user '$user': $lock_parent"
         fi
     else
         if ! as_user_can_mkdir "$user" "$lock_parent"; then
@@ -369,9 +386,13 @@ validate_one() {
         fi
     fi
 
-    # working_directory must exist and be usable by the service user (matches unit).
+    # working_directory must be absolute (systemd WorkingDirectory=), exist, and
+    # be usable by the service user (matches unit).
     workdir="$(tick_field "$json" '.working_directory' "$home_dir")"
     [[ -n "$workdir" && "$workdir" != null ]] || workdir="$home_dir"
+    if [[ "$workdir" != /* ]]; then
+        die "$name: working_directory must be absolute (systemd requirement): $workdir"
+    fi
     if [[ ! -d "$workdir" ]]; then
         die "$name: working_directory not found: $workdir"
     fi
@@ -652,6 +673,24 @@ cmd_run() {
     json="$(registry_json "$name")"
     script="$(tick_field "$json" '.probe.script')"
     user="$(resolve_tick_user "$json")"
+    # Match systemd: ConditionPathExists is evaluated by the system manager
+    # before User= drops privileges. Check once as the caller, then skip on
+    # the post-reexec child so root-only sentinels are not false-skipped.
+    if [[ -z "${HAPI_TICK_CONDITIONS_OK:-}" ]]; then
+        if [[ ! -e "$script" ]]; then
+            err "skipping $name — ConditionPathExists failed: $script"
+            return 0
+        fi
+        local cond
+        while IFS= read -r cond; do
+            [[ -n "$cond" && "$cond" != null ]] || continue
+            if [[ ! -e "$cond" ]]; then
+                err "skipping $name — ConditionPathExists failed: $cond"
+                return 0
+            fi
+        done < <(printf '%s' "$json" | jq -r '.conditions[]? // empty')
+    fi
+
     home_dir="$(getent passwd "$user" | cut -d: -f6)"
     [[ -n "$home_dir" ]] || die "no home directory for user '$user'"
     unit_path="$home_dir/.local/bin:/usr/local/bin:/usr/bin:/bin"
@@ -669,6 +708,7 @@ cmd_run() {
             "USER=$user"
             "PATH=$unit_path"
             "LANG=${LANG:-C.UTF-8}"
+            "HAPI_TICK_CONDITIONS_OK=1"
         )
         [[ -n "${HAPI_TICKS_YAML:-}" ]] && reexec_env+=("HAPI_TICKS_YAML=$HAPI_TICKS_YAML")
         [[ -n "${HAPI_MIRROR_ROOT:-}" ]] && reexec_env+=("HAPI_MIRROR_ROOT=$HAPI_MIRROR_ROOT")
@@ -676,20 +716,6 @@ cmd_run() {
         [[ -n "$bun_exe" ]] && reexec_env+=("BUN=$bun_exe")
         exec sudo -u "$user" -H -- env -i "${reexec_env[@]}" "$(readlink -f "$0")" run "$name"
     fi
-
-    # Match systemd ConditionPathExists: skip (exit 0) when probe/conditions absent.
-    if [[ ! -e "$script" ]]; then
-        err "skipping $name — ConditionPathExists failed: $script"
-        return 0
-    fi
-    local cond
-    while IFS= read -r cond; do
-        [[ -n "$cond" && "$cond" != null ]] || continue
-        if [[ ! -e "$cond" ]]; then
-            err "skipping $name — ConditionPathExists failed: $cond"
-            return 0
-        fi
-    done < <(printf '%s' "$json" | jq -r '.conditions[]? // empty')
 
     workdir="$(tick_field "$json" '.working_directory' "$home_dir")"
     lock="$(expand_user_path "$(tick_field "$json" '.lock.path' "")" "$user")"
@@ -740,6 +766,19 @@ doctor_one() {
     echo "user: $user"
     if [[ -f "$script" ]]; then
         echo "probe: $script  exists=yes"
+        if as_user_test "$user" -x "$script" 2>/dev/null; then
+            echo "  executable_by_user=$user yes"
+        else
+            # Distinguish sudo-auth failure from real permission drift when possible.
+            if same_tick_user "$user" || [[ "$(id -u)" -eq 0 ]] \
+                || sudo -n -u "$user" -H -- true >/dev/null 2>&1; then
+                echo "  executable_by_user=$user NO"
+                healthy=0
+            else
+                echo "  executable_by_user=$user unknown (cannot sudo -n as user)"
+                healthy=0
+            fi
+        fi
     else
         echo "probe: $script  exists=NO"
         healthy=0
