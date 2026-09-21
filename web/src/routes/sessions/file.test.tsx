@@ -20,6 +20,7 @@ const cursorStatusMock = vi.hoisted(() => ({
     error: null as string | null,
     isLoading: false,
 }))
+const sessionActiveMock = vi.hoisted(() => ({ active: false }))
 
 const sampleMarkdown = '# Heading\n\n| Col A | Col B |\n| --- | --- |\n| one | two |'
 const filePath = 'docs/README.md'
@@ -41,7 +42,7 @@ vi.mock('@/hooks/queries/useSession', () => ({
     useSession: () => ({
         session: {
             id: 'session-1',
-            active: false,
+            active: sessionActiveMock.active,
             metadata: {
                 path: '/project',
                 flavor: 'cursor',
@@ -103,13 +104,18 @@ function renderWithProviders() {
             queries: { retry: false },
         },
     })
-    return render(
+    const tree = (
         <QueryClientProvider client={queryClient}>
             <I18nProvider>
                 <FilePage />
             </I18nProvider>
         </QueryClientProvider>
     )
+    const view = render(tree)
+    return {
+        ...view,
+        rerenderPage: () => view.rerender(tree),
+    }
 }
 
 describe('FilePage markdown preview', () => {
@@ -129,6 +135,7 @@ describe('FilePage markdown preview', () => {
         cursorStatusMock.isApplicable = true
         cursorStatusMock.error = null
         cursorStatusMock.isLoading = false
+        sessionActiveMock.active = false
     })
 
     it('renders markdown preview by default and toggles to source', async () => {
@@ -229,6 +236,7 @@ describe('FilePage offline session', () => {
         cursorStatusMock.isApplicable = true
         cursorStatusMock.error = null
         cursorStatusMock.isLoading = false
+        sessionActiveMock.active = false
     })
 
     it('shows friendly offline copy and reopen affordance instead of raw RPC errors', async () => {
@@ -291,5 +299,38 @@ describe('FilePage offline session', () => {
             expect(screen.getByRole('button', { name: 'Reopen session' })).toBeInTheDocument()
         })
         expect(screen.queryByText(/Checking whether Cursor chat data/i)).toBeNull()
+    })
+
+    it('refetches when the session becomes active before the offline responses arrive', async () => {
+        const rpcError = new ApiError(
+            'HTTP 503: rpc target missing',
+            503,
+            RPC_TARGET_MISSING_ERROR_CODE,
+            JSON.stringify({ success: false, code: RPC_TARGET_MISSING_ERROR_CODE })
+        )
+        let rejectRead: (error: unknown) => void = () => {}
+        let rejectDiff: (error: unknown) => void = () => {}
+        readSessionFileMock.mockImplementation(() => new Promise((_resolve, reject) => {
+            rejectRead = reject
+        }))
+        getGitDiffFileMock.mockImplementation(() => new Promise((_resolve, reject) => {
+            rejectDiff = reject
+        }))
+
+        const view = renderWithProviders()
+        await waitFor(() => {
+            expect(readSessionFileMock).toHaveBeenCalledTimes(1)
+            expect(getGitDiffFileMock).toHaveBeenCalledTimes(1)
+        })
+
+        sessionActiveMock.active = true
+        view.rerenderPage()
+        rejectRead(rpcError)
+        rejectDiff(rpcError)
+
+        await waitFor(() => {
+            expect(readSessionFileMock).toHaveBeenCalledTimes(2)
+            expect(getGitDiffFileMock).toHaveBeenCalledTimes(2)
+        })
     })
 })

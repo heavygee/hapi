@@ -313,8 +313,10 @@ export default function FilePage() {
 
     const invalidateFileQueries = useCallback(async () => {
         if (!sessionId || !filePath) return
-        await queryClient.invalidateQueries({ queryKey: queryKeys.sessionFile(sessionId, filePath) })
-        await queryClient.invalidateQueries({ queryKey: queryKeys.gitFileDiff(sessionId, filePath, staged) })
+        await Promise.all([
+            queryClient.invalidateQueries({ queryKey: queryKeys.sessionFile(sessionId, filePath) }),
+            queryClient.invalidateQueries({ queryKey: queryKeys.gitFileDiff(sessionId, filePath, staged) }),
+        ])
     }, [filePath, queryClient, sessionId, staged])
 
     const handleReopen = useCallback(async () => {
@@ -346,14 +348,29 @@ export default function FilePage() {
     }, [canReopen, encodedPath, invalidateFileQueries, navigate, reopenDisabledReason, reopenSession, search.origin, search.query, search.tab, sessionId, staged])
 
     const prevSessionActiveRef = useRef(session?.active)
+    const pendingOfflineRecoveryRef = useRef(false)
     useEffect(() => {
         const wasInactive = prevSessionActiveRef.current === false
         const nowActive = session?.active === true
         prevSessionActiveRef.current = session?.active
-        if (wasInactive && nowActive && sessionRpcOffline) {
+        if (wasInactive && nowActive) {
+            pendingOfflineRecoveryRef.current = true
+        }
+    }, [session?.active])
+    useEffect(() => {
+        if (!pendingOfflineRecoveryRef.current || session?.active !== true) return
+        if (diffQuery.isFetching || fileQuery.isFetching) return
+        pendingOfflineRecoveryRef.current = false
+        if (sessionRpcOffline) {
             void invalidateFileQueries()
         }
-    }, [invalidateFileQueries, session?.active, sessionRpcOffline])
+    }, [
+        diffQuery.isFetching,
+        fileQuery.isFetching,
+        invalidateFileQueries,
+        session?.active,
+        sessionRpcOffline,
+    ])
 
     const diffContent = diffQuery.data?.success ? (diffQuery.data.stdout ?? '') : ''
     const diffError = extractCommandError(diffQuery.data)
