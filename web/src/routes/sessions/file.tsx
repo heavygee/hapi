@@ -308,8 +308,9 @@ export default function FilePage() {
         : cursorReopenGate.disabledReason === 'checking'
             ? t('session.action.reopenCursorChecking')
             : undefined
-    const sessionRpcOffline = hasRpcTargetMissingResponse(fileQuery.data)
-        || hasRpcTargetMissingResponse(diffQuery.data)
+    const fileRpcOffline = hasRpcTargetMissingResponse(fileQuery.data)
+    const diffRpcOffline = hasRpcTargetMissingResponse(diffQuery.data)
+    const sessionRpcOffline = fileRpcOffline || diffRpcOffline
 
     const invalidateFileQueries = useCallback(async () => {
         if (!sessionId || !filePath) return
@@ -479,13 +480,13 @@ export default function FilePage() {
         ? (fileContentResult.error ?? 'Failed to read file')
         : null
     const missingPath = !filePath
-    const sessionOfflineMessage = sessionRpcOffline ? formatFileSessionOfflineError(t) : null
-    const diffErrorMessage = sessionRpcOffline
-        ? null
+    const fileOfflineMessage = fileRpcOffline ? formatFileSessionOfflineError(t) : null
+    const diffErrorMessage = diffRpcOffline
+        ? formatFileSessionOfflineError(t)
         : diffError
             ? formatDiffError(diffError, t)
             : null
-    const fileErrorMessage = sessionOfflineMessage ?? (fileError ? formatReadFileError(fileError, t) : null)
+    const fileErrorMessage = fileOfflineMessage ?? (fileError ? formatReadFileError(fileError, t) : null)
     const fileMetadata = formatFileMetadata(fileContentResult?.size, fileContentResult?.modified, locale)
 
     return (
@@ -577,7 +578,7 @@ export default function FilePage() {
 
             <div ref={fileScrollRef} data-hapi-file-scroll="true" className="app-scroll-y flex-1 min-h-0">
                 <div className="mx-auto w-full max-w-content p-4">
-                    {diffErrorMessage ? (
+                    {diffErrorMessage && !fileOfflineMessage ? (
                         <div className="mb-3 rounded-md bg-amber-500/10 p-2 text-xs text-[var(--app-hint)]">
                             {diffErrorMessage}
                         </div>
@@ -586,9 +587,9 @@ export default function FilePage() {
                         <div className="text-sm text-[var(--app-hint)]">{t('file.page.missingPath')}</div>
                     ) : loading ? (
                         <FileContentSkeleton label={t('loading.file')} />
-                    ) : sessionOfflineMessage ? (
+                    ) : fileOfflineMessage ? (
                         <div className="space-y-3">
-                            <div className="text-sm text-[var(--app-hint)]">{sessionOfflineMessage}</div>
+                            <div className="text-sm text-[var(--app-hint)]">{fileOfflineMessage}</div>
                             {canReopen ? (
                                 <button
                                     type="button"

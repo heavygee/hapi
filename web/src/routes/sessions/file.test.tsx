@@ -301,6 +301,30 @@ describe('FilePage offline session', () => {
         expect(screen.queryByText(/Checking whether Cursor chat data/i)).toBeNull()
     })
 
+    it('keeps loaded file content when only the diff request is offline', async () => {
+        const rpcError = new ApiError(
+            'HTTP 503: rpc target missing',
+            503,
+            RPC_TARGET_MISSING_ERROR_CODE,
+            JSON.stringify({ success: false, code: RPC_TARGET_MISSING_ERROR_CODE })
+        )
+        readSessionFileMock.mockResolvedValue({
+            success: true,
+            content: encodedContent,
+            size: fileSize,
+            modified: fileModified,
+        })
+        getGitDiffFileMock.mockRejectedValue(rpcError)
+
+        renderWithProviders()
+
+        await waitFor(() => {
+            expect(screen.getByTestId('markdown-preview')).toHaveTextContent('# Heading')
+        })
+        expect(screen.getByText(/not connected to your computer right now/i)).toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: 'Reopen session' })).toBeNull()
+    })
+
     it('refetches when the session becomes active before the offline responses arrive', async () => {
         const rpcError = new ApiError(
             'HTTP 503: rpc target missing',
