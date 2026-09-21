@@ -36,13 +36,19 @@ Map to the review skill: Blocker/Major = Critical/Important; fix before push.
 
 ## Review bar (match upstream bot)
 
-- **Findings first**, ordered by severity.
-- **Evidence**: cite `path:line` from the diff.
+Upstream HAPI Bot (`.github/prompts/codex-pr-review.md`) now assesses in order **requirement → approach → code** (then notes testing). Cold reads should match that gate order — do not dive into line bugs before the use case and mechanism are sound.
+
+- **Stage 1 Requirement** — concrete use case / expected behavior / why it fits HAPI; stop if unclear or wrong-scoped.
+- **Stage 2 Approach** — mechanism solves the root cause within existing responsibilities; optional suggestions do not block code review.
+- **Stage 3 Code** — only after both pass: findings ordered by severity (`Blocker` / `Major` / `Minor` / `Nit`).
+- **Evidence**: cite `path:line` from the diff (and linked issues when claiming a requirement).
 - **No speculation** — if uncertain, say so or ask (max 4 questions).
 - **Diff focus** — only flag issues on added/changed lines; use context lines to validate, not to nit unchanged code.
 - **High signal** — if confidence &lt; 80%, do not report as a finding.
 - **Concrete fixes** — every Blocker/Major includes a minimal suggested change.
 - **No praise** — issues and risks only.
+
+On GitHub, the same `github-actions[bot]` posts the staged formal review **and** inline threads for code findings — not a second reviewer.
 
 ## HAPI-specific context
 
@@ -50,19 +56,31 @@ Monorepo: `cli/`, `hub/` (or `server/`), `web/`, `shared/`. Run verification fro
 
 ## Output format (for your own notes)
 
-```markdown
-**Findings**
-- [Blocker|Major|Minor|Nit] Title — evidence `path:line`
-  Suggested fix: ...
+Mirror the upstream staged shape (short is fine):
 
-**Summary**
-- N Blocker, N Major, ...
-- Ready to push: yes/no
+```markdown
+**Requirement — Pass|Needs changes|Needs clarification**
+- …
+
+**Approach — Pass|Needs changes|Needs clarification|Not reviewed**
+- …
+
+**Code — Reviewed|Not reviewed**
+- [Blocker|Major|Minor|Nit] Title — evidence `path:line`
+  Suggested fix: …
+(or: No reportable code issues.)
+
+**Testing**
+- Ran / not run; gaps
+
+Ready to push: yes/no
 ```
+
+Legacy `**Findings**` / `- None.` notes are still readable on older tips; prefer the staged shape for new colds.
 
 ## After upstream bot comments
 
-Reply to each thread with fix SHA + one sentence. Resolve with `resolveReviewThread`. See [pr-review-loop.md](./pr-review-loop.md).
+Reply to each **inline** thread with fix SHA + one sentence. Resolve with `resolveReviewThread`. Requirement/Approach objections live in the formal review body — address in PR description / follow-up commits, then wait for the next tip bot pass. See [pr-review-loop.md](./pr-review-loop.md).
 
 ## Full court press
 

@@ -316,14 +316,16 @@ This was misdocumented as "same vendor, different stochastic samples" until 2026
 
 | | Fork (`heavygee/hapi`) | Upstream (`tiann/hapi`) |
 |---|---|---|
-| Bot login | `chatgpt-codex-connector[bot]` | `github-actions[bot]` |
-| Product | **ChatGPT Codex Cloud Connector** (SaaS, configured at chatgpt.com/codex) | **`openai/codex-action@v1`** (GitHub Action) |
+| Bot login | `chatgpt-codex-connector[bot]` | `github-actions[bot]` (**same login for formal review + inline findings** — not a second bot) |
+| Product | **ChatGPT Codex Cloud Connector** (SaaS, configured at chatgpt.com/codex) | **`openai/codex-action@v1`** (GitHub Action) + in-repo publisher |
 | Runs on | OpenAI's infrastructure, triggered by chatgpt.com integration | GitHub Actions runner using THIS repo's `OPENAI_API_KEY` secret |
 | Config | Whatever the operator's ChatGPT Codex Cloud account sets (black-box from repo's POV) | `.github/workflows/codex-pr-review.yml` + `.github/prompts/codex-pr-review.md` (in-repo, version-controlled) |
 | Model | Set in chatgpt.com (unknown to repo) | `gpt-5.5` via `vars.OPENAI_MODEL` (upstream config) |
 | Repo access | Restricted SaaS view (line-range diff focus) | Full repo checkout (`fetch-depth: 0` of `refs/pull/N/merge`) |
-| Output format | `### 💡 Codex Review` markdown | `**Findings** - [Severity] Title` per the in-repo prompt |
+| Output format | `### 💡 Codex Review` markdown (P1/P2 badge threads) | **Staged review** (prompt `feat(ci): review PR requirements…`, 2026-09): formal review body is Requirement → Evidence → Approach → Evidence → Code → Testing; code defects also land as **inline** `github-actions[bot]` threads. Clean Code often says `No reportable code issues found.` Older tips may still show legacy `**Findings**` / `- None.` |
 | Quota | Operator's ChatGPT Plus subscription | Repo's OpenAI API billing |
+
+**Reading upstream reviews (Ready YES):** one product, two surfaces. Treat `github-actions[bot]` review **body** (stage Pass / needs_changes / Code findings summary) and its **inline threads** as the same HAPI Bot pass. `hapi-pr-status` / `pec_bot_body_findings_clean` already match both legacy Findings and staged “No reportable (code) issues” phrasing; unresolved inline threads still block Ready YES.
 
 **Why this matters:** the workflow + prompt + AGENTS.md alignment work done on 2026-06-06 (commits `978bb7f1`, `92ade7ad`) was based on the wrong mental model. Those files are **only consumed by the upstream bot**. The fork bot uses chatgpt.com's settings and ignores those repo files entirely. The alignment work still helps - when our PRs reach upstream, upstream's bot will see the same AGENTS.md context as before - but it has near-zero effect on the fork bot.
 
