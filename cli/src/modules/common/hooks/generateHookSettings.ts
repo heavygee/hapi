@@ -49,13 +49,13 @@ export type HookSettingsOptions = {
     trackPermissionMode?: boolean;
     /** Mirror main-session permissions without suppressing the native dialog. Local only. */
     includeLocalPermissions?: boolean;
-    /** When set, may attach HAPI PreToolUse Bash guard for paths under a hapi tree. */
+    /** When set and cwd resolves to hapi, inject project-scoped PreToolUse Bash guard. */
     workingDirectory?: string;
 };
 
 /**
  * Build Claude Code hook settings.
- * Soup union: upstream trackPermissionMode + includePreToolUse, plus fork
+ * Soup union: upstream trackPermissionMode + includeLocalPermissions, plus fork
  * workingDirectory PreToolUse Bash guard when cwd is under a hapi tree.
  */
 export function buildHookSettings(
