@@ -2380,7 +2380,7 @@ export function HappyComposer(props: {
                             scratchlistMode={props.scratchlistMode}
                             scratchlistCount={props.scratchlistCount}
                             onScratchlistToggle={props.onScratchlistToggle}
-                            codexUsage={composerCodexUsageForGauge(agentFlavor, codexUsage, agentState)}
+                            codexUsage={composerCodexUsageForGauge(agentFlavor, codexUsage)}
                         />
                     </div>
                 </ComposerPrimitive.Root>

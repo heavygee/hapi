@@ -282,28 +282,14 @@ describe('toCodexBudgetState', () => {
 })
 
 describe('composerCodexUsageForGauge', () => {
-    it('hides ordinary metadata when Luna Reserve is active so the gauge is not blocked', () => {
-        // Bot Major 2026-09-09: exhausted ordinary limits + active Reserve must
-        // not feed the composer gauge (which would report blocked).
-        const exhausted: CodexUsage = {
-            rateLimits: {},
-            credits: { hasCredits: false, unlimited: false, balance: '0' },
-            limitId: 'premium'
+    it('returns metadata usage only for codex flavor', () => {
+        const usage: CodexUsage = {
+            rateLimits: {
+                fiveHour: { usedPercent: 12, windowMinutes: 300 }
+            }
         }
-        expect(toCodexBudgetState(exhausted)?.effective).toBe('blocked')
-
-        expect(composerCodexUsageForGauge('codex', exhausted, {
-            codexUsage: {
-                ordinary: { primary: null, secondary: null },
-                reserve: { primary: null, secondary: null }
-            }
-        })).toBeUndefined()
-
-        expect(composerCodexUsageForGauge('codex', exhausted, {
-            codexUsage: {
-                ordinary: { primary: null, secondary: null },
-                reserve: null
-            }
-        })).toEqual(exhausted)
+        expect(composerCodexUsageForGauge('codex', usage)).toEqual(usage)
+        expect(composerCodexUsageForGauge('claude', usage)).toBeUndefined()
+        expect(composerCodexUsageForGauge('codex', null)).toBeUndefined()
     })
 })

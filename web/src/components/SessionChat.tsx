@@ -2101,8 +2101,7 @@ function SessionChatInner(props: SessionChatProps) {
                         contextModel={reduced.latestUsage?.model ?? props.session.model}
                         codexUsage={composerCodexUsageForGauge(
                             agentFlavor,
-                            props.session.metadata?.codexUsage,
-                            props.session.agentState
+                            props.session.metadata?.codexUsage
                         )}
                         controlledByUser={controlledByUser}
                         onCollaborationModeChange={
