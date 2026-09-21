@@ -279,8 +279,12 @@ validate_one() {
     user="$(resolve_tick_user "$json")"
     script="$(tick_field "$json" '.probe.script')"
     strategy="$(tick_field "$json" '.state.strategy')"
+    local raw_state_path
+    raw_state_path="$(tick_field "$json" '.state.path')"
+    [[ -n "$raw_state_path" && "$raw_state_path" != null ]] || die "$name: state.path required"
     # Expand ~/ against the service user (same as generate_units), not the caller.
-    state_path="$(expand_user_path "$(tick_field "$json" '.state.path')" "$user")"
+    state_path="$(expand_user_path "$raw_state_path" "$user")"
+    [[ -n "$state_path" ]] || die "$name: state.path expands to empty"
     host="$(tick_field "$json" '.host')"
     on_change="$(printf '%s' "$json" | jq -c '.on_change // []')"
 
@@ -478,8 +482,10 @@ generate_units() {
             key="${assignment%%=*}"
             val="${assignment#*=}"
             # Quote full KEY=value so whitespace survives systemd parsing.
+            # Escape % as %% so systemd does not expand / drop specifier sequences.
             val="${val//\\/\\\\}"
             val="${val//\"/\\\"}"
+            val="${val//%/%%}"
             echo "Environment=\"$key=$val\""
         done < <(registry_env_assignments "$json" "$name")
         echo "WorkingDirectory=$workdir"
@@ -794,8 +800,17 @@ cmd_doctor() {
         doctor_one "$name" || rc=1
         return $rc
     fi
-    local n
+    local n here host
+    here="$(hostname_short)"
     for n in $(registry_json | jq -r '.ticks[].name'); do
+        host="$(tick_field "$(registry_json "$n")" '.host')"
+        # Aggregate doctor is host-local; remote ticks stay inspectable by name.
+        if [[ -n "$host" && "$host" != null && "$host" != "$here" && "$host" != "$(hostname)" ]]; then
+            echo "=== $n ==="
+            echo "host(registry): $host  this: $here — skipped (other host)"
+            echo
+            continue
+        fi
         doctor_one "$n" || rc=1
         echo
     done
