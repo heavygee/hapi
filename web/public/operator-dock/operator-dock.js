@@ -3794,6 +3794,10 @@
       chip.setAttribute('data-settings-nav', id);
       chip.setAttribute('role', 'tab');
       chip.setAttribute('aria-selected', 'false');
+      // #382: trail continues onto the About tab while Routing (or any other page) is showing.
+      if (id === 'about' && isVersionUnseen()) {
+        chip.appendChild($('span', 'opdock-version-dot opdock-version-dot--settings-nav opdock-version-dot--pulse'));
+      }
       chip.addEventListener('click', function () { showSettingsPage(id); });
       navChips[id] = chip;
       nav.appendChild(chip);
@@ -4598,7 +4602,7 @@
 
   window.HapiInline = {
     init: init,
-    _version: '0.18.3', // x-release-please-version
+    _version: '0.18.4', // x-release-please-version
     openCluster: function () { return openCluster(); },
     /** #287 — host Settings can offer the same hide/show the dock sheet does. */
     hideForThisUser: function () { setUserHidden(true); hideDockChrome(); },
