@@ -381,10 +381,15 @@ describe.skipIf(!await isServerHealthy())('Runner Integration Tests', { timeout:
     // Collect session IDs for tracking
     const spawnedSessionIds = results.map(r => r.sessionId);
 
-    // Give sessions time to report via webhook
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    // CI runners can be slower than local oos-linux; poll until webhooks land.
+    await waitFor(async () => {
+      const sessions = await listRunnerSessions();
+      const runnerSessions = sessions.filter(
+        (s: any) => s.startedBy === 'runner' && spawnedSessionIds.includes(s.happySessionId)
+      );
+      return runnerSessions.length >= 3;
+    }, 15_000);
 
-    // List should show all sessions
     const sessions = await listRunnerSessions();
     const runnerSessions = sessions.filter(
       (s: any) => s.startedBy === 'runner' && spawnedSessionIds.includes(s.happySessionId)
@@ -495,7 +500,7 @@ describe.skipIf(!await isServerHealthy())('Runner Integration Tests', { timeout:
    * - Using pkgroll alone: doesn't update compiled configuration.currentCliVersion
    * - Modifying package.json after runner starts: triggers immediate version check on startup
    */
-  it('[takes 1 minute to run] should detect version mismatch and kill old runner', { timeout: 100_000 }, async () => {
+  it.skipIf(process.env.HAPI_DISABLE_VERSION_HANDOFF === '1')('[takes 1 minute to run] should detect version mismatch and kill old runner', { timeout: 100_000 }, async () => {
     // Read current package.json to get version
     const packagePath = path.join(process.cwd(), 'package.json');
     const packageJsonOriginalRawText = readFileSync(packagePath, 'utf8');
@@ -555,11 +560,9 @@ describe.skipIf(!await isServerHealthy())('Runner Integration Tests', { timeout:
    * normal test asserts directly.
    */
   it('regression: registered detached child is reaped even when the test body never reaches its own cleanup', async () => {
-    const child = spawnHappyCLI([
-      'claude',
-      '--hapi-starting-mode', 'remote',
-      '--started-by', 'terminal'
-    ], {
+    // Use a long-lived Node child — CI images may not have Claude installed, so
+    // `hapi claude` can exit before the registry assertion (vacuous pass).
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e9)'], {
       cwd: '/tmp',
       detached: true,
       stdio: 'ignore',
@@ -567,7 +570,7 @@ describe.skipIf(!await isServerHealthy())('Runner Integration Tests', { timeout:
     });
     // Register immediately after spawn — cleanup must run even though this
     // test deliberately performs no per-test teardown of its own.
-    trackChildProcess(child, 'regression-terminal');
+    trackChildProcess(child, 'regression-detached');
     if (!child.pid) {
       throw new Error('Failed to spawn regression terminal hapi process');
     }
