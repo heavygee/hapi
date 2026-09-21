@@ -598,8 +598,9 @@ cmd_uninstall() {
     if [[ "$(id -u)" -ne 0 ]]; then
         exec sudo -E -- "$0" uninstall "$name"
     fi
-    systemctl stop "${prefix}.service" 2>/dev/null || true
+    # Disable/stop timer first so it cannot fire while we tear down the oneshot.
     systemctl disable --now "${prefix}.timer" 2>/dev/null || true
+    systemctl stop "${prefix}.service" 2>/dev/null || true
     rm -f "/etc/systemd/system/${prefix}.service" "/etc/systemd/system/${prefix}.timer"
     systemctl daemon-reload
     echo "hapi-tick: uninstalled $prefix"
@@ -633,6 +634,21 @@ cmd_run() {
         [[ -n "${BUN:-}" ]] && reexec_env+=("BUN=$BUN")
         exec sudo -u "$user" -H -- env -i "${reexec_env[@]}" "$(readlink -f "$0")" run "$name"
     fi
+
+    # Match systemd ConditionPathExists: skip (exit 0) when probe/conditions absent.
+    if [[ ! -e "$script" ]]; then
+        err "skipping $name — ConditionPathExists failed: $script"
+        return 0
+    fi
+    local cond
+    while IFS= read -r cond; do
+        [[ -n "$cond" && "$cond" != null ]] || continue
+        if [[ ! -e "$cond" ]]; then
+            err "skipping $name — ConditionPathExists failed: $cond"
+            return 0
+        fi
+    done < <(printf '%s' "$json" | jq -r '.conditions[]? // empty')
+
     workdir="$(tick_field "$json" '.working_directory' "$home_dir")"
     lock="$(expand_user_path "$(tick_field "$json" '.lock.path' "")" "$user")"
     if [[ -z "$lock" ]]; then
