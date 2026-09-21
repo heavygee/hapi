@@ -51,6 +51,10 @@
   var shotImg = null; // Image of the frozen screenshot
   var replies = null, replyPoll = null;
   var pendingShot = null, liveTranscript = '', liveInterim = '', recordLabel = null;
+  // #343: true only after setTranscript/appendTranscript (speech). Host listening
+  // hints must use setRecordStatus — otherwise finishRecording can Send the hint
+  // when onCaptureDone() returns empty (Meta SR often delivers zero partials).
+  var liveFromSpeech = false;
   // #241: keep last outbound after routing miss so picker can complete without re-speaking.
   var pendingOutbound = null;
   var longPressTimer = null, longPressFired = false;
@@ -488,26 +492,20 @@
       var raw = localStorage.getItem(routingModeKey());
       if (raw === 'spawn-per-send') {
         // #246: sticky spawn with missing host config must not stay selected.
-        if (!canSpawnPerSend()) return hasPinnedOrConfigSession() ? 'pin' : 'pick';
+        if (!canSpawnPerSend()) return 'pin';
         return 'spawn-per-send';
       }
-      if (raw === 'pick' || raw === 'pin') return raw;
+      // #342: legacy sticky "pick" collapses to pin (pick is a tool under Pin).
+      if (raw === 'pin' || raw === 'pick') return 'pin';
     } catch (e) {}
-    // #241: fresh unlock with nothing pinned — pick recovers; bare pin does not.
-    return hasPinnedOrConfigSession() ? 'pin' : 'pick';
-  }
-  function hasPinnedOrConfigSession() {
-    try {
-      var override = (localStorage.getItem(pinnedSessionKey()) || '').trim();
-      if (override) return true;
-    } catch (e) {}
-    return !!(cfg && cfg.session);
+    // #241/#342: default pin; session picker recovers when nothing is pinned yet.
+    return 'pin';
   }
   function setRoutingMode(mode) {
-    var next = (mode === 'pick' || mode === 'spawn-per-send') ? mode : 'pin';
+    var next = mode === 'spawn-per-send' ? 'spawn-per-send' : 'pin';
     if (next === 'spawn-per-send' && !canSpawnPerSend()) {
       toast(spawnUnavailableReason() || 'Spawn per send needs a machine and working directory', 'err');
-      next = hasPinnedOrConfigSession() ? 'pin' : 'pick';
+      next = 'pin';
     }
     try { localStorage.setItem(routingModeKey(), next); } catch (e) {}
     return next;
@@ -1305,6 +1303,20 @@
     try { return !!(window.AndroidOperator && window.AndroidOperator.onCaptureDone); } catch (e) { return false; }
   }
 
+  /** #364 — Quest Browser exposes Web Speech but never delivers results; hold the mic. */
+  function isQuestBrowser() {
+    try {
+      return /OculusBrowser|Quest|Oculus/i.test(navigator.userAgent || '');
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /** Prefer MediaRecorder → host sttUrl when Quest Web Speech would block whisper. */
+  function preferWhisperCapture() {
+    return !!(cfg && cfg.sttUrl) && isQuestBrowser();
+  }
+
   /** Pure status for overlay/FAB — exported for unit tests as HapiInline._voiceStatus. */
   function voiceStatus(opts) {
     // Native Android SpeechRecognizer works on LAN HTTP; browser Web Speech / MediaRecorder need HTTPS.
@@ -1744,6 +1756,36 @@
     }
   }
 
+  /** True when an STT probe status means the route is missing (void mic). */
+  function sttProbeMeansMissing(status) {
+    return status === 404;
+  }
+
+  /**
+   * #363: if host published a relative sttUrl but POST returns 404, fail closed —
+   * toast + clear sttUrl so the mic does not look usable into a void.
+   * 401/403/5xx leave sttUrl alone (route exists or transient). Network errors ignored.
+   */
+  function probeSttRouteOrDisable() {
+    if (!cfg || !cfg.sttUrl) return Promise.resolve(false);
+    if (cfg.mode === MODE_BROWSER_HUB && !isRelativeSameOriginPath(cfg.sttUrl)) {
+      return Promise.resolve(false);
+    }
+    if (!isRelativeSameOriginPath(cfg.sttUrl)) return Promise.resolve(false);
+    var url = cfg.sttUrl;
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: '{}',
+      cache: 'no-store',
+    }).then(function (res) {
+      if (!sttProbeMeansMissing(res.status)) return false;
+      cfg.sttUrl = null;
+      toast('Speech route missing (404) — voice disabled until host fixes sttUrl', 'err');
+      return true;
+    }).catch(function () { return false; });
+  }
+
   function requestTarget(path) {
     syncEffectiveHubOrigin();
     if (cfg.mode === MODE_BROWSER_HUB) return joinUrl(cfg.hapiProxy, path);
@@ -2115,6 +2157,7 @@
     stopMediaCapture(true);
     liveTranscript = '';
     liveInterim = '';
+    liveFromSpeech = false;
     hideRecordLabel();
     window.removeEventListener('resize', sizeCanvas);
     if (overlay) { forgetTopLayer(overlay); overlay.remove(); overlay = null; }
@@ -2141,6 +2184,7 @@
     stopMediaCapture(true);
     liveTranscript = '';
     liveInterim = '';
+    liveFromSpeech = false;
     pendingShot = null;
     hideRecordLabel();
     try { if (window.AndroidOperator && window.AndroidOperator.onCaptureDone) window.AndroidOperator.onCaptureDone(); } catch (e) {}
@@ -2588,11 +2632,24 @@
       ev.stopPropagation();
       closeReplies();
     });
+    // #353: life indicator while target session.thinking — not a CoT dump.
+    var thinkingEl = $('span', 'opdock-replies-thinking');
+    thinkingEl.setAttribute('data-testid', 'opdock-replies-thinking');
+    thinkingEl.setAttribute('aria-label', 'Agent working');
+    thinkingEl.setAttribute('aria-hidden', 'true');
+    thinkingEl.hidden = true;
     head.appendChild(title);
+    head.appendChild(thinkingEl);
     head.appendChild(unread);
     head.appendChild(close);
 
     var unreadCount = 0;
+    function setRepliesThinking(on) {
+      var show = !!on;
+      thinkingEl.hidden = !show;
+      thinkingEl.setAttribute('aria-hidden', show ? 'false' : 'true');
+      if (replies) replies.classList.toggle('opdock-replies--thinking', show);
+    }
     function setCollapsed(next) {
       collapsed = !!next;
       replies.classList.toggle('opdock-replies--min', collapsed);
@@ -2678,7 +2735,7 @@
     }
     function tick() {
       var msgPath = '/api/sessions/' + encodeURIComponent(session) + '/messages?limit=25';
-      hapiGet(msgPath, secret)
+      var messagesP = hapiGet(msgPath, secret)
         .then(function (r) {
           if (r.status === 401 || r.status === 403) {
             stopReplyPolling();
@@ -2692,26 +2749,45 @@
             return null;
           }
           return r.json().catch(function () { return null; });
+        });
+      // #353: reuse session list row thinking (hub SessionSummary) alongside messages.
+      var thinkingP = listProjectSessions(secret)
+        .then(function (sessions) {
+          for (var i = 0; i < sessions.length; i++) {
+            if (sessions[i].id === session) return !!sessions[i].thinking;
+          }
+          return false;
         })
-        .then(function (d) {
-          if (!d || !d.messages) return;
-          pollErrorShown = false;
-          var items = d.messages.map(extractMessage).filter(Boolean);
-          var fresh = items.filter(function (it) { return !seen[it.seq]; });
-          if (fresh.length && body.textContent === 'Waiting for the agent…') body.textContent = '';
-          fresh.forEach(function (it) {
-            seen[it.seq] = 1;
-            var row = $('div', 'opdock-msg opdock-msg--' + (it.role === 'agent' ? 'agent' : 'you'));
-            row.appendChild($('div', 'opdock-msg-role', it.role === 'agent' ? 'agent' : 'you'));
-            row.appendChild($('div', 'opdock-msg-text', it.text));
-            body.appendChild(row);
-            body.scrollTop = body.scrollHeight;
-            if (primed && collapsed && it.role === 'agent') {
-              unreadCount += 1;
-              unread.hidden = false;
-            }
-          });
-          primed = true;
+        .catch(function () { return null; });
+      Promise.all([messagesP, thinkingP])
+        .then(function (pair) {
+          var d = pair[0];
+          var thinking = pair[1];
+          var clearedByAgent = false;
+          if (d && d.messages) {
+            pollErrorShown = false;
+            var items = d.messages.map(extractMessage).filter(Boolean);
+            var fresh = items.filter(function (it) { return !seen[it.seq]; });
+            if (fresh.length && body.textContent === 'Waiting for the agent…') body.textContent = '';
+            fresh.forEach(function (it) {
+              seen[it.seq] = 1;
+              var row = $('div', 'opdock-msg opdock-msg--' + (it.role === 'agent' ? 'agent' : 'you'));
+              row.appendChild($('div', 'opdock-msg-role', it.role === 'agent' ? 'agent' : 'you'));
+              row.appendChild($('div', 'opdock-msg-text', it.text));
+              body.appendChild(row);
+              body.scrollTop = body.scrollHeight;
+              if (primed && collapsed && it.role === 'agent') {
+                unreadCount += 1;
+                unread.hidden = false;
+              }
+              if (it.role === 'agent') {
+                setRepliesThinking(false);
+                clearedByAgent = true;
+              }
+            });
+            primed = true;
+          }
+          if (!clearedByAgent && thinking !== null) setRepliesThinking(!!thinking);
         }).catch(function (e) {
           notifyPollError('Replies refresh failed: ' + (e && e.message || e || 'network error'));
         });
@@ -2763,15 +2839,12 @@
     if (dock.classList.contains('opdock--busy')) st = 'sending';
     // #271: mic again = send; H = cancel. Chromium shows live text; Firefox only after stop.
     var labelText = text || 'Listening… tap mic to send · H to cancel';
-    // #104: native host present → one STT label surface (native onMicUi only).
-    if (hasNativeHost()) {
-      recordLabel.style.display = 'none';
-      notifyNativeMicUi(st, recording ? labelText : '');
-      return;
-    }
+    // #334: always show the dock label. Native hosts that mirror into a chip still
+    // get onMicUi; Quest APK has no visible FAB caption, so hiding the label (#104)
+    // made hold-to-talk look dead even when STT was running.
     recordLabel.style.display = 'block';
     recordLabel.textContent = labelText;
-    notifyNativeMicUi(st, recording ? recordLabel.textContent : '');
+    notifyNativeMicUi(st, recording ? labelText : '');
   }
   function hideRecordLabel() {
     if (recordLabel) recordLabel.style.display = 'none';
@@ -2851,6 +2924,7 @@
     }
     liveTranscript = '';
     liveInterim = '';
+    liveFromSpeech = false;
     // Keep strokes when markup overlay is open — tap-to-talk must not erase drawings.
     if (!overlay) strokes = [];
     recording = true;
@@ -2872,7 +2946,7 @@
         } catch (e) {}
         return;
       }
-      var webOk = startWebStt();
+      var webOk = preferWhisperCapture() ? false : startWebStt();
       startMediaCapture().then(function (mediaOk) {
         if (!recording) return;
         if (!webOk && !mediaOk) {
@@ -2918,13 +2992,33 @@
     var fromMarkup = !!overlay;
     recording = false;
     stopWebRecognition();
-    try { if (window.AndroidOperator && window.AndroidOperator.onCaptureDone) window.AndroidOperator.onCaptureDone(); } catch (e) {}
-    var transcript = (liveTranscript || '').trim();
+    // #334: native host owns STT. onCaptureDone is synchronous and may return the
+    // final text — do not discard it. liveTranscript is often still empty here
+    // because host pushTranscript is posted to the WebView after the bridge returns;
+    // MediaRecorder is also skipped when hasNativeHost().
+    // #343: Meta OnDeviceRecognitionService may never call onPartialResults. Hosts
+    // that pushed a listening hint via setTranscript used to Send that hint when
+    // nativeText was empty — only trust liveTranscript when liveFromSpeech.
+    var nativeText = '';
+    try {
+      if (window.AndroidOperator && typeof window.AndroidOperator.onCaptureDone === 'function') {
+        nativeText = String(window.AndroidOperator.onCaptureDone() || '');
+      }
+    } catch (e) {}
+    if (nativeText) {
+      liveTranscript = nativeText;
+      liveFromSpeech = true;
+    }
+    var transcript = '';
+    if (nativeText) transcript = nativeText.trim();
+    else if (liveFromSpeech) transcript = (liveTranscript || '').trim();
+    else if (!hasNativeHost()) transcript = (liveTranscript || '').trim();
     var shot = pendingShot;
     pendingShot = null;
     liveInterim = '';
     function done(text) {
       hideRecordLabel();
+      liveFromSpeech = false;
       var trimmed = (text || '').trim();
       // #271: markup+mic send may have strokes with no speech (draw-only then tap mic twice).
       // Voice-only still requires speech.
@@ -2952,6 +3046,12 @@
     if (transcript) {
       stopMediaCapture(true);
       done(transcript);
+      return;
+    }
+    // #334: native hosts skipped MediaRecorder — do not flash whisper / POST empty audio.
+    if (hasNativeHost()) {
+      stopMediaCapture(true);
+      done('');
       return;
     }
     if (!cfg.sttUrl) {
@@ -3038,6 +3138,7 @@
     if (!text) return;
     var t = String(text).trim();
     if (!t) return;
+    liveFromSpeech = true;
     liveTranscript = (liveTranscript ? liveTranscript + ' ' : '') + t;
     if (overlay && overlay._ta) {
       overlay._ta.value = (overlay._ta.value ? overlay._ta.value + ' ' : '') + t;
@@ -3047,10 +3148,20 @@
 
   /** Replace the in-memory transcript (native SpeechRecognizer pushes full text each partial). */
   function setTranscript(text) {
+    liveFromSpeech = true;
     liveTranscript = text ? String(text) : '';
     liveInterim = '';
     if (overlay && overlay._ta) overlay._ta.value = liveTranscript;
     refreshRecordLabel();
+  }
+
+  /**
+   * #343: label-only status while recording (listening hints, "no live words — text after Send").
+   * Does not write liveTranscript — hosts must not use setTranscript for UX chrome.
+   */
+  function setRecordStatus(text) {
+    if (!recording) return;
+    showRecordLabel(text || 'Listening… tap mic to send · H to cancel');
   }
 
   /**
@@ -3182,9 +3293,13 @@
       }
     }
   }
+  // Keep in sync with lib/operator-mic.ts canonicalizeCodingRoot / isPathUnderProject (#327).
+  function canonicalizeCodingRoot(p) {
+    return String(p || '').replace(/^\/home\/[^/]+\/coding(?=\/|$)/, '/work/coding');
+  }
   function pathUnderProject(sessionPath, projectPath) {
-    var session = String(sessionPath || '').replace(/\\/g, '/').replace(/\/+$/, '');
-    var project = String(projectPath || '').replace(/\\/g, '/').replace(/\/+$/, '');
+    var session = canonicalizeCodingRoot(String(sessionPath || '').replace(/\\/g, '/').replace(/\/+$/, ''));
+    var project = canonicalizeCodingRoot(String(projectPath || '').replace(/\\/g, '/').replace(/\/+$/, ''));
     // #233: empty projectPath is unfiltered (browser-hub public cattle); do not reject all.
     if (!project) return true;
     if (!session) return false;
@@ -3198,14 +3313,37 @@
       id: id,
       name: (meta && meta.name) || s.name || id,
       active: !!(s && s.active),
+      // #353: hub SessionSummary.thinking — life indicator in replies poll.
+      thinking: !!(s && s.thinking),
       updatedAt: typeof s.updatedAt === 'number' ? s.updatedAt : 0,
       flavor: (meta && meta.flavor) || s.flavor || null,
       unread: !!(s && ((s.unread === true) || (typeof s.pendingRequestsCount === 'number' && s.pendingRequestsCount > 0))),
     };
   }
+  /** #326: picker empty-project copy must never cover hub auth / upstream failures. */
+  function sessionsLoadFailureCopy(status, error) {
+    var st = typeof status === 'number' ? status : 0;
+    var err = String(error || '').toLowerCase();
+    if (st === 401 || st === 403) return 'Hub auth failed — check hub token.';
+    if (st === 502 || /upstream/.test(err)) return 'Hub upstream unavailable — check hub token.';
+    if (st) return 'Could not load sessions (HTTP ' + st + ').';
+    return 'Could not load sessions.';
+  }
+  function rejectSessionsListResponse(res) {
+    return res.json().catch(function () { return {}; }).then(function (body) {
+      var error = parseProxyRejectError(body);
+      var err = new Error(sessionsLoadFailureCopy(res.status, error));
+      err.status = res.status;
+      err.error = error;
+      return Promise.reject(err);
+    });
+  }
   function listProjectSessions(secret) {
     if (cfg.mode === MODE_BROWSER_HUB) {
-      return hapiGet('/api/sessions', secret).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+      return hapiGet('/api/sessions', secret).then(function (r) {
+        if (!r.ok) return rejectSessionsListResponse(r);
+        return r.json();
+      }).then(function (d) {
         var raw = (d && Array.isArray(d.sessions)) ? d.sessions : (Array.isArray(d) ? d : []);
         var project = cfg.projectPath || '';
         // #233: null/empty projectPath → show all sessions the token can see.
@@ -3218,7 +3356,10 @@
         return filtered.map(mapPickerSession).filter(Boolean);
       });
     }
-    return hapiGet('/operator/sessions', secret).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+    return hapiGet('/operator/sessions', secret).then(function (r) {
+      if (!r.ok) return rejectSessionsListResponse(r);
+      return r.json();
+    }).then(function (d) {
       return (d && Array.isArray(d.sessions)) ? d.sessions : [];
     });
   }
@@ -3302,7 +3443,7 @@
     if (mode === 'spawn-per-send') {
       if (!canSpawnPerSend()) {
         toast(spawnUnavailableReason() || 'Spawn per send needs a machine and working directory', 'err');
-        setRoutingMode('pick');
+        setRoutingMode('pin');
         openSessionPicker();
         return Promise.resolve(null);
       }
@@ -3323,16 +3464,13 @@
       });
     }
     var pinned = getPinnedSession();
-    // #241: pin and pick both recover via the picker when nothing is chosen.
-    if (mode === 'pick' || mode === 'pin') {
-      if (!pinned) {
-        toast(mode === 'pin' ? 'Pin a project session first' : 'Pick a project session first', 'err');
-        openSessionPicker();
-        return Promise.resolve(null);
-      }
-      return Promise.resolve(pinned);
+    // #241/#342: pin recovers via the picker when nothing is chosen (pick is under Pin).
+    if (!pinned) {
+      toast('Pin a project session first', 'err');
+      openSessionPicker();
+      return Promise.resolve(null);
     }
-    return Promise.resolve(pinned || (cfg && cfg.session) || null);
+    return Promise.resolve(pinned);
   }
   /** #241/#246: block mic-press when routing cannot succeed (before the operator speaks). */
   function ensureRoutableBeforeRecord() {
@@ -3340,12 +3478,12 @@
     if (mode === 'spawn-per-send') {
       if (canSpawnPerSend()) return true;
       toast(spawnUnavailableReason() || 'Spawn per send needs a machine and working directory', 'err');
-      setRoutingMode('pick');
+      setRoutingMode('pin');
       openSessionPicker();
       return false;
     }
     if (getPinnedSession() || (cfg && cfg.session)) return true;
-    toast('Pick a project session before recording', 'err');
+    toast('Pin a project session before recording', 'err');
     openSessionPicker();
     return false;
   }
@@ -3539,8 +3677,58 @@
     function setQuietStatus(el, text) {
       if (el) el.textContent = text;
     }
-    toolSheet.appendChild($('h3', null, 'Routing'));
-    var modes = ['pin', 'pick'];
+    function makeSection(id, title) {
+      var sec = $('section', 'opdock-settings-section');
+      sec.setAttribute('data-settings-section', id);
+      sec.setAttribute('data-settings-page', id);
+      sec.appendChild($('h3', null, title));
+      return sec;
+    }
+    // #349: multi-page Settings — chips switch one visible topic (not scroll-to-section).
+    // Categories remain Routing / Credentials / Spawn / About (#342 B labels).
+    var nav = $('nav', 'opdock-settings-nav');
+    nav.setAttribute('role', 'tablist');
+    var sectionHosts = {};
+    var navChips = {};
+    function showSettingsPage(id) {
+      Object.keys(sectionHosts).forEach(function (key) {
+        var sec = sectionHosts[key];
+        var on = key === id;
+        sec.hidden = !on;
+        if (on) {
+          sec.classList.remove('opdock-settings-section--hidden');
+          sec.removeAttribute('aria-hidden');
+        } else {
+          sec.classList.add('opdock-settings-section--hidden');
+          sec.setAttribute('aria-hidden', 'true');
+        }
+        var chip = navChips[key];
+        if (!chip) return;
+        if (on) {
+          chip.classList.add('opdock-settings-nav-chip--active');
+          chip.setAttribute('aria-selected', 'true');
+        } else {
+          chip.classList.remove('opdock-settings-nav-chip--active');
+          chip.setAttribute('aria-selected', 'false');
+        }
+      });
+    }
+    ;['routing', 'credentials', 'spawn', 'about'].forEach(function (id) {
+      var chip = $('button', 'opdock-settings-nav-chip', id.charAt(0).toUpperCase() + id.slice(1));
+      chip.type = 'button';
+      chip.setAttribute('data-settings-nav', id);
+      chip.setAttribute('role', 'tab');
+      chip.setAttribute('aria-selected', 'false');
+      chip.addEventListener('click', function () { showSettingsPage(id); });
+      navChips[id] = chip;
+      nav.appendChild(chip);
+    });
+    toolSheet.appendChild(nav);
+
+    var routingSec = makeSection('routing', 'Routing');
+    sectionHosts.routing = routingSec;
+    // #342 part A: Pin vs Spawn only — pick is a tool under Pin, not a third radio.
+    var modes = ['pin'];
     if (canSpawnPerSend()) modes.push('spawn-per-send');
     modes.forEach(function (mode) {
       var lab = $('label');
@@ -3552,66 +3740,125 @@
       inp.addEventListener('change', function () {
         // Radios persist instantly (selected state is enough — #139).
         setRoutingMode(mode);
-        // #141: pick must manifest immediately (even if a pin already exists).
-        if (mode === 'pick') openSessionPicker();
       });
       lab.appendChild(inp);
       lab.appendChild(document.createTextNode(mode === 'spawn-per-send' ? 'spawn per send' : mode));
-      toolSheet.appendChild(lab);
+      routingSec.appendChild(lab);
     });
-    if (!canSpawnPerSend() && cfg.mode === MODE_BROWSER_HUB) {
-      toolSheet.appendChild($('div', 'opdock-session-meta',
-        spawnUnavailableReason() || 'Spawn per send needs a machine and working directory below'));
-    } else if (!canSpawnPerSend()) {
-      toolSheet.appendChild($('div', 'opdock-session-meta',
-        spawnUnavailableReason() || 'Spawn per send unavailable on this host'));
-    }
-    toolSheet.appendChild($('div', 'opdock-session-meta',
-      'pin / spawn apply on send · pick opens the session list now (and on send if unset)'));
+    routingSec.appendChild($('div', 'opdock-session-meta',
+      'pin / spawn apply on send · Change pin opens the session list'));
     var pinnedId = getPinnedSession() || cfg.session || null;
     var pinnedLine = $('div', 'opdock-session-meta',
       'Pinned: ' + (getPinnedSessionLabel() || (pinnedId ? operatorSessionLabel(null, 'pinned') : '(none)')));
-    toolSheet.appendChild(pinnedLine);
+    routingSec.appendChild(pinnedLine);
+    var changePinBtn = $('button', 'opdock-btn2 opdock-secondary', 'Change pin');
+    changePinBtn.type = 'button';
+    changePinBtn.addEventListener('click', function () { openSessionPicker(); });
+    routingSec.appendChild(changePinBtn);
     var secretForLabel = getSecret();
     if (secretForLabel && pinnedId) {
       resolvePinnedLabel(secretForLabel).then(function (label) {
         if (!toolSheet || !pinnedLine.isConnected) return;
         pinnedLine.textContent = 'Pinned: ' + (label || operatorSessionLabel(null, 'pinned'));
       });
+    } else if (pinnedId && hostSessionName()) {
+      pinnedLine.textContent = 'Pinned: ' + hostSessionName();
     }
-    toolSheet.appendChild($('h3', null, 'About'));
-    var aboutRow = $('button', 'opdock-session-row');
-    aboutRow.type = 'button';
-    var aboutBody = $('div');
-    var aboutTitle = $('div', 'opdock-row-title');
-    aboutTitle.appendChild($('span', null, 'About hapi-inline'));
-    if (isVersionUnseen()) aboutTitle.appendChild($('span', 'opdock-version-dot opdock-version-dot--about opdock-version-dot--pulse'));
-    aboutBody.appendChild(aboutTitle);
-    aboutBody.appendChild($('div', 'opdock-session-meta', 'Version ' + currentDockVersion() + ' · config summary · changelog'));
-    aboutRow.appendChild(aboutBody);
-    aboutRow.addEventListener('click', function () { openAboutSheet(); });
-    toolSheet.appendChild(aboutRow);
-    // #249/#251: operator picks machine + directory; persist on change/blur (no Save button).
+
+    var hubInp = null;
+    var hubMeta = null;
+    var hubStatus = null;
+    if (cfg.mode === MODE_BROWSER_HUB) {
+      hubMeta = $('div', 'opdock-session-meta', 'Calling: ' + hubOriginDisplayLabel());
+      routingSec.appendChild(hubMeta);
+      hubInp = document.createElement('input');
+      hubInp.type = 'url';
+      hubInp.className = 'opdock-secret-input';
+      hubInp.setAttribute('autocomplete', 'off');
+      hubInp.placeholder = 'https://your-hub.tailnet.ts.net';
+      hubInp.value = getHubOriginOverride() || normalizeHubOrigin(cfg._configHubOrigin) || '';
+      routingSec.appendChild(hubInp);
+      hubStatus = $('div', 'opdock-session-meta',
+        'Saved on this device when you leave the field · site must be allowed in hub CORS');
+      routingSec.appendChild(hubStatus);
+      function persistHubQuiet() {
+        var hub = normalizeHubOrigin(hubInp.value || '');
+        if (!hub) {
+          setQuietStatus(hubStatus, 'Enter your hub HTTPS origin');
+          return;
+        }
+        if (!isHttpsHubBase(hub)) {
+          setQuietStatus(hubStatus, 'Hub URL needs https://…');
+          return;
+        }
+        var prev = syncEffectiveHubOrigin();
+        if (hub === prev) {
+          setQuietStatus(hubStatus, 'Calling: ' + hubOriginDisplayLabel());
+          if (hubMeta) hubMeta.textContent = 'Calling: ' + hubOriginDisplayLabel();
+          return;
+        }
+        // Quiet path — no toast (#251). Credential still probes the hub explicitly.
+        setHubOriginOverride(hub);
+        syncEffectiveHubOrigin();
+        if (hubMeta) hubMeta.textContent = 'Calling: ' + hubOriginDisplayLabel();
+        setQuietStatus(hubStatus, cfg.sttUrl
+          ? 'Hub saved on this device (voice → hub STT)'
+          : 'Hub saved on this device');
+        if (getSecret()) setGateLocked(false);
+      }
+      hubInp.addEventListener('change', persistHubQuiet);
+      hubInp.addEventListener('blur', persistHubQuiet);
+    }
+    toolSheet.appendChild(routingSec);
+
+    var credSec = makeSection('credentials', 'Credentials');
+    sectionHosts.credentials = credSec;
+    var secInp = document.createElement('input');
+    secInp.type = 'password';
+    secInp.className = 'opdock-secret-input';
+    secInp.setAttribute('autocomplete', 'off');
+    secInp.placeholder = cfg.mode === MODE_BROWSER_HUB
+      ? (getSecret() ? 'Saved — paste to replace token/JWT' : 'Paste HAPI CLI token or JWT')
+      : (getSecret() ? 'Saved — paste to replace' : 'Paste gate secret');
+    credSec.appendChild(secInp);
+    // #251: credential is the only prefs field that round-trips — action lives beside it.
+    var hasSecret = !!getSecret();
+    var secBtn = $('button', 'opdock-btn2 opdock-secondary', hasSecret ? 'Update secret' : 'Save secret');
+    secBtn.addEventListener('click', function () { saveProbedSecret(secInp.value, secBtn, hubInp); });
+    credSec.appendChild(secBtn);
+    credSec.appendChild($('div', 'opdock-session-meta',
+      'Probes your hub — keep an explicit save for this one'));
+    toolSheet.appendChild(credSec);
+
+    var spawnSec = makeSection('spawn', 'Spawn');
+    sectionHosts.spawn = spawnSec;
+    if (!canSpawnPerSend() && cfg.mode === MODE_BROWSER_HUB) {
+      spawnSec.appendChild($('div', 'opdock-session-meta',
+        spawnUnavailableReason() || 'Spawn per send needs a machine and working directory below'));
+    } else if (!canSpawnPerSend()) {
+      spawnSec.appendChild($('div', 'opdock-session-meta',
+        spawnUnavailableReason() || 'Spawn per send unavailable on this host'));
+    }
     var machineSelect = null;
     var dirInp = null;
     var spawnStatus = null;
     if (cfg.mode === MODE_BROWSER_HUB) {
-      toolSheet.appendChild($('h3', null, 'Spawn'));
+      // #249/#251: operator picks machine + directory; persist on change/blur (no Save button).
       var hostMid = hostMachineId();
       var hostDir = hostSpawnDirectory();
       if (hostMid) {
-        toolSheet.appendChild($('div', 'opdock-session-meta', 'Machine: host ' + hostMid.slice(0, 8) + '…'));
+        spawnSec.appendChild($('div', 'opdock-session-meta', 'Machine: host ' + hostMid.slice(0, 8) + '…'));
       } else {
-        toolSheet.appendChild($('div', 'opdock-session-meta', 'Machine (from your hub)'));
+        spawnSec.appendChild($('div', 'opdock-session-meta', 'Machine (from your hub)'));
         machineSelect = document.createElement('select');
         machineSelect.className = 'opdock-secret-input';
         machineSelect.appendChild(document.createElement('option')).textContent = 'Loading machines…';
-        toolSheet.appendChild(machineSelect);
+        spawnSec.appendChild(machineSelect);
       }
       if (hostDir) {
-        toolSheet.appendChild($('div', 'opdock-session-meta', 'Working directory: host-configured'));
+        spawnSec.appendChild($('div', 'opdock-session-meta', 'Working directory: host-configured'));
       } else {
-        toolSheet.appendChild($('div', 'opdock-session-meta', 'Working directory (on that machine)'));
+        spawnSec.appendChild($('div', 'opdock-session-meta', 'Working directory (on that machine)'));
         dirInp = document.createElement('input');
         dirInp.type = 'text';
         dirInp.className = 'opdock-secret-input';
@@ -3619,12 +3866,12 @@
         dirInp.setAttribute('autocapitalize', 'off');
         dirInp.placeholder = '/home/you/coding/my-app';
         dirInp.value = getOperatorSpawnDirectory();
-        toolSheet.appendChild(dirInp);
+        spawnSec.appendChild(dirInp);
       }
       if (!hostMid || !hostDir) {
         spawnStatus = $('div', 'opdock-session-meta',
           'Saved on this device as you change them — same idea as your hub URL');
-        toolSheet.appendChild(spawnStatus);
+        spawnSec.appendChild(spawnStatus);
       }
       if (machineSelect) {
         machineSelect.addEventListener('change', function () {
@@ -3674,7 +3921,7 @@
           machineSelect.textContent = '';
           var needCred = document.createElement('option');
           needCred.value = '';
-          needCred.textContent = 'Save credential below first to list machines';
+          needCred.textContent = 'Save credential in Credentials first to list machines';
           machineSelect.appendChild(needCred);
         }
       }
@@ -3696,7 +3943,7 @@
         var eff = resolveEffectiveSpawnAgent();
         agentProv.textContent = 'Agent: ' + (eff || '(hub default)') + ' — ' + spawnAgentProvenance();
       }
-      toolSheet.appendChild($('div', 'opdock-session-meta', 'Agent (spawn flavor)'));
+      spawnSec.appendChild($('div', 'opdock-session-meta', 'Agent (spawn flavor)'));
       var agentSelect = document.createElement('select');
       agentSelect.className = 'opdock-secret-input';
       var agentHubOpt = document.createElement('option');
@@ -3720,9 +3967,9 @@
         setOperatorSpawnAgent(agentSelect.value);
         refreshAgentProv();
       });
-      toolSheet.appendChild(agentSelect);
+      spawnSec.appendChild(agentSelect);
       refreshAgentProv();
-      toolSheet.appendChild(agentProv);
+      spawnSec.appendChild(agentProv);
 
       var yoloProv = $('div', 'opdock-session-meta', '');
       function refreshYoloProv() {
@@ -3730,7 +3977,7 @@
         var shown = eff === true ? 'on' : (eff === false ? 'off' : '(hub default)');
         yoloProv.textContent = 'Yolo: ' + shown + ' — ' + spawnYoloProvenance();
       }
-      toolSheet.appendChild($('div', 'opdock-session-meta', 'Yolo (unattended tools)'));
+      spawnSec.appendChild($('div', 'opdock-session-meta', 'Yolo (unattended tools)'));
       var yoloSelect = document.createElement('select');
       yoloSelect.className = 'opdock-secret-input';
       ;[
@@ -3751,71 +3998,31 @@
         setOperatorSpawnYolo(yoloSelect.value);
         refreshYoloProv();
       });
-      toolSheet.appendChild(yoloSelect);
+      spawnSec.appendChild(yoloSelect);
       refreshYoloProv();
-      toolSheet.appendChild(yoloProv);
+      spawnSec.appendChild(yoloProv);
+    } else {
+      spawnSec.appendChild($('div', 'opdock-session-meta',
+        'Spawn defaults are host-configured on this proxy deployment'));
     }
-    var hubInp = null;
-    var hubMeta = null;
-    var hubStatus = null;
-    if (cfg.mode === MODE_BROWSER_HUB) {
-      toolSheet.appendChild($('h3', null, 'Hub'));
-      hubMeta = $('div', 'opdock-session-meta', 'Calling: ' + hubOriginDisplayLabel());
-      toolSheet.appendChild(hubMeta);
-      hubInp = document.createElement('input');
-      hubInp.type = 'url';
-      hubInp.className = 'opdock-secret-input';
-      hubInp.setAttribute('autocomplete', 'off');
-      hubInp.placeholder = 'https://your-hub.tailnet.ts.net';
-      hubInp.value = getHubOriginOverride() || normalizeHubOrigin(cfg._configHubOrigin) || '';
-      toolSheet.appendChild(hubInp);
-      hubStatus = $('div', 'opdock-session-meta',
-        'Saved on this device when you leave the field · site must be allowed in hub CORS');
-      toolSheet.appendChild(hubStatus);
-      function persistHubQuiet() {
-        var hub = normalizeHubOrigin(hubInp.value || '');
-        if (!hub) {
-          setQuietStatus(hubStatus, 'Enter your hub HTTPS origin');
-          return;
-        }
-        if (!isHttpsHubBase(hub)) {
-          setQuietStatus(hubStatus, 'Hub URL needs https://…');
-          return;
-        }
-        var prev = syncEffectiveHubOrigin();
-        if (hub === prev) {
-          setQuietStatus(hubStatus, 'Calling: ' + hubOriginDisplayLabel());
-          if (hubMeta) hubMeta.textContent = 'Calling: ' + hubOriginDisplayLabel();
-          return;
-        }
-        // Quiet path — no toast (#251). Credential still probes the hub explicitly.
-        setHubOriginOverride(hub);
-        syncEffectiveHubOrigin();
-        if (hubMeta) hubMeta.textContent = 'Calling: ' + hubOriginDisplayLabel();
-        setQuietStatus(hubStatus, cfg.sttUrl
-          ? 'Hub saved on this device (voice → hub STT)'
-          : 'Hub saved on this device');
-        if (getSecret()) setGateLocked(false);
-      }
-      hubInp.addEventListener('change', persistHubQuiet);
-      hubInp.addEventListener('blur', persistHubQuiet);
-    }
-    toolSheet.appendChild($('h3', null, 'Credential'));
-    var secInp = document.createElement('input');
-    secInp.type = 'password';
-    secInp.className = 'opdock-secret-input';
-    secInp.setAttribute('autocomplete', 'off');
-    secInp.placeholder = cfg.mode === MODE_BROWSER_HUB
-      ? (getSecret() ? 'Saved — paste to replace token/JWT' : 'Paste HAPI CLI token or JWT')
-      : (getSecret() ? 'Saved — paste to replace' : 'Paste gate secret');
-    toolSheet.appendChild(secInp);
-    // #251: credential is the only prefs field that round-trips — action lives beside it.
-    var hasSecret = !!getSecret();
-    var secBtn = $('button', 'opdock-btn2 opdock-secondary', hasSecret ? 'Update secret' : 'Save secret');
-    secBtn.addEventListener('click', function () { saveProbedSecret(secInp.value, secBtn, hubInp); });
-    toolSheet.appendChild(secBtn);
-    toolSheet.appendChild($('div', 'opdock-session-meta',
-      'Probes your hub — keep an explicit save for this one'));
+    toolSheet.appendChild(spawnSec);
+
+    var aboutSec = makeSection('about', 'About');
+    sectionHosts.about = aboutSec;
+    var aboutRow = $('button', 'opdock-session-row');
+    aboutRow.type = 'button';
+    var aboutBody = $('div');
+    var aboutTitle = $('div', 'opdock-row-title');
+    aboutTitle.appendChild($('span', null, 'About hapi-inline'));
+    if (isVersionUnseen()) aboutTitle.appendChild($('span', 'opdock-version-dot opdock-version-dot--about opdock-version-dot--pulse'));
+    aboutBody.appendChild(aboutTitle);
+    aboutBody.appendChild($('div', 'opdock-session-meta', 'Version ' + currentDockVersion() + ' · config summary · changelog'));
+    aboutRow.appendChild(aboutBody);
+    aboutRow.addEventListener('click', function () { openAboutSheet(); });
+    aboutSec.appendChild(aboutRow);
+    toolSheet.appendChild(aboutSec);
+    showSettingsPage('routing');
+
     appendHideControl(toolSheet);
     // #139/#251: Done alone in the footer (primary dismiss).
     var actions = $('div', 'opdock-actions');
@@ -3826,6 +4033,7 @@
     dock.appendChild(toolSheet);
     refreshVersionTrailUi();
   }
+
   function stripMarkdownLinks(text) {
     return String(text || '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
   }
@@ -3865,7 +4073,7 @@
     return entries.slice(0, 16);
   }
   /* BEGIN GENERATED bundled-changelog */
-  var BUNDLED_CHANGELOG_FALLBACK = "## [0.15.4](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.3...v0.15.4) (2026-09-14)\n\n\n### Bug Fixes\n\n* **dock:** embed CHANGELOG.md into About fallback ([#306](https://github.com/Heavygee-Projects/hapi-inline/issues/306)) ([2320278](https://github.com/Heavygee-Projects/hapi-inline/commit/2320278cb2fad9b664fe6c4ec104f6f2f2565702))\n\n## [0.15.3](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.2...v0.15.3) (2026-09-14)\n\n\n### Bug Fixes\n\n* **dock:** keep whisper mic on insecure LAN when sttUrl set ([#304](https://github.com/Heavygee-Projects/hapi-inline/issues/304)) ([1568b31](https://github.com/Heavygee-Projects/hapi-inline/commit/1568b3129264ec0eb083eb161164a717955f97b3)), closes [#302](https://github.com/Heavygee-Projects/hapi-inline/issues/302)\n\n## [0.15.2](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.1...v0.15.2) (2026-09-14)\n\n\n### Documentation\n\n* align routingMode default with [#241](https://github.com/Heavygee-Projects/hapi-inline/issues/241) conditional pick/pin ([#299](https://github.com/Heavygee-Projects/hapi-inline/issues/299)) ([9e153c3](https://github.com/Heavygee-Projects/hapi-inline/commit/9e153c37aa4ce9f258320975072d5987e4c889ba)), closes [#297](https://github.com/Heavygee-Projects/hapi-inline/issues/297)\n\n## [0.15.1](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.0...v0.15.1) (2026-09-14)\n\n\n### Bug Fixes\n\n* **dock:** hub-scoped credentials and proactive JWT refresh ([#295](https://github.com/Heavygee-Projects/hapi-inline/issues/295)) ([236988c](https://github.com/Heavygee-Projects/hapi-inline/commit/236988cfd6577e0476940647cf9791c59a48f571))\n\n## [0.15.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.14.1...v0.15.0) (2026-09-14)\n\n\n### Features\n\n* dock site visibility, report-to-GitHub pipe, and per-user hide ([#289](https://github.com/Heavygee-Projects/hapi-inline/issues/289)) ([fb679c2](https://github.com/Heavygee-Projects/hapi-inline/commit/fb679c2cdcdfbe8a526527e2d137c5cb1c06b631))\n\n## [0.14.1](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.14.0...v0.14.1) (2026-09-14)\n\n\n### Bug Fixes\n\n* **dock:** require knock before browser-hub setup sheet ([#291](https://github.com/Heavygee-Projects/hapi-inline/issues/291)) ([aa5b2c4](https://github.com/Heavygee-Projects/hapi-inline/commit/aa5b2c4b52c7a36213a50b4ad78ca2a0407ba48b))\n\n## [0.14.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.13.0...v0.14.0) (2026-09-13)\n\n\n### Features\n\n* **android:** Compose operator dock web-dock parity ([#238](https://github.com/Heavygee-Projects/hapi-inline/issues/238)) ([b980192](https://github.com/Heavygee-Projects/hapi-inline/commit/b980192da1525ed22aba26ed073c9bf26b20b49d))\n\n## [0.13.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.12.23...v0.13.0) (2026-09-13)\n\n\n### Features\n\n* add dock About + changelog unseen trail ([#283](https://github.com/Heavygee-Projects/hapi-inline/issues/283)) ([ed76592](https://github.com/Heavygee-Projects/hapi-inline/commit/ed76592a2a20dcd74208ee1200ac216256d8f227))\n\n## [0.12.23](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.12.22...v0.12.23) (2026-09-13)\n\n\n### Bug Fixes\n\n* restart replies polling after follow-up send ([#281](https://github.com/Heavygee-Projects/hapi-inline/issues/281)) ([93e13a0](https://github.com/Heavygee-Projects/hapi-inline/commit/93e13a053472e221628f2306facb40f79992dd67)), closes [#229](https://github.com/Heavygee-Projects/hapi-inline/issues/229)\n\n## [0.12.22](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.12.21...v0.12.22) (2026-09-11)\n\n\n### Bug Fixes\n\n* **dock:** H/mic hittable over full-bleed markup ([#276](https://github.com/Heavygee-Projects/hapi-inline/issues/276)) ([#277](https://github.com/Heavygee-Projects/hapi-inline/issues/277)) ([58d4438](https://github.com/Heavygee-Projects/hapi-inline/commit/58d443874823d7b637c691382958df102f634dfc))\n\n## [0.12.21](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.12.20...v0.12.21) (2026-09-11)\n\n\n### Bug Fixes\n\n* **dock:** recording interaction — mic sends, H cancels ([#271](https://github.com/Heavygee-Projects/hapi-inline/issues/271)) ([#274](https://github.com/Heavygee-Projects/hapi-inline/issues/274)) ([b863273](https://github.com/Heavygee-Projects/hapi-inline/commit/b86327312858b837668b0f1e50429181a5bf151c))\n\n## [0.12.20](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.12.19...v0.12.20) (2026-09-11)\n\n\n### Bug Fixes\n\n* **dock:** adopt chrome into host :modal for [#254](https://github.com/Heavygee-Projects/hapi-inline/issues/254)/[#268](https://github.com/Heavygee-Projects/hapi-inline/issues/268) ([#269](https://github.com/Heavygee-Projects/hapi-inline/issues/269)) ([354ebf0](https://github.com/Heavygee-Projects/hapi-inline/commit/354ebf0e1b11d487b959177818b3389b4d6f69e5))\n\n## [0.12.19](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.12.18...v0.12.19) (2026-09-11)\n\n\n### Bug Fixes\n\n* **dock:** popover must not collapse FAB to 0×0 ([#264](https://github.com/Heavygee-Projects/hapi-inline/issues/264)) ([#265](https://github.com/Heavygee-Projects/hapi-inline/issues/265)) ([c628e28](https://github.com/Heavygee-Projects/hapi-inline/commit/c628e284519c035c7099165e62e2b72073660504))\n\n## [0.12.18](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.12.17...v0.12.18) (2026-09-11)\n\n\n### Bug Fixes\n\n* **dock:** name session on replies panel ([#259](https://github.com/Heavygee-Projects/hapi-inline/issues/259)) ([#261](https://github.com/Heavygee-Projects/hapi-inline/issues/261)) ([f781132](https://github.com/Heavygee-Projects/hapi-inline/commit/f781132877140ed1fa495c3adfe618d804a15a71))\n* **dock:** operator spawn agent/yolo + hub-default omit ([#260](https://github.com/Heavygee-Projects/hapi-inline/issues/260)) ([#262](https://github.com/Heavygee-Projects/hapi-inline/issues/262)) ([c9bb8bb](https://github.com/Heavygee-Projects/hapi-inline/commit/c9bb8bb410515f0cb18903ce2c5b55b5bb729d05))\n\n## [0.12.17](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.12.16...v0.12.17) (2026-09-11)\n\n\n### Bug Fixes\n\n* **dock:** warn when Popover API missing ([#254](https://github.com/Heavygee-Projects/hapi-inline/issues/254) follow-up) ([#257](https://github.com/Heavygee-Projects/hapi-inline/issues/257)) ([acf09c4](https://github.com/Heavygee-Projects/hapi-inline/commit/acf09c4499a83d616489880e4d0b755a510f4748))\n\n## [0.12.16](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.12.15...v0.12.16) (2026-09-11)\n\n\n### Bug Fixes\n\n* **dock:** top-layer popover vs host showModal ([#254](https://github.com/Heavygee-Projects/hapi-inline/issues/254)) ([#255](https://github.com/Heavygee-Projects/hapi-inline/issues/255)) ([6e47182](https://github.com/Heavygee-Projects/hapi-inline/commit/6e47182b367367972254a420f644a908ff4b377a))\n";
+  var BUNDLED_CHANGELOG_FALLBACK = "## [0.18.1](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.0...v0.18.1) (2026-09-20)\n\n\n### Bug Fixes\n\n* **compose:** PixelCopy WindowScreenshot for ScreenshotProvider ([#369](https://github.com/Heavygee-Projects/hapi-inline/issues/369)) ([#370](https://github.com/Heavygee-Projects/hapi-inline/issues/370)) ([532ac41](https://github.com/Heavygee-Projects/hapi-inline/commit/532ac415e0dd074649347d87ff31966538bdad44))\n\n\n### Documentation\n\n* stamp Wardrobe live dockTag v0.18.0 ([#367](https://github.com/Heavygee-Projects/hapi-inline/issues/367)) ([a947b5c](https://github.com/Heavygee-Projects/hapi-inline/commit/a947b5c50e2a955364db0b4d9e12ba82b68c653e))\n\n## [0.18.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.17.0...v0.18.0) (2026-09-20)\n\n\n### Features\n\n* bulletproof consumer integration verify gate ([#363](https://github.com/Heavygee-Projects/hapi-inline/issues/363)) ([#365](https://github.com/Heavygee-Projects/hapi-inline/issues/365)) ([a025a25](https://github.com/Heavygee-Projects/hapi-inline/commit/a025a25ec691a283a62b9aff1249d9f4a0bbeff8))\n\n\n### Bug Fixes\n\n* Quest Browser prefer whisper over broken Web Speech ([#364](https://github.com/Heavygee-Projects/hapi-inline/issues/364)) ([#366](https://github.com/Heavygee-Projects/hapi-inline/issues/366)) ([16e1a89](https://github.com/Heavygee-Projects/hapi-inline/commit/16e1a89c321a56d9bb0f606e0bcfbf824324ed99))\n\n\n### Documentation\n\n* proxy unlock boot MUST (Wardrobe [#33](https://github.com/Heavygee-Projects/hapi-inline/issues/33) / [#228](https://github.com/Heavygee-Projects/hapi-inline/issues/228)) ([#360](https://github.com/Heavygee-Projects/hapi-inline/issues/360)) ([7e64fa9](https://github.com/Heavygee-Projects/hapi-inline/commit/7e64fa96d95ffb8bc57e9247281bad45f982696c))\n* QAR land-clean v0.17.0 / APK 1.2.21 ([#357](https://github.com/Heavygee-Projects/hapi-inline/issues/357)) ([f28b648](https://github.com/Heavygee-Projects/hapi-inline/commit/f28b648412d305865afd5f6679814122588d8f78))\n* sttUrl omit ≠ no speech (Wardrobe [#38](https://github.com/Heavygee-Projects/hapi-inline/issues/38)) ([#361](https://github.com/Heavygee-Projects/hapi-inline/issues/361)) ([3ef1bce](https://github.com/Heavygee-Projects/hapi-inline/commit/3ef1bce9c7b223f53fdbaa979541cd4c09287a1c))\n* Wardrobe remat ack v0.17.0 ([#362](https://github.com/Heavygee-Projects/hapi-inline/issues/362)) ([47cff00](https://github.com/Heavygee-Projects/hapi-inline/commit/47cff00ccc5343c99f7c1bc9da4f22191607bbd0))\n\n## [Unreleased]\n\n### Bug Fixes\n\n* **compose:** document + ship `WindowScreenshot` (PixelCopy) for `ScreenshotProvider`; ban `drawToBitmap` (#369)\n* **dock:** Quest Browser + `sttUrl` skips broken Web Speech so MediaRecorder/whisper can run ([#364](https://github.com/Heavygee-Projects/hapi-inline/issues/364))\n\n## [0.17.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.16.0...v0.17.0) (2026-09-20)\n\n\n### Features\n\n* **dock:** Replies panel thinking spinner ([#353](https://github.com/Heavygee-Projects/hapi-inline/issues/353)) ([#354](https://github.com/Heavygee-Projects/hapi-inline/issues/354)) ([fb67b37](https://github.com/Heavygee-Projects/hapi-inline/commit/fb67b37df2bd82b537c1290fb930bf6ba1393e3b))\n\n## [0.16.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.12...v0.16.0) (2026-09-20)\n\n\n### Features\n\n* **dock:** multi-page Settings topic panels ([#349](https://github.com/Heavygee-Projects/hapi-inline/issues/349)) ([#350](https://github.com/Heavygee-Projects/hapi-inline/issues/350)) ([6b2574d](https://github.com/Heavygee-Projects/hapi-inline/commit/6b2574d984051e4bd09c8495ce5174a82f2b8055))\n\n## [0.15.12](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.11...v0.15.12) (2026-09-17)\n\n\n### Bug Fixes\n\n* **dock:** Quest live STT status vs speech ([#343](https://github.com/Heavygee-Projects/hapi-inline/issues/343)) ([#345](https://github.com/Heavygee-Projects/hapi-inline/issues/345)) ([f6bba31](https://github.com/Heavygee-Projects/hapi-inline/commit/f6bba31eccfd1d900c2dca254b21ca69975d5ed1))\n* **dock:** sectioned Settings sheet ([#342](https://github.com/Heavygee-Projects/hapi-inline/issues/342) B) ([#347](https://github.com/Heavygee-Projects/hapi-inline/issues/347)) ([fb3e702](https://github.com/Heavygee-Projects/hapi-inline/commit/fb3e7022d6c1b6477e662c90b707cb6d9125ff7e))\n\n## [0.15.11](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.10...v0.15.11) (2026-09-17)\n\n\n### Bug Fixes\n\n* **dock:** Pin vs Spawn only — pick under Pin ([#344](https://github.com/Heavygee-Projects/hapi-inline/issues/344)) ([933cbca](https://github.com/Heavygee-Projects/hapi-inline/commit/933cbca51221b6d520193f007647cc2afaebe036))\n\n\n### Documentation\n\n* QAR remat ack v0.15.10 / app 1.2.12 ([#338](https://github.com/Heavygee-Projects/hapi-inline/issues/338)) ([fa28aa3](https://github.com/Heavygee-Projects/hapi-inline/commit/fa28aa346c15564c4ea9c7a6a5a4624781b0f6fb))\n\n## [0.15.10](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.9...v0.15.10) (2026-09-17)\n\n\n### Bug Fixes\n\n* **dock:** native mic onCaptureDone return + Quest label ([#334](https://github.com/Heavygee-Projects/hapi-inline/issues/334)) ([#336](https://github.com/Heavygee-Projects/hapi-inline/issues/336)) ([58b7d56](https://github.com/Heavygee-Projects/hapi-inline/commit/58b7d56ac3889b773fdfcff24938d7f6bea01037))\n\n\n### Documentation\n\n* QAR land-clean v0.15.9 + consumer registry catch-up ([#331](https://github.com/Heavygee-Projects/hapi-inline/issues/331)) ([2f524c1](https://github.com/Heavygee-Projects/hapi-inline/commit/2f524c1c841416bfee712b1d21d5e09b1189b29f))\n* QAR mic interim until [#334](https://github.com/Heavygee-Projects/hapi-inline/issues/334) remat ([#335](https://github.com/Heavygee-Projects/hapi-inline/issues/335)) ([9de1c15](https://github.com/Heavygee-Projects/hapi-inline/commit/9de1c150f844d11fb8d6dd0d84222d52f28af2c7))\n\n## [0.15.9](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.8...v0.15.9) (2026-09-16)\n\n\n### Bug Fixes\n\n* **dock:** do not map hub auth/502 to empty project sessions ([#328](https://github.com/Heavygee-Projects/hapi-inline/issues/328)) ([1b32dc6](https://github.com/Heavygee-Projects/hapi-inline/commit/1b32dc6e9cb43d3fa19b46fc1bb45f28f9ff1089))\n* projectPath treats /home/…/coding ↔ /work/coding aliases ([#329](https://github.com/Heavygee-Projects/hapi-inline/issues/329)) ([0a9cad2](https://github.com/Heavygee-Projects/hapi-inline/commit/0a9cad20d971bcff96c5ce318cec9b6026728875))\n\n\n### Documentation\n\n* hub-smoke every device + auth≠empty-project ([#330](https://github.com/Heavygee-Projects/hapi-inline/issues/330)) ([5288a78](https://github.com/Heavygee-Projects/hapi-inline/commit/5288a7878aa1d046be913d3ea390ecbef5ebca9e))\n* remat ack covers host FAB/proxy glue ([#322](https://github.com/Heavygee-Projects/hapi-inline/issues/322)) ([#323](https://github.com/Heavygee-Projects/hapi-inline/issues/323)) ([b0d72b1](https://github.com/Heavygee-Projects/hapi-inline/commit/b0d72b1734137df52b7d1c78c4a07c7f180d071f))\n\n## [0.15.8](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.7...v0.15.8) (2026-09-15)\n\n\n### Bug Fixes\n\n* **compose:** markup draw-only with H/mic like web ([#319](https://github.com/Heavygee-Projects/hapi-inline/issues/319)) ([#320](https://github.com/Heavygee-Projects/hapi-inline/issues/320)) ([47d827a](https://github.com/Heavygee-Projects/hapi-inline/commit/47d827ae3b4e7149a8ab578256795f5a030e3228))\n\n## [0.15.7](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.6...v0.15.7) (2026-09-15)\n\n\n### Bug Fixes\n\n* **compose:** replies panel title uses session name ([#316](https://github.com/Heavygee-Projects/hapi-inline/issues/316)) ([#317](https://github.com/Heavygee-Projects/hapi-inline/issues/317)) ([428684b](https://github.com/Heavygee-Projects/hapi-inline/commit/428684b443f051c772ee71649425d0ea6d3e69fe))\n\n## [0.15.6](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.5...v0.15.6) (2026-09-15)\n\n\n### Bug Fixes\n\n* **compose:** hide HubFab and opaque markup underlay ([#313](https://github.com/Heavygee-Projects/hapi-inline/issues/313)) ([#314](https://github.com/Heavygee-Projects/hapi-inline/issues/314)) ([2f42f76](https://github.com/Heavygee-Projects/hapi-inline/commit/2f42f76e3e8aeac2b54b2cc51f883494ce12b594))\n\n## [0.15.5](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.4...v0.15.5) (2026-09-14)\n\n\n### Documentation\n\n* four-state knock matrix + execute gate ≠ host app session ([#310](https://github.com/Heavygee-Projects/hapi-inline/issues/310)) ([4c852b6](https://github.com/Heavygee-Projects/hapi-inline/commit/4c852b6f8ddc395dae2043962eec0d3a81085cbc))\n\n## [0.15.4](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.3...v0.15.4) (2026-09-14)\n\n\n### Bug Fixes\n\n* **dock:** embed CHANGELOG.md into About fallback ([#306](https://github.com/Heavygee-Projects/hapi-inline/issues/306)) ([2320278](https://github.com/Heavygee-Projects/hapi-inline/commit/2320278cb2fad9b664fe6c4ec104f6f2f2565702))\n\n## [0.15.3](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.2...v0.15.3) (2026-09-14)\n\n\n### Bug Fixes\n\n* **dock:** keep whisper mic on insecure LAN when sttUrl set ([#304](https://github.com/Heavygee-Projects/hapi-inline/issues/304)) ([1568b31](https://github.com/Heavygee-Projects/hapi-inline/commit/1568b3129264ec0eb083eb161164a717955f97b3)), closes [#302](https://github.com/Heavygee-Projects/hapi-inline/issues/302)\n\n## [0.15.2](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.1...v0.15.2) (2026-09-14)\n\n\n### Documentation\n\n* align routingMode default with [#241](https://github.com/Heavygee-Projects/hapi-inline/issues/241) conditional pick/pin ([#299](https://github.com/Heavygee-Projects/hapi-inline/issues/299)) ([9e153c3](https://github.com/Heavygee-Projects/hapi-inline/commit/9e153c37aa4ce9f258320975072d5987e4c889ba)), closes [#297](https://github.com/Heavygee-Projects/hapi-inline/issues/297)\n\n## [0.15.1](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.0...v0.15.1) (2026-09-14)\n\n\n### Bug Fixes\n\n* **dock:** hub-scoped credentials and proactive JWT refresh ([#295](https://github.com/Heavygee-Projects/hapi-inline/issues/295)) ([236988c](https://github.com/Heavygee-Projects/hapi-inline/commit/236988cfd6577e0476940647cf9791c59a48f571))\n";
   /* END GENERATED bundled-changelog */
   function loadBundledChangelog() {
     if (bundledChangelogPromise) return bundledChangelogPromise;
@@ -4017,6 +4225,7 @@
     listProjectSessions(secret).then(function (sessions) {
       list.textContent = '';
       if (!sessions.length) {
+        // #326: only after a successful load — never for 502 / hub auth failures.
         list.appendChild($('div', 'opdock-session-meta',
           cfg.projectPath ? 'No sessions for this project.' : 'No sessions on this hub.'));
         return;
@@ -4046,9 +4255,10 @@
         });
         list.appendChild(row);
       });
-    }).catch(function () {
+    }).catch(function (err) {
       list.textContent = '';
-      list.appendChild($('div', 'opdock-session-meta', 'Could not load sessions.'));
+      var msg = (err && err.message) ? String(err.message) : 'Could not load sessions.';
+      list.appendChild($('div', 'opdock-session-meta', msg));
     });
   }
   function applyIdleIcon(btn) {
@@ -4288,6 +4498,7 @@
         }
 
         render();
+        probeSttRouteOrDisable();
         if (!getSecret() || needsBrowserHubSetup) {
           // #155 / #219: unlock without credential or hub — hide H / block tools until probe-OK save.
           setGateLocked(true);
@@ -4312,7 +4523,7 @@
 
   window.HapiInline = {
     init: init,
-    _version: '0.15.5', // x-release-please-version
+    _version: '0.18.1', // x-release-please-version
     openCluster: function () { return openCluster(); },
     /** #287 — host Settings can offer the same hide/show the dock sheet does. */
     hideForThisUser: function () { setUserHidden(true); hideDockChrome(); },
@@ -4334,6 +4545,8 @@
     _needsWhisperFallback: needsWhisperFallback,
     _resolveSttUrl: resolveSttUrl,
     _resolveSttAuth: resolveSttAuth,
+    _sttProbeMeansMissing: sttProbeMeansMissing,
+    _probeSttRouteOrDisable: probeSttRouteOrDisable,
     _voiceIsUsable: voiceIsUsable,
     _voiceCapability: voiceCapability,
     _isTextFirst: isTextFirst,
@@ -4362,6 +4575,11 @@
     setTranscript: function (text) {
       if (!isExecuteSurface()) return;
       setTranscript(text);
+    },
+    // #343: listening / platform-limitation chrome — not speech.
+    setRecordStatus: function (text) {
+      if (!isExecuteSurface()) return;
+      setRecordStatus(text);
     },
     setInterim: function (text) {
       if (!isExecuteSurface()) return;

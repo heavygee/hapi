@@ -308,6 +308,20 @@
   cursor: pointer;
 }
 .opdock-replies-title { flex: 1; min-width: 0; }
+/* #353: life indicator while hub session.thinking — spinner only, no CoT dump */
+.opdock-replies-thinking {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 2px solid rgba(167, 139, 250, 0.35);
+  border-top-color: #a78bfa;
+  animation: opdock-replies-spin 0.8s linear infinite;
+}
+.opdock-replies-thinking[hidden] { display: none !important; }
+@keyframes opdock-replies-spin {
+  to { transform: rotate(360deg); }
+}
 .opdock-replies-unread {
   display: inline-flex;
   width: 8px;
@@ -486,6 +500,39 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: #a78bfa;
+}
+/* #349: multi-page Settings — Routing / Credentials / Spawn / About (one topic at a time) */
+.opdock-settings-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0 0 10px;
+}
+.opdock-settings-nav-chip {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: #e5e7eb;
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.opdock-settings-nav-chip:hover {
+  background: rgba(124, 58, 237, 0.22);
+}
+.opdock-settings-nav-chip--active,
+.opdock-settings-nav-chip[aria-selected="true"] {
+  border-color: rgba(167, 139, 250, 0.65);
+  background: rgba(124, 58, 237, 0.35);
+  color: #f5f3ff;
+}
+.opdock-settings-section {
+  margin: 0 0 12px;
+  padding-bottom: 8px;
+}
+.opdock-settings-section--hidden,
+.opdock-settings-section[hidden] {
+  display: none;
 }
 .opdock-sheet label {
   display: flex;
