@@ -93,8 +93,9 @@ export function buildHookSettings(
 
     const hapiRoot = workingDirectory ? resolveHapiToolingRoot(workingDirectory) : null;
     if (hapiRoot) {
-        const guardCommand = hapiClaudePreToolUseGuardCommand(hapiRoot);
-        if (existsSync(guardCommand)) {
+        const guardScript = hapiClaudePreToolUseGuardCommand(hapiRoot);
+        if (existsSync(guardScript)) {
+            const guardCommand = shellJoin([guardScript]);
             const guardEntry: HookCommandConfig = {
                 matcher: 'Bash',
                 hooks: [

@@ -106,6 +106,34 @@ describe('generateHookSettingsFile', () => {
         );
     });
 
+    it('shell-quotes guard command paths with whitespace', () => {
+        const spacedRoot = mkdtempSync(join(tmpdir(), 'hapi hook test '));
+        fakeHapiRoot = spacedRoot;
+        const tooling = join(spacedRoot, 'scripts', 'tooling');
+        mkdirSync(tooling, { recursive: true });
+        writeFileSync(join(tooling, 'hapi-production-mutation-guard.sh'), '#!/usr/bin/env bash\n');
+        writeFileSync(join(tooling, 'hapi-claude-pretooluse-guard.sh'), '#!/usr/bin/env bash\n');
+        const spacedWorktree = join(spacedRoot, 'worktrees', 'vitest-hook-settings');
+        mkdirSync(spacedWorktree, { recursive: true });
+
+        const path = generateHookSettingsFile(12345, 'test-token', {
+            filenamePrefix: 'test-hook-space',
+            logLabel: 'test',
+            workingDirectory: spacedWorktree
+        });
+        created.push(path);
+
+        const settings = JSON.parse(readFileSync(path, 'utf8')) as {
+            hooks: {
+                PreToolUse?: Array<{ hooks: Array<{ command: string }> }>;
+            };
+        };
+
+        const guardCommand = settings.hooks.PreToolUse?.[0]?.hooks[0]?.command ?? '';
+        expect(guardCommand).toContain('"');
+        expect(guardCommand).toContain('hapi-claude-pretooluse-guard.sh');
+    });
+
     it('omits PreToolUse outside hapi repo', () => {
         const path = generateHookSettingsFile(12345, 'test-token', {
             filenamePrefix: 'test-hook-outside',

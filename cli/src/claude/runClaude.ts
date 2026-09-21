@@ -214,7 +214,8 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
         filenamePrefix: 'session-hook-local',
         logLabel: 'generateHookSettings',
         trackPermissionMode: true,
-        includeLocalPermissions: true
+        includeLocalPermissions: true,
+        workingDirectory
     });
     logger.debug(`[START] Generated hook settings files: ${hookSettingsPath}, ${localHookSettingsPath}`);
 

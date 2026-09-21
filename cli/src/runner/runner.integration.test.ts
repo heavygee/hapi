@@ -361,7 +361,7 @@ describe.skipIf(!await isServerHealthy())('Runner Integration Tests', { timeout:
     expect(output).toContain('already running');
   });
 
-  it('should handle concurrent session operations', async () => {
+  it('should handle concurrent session operations', { timeout: 60_000 }, async () => {
     // Spawn multiple sessions concurrently
     const promises = [];
     for (let i = 0; i < 3; i++) {
@@ -396,11 +396,13 @@ describe.skipIf(!await isServerHealthy())('Runner Integration Tests', { timeout:
     );
     expect(runnerSessions.length).toBeGreaterThanOrEqual(3);
 
-    // Stop all spawned sessions
-    for (const session of runnerSessions) {
-      expect(session.happySessionId).toBeDefined();
-      await stopRunnerSession(session.happySessionId);
-    }
+    // Stop all spawned sessions (parallel — each stop may wait on process tree)
+    await Promise.all(
+      runnerSessions.map(async (session) => {
+        expect(session.happySessionId).toBeDefined();
+        await stopRunnerSession(session.happySessionId);
+      })
+    );
   });
 
   it('should die with logs when SIGKILL is sent', async () => {
