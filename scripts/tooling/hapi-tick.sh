@@ -137,14 +137,35 @@ as_user_test() {
     fi
 }
 
-# True if $user can create $dir (nearest existing ancestor must be writable
-# and searchable — mkdir needs traverse/execute on the parent).
+# True if $user can create $dir. Walks toward /; rejects when an existing
+# path component is a non-directory (mkdir -p cannot create through a file).
+# Nearest existing directory must be writable and searchable.
 as_user_can_mkdir() {
     local user="$1" dir="$2" cur="$2"
-    while [[ "$cur" != "/" && ! -d "$cur" ]]; do
+    while [[ "$cur" != "/" ]]; do
+        if [[ -e "$cur" || -L "$cur" ]]; then
+            if [[ ! -d "$cur" ]]; then
+                return 1
+            fi
+            break
+        fi
         cur="$(dirname "$cur")"
     done
     as_user_test "$user" -w "$cur" && as_user_test "$user" -x "$cur"
+}
+
+# .conditions must be absent/null or a JSON array — a scalar path is a common
+# YAML mistake that jq's `[]?` silently drops.
+assert_conditions_array() {
+    local json="$1" name="$2"
+    local t
+    t="$(printf '%s' "$json" | jq -r '.conditions | type')"
+    case "$t" in
+        null|array) ;;
+        *)
+            die "$name: conditions must be a YAML sequence (got $t); example: conditions: [/path/to/sentinel]"
+            ;;
+    esac
 }
 
 # Safe unit/file identifier: letters, digits, underscore, hyphen; no /, @, dots.
@@ -344,11 +365,15 @@ validate_one() {
     on_change="$(printf '%s' "$json" | jq -c '.on_change // []')"
 
     [[ -n "$script" && "$script" != null ]] || die "$name: probe.script required"
+    if [[ "$script" != /* ]]; then
+        die "$name: probe.script must be absolute (systemd ConditionPathExists / ExecStart): $script"
+    fi
     [[ -n "$strategy" && "$strategy" != null ]] || die "$name: state.strategy required"
     case "$strategy" in
         max-id|seen-set|timestamp-ids|notified-ids) ;;
         *) die "$name: unknown state.strategy '$strategy'" ;;
     esac
+    assert_conditions_array "$json" "$name"
     if [[ ! -f "$script" ]]; then
         die "$name: probe script not found: $script"
     fi
@@ -375,6 +400,15 @@ validate_one() {
         fi
         err "$name: WARN state parent missing (will create on run): $state_parent"
         warnings=$((warnings + 1))
+    fi
+    # Existing state file must be a regular file the service user can update.
+    if [[ -e "$state_path" ]]; then
+        if [[ ! -f "$state_path" ]]; then
+            die "$name: state.path exists but is not a regular file: $state_path"
+        fi
+        if ! as_user_test "$user" -r "$state_path" || ! as_user_test "$user" -w "$state_path"; then
+            die "$name: state.path not readable+writable by user '$user': $state_path"
+        fi
     fi
     if [[ -d "$lock_parent" ]]; then
         if ! as_user_test "$user" -w "$lock_parent" || ! as_user_test "$user" -x "$lock_parent"; then
@@ -404,6 +438,8 @@ validate_one() {
     registry_env_assignments "$json" "$name" >/dev/null
 
     # Token-cost lint: flag agent CLIs and HAPI wake commands in the probe path.
+    # v1 on_change is documentation-only (templates do not dispatch it) — a
+    # change-gated wake inside the probe is the supported path until dispatch.
     local on_len
     on_len="$(printf '%s' "$on_change" | jq 'length')"
     local wakes_agent=0
@@ -412,14 +448,9 @@ validate_one() {
         || grep -Eiq '(^|[[:space:]/`"'\''])(hapi[[:space:]]+(spawn-peer|ping-peer)|hapi-spawn-peer|hapi-ping-peer)([[:space:]|&;]|$)' "$script"; then
         wakes_agent=1
     fi
-    if [[ "$wakes_agent" -eq 1 ]]; then
-        if [[ "$on_len" -eq 0 ]]; then
-            err "$name: WARN probe invokes an agent wake (CLI / spawn-peer / ping-peer) and on_change is empty — mechanical polls must not burn tokens"
-            warnings=$((warnings + 1))
-        else
-            err "$name: WARN probe invokes an agent wake in-tick — prefer moving agent wake to on_change only"
-            warnings=$((warnings + 1))
-        fi
+    if [[ "$wakes_agent" -eq 1 && "$on_len" -eq 0 ]]; then
+        err "$name: WARN probe invokes an agent wake (CLI / spawn-peer / ping-peer) and on_change is empty — keep the wake change-gated in the probe and document intent under on_change (v1 does not dispatch on_change yet)"
+        warnings=$((warnings + 1))
     fi
     # Flag live CronCreate/ScheduleWakeup *invocations*, not historical comments.
     if grep -Eiq '^[[:space:]]*(claude[[:space:]]+.*)?(CronCreate|ScheduleWakeup)[[:space:](]' "$script"; then
@@ -479,6 +510,7 @@ generate_units() {
     local json prefix script calendar delay user workdir lock state_path desc doc_registry home_dir
     assert_tick_name "$name"
     json="$(registry_json "$name")"
+    assert_conditions_array "$json" "$name"
     prefix="$(unit_prefix "$name")"
     script="$(tick_field "$json" '.probe.script')"
     calendar="$(calendar_from_cadence "$(tick_field "$json" '.cadence')")"
@@ -754,6 +786,7 @@ doctor_one() {
     local name="$1"
     local json prefix script state_path strategy host user healthy=1
     json="$(registry_json "$name")"
+    assert_conditions_array "$json" "$name"
     user="$(resolve_tick_user "$json")"
     prefix="$(unit_prefix "$name")"
     script="$(tick_field "$json" '.probe.script')"
