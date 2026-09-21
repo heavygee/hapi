@@ -132,13 +132,16 @@ origin    →  https://github.com/heavygee/hapi.git
 
 ### Merge lanes (A / B / C) - post #1268 blessing
 
-Chip status stays **PR health only** (`✅` / `🔁` / `⚠️` / …). Merge authority is an **estate overlay** (`scripts/tooling/lib/pr-merge-policy.sh`, config `~/.hapi/pr-merge-policy.json` - see `scripts/tooling/pr-merge-policy.example.json`). Meta queue splits green PRs into **WAIT TIANN** vs **SELF-MERGE ELIGIBLE**.
+**Scope: `tiann/hapi` only.** Lanes A/B/C gate who may merge on **upstream**. They do **not** apply to the local fork `heavygee/hapi` — there the operator / Meta merge (or push) whenever they want; no size caps, no `low-impact` promote, no "wait on tiann." Chip advice already encodes this: fork greens say wait on Meta/operator, never lane A.
+
+Chip status stays **PR health only** (`✅` / `🔁` / `⚠️` / …). Merge authority on upstream is an **estate overlay** (`scripts/tooling/lib/pr-merge-policy.sh`, config `~/.hapi/pr-merge-policy.json` - see `scripts/tooling/pr-merge-policy.example.json`). Meta queue splits green **upstream** PRs into **WAIT TIANN** vs **SELF-MERGE ELIGIBLE**.
 
 | Lane | Who merges | How you get there | Agents |
 |------|------------|-------------------|--------|
-| **A** maintainer | **@tiann** | Default when over size caps and not promoted | Prepare only - never `gh pr merge` |
-| **B** self-merge | Operator / Meta tooling (not agents) | Auto: size caps on **product files** (≤8 files, ≤120 delta; `*.test.*` / `*.spec.*` / `__tests__` excluded); **or** human promote via GitHub label `low-impact` **or** `allow_pr_numbers` in policy | Prepare only - no auto merge yet |
-| **C** forbidden | Nobody here | Others' PRs, direct push to `main`, settings, force-push | Hard no |
+| **A** maintainer | **@tiann** | Default when over size caps and not promoted (**upstream only**) | Prepare only - never `gh pr merge` on `tiann/hapi` |
+| **B** self-merge | Operator / Meta tooling (not agents) | Auto: size caps on **product files** (≤8 files, ≤120 delta; `*.test.*` / `*.spec.*` / `__tests__` excluded); **or** human promote via GitHub label `low-impact` **or** `allow_pr_numbers` in policy (**upstream only**) | Prepare only - no auto merge yet |
+| **C** forbidden | Nobody here | Others' PRs, direct push to `tiann/hapi:main`, settings, force-push | Hard no |
+| *(fork)* | Operator / Meta | Any green (or operator-directed) PR on **`heavygee/hapi`** | Still prepare-only unless operator directs a fork merge; lanes A/B do not apply |
 
 **Blessing:** after heavygee self-merged test-only [#1268](https://github.com/tiann/hapi/pull/1268), @tiann replied ([comment](https://github.com/tiann/hapi/pull/1268#issuecomment-5141575753)): *"Sounds great! Thanks for helping out."* That authorizes taking **low-impact** PRs off tiann's plate - not a blank check for every green PR.
 
@@ -268,7 +271,7 @@ What it does, idempotently:
 
 | Emoji / status | Meaning | Advice pinged |
 |----------------|---------|---------------|
-| ✅ `clean` | open PR, CI green, 0 **current** unresolved threads, bot clean, mergeable | **chip.repo**-aware: `tiann/hapi` → wait on tiann (lane A) or self-merge (lane B); **`heavygee/hapi` fork** → wait on Meta/operator (never "wait on tiann") |
+| ✅ `clean` | open PR, CI green, 0 **current** unresolved threads, bot clean, mergeable | **chip.repo**-aware: `tiann/hapi` → lane A/B (wait on tiann or self-merge); **`heavygee/hapi` fork** → Meta/operator may merge freely (lanes A/B do not apply; never "wait on tiann") |
 | 🔁 `pending` | CI/bot in flight, or thread/CI data momentarily unavailable | wait / retry |
 | ⚠️ `needs_work` | failing CI, **current** open threads, bot findings, rebase, or **closed-unmerged** | fix per action string |
 | 📝 `pre_pr` | tracked number, no open PR upstream yet | file when ready |

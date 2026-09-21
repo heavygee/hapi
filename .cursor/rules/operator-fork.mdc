@@ -9,7 +9,7 @@ This repo is a **fork** of `tiann/hapi`. Root **`AGENTS.md` is byte-identical to
 
 **Read `docs/operator/AGENTS.md`** - single canonical guide (HAPI baseline + fork intent + upstream PR discipline).
 
-**NEVER merge on `tiann/hapi` from an agent shell.** Agents prepare only (CI, rebase, threads). Merge lanes A/B/C live in `docs/operator/AGENTS.md` § Upstream relationship: lane A = @tiann; lane B = operator/Meta for low-impact / policy-eligible PRs (blessing: tiann on #1268); lane C = forbidden. Write collaborator access is not a blank check. Incident #1096 was the first accidental heavygee upstream merge (2026-07-20).
+**NEVER merge on `tiann/hapi` from an agent shell.** Agents prepare only (CI, rebase, threads). Merge lanes A/B/C live in `docs/operator/AGENTS.md` § Upstream relationship and apply **only to upstream `tiann/hapi`** (lane A = @tiann; lane B = operator/Meta for low-impact / policy-eligible PRs; blessing: tiann on #1268; lane C = forbidden). They do **not** constrain `heavygee/hapi` — fork merges are operator/Meta choice. Write collaborator access on upstream is not a blank check. Incident #1096 was the first accidental heavygee upstream merge (2026-07-20).
 
 **Public GitHub voice:** do not unsolicited-comment on others' PRs/issues with estate jargon (soup, Meta, remat, lanes). Route findings to the operator; post only with operator-approved wording. Public posts are **I** (heavygee), never royal-we. Do not police other contributors - assume best intent + time lag; tests and the review bot catch real breakage. Canon: `docs/operator/AGENTS.md` § Public GitHub voice.
 

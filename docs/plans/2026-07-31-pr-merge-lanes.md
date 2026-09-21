@@ -2,6 +2,14 @@
 
 Chip = health. Lane = local policy. Build order: (1) policy lib + tests (2) Meta queue sections (3) AGENTS A/B/C (4) optional merge automation later - **not yet**.
 
+## Scope (upstream only)
+
+**Lanes A/B/C apply only to `tiann/hapi`.** They answer "who may merge this green upstream PR?" (@tiann vs operator/Meta vs nobody).
+
+**They do not apply to `heavygee/hapi`.** On the local fork, the operator / Meta merge or push as they please — no auto-B size caps, no `low-impact` promote ritual, no "wait on tiann." Fork chip advice is "wait on Meta/operator" (or just merge), never lane A.
+
+Do not invent a fork-side lane A/B. If Meta queue text ever says "wait on tiann" for a `heavygee/hapi` chip, that is a bug (classify must be per `chip.repo`).
+
 ## Amendment 2026-08-09 - drop path-kind reject
 
 **Retired:** auto-B short-circuit `product_paths` ("because product" → lane A). Touching `cli/src|hub/src|web/src|shared/src` is no longer a hard reject.
