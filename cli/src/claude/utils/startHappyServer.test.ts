@@ -276,6 +276,44 @@ describe('startHappyServer link_pr', () => {
         expect(sessionClient.flushMetadata).not.toHaveBeenCalled()
     })
 
+    it('forwards Enterprise PR URLs to the hub unchanged', async () => {
+        const linkedRef = {
+            kind: 'github_pr' as const,
+            repo: 'owner/repo',
+            number: 42,
+            url: 'https://acme.ghe.com/owner/repo/pull/42',
+            role: 'primary' as const,
+            source: 'agent' as const,
+            linkedAt: 1
+        }
+        mockUpsertSessionExternalRef.mockResolvedValue({
+            ok: true,
+            status: 200,
+            externalRefs: [linkedRef]
+        })
+        const sessionClient = {
+            sessionId: 'sess-ghes',
+            updateMetadata: vi.fn(),
+            flushMetadata: vi.fn(async () => true),
+            getMetadata: vi.fn(() => ({ externalRefs: [linkedRef] })),
+            sendAgentMessage: vi.fn(),
+            sendClaudeSessionMessage: vi.fn()
+        } as unknown as ApiSessionClient
+
+        const client = await connectWithClient(sessionClient)
+        const result = await client.callTool({
+            name: 'link_pr',
+            arguments: { url: 'https://acme.ghe.com/owner/repo/pull/42' }
+        }) as ToolResult
+
+        expect(result.isError).toBeFalsy()
+        expect(mockUpsertSessionExternalRef).toHaveBeenCalledWith('sess-ghes', expect.objectContaining({
+            repo: 'owner/repo',
+            number: 42,
+            url: 'https://acme.ghe.com/owner/repo/pull/42'
+        }))
+    })
+
     it('upserts without wiping other github_pr refs', async () => {
         const existing = {
             kind: 'github_pr' as const,

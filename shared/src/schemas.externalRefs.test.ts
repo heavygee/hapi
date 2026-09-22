@@ -388,6 +388,32 @@ describe('upsertGithubPrIntoExternalRefs', () => {
             role: 'primary'
         }])
     })
+
+    it('treats same repo#N on different hosts as distinct identities', () => {
+        const github = buildGithubPrExternalRef({
+            repo: 'owner/repo',
+            number: 42,
+            role: 'secondary',
+            checks: 'pass',
+            statusCheckedAt: 100
+        })
+        const ghes = buildGithubPrExternalRef({
+            repo: 'owner/repo',
+            number: 42,
+            host: 'acme.ghe.com',
+            role: 'secondary',
+            checks: 'fail',
+            statusCheckedAt: 200
+        })
+        expect(ExternalRefsSchema.safeParse([github, ghes]).success).toBe(true)
+        const next = upsertGithubPrIntoExternalRefs([github], ghes)
+        expect(next).toHaveLength(2)
+        expect(next).toEqual(expect.arrayContaining([github, ghes]))
+        // Cached health must not bleed across hosts.
+        const ghesStored = next.find((ref) => ref.url.includes('acme.ghe.com'))
+        expect(ghesStored?.checks).toBe('fail')
+        expect(ghesStored?.statusCheckedAt).toBe(200)
+    })
 })
 
 describe('pr chip display profile', () => {

@@ -78,6 +78,26 @@ export function getGitHubUrlForRepo(repo: string, number: number, host: string =
     return `https://${host}/${repo}/pull/${number}`
 }
 
+/** Hostname from a PR URL; falls back to github.com on parse failure. */
+export function hostFromGithubPrUrl(url: string): string {
+    try {
+        return new URL(url).hostname || DEFAULT_HOST
+    } catch {
+        return DEFAULT_HOST
+    }
+}
+
+/**
+ * Identity key for dedupe / upsert: host + case-insensitive repo + number.
+ * Distinct forges with the same owner/repo#N must not collide.
+ */
+export function githubPrIdentityKey(repo: string, number: number, hostOrUrl: string): string {
+    const host = hostOrUrl.includes('://')
+        ? hostFromGithubPrUrl(hostOrUrl)
+        : (hostOrUrl.trim() || DEFAULT_HOST)
+    return `github_pr:${host.toLowerCase()}:${repo.toLowerCase()}#${number}`
+}
+
 /**
  * Registry snapshot for callers that expect the multi-repo shape.
  * Browser-safe: no filesystem YAML (fork Meta loads hosts via configureGitHubHosts).

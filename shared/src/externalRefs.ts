@@ -12,15 +12,7 @@ import {
     type ResolvedPrChipDisplay,
     resolvePrChipDisplay
 } from './prChipDisplay'
-import { getGitHubUrlForRepo, isValidGitHubHost } from './projectRegistry'
-
-function hostFromGithubPrUrl(url: string): string {
-    try {
-        return new URL(url).hostname || 'github.com'
-    } catch {
-        return 'github.com'
-    }
-}
+import { getGitHubUrlForRepo, hostFromGithubPrUrl, isValidGitHubHost } from './projectRegistry'
 
 /**
  * Primary GitHub PR chip source. Title/emoji parsing is intentionally not used.
@@ -131,15 +123,18 @@ export function buildGithubPrExternalRef(input: {
     }
 }
 
-/** GitHub owner/repo paths are case-insensitive; compare identity that way. */
+/** GitHub owner/repo paths are case-insensitive; forge host is part of identity. */
 export function isSameGithubPrIdentity(
     candidate: ExternalRef,
     repo: string,
-    number: number
+    number: number,
+    host: string = 'github.com'
 ): boolean {
-    return candidate.kind === 'github_pr'
-        && candidate.repo.toLowerCase() === repo.toLowerCase()
-        && candidate.number === number
+    if (candidate.kind !== 'github_pr') return false
+    if (candidate.repo.toLowerCase() !== repo.toLowerCase() || candidate.number !== number) {
+        return false
+    }
+    return hostFromGithubPrUrl(candidate.url).toLowerCase() === host.toLowerCase()
 }
 
 /**
@@ -150,8 +145,9 @@ export function upsertGithubPrIntoExternalRefs(
     current: readonly ExternalRef[],
     ref: GithubPrExternalRef
 ): ExternalRef[] {
+    const host = hostFromGithubPrUrl(ref.url)
     const same = current.find((candidate): candidate is GithubPrExternalRef =>
-        isSameGithubPrIdentity(candidate, ref.repo, ref.number)
+        isSameGithubPrIdentity(candidate, ref.repo, ref.number, host)
     )
     const nextRef: GithubPrExternalRef = same
         ? {
@@ -170,7 +166,7 @@ export function upsertGithubPrIntoExternalRefs(
         }
         : ref
     const retained = current.filter((candidate) => {
-        if (isSameGithubPrIdentity(candidate, ref.repo, ref.number)) {
+        if (isSameGithubPrIdentity(candidate, ref.repo, ref.number, host)) {
             return false
         }
         if (nextRef.role === 'primary'

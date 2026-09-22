@@ -46,6 +46,7 @@ export function LinkPrDialog(props: LinkPrDialogProps) {
             await onUpsert(buildGithubPrExternalRef({
                 repo: parsed.repo,
                 number: parsed.number,
+                url: parsed.url,
                 role: 'primary',
                 source: 'user',
                 linkedAt: Date.now()

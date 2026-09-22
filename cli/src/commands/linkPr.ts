@@ -35,6 +35,7 @@ export const linkPrCommand: CommandDefinition = {
         const ref = buildGithubPrExternalRef({
             repo: parsed.repo,
             number: parsed.number,
+            url: parsed.url,
             role: 'primary',
             source: 'agent',
             linkedAt: Date.now()

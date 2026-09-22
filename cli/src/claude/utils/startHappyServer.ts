@@ -266,6 +266,7 @@ function createHapiMcpServer(
             const ref = buildGithubPrExternalRef({
                 repo: parsed.repo,
                 number: parsed.number,
+                url: parsed.url,
                 role: args.role ?? 'primary',
                 source: 'agent',
                 linkedAt: Date.now(),
@@ -277,7 +278,7 @@ function createHapiMcpServer(
                     throw new Error(response.error ?? `HTTP ${response.status}`)
                 }
                 const persisted = response.externalRefs?.some((candidate) =>
-                    isSameGithubPrIdentity(candidate, ref.repo, ref.number)
+                    isSameGithubPrIdentity(candidate, ref.repo, ref.number, new URL(ref.url).hostname)
                     && candidate.role === ref.role
                 )
                 if (!persisted) {

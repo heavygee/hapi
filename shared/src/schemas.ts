@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { COPILOT_AGENT_MODES, type CopilotAgentMode } from './copilotModes'
 import { CODEX_COLLABORATION_MODES, PERMISSION_MODES } from './modes'
 import { AgentConfigDescriptorSchema } from './agentConfig'
-import { isValidGitHubHost } from './projectRegistry'
+import { githubPrIdentityKey, isValidGitHubHost } from './projectRegistry'
 
 export const PermissionModeSchema = z.enum(PERMISSION_MODES)
 export const CodexCollaborationModeSchema = z.enum(CODEX_COLLABORATION_MODES)
@@ -152,7 +152,7 @@ export const ExternalRefsSchema = z.array(ExternalRefSchema)
     }
     const identities = new Set<string>()
     refs.forEach((ref, index) => {
-        const key = `${ref.kind}:${ref.repo.toLowerCase()}#${ref.number}`
+        const key = githubPrIdentityKey(ref.repo, ref.number, ref.url)
         if (identities.has(key)) {
             ctx.addIssue({
                 code: 'custom',
