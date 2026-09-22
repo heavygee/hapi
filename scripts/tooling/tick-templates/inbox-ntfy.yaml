@@ -1,0 +1,27 @@
+# Template: inbox-ntfy
+# Shape: overseer inbox watch — bare probe + max-id watermark + ntfy on change.
+# Copy into config/ticks.yaml and adjust paths/host/cadence.
+#
+# Probe owns change detection + ntfy (on_change here is documentation for
+# validate/doctor; v1 does not re-dispatch actions from the generator).
+
+name: example-inbox
+host: REPLACE_HOSTNAME
+template: inbox-ntfy
+description: Example inbox watch (ntfy on new items)
+cadence: "OnCalendar=*:8,38"
+randomized_delay_sec: 90
+probe:
+  type: shell
+  script: /path/to/your-inbox-tick.sh
+state:
+  path: "~/.local/state/hapi/example-inbox-watermark.json"
+  strategy: max-id
+on_change:
+  - ntfy:
+      topic: your-topic
+      priority: 4
+lock:
+  path: "~/.local/state/hapi/example-inbox.lock"
+working_directory: /path/to/repo
+user: REPLACE_USER
