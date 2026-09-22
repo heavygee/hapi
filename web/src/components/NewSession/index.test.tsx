@@ -548,7 +548,7 @@ describe('NewSession launch preferences', () => {
             { modelId: 'openrouter-union-alpha', provider: 'openrouter' }
         ]
 
-        render(
+        renderWithQuery(
             <NewSession
                 api={api}
                 machines={[machine]}
@@ -580,7 +580,7 @@ describe('NewSession launch preferences', () => {
             modelReasoningEffort: 'default'
         })
 
-        render(
+        renderWithQuery(
             <NewSession
                 api={api}
                 machines={[machine]}
@@ -609,7 +609,7 @@ describe('NewSession launch preferences', () => {
             modelReasoningEffort: 'default'
         })
 
-        render(
+        renderWithQuery(
             <NewSession
                 api={api}
                 machines={[machine]}
