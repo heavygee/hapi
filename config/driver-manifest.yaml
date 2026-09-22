@@ -123,25 +123,13 @@ layers:
   # the agent so it can self-correct. Hub+cli only, no SCHEMA bump.
   - branch: feat/mermaid-parse-failure-feedback
 
-  # Codex usage indicator (tiann/hapi#847, upstream PR open).
-  # Ring + popover showing context-window %, 5h/weekly rate-limit usage, token breakdown.
-  # Driven by token_count events -> session.metadata.codexUsage + SSE patches.
-  # Also: Codex session list/resume in NewSession (CodexSessionSelector).
-  # No SCHEMA_VERSION bump. Authorship: Ethan Wang (dsus4wang).
-  # Umbrella: tiann/hapi#846 (cross-flavor budget gauges - this is the Codex seed).
-  #
-  # TEMPORARILY DROPPED 2026-07-19 (meta): upstream 0.23.1 shipped #1088
-  # (codex import/resume from runners) which add/add-collides with and
-  # supersedes this layer's bundled codex-sessions-RPC (codexSessions.ts,
-  # ListCodexSessions, CodexSessionSelector, ArchiveCodexSession). The
-  # "codex-usage" branch interleaves usage-gauge commits with session-resume
-  # commits, so it cannot be cherry-picked thin mechanically. Follow-up owned
-  # by the codex-usage layer owner: re-thin to BUDGET-ONLY (agentBudget,
-  # codexUsage, AgentBudgetIndicator, codexBudgetAdapter) rebased on 0.23.1,
-  # adopting upstream #1088 for session listing. Budget core has no refs to
-  # the sessions surface, so it separates cleanly. No other soup layer depends
-  # on this layer's exports (verified). Re-enable once a thin branch exists.
-  # - branch: feat/codex-usage-indicator-rebased  # DROPPED pending budget-only re-thin
+  # Codex budget gauge (tiann/hapi#1901 — thin re-thin of #847).
+  # Ring + popover: context %, 5h/weekly windows, credits covering/blocked.
+  # Driven by token_count / account rate-limits → metadata.codexUsage + SSE.
+  # Budget-only (no New Session resume surface; adopt #1088 for listing).
+  # Umbrella: tiann/hapi#846. Authorship lineage: Ethan Wang + heavygee re-thin.
+  # Re-enabled 2026-09-22 after #847 closed as superseded by #1901.
+  - branch: feat/codex-budget-gauge
 
   # Bridge: FCM sendModelError for wrist push on model errors (#878).
   # MUST be thin tip on upstream (or post-#803 base) — was on companion-fcm tip —
