@@ -74,7 +74,7 @@ resolve_tick_user() {
     printf '%s\n' "$u"
 }
 
-# Escape % for systemd path condition values (ConditionPathExists, etc.).
+# Escape % for systemd path condition values (ConditionPathExists, WorkingDirectory).
 # Do NOT double $ here — that escaping is Exec*-only; $$ in a condition does
 # not match a literal $ in the filesystem path (verified via systemd-analyze).
 systemd_escape_condition_path() {
@@ -99,6 +99,15 @@ systemd_quote_arg() {
     s="${s//\\/\\\\}"
     s="${s//\"/\\\"}"
     printf '"%s"' "$s"
+}
+
+# Emit Environment="KEY=value" with whitespace-safe quoting and %% for %.
+systemd_env_assignment() {
+    local key="$1" val="$2"
+    val="${val//\\/\\\\}"
+    val="${val//\"/\\\"}"
+    val="${val//%/%%}"
+    printf 'Environment="%s=%s"\n' "$key" "$val"
 }
 
 # True when the current process identity matches the configured tick user.
@@ -374,6 +383,13 @@ validate_one() {
         *) die "$name: unknown state.strategy '$strategy'" ;;
     esac
     assert_conditions_array "$json" "$name"
+    local cond
+    while IFS= read -r cond; do
+        [[ -n "$cond" && "$cond" != null ]] || continue
+        if [[ "$cond" != /* ]]; then
+            die "$name: conditions entries must be absolute (systemd ConditionPathExists): $cond"
+        fi
+    done < <(printf '%s' "$json" | jq -r '.conditions[]? // empty')
     if [[ ! -f "$script" ]]; then
         die "$name: probe script not found: $script"
     fi
@@ -387,6 +403,9 @@ validate_one() {
     lock="$(expand_user_path "$(tick_field "$json" '.lock.path' "")" "$user")"
     if [[ -z "$lock" ]]; then
         lock="$home_dir/.local/state/hapi/tick-${name}.lock"
+    fi
+    if [[ "$lock" != /* ]]; then
+        die "$name: lock.path must be absolute (got relative '$lock')"
     fi
     state_parent="$(dirname "$state_path")"
     lock_parent="$(dirname "$lock")"
@@ -417,6 +436,15 @@ validate_one() {
     else
         if ! as_user_can_mkdir "$user" "$lock_parent"; then
             die "$name: user '$user' cannot create lock parent: $lock_parent"
+        fi
+    fi
+    # Existing lock file must be flock-able by the service user (not parent-only).
+    if [[ -e "$lock" ]]; then
+        if [[ ! -f "$lock" ]]; then
+            die "$name: lock.path exists but is not a regular file: $lock"
+        fi
+        if ! as_user_test "$user" -w "$lock"; then
+            die "$name: lock.path not writable by user '$user': $lock"
         fi
     fi
 
@@ -497,10 +525,15 @@ cmd_validate() {
         validate_one "$name"
         return 0
     fi
-    local names
-    names="$(registry_json | jq -r '.ticks[].name')"
-    local n
-    for n in $names; do
+    # Aggregate validate is host-local (same filter as aggregate doctor).
+    local n here host
+    here="$(hostname_short)"
+    for n in $(registry_json | jq -r '.ticks[].name'); do
+        host="$(tick_field "$(registry_json "$n")" '.host')"
+        if [[ -n "$host" && "$host" != null && "$host" != "$here" && "$host" != "$(hostname)" ]]; then
+            err "$n: skipped (registry host='$host', this='$here') — validate by name to force"
+            continue
+        fi
         validate_one "$n"
     done
 }
@@ -522,6 +555,9 @@ generate_units() {
     lock="$(expand_user_path "$(tick_field "$json" '.lock.path' "")" "$user")"
     if [[ -z "$lock" ]]; then
         lock="$home_dir/.local/state/hapi/tick-${name}.lock"
+    fi
+    if [[ "$lock" != /* ]]; then
+        die "$name: lock.path must be absolute (got relative '$lock')"
     fi
     state_path="$(expand_user_path "$(tick_field "$json" '.state.path')" "$user")"
     desc="$(tick_field "$json" '.description' "HAPI tick: $name")"
@@ -564,22 +600,17 @@ generate_units() {
         echo "User=$user"
         # Omit Group= — systemd uses the account primary group (may differ from username).
         echo "Nice=10"
-        echo "Environment=HOME=$home_dir"
-        echo "Environment=USER=$user"
-        echo "Environment=PATH=$home_dir/.local/bin:/usr/local/bin:/usr/bin:/bin"
+        systemd_env_assignment HOME "$home_dir"
+        systemd_env_assignment USER "$user"
+        systemd_env_assignment PATH "$home_dir/.local/bin:/usr/local/bin:/usr/bin:/bin"
         local assignment key val
         while IFS= read -r assignment; do
             [[ -n "$assignment" ]] || continue
             key="${assignment%%=*}"
             val="${assignment#*=}"
-            # Quote full KEY=value so whitespace survives systemd parsing.
-            # Escape % as %% so systemd does not expand / drop specifier sequences.
-            val="${val//\\/\\\\}"
-            val="${val//\"/\\\"}"
-            val="${val//%/%%}"
-            echo "Environment=\"$key=$val\""
+            systemd_env_assignment "$key" "$val"
         done < <(registry_env_assignments "$json" "$name")
-        echo "WorkingDirectory=$workdir"
+        echo "WorkingDirectory=$(systemd_escape_condition_path "$workdir")"
         echo "ExecStartPre=/usr/bin/mkdir -p $lock_dir_q $state_dir_q"
         echo "ExecStart=/usr/bin/flock -w 60 $lock_q $script_q"
         echo "StandardOutput=journal"
@@ -754,6 +785,9 @@ cmd_run() {
     if [[ -z "$lock" ]]; then
         lock="$home_dir/.local/state/hapi/tick-${name}.lock"
     fi
+    if [[ "$lock" != /* ]]; then
+        die "lock.path must be absolute (got relative '$lock')"
+    fi
     state_path="$(expand_user_path "$(tick_field "$json" '.state.path')" "$user")"
     # Match ExecStartPre: create both lock and state parents before the probe.
     mkdir -p "$(dirname "$lock")" "$(dirname "$state_path")"
@@ -833,13 +867,25 @@ doctor_one() {
     if [[ -f "$state_path" ]]; then
         case "$strategy" in
             max-id)
-                echo "  lastMaxId=$(hapi_tick_max_id_read "$state_path")  mtime=$(date -u -r "$state_path" +%FT%TZ 2>/dev/null || stat -c %y "$state_path")"
+                local mid
+                if mid="$(hapi_tick_max_id_read "$state_path")"; then
+                    echo "  lastMaxId=$mid  mtime=$(date -u -r "$state_path" +%FT%TZ 2>/dev/null || stat -c %y "$state_path")"
+                else
+                    echo "  lastMaxId=INVALID (malformed or unreadable state)"
+                    healthy=0
+                fi
                 ;;
             seen-set)
                 echo "  seen_count=$(wc -l < "$state_path" | tr -d ' ')  mtime=$(date -u -r "$state_path" +%FT%TZ 2>/dev/null || true)"
                 ;;
             timestamp-ids)
-                echo "  $(hapi_tick_timestamp_ids_read "$state_path")"
+                local ts_line
+                if ts_line="$(hapi_tick_timestamp_ids_read "$state_path")"; then
+                    echo "  $ts_line"
+                else
+                    echo "  timestamp-ids=INVALID (malformed or unreadable state)"
+                    healthy=0
+                fi
                 ;;
             *)
                 ls -l "$state_path" || true
