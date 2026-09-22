@@ -48,12 +48,12 @@ describe('OverseerEntity read-only tools', () => {
         const engine = buildEngine(store)
         const o = overseer(engine)
 
-        expect(o.queryEvents({ severityMin: 4 }).map((e) => e.summary)).toEqual(['blocked on CI'])
-        expect(o.queryEvents({ eventType: 'progress' }).map((e) => e.summary)).toEqual(['progress tick'])
-        expect(o.queryEvents({ sourceKind: 'system' }).map((e) => e.summary)).toEqual(['silent'])
-        expect(o.queryEvents({ project: 'api' }).map((e) => e.summary)).toEqual(['silent'])
-        expect(o.queryEvents({ attentionCandidate: 1 }).map((e) => e.summary)).toEqual(['blocked on CI'])
-        expect(o.queryEvents({}).length).toBe(3)
+        expect(o.queryEvents({ severityMin: 4 }).events.map((e) => e.summary)).toEqual(['blocked on CI'])
+        expect(o.queryEvents({ eventType: 'progress' }).events.map((e) => e.summary)).toEqual(['progress tick'])
+        expect(o.queryEvents({ sourceKind: 'system' }).events.map((e) => e.summary)).toEqual(['silent'])
+        expect(o.queryEvents({ project: 'api' }).events.map((e) => e.summary)).toEqual(['silent'])
+        expect(o.queryEvents({ attentionCandidate: 1 }).events.map((e) => e.summary)).toEqual(['blocked on CI'])
+        expect(o.queryEvents({}).events.length).toBe(3)
     })
 
     it('query_inbox groups candidates / surfaced / held', () => {
@@ -156,7 +156,7 @@ describe('OverseerEntity read-only tools', () => {
         expect(byPrefix!.workerReportedState).toBe('complete')
         expect(oUnique.getWorkerHealth('96f67085')!.sessionId).toBe(fullId)
         expect(oUnique.getSessionRecentOutput('96f67085').some((c) => c.text.includes('shipped'))).toBe(true)
-        expect(oUnique.queryEvents({ sessionId: '96f67085' }).length).toBe(1)
+        expect(oUnique.queryEvents({ sessionId: '96f67085' }).events.length).toBe(1)
 
         // Ambiguous prefix must NOT silently pick a winner (rebuild engine so cache sees both).
         store.sessions.getOrCreateSession(
@@ -173,7 +173,12 @@ describe('OverseerEntity read-only tools', () => {
         expect(oAmbiguous.getSessionState('96f67085')).toBeNull()
         expect(oAmbiguous.getWorkerHealth('96f67085')).toBeNull()
         expect(oAmbiguous.getSessionRecentOutput('96f67085')).toEqual([])
-        expect(oAmbiguous.queryEvents({ sessionId: '96f67085' })).toEqual([])
+        expect(oAmbiguous.queryEvents({ sessionId: '96f67085' })).toEqual({
+            events: [],
+            total: 0,
+            hasMore: false,
+            nextCursor: null
+        })
         // Longer unique prefix still works after the collision appears.
         expect(oAmbiguous.getSessionState('96f67085-5dd3')!.sessionId).toBe(fullId)
     })
@@ -321,7 +326,7 @@ describe('OverseerEntity read-only tools', () => {
         const payload = JSON.parse(completed!.payloadJson ?? '{}') as { operatorText: string; overseerText: string }
         expect(payload.operatorText).toBe('still waiting')
         expect(payload.overseerText).toBe('here is the answer')
-        expect(store.events.query({ eventType: 'convo_turn' }).length).toBe(1)
+        expect(store.events.query({ eventType: 'convo_turn' }).events.length).toBe(1)
     })
 })
 
@@ -540,7 +545,7 @@ describe('OverseerEntity dispositions (Stage 1 keystone)', () => {
             OverseerWriteNotAllowedError
         )
 
-        const dispatched = store.events.query({ sessionId, eventType: 'dispatched', limit: 10 })
+        const dispatched = store.events.query({ sessionId, eventType: 'dispatched', limit: 10 }).events
         expect(dispatched.length).toBeGreaterThanOrEqual(1)
         expect(dispatched[0]?.summary).toMatch(/Relayed/)
 
@@ -594,8 +599,8 @@ describe('OverseerEntity namespace isolation (#107 kill criterion)', () => {
 
         expect(overseerA.getSessionState(inA.id)?.sessionId).toBe(inA.id)
         expect(overseerA.getSessionState(inB.id)).toBeNull()
-        expect(overseerA.queryEvents({}).map((e) => e.summary)).not.toContain('secret from B')
-        expect(overseerB.queryEvents({}).map((e) => e.summary)).toContain('secret from B')
+        expect(overseerA.queryEvents({}).events.map((e) => e.summary)).not.toContain('secret from B')
+        expect(overseerB.queryEvents({}).events.map((e) => e.summary)).toContain('secret from B')
 
         const crossRelay = await overseerA.pingSession({
             sessionId: inB.id,

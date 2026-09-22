@@ -202,7 +202,7 @@ export class OverseerEntity {
         const resolvedId = session.id
         const now = this.now()
         const { name, project, flavor } = deriveIdentity(session)
-        const latestEvent = this.events.query({ sessionId: resolvedId, limit: 1 })[0] ?? null
+        const latestEvent = this.events.query({ sessionId: resolvedId, limit: 1 }).events[0] ?? null
         const lastActivityAt = this.computeLastActivityAt(session, latestEvent)
         const silenceMs = lastActivityAt !== null ? Math.max(0, now - lastActivityAt) : null
         const pending = pendingRequestCount(session)
@@ -215,8 +215,8 @@ export class OverseerEntity {
             staleSilenceMs: this.staleSilenceMs
         })
 
-        const lastToolCall = this.events.query({ sessionId: resolvedId, eventType: 'tool_call', limit: 1 })[0]
-            ?? this.events.query({ sessionId: resolvedId, eventType: 'tool_result', limit: 1 })[0]
+        const lastToolCall = this.events.query({ sessionId: resolvedId, eventType: 'tool_call', limit: 1 }).events[0]
+            ?? this.events.query({ sessionId: resolvedId, eventType: 'tool_result', limit: 1 }).events[0]
             ?? null
 
         return {
@@ -265,7 +265,7 @@ export class OverseerEntity {
         const resolvedId = session.id
         const now = this.now()
         const { name, project, flavor } = deriveIdentity(session)
-        const latestEvent = this.events.query({ sessionId: resolvedId, limit: 1 })[0] ?? null
+        const latestEvent = this.events.query({ sessionId: resolvedId, limit: 1 }).events[0] ?? null
         const lastActivityAt = this.computeLastActivityAt(session, latestEvent)
         const silenceMs = lastActivityAt !== null ? Math.max(0, now - lastActivityAt) : null
         const pending = pendingRequestCount(session)
@@ -366,7 +366,7 @@ export class OverseerEntity {
 
         for (const session of this.getSessions()) {
             const { name, project, flavor } = deriveIdentity(session)
-            const latestEvent = this.events.query({ sessionId: session.id, limit: 1 })[0] ?? null
+            const latestEvent = this.events.query({ sessionId: session.id, limit: 1 }).events[0] ?? null
             const lastActivityAt = this.computeLastActivityAt(session, latestEvent)
             const silenceMs = lastActivityAt !== null ? Math.max(0, now - lastActivityAt) : null
             const observedState = deriveObservedWorkerState({
@@ -900,7 +900,7 @@ export class OverseerEntity {
     }
 
     private deriveReportedState(sessionId: string): OverseerWorkerState | null {
-        const workerEvent = this.events.query({ sessionId, sourceKind: 'worker', limit: 1 })[0] ?? null
+        const workerEvent = this.events.query({ sessionId, sourceKind: 'worker', limit: 1 }).events[0] ?? null
         if (!workerEvent) return null
         return mapEventTypeToWorkerState(workerEvent.eventType)
     }

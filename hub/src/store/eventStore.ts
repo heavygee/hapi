@@ -15,10 +15,11 @@ import {
     type InsertSystemEventInput,
     type ListSystemEventsOptions,
     type QueryEventsOptions,
+    type QueryEventsResult,
     type StoredSystemEvent
 } from './events'
 
-export type { InsertSystemEventInput, ListSystemEventsOptions, QueryEventsOptions, StoredSystemEvent }
+export type { InsertSystemEventInput, ListSystemEventsOptions, QueryEventsOptions, QueryEventsResult, StoredSystemEvent }
 
 export class EventStore {
     constructor(private readonly db: Database) {}
@@ -31,7 +32,7 @@ export class EventStore {
         return listSystemEvents(this.db, options)
     }
 
-    query(options: QueryEventsOptions = {}): StoredSystemEvent[] {
+    query(options: QueryEventsOptions = {}): QueryEventsResult {
         return queryEvents(this.db, options)
     }
 

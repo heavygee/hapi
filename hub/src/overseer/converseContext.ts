@@ -108,7 +108,7 @@ export function listRecentConvoTurns(
     opts: { limit?: number } = {}
 ): { turns: StoredConvoTurnView[]; clippedByLimit: boolean } {
     const limit = Math.min(Math.max(opts.limit ?? DEFAULT_CONVERSE_HISTORY_MAX_TURNS, 1), 50)
-    const events = overseer.queryEvents({
+    const { events } = overseer.queryEvents({
         eventType: OVERSEER_CONVO_TURN_EVENT_TYPE,
         limit: limit + 1
     })
