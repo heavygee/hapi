@@ -50,10 +50,15 @@ describe('projectToolResultForBrain', () => {
                 id: 5, ts: 111, eventType: 'blocked', sourceKind: 'worker', relatedSessionId: 'sess-a',
                 attentionCandidate: 1, summary: 'CI auth failing',
                 payloadJson: 'x'.repeat(500), idempotencyKey: 'k'.repeat(120), artifactRefs: ['a'.repeat(90)]
-            }]
+            }],
+            total: 42,
+            hasMore: true,
+            nextCursor: 5
         }
-        const lean = projectToolResultForBrain('query_events', raw) as { total: number; events: unknown[] }
-        expect(lean.total).toBe(1)
+        const lean = projectToolResultForBrain('query_events', raw) as { total: number; events: unknown[]; hasMore?: boolean; nextCursor?: number }
+        expect(lean.total).toBe(42)
+        expect(lean.hasMore).toBe(true)
+        expect(lean.nextCursor).toBe(5)
         expect(lean.events[0]).toEqual({ id: 5, ts: 111, type: 'blocked', source: 'worker', session: 'sess-a', attention: 1, what: 'CI auth failing' })
         expect(JSON.stringify(lean)).not.toContain('payloadJson')
         expect(JSON.stringify(lean)).not.toContain('idempotencyKey')

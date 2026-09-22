@@ -73,6 +73,16 @@ export type QueryEventsOptions = ListSystemEventsOptions & {
     untilTs?: number | null
 }
 
+export type QueryEventsResult = {
+    events: StoredSystemEvent[]
+    /** Total events matching the filter criteria (before beforeId pagination). */
+    total: number
+    /** Whether there are more events available after this page. */
+    hasMore: boolean
+    /** ID of the last event in this page, for use as beforeId in the next request. */
+    nextCursor?: number | null
+}
+
 type SystemEventRow = {
     id: number
     ts: number
@@ -279,14 +289,15 @@ export function getSystemEventByIdempotencyKey(db: Database, idempotencyKey: str
 }
 
 /**
- * Read-only extended event query for the Overseer. Additive over
- * {@link listSystemEvents}; the existing route/promotion paths are untouched.
+ * Read-only extended event query for the Overseer with pagination metadata.
+ * Enables date-bounded queries that can page through all results in a time window.
  */
-export function queryEvents(db: Database, options: QueryEventsOptions = {}): StoredSystemEvent[] {
+export function queryEvents(db: Database, options: QueryEventsOptions = {}): QueryEventsResult {
     const limit = Math.min(Math.max(options.limit ?? 50, 1), 200)
     const clauses: string[] = []
     const params: Array<string | number> = []
 
+    // Build WHERE clauses for filtering (all existing filters preserved)
     if (options.sessionId) {
         clauses.push('related_session_id = ?')
         params.push(options.sessionId)
@@ -326,11 +337,52 @@ export function queryEvents(db: Database, options: QueryEventsOptions = {}): Sto
     }
 
     const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : ''
+    
+    // Get total count of events matching the filter (before beforeId pagination)
+    let totalCountParams = [...params];
+    let totalCountWhere = where;
+    
+    // For total count, exclude beforeId to get the full window size
+    if (options.beforeId) {
+        const beforeIdIndex = clauses.findIndex(clause => clause.includes('id <'));
+        if (beforeIdIndex >= 0) {
+            const totalClauses = [...clauses];
+            totalClauses.splice(beforeIdIndex, 1);
+            totalCountParams = params.slice(0, -1); // Remove the beforeId param
+            totalCountWhere = totalClauses.length > 0 ? `WHERE ${totalClauses.join(' AND ')}` : '';
+        }
+    }
+    
+    const totalResult = db.prepare(
+        `SELECT COUNT(*) as total FROM overseer_events ${totalCountWhere}`
+    ).get(...totalCountParams) as { total: number }
+    const total = totalResult.total
+
+    // Get events (with +1 to detect hasMore)
+    const pageLimit = limit + 1
     const rows = db.prepare(
         `SELECT * FROM overseer_events ${where} ORDER BY id DESC LIMIT ?`
-    ).all(...params, limit) as SystemEventRow[]
+    ).all(...params, pageLimit) as SystemEventRow[]
 
-    return rows.map(mapRow)
+    // Check if there are more results and prepare response
+    const hasMore = rows.length > limit
+    const events = rows.slice(0, limit).map(mapRow)
+    const nextCursor = events.length > 0 ? events[events.length - 1].id : null
+
+    return {
+        events,
+        total,
+        hasMore,
+        nextCursor
+    }
+}
+
+/**
+ * Legacy wrapper that returns only the events array for backward compatibility.
+ * @deprecated Use queryEvents() and access .events property instead.
+ */
+export function queryEventsLegacy(db: Database, options: QueryEventsOptions = {}): StoredSystemEvent[] {
+    return queryEvents(db, options).events
 }
 
 /**
