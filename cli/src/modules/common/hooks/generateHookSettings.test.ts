@@ -148,4 +148,30 @@ describe('generateHookSettingsFile', () => {
 
         expect(settings.hooks.PreToolUse).toBeUndefined();
     });
+
+    it('ignores HAPI_PRIMARY when workingDirectory is outside hapi', () => {
+        const { root } = makeFakeHapiTree();
+        fakeHapiRoot = root;
+        const prev = process.env.HAPI_PRIMARY;
+        process.env.HAPI_PRIMARY = root;
+        try {
+            expect(resolveHapiToolingRoot('/tmp/not-hapi-project')).toBeNull();
+            const path = generateHookSettingsFile(12345, 'test-token', {
+                filenamePrefix: 'test-hook-primary-outside',
+                logLabel: 'test',
+                workingDirectory: '/tmp/not-hapi-project'
+            });
+            created.push(path);
+            const settings = JSON.parse(readFileSync(path, 'utf8')) as {
+                hooks: { PreToolUse?: unknown[] };
+            };
+            expect(settings.hooks.PreToolUse).toBeUndefined();
+        } finally {
+            if (prev === undefined) {
+                delete process.env.HAPI_PRIMARY;
+            } else {
+                process.env.HAPI_PRIMARY = prev;
+            }
+        }
+    });
 });
