@@ -14,10 +14,17 @@
 # Options:
 #   --agent cursor|claude|…     (default cursor)
 #   --model ID                  (optional; forwarded to SpawnSessionRequest.model)
+#                               Valid ids come from the machine's catalog
+#                               (`agent --list-models` / hub model picker), NOT
+#                               from a CLI --help example — those drift (#1752).
 #   --effort LEVEL              (optional; forwarded to SpawnSessionRequest.effort)
 #   --session-type simple|worktree  (default worktree when dir looks like a worktree)
 #   --machine ID|hostname       (default: this host's settings.machineId)
 #   --yolo / --no-yolo          (default yolo on)
+#
+# Exit codes: 2 usage, 3 spawn rejected, 4 remit not delivered (empty shell),
+# 5 remit delivered but the agent died before taking a turn.
+# HAPI_SPAWN_PEER_VERIFY_TIMEOUT_S overrides the 60s liveness wait.
 #
 # Prefer product CLI when available: `hapi spawn-peer --model … --effort …`
 # (soup via ~/.local/bin/hapi). This wrapper exists for remit fail-closed until
@@ -54,7 +61,7 @@ while [[ $# -gt 0 ]]; do
         --yolo) YOLO=1; shift ;;
         --no-yolo) YOLO=0; shift ;;
         --help|-h)
-            sed -n '2,28p' "$0"
+            sed -n '2,35p' "$0"
             exit 0
             ;;
         *) die "unexpected arg: $1" ;;
@@ -188,16 +195,74 @@ else
     "$PING_BIN" "$PEER_ID" --message-file "$MESSAGE_FILE"
 fi
 
-# Fail closed: empty shell is a failed spawn even if ping "ok" raced.
-sleep 1
-MSGS=$(curl -sS --max-time 10 -H "Authorization: Bearer $JWT" \
-    "$HAPI_HOST/api/sessions/$PEER_ID/messages?limit=5" || true)
-COUNT=$(echo "$MSGS" | jq '(.messages // .) | if type=="array" then length else 0 end' 2>/dev/null || echo 0)
+# Fail closed, two ways:
+#   1. no messages at all      → the remit never landed (empty shell)
+#   2. no agent turn, and the session has gone inactive → the remit landed on a
+#      corpse. A rejected --model spawns a child that dies at agent handshake;
+#      the session archives with our own ping as its only turn, and a
+#      messages>=1 check calls that OK.
+#
+# `active` alone proves nothing: the hub marks a session active when the CLI
+# socket connects, and sessionFactory connects that socket BEFORE launching the
+# agent — so every spawn, healthy or doomed, reads active the moment we have its
+# id. What separates them is what happens next. A child that dies either sends
+# session-end or stops heartbeating, and the hub drops it inactive within ~30s
+# (sessionCache.expireInactive). So take an agent turn as positive proof and
+# leave early on it; otherwise wait that window out and require the session to be
+# STILL active at the end.
+VERIFY_TIMEOUT_S="${HAPI_SPAWN_PEER_VERIFY_TIMEOUT_S:-60}"
+[[ "$VERIFY_TIMEOUT_S" =~ ^[0-9]+$ ]] \
+    || die "HAPI_SPAWN_PEER_VERIFY_TIMEOUT_S must be a whole number of seconds, got: $VERIFY_TIMEOUT_S"
+
+message_count() {
+    local msgs
+    msgs=$(curl -sS --max-time 10 -H "Authorization: Bearer $JWT" \
+        "$HAPI_HOST/api/sessions/$PEER_ID/messages?limit=5" || true)
+    echo "$msgs" | jq '(.messages // .) | if type=="array" then length else 0 end' 2>/dev/null || echo 0
+}
+
+ACTIVE=false
+THINKING=false
+poll_session() {
+    local body
+    body=$(curl -sS --max-time 10 -H "Authorization: Bearer $JWT" \
+        "$HAPI_HOST/api/sessions/$PEER_ID" || true)
+    ACTIVE=$(echo "$body" | jq -r '(.session // .) | (.active // false) | tostring' 2>/dev/null || echo false)
+    THINKING=$(echo "$body" | jq -r '(.session // .) | (.thinking // false) | tostring' 2>/dev/null || echo false)
+}
+
+DEADLINE=$(( SECONDS + VERIFY_TIMEOUT_S ))
+COUNT=0
+AGENT_PROVEN=false
+while :; do
+    sleep 2
+    COUNT=$(message_count)
+    poll_session
+    # A turn beyond our own ping, or one in flight, means the agent really ran.
+    if [[ "${COUNT:-0}" -ge 2 || "$THINKING" == "true" ]]; then
+        AGENT_PROVEN=true
+        break
+    fi
+    if (( SECONDS >= DEADLINE )); then
+        break
+    fi
+done
+
 if [[ "${COUNT:-0}" -lt 1 ]]; then
     err "VERIFY FAILED: session $PEER_ID still has no messages (empty shell)."
     err "  Re-run: hapi-ping-peer $PEER_ID --message-file <brief>"
     exit 4
 fi
+if [[ "$AGENT_PROVEN" != "true" && "$ACTIVE" != "true" ]]; then
+    err "VERIFY FAILED: session $PEER_ID took the remit, then went inactive without"
+    err "  producing an agent turn within ${VERIFY_TIMEOUT_S}s - the agent died at startup."
+    err "  Check --agent/--model against the machine's catalog (agent --list-models),"
+    err "  not a CLI --help example."
+    err "  Inspect: hapi inspect-peer $PEER_ID"
+    exit 5
+fi
 
-echo "hapi-spawn-peer: OK $PEER_ID  name=\"$NAME\"  messages>=$COUNT"
+PROOF="agent-turn"
+[[ "$AGENT_PROVEN" == "true" ]] || PROOF="still-active-after-${VERIFY_TIMEOUT_S}s"
+echo "hapi-spawn-peer: OK $PEER_ID  name=\"$NAME\"  messages>=$COUNT  proof=$PROOF"
 echo "$PEER_ID"
