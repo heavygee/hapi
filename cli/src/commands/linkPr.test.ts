@@ -72,18 +72,7 @@ describe('linkPrCommand', () => {
         const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
         axiosPostMock.mockResolvedValueOnce({
             status: 200,
-            data: {
-                ok: true,
-                externalRefs: [{
-                    kind: 'github_pr',
-                    repo: 'owner/repo',
-                    number: 42,
-                    url: 'https://acme.ghe.com/owner/repo/pull/42',
-                    role: 'primary',
-                    source: 'agent',
-                    linkedAt: 1
-                }]
-            }
+            data: { ok: true }
         })
 
         await linkPrCommand.run(createCommandContext([
@@ -91,10 +80,10 @@ describe('linkPrCommand', () => {
         ]))
 
         expect(axiosPostMock).toHaveBeenCalledOnce()
-        const body = axiosPostMock.mock.calls[0]?.[1] as {
+        const posted = axiosPostMock.mock.calls[0]?.[1] as unknown as {
             ref?: { url?: string }
         }
-        expect(body.ref?.url).toBe('https://acme.ghe.com/owner/repo/pull/42')
+        expect(posted.ref?.url).toBe('https://acme.ghe.com/owner/repo/pull/42')
         logSpy.mockRestore()
     })
 })
