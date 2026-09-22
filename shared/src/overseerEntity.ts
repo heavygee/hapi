@@ -314,7 +314,7 @@ export const queryEventsArgsSchema = z.object({
     sinceTs: z.number().int().nonnegative().optional(),
     untilTs: z.number().int().nonnegative().optional(),
     beforeId: z.number().int().positive().optional(),
-    limit: z.number().int().min(1).max(200).optional(),
+    limit: z.number().int().min(1).max(500).optional(),
     detail: toolDetailSchema.optional()
 })
 export type QueryEventsArgs = z.infer<typeof queryEventsArgsSchema>
@@ -538,7 +538,7 @@ export type OverseerToolCatalogEntry = {
 export const OVERSEER_TOOL_CATALOG: OverseerToolCatalogEntry[] = [
     {
         name: 'query_events',
-        description: 'Read the fleet events stream, filtered by session, project, type, source, severity, time window, or attention-candidate flag.',
+        description: 'Read the fleet events stream, filtered by session, project, type, source, severity, time window, or attention-candidate flag. Supports pagination via beforeId cursor and returns total count and hasMore indicator.',
         readonly: true
     },
     {

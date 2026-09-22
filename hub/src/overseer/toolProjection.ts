@@ -155,7 +155,12 @@ export function projectToolResultForBrain(
     if (detail === 'full') return result
 
     if (tool === 'query_events' && isObj(result) && Array.isArray(result.events)) {
-        return { total: result.events.length, events: result.events.map(projectEvent) }
+        return { 
+            total: typeof result.total === 'number' ? result.total : result.events.length,
+            events: result.events.map(projectEvent),
+            hasMore: typeof result.hasMore === 'boolean' ? result.hasMore : undefined,
+            nextCursor: typeof result.nextCursor === 'number' ? result.nextCursor : undefined
+        }
     }
     if (tool === 'list_active_workers' && isObj(result) && Array.isArray(result.workers)) {
         return { total: result.workers.length, workers: result.workers.map(projectWorker) }

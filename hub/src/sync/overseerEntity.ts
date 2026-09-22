@@ -127,17 +127,17 @@ export class OverseerEntity {
 
     // --- Tool 1: query_events ------------------------------------------------
 
-    queryEvents(args: QueryEventsArgs): StoredSystemEvent[] {
+    queryEvents(args: QueryEventsArgs): { events: StoredSystemEvent[]; total: number; hasMore: boolean; nextCursor?: number | null } {
         // Resolve unique prefixes before querying — brain (and operators) often
         // pass the short form. Ambiguous / unknown prefix → empty result (same
         // as "no events for that session"), never a partial match.
         let sessionId = args.sessionId ?? null
         if (sessionId) {
             const resolved = this.resolveSession(sessionId)
-            if (!resolved) return []
+            if (!resolved) return { events: [], total: 0, hasMore: false, nextCursor: null }
             sessionId = resolved.id
         }
-        return this.events.query({
+        const result = this.events.query({
             sessionId,
             project: args.project ?? null,
             eventType: args.eventType ?? null,
@@ -148,7 +148,17 @@ export class OverseerEntity {
             untilTs: args.untilTs ?? null,
             beforeId: args.beforeId ?? null,
             limit: args.limit ?? 50
-        }).filter((event) => this.eventInCallerScope(event))
+        })
+        
+        // Apply scope filtering
+        const filteredEvents = result.events.filter((event) => this.eventInCallerScope(event))
+        
+        return {
+            events: filteredEvents,
+            total: result.total, // Note: total is before scope filtering
+            hasMore: result.hasMore,
+            nextCursor: result.nextCursor
+        }
     }
 
     // --- Tool 2: query_inbox -------------------------------------------------
