@@ -16,13 +16,15 @@ export function startRunnerControlServer({
   stopSession,
   spawnSession,
   requestShutdown,
-  onHappySessionWebhook
+  onHappySessionWebhook,
+  onHappySessionReady
 }: {
   getChildren: () => TrackedSession[];
   stopSession: (sessionId: string) => Promise<'stopped' | 'already_gone' | 'still_alive'>;
   spawnSession: (options: SpawnSessionOptions) => Promise<SpawnSessionResult>;
   requestShutdown: () => void;
   onHappySessionWebhook: (sessionId: string, metadata: Metadata) => void;
+  onHappySessionReady: (sessionId: string) => void;
 }): Promise<{ port: number; stop: () => Promise<void> }> {
   return new Promise((resolve) => {
     const app = fastify({
@@ -53,6 +55,24 @@ export function startRunnerControlServer({
       logger.debug(`[CONTROL SERVER] Session started: ${sessionId}`);
       onHappySessionWebhook(sessionId, metadata);
 
+      return { status: 'ok' as const };
+    });
+
+    typed.post('/session-ready', {
+      schema: {
+        body: z.object({
+          sessionId: z.string(),
+        }),
+        response: {
+          200: z.object({
+            status: z.literal('ok')
+          })
+        }
+      }
+    }, async (request) => {
+      const { sessionId } = request.body;
+      logger.debug(`[CONTROL SERVER] Session ready: ${sessionId}`);
+      onHappySessionReady(sessionId);
       return { status: 'ok' as const };
     });
 

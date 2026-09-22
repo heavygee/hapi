@@ -124,6 +124,10 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                     serverId: cursorHapiMcpServerId(session.client.sessionId),
                 });
             } catch (error) {
+                const detail = error instanceof Error ? error.message : String(error);
+                if (session.startedBy === 'runner') {
+                    throw new Error(`HAPI MCP overlay required for runner-spawned Cursor sessions (${detail})`);
+                }
                 logger.warn(
                     '[cursor-acp] failed to install HAPI MCP overlay; continuing without inline media',
                     error,
