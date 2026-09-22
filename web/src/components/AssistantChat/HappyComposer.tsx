@@ -1660,7 +1660,6 @@ export function HappyComposer(props: {
             dictationActive,
             voiceStatus: effectiveVoiceStatus,
             canSend,
-            hasText,
             routesToScratchlist,
         })) {
             return
@@ -1672,7 +1671,6 @@ export function HappyComposer(props: {
         dictationActive,
         effectiveVoiceStatus,
         canSend,
-        hasText,
         routesToScratchlist,
         effectiveVoiceToggle,
     ])
