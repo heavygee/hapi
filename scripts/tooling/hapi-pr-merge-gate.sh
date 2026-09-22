@@ -94,13 +94,19 @@ fi
 # 5. THE 1842 CASE: any comment by someone other than the author, not yet answered
 #    by a later push. A maintainer's plain comment is blocking even though GitHub
 #    gives it no mechanical weight.
+#    Ignore ChatGPT Codex connector noise (usage-limit replies are not review asks).
 PUSHED_AT="$("$REAL_GH" api "repos/$REPO/commits/$HEAD" --jq '.commit.committer.date' 2>/dev/null || echo "")"
 CMTS_JSON="$("$REAL_GH" pr view "$PR" --repo "$REPO" --json comments 2>/dev/null || echo "")"
 if [ -z "$CMTS_JSON" ]; then
     OTHERS="ERR"
 else
     OTHERS="$(jq -r --arg me "$AUTHOR" --arg since "${PUSHED_AT:-1970-01-01T00:00:00Z}" \
-        '[.comments[]? | select(.author.login != $me) | select(.createdAt > $since) | .author.login] | unique | join(", ")' \
+        '[.comments[]?
+          | select(.author.login != $me)
+          | select(.createdAt > $since)
+          | select(.author.login != "chatgpt-codex-connector")
+          | select(.body | test("usage limits for code reviews") | not)
+          | .author.login] | unique | join(", ")' \
         <<<"$CMTS_JSON" 2>/dev/null || echo "ERR")"
 fi
 if [ "$OTHERS" = "ERR" ]; then
@@ -111,12 +117,17 @@ else
     pass "no unanswered comments since last push"
 fi
 
-# 6. operator-private paths must never reach an upstream PR
-LEAK=$(jq -r '.files[].path' <<<"$META" | grep -E '^(docs/operator/|docs/plans/|CLAUDE\.md$)' | head -3 || true)
-[ -z "$LEAK" ] && pass "no operator-private paths in diff" || fail "operator-private paths in diff: $(tr '\n' ' ' <<<"$LEAK")"
+# 6. operator-private paths must never reach an UPSTREAM PR (fork main may keep them)
+UPSTREAM_REPO="${HAPI_UPSTREAM_REPO:-tiann/hapi}"
+if [ "$REPO" = "$UPSTREAM_REPO" ]; then
+    LEAK=$(jq -r '.files[].path' <<<"$META" | grep -E '^(docs/operator/|docs/plans/|CLAUDE\.md$)' | head -3 || true)
+    [ -z "$LEAK" ] && pass "no operator-private paths in upstream diff" \
+        || fail "operator-private paths in upstream diff: $(tr '\n' ' ' <<<"$LEAK")"
+else
+    pass "fork repo — operator docs/plans allowed on $REPO"
+fi
 
 # 7. LANE POLICY — upstream merges need explicit, per-PR, single-use operator authorisation
-UPSTREAM_REPO="${HAPI_UPSTREAM_REPO:-tiann/hapi}"
 if [ "$REPO" = "$UPSTREAM_REPO" ]; then
     TOKDIR="${HAPI_LANEB_DIR:-$HOME/.config/hapi/laneb}"
     TOK="$TOKDIR/$PR.auth"
