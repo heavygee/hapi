@@ -6,6 +6,10 @@ const GUARD_REL = join('scripts', 'tooling', 'hapi-production-mutation-guard.sh'
 /**
  * Resolve hapi repo root when session cwd is mirror, driver, or a worktree.
  * Returns null outside hapi — no project-scoped Claude guards then.
+ *
+ * Prefer HAPI_PRIMARY when the session cwd sits under that tree (any depth).
+ * Otherwise walk up from cwd looking for the guard script. An exported
+ * HAPI_PRIMARY alone must not install estate guards into unrelated projects.
  */
 export function resolveHapiToolingRoot(workingDirectory: string): string | null {
     const envPrimary = process.env.HAPI_PRIMARY?.trim();
