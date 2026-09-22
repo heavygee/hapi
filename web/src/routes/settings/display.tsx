@@ -11,6 +11,7 @@ import { MAX_SESSION_PREVIEW_LIMIT, MIN_SESSION_PREVIEW_LIMIT, normalizeSessionP
 import { useThemeColors, type ThemeColorKeyId } from '@/hooks/useThemeColors'
 import { useSessionHeaderMetadata, type SessionHeaderMetadataKey } from '@/hooks/useSessionHeaderMetadata'
 import { useAppBadgePreference } from '@/hooks/useAppBadgePreference'
+import { useOpenExternalLinksInNewTab } from '@/hooks/useOpenExternalLinksInNewTab'
 import { SettingsChoiceGroup, SettingsFieldLabel, SettingsPageContent, SettingsRow, SettingsSection, SettingsSwitch } from '@/components/settings/SettingsPrimitives'
 
 function MinusIcon() {
@@ -138,8 +139,9 @@ export default function SettingsDisplayPage() {
     const { terminalFontSize, setTerminalFontSize } = useTerminalFontSize()
     const { sessionListStatusMode, setSessionListStatusMode } = useSessionListStatusMode()
     const { showActiveSessionsOnly, setShowActiveSessionsOnly } = useShowActiveSessionsOnly()
-    const { pinInProgressSessions, setPinInProgressSessions } = usePinInProgressSessions()
+    const { pinInProgressMode, setPinInProgressMode } = usePinInProgressSessions()
     const { appBadgeEnabled, setAppBadgeEnabled } = useAppBadgePreference()
+    const { openExternalLinksInNewTab, setOpenExternalLinksInNewTab } = useOpenExternalLinksInNewTab()
     const { preferences: sessionHeaderMetadata, setPreference: setSessionHeaderMetadata } = useSessionHeaderMetadata()
     const sessionHeaderOptions: ReadonlyArray<{ key: SessionHeaderMetadataKey; labelKey: string }> = [
         { key: 'showLabels', labelKey: 'settings.display.sessionHeader.showLabels' },
@@ -176,7 +178,18 @@ export default function SettingsDisplayPage() {
             <SettingsSection title={t('settings.display.sessions')}>
                 <SessionPreviewLimitControl />
                 <SettingsSwitch label={t('settings.display.activeSessionsOnly')} description={t('settings.display.activeSessionsOnly.desc')} checked={showActiveSessionsOnly} onChange={setShowActiveSessionsOnly} />
-                <SettingsSwitch label={t('settings.display.pinInProgressSessions')} description={t('settings.display.pinInProgressSessions.desc')} checked={pinInProgressSessions} onChange={setPinInProgressSessions} />
+                <SettingsChoiceGroup
+                    label={t('settings.display.pinInProgressSessions')}
+                    description={t('settings.display.pinInProgressSessions.desc')}
+                    value={pinInProgressMode}
+                    columns={3}
+                    options={[
+                        { value: 'off', label: t('settings.display.pinInProgressMode.off') },
+                        { value: 'jobs', label: t('settings.display.pinInProgressMode.jobs') },
+                        { value: 'all', label: t('settings.display.pinInProgressMode.all') },
+                    ]}
+                    onChange={setPinInProgressMode}
+                />
                 <SettingsSwitch label={t('settings.display.appBadge')} description={t('settings.display.appBadge.desc')} checked={appBadgeEnabled} onChange={setAppBadgeEnabled} />
                 <SettingsChoiceGroup
                     label={t('settings.display.sessionListStatus')}
@@ -196,6 +209,15 @@ export default function SettingsDisplayPage() {
                         onChange={(checked) => setSessionHeaderMetadata(option.key, checked)}
                     />
                 ))}
+            </SettingsSection>
+
+            <SettingsSection title={t('settings.display.links')}>
+                <SettingsSwitch
+                    label={t('settings.display.openExternalLinksInNewTab')}
+                    description={t('settings.display.openExternalLinksInNewTab.desc')}
+                    checked={openExternalLinksInNewTab}
+                    onChange={setOpenExternalLinksInNewTab}
+                />
             </SettingsSection>
         </SettingsPageContent>
     )
