@@ -14,30 +14,11 @@ function isPathUnder(root: string, child: string): boolean {
  * Resolve hapi repo root when session cwd is mirror, driver, or a worktree.
  * Returns null outside hapi — no project-scoped Claude guards then.
  *
- * HAPI_PRIMARY is only used as the tooling source after confirming the
- * working directory itself belongs to a HAPI checkout (walk finds the guard)
- * and the session cwd sits under that primary tree. Otherwise an exported
- * HAPI_PRIMARY would install estate guards into unrelated Claude sessions.
+ * Prefer HAPI_PRIMARY when the session cwd sits under that tree (any depth).
+ * Otherwise walk up from cwd looking for the guard script. An exported
+ * HAPI_PRIMARY alone must not install estate guards into unrelated projects.
  */
 export function resolveHapiToolingRoot(workingDirectory: string): string | null {
-    let dir = workingDirectory;
-    let foundInTree: string | null = null;
-    for (let depth = 0; depth < 12; depth += 1) {
-        if (existsSync(join(dir, GUARD_REL))) {
-            foundInTree = resolve(dir);
-            break;
-        }
-        const parent = dirname(dir);
-        if (parent === dir) {
-            break;
-        }
-        dir = parent;
-    }
-
-    if (!foundInTree) {
-        return null;
-    }
-
     const envPrimary = process.env.HAPI_PRIMARY?.trim();
     if (
         envPrimary
@@ -47,7 +28,19 @@ export function resolveHapiToolingRoot(workingDirectory: string): string | null 
         return resolve(envPrimary);
     }
 
-    return foundInTree;
+    let dir = workingDirectory;
+    for (let depth = 0; depth < 12; depth += 1) {
+        if (existsSync(join(dir, GUARD_REL))) {
+            return resolve(dir);
+        }
+        const parent = dirname(dir);
+        if (parent === dir) {
+            break;
+        }
+        dir = parent;
+    }
+
+    return null;
 }
 
 export function hapiClaudePreToolUseGuardCommand(hapiRoot: string): string {

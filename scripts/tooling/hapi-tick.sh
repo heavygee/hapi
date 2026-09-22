@@ -370,6 +370,9 @@ validate_one() {
     # Expand ~/ against the service user (same as generate_units), not the caller.
     state_path="$(expand_user_path "$raw_state_path" "$user")"
     [[ -n "$state_path" ]] || die "$name: state.path expands to empty"
+    if [[ "$state_path" != /* ]]; then
+        die "$name: state.path must be absolute after expansion (got '$state_path')"
+    fi
     host="$(tick_field "$json" '.host')"
     on_change="$(printf '%s' "$json" | jq -c '.on_change // []')"
 
@@ -526,9 +529,12 @@ cmd_validate() {
         return 0
     fi
     # Aggregate validate is host-local (same filter as aggregate doctor).
-    local n here host
+    # Capture the name list first so registry_json failures abort under set -e
+    # (a failing substitution inside `for $(...)` does not).
+    local names n here host
+    names="$(registry_json | jq -r '.ticks[].name')"
     here="$(hostname_short)"
-    for n in $(registry_json | jq -r '.ticks[].name'); do
+    for n in $names; do
         host="$(tick_field "$(registry_json "$n")" '.host')"
         if [[ -n "$host" && "$host" != null && "$host" != "$here" && "$host" != "$(hostname)" ]]; then
             err "$n: skipped (registry host='$host', this='$here') — validate by name to force"
@@ -560,6 +566,9 @@ generate_units() {
         die "$name: lock.path must be absolute (got relative '$lock')"
     fi
     state_path="$(expand_user_path "$(tick_field "$json" '.state.path')" "$user")"
+    if [[ "$state_path" != /* ]]; then
+        die "$name: state.path must be absolute after expansion (got '$state_path')"
+    fi
     desc="$(tick_field "$json" '.description' "HAPI tick: $name")"
     # Prefer the primary-mirror registry path in unit Documentation= when generating
     # from a worktree (install paths in ticks.yaml already point at runtime scripts).
@@ -865,32 +874,46 @@ doctor_one() {
     echo "state($strategy): $state_path"
 
     if [[ -f "$state_path" ]]; then
-        case "$strategy" in
-            max-id)
-                local mid
-                if mid="$(hapi_tick_max_id_read "$state_path")"; then
-                    echo "  lastMaxId=$mid  mtime=$(date -u -r "$state_path" +%FT%TZ 2>/dev/null || stat -c %y "$state_path")"
-                else
-                    echo "  lastMaxId=INVALID (malformed or unreadable state)"
-                    healthy=0
-                fi
-                ;;
-            seen-set)
-                echo "  seen_count=$(wc -l < "$state_path" | tr -d ' ')  mtime=$(date -u -r "$state_path" +%FT%TZ 2>/dev/null || true)"
-                ;;
-            timestamp-ids)
-                local ts_line
-                if ts_line="$(hapi_tick_timestamp_ids_read "$state_path")"; then
-                    echo "  $ts_line"
-                else
-                    echo "  timestamp-ids=INVALID (malformed or unreadable state)"
-                    healthy=0
-                fi
-                ;;
-            *)
-                ls -l "$state_path" || true
-                ;;
-        esac
+        # Interpret watermark only if the service user can read+write it
+        # (caller may be root while the probe runs as .user).
+        if ! as_user_test "$user" -r "$state_path" 2>/dev/null \
+            || ! as_user_test "$user" -w "$state_path" 2>/dev/null; then
+            if same_tick_user "$user" || [[ "$(id -u)" -eq 0 ]] \
+                || sudo -n -u "$user" -H -- true >/dev/null 2>&1; then
+                echo "  accessible_by_user=$user NO"
+                healthy=0
+            else
+                echo "  accessible_by_user=$user unknown (cannot sudo -n as user)"
+                healthy=0
+            fi
+        else
+            case "$strategy" in
+                max-id)
+                    local mid
+                    if mid="$(hapi_tick_max_id_read "$state_path")"; then
+                        echo "  lastMaxId=$mid  mtime=$(date -u -r "$state_path" +%FT%TZ 2>/dev/null || stat -c %y "$state_path")"
+                    else
+                        echo "  lastMaxId=INVALID (malformed or unreadable state)"
+                        healthy=0
+                    fi
+                    ;;
+                seen-set)
+                    echo "  seen_count=$(wc -l < "$state_path" | tr -d ' ')  mtime=$(date -u -r "$state_path" +%FT%TZ 2>/dev/null || true)"
+                    ;;
+                timestamp-ids)
+                    local ts_line
+                    if ts_line="$(hapi_tick_timestamp_ids_read "$state_path")"; then
+                        echo "  $ts_line"
+                    else
+                        echo "  timestamp-ids=INVALID (malformed or unreadable state)"
+                        healthy=0
+                    fi
+                    ;;
+                *)
+                    ls -l "$state_path" || true
+                    ;;
+            esac
+        fi
     else
         echo "  (state file missing)"
     fi
@@ -976,9 +999,11 @@ cmd_doctor() {
         doctor_one "$name" || rc=1
         return $rc
     fi
-    local n here host
+    # Capture name list first so registry_json failures abort under set -e.
+    local names n here host
+    names="$(registry_json | jq -r '.ticks[].name')"
     here="$(hostname_short)"
-    for n in $(registry_json | jq -r '.ticks[].name'); do
+    for n in $names; do
         host="$(tick_field "$(registry_json "$n")" '.host')"
         # Aggregate doctor is host-local; remote ticks stay inspectable by name.
         if [[ -n "$host" && "$host" != null && "$host" != "$here" && "$host" != "$(hostname)" ]]; then
