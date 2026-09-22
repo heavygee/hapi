@@ -1,0 +1,31 @@
+# Template: inbox-ping-peer
+# Shape: trailer-job inbox watch (design shape A) — bare probe + notified-ids +
+# ping_peer to an existing factory/session on change.
+# Copy into config/ticks.yaml and adjust paths/host/session/cadence.
+#
+# Probe owns change detection + ping-peer (on_change here documents the
+# escalation lane for validate/doctor; v1 does not re-dispatch from the generator).
+
+name: example-inbox-ping
+host: REPLACE_HOSTNAME
+template: inbox-ping-peer
+description: Example inbox watch (ping_peer on new items)
+cadence: "OnCalendar=*:0/1"
+randomized_delay_sec: 15
+probe:
+  type: shell
+  script: /path/to/your-inbox-ping-tick.sh
+state:
+  path: "~/.cache/example-inbox-ping-state.json"
+  strategy: notified-ids
+on_change:
+  - ping_peer:
+      session: REPLACE_SESSION_ID_OR_NAME
+      message_template: file://scripts/tooling/tick-templates/inbox-ping.md
+lock:
+  path: "~/.cache/example-inbox-ping.lock"
+working_directory: /path/to/repo
+user: REPLACE_USER
+env:
+  # Optional: factory session the probe resolves when pinging.
+  # TICK_PING_SESSION: REPLACE_SESSION_ID_OR_NAME
