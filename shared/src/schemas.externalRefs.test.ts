@@ -242,6 +242,16 @@ describe('parseGithubPrInput', () => {
         expect(parseGithubPrInput('').ok).toBe(false)
         expect(parseGithubPrInput('https://gitlab.com/a/b/-/merge_requests/1').ok).toBe(false)
         expect(parseGithubPrInput('not-a-ref').ok).toBe(false)
+        expect(parseGithubPrInput('https://ghe.com/a/b/pull/1').ok).toBe(false)
+    })
+
+    it('parses GHES hosts (*.ghe.com) and preserves the host in the URL', () => {
+        expect(parseGithubPrInput('https://lhs.ghe.com/lockhouse/lockhouse/pull/42')).toEqual({
+            ok: true,
+            repo: 'lockhouse/lockhouse',
+            number: 42,
+            url: 'https://lhs.ghe.com/lockhouse/lockhouse/pull/42'
+        })
     })
 })
 
@@ -261,6 +271,18 @@ describe('buildGithubPrExternalRef', () => {
             source: 'agent',
             linkedAt: 42
         })
+    })
+
+    it('builds a GHES-hosted ref that passes ExternalRefsSchema', () => {
+        const ref = buildGithubPrExternalRef({
+            repo: 'lockhouse/lockhouse',
+            number: 42,
+            host: 'lhs.ghe.com',
+            source: 'user',
+            linkedAt: 1
+        })
+        expect(ref.url).toBe('https://lhs.ghe.com/lockhouse/lockhouse/pull/42')
+        expect(ExternalRefsSchema.safeParse([ref]).success).toBe(true)
     })
 })
 
@@ -340,6 +362,31 @@ describe('upsertGithubPrIntoExternalRefs', () => {
             linkedAt: 2
         })
         expect(upsertGithubPrIntoExternalRefs([prior], next)).toEqual([next])
+    })
+
+    it('preserves GHES host when re-linking the same PR', () => {
+        const existing = buildGithubPrExternalRef({
+            repo: 'lockhouse/lockhouse',
+            number: 42,
+            host: 'lhs.ghe.com',
+            source: 'user',
+            linkedAt: 100,
+            checks: 'pass',
+            statusCheckedAt: 200
+        })
+        const incoming = buildGithubPrExternalRef({
+            repo: 'lockhouse/lockhouse',
+            number: 42,
+            host: 'lhs.ghe.com',
+            source: 'agent',
+            linkedAt: 300
+        })
+        expect(upsertGithubPrIntoExternalRefs([existing], incoming)).toEqual([{
+            ...existing,
+            source: 'agent',
+            linkedAt: 300,
+            role: 'primary'
+        }])
     })
 })
 

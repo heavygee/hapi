@@ -12,6 +12,15 @@ import {
     type ResolvedPrChipDisplay,
     resolvePrChipDisplay
 } from './prChipDisplay'
+import { getGitHubUrlForRepo, isValidGitHubHost } from './projectRegistry'
+
+function hostFromGithubPrUrl(url: string): string {
+    try {
+        return new URL(url).hostname || 'github.com'
+    } catch {
+        return 'github.com'
+    }
+}
 
 /**
  * Primary GitHub PR chip source. Title/emoji parsing is intentionally not used.
@@ -28,8 +37,8 @@ export function getPrimaryGithubPrRef(
     return null
 }
 
-export function githubPrUrl(repo: string, number: number): string {
-    return `https://github.com/${repo}/pull/${number}`
+export function githubPrUrl(repo: string, number: number, host: string = 'github.com'): string {
+    return getGitHubUrlForRepo(repo, number, host)
 }
 
 export type ParseGithubPrInputResult =
@@ -64,13 +73,13 @@ export function parseGithubPrInput(raw: string): ParseGithubPrInputResult {
         return { ok: false, error: 'expected GitHub PR URL or owner/repo#N' }
     }
 
-    if (url.protocol !== 'https:' || url.hostname !== 'github.com') {
-        return { ok: false, error: 'expected https://github.com/.../pull/N URL' }
+    if (url.protocol !== 'https:' || !isValidGitHubHost(url.hostname)) {
+        return { ok: false, error: 'expected https://<github-or-ghes-host>/.../pull/N URL' }
     }
 
     const pathMatch = url.pathname.match(/^\/([^/]+\/[^/]+)\/pull\/(\d+)\/?$/)
     if (!pathMatch) {
-        return { ok: false, error: 'expected https://github.com/owner/repo/pull/N URL' }
+        return { ok: false, error: 'expected https://<host>/owner/repo/pull/N URL' }
     }
 
     const repoParsed = GithubRepoSlugSchema.safeParse(pathMatch[1])
@@ -83,7 +92,8 @@ export function parseGithubPrInput(raw: string): ParseGithubPrInputResult {
         ok: true,
         repo: repoParsed.data,
         number,
-        url: githubPrUrl(repoParsed.data, number)
+        // Preserve GHES / custom host — do not rewrite to github.com.
+        url: githubPrUrl(repoParsed.data, number, url.hostname)
     }
 }
 
@@ -98,12 +108,18 @@ export function buildGithubPrExternalRef(input: {
     merge?: GithubPrMerge
     statusCheckedAt?: number
     estateCode?: string
+    /** Forge host when not github.com (e.g. lhs.ghe.com). Ignored if `url` is set. */
+    host?: string
+    /** Full PR URL; when set, wins over host+repo+number construction. */
+    url?: string
 }): GithubPrExternalRef {
+    const url = input.url
+        ?? githubPrUrl(input.repo, input.number, input.host ?? 'github.com')
     return {
         kind: 'github_pr',
         repo: input.repo,
         number: input.number,
-        url: githubPrUrl(input.repo, input.number),
+        url,
         role: input.role ?? 'primary',
         ...(input.source ? { source: input.source } : {}),
         ...(input.linkedAt ? { linkedAt: input.linkedAt } : {}),
@@ -143,7 +159,13 @@ export function upsertGithubPrIntoExternalRefs(
             ...ref,
             // Keep the stored slug casing so re-links with different case merge.
             repo: same.repo,
-            url: githubPrUrl(same.repo, same.number),
+            // Keep forge host from the incoming URL when present, else the stored
+            // one — but always rebuild with `same.repo` casing.
+            url: githubPrUrl(
+                same.repo,
+                same.number,
+                hostFromGithubPrUrl(ref.url ?? same.url)
+            ),
             number: same.number
         }
         : ref

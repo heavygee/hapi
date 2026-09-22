@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { COPILOT_AGENT_MODES, type CopilotAgentMode } from './copilotModes'
 import { CODEX_COLLABORATION_MODES, PERMISSION_MODES } from './modes'
 import { AgentConfigDescriptorSchema } from './agentConfig'
+import { isValidGitHubHost } from './projectRegistry'
 
 export const PermissionModeSchema = z.enum(PERMISSION_MODES)
 export const CodexCollaborationModeSchema = z.enum(CODEX_COLLABORATION_MODES)
@@ -109,8 +110,20 @@ export const GithubPrExternalRefSchema = z.object({
     // Opaque estate classifier code; only pr-chip-display estateCodes interpret it.
     estateCode: z.string().min(1).max(64).optional()
 }).superRefine((ref, ctx) => {
-    const expectedUrl = `https://github.com/${ref.repo}/pull/${ref.number}`
-    if (ref.url !== expectedUrl) {
+    let parsed: URL
+    try {
+        parsed = new URL(ref.url)
+    } catch {
+        ctx.addIssue({
+            code: 'custom',
+            path: ['url'],
+            message: 'expected GitHub PR URL matching repo and number'
+        })
+        return
+    }
+    const pathOk = parsed.pathname === `/${ref.repo}/pull/${ref.number}`
+        || parsed.pathname === `/${ref.repo}/pull/${ref.number}/`
+    if (parsed.protocol !== 'https:' || !isValidGitHubHost(parsed.hostname) || !pathOk) {
         ctx.addIssue({
             code: 'custom',
             path: ['url'],
