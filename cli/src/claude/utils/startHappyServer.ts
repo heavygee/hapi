@@ -31,11 +31,8 @@ import {
 import { CREATABLE_AGENT_FLAVORS } from '@hapi/protocol/modes'
 import { PermissionModeSchema } from '@hapi/protocol/schemas'
 import { PingPeerError, formatInspectPeerReport, formatPeerSessionsList, inspectPeer, listPeerSessions, peerListFetchLimit, pingPeer } from "@/modules/pingPeer/pingPeer";
-<<<<<<< HEAD
 import { applySessionDisplayRename, normalizeSessionDisplayTitle } from "@/agent/sessionDisplayRename";
-=======
 import { SpawnPeerError, spawnPeer } from "@/modules/spawnPeer/spawnPeer";
->>>>>>> d25ea0b39 (feat(cli): spawn-peer with required remit and MCP spawn_peer)
 
 type StartHappyServerOptions = {
     /**
