@@ -28,7 +28,7 @@ const convoTurnBodySchema = z.object({
 function runTool(overseer: OverseerEntity, tool: OverseerToolName, args: unknown): unknown {
     switch (tool) {
         case 'query_events':
-            return { events: overseer.queryEvents(overseerToolArgsSchemas.query_events.parse(args)) }
+            return overseer.queryEvents(overseerToolArgsSchemas.query_events.parse(args))
         case 'query_inbox':
             return overseer.queryInbox(overseerToolArgsSchemas.query_inbox.parse(args))
         case 'get_session_state': {

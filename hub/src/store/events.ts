@@ -51,6 +51,13 @@ export type StoredSystemEvent = {
     severity: number | null
 }
 
+export type QueryEventsResult = {
+    events: StoredSystemEvent[]
+    total: number
+    hasMore: boolean
+    nextCursor: number | null
+}
+
 export type ListSystemEventsOptions = {
     limit?: number
     beforeId?: number | null
@@ -70,6 +77,8 @@ export type QueryEventsOptions = ListSystemEventsOptions & {
     sinceTs?: number | null
     /** Inclusive upper bound on `ts` (ms epoch). */
     untilTs?: number | null
+    /** Cursor for forward pagination (id > afterId). */
+    afterId?: number | null
 }
 
 type SystemEventRow = {
@@ -297,6 +306,10 @@ export function queryEvents(db: Database, options: QueryEventsOptions = {}): Sto
         clauses.push('id < ?')
         params.push(options.beforeId)
     }
+    if (options.afterId) {
+        clauses.push('id > ?')
+        params.push(options.afterId)
+    }
 
     const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : ''
     const rows = db.prepare(
@@ -304,6 +317,84 @@ export function queryEvents(db: Database, options: QueryEventsOptions = {}): Sto
     ).all(...params, limit) as SystemEventRow[]
 
     return rows.map(mapRow)
+}
+
+export function queryEventsWithPagination(db: Database, options: QueryEventsOptions = {}): QueryEventsResult {
+    const limit = Math.min(Math.max(options.limit ?? 50, 1), 1000)
+    const clauses: string[] = []
+    const params: Array<string | number> = []
+
+    if (options.sessionId) {
+        clauses.push('related_session_id = ?')
+        params.push(options.sessionId)
+    }
+    if (options.attentionCandidate !== undefined && options.attentionCandidate !== null) {
+        clauses.push('attention_candidate = ?')
+        params.push(options.attentionCandidate)
+    }
+    if (options.eventType) {
+        clauses.push('event_type = ?')
+        params.push(options.eventType)
+    }
+    if (options.sourceKind) {
+        clauses.push('source_kind = ?')
+        params.push(options.sourceKind)
+    }
+    if (options.severityMin !== undefined && options.severityMin !== null) {
+        clauses.push('severity >= ?')
+        params.push(options.severityMin)
+    }
+    if (options.sinceTs !== undefined && options.sinceTs !== null) {
+        clauses.push('ts >= ?')
+        params.push(options.sinceTs)
+    }
+    if (options.untilTs !== undefined && options.untilTs !== null) {
+        clauses.push('ts <= ?')
+        params.push(options.untilTs)
+    }
+    if (options.project) {
+        // Denormalized session.project lives in payload_json (#22).
+        clauses.push("json_extract(payload_json, '$.session.project') = ?")
+        params.push(options.project)
+    }
+    if (options.beforeId) {
+        clauses.push('id < ?')
+        params.push(options.beforeId)
+    }
+    if (options.afterId) {
+        clauses.push('id > ?')
+        params.push(options.afterId)
+    }
+
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : ''
+    
+    // Get the total count first (without pagination)
+    const countQuery = `SELECT COUNT(*) as total FROM events ${where}`
+    const countRow = db.prepare(countQuery).get(...params) as { total: number }
+    const total = countRow.total
+
+    // Get the events with pagination
+    const orderBy = options.afterId ? 'ORDER BY id ASC' : 'ORDER BY id DESC'
+    const rows = db.prepare(
+        `SELECT * FROM events ${where} ${orderBy} LIMIT ?`
+    ).all(...params, limit + 1) as SystemEventRow[] // +1 to check if there's more
+
+    const hasMore = rows.length > limit
+    const events = (hasMore ? rows.slice(0, limit) : rows).map(mapRow)
+    
+    // If using afterId (forward pagination), reverse the results to maintain DESC order
+    if (options.afterId) {
+        events.reverse()
+    }
+
+    const nextCursor = hasMore && events.length > 0 ? events[events.length - 1].id : null
+
+    return {
+        events,
+        total,
+        hasMore,
+        nextCursor
+    }
 }
 
 export function insertEventLink(

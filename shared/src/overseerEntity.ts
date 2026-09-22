@@ -279,9 +279,40 @@ export const queryEventsArgsSchema = z.object({
     sinceTs: z.number().int().nonnegative().optional(),
     untilTs: z.number().int().nonnegative().optional(),
     beforeId: z.number().int().positive().optional(),
-    limit: z.number().int().min(1).max(200).optional()
+    afterId: z.number().int().positive().optional(),
+    limit: z.number().int().min(1).max(1000).optional()
 })
 export type QueryEventsArgs = z.infer<typeof queryEventsArgsSchema>
+
+export type QueryEventsResult = {
+    events: Array<{
+        id: number
+        ts: number
+        sourceKind: string
+        sourceRef: string | null
+        sinkKind: string | null
+        sinkRef: string | null
+        eventType: string
+        attentionCandidate: number
+        operatorActionRequired: number
+        riskDetected: number
+        summary: string
+        payloadJson: string | null
+        artifactRefs: string | null
+        tags: string | null
+        relatedSessionId: string | null
+        relatedEventId: number | null
+        dedupeKey: string | null
+        expiresAt: number | null
+        provenance: string | null
+        idempotencyKey: string | null
+        confidence: number | null
+        severity: number | null
+    }>
+    total: number
+    hasMore: boolean
+    nextCursor: number | null
+}
 
 export const queryInboxArgsSchema = z.object({
     statuses: z.array(z.string().min(1)).min(1).optional(),
