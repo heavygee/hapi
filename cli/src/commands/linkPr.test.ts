@@ -79,11 +79,15 @@ describe('linkPrCommand', () => {
             'https://acme.ghe.com/owner/repo/pull/42'
         ]))
 
-        expect(axiosPostMock).toHaveBeenCalledOnce()
-        const posted = axiosPostMock.mock.calls[0]?.[1] as unknown as {
-            ref?: { url?: string }
-        }
-        expect(posted.ref?.url).toBe('https://acme.ghe.com/owner/repo/pull/42')
+        expect(axiosPostMock).toHaveBeenCalledWith(
+            expect.stringContaining('/external-refs/upsert'),
+            expect.objectContaining({
+                ref: expect.objectContaining({
+                    url: 'https://acme.ghe.com/owner/repo/pull/42'
+                })
+            }),
+            expect.any(Object)
+        )
         logSpy.mockRestore()
     })
 })
