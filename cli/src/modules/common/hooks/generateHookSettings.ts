@@ -5,6 +5,10 @@ import { logger } from '@/ui/logger';
 import { getHappyCliCommand } from '@/utils/spawnHappyCLI';
 import { shellJoin } from '@/modules/common/shellQuote';
 import { LOCAL_PERMISSION_TIMEOUT_SECONDS } from '@/claude/utils/localPermissionProtocol';
+import {
+    hapiClaudePreToolUseGuardCommand,
+    resolveHapiToolingRoot
+} from '@/modules/common/hooks/resolveHapiToolingRoot';
 
 type HookCommandConfig = {
     matcher?: string;
@@ -45,18 +49,21 @@ export type HookSettingsOptions = {
     trackPermissionMode?: boolean;
     /** Mirror main-session permissions without suppressing the native dialog. Local only. */
     includeLocalPermissions?: boolean;
+    /** When set and cwd resolves to hapi, inject project-scoped PreToolUse Bash guard. */
+    workingDirectory?: string;
 };
 
 /**
  * Build Claude Code hook settings.
- * Soup union: upstream trackPermissionMode + includePreToolUse, plus fork
+ * Soup union: upstream trackPermissionMode + includeLocalPermissions, plus fork
  * workingDirectory PreToolUse Bash guard when cwd is under a hapi tree.
  */
 export function buildHookSettings(
     command: string,
     hooksEnabled?: boolean,
     trackPermissionMode?: boolean,
-    includeLocalPermissions?: boolean
+    includeLocalPermissions?: boolean,
+    workingDirectory?: string
 ): HookSettings {
     const commandHook = {
         hooks: [
@@ -86,8 +93,9 @@ export function buildHookSettings(
 
     const hapiRoot = workingDirectory ? resolveHapiToolingRoot(workingDirectory) : null;
     if (hapiRoot) {
-        const guardCommand = hapiClaudePreToolUseGuardCommand(hapiRoot);
-        if (existsSync(guardCommand)) {
+        const guardScript = hapiClaudePreToolUseGuardCommand(hapiRoot);
+        if (existsSync(guardScript)) {
+            const guardCommand = shellJoin([guardScript]);
             const guardEntry: HookCommandConfig = {
                 matcher: 'Bash',
                 hooks: [
@@ -137,7 +145,8 @@ export function generateHookSettingsFile(
         hookCommand,
         options.hooksEnabled,
         options.trackPermissionMode,
-        options.includeLocalPermissions
+        options.includeLocalPermissions,
+        options.workingDirectory
     );
 
     writeFileSync(filepath, JSON.stringify(settings, null, 4));
