@@ -1006,3 +1006,12 @@ layers:
   # Hub+cli+web → remat needs --build-web + hapi-restart-hub. Drop when #1605 merges.
   # Wave slot 1 (before #1607 / #1772). Remat owner: tooling/meta — no self-remat.
   - branch: driver/claude-model-catalog
+
+  # heavygee/hapi#159 — hapi tick v1: declarative bare pollers (systemd timers).
+  # Fork-only dogfood; upstream path needs pluggable backend (see PR body).
+  # MERGED fork main @ baf1893b6; keep branch tip for soup until absorbed into
+  # a durable fork-main overlay or dropped after upstream-shaped re-thin.
+  # Worktree: ~/coding/hapi/worktrees/hapi-watch-v1 @ tooling/hapi-tick-v1
+  # Tip: d766c0822 — scripts/tooling + tiny CLI guard scope; remat needs
+  # --build-web + hapi-restart-hub (cli changed).
+  - branch: tooling/hapi-tick-v1
