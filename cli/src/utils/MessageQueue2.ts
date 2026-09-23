@@ -523,6 +523,32 @@ export class MessageQueue2<T> {
     }
 
     /**
+     * Drop pending messages matching the predicate (e.g. reconcile an internal
+     * slash that a fresh spawn already satisfies). Does not hub-ack.
+     */
+    removeMessagesMatching(predicate: (message: string) => boolean): number {
+        const kept: QueueItem<T>[] = [];
+        let removed = 0;
+        for (const item of this.queue) {
+            if (!predicate(item.message)) {
+                kept.push(item);
+                continue;
+            }
+            removed += 1;
+            if (item.localId) {
+                const reservation = this.reservations.get(item.localId);
+                if (reservation) {
+                    reservation.cancelReason = 'explicit';
+                    reservation.state = 'cancelled';
+                    this.reservations.delete(item.localId);
+                }
+            }
+        }
+        this.queue = kept;
+        return removed;
+    }
+
+    /**
      * Close the queue - no more messages can be pushed
      */
     close(): void {

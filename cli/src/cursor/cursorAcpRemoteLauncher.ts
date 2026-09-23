@@ -1334,8 +1334,19 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         // Fresh ACP process — bookkeeping must reflect THIS spawn's flags, not
         // the prior process (e.g. started with --auto-review, relaunched without).
         this.spawnedWithAutoReview = args.autoReview;
-        this.autoReviewSlashQueued = args.autoReview
-            || this.session.queue.hasMessageMatching((message) => message.trim() === '/auto-review');
+        if (args.autoReview) {
+            // `/auto-review` is a toggle; drop any queued slash that was meant for
+            // the old process so we do not turn Auto-review off on a spawn that
+            // already has --auto-review.
+            this.session.queue.removeMessagesMatching(
+                (message) => message.trim() === '/auto-review'
+            );
+            this.autoReviewSlashQueued = true;
+        } else {
+            this.autoReviewSlashQueued = this.session.queue.hasMessageMatching(
+                (message) => message.trim() === '/auto-review'
+            );
+        }
 
         // Apply current mode after publish so Auto-review changes made while the
         // backend was null during relaunch still take effect (slash if needed).

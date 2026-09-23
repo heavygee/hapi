@@ -1970,6 +1970,89 @@ describe('cursorAcpRemoteLauncher', () => {
         await runPromise;
     });
 
+    it('drops queued Auto-review slash when Auto relaunch spawns with --auto-review', async () => {
+        const queue = new MessageQueue2<EnhancedMode>((mode) => mode.permissionMode);
+        const client = {
+            rpcHandlerManager: { registerHandler: vi.fn() },
+            updateMetadata: vi.fn(),
+            flushMetadata: vi.fn(async () => true),
+            sendSessionEvent: vi.fn(),
+            sendAgentMessage: vi.fn(),
+            keepAlive: vi.fn(),
+            emitSessionReady: vi.fn(),
+            emitMessagesConsumed: vi.fn()
+        } as unknown as ApiSessionClient;
+
+        const session = new CursorSession({
+            api: {} as never,
+            client,
+            path: '/tmp/project',
+            logPath: '/tmp/log',
+            sessionId: null,
+            messageQueue: queue,
+            onModeChange: vi.fn(),
+            mode: 'remote',
+            startedBy: 'runner',
+            startingMode: 'remote',
+            permissionMode: 'default'
+        });
+        session.onSessionFoundWithProtocol = vi.fn((id: string) => {
+            session.sessionId = id;
+        });
+        queue.push('hold-open', { permissionMode: 'default' });
+
+        const runPromise = cursorAcpRemoteLauncher(session);
+        await vi.waitFor(() => expect(harness.newSessionCalled).toBe(true));
+        await vi.waitFor(() => expect(session.canApplyModelConfig()).toBe(true));
+        await session.applyModelConfig('composer-2.5[fast=false]');
+
+        // Mode is Auto-review before relaunch so the replacement gets --auto-review.
+        session.setPermissionMode('autoReview');
+        await vi.waitFor(() => {
+            expect(
+                harness.prompts.some((prompt) => JSON.stringify(prompt).includes('/auto-review'))
+            ).toBe(true);
+        });
+        // Wait until the slash prompt finishes so relaunch is not blocked by promptInFlight.
+        await vi.waitFor(() => {
+            expect(queue.hasMessageMatching((message) => message === '/auto-review')).toBe(false);
+        });
+
+        let releaseInitialize!: () => void;
+        harness.deferNextInitialize = new Promise<void>((resolve) => {
+            releaseInitialize = resolve;
+        });
+        const autoSwitch = session.applyModelConfig('auto');
+        await vi.waitFor(() => expect(harness.deferNextInitialize).toBeNull());
+
+        // Leftover toggle from the old process still queued while replacement starts
+        // with --auto-review. Insert without waking the waiter so the message loop
+        // cannot dequeue it before bindFresh reconciles (mode+model race).
+        queue.queue.push({
+            message: '/auto-review',
+            mode: { permissionMode: 'autoReview', model: session.model },
+            modeHash: queue.modeHasher({ permissionMode: 'autoReview', model: session.model }),
+            isolate: true,
+            enqueueOrder: 9999
+        });
+        expect(queue.hasMessageMatching((message) => message === '/auto-review')).toBe(true);
+
+        const promptsBeforeBind = harness.prompts.filter(
+            (prompt) => JSON.stringify(prompt).includes('/auto-review')
+        ).length;
+        releaseInitialize();
+        await autoSwitch;
+
+        expect(harness.spawnAutoReviewFlags.at(-1)).toBe(true);
+        expect(queue.hasMessageMatching((message) => message === '/auto-review')).toBe(false);
+        expect(
+            harness.prompts.filter((prompt) => JSON.stringify(prompt).includes('/auto-review')).length
+        ).toBe(promptsBeforeBind);
+
+        queue.close();
+        await runPromise;
+    });
+
     it('queues Auto-review slash when mode flips during Auto relaunch', async () => {
         const queue = new MessageQueue2<EnhancedMode>((mode) => mode.permissionMode);
         const client = {
