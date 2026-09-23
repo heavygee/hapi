@@ -52,7 +52,7 @@ describe('reconcileCliApiToken', () => {
                 ok: body.accessToken === 'env-live',
                 json: async () => ({ token: body.accessToken === 'env-live' ? 'jwt' : undefined })
             }
-        }) as typeof fetch
+        }) as unknown as typeof fetch
 
         await expect(
             reconcileCliApiToken('http://127.0.0.1:3006', 'env-live', 'settings-token')
@@ -66,7 +66,7 @@ describe('reconcileCliApiToken', () => {
                 ok: body.accessToken === 'settings-live',
                 json: async () => ({ token: body.accessToken === 'settings-live' ? 'jwt' : undefined })
             }
-        }) as typeof fetch
+        }) as unknown as typeof fetch
 
         await expect(
             reconcileCliApiToken('http://127.0.0.1:3006', 'stale-env', 'settings-live')
