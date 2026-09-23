@@ -592,7 +592,33 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         try {
         while (!this.shouldExit) {
             const waitSignal = this.abortController.signal;
-            const batch = await session.queue.waitForMessagesAndGetAsString(waitSignal);
+            if (this.acpRelaunchPromise) {
+                await this.acpRelaunchPromise;
+            }
+
+            // Do not dequeue (and hub-ack) while the ACP backend is missing —
+            // wait for an in-flight relaunch, or end without consuming the queue.
+            if (!this.backend || !this.acpSessionId) {
+                if (this.acpRelaunchPromise) {
+                    continue;
+                }
+                if (!this.shouldExit) {
+                    this.surfacePromptFailure(
+                        'Cursor ACP backend unavailable after model switch; ending session.'
+                    );
+                }
+                break;
+            }
+
+            // Defer hub ack until we confirm a live backend can take the turn.
+            const acknowledgeBatch = this.session.queue.onBatchConsumed;
+            this.session.queue.onBatchConsumed = null;
+            let batch: Awaited<ReturnType<typeof session.queue.waitForMessagesAndGetAsString>>;
+            try {
+                batch = await session.queue.waitForMessagesAndGetAsString(waitSignal);
+            } finally {
+                this.session.queue.onBatchConsumed = acknowledgeBatch;
+            }
 
             if (!batch) {
                 if (waitSignal.aborted && !this.shouldExit) {
@@ -626,7 +652,7 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
             const liveBackend = this.backend;
             const liveSessionId: string | null = this.acpSessionId;
             if (!liveBackend || !liveSessionId) {
-                // Preserve the dequeued batch so a double-failure does not drop the turn.
+                // Never hub-acked — put the turn back for resume/recovery.
                 for (let i = batch.items.length - 1; i >= 0; i -= 1) {
                     const item = batch.items[i]!;
                     if (batch.isolate) {
@@ -640,8 +666,14 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                         'Cursor ACP backend unavailable after model switch; ending session.'
                     );
                 }
-                // End the loop (no requeue-spin); pending items remain for resume/recovery.
                 break;
+            }
+
+            const consumedLocalIds = batch.items
+                .map((item) => item.localId)
+                .filter((id): id is string => typeof id === 'string');
+            if (consumedLocalIds.length > 0) {
+                acknowledgeBatch?.(consumedLocalIds);
             }
 
             // Hold promptInFlight before mode apply so a concurrent Auto relaunch
@@ -1298,6 +1330,10 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
 
         this.backend = backend;
         this.acpSessionId = acpSessionId;
+
+        // Fresh ACP process — recompute slash bookkeeping for this replacement.
+        this.autoReviewSlashQueued = this.spawnedWithAutoReview
+            || this.session.queue.hasMessageMatching((message) => message.trim() === '/auto-review');
 
         // Apply current mode after publish so Auto-review changes made while the
         // backend was null during relaunch still take effect (slash if needed).

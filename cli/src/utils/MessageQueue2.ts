@@ -517,6 +517,11 @@ export class MessageQueue2<T> {
             .filter((id): id is string => typeof id === 'string');
     }
 
+    /** True if any pending (not yet dequeued) message matches the predicate. */
+    hasMessageMatching(predicate: (message: string) => boolean): boolean {
+        return this.queue.some((item) => predicate(item.message));
+    }
+
     /**
      * Close the queue - no more messages can be pushed
      */
