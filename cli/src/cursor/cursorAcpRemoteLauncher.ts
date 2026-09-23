@@ -411,7 +411,7 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                 && spawnModel
                 && spawnModel !== desiredModel
             );
-            await this.applyLiveModel(backend, acpSessionId, modelToApply, previousSetModel, {
+            await this.applyLiveModel(modelToApply, previousSetModel, {
                 optimistic: false,
                 throwOnFailure: mustRestoreDesiredModel
             });
@@ -419,7 +419,7 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
             this.pushModelStatusLine(this.currentBackendModel);
         }
 
-        this.installLiveSessionConfigSync(backend, acpSessionId, previousSetModel);
+        this.installLiveSessionConfigSync(previousSetModel);
 
         this.applyDisplayMode(session.getPermissionMode() as PermissionMode);
 
@@ -598,13 +598,17 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                 ? this.defaultBackendModel
                 : batch.mode.model;
 
+            const backend = this.backend;
+            const acpSessionId = this.acpSessionId;
+            if (!backend || !acpSessionId) {
+                break;
+            }
+
             const modelChanged = Boolean(
                 requestedModel && requestedModel !== this.currentBackendModel
             );
             if (modelChanged) {
                 const appliedModel = await this.applyLiveModel(
-                    backend,
-                    acpSessionId,
                     requestedModel,
                     previousSetModel,
                     { optimistic: false, throwOnFailure: false }
@@ -912,14 +916,17 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
     }
 
     private installLiveSessionConfigSync(
-        backend: AcpSdkBackend,
-        acpSessionId: string,
         previousSetModel: CursorSession['setModel']
     ): void {
         const session = this.session;
         const previousSetPermissionMode = session.setPermissionMode.bind(session);
         session.setPermissionMode = (mode: PermissionMode) => {
             previousSetPermissionMode(mode);
+            const backend = this.backend;
+            const acpSessionId = this.acpSessionId;
+            if (!backend || !acpSessionId) {
+                return;
+            }
             void applyCursorAcpMode(backend, acpSessionId, mode).then(() => {
                 this.applyDisplayMode(mode);
             });
@@ -927,14 +934,14 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         };
 
         this.unregisterModelApplyHandler = session.registerModelApplyHandler(async (model) => (
-            await this.applyLiveModel(backend, acpSessionId, model, previousSetModel, {
+            await this.applyLiveModel(model, previousSetModel, {
                 optimistic: false,
                 throwOnFailure: true
             })
         ));
 
         session.setModel = (model: string | null | undefined) => {
-            void this.applyLiveModel(backend, acpSessionId, model, previousSetModel, {
+            void this.applyLiveModel(model, previousSetModel, {
                 optimistic: true,
                 throwOnFailure: false
             }).catch((error) => {
@@ -944,23 +951,28 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
     }
 
     private async applyLiveModel(
-        backend: AcpSdkBackend,
-        acpSessionId: string,
         model: string | null | undefined,
         previousSetModel: CursorSession['setModel'],
         options: { optimistic: boolean; throwOnFailure: boolean }
     ): Promise<string | null> {
         return this.modelApplyLock.inLock(() =>
-            this.applyLiveModelLocked(backend, acpSessionId, model, previousSetModel, options));
+            this.applyLiveModelLocked(model, previousSetModel, options));
     }
 
     private async applyLiveModelLocked(
-        backend: AcpSdkBackend,
-        acpSessionId: string,
         model: string | null | undefined,
         previousSetModel: CursorSession['setModel'],
         options: { optimistic: boolean; throwOnFailure: boolean }
     ): Promise<string | null> {
+        const backend = this.backend;
+        const acpSessionId = this.acpSessionId;
+        if (!backend || !acpSessionId) {
+            if (options.throwOnFailure) {
+                throw new Error('Cursor ACP session is not ready');
+            }
+            return this.currentBackendModel ?? this.session.model ?? null;
+        }
+
         const requested = model?.trim();
         const previousModel = this.currentBackendModel ?? this.session.model ?? null;
 
@@ -977,25 +989,35 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                     appliedLive = true;
                 } catch (error) {
                     logger.debug('[cursor-acp] Failed to set auto model via ACP', error);
-                    if (options.throwOnFailure) {
-                        throw new Error('Cursor auto model is not available via ACP');
-                    }
+                    // Fall through to in-place relaunch with CLI `--model auto`.
                 }
             }
             // Live ACP catalogs usually advertise `default[]`, which is not CLI
-            // Auto (#1817). Only acknowledge Auto after a confirmed spawn or ACP
-            // `auto` option. In-session Auto without either requires a restart.
+            // Auto (#1817). When ACP cannot confirm Auto, relaunch the same hub
+            // session under `--model auto` + session/load (#1908).
             if (!appliedLive && !this.spawnedWithCliAuto) {
-                if (options.throwOnFailure) {
-                    throw new Error('Cursor Auto requires restarting with --model auto');
+                try {
+                    await this.relaunchAcpWithSpawnModel(CURSOR_AUTO_MODEL_ID);
+                } catch (error) {
+                    logger.warn('[cursor-acp] In-place Auto relaunch failed', error);
+                    if (options.throwOnFailure) {
+                        const detail = error instanceof Error ? error.message : String(error);
+                        throw new Error(
+                            `Cursor Auto relaunch with --model auto failed: ${detail}`
+                        );
+                    }
+                    return previousModel;
                 }
-                return previousModel;
             }
             previousSetModel(CURSOR_AUTO_MODEL_ID);
             this.currentBackendModel = CURSOR_AUTO_MODEL_ID;
             this.pushModelStatusLine(CURSOR_AUTO_MODEL_ID);
             this.session.pushKeepAlive();
-            syncCursorModelsFromAcp(backend, acpSessionId);
+            const liveBackend = this.backend;
+            const liveSessionId = this.acpSessionId;
+            if (liveBackend && liveSessionId) {
+                syncCursorModelsFromAcp(liveBackend, liveSessionId);
+            }
             return CURSOR_AUTO_MODEL_ID;
         }
 
@@ -1050,6 +1072,147 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         this.session.pushKeepAlive();
         syncCursorModelsFromAcp(backend, acpSessionId);
         return sessionWire;
+    }
+
+    /**
+     * Disconnect the live ACP process and spawn a replacement under the same hub
+     * session, loading the existing agent session id (CLI Auto pin, #1908).
+     * On failure after disconnect, best-effort restore the prior spawn so the
+     * launcher is not left without a backend.
+     */
+    private async relaunchAcpWithSpawnModel(spawnModel: string): Promise<void> {
+        const session = this.session;
+        const resumeSessionId = this.acpSessionId ?? session.sessionId;
+        if (!resumeSessionId) {
+            throw new Error('No Cursor ACP session id available for in-place relaunch');
+        }
+        if (this.promptInFlight) {
+            throw new Error('Cannot relaunch Cursor ACP while a prompt is in flight');
+        }
+        if (this.softSteerWaiters.length > 0) {
+            await Promise.allSettled([...this.softSteerWaiters]);
+            this.softSteerWaiters = [];
+        }
+
+        const rollbackSpawnModel = this.spawnedWithCliAuto
+            ? CURSOR_AUTO_MODEL_ID
+            : resolveCursorSpawnModel(this.currentBackendModel ?? session.model);
+        const rollbackAutoReview = this.spawnedWithAutoReview;
+        const autoReview = isCursorAutoReviewMode(session.getPermissionMode() as PermissionMode);
+
+        const previousBackend = this.backend;
+        this.backend = null;
+        if (previousBackend) {
+            await previousBackend.disconnect().catch((error) => {
+                logger.debug('[cursor-acp] Prior ACP disconnect during relaunch', error);
+            });
+        }
+
+        try {
+            await this.bindFreshAcpBackend({
+                spawnModel,
+                autoReview,
+                resumeSessionId
+            });
+            this.spawnedWithAutoReview = autoReview;
+            this.spawnedWithCliAuto = cursorSpawnModelId(spawnModel) === CURSOR_AUTO_MODEL_ID;
+            logger.info(
+                `[cursor-acp] In-place relaunch with --model ${cursorSpawnModelId(spawnModel) ?? spawnModel} (session=${this.acpSessionId})`
+            );
+        } catch (error) {
+            logger.warn('[cursor-acp] In-place relaunch failed; attempting prior-spawn restore', error);
+            try {
+                await this.bindFreshAcpBackend({
+                    spawnModel: rollbackSpawnModel,
+                    autoReview: rollbackAutoReview,
+                    resumeSessionId
+                });
+                this.spawnedWithAutoReview = rollbackAutoReview;
+                this.spawnedWithCliAuto = cursorSpawnModelId(rollbackSpawnModel) === CURSOR_AUTO_MODEL_ID;
+            } catch (restoreError) {
+                logger.warn('[cursor-acp] Prior-spawn restore after failed relaunch also failed', restoreError);
+            }
+            throw error;
+        }
+    }
+
+    private async bindFreshAcpBackend(args: {
+        spawnModel: string | null;
+        autoReview: boolean;
+        resumeSessionId: string;
+    }): Promise<void> {
+        const session = this.session;
+        let recentStderrHint: string | null = null;
+        const backend = createCursorAcpBackend({
+            cwd: session.path,
+            model: args.spawnModel,
+            autoReview: args.autoReview,
+            worktree: session.cursorWorktree,
+            addDirs: session.cursorAddDirs
+        });
+        this.backend = backend;
+        registerAcpSessionTitleSync(backend, session.client);
+        backend.setUsageUpdateListener((message) => this.handleAgentMessage(message));
+        this.wireAgentActivityThinking(backend, session);
+        this.wireStderrErrorListener(backend, (hint) => {
+            recentStderrHint = hint;
+        });
+
+        try {
+            await backend.initialize();
+            await backend.authenticateIfAvailable('cursor_login');
+        } catch (error) {
+            const message = classifyCursorAcpLoadError(error, {
+                recentStderr: recentStderrHint,
+                action: 'start'
+            });
+            await backend.disconnect().catch(() => {});
+            this.backend = null;
+            throw new Error(message);
+        }
+
+        this.extensionAdapter = new CursorExtensionAdapter(
+            session.client,
+            backend,
+            (message) => this.handleAgentMessage(message),
+            () => this.handleCreatePlanAccepted()
+        );
+        this.permissionAdapter = new PermissionAdapter(
+            session.client,
+            backend,
+            () => session.getPermissionMode(),
+            (response) => this.handlePermissionResponse(this.extensionAdapter!, response)
+        );
+
+        if (!backend.supportsLoadSession()) {
+            await backend.disconnect().catch(() => {});
+            this.backend = null;
+            throw new Error(
+                'Cursor ACP session/load is not supported by this agent build; cannot relaunch in place'
+            );
+        }
+
+        try {
+            const acpSessionId = await backend.loadSession({
+                sessionId: args.resumeSessionId,
+                cwd: session.path,
+                mcpServers: []
+            });
+            this.acpSessionId = acpSessionId;
+        } catch (error) {
+            logger.warn('[cursor-acp] session/load failed during in-place relaunch', formatAcpLoadError(error));
+            const message = classifyCursorAcpLoadError(error, { recentStderr: recentStderrHint });
+            await backend.disconnect().catch(() => {});
+            this.backend = null;
+            throw new Error(message);
+        }
+
+        await applyCursorAcpMode(
+            backend,
+            this.acpSessionId!,
+            session.getPermissionMode() as PermissionMode
+        );
+        syncCursorModelsFromAcp(backend, this.acpSessionId!);
     }
 
     private pushModelStatusLine(model: string | null | undefined): void {

@@ -44,7 +44,9 @@ const harness = vi.hoisted(() => ({
     stderrErrorHandler: null as ((error: { type: string; message: string; raw?: string }) => void) | null,
     disconnectError: null as Error | null,
     overlayCleanup: null as ReturnType<typeof vi.fn> | null,
-    agentActivityListener: null as ((thinking: boolean) => void) | null
+    agentActivityListener: null as ((thinking: boolean) => void) | null,
+    /** When set, the next backend.initialize() rejects once, then clears. */
+    failNextInitialize: null as Error | null
 }));
 
 const legacyLauncher = vi.hoisted(() => vi.fn());
@@ -68,6 +70,11 @@ vi.mock('./utils/cursorAcpBackend', () => ({
         return {
             initialize: vi.fn(async () => {
                 harness.initializeAttempts += 1;
+                if (harness.failNextInitialize) {
+                    const error = harness.failNextInitialize;
+                    harness.failNextInitialize = null;
+                    throw error;
+                }
                 if (harness.initializeError && harness.initializeAttempts === 1) {
                     harness.stderrErrorHandler?.({
                         type: 'model_not_found',
@@ -333,6 +340,7 @@ describe('cursorAcpRemoteLauncher', () => {
         harness.disconnectError = null;
         harness.overlayCleanup = null;
         harness.agentActivityListener = null;
+        harness.failNextInitialize = null;
         legacyLauncher.mockClear();
         process.stdin.isTTY = false;
         process.stdout.isTTY = false;
@@ -1566,7 +1574,7 @@ describe('cursorAcpRemoteLauncher', () => {
         await runPromise;
     });
 
-    it('does not claim live Auto when ACP has no auto option', async () => {
+    it('relaunches via setModel Auto when ACP has no auto option', async () => {
         const queue = new MessageQueue2<EnhancedMode>((mode) => mode.permissionMode);
         const client = {
             rpcHandlerManager: { registerHandler: vi.fn() },
@@ -1575,7 +1583,7 @@ describe('cursorAcpRemoteLauncher', () => {
             sendSessionEvent: vi.fn(),
             sendAgentMessage: vi.fn(),
             keepAlive: vi.fn(),
-        emitSessionReady: vi.fn()
+            emitSessionReady: vi.fn()
         } as unknown as ApiSessionClient;
 
         const session = new CursorSession({
@@ -1591,7 +1599,9 @@ describe('cursorAcpRemoteLauncher', () => {
             startingMode: 'remote',
             permissionMode: 'default'
         });
-        session.onSessionFoundWithProtocol = vi.fn();
+        session.onSessionFoundWithProtocol = vi.fn((id: string) => {
+            session.sessionId = id;
+        });
         queue.push('hold-open', { permissionMode: 'default' });
 
         const runPromise = cursorAcpRemoteLauncher(session);
@@ -1608,13 +1618,14 @@ describe('cursorAcpRemoteLauncher', () => {
         });
 
         harness.setConfigOptionCalls.length = 0;
+        harness.loadSessionCalled = false;
         session.setModel('auto');
 
         await vi.waitFor(() => {
-            expect(session.model).toBe('composer-2.5[fast=false]');
+            expect(session.model).toBe('auto');
         });
-        await new Promise((resolve) => setTimeout(resolve, 30));
-        expect(session.model).toBe('composer-2.5[fast=false]');
+        expect(harness.backendArgs).toEqual({ command: 'agent', args: ['--model', 'auto', 'acp'] });
+        expect(harness.loadSessionCalled).toBe(true);
         expect(harness.setConfigOptionCalls.filter((call) => call.configId === 'model-opt')).toEqual([]);
 
         queue.close();
@@ -1665,7 +1676,7 @@ describe('cursorAcpRemoteLauncher', () => {
         await runPromise;
     });
 
-    it('rejects live applyModelConfig Auto when ACP has no auto option', async () => {
+    it('relaunches in place with --model auto when ACP has no auto option', async () => {
         const queue = new MessageQueue2<EnhancedMode>((mode) => mode.permissionMode);
         const client = {
             rpcHandlerManager: { registerHandler: vi.fn() },
@@ -1690,7 +1701,9 @@ describe('cursorAcpRemoteLauncher', () => {
             startingMode: 'remote',
             permissionMode: 'default'
         });
-        session.onSessionFoundWithProtocol = vi.fn();
+        session.onSessionFoundWithProtocol = vi.fn((id: string) => {
+            session.sessionId = id;
+        });
         queue.push('hold-open', { permissionMode: 'default' });
 
         const runPromise = cursorAcpRemoteLauncher(session);
@@ -1699,13 +1712,65 @@ describe('cursorAcpRemoteLauncher', () => {
 
         await session.applyModelConfig('composer-2.5[fast=false]');
         harness.setConfigOptionCalls.length = 0;
+        harness.loadSessionCalled = false;
+        const createCallsBefore = vi.mocked(createCursorAcpBackend).mock.calls.length;
 
-        await expect(session.applyModelConfig('auto')).rejects.toThrow(
-            'Cursor Auto requires restarting with --model auto'
-        );
+        await session.applyModelConfig('auto');
 
-        expect(session.model).toBe('composer-2.5[fast=false]');
+        expect(session.model).toBe('auto');
+        expect(harness.backendArgs).toEqual({ command: 'agent', args: ['--model', 'auto', 'acp'] });
+        expect(harness.loadSessionCalled).toBe(true);
+        expect(vi.mocked(createCursorAcpBackend).mock.calls.length).toBeGreaterThan(createCallsBefore);
         expect(harness.setConfigOptionCalls.filter((call) => call.configId === 'model-opt')).toEqual([]);
+
+        queue.close();
+        await runPromise;
+    });
+
+    it('restores the prior ACP spawn when Auto relaunch initialize fails', async () => {
+        const queue = new MessageQueue2<EnhancedMode>((mode) => mode.permissionMode);
+        const client = {
+            rpcHandlerManager: { registerHandler: vi.fn() },
+            updateMetadata: vi.fn(),
+            flushMetadata: vi.fn(async () => true),
+            sendSessionEvent: vi.fn(),
+            sendAgentMessage: vi.fn(),
+            keepAlive: vi.fn(),
+            emitSessionReady: vi.fn()
+        } as unknown as ApiSessionClient;
+
+        const session = new CursorSession({
+            api: {} as never,
+            client,
+            path: '/tmp/project',
+            logPath: '/tmp/log',
+            sessionId: null,
+            messageQueue: queue,
+            onModeChange: vi.fn(),
+            mode: 'remote',
+            startedBy: 'runner',
+            startingMode: 'remote',
+            permissionMode: 'default'
+        });
+        session.onSessionFoundWithProtocol = vi.fn((id: string) => {
+            session.sessionId = id;
+        });
+        queue.push('hold-open', { permissionMode: 'default' });
+
+        const runPromise = cursorAcpRemoteLauncher(session);
+        await vi.waitFor(() => expect(harness.newSessionCalled).toBe(true));
+        await vi.waitFor(() => expect(session.canApplyModelConfig()).toBe(true));
+
+        await session.applyModelConfig('composer-2.5[fast=false]');
+        expect(session.model).toBe('composer-2.5[fast=false]');
+
+        harness.failNextInitialize = new Error('auto spawn refused');
+        await expect(session.applyModelConfig('auto')).rejects.toThrow(/relaunch with --model auto failed/i);
+        expect(session.model).toBe('composer-2.5[fast=false]');
+
+        // Prior spawn restored — concrete model apply still works.
+        await session.applyModelConfig('composer-2.5[fast=true]');
+        expect(session.model).toBe('composer-2.5[fast=true]');
 
         queue.close();
         await runPromise;
@@ -1760,7 +1825,7 @@ describe('cursorAcpRemoteLauncher', () => {
         await runPromise;
     });
 
-    it('rejects applyModelConfig Auto when advertised auto cannot be set', async () => {
+    it('falls back to in-place relaunch when advertised auto cannot be set via ACP', async () => {
         harness.modelOptionValues = ['auto', 'composer-2.5[fast=false]'];
         harness.failSetConfigOption = true;
         const queue = new MessageQueue2<EnhancedMode>((mode) => mode.permissionMode);
@@ -1787,23 +1852,25 @@ describe('cursorAcpRemoteLauncher', () => {
             startingMode: 'remote',
             permissionMode: 'default'
         });
-        session.onSessionFoundWithProtocol = vi.fn();
+        session.onSessionFoundWithProtocol = vi.fn((id: string) => {
+            session.sessionId = id;
+        });
         queue.push('hold-open', { permissionMode: 'default' });
 
         const runPromise = cursorAcpRemoteLauncher(session);
         await vi.waitFor(() => expect(harness.newSessionCalled).toBe(true));
         await vi.waitFor(() => expect(session.canApplyModelConfig()).toBe(true));
 
-        await expect(session.applyModelConfig('auto')).rejects.toThrow(
-            'Cursor auto model is not available via ACP'
-        );
-        expect(session.model).not.toBe('auto');
+        await session.applyModelConfig('auto');
+        expect(session.model).toBe('auto');
+        expect(harness.backendArgs).toEqual({ command: 'agent', args: ['--model', 'auto', 'acp'] });
+        expect(harness.loadSessionCalled).toBe(true);
 
         queue.close();
         await runPromise;
     });
 
-    it.each([[false, false], [true, false], [false, true], [true, true]])('rejects Auto after an Auto-spawned concrete switch (partial=%s, concurrent=%s)', async (partial, concurrent) => {
+    it.each([[false, false], [true, false], [false, true], [true, true]])('relaunches Auto after an Auto-spawned concrete switch (partial=%s, concurrent=%s)', async (partial, concurrent) => {
         const queue = new MessageQueue2<EnhancedMode>((mode) => mode.permissionMode);
         const client = {
             rpcHandlerManager: { registerHandler: vi.fn() },
@@ -1829,7 +1896,9 @@ describe('cursorAcpRemoteLauncher', () => {
             permissionMode: 'default',
             model: 'auto'
         });
-        session.onSessionFoundWithProtocol = vi.fn();
+        session.onSessionFoundWithProtocol = vi.fn((id: string) => {
+            session.sessionId = id;
+        });
         queue.push('hold-open', { permissionMode: 'default' });
 
         const runPromise = cursorAcpRemoteLauncher(session);
@@ -1865,17 +1934,22 @@ describe('cursorAcpRemoteLauncher', () => {
             await concreteRequest;
         }
         if (autoRequest) {
-            expect((await autoRequest).error?.message).toContain('Cursor Auto requires restarting with --model auto');
-        }
-        const concreteModel = partial ? 'composer-2.5' : 'composer-2.5[fast=false]';
-        expect(session.model).toBe(concreteModel);
-        harness.setConfigOptionCalls.length = 0;
+            const result = await autoRequest;
+            expect(result.error).toBeNull();
+            expect(result.value).toBe('auto');
+            expect(session.model).toBe('auto');
+        } else {
+            const concreteModel = partial ? 'composer-2.5' : 'composer-2.5[fast=false]';
+            expect(session.model).toBe(concreteModel);
+            harness.setConfigOptionCalls.length = 0;
+            harness.loadSessionCalled = false;
 
-        await expect(session.applyModelConfig('auto')).rejects.toThrow(
-            'Cursor Auto requires restarting with --model auto'
-        );
-        expect(session.model).toBe(concreteModel);
-        expect(harness.setConfigOptionCalls.filter((call) => call.configId === 'model-opt')).toEqual([]);
+            await session.applyModelConfig('auto');
+            expect(session.model).toBe('auto');
+            expect(harness.backendArgs).toEqual({ command: 'agent', args: ['--model', 'auto', 'acp'] });
+            expect(harness.loadSessionCalled).toBe(true);
+            expect(harness.setConfigOptionCalls.filter((call) => call.configId === 'model-opt')).toEqual([]);
+        }
 
         queue.close();
         await runPromise;
