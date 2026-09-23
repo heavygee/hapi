@@ -31,6 +31,7 @@ import { hashRunnerCliApiToken, hashRunnerExtraHeaders } from './runnerIdentity'
 import { readRuntimes, runtimeMayBeAlive, runtimeAuthHash } from '@/codex/shared/registry';
 import { scheduleCursorModelsPrewarm } from '@/modules/common/cursorModelsPrewarm';
 import { isLinkedGitWorktree } from '@/utils/isLinkedGitWorktree';
+import { agentRequiresSpawnReady, resolveAgentReadyTimeoutMs } from './spawnReadyGate';
 import { agentUnavailableMessage, getAgentAvailability } from '@/agent/agentAvailability';
 import { copyCodexConfigFile, resolveCodexHome } from '@/codex/utils/codexHome';
 
@@ -397,6 +398,9 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     // Session spawning awaiter system
     const pidToAwaiter = new Map<number, (session: TrackedSession) => void>();
     const pidToErrorAwaiter = new Map<number, (errorMessage: string) => void>();
+    /** Runner-spawned sessions waiting for agent-ready after the initial webhook (heavygee/hapi#151). */
+    const sessionIdAwaitingReady = new Map<string, number>();
+    const pidToSpawnCompleter = new Map<number, (session: TrackedSession) => void>();
     // existingSessionId identifies the HAPI row, not a permanent spawn request.
     // Keep the dedupe entry only while this runner still owns the child PID.
     const existingSessionIdByChildPid = new Map<number, string>();
@@ -515,6 +519,25 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       }
     };
 
+    const onHappySessionReady = (sessionId: string) => {
+      const pid = sessionIdAwaitingReady.get(sessionId);
+      if (pid === undefined) {
+        return;
+      }
+      sessionIdAwaitingReady.delete(sessionId);
+      const session = pidToTrackedSession.get(pid);
+      const completer = pidToSpawnCompleter.get(pid);
+      if (!session || !completer) {
+        logger.debug(`[RUNNER RUN] Session-ready for ${sessionId} but spawn completer already cleared (PID ${pid})`);
+        return;
+      }
+      pidToAwaiter.delete(pid);
+      pidToErrorAwaiter.delete(pid);
+      pidToSpawnCompleter.delete(pid);
+      logger.debug(`[RUNNER RUN] Session ${sessionId} agent-ready; completing runner spawn for PID ${pid}`);
+      completer(session);
+    };
+
     // Spawn a new session (sessionId reserved for future --resume functionality)
     let spawnSession!: SpawnDeduplicator;
     const spawnSessionOnce = async (options: SpawnSessionOptions): Promise<SpawnSessionResult> => {
@@ -616,35 +639,24 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       }
 
       if (sessionType === 'worktree') {
-        // Cursor Agent has native `--worktree` under ~/.cursor/worktrees/. Prefer that
-        // over HAPI's sibling-directory worktree so Cursor sandbox/skills see the same layout.
-        // Exception: if `directory` is already a linked git worktree (e.g. HAPI feature
-        // worktree or driver/), nesting `--cursor-worktree` hangs ACP initialize (#1085).
-        if (agent === 'cursor') {
-          spawnDirectory = directory;
-          if (isLinkedGitWorktree(directory)) {
-            logger.debug(
-              `[RUNNER RUN] Directory is already a linked git worktree; skipping Cursor --worktree (cwd=${directory})`
-            );
-          } else {
-            logger.debug(`[RUNNER RUN] Cursor-native worktree requested (nameHint=${worktreeName ?? '(auto)'})`);
-          }
-        } else {
-          const worktreeResult = await createWorktree({
-            basePath: directory,
-            nameHint: worktreeName
-          });
-          if (!worktreeResult.ok) {
-            logger.debug(`[RUNNER RUN] Worktree creation failed: ${worktreeResult.error}`);
-            return {
-              type: 'error',
-              errorMessage: worktreeResult.error
-            };
-          }
-          worktreeInfo = worktreeResult.info;
-          spawnDirectory = worktreeInfo.worktreePath;
-          logger.debug(`[RUNNER RUN] Created worktree ${worktreeInfo.worktreePath} (branch ${worktreeInfo.branch})`);
+        // Always create a HAPI git worktree for isolation. Cursor `--cursor-worktree`
+        // on the shared base repo collides on project MCP mailboxes and can hang ACP
+        // initialize (heavygee/hapi#152). Linked worktrees skip `--cursor-worktree` in
+        // buildCliArgs (#1085) and get per-path MCP overlay + clean git state.
+        const worktreeResult = await createWorktree({
+          basePath: directory,
+          nameHint: worktreeName
+        });
+        if (!worktreeResult.ok) {
+          logger.debug(`[RUNNER RUN] Worktree creation failed: ${worktreeResult.error}`);
+          return {
+            type: 'error',
+            errorMessage: worktreeResult.error
+          };
         }
+        worktreeInfo = worktreeResult.info;
+        spawnDirectory = worktreeInfo.worktreePath;
+        logger.debug(`[RUNNER RUN] Created worktree ${worktreeInfo.worktreePath} (branch ${worktreeInfo.branch})`);
       }
 
       const cleanupWorktree = async () => {
@@ -712,7 +724,11 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           };
         }
 
-        const args = buildCliArgs(agent, options, yolo);
+        // Pass the effective cwd (spawnDirectory), not the original base path.
+        // After createWorktree, options.directory is still the primary checkout;
+        // buildCliArgs must see the linked worktree so it skips --cursor-worktree
+        // (nested Cursor worktree hangs ACP init — heavygee/hapi#152 / Codex P1).
+        const args = buildCliArgs(agent, { ...options, directory: spawnDirectory }, yolo);
 
         // sessionId reserved for future use
         const MAX_TAIL_CHARS = 4000;
@@ -796,12 +812,35 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         logger.debug(`[RUNNER RUN] Spawned process with PID ${pid}`);
         let observedExitCode: number | null = null;
         let observedExitSignal: NodeJS.Signals | null = null;
-        const buildWebhookFailureMessage = (reason: 'timeout' | 'exit-before-webhook' | 'process-error-before-webhook'): string => {
+        const requiresAgentReady = agentRequiresSpawnReady(agent);
+        const agentReadyTimeoutMs = resolveAgentReadyTimeoutMs();
+        let agentReadyTimeout: ReturnType<typeof setTimeout> | null = null;
+        const clearAgentReadyTimeout = () => {
+          if (agentReadyTimeout) {
+            clearTimeout(agentReadyTimeout);
+            agentReadyTimeout = null;
+          }
+        };
+        const clearAwaitingReadyForPid = () => {
+          for (const [sid, awaitingPid] of sessionIdAwaitingReady) {
+            if (awaitingPid === pid) {
+              sessionIdAwaitingReady.delete(sid);
+            }
+          }
+        };
+
+        const buildWebhookFailureMessage = (
+          reason: 'timeout' | 'exit-before-webhook' | 'process-error-before-webhook' | 'exit-before-agent-ready' | 'agent-ready-timeout'
+        ): string => {
           let message = '';
           if (reason === 'exit-before-webhook') {
             message = `Session process exited before webhook for PID ${pid}`;
           } else if (reason === 'process-error-before-webhook') {
             message = `Session process error before webhook for PID ${pid}`;
+          } else if (reason === 'exit-before-agent-ready') {
+            message = `Session process exited before agent ready for PID ${pid}`;
+          } else if (reason === 'agent-ready-timeout') {
+            message = `Session agent-ready timeout for PID ${pid} (${agentReadyTimeoutMs}ms)`;
           } else {
             message = `Session webhook timeout for PID ${pid}`;
           }
@@ -854,11 +893,17 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           if (code !== 0 || signal) {
             logStderrTail();
           }
+          clearAgentReadyTimeout();
+          const wasAwaitingReady = [...sessionIdAwaitingReady.values()].includes(pid);
+          clearAwaitingReadyForPid();
+          pidToSpawnCompleter.delete(pid);
           const errorAwaiter = pidToErrorAwaiter.get(pid);
           if (errorAwaiter) {
             pidToErrorAwaiter.delete(pid);
             pidToAwaiter.delete(pid);
-            errorAwaiter(buildWebhookFailureMessage('exit-before-webhook'));
+            errorAwaiter(buildWebhookFailureMessage(
+              wasAwaitingReady ? 'exit-before-agent-ready' : 'exit-before-webhook'
+            ));
           }
           onChildExited(pid);
         });
@@ -884,8 +929,11 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           // HAPI_RUNNER_WEBHOOK_TIMEOUT_MS for users on slow models
           // (e.g. opus[1m] --resume).
           const timeout = setTimeout(() => {
+            clearAgentReadyTimeout();
+            clearAwaitingReadyForPid();
             pidToAwaiter.delete(pid);
             pidToErrorAwaiter.delete(pid);
+            pidToSpawnCompleter.delete(pid);
 
             // Remove the tracked session entry so a late-arriving webhook
             // from this orphaned PID cannot be silently promoted into a
@@ -923,15 +971,76 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             });
           }, webhookTimeoutMs);
 
-          // Register awaiter
-          pidToAwaiter.set(pid, (completedSession) => {
+          const completeRunnerSpawn = (completedSession: TrackedSession) => {
+            clearAgentReadyTimeout();
+            clearAwaitingReadyForPid();
             clearTimeout(timeout);
+            pidToAwaiter.delete(pid);
             pidToErrorAwaiter.delete(pid);
+            pidToSpawnCompleter.delete(pid);
             logger.debug(`[RUNNER RUN] Session ${completedSession.happySessionId} fully spawned with webhook`);
             resolve({
               type: 'success',
               sessionId: completedSession.happySessionId!
             });
+          };
+
+          const failRunnerSpawn = (reason: 'agent-ready-timeout') => {
+            clearAgentReadyTimeout();
+            clearAwaitingReadyForPid();
+            pidToAwaiter.delete(pid);
+            pidToErrorAwaiter.delete(pid);
+            pidToSpawnCompleter.delete(pid);
+            clearTimeout(timeout);
+            pidToTrackedSession.delete(pid);
+            if (happyProcess) {
+              void killProcessByChildProcess(happyProcess).finally(() => {
+                void cleanupCopiedCodexConfig('agent-ready-timeout');
+              });
+            } else {
+              void cleanupCopiedCodexConfig('agent-ready-timeout');
+            }
+            if (worktreeInfo && happyProcess) {
+              happyProcess.once('exit', () => {
+                void cleanupWorktree();
+              });
+            }
+            logStderrTail();
+            resolve({
+              type: 'error',
+              errorMessage: buildWebhookFailureMessage(reason)
+            });
+          };
+
+          pidToSpawnCompleter.set(pid, completeRunnerSpawn);
+
+          // Register awaiter
+          pidToAwaiter.set(pid, (completedSession) => {
+            const sessionId = completedSession.happySessionId;
+            if (requiresAgentReady) {
+              // Keep pidToErrorAwaiter until completeRunnerSpawn / failRunnerSpawn
+              // so exit-during-ACP-init still rejects the spawn promise (Codex P1).
+              if (!sessionId) {
+                pidToErrorAwaiter.delete(pid);
+                pidToSpawnCompleter.delete(pid);
+                clearTimeout(timeout);
+                resolve({
+                  type: 'error',
+                  errorMessage: 'Session webhook missing session id'
+                });
+                return;
+              }
+              clearTimeout(timeout);
+              sessionIdAwaitingReady.set(sessionId, pid);
+              logger.debug(`[RUNNER RUN] Session ${sessionId} webhook received; waiting for agent-ready (PID ${pid})`);
+              agentReadyTimeout = setTimeout(() => {
+                failRunnerSpawn('agent-ready-timeout');
+              }, agentReadyTimeoutMs);
+              agentReadyTimeout.unref?.();
+              return;
+            }
+            pidToSpawnCompleter.delete(pid);
+            completeRunnerSpawn(completedSession);
           });
           pidToErrorAwaiter.set(pid, (errorMessage) => {
             clearTimeout(timeout);
@@ -1132,6 +1241,12 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         existingSessionIdByChildPid.delete(pid);
       }
       pidToTrackedSession.delete(pid);
+      for (const [sid, awaitingPid] of sessionIdAwaitingReady) {
+        if (awaitingPid === pid) {
+          sessionIdAwaitingReady.delete(sid);
+        }
+      }
+      pidToSpawnCompleter.delete(pid);
       pidToAwaiter.delete(pid);
       pidToErrorAwaiter.delete(pid);
       pidToRequestedSessionId.delete(pid);
@@ -1145,7 +1260,8 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       stopSession,
       spawnSession,
       requestShutdown: () => requestShutdown('hapi-cli'),
-      onHappySessionWebhook
+      onHappySessionWebhook,
+      onHappySessionReady
     });
 
     // Baseline mtime at runner-process start. Immutable: per Codex review #814

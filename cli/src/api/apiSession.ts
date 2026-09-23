@@ -1232,6 +1232,11 @@ export class ApiSessionClient extends EventEmitter {
                 sid: this.sessionId,
                 time: Date.now()
             })
+            void import('@/runner/controlClient').then(({ notifyRunnerSessionReady }) =>
+                notifyRunnerSessionReady(this.sessionId)
+            ).catch(() => {
+                // Runner may not be running (terminal sessions).
+            })
         }, 'droppable')
     }
 
