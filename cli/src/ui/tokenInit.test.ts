@@ -1,9 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { initializeApiUrlMock, readSettingsMock, updateSettingsMock } = vi.hoisted(() => ({
+const {
+    initializeApiUrlMock,
+    readSettingsMock,
+    updateSettingsMock,
+    reconcileCliApiTokenMock
+} = vi.hoisted(() => ({
     initializeApiUrlMock: vi.fn(async () => 'default' as const),
     readSettingsMock: vi.fn(),
-    updateSettingsMock: vi.fn()
+    updateSettingsMock: vi.fn(),
+    reconcileCliApiTokenMock: vi.fn(async (_apiUrl: string, envToken: string) => envToken)
 }))
 
 vi.mock('@/ui/apiUrlInit', () => ({
@@ -13,6 +19,10 @@ vi.mock('@/ui/apiUrlInit', () => ({
 vi.mock('@/persistence', () => ({
     readSettings: readSettingsMock,
     updateSettings: updateSettingsMock
+}))
+
+vi.mock('@/api/cliApiTokenProbe', () => ({
+    reconcileCliApiToken: reconcileCliApiTokenMock
 }))
 
 import { configuration } from '@/configuration'
@@ -27,7 +37,10 @@ describe('initializeToken extra headers', () => {
         configuration._setExtraHeaders({})
         initializeApiUrlMock.mockClear()
         readSettingsMock.mockReset()
+        readSettingsMock.mockResolvedValue({ cliApiToken: 'token-from-env' })
         updateSettingsMock.mockReset()
+        reconcileCliApiTokenMock.mockClear()
+        reconcileCliApiTokenMock.mockImplementation(async (_apiUrl, envToken) => envToken)
     })
 
     afterEach(() => {
@@ -82,7 +95,7 @@ describe('initializeToken extra headers', () => {
         await initializeToken()
 
         expect(configuration.extraHeaders).toEqual({ 'X-Source': 'environment' })
-        expect(readSettingsMock).not.toHaveBeenCalled()
+        expect(reconcileCliApiTokenMock).toHaveBeenCalledOnce()
     })
 
     it.each(['{}', '{not-json'])(
@@ -97,9 +110,26 @@ describe('initializeToken extra headers', () => {
             await initializeToken()
 
             expect(configuration.extraHeaders).toEqual({})
-            expect(readSettingsMock).not.toHaveBeenCalled()
+            expect(reconcileCliApiTokenMock).toHaveBeenCalledOnce()
         }
     )
+
+    it('replaces stale inherited env token with settings when reconcile picks settings', async () => {
+        reconcileCliApiTokenMock.mockResolvedValueOnce('token-from-settings')
+        readSettingsMock.mockReset()
+        readSettingsMock.mockResolvedValue({
+            cliApiToken: 'token-from-settings'
+        })
+
+        await initializeToken()
+
+        expect(configuration.cliApiToken).toBe('token-from-settings')
+        expect(reconcileCliApiTokenMock).toHaveBeenCalledWith(
+            configuration.apiUrl,
+            'token-from-env',
+            'token-from-settings'
+        )
+    })
 
     it('drops non-string settings header values without exposing them', async () => {
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})

@@ -2,7 +2,7 @@
  * Token initialization module
  *
  * Handles CLI_API_TOKEN initialization with priority:
- * 1. Environment variable (highest - allows temporary override)
+ * 1. Environment variable (when it still authenticates against the hub)
  * 2. Settings file (~/.hapi/settings.json)
  * 3. Interactive prompt (only when both above are missing)
  */
@@ -10,6 +10,7 @@
 import * as readline from 'node:readline/promises'
 import { stdin as input, stdout as output } from 'node:process'
 import chalk from 'chalk'
+import { reconcileCliApiToken } from '@/api/cliApiTokenProbe'
 import { exportHapiHubAuthEnv } from '@/agent/hapiSessionEnv'
 import { configuration } from '@/configuration'
 import { readSettings, updateSettings } from '@/persistence'
@@ -26,14 +27,24 @@ export async function initializeToken(): Promise<void> {
     await initializeExtraHeaders()
     const exportApiUrl = apiUrlSource !== 'default'
 
-    // 1. Environment variable has highest priority (allows temporary override)
+    // 1. Environment variable has highest priority when it still authenticates.
+    // Agent shells (Cursor, etc.) often inherit a stale CLI_API_TOKEN while
+    // ~/.hapi/settings.json holds the live token from `hapi auth login`.
+    const settings = await readSettings()
     if (configuration.cliApiToken) {
+        const resolved = await reconcileCliApiToken(
+            configuration.apiUrl,
+            configuration.cliApiToken,
+            settings.cliApiToken
+        )
+        if (resolved !== configuration.cliApiToken) {
+            configuration._setCliApiToken(resolved)
+        }
         exportHapiHubAuthEnv({ exportApiUrl })
         return
     }
 
     // 2. Read from settings file
-    const settings = await readSettings()
     if (settings.cliApiToken) {
         configuration._setCliApiToken(settings.cliApiToken)
         exportHapiHubAuthEnv({ exportApiUrl })
