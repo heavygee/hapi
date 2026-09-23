@@ -50,7 +50,9 @@ const harness = vi.hoisted(() => ({
     /** When > 0, the next N backend.initialize() calls reject. */
     failInitializeTimes: 0,
     /** When set, the next backend.initialize() awaits this before completing. */
-    deferNextInitialize: null as Promise<void> | null
+    deferNextInitialize: null as Promise<void> | null,
+    /** Spawn flags passed to createCursorAcpBackend (newest last). */
+    spawnAutoReviewFlags: [] as boolean[]
 }));
 
 const legacyLauncher = vi.hoisted(() => vi.fn());
@@ -61,7 +63,7 @@ vi.mock('./cursorLegacyRemoteLauncher', () => ({
 
 vi.mock('./utils/cursorAcpBackend', () => ({
     CURSOR_ACP_REQUIRED_MESSAGE: 'Cursor ACP mode is required for new Cursor remote sessions.',
-    createCursorAcpBackend: vi.fn((opts?: { model?: string | null }) => {
+    createCursorAcpBackend: vi.fn((opts?: { model?: string | null; autoReview?: boolean }) => {
         const args = ['acp'];
         const model = opts?.model?.trim();
         const spawn = !model
@@ -70,6 +72,10 @@ vi.mock('./utils/cursorAcpBackend', () => ({
         if (spawn) {
             args.unshift('--model', spawn);
         }
+        if (opts?.autoReview) {
+            args.unshift('--auto-review');
+        }
+        harness.spawnAutoReviewFlags.push(Boolean(opts?.autoReview));
         harness.backendArgs = { command: 'agent', args };
         return {
             initialize: vi.fn(async () => {
@@ -356,6 +362,7 @@ describe('cursorAcpRemoteLauncher', () => {
         harness.failNextInitialize = null;
         harness.failInitializeTimes = 0;
         harness.deferNextInitialize = null;
+        harness.spawnAutoReviewFlags = [];
         legacyLauncher.mockClear();
         process.stdin.isTTY = false;
         process.stdout.isTTY = false;
@@ -1899,6 +1906,64 @@ describe('cursorAcpRemoteLauncher', () => {
             expect(
                 harness.prompts.filter((prompt) => JSON.stringify(prompt).includes('/auto-review')).length
             ).toBeGreaterThanOrEqual(2);
+        });
+
+        queue.close();
+        await runPromise;
+    });
+
+    it('queues Auto-review slash after Auto relaunch when session started with --auto-review', async () => {
+        const queue = new MessageQueue2<EnhancedMode>((mode) => mode.permissionMode);
+        const client = {
+            rpcHandlerManager: { registerHandler: vi.fn() },
+            updateMetadata: vi.fn(),
+            flushMetadata: vi.fn(async () => true),
+            sendSessionEvent: vi.fn(),
+            sendAgentMessage: vi.fn(),
+            keepAlive: vi.fn(),
+            emitSessionReady: vi.fn(),
+            emitMessagesConsumed: vi.fn()
+        } as unknown as ApiSessionClient;
+
+        const session = new CursorSession({
+            api: {} as never,
+            client,
+            path: '/tmp/project',
+            logPath: '/tmp/log',
+            sessionId: null,
+            messageQueue: queue,
+            onModeChange: vi.fn(),
+            mode: 'remote',
+            startedBy: 'runner',
+            startingMode: 'remote',
+            permissionMode: 'autoReview'
+        });
+        session.onSessionFoundWithProtocol = vi.fn((id: string) => {
+            session.sessionId = id;
+        });
+        queue.push('hold-open', { permissionMode: 'autoReview' });
+
+        const runPromise = cursorAcpRemoteLauncher(session);
+        await vi.waitFor(() => expect(harness.newSessionCalled).toBe(true));
+        await vi.waitFor(() => expect(session.canApplyModelConfig()).toBe(true));
+        expect(harness.spawnAutoReviewFlags[0]).toBe(true);
+        // Spawned with --auto-review — no slash needed yet.
+        expect(queue.hasMessageMatching((message) => message === '/auto-review')).toBe(false);
+
+        session.setPermissionMode('default');
+        await session.applyModelConfig('composer-2.5[fast=false]');
+        await session.applyModelConfig('auto');
+
+        await vi.waitFor(() => {
+            expect(harness.spawnAutoReviewFlags.at(-1)).toBe(false);
+        });
+
+        session.setPermissionMode('autoReview');
+        await vi.waitFor(() => {
+            expect(
+                harness.prompts.some((prompt) => JSON.stringify(prompt).includes('/auto-review'))
+                || queue.hasMessageMatching((message) => message === '/auto-review')
+            ).toBe(true);
         });
 
         queue.close();

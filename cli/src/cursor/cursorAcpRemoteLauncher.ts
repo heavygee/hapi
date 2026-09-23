@@ -1331,8 +1331,10 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         this.backend = backend;
         this.acpSessionId = acpSessionId;
 
-        // Fresh ACP process — recompute slash bookkeeping for this replacement.
-        this.autoReviewSlashQueued = this.spawnedWithAutoReview
+        // Fresh ACP process — bookkeeping must reflect THIS spawn's flags, not
+        // the prior process (e.g. started with --auto-review, relaunched without).
+        this.spawnedWithAutoReview = args.autoReview;
+        this.autoReviewSlashQueued = args.autoReview
             || this.session.queue.hasMessageMatching((message) => message.trim() === '/auto-review');
 
         // Apply current mode after publish so Auto-review changes made while the
