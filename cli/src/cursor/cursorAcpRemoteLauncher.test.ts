@@ -47,6 +47,8 @@ const harness = vi.hoisted(() => ({
     agentActivityListener: null as ((thinking: boolean) => void) | null,
     /** When set, the next backend.initialize() rejects once, then clears. */
     failNextInitialize: null as Error | null,
+    /** When > 0, the next N backend.initialize() calls reject. */
+    failInitializeTimes: 0,
     /** When set, the next backend.initialize() awaits this before completing. */
     deferNextInitialize: null as Promise<void> | null
 }));
@@ -76,6 +78,10 @@ vi.mock('./utils/cursorAcpBackend', () => ({
                     const error = harness.failNextInitialize;
                     harness.failNextInitialize = null;
                     throw error;
+                }
+                if (harness.failInitializeTimes > 0) {
+                    harness.failInitializeTimes -= 1;
+                    throw new Error('initialize failed');
                 }
                 if (harness.deferNextInitialize) {
                     const deferred = harness.deferNextInitialize;
@@ -348,6 +354,7 @@ describe('cursorAcpRemoteLauncher', () => {
         harness.overlayCleanup = null;
         harness.agentActivityListener = null;
         harness.failNextInitialize = null;
+        harness.failInitializeTimes = 0;
         harness.deferNextInitialize = null;
         legacyLauncher.mockClear();
         process.stdin.isTTY = false;
@@ -1779,6 +1786,118 @@ describe('cursorAcpRemoteLauncher', () => {
         // Prior spawn restored — concrete model apply still works.
         await session.applyModelConfig('composer-2.5[fast=true]');
         expect(session.model).toBe('composer-2.5[fast=true]');
+
+        queue.close();
+        await runPromise;
+    });
+
+    it('requeues a pending message when Auto relaunch and restore both fail', async () => {
+        const queue = new MessageQueue2<EnhancedMode>((mode) => mode.permissionMode);
+        const client = {
+            rpcHandlerManager: { registerHandler: vi.fn() },
+            updateMetadata: vi.fn(),
+            flushMetadata: vi.fn(async () => true),
+            sendSessionEvent: vi.fn(),
+            sendAgentMessage: vi.fn(),
+            keepAlive: vi.fn(),
+            emitSessionReady: vi.fn(),
+            emitMessagesConsumed: vi.fn()
+        } as unknown as ApiSessionClient;
+
+        const session = new CursorSession({
+            api: {} as never,
+            client,
+            path: '/tmp/project',
+            logPath: '/tmp/log',
+            sessionId: null,
+            messageQueue: queue,
+            onModeChange: vi.fn(),
+            mode: 'remote',
+            startedBy: 'runner',
+            startingMode: 'remote',
+            permissionMode: 'default'
+        });
+        session.onSessionFoundWithProtocol = vi.fn((id: string) => {
+            session.sessionId = id;
+        });
+        queue.push('hold-open', { permissionMode: 'default' });
+
+        const runPromise = cursorAcpRemoteLauncher(session);
+        await vi.waitFor(() => expect(harness.newSessionCalled).toBe(true));
+        await vi.waitFor(() => expect(session.canApplyModelConfig()).toBe(true));
+        await session.applyModelConfig('composer-2.5[fast=false]');
+
+        harness.failInitializeTimes = 2;
+        const autoSwitch = session.applyModelConfig('auto');
+        queue.push('must-survive-double-failure', { permissionMode: 'default' });
+        await expect(autoSwitch).rejects.toThrow(/relaunch with --model auto failed/i);
+
+        await vi.waitFor(() => expect(queue.size()).toBeGreaterThan(0));
+        expect(
+            // Queue still holds the user turn for recovery/resume.
+            (queue as unknown as { queue: Array<{ message: string }> }).queue
+                ?.some((item) => item.message === 'must-survive-double-failure')
+            ?? queue.size() > 0
+        ).toBe(true);
+
+        queue.close();
+        await runPromise;
+    });
+
+    it('queues Auto-review slash when mode flips during Auto relaunch', async () => {
+        const queue = new MessageQueue2<EnhancedMode>((mode) => mode.permissionMode);
+        const client = {
+            rpcHandlerManager: { registerHandler: vi.fn() },
+            updateMetadata: vi.fn(),
+            flushMetadata: vi.fn(async () => true),
+            sendSessionEvent: vi.fn(),
+            sendAgentMessage: vi.fn(),
+            keepAlive: vi.fn(),
+            emitSessionReady: vi.fn(),
+            emitMessagesConsumed: vi.fn()
+        } as unknown as ApiSessionClient;
+
+        const session = new CursorSession({
+            api: {} as never,
+            client,
+            path: '/tmp/project',
+            logPath: '/tmp/log',
+            sessionId: null,
+            messageQueue: queue,
+            onModeChange: vi.fn(),
+            mode: 'remote',
+            startedBy: 'runner',
+            startingMode: 'remote',
+            permissionMode: 'default'
+        });
+        session.onSessionFoundWithProtocol = vi.fn((id: string) => {
+            session.sessionId = id;
+        });
+        queue.push('hold-open', { permissionMode: 'default' });
+
+        const runPromise = cursorAcpRemoteLauncher(session);
+        await vi.waitFor(() => expect(harness.newSessionCalled).toBe(true));
+        await vi.waitFor(() => expect(session.canApplyModelConfig()).toBe(true));
+        await session.applyModelConfig('composer-2.5[fast=false]');
+
+        let releaseInitialize!: () => void;
+        harness.deferNextInitialize = new Promise<void>((resolve) => {
+            releaseInitialize = resolve;
+        });
+        const autoSwitch = session.applyModelConfig('auto');
+        await vi.waitFor(() => expect(harness.deferNextInitialize).toBeNull());
+
+        session.setPermissionMode('autoReview');
+        releaseInitialize();
+        await autoSwitch;
+
+        await vi.waitFor(() => {
+            expect(
+                harness.prompts.some((prompt) => JSON.stringify(prompt).includes('/auto-review'))
+                || (queue as unknown as { queue: Array<{ message: string }> }).queue
+                    ?.some((item) => item.message === '/auto-review')
+            ).toBe(true);
+        });
 
         queue.close();
         await runPromise;

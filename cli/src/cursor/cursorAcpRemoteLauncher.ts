@@ -626,12 +626,21 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
             const liveBackend = this.backend;
             const liveSessionId: string | null = this.acpSessionId;
             if (!liveBackend || !liveSessionId) {
+                // Preserve the dequeued batch so a double-failure does not drop the turn.
+                for (let i = batch.items.length - 1; i >= 0; i -= 1) {
+                    const item = batch.items[i]!;
+                    if (batch.isolate) {
+                        session.queue.unshiftIsolated(item.message, batch.mode, item.localId);
+                    } else {
+                        session.queue.unshift(item.message, batch.mode, item.localId);
+                    }
+                }
                 if (!this.shouldExit) {
                     this.surfacePromptFailure(
                         'Cursor ACP backend unavailable after model switch; ending session.'
                     );
                 }
-                // Do not requeue forever when restore failed — that spins the loop.
+                // End the loop (no requeue-spin); pending items remain for resume/recovery.
                 break;
             }
 
@@ -967,6 +976,9 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
             const backend = this.backend;
             const acpSessionId = this.acpSessionId;
             if (!backend || !acpSessionId) {
+                // Relaunch may have nulled the backend; still record Auto-review so
+                // maybeQueueAutoReviewSlash can fire once the replacement is ready.
+                this.maybeQueueAutoReviewSlash(mode);
                 return;
             }
             void applyCursorAcpMode(backend, acpSessionId, mode).then(() => {
@@ -1279,13 +1291,6 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
             await session.client.flushMetadata();
         }
 
-        await applyCursorAcpMode(
-            backend,
-            acpSessionId,
-            session.getPermissionMode() as PermissionMode
-        );
-        syncCursorModelsFromAcp(backend, acpSessionId);
-
         if (this.sessionTeardownStarted || this.shouldExit) {
             await backend.disconnect().catch(() => {});
             throw new Error('Session ending; discarding replacement ACP backend');
@@ -1293,6 +1298,14 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
 
         this.backend = backend;
         this.acpSessionId = acpSessionId;
+
+        // Apply current mode after publish so Auto-review changes made while the
+        // backend was null during relaunch still take effect (slash if needed).
+        const modeAfterLoad = session.getPermissionMode() as PermissionMode;
+        await applyCursorAcpMode(backend, acpSessionId, modeAfterLoad);
+        syncCursorModelsFromAcp(backend, acpSessionId);
+        this.applyDisplayMode(modeAfterLoad);
+        this.maybeQueueAutoReviewSlash(modeAfterLoad);
     }
 
     private pushModelStatusLine(model: string | null | undefined): void {
