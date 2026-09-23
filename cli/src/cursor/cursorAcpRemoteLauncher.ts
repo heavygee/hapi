@@ -1199,6 +1199,10 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                 mcpServers: []
             });
             this.acpSessionId = acpSessionId;
+            if (acpSessionId !== args.resumeSessionId) {
+                session.onSessionFoundWithProtocol(acpSessionId, 'acp');
+                await session.client.flushMetadata();
+            }
         } catch (error) {
             logger.warn('[cursor-acp] session/load failed during in-place relaunch', formatAcpLoadError(error));
             const message = classifyCursorAcpLoadError(error, { recentStderr: recentStderrHint });
