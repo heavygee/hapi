@@ -37,6 +37,10 @@ import {
 import { createSerialAsyncQueue } from '@/lib/serialAsyncQueue'
 import { HappyComposer, type ComposerSendError } from '@/components/AssistantChat/HappyComposer'
 import { composerCodexUsageForGauge } from '@/components/AssistantChat/codexBudgetAdapter'
+import {
+    isDictateHotkeyBlockedTarget,
+    isDictateToggleHotkey,
+} from '@/lib/composerDictateShortcut'
 import { codexModelAdvertisesFastTier, getEffectiveCodexServiceTier } from '@/components/AssistantChat/codexFastMode'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import { resolvePendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
@@ -796,6 +800,7 @@ function SessionChatInner(props: SessionChatProps) {
         if (isScratchlistParking) return
         setScratchlistMode((m) => !m)
     }, [isScratchlistParking])
+    const dictateHotkeyRef = useRef<(() => void) | null>(null)
     /**
      * Global keyboard shortcut: Ctrl/Cmd + Shift + S toggles scratchlist
      * mode (open/close drawer + flip composer routing).
@@ -829,6 +834,26 @@ function SessionChatInner(props: SessionChatProps) {
         window.addEventListener('keydown', onKeyDown)
         return () => window.removeEventListener('keydown', onKeyDown)
     }, [isScratchlistParking])
+    /**
+     * Global keyboard shortcut: Ctrl/Cmd + Shift + D toggles composer
+     * dictation (Settings → Voice mode: dictation) or voice assistant,
+     * using the same effective toggle as the mic / dictate buttons in
+     * HappyComposer. Skipped for dialog / single-line input targets;
+     * rich composer input is allowed (see isDictateHotkeyBlockedTarget).
+     */
+    useEffect(() => {
+        const onKeyDown = (e: globalThis.KeyboardEvent) => {
+            if (e.repeat) return
+            if (!isDictateToggleHotkey(e)) return
+            if (isDictateHotkeyBlockedTarget(e.target)) return
+            const invoke = dictateHotkeyRef.current
+            if (!invoke) return
+            e.preventDefault()
+            invoke()
+        }
+        window.addEventListener('keydown', onKeyDown)
+        return () => window.removeEventListener('keydown', onKeyDown)
+    }, [])
     /**
      * Global select-all takeover: see applyGlobalSelectAll. Bound at
      * window scope because the broken case is focus on the page body /
@@ -2387,6 +2412,7 @@ function SessionChatInner(props: SessionChatProps) {
                         onScratchlistToggle={handleScratchlistToggle}
                         onParkScratchlist={onParkScratchlist}
                         onScratchlistParkingChange={setIsScratchlistParking}
+                        dictateHotkeyRef={dictateHotkeyRef}
                         sendError={props.sendError ?? null}
                         onClearSendError={props.onClearSendError}
                         onSuppressSendErrorRestore={props.onSuppressSendErrorRestore}
