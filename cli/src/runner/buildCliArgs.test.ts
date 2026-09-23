@@ -240,6 +240,17 @@ describe('buildCliArgs', () => {
             })
             expect(args).not.toContain('--cursor-worktree')
             expect(args).not.toContain('should-not-appear')
+
+            // Regression: runner createWorktree leaves options.directory as the
+            // primary checkout; buildCliArgs must be called with spawnDirectory
+            // (the linked path), not the base — otherwise --cursor-worktree is
+            // re-added and nests Cursor worktrees (#152 / PR #171 Codex P1).
+            const argsFromPrimaryBase = buildCliArgs('cursor', {
+                directory: main,
+                sessionType: 'worktree',
+                worktreeName: 'nested-bug',
+            })
+            expect(argsFromPrimaryBase).toContain('--cursor-worktree')
         } finally {
             rmSync(linkedParent, { recursive: true, force: true })
             rmSync(main, { recursive: true, force: true })

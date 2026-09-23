@@ -96,6 +96,13 @@ export async function notifyRunnerSessionStarted(
   });
 }
 
+/** Agent finished init (ACP initialize, Pi get_state, etc.) — unblocks runner spawn for gated flavors. */
+export async function notifyRunnerSessionReady(
+  sessionId: string,
+): Promise<{ error?: string } | any> {
+  return await runnerPost('/session-ready', { sessionId });
+}
+
 export async function listRunnerSessions(): Promise<any[]> {
   const result = await runnerPost('/list');
   return result.children || [];

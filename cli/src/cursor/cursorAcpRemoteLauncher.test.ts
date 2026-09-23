@@ -1236,6 +1236,8 @@ describe('cursorAcpRemoteLauncher', () => {
         );
         expect(harness.newSessionAttempts).toBe(2);
         expect(harness.backendArgs?.args).toEqual(['--model', 'composer-2.5', 'acp']);
+        // Must not notify the runner before required model restore fails (#171 Codex P1).
+        expect(client.emitSessionReady).not.toHaveBeenCalled();
     });
 
     it('spawns bare remap but reapplies original fast=true variant via ACP (#1430)', async () => {
