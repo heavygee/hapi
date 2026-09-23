@@ -394,8 +394,6 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
             }
         }
 
-        session.client.emitSessionReady();
-
         syncCursorModelsFromAcp(backend, acpSessionId);
 
         const initialMetadata = backend.getSessionModelsMetadata(acpSessionId);
@@ -422,6 +420,11 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         } else if (this.currentBackendModel && !isCursorAutoModelId(this.currentBackendModel)) {
             this.pushModelStatusLine(this.currentBackendModel);
         }
+
+        // Emit after mode/model setup that can terminate the launcher — otherwise
+        // the runner's agent-ready gate can succeed while we still exit with error
+        // (Codex P1 on heavygee/hapi#171).
+        session.client.emitSessionReady();
 
         this.installLiveSessionConfigSync(backend, acpSessionId, previousSetModel);
 

@@ -724,7 +724,11 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           };
         }
 
-        const args = buildCliArgs(agent, options, yolo);
+        // Pass the effective cwd (spawnDirectory), not the original base path.
+        // After createWorktree, options.directory is still the primary checkout;
+        // buildCliArgs must see the linked worktree so it skips --cursor-worktree
+        // (nested Cursor worktree hangs ACP init — heavygee/hapi#152 / Codex P1).
+        const args = buildCliArgs(agent, { ...options, directory: spawnDirectory }, yolo);
 
         // sessionId reserved for future use
         const MAX_TAIL_CHARS = 4000;
@@ -1012,10 +1016,12 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
 
           // Register awaiter
           pidToAwaiter.set(pid, (completedSession) => {
-            pidToErrorAwaiter.delete(pid);
             const sessionId = completedSession.happySessionId;
             if (requiresAgentReady) {
+              // Keep pidToErrorAwaiter until completeRunnerSpawn / failRunnerSpawn
+              // so exit-during-ACP-init still rejects the spawn promise (Codex P1).
               if (!sessionId) {
+                pidToErrorAwaiter.delete(pid);
                 pidToSpawnCompleter.delete(pid);
                 clearTimeout(timeout);
                 resolve({
