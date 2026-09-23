@@ -83,6 +83,8 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
      * The message loop awaits this instead of exiting when `backend` is briefly null.
      */
     private acpRelaunchPromise: Promise<void> | null = null;
+    /** Set when cleanup begins so a late relaunch cannot publish a live backend. */
+    private sessionTeardownStarted = false;
     /** Avoid re-queueing `/auto-review` on every mid-session mode sync. */
     private autoReviewSlashQueued = false;
     private cursorMcpOverlay: CursorMcpOverlayHandle | null = null;
@@ -621,50 +623,55 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
 
             // Re-read after model apply / concurrent relaunch — do not prompt on a
             // backend captured before an in-place Auto respawn (#1908 bot Majors).
-            const backend = this.backend;
-            const acpSessionId = this.acpSessionId;
-            if (!backend || !acpSessionId) {
-                if (this.shouldExit) {
-                    break;
+            const liveBackend = this.backend;
+            const liveSessionId = this.acpSessionId;
+            if (!liveBackend || !liveSessionId) {
+                if (!this.shouldExit) {
+                    this.surfacePromptFailure(
+                        'Cursor ACP backend unavailable after model switch; ending session.'
+                    );
                 }
-                logger.warn(
-                    '[cursor-acp] ACP backend unavailable after model apply; requeueing batch'
-                );
-                for (let i = batch.items.length - 1; i >= 0; i -= 1) {
-                    const item = batch.items[i]!;
-                    if (batch.isolate) {
-                        session.queue.unshiftIsolated(item.message, batch.mode, item.localId);
-                    } else {
-                        session.queue.unshift(item.message, batch.mode, item.localId);
-                    }
-                }
-                continue;
+                // Do not requeue forever when restore failed — that spins the loop.
+                break;
             }
 
-            await applyCursorAcpMode(backend, acpSessionId, batch.mode.permissionMode as PermissionMode);
-            this.applyDisplayMode(batch.mode.permissionMode as PermissionMode);
-
-            const specialCommand = parseCursorSpecialCommand(batch.message);
-            if (specialCommand.type === 'pass-through') {
-                messageBuffer.addMessage(cursorPassThroughStatusMessage(specialCommand.command), 'status');
-            }
-            messageBuffer.addMessage(batch.message, 'user');
-
-            // skill_lookup discovery lives on the MCP tool description — do not
-            // prepend instructions onto user turns (prompt-injection false positive).
-            const promptContent: PromptContent[] = [{
-                type: 'text',
-                text: batch.message
-            }];
-
+            // Hold promptInFlight before mode apply so a concurrent Auto relaunch
+            // cannot disconnect this backend mid-dispatch.
             session.onThinkingChange(true);
             this.promptInFlight = true;
             session.client.updateAgentState?.((state) => ({ ...state, steeringActive: true }));
             this.activePromptModeHash = batch.hash;
+            this.userAbortRequested = false;
 
             try {
-                this.promptInFlight = true;
-                this.userAbortRequested = false;
+                if (this.backend !== liveBackend || this.acpSessionId !== liveSessionId) {
+                    for (let i = batch.items.length - 1; i >= 0; i -= 1) {
+                        const item = batch.items[i]!;
+                        if (batch.isolate) {
+                            session.queue.unshiftIsolated(item.message, batch.mode, item.localId);
+                        } else {
+                            session.queue.unshift(item.message, batch.mode, item.localId);
+                        }
+                    }
+                    continue;
+                }
+
+                await applyCursorAcpMode(liveBackend, liveSessionId, batch.mode.permissionMode as PermissionMode);
+                this.applyDisplayMode(batch.mode.permissionMode as PermissionMode);
+
+                const specialCommand = parseCursorSpecialCommand(batch.message);
+                if (specialCommand.type === 'pass-through') {
+                    messageBuffer.addMessage(cursorPassThroughStatusMessage(specialCommand.command), 'status');
+                }
+                messageBuffer.addMessage(batch.message, 'user');
+
+                // skill_lookup discovery lives on the MCP tool description — do not
+                // prepend instructions onto user turns (prompt-injection false positive).
+                const promptContent: PromptContent[] = [{
+                    type: 'text',
+                    text: batch.message
+                }];
+
                 for (let retryAttempt = 0; retryAttempt <= CURSOR_AUTO_RETRY_LIMIT; retryAttempt += 1) {
                     this.pendingRetryableError = null;
                     this.pendingRetryableFromStderr = false;
@@ -672,7 +679,7 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                     this.attemptProducedToolActivity = false;
                     let turnCompleted = false;
                     try {
-                        await backend.prompt(acpSessionId, promptContent, (message) => {
+                        await liveBackend.prompt(liveSessionId, promptContent, (message) => {
                             if (message.type === 'turn_complete') turnCompleted = true;
                             this.handleAgentMessage(message);
                         });
@@ -681,7 +688,7 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                             this.pendingRetryableError = null;
                         }
                         if (!this.pendingRetryableError) {
-                            void backend.refreshSessionInfo(acpSessionId, session.path);
+                            void liveBackend.refreshSessionInfo(liveSessionId, session.path);
                             break;
                         }
                     } catch (error) {
@@ -755,6 +762,7 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         // cancelAll/disconnect cannot leave a dead hapi-* entry in ~/.cursor/mcp.json.
         const overlay = this.cursorMcpOverlay;
         this.cursorMcpOverlay = null;
+        this.sessionTeardownStarted = true;
 
         try {
             this.clearAbortHandlers(this.session.client.rpcHandlerManager);
@@ -767,6 +775,10 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
             this.softSteerWaiters = [];
             this.unregisterModelApplyHandler?.();
             this.unregisterModelApplyHandler = null;
+
+            if (this.acpRelaunchPromise) {
+                await this.acpRelaunchPromise.catch(() => {});
+            }
 
             if (this.permissionAdapter) {
                 await this.permissionAdapter.cancelAll('Session ended');
@@ -1138,6 +1150,9 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         if (this.promptInFlight) {
             throw new Error('Cannot relaunch Cursor ACP while a prompt is in flight');
         }
+        if (this.sessionTeardownStarted || this.shouldExit) {
+            throw new Error('Cannot relaunch Cursor ACP while the session is ending');
+        }
         if (this.softSteerWaiters.length > 0) {
             await Promise.allSettled([...this.softSteerWaiters]);
             this.softSteerWaiters = [];
@@ -1265,6 +1280,11 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
             session.getPermissionMode() as PermissionMode
         );
         syncCursorModelsFromAcp(backend, acpSessionId);
+
+        if (this.sessionTeardownStarted || this.shouldExit) {
+            await backend.disconnect().catch(() => {});
+            throw new Error('Session ending; discarding replacement ACP backend');
+        }
 
         this.backend = backend;
         this.acpSessionId = acpSessionId;
