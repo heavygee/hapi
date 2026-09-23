@@ -18,7 +18,7 @@ describe('probeCliApiToken', () => {
         globalThis.fetch = vi.fn(async () => ({
             ok: true,
             json: async () => ({ token: 'jwt-here' })
-        })) as typeof fetch
+        })) as unknown as typeof fetch
 
         await expect(probeCliApiToken('http://127.0.0.1:3006', 'good-token')).resolves.toBe(true)
     })
@@ -27,7 +27,7 @@ describe('probeCliApiToken', () => {
         globalThis.fetch = vi.fn(async () => ({
             ok: false,
             json: async () => ({ error: 'Invalid access token' })
-        })) as typeof fetch
+        })) as unknown as typeof fetch
 
         await expect(probeCliApiToken('http://127.0.0.1:3006', 'bad-token')).resolves.toBe(false)
     })
