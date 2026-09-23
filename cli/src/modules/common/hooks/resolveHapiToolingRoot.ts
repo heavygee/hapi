@@ -20,7 +20,7 @@ export function resolveHapiToolingRoot(workingDirectory: string): string | null 
     let dir = workingDirectory;
     for (let depth = 0; depth < 12; depth += 1) {
         if (existsSync(join(dir, GUARD_REL))) {
-            return resolve(dir);
+            return dir;
         }
         const parent = dirname(dir);
         if (parent === dir) {
