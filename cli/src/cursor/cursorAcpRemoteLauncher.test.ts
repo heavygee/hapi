@@ -2033,6 +2033,7 @@ describe('cursorAcpRemoteLauncher', () => {
             mode: { permissionMode: 'autoReview', model: session.model },
             modeHash: queue.modeHasher({ permissionMode: 'autoReview', model: session.model }),
             isolate: true,
+            internal: true,
             enqueueOrder: 9999
         });
         expect(queue.hasMessageMatching((message) => message === '/auto-review')).toBe(true);
@@ -2048,6 +2049,153 @@ describe('cursorAcpRemoteLauncher', () => {
         expect(
             harness.prompts.filter((prompt) => JSON.stringify(prompt).includes('/auto-review')).length
         ).toBe(promptsBeforeBind);
+
+        queue.close();
+        await runPromise;
+    });
+
+    it('discards a dequeued internal Auto-review toggle held across Auto relaunch', async () => {
+        const queue = new MessageQueue2<EnhancedMode>((mode) =>
+            `${mode.permissionMode}:${mode.model ?? ''}`
+        );
+        const client = {
+            rpcHandlerManager: { registerHandler: vi.fn() },
+            updateMetadata: vi.fn(),
+            flushMetadata: vi.fn(async () => true),
+            sendSessionEvent: vi.fn(),
+            sendAgentMessage: vi.fn(),
+            keepAlive: vi.fn(),
+            emitSessionReady: vi.fn(),
+            emitMessagesConsumed: vi.fn()
+        } as unknown as ApiSessionClient;
+
+        const session = new CursorSession({
+            api: {} as never,
+            client,
+            path: '/tmp/project',
+            logPath: '/tmp/log',
+            sessionId: null,
+            messageQueue: queue,
+            onModeChange: vi.fn(),
+            mode: 'remote',
+            startedBy: 'runner',
+            startingMode: 'remote',
+            permissionMode: 'default'
+        });
+        session.onSessionFoundWithProtocol = vi.fn((id: string) => {
+            session.sessionId = id;
+        });
+        queue.push('hold-open', { permissionMode: 'default' });
+
+        const runPromise = cursorAcpRemoteLauncher(session);
+        await vi.waitFor(() => expect(harness.newSessionCalled).toBe(true));
+        await vi.waitFor(() => expect(session.canApplyModelConfig()).toBe(true));
+        await session.applyModelConfig('composer-2.5[fast=false]');
+
+        session.setPermissionMode('autoReview');
+        const slash = queue.queue.find((entry) => entry.message === '/auto-review');
+        expect(slash?.internal).toBe(true);
+        // Force the held batch to trigger Auto relaunch while dequeued (tip-bot Major).
+        slash!.mode = { permissionMode: 'autoReview', model: 'auto' };
+        slash!.modeHash = queue.modeHasher(slash!.mode);
+
+        await vi.waitFor(() => {
+            expect(harness.spawnAutoReviewFlags.at(-1)).toBe(true);
+        });
+        await vi.waitFor(() => expect(session.model).toBe('auto'));
+
+        // Internal toggle must not be prompted on a --auto-review replacement.
+        expect(
+            harness.prompts.filter((prompt) => JSON.stringify(prompt).includes('/auto-review')).length
+        ).toBe(0);
+
+        queue.close();
+        await runPromise;
+    });
+
+    it('preserves a user-sent /auto-review across Auto relaunch with --auto-review', async () => {
+        const queue = new MessageQueue2<EnhancedMode>((mode) => mode.permissionMode);
+        const client = {
+            rpcHandlerManager: { registerHandler: vi.fn() },
+            updateMetadata: vi.fn(),
+            flushMetadata: vi.fn(async () => true),
+            sendSessionEvent: vi.fn(),
+            sendAgentMessage: vi.fn(),
+            keepAlive: vi.fn(),
+            emitSessionReady: vi.fn(),
+            emitMessagesConsumed: vi.fn()
+        } as unknown as ApiSessionClient;
+
+        const session = new CursorSession({
+            api: {} as never,
+            client,
+            path: '/tmp/project',
+            logPath: '/tmp/log',
+            sessionId: null,
+            messageQueue: queue,
+            onModeChange: vi.fn(),
+            mode: 'remote',
+            startedBy: 'runner',
+            startingMode: 'remote',
+            permissionMode: 'default'
+        });
+        session.onSessionFoundWithProtocol = vi.fn((id: string) => {
+            session.sessionId = id;
+        });
+        queue.push('hold-open', { permissionMode: 'default' });
+
+        const runPromise = cursorAcpRemoteLauncher(session);
+        await vi.waitFor(() => expect(harness.newSessionCalled).toBe(true));
+        await vi.waitFor(() => expect(session.canApplyModelConfig()).toBe(true));
+        await session.applyModelConfig('composer-2.5[fast=false]');
+
+        session.setPermissionMode('autoReview');
+        await vi.waitFor(() => {
+            expect(
+                harness.prompts.some((prompt) => JSON.stringify(prompt).includes('/auto-review'))
+            ).toBe(true);
+        });
+        await vi.waitFor(() => {
+            expect(queue.hasMessageMatching((message) => message === '/auto-review')).toBe(false);
+        });
+
+        let releaseInitialize!: () => void;
+        harness.deferNextInitialize = new Promise<void>((resolve) => {
+            releaseInitialize = resolve;
+        });
+        const autoSwitch = session.applyModelConfig('auto');
+        await vi.waitFor(() => expect(harness.deferNextInitialize).toBeNull());
+
+        // User-authored command (no internal flag) must survive bindFresh reconcile.
+        queue.queue.push({
+            message: '/auto-review',
+            mode: { permissionMode: 'autoReview', model: session.model },
+            modeHash: queue.modeHasher({ permissionMode: 'autoReview', model: session.model }),
+            isolate: true,
+            localId: 'user-auto-review-1',
+            enqueueOrder: 9999
+        });
+        const promptsBeforeUserSlash = harness.prompts.filter(
+            (prompt) => JSON.stringify(prompt).includes('/auto-review')
+        ).length;
+
+        releaseInitialize();
+        await autoSwitch;
+        expect(harness.spawnAutoReviewFlags.at(-1)).toBe(true);
+        expect(queue.hasMessageMatching((message) => message === '/auto-review')).toBe(true);
+
+        // Silent insert during relaunch did not wake the idle waiter — nudge the loop.
+        queue.push('wake-loop', { permissionMode: 'default' });
+
+        await vi.waitFor(() => {
+            expect(
+                harness.prompts.filter((prompt) => JSON.stringify(prompt).includes('/auto-review')).length
+            ).toBeGreaterThan(promptsBeforeUserSlash);
+        });
+        expect(queue.hasMessageMatching((message) => message === '/auto-review')).toBe(false);
+        expect(vi.mocked(client.emitMessagesConsumed)).toHaveBeenCalledWith(
+            expect.arrayContaining(['user-auto-review-1'])
+        );
 
         queue.close();
         await runPromise;

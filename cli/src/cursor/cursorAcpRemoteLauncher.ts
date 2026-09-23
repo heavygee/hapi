@@ -656,7 +656,9 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                 for (let i = batch.items.length - 1; i >= 0; i -= 1) {
                     const item = batch.items[i]!;
                     if (batch.isolate) {
-                        session.queue.unshiftIsolated(item.message, batch.mode, item.localId);
+                        session.queue.unshiftIsolated(item.message, batch.mode, item.localId, {
+                            internal: item.internal
+                        });
                     } else {
                         session.queue.unshift(item.message, batch.mode, item.localId);
                     }
@@ -667,6 +669,19 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                     );
                 }
                 break;
+            }
+
+            // Internal Auto-review toggle already dequeued, then held across an
+            // in-place relaunch that spawned with --auto-review: prompting would
+            // toggle Auto-review off while HAPI still displays it.
+            if (
+                this.spawnedWithAutoReview
+                && batch.items.length > 0
+                && batch.items.every(
+                    (item) => item.internal === true && item.message.trim() === '/auto-review'
+                )
+            ) {
+                continue;
             }
 
             const consumedLocalIds = batch.items
@@ -788,7 +803,9 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                 for (let i = batch.items.length - 1; i >= 0; i -= 1) {
                     const item = batch.items[i]!;
                     if (batch.isolate) {
-                        session.queue.unshiftIsolated(item.message, batch.mode, item.localId);
+                        session.queue.unshiftIsolated(item.message, batch.mode, item.localId, {
+                            internal: item.internal
+                        });
                     } else {
                         session.queue.unshift(item.message, batch.mode, item.localId);
                     }
@@ -1335,11 +1352,11 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         // the prior process (e.g. started with --auto-review, relaunched without).
         this.spawnedWithAutoReview = args.autoReview;
         if (args.autoReview) {
-            // `/auto-review` is a toggle; drop any queued slash that was meant for
-            // the old process so we do not turn Auto-review off on a spawn that
-            // already has --auto-review.
-            this.session.queue.removeMessagesMatching(
-                (message) => message.trim() === '/auto-review'
+            // `/auto-review` is a toggle; drop any *internal* queued slash that was
+            // meant for the old process so we do not turn Auto-review off on a
+            // spawn that already has --auto-review. Preserve user-sent commands.
+            this.session.queue.removeItemsMatching(
+                (item) => item.internal === true && item.message.trim() === '/auto-review'
             );
             this.autoReviewSlashQueued = true;
         } else {
@@ -1390,7 +1407,9 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
             {
                 permissionMode: mode,
                 model: this.session.model
-            }
+            },
+            undefined,
+            { internal: true }
         );
         this.messageBuffer.addMessage(cursorPassThroughStatusMessage('auto-review'), 'status');
     }
