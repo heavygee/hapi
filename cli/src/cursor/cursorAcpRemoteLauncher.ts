@@ -1137,7 +1137,7 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
     }
 
     private async bindFreshAcpBackend(args: {
-        spawnModel: string | null;
+        spawnModel: string | null | undefined;
         autoReview: boolean;
         resumeSessionId: string;
     }): Promise<void> {
