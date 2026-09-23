@@ -621,10 +621,10 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                 await this.acpRelaunchPromise;
             }
 
-            // Re-read after model apply / concurrent relaunch — do not prompt on a
+            // Re-read after model apply / concurrent relaunch - do not prompt on a
             // backend captured before an in-place Auto respawn (#1908 bot Majors).
             const liveBackend = this.backend;
-            const liveSessionId = this.acpSessionId;
+            const liveSessionId: string | null = this.acpSessionId;
             if (!liveBackend || !liveSessionId) {
                 if (!this.shouldExit) {
                     this.surfacePromptFailure(
@@ -643,73 +643,66 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
             this.activePromptModeHash = batch.hash;
             this.userAbortRequested = false;
 
+            let requeueBatch = false;
             try {
                 if (this.backend !== liveBackend || this.acpSessionId !== liveSessionId) {
-                    for (let i = batch.items.length - 1; i >= 0; i -= 1) {
-                        const item = batch.items[i]!;
-                        if (batch.isolate) {
-                            session.queue.unshiftIsolated(item.message, batch.mode, item.localId);
-                        } else {
-                            session.queue.unshift(item.message, batch.mode, item.localId);
-                        }
+                    requeueBatch = true;
+                } else {
+                    await applyCursorAcpMode(liveBackend, liveSessionId, batch.mode.permissionMode as PermissionMode);
+                    this.applyDisplayMode(batch.mode.permissionMode as PermissionMode);
+
+                    const specialCommand = parseCursorSpecialCommand(batch.message);
+                    if (specialCommand.type === 'pass-through') {
+                        messageBuffer.addMessage(cursorPassThroughStatusMessage(specialCommand.command), 'status');
                     }
-                    continue;
-                }
+                    messageBuffer.addMessage(batch.message, 'user');
 
-                await applyCursorAcpMode(liveBackend, liveSessionId, batch.mode.permissionMode as PermissionMode);
-                this.applyDisplayMode(batch.mode.permissionMode as PermissionMode);
+                    // skill_lookup discovery lives on the MCP tool description — do not
+                    // prepend instructions onto user turns (prompt-injection false positive).
+                    const promptContent: PromptContent[] = [{
+                        type: 'text',
+                        text: batch.message
+                    }];
 
-                const specialCommand = parseCursorSpecialCommand(batch.message);
-                if (specialCommand.type === 'pass-through') {
-                    messageBuffer.addMessage(cursorPassThroughStatusMessage(specialCommand.command), 'status');
-                }
-                messageBuffer.addMessage(batch.message, 'user');
-
-                // skill_lookup discovery lives on the MCP tool description — do not
-                // prepend instructions onto user turns (prompt-injection false positive).
-                const promptContent: PromptContent[] = [{
-                    type: 'text',
-                    text: batch.message
-                }];
-
-                for (let retryAttempt = 0; retryAttempt <= CURSOR_AUTO_RETRY_LIMIT; retryAttempt += 1) {
-                    this.pendingRetryableError = null;
-                    this.pendingRetryableFromStderr = false;
-                    this.pendingInlineRetryableError = false;
-                    this.attemptProducedToolActivity = false;
-                    let turnCompleted = false;
-                    try {
-                        await liveBackend.prompt(liveSessionId, promptContent, (message) => {
-                            if (message.type === 'turn_complete') turnCompleted = true;
-                            this.handleAgentMessage(message);
-                        });
-                        if (this.userAbortRequested) break;
-                        if (turnCompleted && this.pendingRetryableFromStderr && !this.pendingInlineRetryableError) {
-                            this.pendingRetryableError = null;
+                    for (let retryAttempt = 0; retryAttempt <= CURSOR_AUTO_RETRY_LIMIT; retryAttempt += 1) {
+                        this.pendingRetryableError = null;
+                        this.pendingRetryableFromStderr = false;
+                        this.pendingInlineRetryableError = false;
+                        this.attemptProducedToolActivity = false;
+                        let turnCompleted = false;
+                        try {
+                            await liveBackend.prompt(liveSessionId, promptContent, (message) => {
+                                if (message.type === 'turn_complete') turnCompleted = true;
+                                this.handleAgentMessage(message);
+                            });
+                            if (this.userAbortRequested) break;
+                            if (turnCompleted && this.pendingRetryableFromStderr && !this.pendingInlineRetryableError) {
+                                this.pendingRetryableError = null;
+                            }
+                            if (!this.pendingRetryableError) {
+                                void liveBackend.refreshSessionInfo(liveSessionId, session.path);
+                                break;
+                            }
+                        } catch (error) {
+                            logger.warn('[cursor-acp] prompt failed', error);
+                            if (this.userAbortRequested) break;
+                            if (!isRetryableCursorError(error)) {
+                                this.surfacePromptFailure(error instanceof Error ? error.message : String(error));
+                                break;
+                            }
+                            this.pendingRetryableError = error instanceof Error ? error.message : String(error);
                         }
-                        if (!this.pendingRetryableError) {
-                            void liveBackend.refreshSessionInfo(liveSessionId, session.path);
+
+                        if (this.attemptProducedToolActivity) {
+                            this.surfacePromptFailure('Cursor connection interrupted after tool activity; the prompt was not retried.');
                             break;
                         }
-                    } catch (error) {
-                        logger.warn('[cursor-acp] prompt failed', error);
-                        if (this.userAbortRequested) break;
-                        if (!isRetryableCursorError(error)) {
-                            this.surfacePromptFailure(error instanceof Error ? error.message : String(error));
-                            break;
+                        if (retryAttempt < CURSOR_AUTO_RETRY_LIMIT) {
+                            this.surfaceRetry(retryAttempt + 1);
+                            continue;
                         }
-                        this.pendingRetryableError = error instanceof Error ? error.message : String(error);
+                        this.surfacePromptFailure(`Cursor Agent failed after ${CURSOR_AUTO_RETRY_LIMIT} retries.`);
                     }
-
-                    if (this.attemptProducedToolActivity) {
-                        this.surfacePromptFailure('Cursor connection interrupted after tool activity; the prompt was not retried.');
-                        break;
-                    }
-                    if (retryAttempt < CURSOR_AUTO_RETRY_LIMIT) {
-                        this.surfaceRetry(retryAttempt + 1);
-                        continue;
-                    }
-                    this.surfacePromptFailure(`Cursor Agent failed after ${CURSOR_AUTO_RETRY_LIMIT} retries.`);
                 }
             } finally {
                 this.promptInFlight = false;
@@ -748,6 +741,18 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                 if (session.queue.size() === 0 && !this.shouldExit) {
                     sendReady();
                 }
+            }
+
+            if (requeueBatch) {
+                for (let i = batch.items.length - 1; i >= 0; i -= 1) {
+                    const item = batch.items[i]!;
+                    if (batch.isolate) {
+                        session.queue.unshiftIsolated(item.message, batch.mode, item.localId);
+                    } else {
+                        session.queue.unshift(item.message, batch.mode, item.localId);
+                    }
+                }
+                continue;
             }
         }
         } finally {
