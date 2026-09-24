@@ -363,13 +363,24 @@ describe('buildCliArgs', () => {
         expect(args[args.indexOf('--existing-session-id') + 1]).toBe('existing-hub-id')
     })
 
-    it('does not emit --hapi-session-id for a non-pty flavor', () => {
+    it('emits --hapi-session-id for Claude when a HAPI id is known (orphan reap stamp)', () => {
+        const args = buildCliArgs('claude', {
+            directory: '/tmp',
+            sessionId: 'hapi-session-reap',
+        })
+        expect(args).toContain('--hapi-session-id')
+        expect(args[args.indexOf('--hapi-session-id') + 1]).toBe('hapi-session-reap')
+        expect(args).toContain('--started-by')
+    })
+
+    it('does not emit --hapi-session-id for a non-pty flavor that already uses --existing-session-id', () => {
         const args = buildCliArgs('opencode', {
             directory: '/tmp',
             existingSessionId: 'existing-hub-id',
             startingMode: 'pty',
         })
         expect(args).not.toContain('--hapi-session-id')
+        expect(args).toContain('--existing-session-id')
     })
 
 })

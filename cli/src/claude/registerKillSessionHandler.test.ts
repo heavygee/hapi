@@ -62,4 +62,29 @@ describe('registerKillSessionHandler (tiann/hapi#914)', () => {
 
         expect(cleanupAndExit).toHaveBeenCalled()
     })
+
+    it('exits on hub-archived metadata when a session listener is provided (#1910)', async () => {
+        const registry = makeRegistry()
+        const lifecycle = {
+            setArchiveReason: vi.fn(),
+            cleanupAndExit: vi.fn(async () => {})
+        }
+        const listeners = new Map<string, () => void>()
+        const session = {
+            on(event: string, listener: () => void) {
+                listeners.set(event, listener)
+            }
+        }
+
+        registerKillSessionHandler(
+            registry as unknown as Parameters<typeof registerKillSessionHandler>[0],
+            lifecycle,
+            session
+        )
+
+        expect(listeners.has('hub-archived')).toBe(true)
+        listeners.get('hub-archived')?.()
+        expect(lifecycle.setArchiveReason).toHaveBeenCalledWith('User terminated')
+        expect(lifecycle.cleanupAndExit).toHaveBeenCalled()
+    })
 })

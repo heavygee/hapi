@@ -2719,7 +2719,7 @@ export class SyncEngine {
     ): Promise<void> {
         if (spawnAttempted) {
             const status = await this.rpcGateway.stopRunnerSession(machineId, childId)
-            if (status === 'still_alive') {
+            if (status === 'still_alive' || status === 'unknown') {
                 throw new Error('Fork child termination was not confirmed')
             }
         }
@@ -2822,65 +2822,79 @@ export class SyncEngine {
     }
 
     async archiveSession(sessionId: string): Promise<void> {
-        // tiann/hapi#916: missing KillSession used to mean "CLI already gone".
-        // After #1203, an in-flight pre-proof CLI can stay connected without
-        // registering `${sessionId}:killSession`. Do not stamp archived while
-        // that process is still alive: try runner StopSession, then refuse if
-        // the session is still heartbeating.
+        // tiann/hapi#916 / #1910: KillSession is a session-socket RPC. A missing
+        // target does not prove the runner child is dead (stale registration,
+        // mid-reconnect, id rotation on resume). Always fall through to the
+        // machine-level StopSession RPC when we know a machineId, and refuse
+        // to archive while the runner reports still_alive / unknown.
+        // Soup: throw SessionArchiveUncontrollableError so web routes map 409.
+        let cliUnreachable = false
         try {
             await this.rpcGateway.killSession(sessionId)
-            this.handleSessionEnd({ sid: sessionId, time: Date.now() })
-            return
         } catch (error) {
-            if (!(error instanceof RpcTargetMissingError)) {
+            if (error instanceof RpcTargetMissingError) {
+                cliUnreachable = true
+            } else {
                 throw error
             }
         }
 
-        const session = this.sessionCache.getSession(sessionId)
-        const machineId = typeof session?.metadata?.machineId === 'string'
-            ? session.metadata.machineId.trim()
-            : ''
-
+        const machineId = this.sessionCache.getSession(sessionId)?.metadata?.machineId
         if (machineId) {
+            let status: 'stopped' | 'already_gone' | 'still_alive' | 'unknown'
             try {
-                const status = await this.rpcGateway.stopRunnerSession(machineId, sessionId)
-                if (status === 'still_alive') {
-                    throw new SessionArchiveUncontrollableError(sessionId)
-                }
-                if (status === 'stopped') {
-                    this.sessionCache.markSessionArchivedFromHub(
-                        sessionId,
-                        'Archived from hub (CLI unreachable)'
-                    )
-                    this.handleSessionEnd({ sid: sessionId, time: Date.now() })
-                    return
-                }
-                // already_gone: runner does not have the pid. Fall through to
-                // the heartbeat check — do not trust `/cli` room membership
-                // (namespace token joins that room before tag/capability).
-            } catch (error) {
-                if (error instanceof SessionArchiveUncontrollableError) {
-                    throw error
-                }
-                if (!(error instanceof RpcTargetMissingError)) {
-                    throw error
-                }
+                status = await this.rpcGateway.stopRunnerSession(machineId, sessionId)
+            } catch (stopError) {
+                // Machine RPC missing is NOT proof the detached CLI is gone
+                // (KillMode=process children survive runner death). Any stop
+                // failure is unconfirmed — refuse to archive (#1910).
+                void stopError
+                status = 'still_alive'
+            }
+            // After KillSession reached the CLI, `unknown` can mean the child
+            // already tore down its runner maps while exiting — that is fine.
+            // When KillSession missed, require a confirmed gone/stopped so we
+            // never archive a live orphan (#1910 / #1705).
+            const blocked = cliUnreachable
+                ? (status === 'still_alive' || status === 'unknown')
+                : status === 'still_alive'
+            if (blocked) {
+                throw new SessionArchiveUncontrollableError(sessionId)
             }
         }
 
-        // Unproven in-flight CLIs keep session-alive without KillSession.
-        // Counting raw room sockets is attacker-controlled (#1473 review).
-        // Counting only sessionRpcAuthorizedId sockets misses this CLI.
-        // Heartbeat is the hub-side liveness signal; expireInactive (~30s)
-        // clears it when the process is actually gone (#916).
-        const latest = this.sessionCache.getSession(sessionId)
-        if (latest?.active) {
-            throw new SessionArchiveUncontrollableError(sessionId)
+        if (cliUnreachable) {
+            this.sessionCache.markSessionArchivedFromHub(sessionId, 'Archived from hub (CLI unreachable)')
+            // #1910: SSE alone is not enough — ApiSessionClient only applies
+            // hub archival from Socket.IO `update-session` (and reconnect
+            // reconcile). Push the versioned metadata to any CLI still in the
+            // session room so a briefly-disconnected child can exit.
+            this.emitCliSessionMetadataUpdate(sessionId)
         }
-
-        this.sessionCache.markSessionArchivedFromHub(sessionId, 'Archived from hub (CLI unreachable)')
         this.handleSessionEnd({ sid: sessionId, time: Date.now() })
+    }
+
+    /**
+     * Broadcast versioned session metadata to CLI sockets in `session:<id>`.
+     * Mirrors the shape used by update-metadata handlers so ApiSessionClient
+     * applies the same hub-archived detection path.
+     */
+    private emitCliSessionMetadataUpdate(sessionId: string): void {
+        const session = this.sessionCache.getSession(sessionId)
+        if (!session?.metadata) return
+        if (typeof this.io.of !== 'function') return
+        const update = {
+            id: randomUUID(),
+            seq: Date.now(),
+            createdAt: Date.now(),
+            body: {
+                t: 'update-session' as const,
+                sid: sessionId,
+                metadata: { version: session.metadataVersion, value: session.metadata },
+                agentState: null as null
+            }
+        }
+        this.io.of('/cli').to(`session:${sessionId}`).emit('update', update)
     }
 
     /**
@@ -4027,7 +4041,7 @@ export class SyncEngine {
         if (session.active || operation?.state !== 'reserved' || !machineId) return false
         try {
             const status = await this.rpcGateway.stopRunnerSession(machineId, session.id)
-            if (status === 'still_alive') return false
+            if (status === 'still_alive' || status === 'unknown') return false
             return this.abortOpenCodeClearSession(
                 session.id, namespace, operation.replacementSessionId, 'reserved', true
             ).type === 'success'
@@ -4873,7 +4887,7 @@ export class SyncEngine {
         await new Promise((resolve) => setTimeout(resolve, 0))
         const session = this.sessionCache.refreshSession(sessionId) ?? this.sessionCache.getSession(sessionId)
         const attemptClearedByEnd = session?.metadata?.piResumeAttempt === undefined
-        if (status === 'still_alive') {
+        if (status === 'still_alive' || status === 'unknown') {
             if (attemptClearedByEnd) return true
             return false
         }
@@ -4908,7 +4922,7 @@ export class SyncEngine {
         const session = this.sessionCache.refreshSession(sessionId) ?? this.sessionCache.getSession(sessionId)
         const original = this.sessionCache.refreshSession(originalSessionId) ?? this.sessionCache.getSession(originalSessionId)
         const attemptClearedByEnd = original?.metadata?.piResumeAttempt === undefined
-        if (status === 'still_alive' && !attemptClearedByEnd) {
+        if ((status === 'still_alive' || status === 'unknown') && !attemptClearedByEnd) {
             await this.writePiResumeAttempt(originalSessionId, namespace, {
                 ...existingAttempt,
                 state: 'quarantined',
@@ -5087,7 +5101,7 @@ export class SyncEngine {
         } catch {
             return false
         }
-        if (status === 'still_alive') return false
+        if (status === 'still_alive' || status === 'unknown') return false
 
         const current = this.sessionCache.getSession(session.id)
         if (current?.active) {
@@ -5113,7 +5127,7 @@ export class SyncEngine {
         } catch {
             return false
         }
-        if (status === 'still_alive') return false
+        if (status === 'still_alive' || status === 'unknown') return false
 
         const child = this.sessionCache.getSession(childSessionId)
         if (child?.active) this.handleSessionEnd({ sid: childSessionId, time: Date.now(), reason: 'error' })
