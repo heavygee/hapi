@@ -5,6 +5,12 @@ import { FLEET_UPGRADE_POLICIES } from '@hapi/protocol/upgradeChannel'
 import type { WebAppEnv } from '../middleware/auth'
 import { ensureCliArtifact, findArtifactMetaBySha256 } from '../../upgrade/cliArtifact'
 import { defaultHubPackageRoot, resolveUpgradeOffer } from '../../upgrade/resolveUpgradeOffer'
+import {
+    ensureSoupCliArtifact,
+    preferPublishedSoupTip,
+    readPublishedSoupTip,
+    soupTipToUpgradeOffer,
+} from '../../upgrade/soupArtifact'
 import { getFleetUpgradePolicy, setFleetUpgradePolicy } from '../../upgrade/fleetUpgradePolicy'
 import { getConfiguration } from '../../configuration'
 import { constantTimeEquals } from '../../utils/crypto'
@@ -26,10 +32,24 @@ export function createUpgradeRoutes(getSyncEngine: () => SyncEngine | null): Hon
             // Fallback for early boot / tests without a SyncEngine — still
             // resolves a channel/version without forcing a fingerprint walk
             // when the engine cache is available.
-            const fallback = resolveUpgradeOffer({
+            let fallback = resolveUpgradeOffer({
                 hubPackageRoot: defaultHubPackageRoot(),
                 execPath: process.execPath,
             })
+            if (fallback.channel === 'hub-artifact' && preferPublishedSoupTip()) {
+                const tip = readPublishedSoupTip()
+                if (tip) {
+                    const soupOffer = soupTipToUpgradeOffer(
+                        tip,
+                        process.platform,
+                        process.arch,
+                        fallback,
+                    )
+                    if (soupOffer) {
+                        fallback = soupOffer
+                    }
+                }
+            }
             return c.json({ offer: fallback, policy: getFleetUpgradePolicy() })
         }
         return c.json({ offer, policy: getFleetUpgradePolicy() })
@@ -100,15 +120,30 @@ export function createUpgradeCliRoutes(): Hono<CliEnv> {
             hubPackageRoot: defaultHubPackageRoot(),
             execPath: process.execPath,
         })
-        const targetVersion = version || baseOffer.targetVersion
+        let effectiveOffer = baseOffer
+        if (baseOffer.channel === 'hub-artifact' && preferPublishedSoupTip()) {
+            const tip = readPublishedSoupTip()
+            if (tip) {
+                const soupOffer = soupTipToUpgradeOffer(
+                    tip,
+                    platform,
+                    arch,
+                    baseOffer,
+                )
+                if (soupOffer) {
+                    effectiveOffer = soupOffer
+                }
+            }
+        }
+        const targetVersion = version || effectiveOffer.targetVersion
 
-        if (baseOffer.channel === 'off') {
+        if (effectiveOffer.channel === 'off') {
             return c.json({ error: 'Fleet upgrade disabled' }, 403)
         }
 
         // Only serve the hub's current offer version — prevents arbitrary-version
-        // compiles and keeps path tokens aligned with a known semver.
-        if (targetVersion !== baseOffer.targetVersion) {
+        // compiles and keeps path tokens aligned with a known semver / soup tag.
+        if (targetVersion !== effectiveOffer.targetVersion) {
             return c.json({ error: 'Unsupported artifact version' }, 400)
         }
 
@@ -119,15 +154,37 @@ export function createUpgradeCliRoutes(): Hono<CliEnv> {
                 // rebuild — a newer generation would fail the runner's sha check.
                 const retained = findArtifactMetaBySha256(wantedSha, config.dataDir)
                 if (!retained || !existsSync(retained.path)) {
+                    // Soup tip may not yet be mirrored into upgrade-artifacts —
+                    // materialize on demand when the digest matches the tip.
+                    if (
+                        preferPublishedSoupTip()
+                        && effectiveOffer.targetVersion.startsWith('hapi-soup-v')
+                    ) {
+                        const tip = readPublishedSoupTip()
+                        if (tip && tip.tag === effectiveOffer.targetVersion) {
+                            const meta = ensureSoupCliArtifact({
+                                tip,
+                                platform,
+                                arch,
+                                dataDir: config.dataDir,
+                            })
+                            if (meta.sha256 === wantedSha.trim().toLowerCase() && existsSync(meta.path)) {
+                                return new Response(Bun.file(meta.path), {
+                                    headers: {
+                                        'Content-Type': 'application/octet-stream',
+                                        'Content-Disposition': `attachment; filename="hapi-${meta.version}"`,
+                                        'X-Hapi-Artifact-Sha256': meta.sha256,
+                                        'X-Hapi-Artifact-Version': meta.version,
+                                    },
+                                })
+                            }
+                        }
+                    }
                     return c.json({ error: 'Artifact not retained for digest' }, 404)
                 }
                 if (retained.version !== targetVersion) {
                     return c.json({ error: 'Artifact digest does not match offer version' }, 400)
                 }
-                c.header('Content-Type', 'application/octet-stream')
-                c.header('Content-Disposition', `attachment; filename="hapi-${retained.version}"`)
-                c.header('X-Hapi-Artifact-Sha256', retained.sha256)
-                c.header('X-Hapi-Artifact-Version', retained.version)
                 return new Response(Bun.file(retained.path), {
                     headers: {
                         'Content-Type': 'application/octet-stream',
@@ -138,22 +195,29 @@ export function createUpgradeCliRoutes(): Hono<CliEnv> {
                 })
             }
 
-            // Unpinned: ensureCliArtifact refuses same-version stale caches via sourceFingerprint.
-            const meta = await ensureCliArtifact({
-                version: targetVersion,
-                platform,
-                arch,
-                dataDir: config.dataDir,
-                hubPackageRoot: defaultHubPackageRoot(),
-            })
+            // Unpinned: soup tip → retain published bytes; else compile from tree.
+            const tip = preferPublishedSoupTip()
+                && targetVersion.startsWith('hapi-soup-v')
+                ? readPublishedSoupTip()
+                : null
+            const meta = tip && tip.tag === targetVersion
+                ? ensureSoupCliArtifact({
+                    tip,
+                    platform,
+                    arch,
+                    dataDir: config.dataDir,
+                })
+                : await ensureCliArtifact({
+                    version: targetVersion,
+                    platform,
+                    arch,
+                    dataDir: config.dataDir,
+                    hubPackageRoot: defaultHubPackageRoot(),
+                })
             if (!existsSync(meta.path)) {
                 return c.json({ error: 'Artifact missing on disk' }, 404)
             }
 
-            c.header('Content-Type', 'application/octet-stream')
-            c.header('Content-Disposition', `attachment; filename="hapi-${meta.version}"`)
-            c.header('X-Hapi-Artifact-Sha256', meta.sha256)
-            c.header('X-Hapi-Artifact-Version', meta.version)
             return new Response(Bun.file(meta.path), {
                 headers: {
                     'Content-Type': 'application/octet-stream',

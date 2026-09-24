@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'bun:test'
-import { detectUpgradeChannel, machineTrailsUpgradeOffer, compareHapiVersions, type HubUpgradeOffer } from './upgradeChannel'
+import {
+    detectUpgradeChannel,
+    machineTrailsUpgradeOffer,
+    compareHapiVersions,
+    inferMachineArch,
+    type HubUpgradeOffer,
+} from './upgradeChannel'
 
 describe('compareHapiVersions', () => {
     it('orders major.minor.patch and returns null for junk', () => {
@@ -7,6 +13,17 @@ describe('compareHapiVersions', () => {
         expect(compareHapiVersions('0.25.0', '0.24.0')).toBe(1)
         expect(compareHapiVersions('0.24.0', '0.24.0')).toBe(0)
         expect(compareHapiVersions('not-a-version', '0.24.0')).toBeNull()
+        expect(compareHapiVersions('0.30.7', 'hapi-soup-v2026.09.24-c699518')).toBeNull()
+    })
+})
+
+describe('inferMachineArch', () => {
+    it('infers x64 for estate fleet platforms and undefined otherwise', () => {
+        expect(inferMachineArch('linux')).toBe('x64')
+        expect(inferMachineArch('win32')).toBe('x64')
+        expect(inferMachineArch('darwin')).toBe('x64')
+        expect(inferMachineArch(null)).toBeUndefined()
+        expect(inferMachineArch('aix')).toBeUndefined()
     })
 })
 
@@ -181,6 +198,37 @@ describe('machineTrailsUpgradeOffer', () => {
             '0.26.0',
             ['cursor-chat-store-status', 'runner-self-upgrade'],
             'gen-runner',
+        )).toBe(false)
+    })
+
+    it('trails stock semver runners toward a soup-tag offer (non-semver target)', () => {
+        // Estate: soup tip embeds 0.29.x while stock sits at 0.30.x. Offer must
+        // use the soup tag so compareHapiVersions returns null and generation
+        // identity can pull fleet onto the tip instead of stomping it.
+        const soupOffer: HubUpgradeOffer = {
+            channel: 'hub-artifact',
+            targetVersion: 'hapi-soup-v2026.09.24-c699518',
+            targetCapabilities: ['runner-self-upgrade'],
+            targetGeneration: 'hapi-soup-v2026.09.24-c699518',
+            artifact: {
+                url: '/cli/upgrade/cli-artifact?sha256=deadbeef',
+                sha256: 'deadbeef',
+                platform: 'linux',
+                arch: 'x64',
+                sizeBytes: 1,
+            },
+        }
+        expect(machineTrailsUpgradeOffer(
+            soupOffer,
+            '0.30.7',
+            ['runner-self-upgrade'],
+            'ea994d122bc7ebed',
+        )).toBe(true)
+        expect(machineTrailsUpgradeOffer(
+            soupOffer,
+            '0.29.1',
+            ['runner-self-upgrade'],
+            'hapi-soup-v2026.09.24-c699518',
         )).toBe(false)
     })
 })

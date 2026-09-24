@@ -28,6 +28,12 @@ import { waitForTunnelTlsReady } from './tunnel/tlsGate'
 import { ServerChanChannel } from './serverchan/channel'
 import { findMonorepoRoot, defaultHubPackageRoot, resolveUpgradeOffer, setConfiguredUpgradeTargetVersion } from './upgrade/resolveUpgradeOffer'
 import { ensureCliArtifact, isTransientArtifactBuildFailure, resolveArtifactSourceFingerprint, retainArtifactOffer } from './upgrade/cliArtifact'
+import {
+    ensureSoupCliArtifact,
+    preferPublishedSoupTip,
+    readPublishedSoupTip,
+    soupTipToUpgradeOffer,
+} from './upgrade/soupArtifact'
 import { readSettings } from './config/settings'
 import { getFleetUpgradePolicy, initFleetUpgradePolicy } from './upgrade/fleetUpgradePolicy'
 import QRCode from 'qrcode'
@@ -136,6 +142,22 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
             execPath: process.execPath,
             targetVersion: options.cliVersion,
         })
+        // Estate soup tip wins over live-tree fingerprint: policy=auto must
+        // not stomp a just-published hapi-soup-v* with hapi-0.<semver>-<fp>.
+        if (offer.channel === 'hub-artifact' && preferPublishedSoupTip()) {
+            const tip = readPublishedSoupTip()
+            if (tip) {
+                const soupOffer = soupTipToUpgradeOffer(tip, process.platform, process.arch, offer)
+                if (soupOffer) {
+                    cachedUpgradeOffer = { at: now, offer: soupOffer }
+                    return soupOffer
+                }
+                console.warn(
+                    `[fleet-upgrade] soup tip ${tip.tag} present but no binary for `
+                    + `${process.platform}/${process.arch}; falling back to source fingerprint`,
+                )
+            }
+        }
         if (offer.channel === 'hub-artifact' && !offer.targetGeneration) {
             const monorepoRoot = findMonorepoRoot(defaultHubPackageRoot())
             if (monorepoRoot) {
@@ -253,19 +275,29 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         getUpgradeOffer: () => resolveCurrentUpgradeOffer(),
         getFleetUpgradePolicy: () => getFleetUpgradePolicy(),
         prepareArtifactOffer: async (offer, platform, arch) => {
-            const meta = await ensureCliArtifact({
-                version: offer.targetVersion,
-                platform,
-                arch,
-                dataDir: config.dataDir,
-                hubPackageRoot: defaultHubPackageRoot(),
-            })
+            const tip = preferPublishedSoupTip()
+                && offer.targetVersion.startsWith('hapi-soup-v')
+                ? readPublishedSoupTip()
+                : null
+            const meta = tip && tip.tag === offer.targetVersion
+                ? ensureSoupCliArtifact({
+                    tip,
+                    platform,
+                    arch,
+                    dataDir: config.dataDir,
+                })
+                : await ensureCliArtifact({
+                    version: offer.targetVersion,
+                    platform,
+                    arch,
+                    dataDir: config.dataDir,
+                    hubPackageRoot: defaultHubPackageRoot(),
+                })
             retainArtifactOffer(meta.sha256)
             const prepared = {
                 ...offer,
-                // Always advertise the fingerprint of the artifact that was
-                // actually built/cached — tunwg pin refresh can change inputs
-                // after the pre-build offer fingerprint.
+                // Soup tip: sourceFingerprint is the soup tag (matches SCP
+                // durable markers). Live-tree compiles: content fingerprint.
                 targetGeneration: meta.sourceFingerprint,
                 artifact: {
                     url: `/cli/upgrade/cli-artifact?sha256=${encodeURIComponent(meta.sha256)}`,

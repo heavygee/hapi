@@ -130,20 +130,6 @@ export type MachineTrailsOptions = {
     ignoreGenerationDrift?: boolean
 }
 
-export function inferMachineArch(platform: string | null | undefined): string | undefined {
-    if (!platform) {
-        return undefined
-    }
-    switch (platform) {
-        case 'linux':
-        case 'win32':
-        case 'darwin':
-            return 'x64'
-        default:
-            return undefined
-    }
-}
-
 /**
  * Legacy runners omitted `metadata.arch`. Estate fleet is x64-only today; infer
  * so hub-artifact upgrades can proceed before remotes reconnect with fixed CLI.
