@@ -2832,7 +2832,7 @@ export class SyncEngine {
         let killPid: number | undefined
         let killProcessStartMarker: string | undefined
         try {
-            const killResult = await this.rpcGateway.killSession(sessionId)
+            const killResult = (await this.rpcGateway.killSession(sessionId)) ?? {}
             killPid = killResult.pid
             killProcessStartMarker = killResult.processStartMarker
         } catch (error) {
