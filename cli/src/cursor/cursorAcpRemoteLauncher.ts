@@ -444,8 +444,8 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
 
         this.installLiveSessionConfigSync(previousSetModel);
         this.lastCredentialRefreshAt =
-            session.client.getMetadata()?.cursorCredentialRefreshAt ?? null;
-        session.client.on('cursor-credential-refresh', this.onCredentialRefresh);
+            session.client.getMetadata?.()?.cursorCredentialRefreshAt ?? null;
+        session.client.on?.('cursor-credential-refresh', this.onCredentialRefresh);
 
         this.applyDisplayMode(session.getPermissionMode() as PermissionMode);
 
@@ -840,7 +840,7 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
             this.softSteerWaiters = [];
             this.unregisterModelApplyHandler?.();
             this.unregisterModelApplyHandler = null;
-            this.session.client.off('cursor-credential-refresh', this.onCredentialRefresh);
+            this.session.client.off?.('cursor-credential-refresh', this.onCredentialRefresh);
 
             if (this.acpRelaunchPromise) {
                 await this.acpRelaunchPromise.catch(() => {});
