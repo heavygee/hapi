@@ -65,10 +65,21 @@ export function shouldApplyUpgradeOffer(
     }
     const versionMatches = versionRelation === 0
         || (versionRelation === null && localVersion === offer.targetVersion)
+    // Soup tip offers use the publish tag as targetVersion (non-semver). Runners
+    // still advertise the embedded package.json semver (e.g. 0.29.1), so version
+    // never string-matches the tag — generation identity is the stickiness key
+    // (same contract as hapi-fleet-runner-upgrade durable markers).
+    const soupTagOffer = offer.channel === 'hub-artifact'
+        && offer.targetVersion.startsWith('hapi-soup-v')
+        && offer.targetGeneration === offer.targetVersion
+    const soupGenerationCurrent = soupTagOffer
+        && typeof offer.targetGeneration === 'string'
+        && offer.targetGeneration.length > 0
+        && offer.targetGeneration === (localGeneration ?? '')
     // Fleet upgrade is capability-driven: same semver with missing target
     // capabilities (or a new hub-artifact generation) must still apply.
     if (
-        versionMatches
+        (versionMatches || soupGenerationCurrent)
         && hasTargetCapabilities(offer, localCapabilities)
         && !generationDrift
     ) {

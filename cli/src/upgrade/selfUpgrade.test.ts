@@ -291,6 +291,37 @@ describe('shouldApplyUpgradeOffer', () => {
         })
     })
 
+    it('treats soup-tag generation match as current despite embedded semver skew', () => {
+        const soupTag = 'hapi-soup-v2026.09.24-c699518'
+        const soupOffer = baseOffer({
+            channel: 'hub-artifact',
+            targetVersion: soupTag,
+            targetCapabilities: [...CURRENT_MACHINE_CAPABILITIES],
+            targetGeneration: soupTag,
+            artifact: {
+                url: '/api/upgrade/cli-artifact',
+                sha256: 'abc',
+                platform: 'linux',
+                arch: 'x64',
+                sizeBytes: 10,
+            },
+        })
+        // Tip binary embeds 0.29.1; durable marker advertises the soup tag.
+        expect(shouldApplyUpgradeOffer(
+            soupOffer,
+            '0.29.1',
+            CURRENT_MACHINE_CAPABILITIES,
+            soupTag,
+        )).toEqual({ apply: false, reason: 'already-current' })
+        // Stock 0.30.7 + fingerprint gen must still apply toward the tip.
+        expect(shouldApplyUpgradeOffer(
+            soupOffer,
+            '0.30.7',
+            CURRENT_MACHINE_CAPABILITIES,
+            'ea994d122bc7ebed',
+        )).toEqual({ apply: true, reason: 'upgrade' })
+    })
+
     it('refuses to downgrade when local version is ahead of the hub offer', () => {
         expect(shouldApplyUpgradeOffer(baseOffer({ targetVersion: '0.23.0' }), '0.25.0')).toEqual({
             apply: false,
