@@ -1129,6 +1129,30 @@ export function createSessionsRoutes(
         }
     })
 
+    app.post('/sessions/:id/cursor-credentials/refresh', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine, { requireActive: true })
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        if (sessionResult.session.metadata?.flavor !== 'cursor') {
+            return c.json({ error: 'Cursor credential refresh is only supported for Cursor sessions' }, 400)
+        }
+
+        try {
+            const { refreshAt } = await engine.requestCursorCredentialRefresh(sessionResult.sessionId)
+            return c.json({ ok: true, refreshAt })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to request credential refresh'
+            return c.json({ error: message }, 409)
+        }
+    })
+
     app.post('/sessions/:id/model-reasoning-effort', async (c) => {
         const engine = requireSyncEngine(c, getSyncEngine)
         if (engine instanceof Response) {

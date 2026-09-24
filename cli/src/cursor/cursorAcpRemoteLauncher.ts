@@ -53,6 +53,10 @@ import {
     isRetryableCursorError,
     stripRetryableCursorError
 } from './cursorAutoRetry';
+import {
+    applyCanonicalCursorApiKeyToProcessEnv,
+    cursorApiKeyLogPrefix
+} from './utils/cursorCredentialEnv';
 
 const CURSOR_ABORT_DRAIN_TIMEOUT_MS = 5_000;
 
@@ -93,6 +97,11 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
     private pendingInlineRetryableError = false;
     private attemptProducedToolActivity = false;
     private userAbortRequested = false;
+    /** Last hub cursorCredentialRefreshAt we already acted on (dedupe). */
+    private lastCredentialRefreshAt: string | null = null;
+    private onCredentialRefresh = (nonce: string): void => {
+        void this.handleCredentialRefreshRequest(nonce);
+    };
 
     constructor(session: CursorSession) {
         super(process.env.DEBUG ? session.logPath : undefined);
@@ -434,6 +443,9 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         session.client.emitSessionReady();
 
         this.installLiveSessionConfigSync(previousSetModel);
+        this.lastCredentialRefreshAt =
+            session.client.getMetadata()?.cursorCredentialRefreshAt ?? null;
+        session.client.on('cursor-credential-refresh', this.onCredentialRefresh);
 
         this.applyDisplayMode(session.getPermissionMode() as PermissionMode);
 
@@ -828,6 +840,7 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
             this.softSteerWaiters = [];
             this.unregisterModelApplyHandler?.();
             this.unregisterModelApplyHandler = null;
+            this.session.client.off('cursor-credential-refresh', this.onCredentialRefresh);
 
             if (this.acpRelaunchPromise) {
                 await this.acpRelaunchPromise.catch(() => {});
@@ -1194,6 +1207,46 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
             if (this.acpRelaunchPromise === relaunchDone) {
                 this.acpRelaunchPromise = null;
             }
+        }
+    }
+
+    /**
+     * Credential twin of #1909: refresh CURSOR_API_KEY from ~/.hapi/cursor.env,
+     * then relaunch ACP under the same hub + agent session id via session/load.
+     */
+    private async handleCredentialRefreshRequest(nonce: string): Promise<void> {
+        if (this.sessionTeardownStarted || this.shouldExit) return;
+        if (nonce === this.lastCredentialRefreshAt) return;
+        if (this.promptInFlight) {
+            logger.info('[cursor-acp] Deferring credential refresh until prompt completes');
+            // Best-effort: retry once the current turn settles via relaunch lock.
+        }
+
+        const applyResult = applyCanonicalCursorApiKeyToProcessEnv();
+        if (applyResult.applied === false && applyResult.reason === 'missing_or_invalid') {
+            logger.warn('[cursor-acp] Credential refresh skipped — no canonical CURSOR_API_KEY on disk');
+            return;
+        }
+
+        const spawnModel = this.spawnedWithCliAuto
+            ? CURSOR_AUTO_MODEL_ID
+            : resolveCursorSpawnModel(this.currentBackendModel ?? this.session.model);
+
+        try {
+            await this.relaunchAcpWithSpawnModel(spawnModel ?? CURSOR_AUTO_MODEL_ID);
+            this.lastCredentialRefreshAt = nonce;
+            const prefix = applyResult.applied
+                ? applyResult.keyPrefix
+                : applyResult.keyPrefix;
+            logger.info(
+                `[cursor-acp] In-place credential relaunch complete (key=${prefix}…, nonce=${nonce})`
+            );
+            this.messageBuffer.addMessage(
+                `[AUTH:cursor-key-refreshed ${cursorApiKeyLogPrefix(process.env.CURSOR_API_KEY ?? '')}…]`,
+                'system'
+            );
+        } catch (error) {
+            logger.warn('[cursor-acp] In-place credential relaunch failed', error);
         }
     }
 

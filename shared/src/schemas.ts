@@ -176,6 +176,12 @@ export const MetadataSchema = z.object({
     agySessionId: z.string().optional(),
     cursorSessionId: z.string().optional(),
     cursorSessionProtocol: z.enum(['acp', 'stream-json']).optional(),
+    /**
+     * Hub-authored nonce/timestamp. When it changes, a live Cursor ACP launcher
+     * refreshes CURSOR_API_KEY from ~/.hapi/cursor.env and relaunches ACP in
+     * place (same hub id + session/load) — credential twin of #1909 Auto relaunch.
+     */
+    cursorCredentialRefreshAt: z.string().optional(),
     // Drives the web `CursorMigrationBanner`:
     //   'in_progress' = legacy-to-ACP transplant currently running; banner shows spinner + "Upgrading..."
     //   'ambiguous'   = migrator refused to transplant (ambiguous source drawer OR size mismatch);
