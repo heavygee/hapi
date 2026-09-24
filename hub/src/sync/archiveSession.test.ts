@@ -6,9 +6,17 @@ import { SessionArchiveUncontrollableError, SyncEngine } from './syncEngine'
 
 type StopStatus = 'stopped' | 'already_gone' | 'still_alive' | 'unknown'
 
+type KillResult = { pid?: number; processStartMarker?: string }
+
 type RpcGatewayStub = {
-    killSession: (sessionId: string) => Promise<void>
-    stopRunnerSession: (machineId: string, sessionId: string) => Promise<StopStatus>
+    // Match rpcGateway.killSession — always returns an object (never void).
+    // Tip-forward #1911 CLEAN added pid/start-marker; void stubs crash on .pid.
+    killSession: (sessionId: string) => Promise<KillResult>
+    stopRunnerSession: (
+        machineId: string,
+        sessionId: string,
+        opts?: { processStartMarker?: string }
+    ) => Promise<StopStatus>
 }
 
 function gateway(engine: SyncEngine): RpcGatewayStub {
@@ -73,7 +81,7 @@ describe('archiveSession (#1911 runner reaping / #1203 successor)', () => {
             const session = seedActiveSession(engine, 'kill-ok', { machineId: 'machine-1' })
             const stops: string[] = []
             const rpc = gateway(engine)
-            rpc.killSession = async () => {}
+            rpc.killSession = async () => ({})
             rpc.stopRunnerSession = async (_machineId, sessionId) => {
                 stops.push(sessionId)
                 return 'already_gone'
