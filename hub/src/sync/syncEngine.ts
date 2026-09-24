@@ -2829,8 +2829,12 @@ export class SyncEngine {
         // to archive while the runner reports still_alive / unknown.
         // Soup: throw SessionArchiveUncontrollableError so web routes map 409.
         let cliUnreachable = false
+        let killPid: number | undefined
+        let killProcessStartMarker: string | undefined
         try {
-            await this.rpcGateway.killSession(sessionId)
+            const killResult = await this.rpcGateway.killSession(sessionId)
+            killPid = killResult.pid
+            killProcessStartMarker = killResult.processStartMarker
         } catch (error) {
             if (error instanceof RpcTargetMissingError) {
                 cliUnreachable = true
@@ -2851,24 +2855,41 @@ export class SyncEngine {
                 void stopError
                 status = 'still_alive'
             }
-            // After KillSession reached the CLI, `unknown` can mean the child
-            // already tore down its runner maps while exiting — that is fine.
-            // When KillSession missed, require a confirmed gone/stopped so we
-            // never archive a live orphan (#1910 / #1705).
-            const blocked = cliUnreachable
-                ? (status === 'still_alive' || status === 'unknown')
-                : status === 'still_alive'
-            if (blocked) {
+            // KillSession acknowledges before cleanupAndExit finishes, and socket
+            // loss is not exit proof. When the runner cannot find the HAPI id,
+            // confirm the KillSession-reported OS pid + start marker.
+            if (
+                status === 'unknown'
+                && typeof killPid === 'number'
+                && killPid > 0
+                && typeof killProcessStartMarker === 'string'
+                && killProcessStartMarker.length > 0
+            ) {
+                try {
+                    status = await this.rpcGateway.stopRunnerSession(machineId, `PID-${killPid}`, {
+                        processStartMarker: killProcessStartMarker,
+                    })
+                } catch (pidStopError) {
+                    void pidStopError
+                    status = 'still_alive'
+                }
+            }
+            if (status === 'still_alive' || status === 'unknown') {
                 throw new SessionArchiveUncontrollableError(sessionId)
             }
         }
 
-        if (cliUnreachable) {
-            this.sessionCache.markSessionArchivedFromHub(sessionId, 'Archived from hub (CLI unreachable)')
-            // #1910: SSE alone is not enough — ApiSessionClient only applies
-            // hub archival from Socket.IO `update-session` (and reconnect
-            // reconcile). Push the versioned metadata to any CLI still in the
-            // session room so a briefly-disconnected child can exit.
+        // KillSession cleanup writes archive metadata asynchronously; StopSession
+        // may terminate the CLI mid-flush. If the row is still not archived,
+        // hub-author the metadata so we do not leave lifecycleState=running.
+        const lifecycleState = this.sessionCache.getSession(sessionId)?.metadata?.lifecycleState
+        if (lifecycleState !== 'archived') {
+            this.sessionCache.markSessionArchivedFromHub(
+                sessionId,
+                cliUnreachable
+                    ? 'Archived from hub (CLI unreachable)'
+                    : 'Archived from hub (CLI stopped before archive metadata)'
+            )
             this.emitCliSessionMetadataUpdate(sessionId)
         }
         this.handleSessionEnd({ sid: sessionId, time: Date.now() })

@@ -36,9 +36,12 @@ describe('SyncEngine.archiveSession runner reaping (#1910)', () => {
             async () => { throw new RpcTargetMissingError('KillSession', 'handler-not-registered') }
     }
 
-    function setKillSessionOk(): void {
+    function setKillSessionOk(opts?: { pid?: number; processStartMarker?: string }): void {
         ;(engine as unknown as { rpcGateway: { killSession: unknown } }).rpcGateway.killSession =
-            async () => undefined
+            async () => ({
+                ...(typeof opts?.pid === 'number' ? { pid: opts.pid } : {}),
+                ...(opts?.processStartMarker ? { processStartMarker: opts.processStartMarker } : {}),
+            })
     }
 
     beforeEach(() => {
@@ -73,6 +76,9 @@ describe('SyncEngine.archiveSession runner reaping (#1910)', () => {
 
         expect(calledWith).toEqual(['machine-x', sessionId])
         expect(cache().getSession(sessionId)?.active).toBe(false)
+        // Stop confirmed before CLI could flush — hub must author archive metadata.
+        expect(cache().getSession(sessionId)?.metadata?.lifecycleState).toBe('archived')
+        expect(cache().getSession(sessionId)?.metadata?.archivedBy).toBe('hub')
     })
 
     it('archives once the runner confirms the process is gone', async () => {
@@ -165,15 +171,75 @@ describe('SyncEngine.archiveSession runner reaping (#1910)', () => {
         expect(session?.metadata?.lifecycleState).not.toBe('archived')
     })
 
-    it('archives when KillSession succeeded even if stopRunnerSession returns unknown', async () => {
-        // CLI accepted KillSession and is exiting; runner maps may already be gone.
-        const sessionId = insertActiveSession('sess-kill-ok-unknown', 'machine-x')
+    it('does NOT archive when KillSession succeeded but StopSession stays unknown without a confirmable pid', async () => {
+        // KillSession ack alone is not exit proof; without a pid the runner
+        // cannot confirm termination of an untracked CLI (#1910).
+        const sessionId = insertActiveSession('sess-kill-ok-unknown-no-pid', 'machine-x')
         setKillSessionOk()
         ;(engine as unknown as { rpcGateway: { stopRunnerSession: unknown } }).rpcGateway.stopRunnerSession =
             async () => 'unknown'
 
+        await expect(engine.archiveSession(sessionId)).rejects.toThrow()
+
+        const session = cache().getSession(sessionId)
+        expect(session?.active).toBe(true)
+        expect(session?.metadata?.lifecycleState).not.toBe('archived')
+    })
+
+    it('does NOT archive when KillSession pid confirm lacks a start marker (PID reuse guard)', async () => {
+        const sessionId = insertActiveSession('sess-kill-ok-pid-no-marker', 'machine-x')
+        setKillSessionOk({ pid: 4242 })
+        const stopCalls: Array<{ sid: string; marker?: string }> = []
+        ;(engine as unknown as { rpcGateway: { stopRunnerSession: unknown } }).rpcGateway.stopRunnerSession =
+            async (_machineId: string, sid: string, opts?: { processStartMarker?: string }) => {
+                stopCalls.push({ sid, marker: opts?.processStartMarker })
+                return 'unknown'
+            }
+
+        await expect(engine.archiveSession(sessionId)).rejects.toThrow()
+
+        // Without a marker, do not attempt the raw-PID confirm kill.
+        expect(stopCalls).toEqual([{ sid: sessionId, marker: undefined }])
+        expect(cache().getSession(sessionId)?.active).toBe(true)
+    })
+
+    it('does NOT archive when KillSession pid confirm still reports unknown (socket drop is not exit)', async () => {
+        const sessionId = insertActiveSession('sess-kill-ok-pid-unknown', 'machine-x')
+        setKillSessionOk({ pid: 4242, processStartMarker: 'started-at-1' })
+        const stopCalls: Array<{ sid: string; marker?: string }> = []
+        ;(engine as unknown as { rpcGateway: { stopRunnerSession: unknown } }).rpcGateway.stopRunnerSession =
+            async (_machineId: string, sid: string, opts?: { processStartMarker?: string }) => {
+                stopCalls.push({ sid, marker: opts?.processStartMarker })
+                return 'unknown'
+            }
+
+        await expect(engine.archiveSession(sessionId)).rejects.toThrow()
+
+        expect(stopCalls).toEqual([
+            { sid: sessionId, marker: undefined },
+            { sid: 'PID-4242', marker: 'started-at-1' },
+        ])
+        const session = cache().getSession(sessionId)
+        expect(session?.active).toBe(true)
+        expect(session?.metadata?.lifecycleState).not.toBe('archived')
+    })
+
+    it('archives when KillSession pid confirm returns already_gone after session-id unknown', async () => {
+        const sessionId = insertActiveSession('sess-kill-ok-pid-gone', 'machine-x')
+        setKillSessionOk({ pid: 4242, processStartMarker: 'started-at-1' })
+        const stopCalls: Array<{ sid: string; marker?: string }> = []
+        ;(engine as unknown as { rpcGateway: { stopRunnerSession: unknown } }).rpcGateway.stopRunnerSession =
+            async (_machineId: string, sid: string, opts?: { processStartMarker?: string }) => {
+                stopCalls.push({ sid, marker: opts?.processStartMarker })
+                return sid.startsWith('PID-') ? 'already_gone' : 'unknown'
+            }
+
         await engine.archiveSession(sessionId)
 
+        expect(stopCalls).toEqual([
+            { sid: sessionId, marker: undefined },
+            { sid: 'PID-4242', marker: 'started-at-1' },
+        ])
         expect(cache().getSession(sessionId)?.active).toBe(false)
     })
 
