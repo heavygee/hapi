@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
+    decideKeepWrapperArchive,
+    decideRawPidStop,
     detachSharedRootFromWrapper,
     keepWrapperForSharedSiblings,
+    pidHasActiveSharedRoots,
+    sessionRegistryBindingState,
     sessionRuntimeHasActiveSiblings,
     trackedSharedWrapperPidsWithSiblings,
     wrapperHasActiveSiblingRoots,
@@ -141,5 +145,99 @@ describe('runtime registry sibling guards (post-restart)', () => {
             && !wrapperHasActiveSiblingRoots([], 'root-a', pid)
         ))
         expect(filtered).toEqual([9999])
+    })
+
+    it('keeps recovered shared wrapper when only the new root is tracked (restart + webhook + archive)', () => {
+        // Runner restart wiped TrackedSession. A later /new webhook adopts only
+        // the newly reported root onto the live shared Codex PID. Older roots
+        // remain active solely in the durable registry. Archiving the new root
+        // must not fall through to killProcess on that PID.
+        const tracked = {
+            happySessionId: 'new-root',
+            sharedSessions: {
+                'new-root': {},
+            },
+        }
+        const runtimesAfterArchive = [
+            {
+                pid: 4242,
+                sessions: {
+                    'old-root': { active: true },
+                    'new-root': { active: false },
+                },
+            },
+        ]
+
+        // Solo in-memory entry (adoption of the new root only) does not protect the PID:
+        expect(trackedSharedWrapperPidsWithSiblings(
+            new Map([[4242, { ...tracked, sharedSessions: { ...tracked.sharedSessions } }]]).entries(),
+            'new-root'
+        ).size).toBe(0)
+
+        // Detach + keepWrapper in-memory path alone would allow killing the wrapper:
+        expect(detachSharedRootFromWrapper(tracked, 'new-root')).toEqual({ kind: 'allow_kill' })
+        expect(keepWrapperForSharedSiblings(tracked, 'new-root')).toBe(false)
+
+        // Registry siblings on the same PID must keep the wrapper alive:
+        expect(wrapperHasActiveSiblingRoots(runtimesAfterArchive, 'new-root', 4242)).toBe(true)
+        expect(sessionRuntimeHasActiveSiblings(runtimesAfterArchive, 'new-root')).toBe(true)
+        expect(pidHasActiveSharedRoots(runtimesAfterArchive, 4242)).toBe(true)
+    })
+
+    it('refuses raw PID kill when the start marker is missing or mismatched', () => {
+        expect(decideRawPidStop({
+            alive: true,
+            expectedMarker: undefined,
+            currentMarker: 'gen-a',
+            hasActiveSharedRoots: false,
+        })).toBe('unknown')
+        expect(decideRawPidStop({
+            alive: true,
+            expectedMarker: 'gen-a',
+            currentMarker: 'gen-b',
+            hasActiveSharedRoots: false,
+        })).toBe('unknown')
+        expect(decideRawPidStop({
+            alive: true,
+            expectedMarker: 'gen-a',
+            currentMarker: 'gen-a',
+            hasActiveSharedRoots: false,
+        })).toBe('allow_kill')
+        expect(decideRawPidStop({
+            alive: false,
+            expectedMarker: 'gen-a',
+            currentMarker: null,
+            hasActiveSharedRoots: false,
+        })).toBe('already_gone')
+    })
+
+    it('treats inactive registry binding as stop proof while siblings keep the wrapper', () => {
+        expect(sessionRegistryBindingState(runtimes, 'root-a', 4242)).toBe('inactive')
+        expect(sessionRegistryBindingState(runtimes, 'root-b', 4242)).toBe('active')
+        expect(sessionRegistryBindingState(runtimes, 'missing', 4242)).toBe('absent')
+        expect(decideKeepWrapperArchive('inactive')).toBe('stopped')
+        expect(decideKeepWrapperArchive('active')).toBe('still_alive')
+        expect(decideKeepWrapperArchive('absent')).toBe('unknown')
+    })
+
+    it('does not claim stopped from siblings alone on retry (no binding evidence)', () => {
+        // First StopSession detached in-memory tracking and returned unknown.
+        // Retry: argv scan skips the sibling-protected wrapper; without an
+        // inactive registry row we must stay unknown — not archive the live root.
+        const siblingsOnly = [
+            {
+                pid: 4242,
+                sessions: {
+                    // Target never made it into the durable registry (or was
+                    // never written). Sibling is still active.
+                    'root-sibling': { active: true },
+                },
+            },
+        ]
+        expect(wrapperHasActiveSiblingRoots(siblingsOnly, 'root-unconfirmed', 4242)).toBe(true)
+        expect(sessionRegistryBindingState(siblingsOnly, 'root-unconfirmed')).toBe('absent')
+        expect(decideKeepWrapperArchive(
+            sessionRegistryBindingState(siblingsOnly, 'root-unconfirmed')
+        )).toBe('unknown')
     })
 })
