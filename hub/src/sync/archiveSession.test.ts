@@ -2,9 +2,9 @@ import { describe, expect, it } from 'bun:test'
 import { Store } from '../store'
 import { RpcRegistry } from '../socket/rpcRegistry'
 import { RpcTargetMissingError } from './rpcGateway'
-import { SyncEngine } from './syncEngine'
+import { SessionArchiveUncontrollableError, SyncEngine } from './syncEngine'
 
-type StopStatus = 'stopped' | 'already_gone' | 'still_alive'
+type StopStatus = 'stopped' | 'already_gone' | 'still_alive' | 'unknown'
 
 type RpcGatewayStub = {
     killSession: (sessionId: string) => Promise<void>
@@ -61,8 +61,13 @@ function missingStop(machineId: string) {
     return new RpcTargetMissingError(`${machineId}:stopSession`, 'handler-not-registered')
 }
 
-describe('archiveSession (#1203 in-flight CLI)', () => {
-    it('archives when KillSession succeeds and does not call StopSession', async () => {
+/**
+ * #1911 supersedes the incomplete #1706 / #1203 heartbeat-gated archive path.
+ * Archive always asks StopSession when a machineId is known; KillSession miss
+ * alone never proves the process gone.
+ */
+describe('archiveSession (#1911 runner reaping / #1203 successor)', () => {
+    it('always calls StopSession after KillSession succeeds', async () => {
         const { engine } = createEngine()
         try {
             const session = seedActiveSession(engine, 'kill-ok', { machineId: 'machine-1' })
@@ -71,13 +76,13 @@ describe('archiveSession (#1203 in-flight CLI)', () => {
             rpc.killSession = async () => {}
             rpc.stopRunnerSession = async (_machineId, sessionId) => {
                 stops.push(sessionId)
-                return 'stopped'
+                return 'already_gone'
             }
 
             await engine.archiveSession(session.id)
 
             expect(engine.getSessionByNamespace(session.id, 'default')?.active).toBe(false)
-            expect(stops).toEqual([])
+            expect(stops).toEqual([session.id])
         } finally {
             engine.stop()
         }
@@ -118,7 +123,9 @@ describe('archiveSession (#1203 in-flight CLI)', () => {
             }
             rpc.stopRunnerSession = async () => 'still_alive'
 
-            await expect(engine.archiveSession(session.id)).rejects.toThrow(/not controllable/)
+            await expect(engine.archiveSession(session.id)).rejects.toBeInstanceOf(
+                SessionArchiveUncontrollableError
+            )
 
             const row = engine.getSessionByNamespace(session.id, 'default')
             expect(row?.active).toBe(true)
@@ -128,7 +135,9 @@ describe('archiveSession (#1203 in-flight CLI)', () => {
         }
     })
 
-    it('refuses to archive when StopSession is already_gone but the session is still heartbeating', async () => {
+    it('archives when StopSession is already_gone after KillSession miss (no heartbeat gate)', async () => {
+        // #1911: runner confirmation is authoritative — do not second-guess with
+        // heartbeat after already_gone (that was the incomplete #1706 path).
         const { engine } = createEngine()
         try {
             const session = seedActiveSession(engine, 'zombie-active', { machineId: 'machine-1' })
@@ -138,17 +147,17 @@ describe('archiveSession (#1203 in-flight CLI)', () => {
             }
             rpc.stopRunnerSession = async () => 'already_gone'
 
-            await expect(engine.archiveSession(session.id)).rejects.toThrow(/not controllable/)
+            await engine.archiveSession(session.id)
 
             const row = engine.getSessionByNamespace(session.id, 'default')
-            expect(row?.active).toBe(true)
-            expect(row?.metadata?.lifecycleState).not.toBe('archived')
+            expect(row?.active).toBe(false)
+            expect(row?.metadata?.lifecycleState).toBe('archived')
         } finally {
             engine.stop()
         }
     })
 
-    it('archives the classic #916 case: no kill handler, runner already_gone, heartbeat already expired', async () => {
+    it('archives the classic #916 case: no kill handler, runner already_gone', async () => {
         const { engine } = createEngine()
         try {
             const session = seedActiveSession(engine, 'truly-gone', { machineId: 'machine-1' })
@@ -170,7 +179,9 @@ describe('archiveSession (#1203 in-flight CLI)', () => {
         }
     })
 
-    it('refuses to archive a heartbeating unproven CLI when there is no machineId', async () => {
+    it('archives when KillSession misses and there is no machineId to verify against', async () => {
+        // No machine → cannot StopSession; #1911 still allows hub archive +
+        // Socket.IO metadata push so a reconnecting CLI can exit.
         const { engine } = createEngine()
         try {
             const session = seedActiveSession(engine, 'no-machine')
@@ -178,17 +189,18 @@ describe('archiveSession (#1203 in-flight CLI)', () => {
                 throw missingKill(sessionId)
             }
 
-            await expect(engine.archiveSession(session.id)).rejects.toThrow(/not controllable/)
+            await engine.archiveSession(session.id)
 
             const row = engine.getSessionByNamespace(session.id, 'default')
-            expect(row?.active).toBe(true)
-            expect(row?.metadata?.lifecycleState).not.toBe('archived')
+            expect(row?.active).toBe(false)
+            expect(row?.metadata?.lifecycleState).toBe('archived')
         } finally {
             engine.stop()
         }
     })
 
-    it('refuses to archive when KillSession and StopSession are both missing but the session is still heartbeating', async () => {
+    it('refuses when KillSession and StopSession are both missing (unconfirmed)', async () => {
+        // Detached children can outlive both RPCs — refuse without confirmation.
         const { engine } = createEngine()
         try {
             const session = seedActiveSession(engine, 'both-missing-live', { machineId: 'machine-1' })
@@ -200,14 +212,17 @@ describe('archiveSession (#1203 in-flight CLI)', () => {
                 throw missingStop(machineId)
             }
 
-            await expect(engine.archiveSession(session.id)).rejects.toThrow(/not controllable/)
+            await expect(engine.archiveSession(session.id)).rejects.toBeInstanceOf(
+                SessionArchiveUncontrollableError
+            )
             expect(engine.getSessionByNamespace(session.id, 'default')?.active).toBe(true)
         } finally {
             engine.stop()
         }
     })
 
-    it('archives when KillSession and StopSession are both missing and the heartbeat has expired', async () => {
+    it('refuses when StopSession RPC is missing even if heartbeat already expired', async () => {
+        // Same unconfirmed machine RPC — heartbeat expiry alone is not enough (#1910).
         const { engine } = createEngine()
         try {
             const session = seedActiveSession(engine, 'both-missing-dead', { machineId: 'machine-1' })
@@ -220,11 +235,12 @@ describe('archiveSession (#1203 in-flight CLI)', () => {
                 throw missingStop(machineId)
             }
 
-            await engine.archiveSession(session.id)
-
-            const row = engine.getSessionByNamespace(session.id, 'default')
-            expect(row?.active).toBe(false)
-            expect(row?.metadata?.lifecycleState).toBe('archived')
+            await expect(engine.archiveSession(session.id)).rejects.toBeInstanceOf(
+                SessionArchiveUncontrollableError
+            )
+            expect(engine.getSessionByNamespace(session.id, 'default')?.active).toBe(false)
+            expect(engine.getSessionByNamespace(session.id, 'default')?.metadata?.lifecycleState)
+                .not.toBe('archived')
         } finally {
             engine.stop()
         }
