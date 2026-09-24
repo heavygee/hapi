@@ -8,14 +8,16 @@ import {
     insertSystemEvent,
     listSystemEvents,
     queryEvents,
+    queryEventsWithPagination,
     repointSessionEvents,
     type InsertSystemEventInput,
     type ListSystemEventsOptions,
     type QueryEventsOptions,
+    type QueryEventsResult,
     type StoredSystemEvent
 } from './events'
 
-export type { InsertSystemEventInput, ListSystemEventsOptions, QueryEventsOptions, StoredSystemEvent }
+export type { InsertSystemEventInput, ListSystemEventsOptions, QueryEventsOptions, QueryEventsResult, StoredSystemEvent }
 
 export class EventStore {
     constructor(private readonly db: Database) {}
@@ -30,6 +32,10 @@ export class EventStore {
 
     query(options: QueryEventsOptions = {}): StoredSystemEvent[] {
         return queryEvents(this.db, options)
+    }
+
+    queryWithPagination(options: QueryEventsOptions = {}): QueryEventsResult {
+        return queryEventsWithPagination(this.db, options)
     }
 
     getById(id: number): StoredSystemEvent | null {

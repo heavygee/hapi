@@ -13,10 +13,23 @@ import { logger } from "@/ui/logger";
 import { ApiSessionClient } from "@/api/apiSession";
 import { randomUUID } from "node:crypto";
 import { detectImageMimeType, registerGeneratedImage } from "@/modules/common/generatedImages";
+import {
+    SearchContentError,
+    formatSearchContentMatches,
+    searchSessionContent,
+} from "@/modules/searchContent/searchContent";
 
 type StartHappyServerOptions = {
     emitTitleSummary?: boolean;
 };
+
+const SEARCH_CONTENT_DESCRIPTION =
+    'Search transcript text across HAPI sessions on the same hub/namespace (what sessions actually said). ' +
+    'Uses this session\'s CLI credentials — never hand-mint a JWT (expired JWT previously returned an empty list, ' +
+    'indistinguishable from no matches). Optional sessionId scopes to one session. ' +
+    'Returns session id, name, timestamp, and snippet so you can inspect_peer / ping_peer next. ' +
+    'Query tip: short/common substrings match badly via trigram FTS (e.g. "Ian" hits Austral**ian**; ' +
+    '"home" hits every /home/ path) — prefer distinctive nouns. Auth/backend failures surface as errors, never [].';
 
 function createHapiMcpServer(client: ApiSessionClient, emitTitleSummary: boolean): McpServer {
     const handler = async (title: string) => {
@@ -48,6 +61,18 @@ function createHapiMcpServer(client: ApiSessionClient, emitTitleSummary: boolean
     const displayImageInputSchema: z.ZodTypeAny = z.object({
         path: z.string().describe('Local filesystem path of the image to display to the user'),
         title: z.string().optional().describe('Optional display title or filename for the image'),
+    });
+
+    const searchContentInputSchema: z.ZodTypeAny = z.object({
+        query: z.string().trim().min(2).max(200).describe(
+            'Distinctive noun/phrase from transcript text. Avoid short/common substrings (trigram FTS noise).'
+        ),
+        sessionId: z.string().min(1).optional().describe(
+            'Optional hub session id to scope search to one conversation.'
+        ),
+        limit: z.number().int().min(1).max(100).optional().describe(
+            'Max matches to return (default 50, hub max 100).'
+        ),
     });
 
     mcp.registerTool<any, any>('change_title', {
@@ -145,6 +170,50 @@ function createHapiMcpServer(client: ApiSessionClient, emitTitleSummary: boolean
         }
     });
 
+    mcp.registerTool<any, any>('search_content', {
+        description: SEARCH_CONTENT_DESCRIPTION,
+        title: 'Search Session Transcripts',
+        inputSchema: searchContentInputSchema,
+    }, async (args: { query: string; sessionId?: string; limit?: number }) => {
+        logger.debug('[hapiMCP] search_content:', args.query);
+        try {
+            const limit = args.limit ?? 50;
+            const result = await searchSessionContent({
+                query: args.query,
+                sessionId: args.sessionId,
+                limit,
+            });
+            return {
+                content: [
+                    {
+                        type: 'text' as const,
+                        text: formatSearchContentMatches(result, {
+                            query: args.query,
+                            maxRows: limit,
+                        }),
+                    },
+                ],
+                isError: false,
+            };
+        } catch (error) {
+            const message = error instanceof SearchContentError
+                ? error.message
+                : error instanceof Error
+                    ? error.message
+                    : String(error);
+            logger.debug('[hapiMCP] search_content failed:', message);
+            return {
+                content: [
+                    {
+                        type: 'text' as const,
+                        text: `Failed to search content: ${message}`,
+                    },
+                ],
+                isError: true,
+            };
+        }
+    });
+
     return mcp;
 }
 
@@ -221,7 +290,7 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
 
     return {
         url: mcpUrl,
-        toolNames: ['change_title', 'display_image'],
+        toolNames: ['change_title', 'display_image', 'search_content'],
         stop: () => {
             logger.debug('[hapiMCP] Stopping server');
             for (const mcp of mcps.values()) {

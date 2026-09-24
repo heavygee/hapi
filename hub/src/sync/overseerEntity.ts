@@ -25,6 +25,7 @@ import {
     type OverseerWorkerHealth,
     type OverseerWorkerState,
     type QueryEventsArgs,
+    type QueryEventsResult,
     type QueryInboxArgs,
     type ListActiveWorkersArgs
 } from '@hapi/protocol'
@@ -93,8 +94,8 @@ export class OverseerEntity {
 
     // --- Tool 1: query_events ------------------------------------------------
 
-    queryEvents(args: QueryEventsArgs): StoredSystemEvent[] {
-        return this.events.query({
+    queryEvents(args: QueryEventsArgs): QueryEventsResult {
+        return this.events.queryWithPagination({
             sessionId: args.sessionId ?? null,
             project: args.project ?? null,
             eventType: args.eventType ?? null,
@@ -104,6 +105,7 @@ export class OverseerEntity {
             sinceTs: args.sinceTs ?? null,
             untilTs: args.untilTs ?? null,
             beforeId: args.beforeId ?? null,
+            afterId: args.afterId ?? null,
             limit: args.limit ?? 50
         })
     }

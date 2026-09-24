@@ -74,6 +74,9 @@ export async function buildHapiMcpBridge(
                 tools: {
                     change_title: {
                         approval_mode: 'approve'
+                    },
+                    search_content: {
+                        approval_mode: 'approve'
                     }
                 }
             }

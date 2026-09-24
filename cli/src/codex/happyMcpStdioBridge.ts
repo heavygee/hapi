@@ -1,7 +1,7 @@
 /**
  * HAPI MCP STDIO Bridge
  *
- * Minimal STDIO MCP server exposing HAPI tools such as `change_title` and `display_image`.
+ * Minimal STDIO MCP server exposing HAPI tools such as `change_title`, `display_image`, and `search_content`.
  * On invocation it forwards the tool call to an existing HAPI HTTP MCP server
  * using the StreamableHTTPClientTransport.
  *
@@ -116,6 +116,42 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
           return {
             content: [
               { type: 'text' as const, text: `Failed to display image: ${error instanceof Error ? error.message : String(error)}` },
+            ],
+            isError: true,
+          };
+        }
+      }
+    );
+
+    const searchContentInputSchema: z.ZodTypeAny = z.object({
+      query: z.string().trim().min(2).max(200).describe(
+        'Distinctive noun/phrase from transcript text. Avoid short/common substrings (trigram FTS noise).'
+      ),
+      sessionId: z.string().min(1).optional().describe(
+        'Optional hub session id to scope search to one conversation.'
+      ),
+      limit: z.number().int().min(1).max(100).optional().describe(
+        'Max matches to return (default 50, hub max 100).'
+      ),
+    });
+
+    server.registerTool<any, any>(
+      'search_content',
+      {
+        description:
+          'Search transcript text across HAPI sessions on the same hub/namespace. Uses session CLI credentials — never hand-mint a JWT. Auth/backend failures are errors, never empty lists. Prefer distinctive nouns (trigram FTS).',
+        title: 'Search Session Transcripts',
+        inputSchema: searchContentInputSchema,
+      },
+      async (args: Record<string, unknown>) => {
+        try {
+          const client = await ensureHttpClient();
+          const response = await client.callTool({ name: 'search_content', arguments: args });
+          return response as any;
+        } catch (error) {
+          return {
+            content: [
+              { type: 'text' as const, text: `Failed to search content: ${error instanceof Error ? error.message : String(error)}` },
             ],
             isError: true,
           };
