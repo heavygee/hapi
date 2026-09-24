@@ -6,28 +6,12 @@ import { RpcTargetMissingError } from './rpcGateway'
 import type { SessionCache } from './sessionCache'
 
 /**
- * `archiveSession`'s only kill mechanism is `rpcGateway.killSession`, a
- * session-scoped socket RPC keyed on `${sessionId}:KillSession`. That
- * registration goes stale independently of the actual runner child process
- * — e.g. `SessionCache.mergeSessions` rotates the hub's canonical session id
- * on resume without the CLI re-registering under it, or the session socket
- * is mid-reconnect — so `RpcTargetMissingError` alone does not prove the
- * process is dead.
- *
- * Before this fix, any `RpcTargetMissingError` was treated as "CLI already
- * gone" and the row was unconditionally marked `archived`, silently
- * orphaning a still-running child with no runner-side supervision left
- * pointed at it. The fix confirms with the runner's machine-level
- * `StopSession` RPC (which resolves the child by PID and checks both the
- * requested and confirmed session ids) before trusting that the process is
- * actually gone. It deliberately does NOT pre-check `MachineCache.active`
- * (a 45s heartbeat heuristic) before attempting that RPC — a delayed
- * heartbeat can leave `active` false while the machine's RPC target is
- * still fully registered and reachable — so the RPC's own
- * `RpcTargetMissingError` failure mode is the only signal trusted for
- * "nothing to check."
+ * #1910 / #1705: `killSession` is a session-socket RPC. A missing target does
+ * not prove the runner child is dead. Archive must always ask the runner via
+ * `stopRunnerSession` when a machineId is known, and must refuse to archive
+ * when the runner reports the process still alive (or unknown).
  */
-describe('SyncEngine.archiveSession RpcTargetMissingError fallback', () => {
+describe('SyncEngine.archiveSession runner reaping (#1910)', () => {
     let store: Store
     let engine: SyncEngine
     const NAMESPACE = 'default'
@@ -52,12 +36,17 @@ describe('SyncEngine.archiveSession RpcTargetMissingError fallback', () => {
             async () => { throw new RpcTargetMissingError('KillSession', 'handler-not-registered') }
     }
 
+    function setKillSessionOk(): void {
+        ;(engine as unknown as { rpcGateway: { killSession: unknown } }).rpcGateway.killSession =
+            async () => undefined
+    }
+
     beforeEach(() => {
         store = new Store(':memory:')
         engine = new SyncEngine(store, {} as never, new RpcRegistry(), { broadcast() {} } as never)
     })
 
-    it('does not archive a session the runner confirms is still alive', async () => {
+    it('does not archive when the runner confirms still_alive after KillSession miss', async () => {
         const sessionId = insertActiveSession('sess-still-alive', 'machine-x')
         setKillSessionMissingTarget()
         ;(engine as unknown as { rpcGateway: { stopRunnerSession: unknown } }).rpcGateway.stopRunnerSession =
@@ -70,14 +59,30 @@ describe('SyncEngine.archiveSession RpcTargetMissingError fallback', () => {
         expect(session?.metadata?.lifecycleState).not.toBe('archived')
     })
 
-    it('archives the session once the runner confirms the process is gone', async () => {
+    it('always calls stopRunnerSession after a successful KillSession', async () => {
+        const sessionId = insertActiveSession('sess-kill-ok', 'machine-x')
+        setKillSessionOk()
+        let calledWith: [string, string] | undefined
+        ;(engine as unknown as { rpcGateway: { stopRunnerSession: unknown } }).rpcGateway.stopRunnerSession =
+            async (machineId: string, sid: string) => {
+                calledWith = [machineId, sid]
+                return 'already_gone'
+            }
+
+        await engine.archiveSession(sessionId)
+
+        expect(calledWith).toEqual(['machine-x', sessionId])
+        expect(cache().getSession(sessionId)?.active).toBe(false)
+    })
+
+    it('archives once the runner confirms the process is gone', async () => {
         const sessionId = insertActiveSession('sess-confirmed-gone', 'machine-x')
         setKillSessionMissingTarget()
         let calledWith: [string, string] | undefined
         ;(engine as unknown as { rpcGateway: { stopRunnerSession: unknown } }).rpcGateway.stopRunnerSession =
             async (machineId: string, sid: string) => {
                 calledWith = [machineId, sid]
-                return 'stopped'
+                return 'already_gone'
             }
 
         await engine.archiveSession(sessionId)
@@ -88,9 +93,8 @@ describe('SyncEngine.archiveSession RpcTargetMissingError fallback', () => {
         expect(session?.metadata?.lifecycleState).toBe('archived')
     })
 
-    it('falls back to archiving when the session has no known machine to verify against', async () => {
+    it('falls back to archiving when the session has no known machine', async () => {
         const sessionId = insertActiveSession('sess-no-machine')
-        cache().handleSessionEnd({ sid: sessionId, time: Date.now() })
         setKillSessionMissingTarget()
         let stopRunnerSessionCalled = false
         ;(engine as unknown as { rpcGateway: { stopRunnerSession: unknown } }).rpcGateway.stopRunnerSession =
@@ -104,34 +108,51 @@ describe('SyncEngine.archiveSession RpcTargetMissingError fallback', () => {
         expect(session?.metadata?.lifecycleState).toBe('archived')
     })
 
-    it('falls back to archiving when the machine has no RPC target at all (RpcTargetMissingError)', async () => {
-        // This is the genuinely-unreachable case — mirrors the #916
-        // hub-restart-cascade scenario the fallback was originally built
-        // for. There is no runner to ask, so "already gone" is the right
-        // guess.
+    it('emits Socket.IO update-session when hub-authoring archive without a machine (#1910)', async () => {
+        const emitted: Array<{ room: string; event: string; payload: unknown }> = []
+        const io = {
+            of: (ns: string) => ({
+                to: (room: string) => ({
+                    emit: (event: string, payload: unknown) => {
+                        if (ns === '/cli') {
+                            emitted.push({ room, event, payload })
+                        }
+                    }
+                })
+            })
+        }
+        engine = new SyncEngine(store, io as never, new RpcRegistry(), { broadcast() {} } as never)
+        const sessionId = insertActiveSession('sess-hub-archive-socket')
+        setKillSessionMissingTarget()
+
+        await engine.archiveSession(sessionId)
+
+        expect(emitted).toHaveLength(1)
+        expect(emitted[0]?.room).toBe(`session:${sessionId}`)
+        expect(emitted[0]?.event).toBe('update')
+        const body = (emitted[0]?.payload as { body: { t: string; metadata: { version: number; value: { archivedBy?: string; lifecycleState?: string } } } }).body
+        expect(body.t).toBe('update-session')
+        expect(body.metadata.value.lifecycleState).toBe('archived')
+        expect(body.metadata.value.archivedBy).toBe('hub')
+        expect(body.metadata.version).toBeGreaterThan(0)
+    })
+
+    it('does NOT archive when the machine RPC target is missing', async () => {
+        // Detached children can outlive both KillSession and a missing machine
+        // socket; refuse to archive without a confirmed stop (#1910).
         const sessionId = insertActiveSession('sess-machine-unreachable', 'machine-x')
-        cache().handleSessionEnd({ sid: sessionId, time: Date.now() })
         setKillSessionMissingTarget()
         ;(engine as unknown as { rpcGateway: { stopRunnerSession: unknown } }).rpcGateway.stopRunnerSession =
             async () => { throw new RpcTargetMissingError('StopSession', 'handler-not-registered') }
 
-        await engine.archiveSession(sessionId)
+        await expect(engine.archiveSession(sessionId)).rejects.toThrow()
 
         const session = cache().getSession(sessionId)
-        expect(session?.active).toBe(false)
-        expect(session?.metadata?.lifecycleState).toBe('archived')
+        expect(session?.active).toBe(true)
+        expect(session?.metadata?.lifecycleState).not.toBe('archived')
     })
 
-    it('does NOT archive when the runner reports the session id as unknown', async () => {
-        // cli/src/runner/run.ts's stopSession returns 'unknown' — not
-        // 'still_alive' — when no PID matches this id anywhere and there is
-        // no verified-exit tombstone. That is NOT confirmation the process
-        // is gone: terminal-started sessions are tracked only in-memory
-        // (never persisted across a runner restart), so a still-alive
-        // terminal session can return 'unknown' right after this exact
-        // runner process restarts — indistinguishable, from this RPC alone,
-        // from a row this runner generation genuinely never knew about.
-        // Treat it conservatively, the same as 'still_alive'.
+    it('does NOT archive when the runner reports unknown after KillSession miss', async () => {
         const sessionId = insertActiveSession('sess-unknown-to-runner', 'machine-x')
         setKillSessionMissingTarget()
         ;(engine as unknown as { rpcGateway: { stopRunnerSession: unknown } }).rpcGateway.stopRunnerSession =
@@ -144,12 +165,19 @@ describe('SyncEngine.archiveSession RpcTargetMissingError fallback', () => {
         expect(session?.metadata?.lifecycleState).not.toBe('archived')
     })
 
-    it('does NOT archive when the StopSession RPC fails ambiguously (not a target-missing error)', async () => {
-        // Regression guard: an ack timeout / protocol error from an
-        // otherwise-reachable machine must NOT be coerced into "already
-        // gone" — that would silently archive a session whose runner
-        // simply didn't answer in time, reproducing this fix's own bug one
-        // RPC layer down.
+    it('archives when KillSession succeeded even if stopRunnerSession returns unknown', async () => {
+        // CLI accepted KillSession and is exiting; runner maps may already be gone.
+        const sessionId = insertActiveSession('sess-kill-ok-unknown', 'machine-x')
+        setKillSessionOk()
+        ;(engine as unknown as { rpcGateway: { stopRunnerSession: unknown } }).rpcGateway.stopRunnerSession =
+            async () => 'unknown'
+
+        await engine.archiveSession(sessionId)
+
+        expect(cache().getSession(sessionId)?.active).toBe(false)
+    })
+
+    it('does NOT archive when StopSession fails ambiguously', async () => {
         const sessionId = insertActiveSession('sess-machine-ambiguous-failure', 'machine-x')
         setKillSessionMissingTarget()
         ;(engine as unknown as { rpcGateway: { stopRunnerSession: unknown } }).rpcGateway.stopRunnerSession =
@@ -161,5 +189,4 @@ describe('SyncEngine.archiveSession RpcTargetMissingError fallback', () => {
         expect(session?.active).toBe(true)
         expect(session?.metadata?.lifecycleState).not.toBe('archived')
     })
-
 })

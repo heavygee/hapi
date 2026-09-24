@@ -72,13 +72,8 @@ export type HookSettingsOptions = {
 
 /**
  * Build Claude Code hook settings.
-<<<<<<< HEAD
  * Soup union: upstream trackPermissionMode + includeLocalPermissions,
  * fork includePreToolUse + workingDirectory PreToolUse Bash guard.
-=======
- * Soup union: upstream trackPermissionMode + includeLocalPermissions, plus fork
- * workingDirectory PreToolUse Bash guard when cwd is under a hapi tree.
->>>>>>> baf1893b6 (feat(tooling): hapi tick v1 — declarative bare pollers (#159))
  */
 export function buildHookSettings(
     command: string,

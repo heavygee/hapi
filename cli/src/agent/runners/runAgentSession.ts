@@ -166,7 +166,7 @@ export async function runAgentSession(opts: {
         }
     };
 
-    registerKillSessionHandler(session.rpcHandlerManager, handleKillSession);
+    registerKillSessionHandler(session.rpcHandlerManager, handleKillSession, session);
 
     let sessionEndReason: SessionEndReason = 'completed';
     try {

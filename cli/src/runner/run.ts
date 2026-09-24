@@ -14,6 +14,15 @@ import { spawnHappyCLI } from '@/utils/spawnHappyCLI';
 import { writeRunnerState, RunnerLocallyPersistedState, readRunnerState, acquireRunnerLock, releaseRunnerLock } from '@/persistence';
 import { getCliArgs } from '@/utils/cliArgs';
 import { getProcessStartMarker, isProcessAlive, isWindows, killProcess, killProcessByChildProcess, killProcessTreeByPid } from '@/utils/process';
+import { findRunnerSpawnedOrphanPids, reapRunnerSpawnedOrphans } from '@/runner/orphanReap';
+import { decideUntrackedRunnerWebhook } from '@/runner/lateRunnerWebhook';
+import {
+    detachSharedRootFromWrapper,
+    keepWrapperForSharedSiblings,
+    sessionRuntimeHasActiveSiblings,
+    trackedSharedWrapperPidsWithSiblings,
+    wrapperHasActiveSiblingRoots,
+} from '@/runner/sharedSessionStop';
 import { PERMISSION_MODES } from '@hapi/protocol/modes';
 import { RUNNER_CAPABILITIES } from '@hapi/protocol';
 import { withRetry } from '@/utils/time';
@@ -274,6 +283,10 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     // tracking, so confirmed exit can be attributed to the requested HAPI row.
     const pidToRequestedSessionId = new Map<number, string>();
     const pidToConfirmedSessionId = new Map<number, string>();
+    // Generation-local: PIDs whose TrackedSession was dropped by webhook timeout.
+    // Late runner webhooks may kill only these — never recovered shared roots
+    // that merely appear in resume-processes after a runner restart (#1911).
+    const webhookTimeoutOrphanPids = new Set<number>();
     // Only actual observed child exits may create a stop-session tombstone.
     // Tracking loss (notably webhook timeout) is deliberately not evidence.
     const exitTombstoneFile = `${configuration.runnerStateFile}.verified-exits.json`;
@@ -460,6 +473,21 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         if (persisted) {
           persisted.confirmedSessionId = sessionId;
           persistResumeProcesses();
+        } else {
+          // Fresh Claude/etc. spawns often have no reserved HAPI id at spawn
+          // time, so nothing was persisted then. Once the webhook names the
+          // row, keep a durable PID mapping so stopSession can still reap
+          // after in-memory tracking is dropped (#1910).
+          const processStartMarker = getProcessStartMarker(pid);
+          if (processStartMarker) {
+            persistedResumeProcesses.set(pid, {
+              requestedSessionId: existingSession.requestedHappySessionId ?? sessionId,
+              confirmedSessionId: sessionId,
+              pid,
+              processStartMarker
+            });
+            persistResumeProcesses();
+          }
         }
         existingSession.happySessionMetadataFromLocalWebhook = sessionMetadata;
         logger.debug(`[RUNNER RUN] Updated runner-spawned session ${sessionId} with metadata`);
@@ -484,22 +512,58 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         // anything claiming `'runner'` here must be the second case and
         // should be ignored + terminated instead of silently promoted.
         if (sessionMetadata.startedBy === 'runner') {
-          // A shared root can report /new after a Runner restart. Unknown is
-          // not proof of an orphan: never kill its sibling roots. Known spawn
-          // timeouts already terminate their ChildProcess tree at the source.
-          // No registry scan/adoption lifecycle is needed for live attachment.
-          if (sessionMetadata.capabilities?.concurrentClients) return;
+          // Untracked runner-spawned webhook: either this generation timed the
+          // spawn out, or the runner restarted before the webhook (no stamp).
+          // Shared Codex must never be killed here (siblings). Nonshared
+          // post-restart CLIs must be adopted so StopSession can find them —
+          // Claude often has no HAPI id on argv yet (#1910 / #1911).
+          const timedOutByThisRunner = webhookTimeoutOrphanPids.has(pid);
+          webhookTimeoutOrphanPids.delete(pid);
+          const decision = decideUntrackedRunnerWebhook({
+            concurrentClients: Boolean(sessionMetadata.capabilities?.concurrentClients),
+            timedOutByThisRunner,
+          });
+          if (decision === 'kill') {
+            logger.debug(
+              `[RUNNER RUN] Ignoring late webhook from orphaned runner-spawned PID ${pid} (session ${sessionId}). Terminating child.`
+            );
+            // Use killProcess (SIGTERM → SIGKILL escalation) rather than a
+            // bare process.kill() so the orphan is reliably reaped even if
+            // it ignores SIGTERM. We don't have a ChildProcess reference
+            // here (tracking entry was already removed by the timeout
+            // handler), so tree-kill via killProcessByChildProcess is not
+            // available — but the timeout handler should have already
+            // tree-killed the process group; this is defence-in-depth.
+            void killProcess(pid);
+            return;
+          }
+
+          const processStartMarker = getProcessStartMarker(pid);
+          const adopted: TrackedSession = {
+            ...(sessionMetadata.capabilities?.concurrentClients
+              ? { sharedSessions: { [sessionId]: sessionMetadata } }
+              : {}),
+            startedBy: 'runner',
+            happySessionId: sessionId,
+            happySessionMetadataFromLocalWebhook: sessionMetadata,
+            pid,
+          };
+          invalidateVerifiedExit(sessionId);
+          invalidateVerifiedExit(`PID-${pid}`);
+          pidToTrackedSession.set(pid, adopted);
+          pidToConfirmedSessionId.set(pid, sessionId);
+          if (processStartMarker) {
+            persistedResumeProcesses.set(pid, {
+              requestedSessionId: sessionId,
+              confirmedSessionId: sessionId,
+              pid,
+              processStartMarker,
+            });
+            persistResumeProcesses();
+          }
           logger.debug(
-            `[RUNNER RUN] Ignoring late webhook from orphaned runner-spawned PID ${pid} (session ${sessionId}). Terminating child.`
+            `[RUNNER RUN] Adopted untracked runner-spawned session ${sessionId} (PID ${pid}) after restart or shared recovery`
           );
-          // Use killProcess (SIGTERM → SIGKILL escalation) rather than a
-          // bare process.kill() so the orphan is reliably reaped even if
-          // it ignores SIGTERM.  We don't have a ChildProcess reference
-          // here (tracking entry was already removed by the timeout
-          // handler), so tree-kill via killProcessByChildProcess is not
-          // available — but the timeout handler should have already
-          // tree-killed the process group; this is defence-in-depth.
-          void killProcess(pid);
           return;
         }
 
@@ -917,46 +981,72 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           // HAPI_RUNNER_WEBHOOK_TIMEOUT_MS for users on slow models
           // (e.g. opus[1m] --resume).
           const timeout = setTimeout(() => {
-            clearAgentReadyTimeout();
-            clearAwaitingReadyForPid();
-            pidToAwaiter.delete(pid);
-            pidToErrorAwaiter.delete(pid);
-            pidToSpawnCompleter.delete(pid);
+            void (async () => {
+              clearAgentReadyTimeout();
+              clearAwaitingReadyForPid();
+              pidToAwaiter.delete(pid);
+              pidToErrorAwaiter.delete(pid);
+              pidToSpawnCompleter.delete(pid);
 
-            // Remove the tracked session entry so a late-arriving webhook
-            // from this orphaned PID cannot be silently promoted into a
-            // ghost session by onHappySessionWebhook().
-            pidToTrackedSession.delete(pid);
+              // Remove the tracked session entry so a late-arriving webhook
+              // from this orphaned PID cannot be silently promoted into a
+              // ghost session by onHappySessionWebhook(). Keep durable
+              // resume-process / requested-id maps until the process is
+              // proven dead so StopSession can still target this PID (#1910).
+              pidToTrackedSession.delete(pid);
+              webhookTimeoutOrphanPids.add(pid);
 
-            // Terminate the entire process tree (wrapper + agent
-            // grandchildren).  Using killProcessByChildProcess instead of
-            // a bare SIGTERM ensures that detached grandchild processes
-            // (the actual claude/codex agent) are also reaped, and that
-            // SIGTERM → SIGKILL escalation kicks in if needed.
-            if (happyProcess) {
-              void killProcessByChildProcess(happyProcess).finally(() => {
-                void cleanupCopiedCodexConfig('webhook-timeout');
+              // Await tree-kill (wrapper + agent grandchildren). Do not fire-
+              // and-forget: under load an unawaited kill can fail silently and
+              // leave an immortal detached child.
+              let treeDead = false;
+              if (happyProcess) {
+                try {
+                  treeDead = await killProcessByChildProcess(happyProcess);
+                } catch (error) {
+                  logger.debug(`[RUNNER RUN] Webhook-timeout tree-kill failed for PID ${pid}:`, error);
+                }
+              }
+              if (!treeDead && isProcessAlive(pid)) {
+                try {
+                  treeDead = await killProcessTreeByPid(pid);
+                } catch (error) {
+                  logger.debug(`[RUNNER RUN] Webhook-timeout PID tree-kill failed for ${pid}:`, error);
+                }
+              }
+
+              if (!isProcessAlive(pid)) {
+                if (trackedSession.requestedHappySessionId) {
+                  rememberVerifiedExit(trackedSession.requestedHappySessionId);
+                }
+                rememberVerifiedExit(`PID-${pid}`);
+                pidToRequestedSessionId.delete(pid);
+                pidToConfirmedSessionId.delete(pid);
+                webhookTimeoutOrphanPids.delete(pid);
+                if (persistedResumeProcesses.delete(pid)) persistResumeProcesses();
+                releaseRecoveredSpawnDedupe(pid, existingSessionIdByChildPid, spawnSession);
+              }
+
+              await cleanupCopiedCodexConfig('webhook-timeout');
+
+              // If this was a worktree session, the worktree can only be
+              // safely removed after the child has actually exited.
+              if (worktreeInfo && happyProcess) {
+                happyProcess.once('exit', () => {
+                  void cleanupWorktree();
+                });
+                if (!isProcessAlive(pid)) {
+                  void cleanupWorktree();
+                }
+              }
+
+              logger.debug(`[RUNNER RUN] Session webhook timeout for PID ${pid}`);
+              logStderrTail();
+              resolve({
+                type: 'error',
+                errorMessage: buildWebhookFailureMessage('timeout')
               });
-            } else {
-              void cleanupCopiedCodexConfig('webhook-timeout');
-            }
-
-            // If this was a worktree session, the worktree can only be
-            // safely removed after the child has actually exited (the
-            // child may still be writing to it).  Register a one-shot
-            // exit listener so cleanup happens once the tree-kill lands.
-            if (worktreeInfo && happyProcess) {
-              happyProcess.once('exit', () => {
-                void cleanupWorktree();
-              });
-            }
-
-            logger.debug(`[RUNNER RUN] Session webhook timeout for PID ${pid}`);
-            logStderrTail();
-            resolve({
-              type: 'error',
-              errorMessage: buildWebhookFailureMessage('timeout')
-            });
+            })();
           }, webhookTimeoutMs);
 
           const completeRunnerSpawn = (completedSession: TrackedSession) => {
@@ -1084,8 +1174,54 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     }
 
     // Stop a session by sessionId or PID fallback
-    const stopSession = async (sessionId: string): Promise<'stopped' | 'already_gone' | 'still_alive'> => {
+    const stopSession = async (sessionId: string): Promise<'stopped' | 'already_gone' | 'still_alive' | 'unknown'> => {
       logger.debug(`[RUNNER RUN] Attempting to stop session ${sessionId}`);
+
+      // After a mapped/persisted PID path succeeds, still scan argv for other
+      // generations of the same HAPI id (untracked orphans from an earlier
+      // runner) before reporting stopped/already_gone (#1910). Skip only PIDs
+      // that still host active shared siblings — never skip the whole scan.
+      // Protect tracked wrappers even when the durable runtime registry is
+      // missing/unreadable (argv would otherwise match the primary session id).
+      const shouldSkipOrphanPid = (
+        liveRuntimes: Parameters<typeof wrapperHasActiveSiblingRoots>[0],
+        protectedTrackedPids: Set<number>,
+        id: string,
+        pid: number
+      ): boolean => (
+        protectedTrackedPids.has(pid)
+        || wrapperHasActiveSiblingRoots(liveRuntimes, id, pid)
+      );
+
+      const finishWithOrphanSweep = async (
+        base: 'stopped' | 'already_gone'
+      ): Promise<'stopped' | 'already_gone' | 'still_alive'> => {
+        const liveRuntimes = (await readRuntimes()).filter(runtime =>
+          runtime.hub === configuration.apiUrl
+          && runtime.authHash === runtimeAuthHash()
+          && runtimeMayBeAlive(runtime)
+        );
+        const protectedTrackedPids = trackedSharedWrapperPidsWithSiblings(
+          pidToTrackedSession.entries(),
+          sessionId
+        );
+        const orphanStatus = await reapRunnerSpawnedOrphans(sessionId, {
+          findOrphans: async (id) => {
+            const found = await findRunnerSpawnedOrphanPids(id);
+            if (found === 'scan_failed') return found;
+            return found.filter(pid => !shouldSkipOrphanPid(liveRuntimes, protectedTrackedPids, id, pid));
+          },
+        });
+        if (orphanStatus === 'still_alive') {
+          logger.debug(`[RUNNER RUN] Orphan argv sweep left live PIDs for session ${sessionId}`);
+          return 'still_alive';
+        }
+        if (orphanStatus === 'stopped') {
+          rememberVerifiedExit(sessionId);
+          return 'stopped';
+        }
+        return base;
+      };
 
       const { findRuntime } = await import('@/codex/shared/registry');
       const sharedRuntime = await findRuntime(sessionId);
@@ -1094,20 +1230,66 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           const { runtimeControl } = await import('@/codex/shared/frontend');
           await runtimeControl(sharedRuntime, 'hapi/stopSession', sessionId);
           const tracked = pidToTrackedSession.get(sharedRuntime.pid);
-          if (tracked?.sharedSessions) delete tracked.sharedSessions[sessionId];
-          return 'stopped';
+          if (tracked) {
+            const detach = detachSharedRootFromWrapper(tracked, sessionId);
+            if (detach.kind === 'keep_wrapper' || keepWrapperForSharedSiblings(tracked, sessionId)) {
+              // App-server ended this root; sibling roots still need the wrapper.
+              // Still argv-sweep other generations; PID filter skips this wrapper.
+              logger.debug(
+                `[RUNNER RUN] Shared runtime stopped root ${sessionId}; wrapper PID ${sharedRuntime.pid} kept`
+              );
+              return await finishWithOrphanSweep('stopped');
+            }
+          }
+          // Post-restart: TrackedSession may be gone; registry still lists siblings.
+          const liveAfterStop = (await readRuntimes()).filter(runtime =>
+            runtime.hub === configuration.apiUrl
+            && runtime.authHash === runtimeAuthHash()
+            && runtimeMayBeAlive(runtime)
+          );
+          if (wrapperHasActiveSiblingRoots(liveAfterStop, sessionId, sharedRuntime.pid)) {
+            logger.debug(
+              `[RUNNER RUN] Shared runtime stopped root ${sessionId}; registry siblings keep PID ${sharedRuntime.pid}`
+            );
+            return await finishWithOrphanSweep('stopped');
+          }
+          return await finishWithOrphanSweep('stopped');
         } catch { return 'still_alive'; }
       }
       if ((await readRuntimes()).some(runtime => runtime.hub === configuration.apiUrl && runtime.authHash === runtimeAuthHash()
         && runtime.sessions[sessionId]?.active && runtimeMayBeAlive(runtime))) return 'still_alive';
-      // Missing registry is not permission to kill siblings in a live execution.
-      if ([...pidToTrackedSession.values()].some(session => session.sharedSessions?.[sessionId])) return 'still_alive';
+
+      // After KillSession, the shared runtime row may already be inactive so
+      // findRuntime misses. Detach this root from sharedSessions without
+      // tree-killing the wrapper while sibling roots remain.
+      for (const [pid, session] of pidToTrackedSession.entries()) {
+        if (!session.sharedSessions?.[sessionId]) continue;
+        if (detachSharedRootFromWrapper(session, sessionId).kind === 'keep_wrapper') {
+          logger.debug(
+            `[RUNNER RUN] Detached shared root ${sessionId} from wrapper PID ${pid}; siblings remain`
+          );
+          // Argv sweep must not kill this tracked wrapper (registry may be
+          // empty); other untracked orphan PIDs are still reaped.
+          return await finishWithOrphanSweep('stopped');
+        }
+        // Last shared entry removed — fall through so the wrapper can be stopped.
+        break;
+      }
 
       // Try to find by sessionId first
       for (const [pid, session] of pidToTrackedSession.entries()) {
         if (session.happySessionId === sessionId ||
           session.requestedHappySessionId === sessionId ||
           (sessionId.startsWith('PID-') && pid === parseInt(sessionId.replace('PID-', '')))) {
+
+          // Primary match, but live shared siblings still use this wrapper
+          // (KillSession may already have cleared this id from sharedSessions).
+          if (keepWrapperForSharedSiblings(session, sessionId)) {
+            logger.debug(
+              `[RUNNER RUN] Keeping shared wrapper PID ${pid} alive for remaining shared roots`
+            );
+            return await finishWithOrphanSweep('stopped');
+          }
 
           if (session.startedBy === 'runner' && session.childProcess) {
             try {
@@ -1154,7 +1336,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           pidToConfirmedSessionId.delete(pid);
           if (persistedResumeProcesses.delete(pid)) persistResumeProcesses();
           logger.debug(`[RUNNER RUN] Removed terminated session ${sessionId} from tracking`);
-          return 'stopped';
+          return await finishWithOrphanSweep('stopped');
         }
       }
 
@@ -1176,14 +1358,28 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           const currentMarker = getProcessStartMarker(pid);
           if (currentMarker === null) return 'still_alive';
           if (currentMarker !== persisted.processStartMarker) {
+            // PID reuse: drop the stale mapping, but do NOT claim already_gone
+            // or write a verified-exit tombstone — the HAPI CLI for this session
+            // may still be alive under a different PID (#1910). Continue so
+            // other fallback PIDs / argv orphan scan can still reap it.
             persistedResumeProcesses.delete(pid);
             persistResumeProcesses();
             pidToRequestedSessionId.delete(pid);
             pidToConfirmedSessionId.delete(pid);
-            if (requestedSessionId) rememberVerifiedExit(requestedSessionId);
-            if (confirmedSessionId) rememberVerifiedExit(confirmedSessionId);
             releaseRecoveredSpawnDedupe(pid, existingSessionIdByChildPid, spawnSession);
-            return 'already_gone';
+            continue;
+          }
+          const liveForPid = (await readRuntimes()).filter(runtime =>
+            runtime.hub === configuration.apiUrl
+            && runtime.authHash === runtimeAuthHash()
+            && runtimeMayBeAlive(runtime)
+          );
+          if (wrapperHasActiveSiblingRoots(liveForPid, sessionId, pid)) {
+            // Keep this shared wrapper; still scan argv for older untracked CLIs.
+            logger.debug(
+              `[RUNNER RUN] Persisted PID ${pid} hosts active shared siblings; not killing for ${sessionId}`
+            );
+            return await finishWithOrphanSweep('stopped');
           }
           if (!(await killProcessTreeByPid(pid))) return 'still_alive';
           if (requestedSessionId) rememberVerifiedExit(requestedSessionId);
@@ -1193,7 +1389,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           pidToConfirmedSessionId.delete(pid);
           if (persistedResumeProcesses.delete(pid)) persistResumeProcesses();
           releaseRecoveredSpawnDedupe(pid, existingSessionIdByChildPid, spawnSession);
-          return 'stopped';
+          return await finishWithOrphanSweep('stopped');
         }
         if (requestedSessionId) rememberVerifiedExit(requestedSessionId);
         if (confirmedSessionId) rememberVerifiedExit(confirmedSessionId);
@@ -1202,15 +1398,58 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         pidToConfirmedSessionId.delete(pid);
         if (persistedResumeProcesses.delete(pid)) persistResumeProcesses();
         releaseRecoveredSpawnDedupe(pid, existingSessionIdByChildPid, spawnSession);
-        return 'already_gone';
+        return await finishWithOrphanSweep('already_gone');
+      }
+
+      // Maps missed (or marker-mismatch cleared a stale row). Scan live argv for
+      // `--started-by runner` + this HAPI session id and tree-kill matches —
+      // excluding PIDs that still host active shared sibling roots (registry
+      // and/or in-memory tracked wrappers).
+      {
+        const liveRuntimes = (await readRuntimes()).filter(runtime =>
+          runtime.hub === configuration.apiUrl
+          && runtime.authHash === runtimeAuthHash()
+          && runtimeMayBeAlive(runtime)
+        );
+        const protectedTrackedPids = trackedSharedWrapperPidsWithSiblings(
+          pidToTrackedSession.entries(),
+          sessionId
+        );
+        const orphanStatus = await reapRunnerSpawnedOrphans(sessionId, {
+          findOrphans: async (id) => {
+            const found = await findRunnerSpawnedOrphanPids(id);
+            if (found === 'scan_failed') return found;
+            return found.filter(pid => !shouldSkipOrphanPid(liveRuntimes, protectedTrackedPids, id, pid));
+          },
+        });
+        if (orphanStatus === 'still_alive') {
+          logger.debug(`[RUNNER RUN] Orphan argv scan left live PIDs for session ${sessionId}`);
+          return 'still_alive';
+        }
+        if (orphanStatus === 'stopped') {
+          rememberVerifiedExit(sessionId);
+          logger.debug(`[RUNNER RUN] Reaped argv-orphan PID(s) for session ${sessionId}`);
+          return 'stopped';
+        }
+        // No killable orphans: if a shared wrapper still has siblings (registry
+        // or tracked), the archived root is done without tearing that wrapper down.
+        if (sessionRuntimeHasActiveSiblings(liveRuntimes, sessionId) || protectedTrackedPids.size > 0) {
+          logger.debug(
+            `[RUNNER RUN] Session ${sessionId} archived; shared siblings remain on wrapper`
+          );
+          return 'stopped';
+        }
       }
 
       if (hasVerifiedExit(sessionId)) {
         logger.debug(`[RUNNER RUN] Session ${sessionId} was previously observed exited`);
         return 'already_gone';
       }
+      // No PID matched and no verified-exit tombstone — distinct from
+      // still_alive so callers reconciling stale rows are not blocked forever,
+      // while callers that just spawned this id can treat unknown defensively.
       logger.debug(`[RUNNER RUN] Session ${sessionId} not found without verified exit`);
-      return 'still_alive';
+      return 'unknown';
     };
 
     // Handle child process exit
@@ -1239,6 +1478,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       pidToErrorAwaiter.delete(pid);
       pidToRequestedSessionId.delete(pid);
       pidToConfirmedSessionId.delete(pid);
+      webhookTimeoutOrphanPids.delete(pid);
       if (persistedResumeProcesses.delete(pid)) persistResumeProcesses();
     };
 
@@ -1704,24 +1944,25 @@ export function buildCliArgs(
   // Codex shares one engine; Runner owns the wrapper, not a remote mode.
   if (agent !== 'codex') args.push('--hapi-starting-mode', startingMode);
   args.push('--started-by', 'runner');
-  // Codex, Cursor ACP, OpenCode, Pi native resume, and Claude message-level
-  // forks reuse the original HAPI row via --existing-session-id.
+  // Stamp the HAPI row id on argv whenever known so stopSession can reap
+  // detached orphans via ps argv scan after tracking maps are lost (#1910).
+  // Flavors that already emit `--existing-session-id` keep that form; others
+  // get `--hapi-session-id` (parsed by agentCommandOptions / ignored as
+  // unknown by Claude's passthrough only when we consume it explicitly).
+  const reapSessionId = options.existingSessionId ?? options.sessionId;
   if (agent === 'codex' || agent === 'cursor' || agent === 'pi'
       || agent === 'opencode'
       || agent === 'agy'
       || agent === 'dsh'
+      || agent === 'grok'
       || (agentCommand === 'claude' && options.forkSession)) {
-    const existingSessionId = options.existingSessionId ?? options.sessionId;
-    if (existingSessionId) {
-      args.push('--existing-session-id', existingSessionId);
+    if (reapSessionId) {
+      args.push('--existing-session-id', reapSessionId);
     }
-  }
-  // Grok fork children also bind the pending HAPI session id.
-  if (agent === 'grok') {
-    const existingSessionId = options.existingSessionId ?? options.sessionId;
-    if (existingSessionId && !args.includes('--existing-session-id')) {
-      args.push('--existing-session-id', existingSessionId);
-    }
+  } else if (reapSessionId) {
+    // Claude (non-fork), kimi, copilot, etc. — stamp for reaping without
+    // changing create-vs-reuse semantics of `--existing-session-id`.
+    args.push('--hapi-session-id', reapSessionId);
   }
   if (options.model) {
     args.push('--model', options.model);
