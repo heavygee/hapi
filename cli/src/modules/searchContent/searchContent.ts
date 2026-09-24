@@ -397,9 +397,37 @@ export function exitCodeForSearchContentError(error: SearchContentError): number
     }
 }
 
+/** Duck-type across module copies — `instanceof` alone can miss and fall through. */
+export function isSearchContentError(error: unknown): error is SearchContentError {
+    if (error instanceof SearchContentError) {
+        return true
+    }
+    if (!error || typeof error !== 'object') {
+        return false
+    }
+    const record = error as { name?: unknown; code?: unknown }
+    return record.name === 'SearchContentError' && typeof record.code === 'string'
+}
+
+/**
+ * Fail the process with a non-zero code. Sets exitCode before exit so callers
+ * that only observe process.exitCode (or a delayed exit) still see failure.
+ */
+export function failSearchContent(error: unknown): never {
+    if (isSearchContentError(error)) {
+        const code = exitCodeForSearchContentError(error)
+        process.exitCode = code
+        process.exit(code)
+    }
+    process.exitCode = 1
+    process.exit(1)
+}
+
 /** Exported for tests — keep parse strict. */
 export const _test = {
     parseContentSearchBody,
     normalizeMatch,
-    TRIGRAM_HINT
+    TRIGRAM_HINT,
+    isSearchContentError,
+    failSearchContent
 }

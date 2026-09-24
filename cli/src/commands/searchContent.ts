@@ -2,8 +2,9 @@ import chalk from 'chalk'
 import { initializeToken } from '@/ui/tokenInit'
 import {
     SearchContentError,
-    exitCodeForSearchContentError,
+    failSearchContent,
     formatSearchContentMatches,
+    isSearchContentError,
     searchSessionContent
 } from '@/modules/searchContent/searchContent'
 import type { CommandDefinition } from './types'
@@ -116,15 +117,15 @@ export const searchContentCommand: CommandDefinition = {
         try {
             await handleSearchContentCommand(commandArgs)
         } catch (error) {
-            if (error instanceof SearchContentError) {
+            if (isSearchContentError(error)) {
                 console.error(chalk.red('hapi search-content:'), error.message)
-                process.exit(exitCodeForSearchContentError(error))
+                failSearchContent(error)
             }
             console.error(
                 chalk.red('hapi search-content:'),
                 error instanceof Error ? error.message : 'Unknown error'
             )
-            process.exit(1)
+            failSearchContent(error)
         }
     }
 }
