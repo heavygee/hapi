@@ -2898,6 +2898,43 @@ export class SyncEngine {
     }
 
     /**
+     * Bump `metadata.cursorCredentialRefreshAt` and push Socket.IO update-session
+     * so a live Cursor ACP launcher refreshes CURSOR_API_KEY from disk and
+     * relaunches ACP in place (#1909 twin). Flavor must be cursor.
+     */
+    async requestCursorCredentialRefresh(sessionId: string): Promise<{ refreshAt: string }> {
+        const refreshAt = new Date().toISOString()
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+            const session = this.sessionCache.getSession(sessionId)
+            if (!session) throw new Error('Session not found')
+            if (session.metadata?.flavor !== 'cursor') {
+                throw new Error('Cursor credential refresh is only supported for Cursor sessions')
+            }
+            const next = {
+                ...(session.metadata ?? { path: '', host: '' }),
+                cursorCredentialRefreshAt: refreshAt
+            }
+            const result = this.store.sessions.updateSessionMetadata(
+                sessionId,
+                next,
+                session.metadataVersion,
+                session.namespace,
+                { touchUpdatedAt: false }
+            )
+            if (result.result === 'error') {
+                throw new Error('Failed to update session metadata')
+            }
+            if (result.result === 'success') {
+                this.sessionCache.refreshSession(sessionId)
+                this.emitCliSessionMetadataUpdate(sessionId)
+                return { refreshAt }
+            }
+            this.sessionCache.refreshSession(sessionId)
+        }
+        throw new Error('Session was modified concurrently. Please try again.')
+    }
+
+    /**
      * Apply the post-migration metadata flip in hapi.db:
      *   - metadata.cursorSessionProtocol = 'acp'
      *   - session.model = lastUsedModel (if provided)

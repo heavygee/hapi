@@ -846,6 +846,7 @@ export class ApiSessionClient extends EventEmitter {
         }
         const wasHubArchived = this.metadata?.lifecycleState === 'archived'
             && this.metadata?.archivedBy === 'hub'
+        const previousCredentialRefreshAt = this.metadata?.cursorCredentialRefreshAt
         this.metadata = parsed.data
         this.metadataVersion = version
         // #1910: hub may archive via metadata when KillSession cannot reach
@@ -855,6 +856,12 @@ export class ApiSessionClient extends EventEmitter {
             && parsed.data.lifecycleState === 'archived'
             && parsed.data.archivedBy === 'hub') {
             this.noteHubArchived()
+        }
+        // Credential twin of #1909 Auto relaunch: hub bumps this nonce when
+        // the fleet Cursor key changes; launcher refreshes env + ACP in place.
+        const nextRefresh = parsed.data.cursorCredentialRefreshAt
+        if (nextRefresh && nextRefresh !== previousCredentialRefreshAt) {
+            this.emit('cursor-credential-refresh', nextRefresh)
         }
     }
 

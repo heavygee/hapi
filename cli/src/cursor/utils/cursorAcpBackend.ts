@@ -26,6 +26,11 @@ export type CursorAcpBackendOptions = {
     worktree?: boolean | string;
     /** Extra workspace roots (`--add-dir`, repeatable). */
     addDirs?: readonly string[];
+    /**
+     * Optional env overlay merged onto `process.env` for the ACP child.
+     * Used after credential refresh so the relaunch inherits the new key.
+     */
+    env?: Record<string, string>;
 };
 
 /** Build `agent … acp` argv (global flags before the `acp` subcommand). */
@@ -75,10 +80,14 @@ export function resolveCursorNativeWorktreePath(repoPath: string, worktreeName: 
 }
 
 export function createCursorAcpBackend(opts: CursorAcpBackendOptions): AcpSdkBackend {
+    const env = {
+        ...filterEnv(process.env),
+        ...(opts.env ?? {})
+    };
     return new AcpSdkBackend({
         command: getAgentLaunchCommand('cursor'),
         args: buildCursorAcpArgs(opts),
-        env: filterEnv(process.env),
+        env,
         flavor: 'cursor',
     });
 }
