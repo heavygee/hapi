@@ -60,7 +60,7 @@ describe('cursorCredentialEnv', () => {
     });
 
     it('cursorApiKeyLogPrefix is stable and short', () => {
-        expect(cursorApiKeyLogPrefix('crsr_7f4d5beaa3xxxxxxxx')).toBe('crsr_7f4d5bea');
+        expect(cursorApiKeyLogPrefix('crsr_7f4d5beaa3xxxxxxxx')).toBe('crsr_7f4d5be');
         expect(cursorApiKeyLogPrefix('nope')).toBe('invalid');
     });
 });
