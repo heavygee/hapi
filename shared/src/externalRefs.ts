@@ -180,19 +180,19 @@ export function upsertGithubPrIntoExternalRefs(
 }
 
 /**
- * Compact chip glyph for session rows: status emoji only (or `?` when stale).
- * Full `repo#N` + status copy lives in the tooltip / aria-label — not the
- * visible chip — so multi-digit PR numbers do not crowd the list.
- * Fallback `PR` when a forge snapshot has no emoji (upstream defaults).
+ * Compact chip glyph for session rows: status emoji + `#N` (or `?` when stale).
+ * Full `repo#N` + status copy lives in the tooltip / aria-label.
+ * Fallback `PR#N` when a forge snapshot has no emoji (upstream defaults).
  */
 export function formatGithubPrChipLabel(
-    _ref: GithubPrExternalRef,
+    ref: GithubPrExternalRef,
     display: ResolvedPrChipDisplay
 ): string {
-    if (display.stale) return '?'
+    const number = `#${ref.number}`
+    if (display.stale) return `?${number}`
     const emoji = display.emoji.trim()
-    if (emoji) return emoji
-    return 'PR'
+    if (emoji) return `${emoji}${number}`
+    return `PR${number}`
 }
 
 export function resolveGithubPrChipDisplay(

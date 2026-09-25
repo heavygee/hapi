@@ -66,7 +66,7 @@ import {
     getPrimaryGithubPrRef,
     resolveGithubPrChipDisplay
 } from '@hapi/protocol'
-import { formatGithubPrChipDetailParts } from '@/components/SessionPrChip'
+import { formatGithubPrChipDetailParts, SessionPrChip } from '@/components/SessionPrChip'
 import { Spinner } from '@/components/Spinner'
 import { transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
 import { useToast } from '@/lib/toast-context'
@@ -1089,32 +1089,47 @@ function SessionItem(props: {
     )
     return (
         <>
-            <button
-                type="button"
-                {...longPressHandlers}
-                data-session-scroll-anchor
-                className={`session-list-item group/session-row flex w-full flex-col gap-1 py-2 pl-2.5 pr-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none rounded-lg ${selected ? 'bg-[var(--app-secondary-bg)]' : ''}`}
-                style={{ WebkitTouchCallout: 'none' }}
-                aria-current={selected ? 'page' : undefined}
-                aria-describedby={describedBy}
+            <div
+                className={`group/session-row flex w-full items-start rounded-lg ${selected ? 'bg-[var(--app-secondary-bg)]' : ''}`}
             >
-                <SessionRowSummary
-                    session={s}
-                    showPath={showPath}
-                    showDetailedStatus={showDetailedStatus}
-                    selected={selected}
-                    nestedTooltips
-                    attentionTooltipId={attentionId}
-                    lastSeenVersion={lastSeenVersion}
-                    scheduleTooltipId={scheduleId}
-                    githubPrAwarenessEnabled={githubPrAwarenessEnabled}
-                    prChipDisplay={prChipDisplay}
-                    prNowMs={prNowMs}
-                    inRunningSection={inRunningSection}
-                    projectLabel={projectLabel}
-                    machineLabel={machineLabel}
-                />
-            </button>
+                <button
+                    type="button"
+                    {...longPressHandlers}
+                    data-session-scroll-anchor
+                    className="session-list-item flex min-w-0 flex-1 flex-col gap-1 py-2 pl-2.5 pr-1 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none rounded-lg"
+                    style={{ WebkitTouchCallout: 'none' }}
+                    aria-current={selected ? 'page' : undefined}
+                    aria-describedby={describedBy}
+                >
+                    <SessionRowSummary
+                        session={s}
+                        showPath={showPath}
+                        showDetailedStatus={showDetailedStatus}
+                        selected={selected}
+                        nestedTooltips
+                        attentionTooltipId={attentionId}
+                        lastSeenVersion={lastSeenVersion}
+                        scheduleTooltipId={scheduleId}
+                        githubPrAwarenessEnabled={githubPrAwarenessEnabled}
+                        showPrChip={!(githubPrAwarenessEnabled && primaryPrRef)}
+                        prChipDisplay={prChipDisplay}
+                        prNowMs={prNowMs}
+                        inRunningSection={inRunningSection}
+                        projectLabel={projectLabel}
+                        machineLabel={machineLabel}
+                    />
+                </button>
+                {githubPrAwarenessEnabled && primaryPrRef ? (
+                    <div className="flex shrink-0 items-center self-start py-2 pr-2">
+                        <SessionPrChip
+                            refs={s.metadata?.externalRefs}
+                            displayProfile={prChipDisplay}
+                            nowMs={prNowMs}
+                            interactive
+                        />
+                    </div>
+                ) : null}
+            </div>
 
             <SessionActionMenu
                 isOpen={menuOpen}

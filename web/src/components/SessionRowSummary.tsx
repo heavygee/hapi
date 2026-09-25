@@ -117,6 +117,11 @@ export function SessionRowSummary(props: {
     className?: string
     /** When enabled, show primary GitHub PR chip left of the time column (ADR D8). */
     githubPrAwarenessEnabled?: boolean
+    /**
+     * When false, omit the inline PR chip (parent renders an interactive chip
+     * beside the row button to avoid nesting `<a>` inside `<button>`).
+     */
+    showPrChip?: boolean
     prChipDisplay?: PrChipDisplayProfile
     /** Shared minute clock from the session list (avoids per-row timers). */
     prNowMs?: number
@@ -138,6 +143,7 @@ export function SessionRowSummary(props: {
         scheduleTooltipId: scheduleTooltipIdProp,
         className,
         githubPrAwarenessEnabled = false,
+        showPrChip = true,
         prChipDisplay,
         prNowMs,
         inRunningSection = false,
@@ -297,7 +303,7 @@ export function SessionRowSummary(props: {
                             {t('session.item.pending')} {s.pendingRequestsCount}
                         </span>
                     ) : null}
-                    {primaryPrRef ? (
+                    {primaryPrRef && showPrChip ? (
                         <SessionPrChip
                             refs={s.metadata?.externalRefs}
                             displayProfile={prChipDisplay}
