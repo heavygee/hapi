@@ -568,6 +568,25 @@ export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerRes
         )
     }
 
+    // Fresh conclusive absence required before archive. An earlier empty page
+    // plus later unread GETs must not kill a child whose remit arrived late.
+    const preArchive = await verifySessionRemit(apiUrl, jwt, sessionId, message, http)
+    if (preArchive === 'found') {
+        return {
+            sessionId,
+            name: renamed
+                ? requestedName
+                : pingResult?.name || sessionId.slice(0, 8)
+        }
+    }
+    if (preArchive !== 'absent') {
+        throw new SpawnPeerError(
+            'verify_failed',
+            `could not re-verify empty transcript for ${sessionId} before archive; `
+            + `left child running - inspect or archive ${sessionId} before retrying spawn-peer`
+        )
+    }
+
     const archived = await archiveFailedSpawn(apiUrl, jwt, sessionId, http)
     const cleanupNote = failedChildCleanupNote(sessionId, archived)
     if (deliveryError) {
