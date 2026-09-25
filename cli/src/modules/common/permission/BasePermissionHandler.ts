@@ -102,12 +102,14 @@ export function resolveToolAutoApprovalDecision(
     const lowerId = toolCallId.toLowerCase();
     const decisionForMode: AutoApprovalDecision = (mode === 'yolo' || mode === 'always-proceed') ? 'approved_for_session' : 'approved';
 
-    if (isVerifiedHapiLinkPrTool(lowerTool, context)) {
-        return decisionForMode;
-    }
-
+    // link_pr mutates session metadata — never auto-approve in read-only,
+    // even when the call arrives on a trusted HAPI MCP transport.
     if (HAPI_LINK_PR_TOOL_NAMES.has(lowerTool) && mode === 'read-only') {
         return null;
+    }
+
+    if (isVerifiedHapiLinkPrTool(lowerTool, context)) {
+        return decisionForMode;
     }
 
     if (
