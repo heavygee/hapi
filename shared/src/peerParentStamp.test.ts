@@ -94,7 +94,7 @@ describe('P2 falsification: spawn → rename → ping by handoff UUID only', () 
         expect(stamped.message).toContain(originalName)
         expect(stamped.message).not.toContain(renamedName)
 
-        // Child must address parent by UUID from the handoff chip — not invent titles.
+        // Child must address parent by UUID from the handoff chip - not invent titles.
         const handoffIds = extractSessionCitationIds(stamped.message)
         expect(handoffIds).toEqual([PARENT_ID])
         expect(extractParentSessionIdFromRemit(stamped.message)).toBe(PARENT_ID)

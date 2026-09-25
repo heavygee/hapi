@@ -361,7 +361,7 @@ export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerRes
             )
         } else if (!(parent?.sessionId ?? '').trim()) {
             onProgress?.(
-                'WARNING: no parent session id — remit unattributed '
+                'WARNING: no parent session id - remit unattributed '
                 + '(outside-session OK; in-session set HAPI_SESSION_ID or use MCP spawn_peer)'
             )
         }
