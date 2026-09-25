@@ -189,10 +189,10 @@ controls for DSH.
 ### Required
 
 - `CLI_API_TOKEN` - Shared secret; must match the hub. Can be set via env or `~/.hapi/settings.json` (env wins).
-- `HAPI_API_URL` - Hub base URL (default: http://localhost:3006).
 
 ### Optional
 
+- `HAPI_API_URL` - Hub base URL (default: http://localhost:3006). Also accepted via `~/.hapi/settings.json` (`serverUrl` / settings-backed URL); env wins when set.
 - `HAPI_HOME` - Config/data directory (default: ~/.hapi).
 - `HAPI_EXPERIMENTAL` - Enable experimental features (true/1/yes).
 - `HAPI_EXTRA_HEADERS_JSON` - JSON object of extra headers to send on CLI → hub requests, e.g. `{"Cookie":"CF_Authorization=..."}`. Can also be set as the `extraHeaders` object in `~/.hapi/settings.json` (environment variable wins).

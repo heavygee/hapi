@@ -315,7 +315,7 @@ describe('machines routes', () => {
         }
     })
 
-    
+
     it('rejects incompatible explicit permissionMode for the resolved agent', async () => {
         const machine = createMachine()
         const engine = {

@@ -278,7 +278,7 @@ describe('spawnPeer', () => {
         expect(http.post).toHaveBeenCalledTimes(1)
     })
 
-    
+
     it('omits permissionMode for pi (empty launch catalog)', async () => {
         let spawnedBody: Record<string, unknown> | undefined
         const http = createHttpMock({
