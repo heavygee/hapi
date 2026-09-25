@@ -52,6 +52,8 @@ function seedActiveSession(
             path: '/tmp/project',
             host: 'localhost',
             flavor: 'codex',
+            // Archive refuse path only applies to runner-spawned rows (#1911).
+            startedBy: 'runner',
             ...metadata
         },
         null,
