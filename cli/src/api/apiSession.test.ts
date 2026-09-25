@@ -65,9 +65,9 @@ vi.mock('socket.io-client', () => ({
                 return socket
             },
             emitWithAck: async (event: string, ...args: unknown[]) => state.emitWithAckImpl(event, ...args),
-            timeout: () => ({
-                emitWithAck: async (event: string, ...args: unknown[]) => state.emitWithAckImpl(event, ...args)
-            }),
+            // Must return the socket itself: RpcHandlerManager.emitRegister uses
+            // socket.timeout(5_000).emit('rpc-register', ...) (#1911 / soup tip).
+            timeout: () => socket,
             connect: () => {
                 state.connectCalls += 1
                 if (state.connectImmediately) {
