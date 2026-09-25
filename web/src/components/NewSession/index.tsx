@@ -118,6 +118,10 @@ export function NewSession(props: {
         retry: false
     })
     const hubPeerSpawnDefaults = hubSettingsQuery.data?.peerSpawnDefaults
+    // Block Create until hub peerSpawnDefaults settle once. Fresh browsers would
+    // otherwise POST mount defaults (claude + default) before seeding and bypass a
+    // restrictive hub config. Errors unlock Create with local/sticky defaults.
+    const hubDefaultsPending = hubSettingsQuery.isPending
     const seededFromHubRef = useRef(false)
     // Snapshot sticky localStorage keys before mount effects call
     // savePreferredAgent / savePreferredYoloMode (those write keys even on a
@@ -1693,6 +1697,7 @@ export function NewSession(props: {
 
     async function handleCreate() {
         if (!machineId || !trimmedDirectory || createInFlightRef.current) return
+        if (hubDefaultsPending) return
 
         createInFlightRef.current = true
         setIsCreating(true)
@@ -1929,6 +1934,7 @@ export function NewSession(props: {
         && selectedAgentAvailable
         && !isLaunchPreferenceValidationPending
         && !fastModeSelectionPending
+        && !hubDefaultsPending
     )
 
     return (

@@ -1407,6 +1407,8 @@ describe('NewSession launch preferences', () => {
             </QueryClientProvider>
         )
 
+        expect(screen.getByTestId('create')).toBeDisabled()
+
         await act(async () => {
             resolveSettings({
                 sessionSummaryContract: false,
@@ -1423,6 +1425,33 @@ describe('NewSession launch preferences', () => {
         await waitFor(() => {
             expect(screen.getByTestId('permission-mode')).toHaveTextContent('read-only')
         })
+        expect(screen.getByTestId('create')).not.toBeDisabled()
+    })
+
+    it('keeps Create disabled while getHubSettings is pending', async () => {
+        localStorage.clear()
+        const deferred = new Promise(() => {})
+        const slowApi = {
+            getHubSettings: vi.fn(() => deferred)
+        } as unknown as ApiClient
+
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        render(
+            <QueryClientProvider client={client}>
+                <NewSession
+                    api={slowApi}
+                    machines={[machine]}
+                    initialMachineId="machine-1"
+                    initialDirectory="C:\\repo"
+                    onSuccess={mocks.onSuccess}
+                    onCancel={() => {}}
+                />
+            </QueryClientProvider>
+        )
+
+        expect(screen.getByTestId('create')).toBeDisabled()
+        fireEvent.click(screen.getByTestId('create'))
+        expect(mocks.spawnSession).not.toHaveBeenCalled()
     })
 
     it('keeps an explicit Default permission when hub settings resolve after the edit', async () => {

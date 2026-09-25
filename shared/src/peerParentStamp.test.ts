@@ -53,7 +53,7 @@ describe('ensureParentStamp', () => {
         expect(result.message).toContain('## Your assignment')
     })
 
-    it('is a no-op when the remit already has a ## Parent block for this UUID', () => {
+    it('is a no-op when the remit already has a ## Parent markdown chip for this UUID', () => {
         const body = `## Parent\n- Orchestrator chip: [Old Title](/sessions/${PARENT_ID})\n\nGo.`
         const result = ensureParentStamp(body, {
             sessionId: PARENT_ID,
@@ -76,6 +76,29 @@ describe('ensureParentStamp', () => {
         expect(result.alreadyPresent).toBe(false)
         expect(result.message.startsWith('## Parent')).toBe(true)
         expect(result.message).toContain(body)
+    })
+
+    it('still stamps when ## Parent is empty and the UUID only appears under a later heading', () => {
+        const body = `## Parent\n\n## Context\nSee [other](/sessions/${PARENT_ID}) for prior work.\n\nDo the work.`
+        const result = ensureParentStamp(body, {
+            sessionId: PARENT_ID,
+            name: 'Parent',
+        })
+        expect(result.stamped).toBe(true)
+        expect(result.alreadyPresent).toBe(false)
+        expect(result.message.startsWith('## Parent')).toBe(true)
+        expect(result.message).toContain(`[Parent](/sessions/${PARENT_ID})`)
+    })
+
+    it('still stamps when ## Parent only has a bare /sessions path (no markdown chip)', () => {
+        const body = `## Parent\n- source: /sessions/${PARENT_ID}\n\nDo the work.`
+        const result = ensureParentStamp(body, {
+            sessionId: PARENT_ID,
+            name: 'Parent',
+        })
+        expect(result.stamped).toBe(true)
+        expect(result.alreadyPresent).toBe(false)
+        expect(result.message).toContain(`[Parent](/sessions/${PARENT_ID})`)
     })
 
     it('fail-closes when requireParent and parent id is missing', () => {

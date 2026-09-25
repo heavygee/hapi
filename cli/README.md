@@ -28,7 +28,7 @@ Choose a supported coding agent from your terminal and control its sessions remo
 - `hapi` - Choose an agent interactively. Unavailable agents are shown with a reason and cannot be selected.
 - `hapi claude` - Start a Claude Code session (passes through Claude CLI flags).
 - `hapi codex` - Start Codex mode. See `src/codex/runCodex.ts`.
-- `hapi codex resume <sessionId>` - Resume existing Codex session.
+- `hapi codex resume <native-thread-id>` - Resume a Codex conversation by its native thread ID. For a HAPI session ID, use `hapi resume <id>`.
 - `hapi cursor` - Start Cursor Agent mode. See `src/cursor/runCursor.ts`.
   Supports `hapi cursor resume <chatId>`, `hapi cursor --continue`, `--mode plan|ask`, `--yolo`, `--model`.
   Local and remote modes supported; new remote sessions use `agent acp`. Pre-ACP sessions retain the legacy `agent -p` stream-json resume path.
