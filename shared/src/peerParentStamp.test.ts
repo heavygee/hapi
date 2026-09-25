@@ -79,6 +79,18 @@ describe('ensureParentStamp', () => {
         expect(second.message.match(/## Parent/g)?.length).toBe(1)
     })
 
+    it('does not hang on a long nonmatching backslash run under ## Parent', () => {
+        const body = `## Parent\n- [${'\\'.repeat(40)}\n\nDo the work.`
+        const started = Date.now()
+        const result = ensureParentStamp(body, {
+            sessionId: PARENT_ID,
+            name: 'Parent',
+        })
+        expect(Date.now() - started).toBeLessThan(200)
+        expect(result.stamped).toBe(true)
+        expect(result.message).toContain(`[Parent](/sessions/${PARENT_ID})`)
+    })
+
     it('still stamps when the remit only has a bare parent citation (no ## Parent block)', () => {
         // Bare /sessions/<uuid> must not suppress the Parent chip - chat UI only
         // promotes citations under ## Parent into the sender-style chip.
