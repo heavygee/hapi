@@ -1,5 +1,4 @@
 import chalk from 'chalk'
-import { execFileSync } from 'node:child_process'
 import { z } from 'zod'
 import { PROTOCOL_VERSION } from '@hapi/protocol'
 import type { StartOptions } from '@/claude/runClaude'
@@ -11,7 +10,6 @@ import { logger } from '@/ui/logger'
 import { initializeToken } from '@/ui/tokenInit'
 import { spawnHappyCLI } from '@/utils/spawnHappyCLI'
 import { maybeAutoStartServer } from '@/utils/autoStartServer'
-import { withBunRuntimeEnv } from '@/utils/bunRuntime'
 import { extractErrorInfo } from '@/utils/errorUtils'
 import type { CommandDefinition } from './types'
 
@@ -31,8 +29,6 @@ export const claudeCommand: CommandDefinition = {
             if (arg === '--') {
                 unknownArgs.push(...args.slice(i))
                 break
-            } else if (arg === '-h' || arg === '--help') {
-                unknownArgs.push(arg)
             } else if (arg === '--hapi-starting-mode') {
                 options.startingMode = z.enum(['local', 'remote']).parse(args[++i])
             } else if (arg === '--permission-mode') {
@@ -70,11 +66,14 @@ export const claudeCommand: CommandDefinition = {
             } else if (arg === '--started-by') {
                 options.startedBy = args[++i] as 'runner' | 'terminal'
             } else if (arg === '--hapi-session-id') {
-                // #1910 reap stamp only — must not flip create→reuse bootstrap.
+                // Fresh-spawn reserved id (hub prealloc / runner stamp). Create
+                // bootstrap with getOrCreate({ id }) — must NOT take the reopen
+                // path (`existingSessionId` / `--existing-session-id`).
                 const sessionId = args[++i]
                 if (!sessionId) {
                     throw new Error('Missing --hapi-session-id value')
                 }
+                options.reservedSessionId = sessionId
             } else if (arg === '--existing-session-id') {
                 const sessionId = args[++i]
                 if (!sessionId) {

@@ -148,6 +148,7 @@ export function createMachinesRoutes(
             return c.json({ error: `${parsed.data.agent.toUpperCase()} only supports remote mode` }, 400)
         }
         const startingMode = parsed.data.startingMode
+        const namespace = c.get('namespace')
 
         // Apply hub peerSpawnDefaults when agent / permissionMode / model are omitted
         // so scavenger/raw machine spawn matches Settings → General → Agents (and stock yolo).
@@ -175,7 +176,8 @@ export function createMachinesRoutes(
             undefined,
             parsed.data.collaborationMode,
             parsed.data.copilotAgentMode,
-            startingMode
+            startingMode,
+            namespace
         )
         return c.json(result)
     })

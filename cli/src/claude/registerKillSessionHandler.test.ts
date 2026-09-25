@@ -90,4 +90,41 @@ describe('registerKillSessionHandler (tiann/hapi#914)', () => {
         expect(lifecycle.setArchiveReason).toHaveBeenCalledWith('User terminated')
         expect(lifecycle.cleanupAndExit).toHaveBeenCalled()
     })
+
+    it('exits when registration happens after hub-archived write (production order, #1911 AC6)', async () => {
+        // Production: bootstrap updateMetadata / ack may noteHubArchived before
+        // flavor runners call registerKillSessionHandler. EventEmitter does not
+        // replay — without the latch, cleanupAndExit stays 0×.
+        const registry = makeRegistry()
+        const lifecycle = {
+            setArchiveReason: vi.fn(),
+            cleanupAndExit: vi.fn(async () => {})
+        }
+        const listeners = new Map<string, () => void>()
+        const session: {
+            hubArchived: boolean
+            on(event: string, listener: () => void): void
+        } = {
+            hubArchived: false,
+            on(event: string, listener: () => void) {
+                listeners.set(event, listener)
+            }
+        }
+
+        // Write first (noteHubArchived), then register — production order.
+        session.hubArchived = true
+        // Emit with no listeners yet (would be missed without the latch).
+        listeners.get('hub-archived')?.()
+
+        registerKillSessionHandler(
+            registry as unknown as Parameters<typeof registerKillSessionHandler>[0],
+            lifecycle,
+            session
+        )
+
+        expect(lifecycle.setArchiveReason).toHaveBeenCalledWith('User terminated')
+        expect(lifecycle.cleanupAndExit).toHaveBeenCalledTimes(1)
+        // Still subscribed for any later emit.
+        expect(listeners.has('hub-archived')).toBe(true)
+    })
 })

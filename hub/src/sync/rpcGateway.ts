@@ -5,10 +5,7 @@ import {
     AgentAvailabilityResponseSchema,
     CursorChatStoreStatusSchema,
     ListCodexSessionsRpcResponseSchema,
-    ListClaudeSessionsRpcResponseSchema,
-    ListCursorImportableSessionsRpcResponseSchema,
-    ListPiSessionsRpcResponseSchema,
-    PrepareCursorImportRpcResponseSchema
+    ListPiSessionsRpcResponseSchema
 } from '@hapi/protocol/apiTypes'
 import type {
     AgyModelsResponse,
@@ -30,10 +27,7 @@ import type {
     GrokReasoningEffortResponse,
     ListDirectoryResponse,
     ListCodexSessionsRpcResponse,
-    ListClaudeSessionsRpcResponse,
-    ListCursorImportableSessionsRpcResponse,
     ListPiSessionsRpcResponse,
-    PrepareCursorImportRpcResponse,
     ArchiveCodexSessionRpcResponse,
     OpencodeModelsResponse,
     OpencodeModelSummary,
@@ -110,6 +104,7 @@ export type RpcPathExistsResponse = PathExistsResponse
 export type RpcCodexModel = CodexModelSummary
 export type RpcListCodexModelsResponse = CodexModelsResponse
 export type RpcListCodexSessionsResponse = ListCodexSessionsRpcResponse
+export type RpcListPiSessionsResponse = ListPiSessionsRpcResponse
 export type RpcArchiveCodexSessionResponse = ArchiveCodexSessionRpcResponse
 export type RpcCursorModel = CursorModelSummary
 export type RpcListCursorModelsResponse = CursorModelsResponse
@@ -184,7 +179,6 @@ export class RpcGateway {
             modelReasoningEffort?: string | null
             effort?: string | null
             collaborationMode?: CodexCollaborationMode
-            autoBridgeTransientModelErrors?: boolean
             copilotAgentMode?: CopilotAgentMode
         }
     ): Promise<unknown> {
@@ -220,25 +214,6 @@ export class RpcGateway {
         await this.sessionRpc(sessionId, RPC_METHODS.HandoffLocal, {})
     }
 
-    async bridgeModelError(
-        sessionId: string,
-        payload: {
-            atTs: number
-            kind: string
-            rawSnippet: string
-            lastUserMessage?: string
-            priorAssistantClaimsDone: boolean
-            transient: boolean
-            bridgedForAtTs?: number
-            retriedAndFailed?: boolean
-        }
-    ): Promise<{ ok: boolean; reason?: string }> {
-        return await this.sessionRpc(sessionId, RPC_METHODS.BridgeModelError, payload) as {
-            ok: boolean
-            reason?: string
-        }
-    }
-
     async spawnSession(
         machineId: string,
         directory: string,
@@ -256,12 +231,12 @@ export class RpcGateway {
         collaborationMode?: CodexCollaborationMode,
         copilotAgentMode?: CopilotAgentMode,
         startingMode?: 'remote' | 'pty',
-        // Hub session id to reuse for this spawn. When set, the runner boots the
-        // CLI with `--hapi-session-id`, so the child reuses the existing hub
-        // session row (same id) instead of minting a new one.
+        // Hub session id for this spawn (preallocated stub or reopen). Runner
+        // stamps `--existing-session-id` or `--hapi-session-id` by flavor; the
+        // latter is adopt-stub (create/getOrCreate with id), not reopen.
         forkSession?: boolean,
-        /** One-shot nonce for runner to redeem resume peer capability (pass 2h). */
-        resumePeerMintNonce?: string
+        /** Fresh machine-spawn stub — distinct from reopen existingSessionId. */
+        reservedSessionId?: string
     ): Promise<
         | { type: 'success'; sessionId: string }
         | {
@@ -269,6 +244,8 @@ export class RpcGateway {
             message: string
             code?: 'agent_unavailable' | 'outside_workspace_roots'
             agent?: AgentFlavor
+            /** Explicit false = no OS child; stub safe to delete (#1911 B3). */
+            childStarted?: boolean
         }
     > {
         try {
@@ -289,12 +266,14 @@ export class RpcGateway {
                     permissionMode,
                     serviceTier,
                     existingSessionId,
-                    sessionId: existingSessionId,
+                    reservedSessionId,
+                    // Local HTTP / tracking may still read sessionId; prefer
+                    // reserved stub id, then reopen id.
+                    sessionId: reservedSessionId ?? existingSessionId,
                     collaborationMode,
                     copilotAgentMode,
                     startingMode,
-                    forkSession: forkSession === true,
-                    resumePeerMintNonce,
+                    forkSession: forkSession === true
                 }
             )
             if (result && typeof result === 'object') {
@@ -307,15 +286,21 @@ export class RpcGateway {
                         ? obj.code
                         : undefined
                     const unavailableAgent = typeof obj.agent === 'string' ? obj.agent as AgentFlavor : undefined
+                    const childStarted = obj.childStarted === false ? false : undefined
                     return {
                         type: 'error',
                         message: obj.errorMessage,
                         ...(code ? { code } : {}),
                         ...(unavailableAgent ? { agent: unavailableAgent } : {}),
+                        ...(childStarted === false ? { childStarted: false } : {}),
                     }
                 }
                 if (obj.type === 'requestToApproveDirectoryCreation' && typeof obj.directory === 'string') {
-                    return { type: 'error', message: `Directory creation requires approval: ${obj.directory}` }
+                    return {
+                        type: 'error',
+                        message: `Directory creation requires approval: ${obj.directory}`,
+                        childStarted: false,
+                    }
                 }
                 if (typeof obj.error === 'string') {
                     return { type: 'error', message: obj.error }
@@ -335,6 +320,8 @@ export class RpcGateway {
                 })()
             return { type: 'error', message: `Unexpected spawn result: ${details}` }
         } catch (error) {
+            // Ambiguous: the machine RPC may have started a child before failing.
+            // Do not claim childStarted: false — hub keeps the stub.
             return { type: 'error', message: error instanceof Error ? error.message : String(error) }
         }
     }
@@ -394,25 +381,6 @@ export class RpcGateway {
         await this.machineRpc(machineId, RPC_METHODS.StopRunner, {})
     }
 
-    async runnerSelfUpgrade(machineId: string, offer: unknown): Promise<unknown> {
-        // Upgrades can take minutes (npm install / artifact download).
-        return await this.machineRpc(machineId, RPC_METHODS.RunnerSelfUpgrade, { offer }, 10 * 60_000)
-    }
-
-    /**
-     * Ask the CLI to deliver one queued message into the active Pi turn
-     * (Pi native steer). Only the pi flavor registers this handler.
-     */
-    async steerQueuedMessage(
-        sessionId: string,
-        localId: string
-    ): Promise<{ steered: boolean; error?: string }> {
-        return await this.sessionRpc(sessionId, RPC_METHODS.SteerQueuedMessage, { localId }) as {
-            steered: boolean
-            error?: string
-        }
-    }
-
     async getGitStatus(sessionId: string, cwd?: string): Promise<RpcCommandResponse> {
         return await this.sessionRpc(sessionId, RPC_METHODS.GitStatus, { cwd }) as RpcCommandResponse
     }
@@ -469,10 +437,6 @@ export class RpcGateway {
         }
     }
 
-    async listCodexModelsForSession(sessionId: string): Promise<RpcListCodexModelsResponse> {
-        return await this.sessionRpc(sessionId, RPC_METHODS.ListCodexModels, {}, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListCodexModelsResponse
-    }
-
     async listCodexModelsForMachine(machineId: string): Promise<RpcListCodexModelsResponse> {
         return await this.machineRpc(machineId, RPC_METHODS.ListCodexModels, {}, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListCodexModelsResponse
     }
@@ -481,47 +445,23 @@ export class RpcGateway {
         return await this.machineRpc(machineId, RPC_METHODS.ListOpencodeModelVariants, { cwd: cwd ?? null }, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListOpencodeModelVariantsResponse
     }
 
+    async listCodexModelsForSession(sessionId: string): Promise<RpcListCodexModelsResponse> {
+        return await this.sessionRpc(
+            sessionId,
+            RPC_METHODS.ListCodexModels,
+            {},
+            MODEL_LIST_RPC_TIMEOUT_MS
+        ) as RpcListCodexModelsResponse
+    }
+
     async listCodexSessionsForMachine(machineId: string, cwd?: string | null, sessionIds?: string[]): Promise<RpcListCodexSessionsResponse> {
         const result = await this.machineRpc(machineId, RPC_METHODS.ListCodexSessions, { cwd: cwd ?? null, sessionIds }, MODEL_LIST_RPC_TIMEOUT_MS)
         return ListCodexSessionsRpcResponseSchema.parse(result)
     }
 
-    async listClaudeSessionsForMachine(machineId: string, cwd?: string | null, sessionIds?: string[]): Promise<ListClaudeSessionsRpcResponse> {
-        const result = await this.machineRpc(machineId, RPC_METHODS.ListClaudeSessions, { cwd: cwd ?? null, sessionIds }, MODEL_LIST_RPC_TIMEOUT_MS)
-        return ListClaudeSessionsRpcResponseSchema.parse(result)
-    }
-
-    async listPiSessionsForMachine(machineId: string, cwd?: string | null, sessionIds?: string[]): Promise<ListPiSessionsRpcResponse> {
+    async listPiSessionsForMachine(machineId: string, cwd?: string | null, sessionIds?: string[]): Promise<RpcListPiSessionsResponse> {
         const result = await this.machineRpc(machineId, RPC_METHODS.ListPiSessions, { cwd: cwd ?? null, sessionIds }, MODEL_LIST_RPC_TIMEOUT_MS)
         return ListPiSessionsRpcResponseSchema.parse(result)
-    }
-
-    async listCursorImportableSessionsForMachine(
-        machineId: string,
-        candidateWorkspacePaths?: string[],
-        limit?: number
-    ): Promise<ListCursorImportableSessionsRpcResponse> {
-        const result = await this.machineRpc(
-            machineId,
-            RPC_METHODS.ListCursorImportableSessions,
-            { candidateWorkspacePaths, limit },
-            MODEL_LIST_RPC_TIMEOUT_MS
-        )
-        return ListCursorImportableSessionsRpcResponseSchema.parse(result)
-    }
-
-    async prepareCursorImportForMachine(
-        machineId: string,
-        uuid: string,
-        workspacePath?: string | null
-    ): Promise<PrepareCursorImportRpcResponse> {
-        const result = await this.machineRpc(
-            machineId,
-            RPC_METHODS.PrepareCursorImport,
-            { uuid, workspacePath: workspacePath ?? null },
-            MODEL_LIST_RPC_TIMEOUT_MS
-        )
-        return PrepareCursorImportRpcResponseSchema.parse(result)
     }
 
     async archiveCodexSessionForMachine(machineId: string, sessionId: string): Promise<RpcArchiveCodexSessionResponse> {
@@ -603,6 +543,20 @@ export class RpcGateway {
         return await this.sessionRpc(sessionId, method, params ?? {}, timeoutMs ?? DEFAULT_RPC_TIMEOUT_MS) as T
     }
 
+    /**
+     * Ask the CLI to deliver one queued message into the active Pi turn
+     * (Pi native steer). Only the pi flavor registers this handler.
+     */
+    async steerQueuedMessage(
+        sessionId: string,
+        localId: string
+    ): Promise<{ steered: boolean; error?: string }> {
+        return await this.sessionRpc(sessionId, RPC_METHODS.SteerQueuedMessage, { localId }) as {
+            steered: boolean
+            error?: string
+        }
+    }
+
     async forkConversation(
         sessionId: string,
         params: { messageLocalId?: string }
@@ -664,15 +618,6 @@ export class RpcGateway {
         timeoutMs: number = DEFAULT_RPC_TIMEOUT_MS
     ): Promise<unknown> {
         return await this.rpcCall(`${machineId}:${method}`, params, timeoutMs)
-    }
-
-    /** True when a live /cli socket owns the RPC method (hub-side provenance signal). */
-    hasLiveHandler(method: string): boolean {
-        const socketId = this.rpcRegistry.getSocketIdForMethod(method)
-        if (!socketId) {
-            return false
-        }
-        return this.io.of('/cli').sockets.has(socketId)
     }
 
     private async rpcCall(method: string, params: unknown, timeoutMs: number = DEFAULT_RPC_TIMEOUT_MS): Promise<unknown> {
