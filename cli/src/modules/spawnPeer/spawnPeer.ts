@@ -512,7 +512,9 @@ export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerRes
     const deadline = now() + waitActiveSecs * 1000
     // Failure path never auto-archives (remit POST may still land). Poll only
     // to recover a late-visible remit; unread GETs must not look like success.
-    let observedAbsent = false
+    // Classify from the *final* verify result: an earlier empty read must not
+    // stick as empty_session once later transcript GETs become unavailable.
+    let lastVerify: Exclude<RemitVerifyResult, 'found'> | null = null
     while (now() <= deadline) {
         const verify = await verifySessionRemit(apiUrl, jwt, sessionId, message, http)
         if (verify === 'found') {
@@ -523,16 +525,14 @@ export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerRes
                     : pingResult?.name || sessionId.slice(0, 8)
             }
         }
-        if (verify === 'absent') {
-            observedAbsent = true
-        }
+        lastVerify = verify
         if (now() >= deadline) {
             break
         }
         await sleep(POLL_VERIFY_MS)
     }
 
-    if (!observedAbsent) {
+    if (lastVerify !== 'absent') {
         throw new SpawnPeerError(
             'verify_failed',
             `could not verify remit for ${sessionId} (transcript unread); `
