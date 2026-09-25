@@ -244,8 +244,9 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
         .describe('simple or worktree. Default simple (use directory as cwd). worktree creates a new tree from directory.'),
       permissionMode: PermissionModeSchema.optional()
         .describe(
-          'Permission mode for the new session. Omit to use hub/stock default (yolo). '
-          + 'Do not pass \"default\" — it is treated as omit (use stock). '
+          'Permission mode for the new session. Omit to inherit hub peerSpawnDefaults, '
+          + 'falling back to stock yolo only when the hub has no override. '
+          + 'Do not pass \"default\" — treated as omit (same hub-then-stock chain). '
           + 'Pass only to tighten or when the operator names a mode — do not clone the parent session.'
         ),
     });
