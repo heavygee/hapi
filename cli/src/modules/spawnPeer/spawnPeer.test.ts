@@ -1125,79 +1125,6 @@ it('resolves relative directory against cwd (MCP session working directory)', as
         expect(messageGets.length).toBeGreaterThanOrEqual(2)
     })
 
-    it('does not archive when a fresh pre-archive transcript check is unavailable', async () => {
-        let messageGets = 0
-        const http = createHttpMock({
-            post: (url) => {
-                if (url.endsWith('/api/auth')) {
-                    return { status: 200, data: { token: 'jwt' } }
-                }
-                if (url.endsWith(`/api/machines/${MACHINE_ID}/spawn`)) {
-                    return { status: 200, data: { type: 'success', sessionId: SESSION_ID } }
-                }
-                if (url.endsWith(`/api/sessions/${SESSION_ID}/messages`)) {
-                    return { status: 200, data: { ok: true } }
-                }
-                if (url.endsWith(`/api/sessions/${SESSION_ID}/archive`)) {
-                    throw new Error('must not archive when pre-archive re-check is unavailable')
-                }
-                throw new Error(`unexpected POST ${url}`)
-            },
-            get: (url) => {
-                if (url.endsWith(`/api/sessions/${SESSION_ID}`)) {
-                    return {
-                        status: 200,
-                        data: {
-                            session: {
-                                id: SESSION_ID,
-                                active: true,
-                                metadata: { name: 'Empty', flavor: 'claude' }
-                            }
-                        }
-                    }
-                }
-                if (url.includes(`/api/sessions/${SESSION_ID}/messages`)) {
-                    messageGets += 1
-                    // Poll loop observes absence; pre-archive re-check fails closed.
-                    if (messageGets <= 2) {
-                        return {
-                            status: 200,
-                            data: {
-                                messages: [],
-                                page: { hasMore: false }
-                            }
-                        }
-                    }
-                    throw new Error('hub disconnect on pre-archive re-check')
-                }
-                throw new Error(`unexpected GET ${url}`)
-            }
-        })
-
-        await expect(spawnPeer({
-            directory: '/tmp/project',
-            message: 'remit that may arrive late',
-            machineId: MACHINE_ID,
-            accessToken: 'tok',
-            apiUrl: 'http://hub.test',
-            waitActiveSecs: 2,
-            http: http as never,
-            now: () => nowMs,
-            sleep: async (ms) => {
-                nowMs += ms
-            }
-        })).rejects.toMatchObject({
-            code: 'verify_failed',
-            message: expect.stringMatching(/re-verify|left child running/i)
-        })
-
-        expect(http.post).not.toHaveBeenCalledWith(
-            `http://hub.test/api/sessions/${SESSION_ID}/archive`,
-            expect.anything(),
-            expect.anything()
-        )
-    })
-
     it('fails closed when spawn+send succeed but the session still has no user message', async () => {
         const http = createHttpMock({
             post: (url) => {
@@ -1211,7 +1138,7 @@ it('resolves relative directory against cwd (MCP session working directory)', as
                     return { status: 200, data: { ok: true } }
                 }
                 if (url.endsWith(`/api/sessions/${SESSION_ID}/archive`)) {
-                    return { status: 200, data: { ok: true } }
+                    throw new Error('must not auto-archive on empty remit')
                 }
                 throw new Error(`unexpected POST ${url}`)
             },
@@ -1259,71 +1186,16 @@ it('resolves relative directory against cwd (MCP session working directory)', as
             sleep: async (ms) => {
                 nowMs += ms
             }
-        })).rejects.toMatchObject({ code: 'empty_session' })
-
-        expect(http.post).toHaveBeenCalledWith(
-            `http://hub.test/api/sessions/${SESSION_ID}/archive`,
-            {},
-            expect.anything()
-        )
-    })
-
-    it('does not claim archive succeeded when the archive POST fails', async () => {
-        const http = createHttpMock({
-            post: (url) => {
-                if (url.endsWith('/api/auth')) {
-                    return { status: 200, data: { token: 'jwt' } }
-                }
-                if (url.endsWith(`/api/machines/${MACHINE_ID}/spawn`)) {
-                    return { status: 200, data: { type: 'success', sessionId: SESSION_ID } }
-                }
-                if (url.endsWith(`/api/sessions/${SESSION_ID}/messages`)) {
-                    return { status: 200, data: { ok: true } }
-                }
-                if (url.endsWith(`/api/sessions/${SESSION_ID}/archive`)) {
-                    return { status: 500, data: { error: 'rpc failed' } }
-                }
-                throw new Error(`unexpected POST ${url}`)
-            },
-            get: (url) => {
-                if (url.endsWith(`/api/sessions/${SESSION_ID}`)) {
-                    return {
-                        status: 200,
-                        data: {
-                            session: {
-                                id: SESSION_ID,
-                                active: true,
-                                metadata: { name: 'Empty', flavor: 'claude' }
-                            }
-                        }
-                    }
-                }
-                if (url.includes(`/api/sessions/${SESSION_ID}/messages`)) {
-                    return {
-                        status: 200,
-                        data: { messages: [] }
-                    }
-                }
-                throw new Error(`unexpected GET ${url}`)
-            }
-        })
-
-        await expect(spawnPeer({
-            directory: '/tmp/project',
-            message: 'this remit must land',
-            machineId: MACHINE_ID,
-            accessToken: 'tok',
-            apiUrl: 'http://hub.test',
-            waitActiveSecs: 2,
-            http: http as never,
-            now: () => nowMs,
-            sleep: async (ms) => {
-                nowMs += ms
-            }
         })).rejects.toMatchObject({
             code: 'empty_session',
-            message: expect.stringMatching(/archive failed[\s\S]*still be running/i)
+            message: expect.stringMatching(new RegExp(`left child running[\\s\\S]*${SESSION_ID}`, 'i'))
         })
+
+        expect(http.post).not.toHaveBeenCalledWith(
+            `http://hub.test/api/sessions/${SESSION_ID}/archive`,
+            expect.anything(),
+            expect.anything()
+        )
     })
 
     it('applies hub peerSpawnDefaults when explicit args are omitted', async () => {
@@ -1593,7 +1465,7 @@ it('resolves relative directory against cwd (MCP session working directory)', as
                     return { status: 200, data: { ok: true } }
                 }
                 if (url.endsWith(`/api/sessions/${SESSION_ID}/archive`)) {
-                    return { status: 200, data: { ok: true } }
+                    throw new Error('must not auto-archive when remit mismatch')
                 }
                 throw new Error(`unexpected POST ${url}`)
             },

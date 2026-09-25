@@ -230,34 +230,6 @@ async function fetchHubPeerSpawnDefaults(
     }
 }
 
-async function archiveFailedSpawn(
-    apiUrl: string,
-    jwt: string,
-    sessionId: string,
-    http: AxiosInstance
-): Promise<boolean> {
-    try {
-        const response = await http.post(
-            `${apiUrl}/api/sessions/${encodeURIComponent(sessionId)}/archive`,
-            {},
-            {
-                headers: authHeaders(jwt),
-                timeout: 15_000,
-                validateStatus: () => true
-            }
-        )
-        return response.status >= 200 && response.status < 300 && response.data?.ok === true
-    } catch {
-        return false
-    }
-}
-
-function failedChildCleanupNote(sessionId: string, archived: boolean): string {
-    return archived
-        ? `archived the failed child. Retry spawn-peer; do not ping the archived id.`
-        : `archive failed so the child may still be running. Stop or archive ${sessionId} before retrying spawn-peer.`
-}
-
 function collapsedRemitNeedle(message: string): string {
     return message.replace(/\s+/g, ' ').trim().slice(0, 800)
 }
@@ -538,8 +510,8 @@ export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerRes
     }
 
     const deadline = now() + waitActiveSecs * 1000
-    // Only archive when we observed an empty transcript. Failed GETs must not
-    // look like "empty shell" — the child may already be working.
+    // Failure path never auto-archives (remit POST may still land). Poll only
+    // to recover a late-visible remit; unread GETs must not look like success.
     let observedAbsent = false
     while (now() <= deadline) {
         const verify = await verifySessionRemit(apiUrl, jwt, sessionId, message, http)
@@ -568,42 +540,27 @@ export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerRes
         )
     }
 
-    // Fresh conclusive absence required before archive. An earlier empty page
-    // plus later unread GETs must not kill a child whose remit arrived late.
-    const preArchive = await verifySessionRemit(apiUrl, jwt, sessionId, message, http)
-    if (preArchive === 'found') {
-        return {
-            sessionId,
-            name: renamed
-                ? requestedName
-                : pingResult?.name || sessionId.slice(0, 8)
-        }
-    }
-    if (preArchive !== 'absent') {
-        throw new SpawnPeerError(
-            'verify_failed',
-            `could not re-verify empty transcript for ${sessionId} before archive; `
-            + `left child running - inspect or archive ${sessionId} before retrying spawn-peer`
-        )
-    }
-
-    const archived = await archiveFailedSpawn(apiUrl, jwt, sessionId, http)
-    const cleanupNote = failedChildCleanupNote(sessionId, archived)
+    // Never auto-archive on the failure path. A timed-out remit POST (or a
+    // TOCTOU gap between an empty read and archive) can still land work on
+    // the child; killing it would destroy an in-flight peer. Leave the id
+    // for the caller to inspect / archive.
+    const leaveRunning =
+        `left child running - inspect or archive ${sessionId} before retrying spawn-peer`
     if (deliveryError) {
         if (deliveryError instanceof SpawnPeerError) {
-            throw new SpawnPeerError(deliveryError.code, `${deliveryError.message}; ${cleanupNote}`)
+            throw new SpawnPeerError(deliveryError.code, `${deliveryError.message}; ${leaveRunning}`)
         }
         if (deliveryError instanceof PingPeerError) {
-            throw new SpawnPeerError(deliveryError.code, `${deliveryError.message}; ${cleanupNote}`)
+            throw new SpawnPeerError(deliveryError.code, `${deliveryError.message}; ${leaveRunning}`)
         }
         throw new SpawnPeerError(
             'send_failed',
-            `${deliveryError instanceof Error ? deliveryError.message : String(deliveryError)}; ${cleanupNote}`
+            `${deliveryError instanceof Error ? deliveryError.message : String(deliveryError)}; ${leaveRunning}`
         )
     }
     throw new SpawnPeerError(
         'empty_session',
-        `session ${sessionId} still has no user message after remit delivery (empty shell); ${cleanupNote}`
+        `session ${sessionId} still has no user message after remit delivery (empty shell); ${leaveRunning}`
     )
 }
 
