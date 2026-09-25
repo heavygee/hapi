@@ -27,6 +27,11 @@ import {
     type PeerSpawnDefaults,
     type ResolvedPeerSpawnDefaults
 } from '@hapi/protocol/peerSpawnDefaults'
+import {
+    ParentStampError,
+    ensureParentStamp,
+    type PeerParentIdentity,
+} from '@hapi/protocol/peerParentStamp'
 import { configuration } from '@/configuration'
 import { getAuthToken } from '@/api/auth'
 import { buildHubRequestHeaders } from '@/api/hubExtraHeaders'
@@ -79,6 +84,17 @@ export type SpawnPeerOptions = {
      * Absolute directories are unchanged. Defaults to process.cwd().
      */
     cwd?: string
+    /**
+     * Orchestrator identity for rename-proof Parent stamp (heavygee/hapi#175).
+     * When omitted, falls back to `HAPI_SESSION_ID` / `HAPI_SESSION_NAME` /
+     * `HAPI_AGENT_SESSION_ID` env (in-session CLI).
+     */
+    parent?: PeerParentIdentity | null
+    /**
+     * MCP / in-session: fail closed when parent id is missing.
+     * Outside-session CLI leaves this false and warns instead.
+     */
+    requireParent?: boolean
     http?: AxiosInstance
     sleep?: (ms: number) => Promise<void>
     now?: () => number
@@ -100,6 +116,21 @@ const AUTH_RECOVERY_HINT =
 
 function defaultSleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/** Resolve parent identity from in-session env when callers omit `parent`. */
+export function parentIdentityFromEnv(
+    env: NodeJS.ProcessEnv = process.env
+): PeerParentIdentity | null {
+    const sessionId = (env.HAPI_SESSION_ID ?? '').trim()
+    if (!sessionId) {
+        return null
+    }
+    return {
+        sessionId,
+        name: (env.HAPI_SESSION_NAME ?? '').trim() || null,
+        agentSessionId: (env.HAPI_AGENT_SESSION_ID ?? '').trim() || null,
+    }
 }
 
 function resolveApiUrl(apiUrl?: string): string {
@@ -304,7 +335,7 @@ async function sessionHasRemit(
 
 export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerResult> {
     const rawDirectory = (options.directory ?? '').trim()
-    const message = options.message ?? ''
+    const onProgress = options.onProgress
     if (!rawDirectory) {
         throw new SpawnPeerError('bad_args', 'directory is required')
     }
@@ -314,6 +345,32 @@ export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerRes
     const directory = options.cwd
         ? resolvePath(options.cwd, rawDirectory)
         : resolvePath(rawDirectory)
+
+    const parent = options.parent !== undefined
+        ? options.parent
+        : parentIdentityFromEnv()
+    let message: string
+    try {
+        const stamped = ensureParentStamp(options.message ?? '', parent, {
+            requireParent: options.requireParent === true,
+        })
+        message = stamped.message
+        if (stamped.stamped) {
+            onProgress?.(
+                `stamped Parent chip /sessions/${(parent?.sessionId ?? '').trim()}`
+            )
+        } else if (!(parent?.sessionId ?? '').trim()) {
+            onProgress?.(
+                'WARNING: no parent session id — remit unattributed '
+                + '(outside-session OK; in-session set HAPI_SESSION_ID or use MCP spawn_peer)'
+            )
+        }
+    } catch (error) {
+        if (error instanceof ParentStampError) {
+            throw new SpawnPeerError('bad_args', error.message)
+        }
+        throw error
+    }
     if (!message.trim()) {
         throw new SpawnPeerError(
             'bad_args',
@@ -343,7 +400,6 @@ export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerRes
     const http = options.http ?? axios
     const sleep = options.sleep ?? defaultSleep
     const now = options.now ?? Date.now
-    const onProgress = options.onProgress
 
     let machineId = (options.machineId ?? '').trim()
     if (!machineId) {
