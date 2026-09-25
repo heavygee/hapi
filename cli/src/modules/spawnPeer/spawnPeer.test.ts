@@ -99,6 +99,23 @@ describe('spawnPeer', () => {
         })).rejects.toMatchObject({ code: 'bad_args' })
     })
 
+    it('rejects a blank remit even when a Parent stamp would otherwise fill it', async () => {
+        // Regression: ensureParentStamp used to turn '' into "## Parent\n..." so the
+        // post-stamp emptiness check passed and idle sessions could be created.
+        process.env.HAPI_SESSION_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+        process.env.HAPI_SESSION_NAME = 'Parent'
+        await expect(spawnPeer({
+            directory: '/tmp/project',
+            message: '   ',
+            machineId: MACHINE_ID,
+            accessToken: 'tok',
+            apiUrl: 'http://hub.test'
+        })).rejects.toMatchObject({
+            code: 'bad_args',
+            message: expect.stringMatching(/empty remit/i),
+        })
+    })
+
     it('rejects a missing directory', async () => {
         await expect(spawnPeer({
             directory: '',

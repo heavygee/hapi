@@ -53,7 +53,7 @@ describe('ensureParentStamp', () => {
         expect(result.message).toContain('## Your assignment')
     })
 
-    it('is a no-op when the remit already cites the parent UUID', () => {
+    it('is a no-op when the remit already has a ## Parent block for this UUID', () => {
         const body = `## Parent\n- Orchestrator chip: [Old Title](/sessions/${PARENT_ID})\n\nGo.`
         const result = ensureParentStamp(body, {
             sessionId: PARENT_ID,
@@ -62,6 +62,20 @@ describe('ensureParentStamp', () => {
         expect(result.stamped).toBe(false)
         expect(result.alreadyPresent).toBe(true)
         expect(result.message).toBe(body)
+    })
+
+    it('still stamps when the remit only has a bare parent citation (no ## Parent block)', () => {
+        // Bare /sessions/<uuid> must not suppress the Parent chip - chat UI only
+        // promotes citations under ## Parent into the sender-style chip.
+        const body = `See /sessions/${PARENT_ID} for context.\n\nDo the work.`
+        const result = ensureParentStamp(body, {
+            sessionId: PARENT_ID,
+            name: 'Parent',
+        })
+        expect(result.stamped).toBe(true)
+        expect(result.alreadyPresent).toBe(false)
+        expect(result.message.startsWith('## Parent')).toBe(true)
+        expect(result.message).toContain(body)
     })
 
     it('fail-closes when requireParent and parent id is missing', () => {

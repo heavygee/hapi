@@ -95,8 +95,9 @@ export function extractParentSessionIdFromRemit(message: string): string | null 
 }
 
 /**
- * Ensure an orchestrated remit cites the parent as `[title](/sessions/<uuid>)`.
- * Idempotent when the UUID is already present (including agent-authored Parent blocks).
+ * Ensure an orchestrated remit cites the parent under a `## Parent` chip block.
+ * Idempotent when a `## Parent` section already cites this UUID. Bare citations
+ * elsewhere do not suppress the stamp (chat only chips the Parent section).
  */
 export function ensureParentStamp(
     message: string,
@@ -117,7 +118,13 @@ export function ensureParentStamp(
         return { message, stamped: false, alreadyPresent: false }
     }
 
-    if (remitCitesSessionId(message, sessionId)) {
+    // Only treat as already-present when a ## Parent section cites this UUID.
+    // A bare /sessions/<uuid> elsewhere in the remit does not render as the
+    // Parent chip, so we still prepend the stamp block.
+    if (
+        /^##\s*Parent\b/im.test(message)
+        && extractParentSessionIdFromRemit(message) === sessionId
+    ) {
         return { message, stamped: false, alreadyPresent: true }
     }
 

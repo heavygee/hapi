@@ -349,9 +349,18 @@ export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerRes
     const parent = options.parent !== undefined
         ? options.parent
         : parentIdentityFromEnv()
+    // Reject blank remits before Parent stamping. Stamping an empty body would
+    // produce a non-empty "## Parent" remit and bypass the idle-session guard.
+    const rawMessage = options.message ?? ''
+    if (!rawMessage.trim()) {
+        throw new SpawnPeerError(
+            'bad_args',
+            'message is required; empty remit would create an idle session'
+        )
+    }
     let message: string
     try {
-        const stamped = ensureParentStamp(options.message ?? '', parent, {
+        const stamped = ensureParentStamp(rawMessage, parent, {
             requireParent: options.requireParent === true,
         })
         message = stamped.message
@@ -370,12 +379,6 @@ export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerRes
             throw new SpawnPeerError('bad_args', error.message)
         }
         throw error
-    }
-    if (!message.trim()) {
-        throw new SpawnPeerError(
-            'bad_args',
-            'message is required; empty remit would create an idle session'
-        )
     }
     const requestedName = (options.name ?? '').trim()
     if (requestedName.length > SESSION_NAME_MAX_LENGTH) {
