@@ -100,8 +100,10 @@ export function parentSectionHasSessionChip(
     const section = extractParentSection(message)
     if (!section) return false
     // Chip form only - bare /sessions/<id> does not render as the Parent sender chip.
+    // Labels may contain escaped brackets (`\]` / `\[`) from escapeChipTitle; do not
+    // stop the title class at the first raw `]`.
     const chipRe =
-        /\[[^\]]*\]\((?:[^)\s]*\/)?sessions\/([^/?#)\s]+)\)/g
+        /\[(?:\\.|[^\]])*\]\((?:[^)\s]*\/)?sessions\/([^/?#)\s]+)\)/g
     for (const match of section.matchAll(chipRe)) {
         const raw = match[1]
         if (!raw) continue
