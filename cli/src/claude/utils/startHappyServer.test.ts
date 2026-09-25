@@ -331,3 +331,39 @@ describe('toClaudeAllowedHapiMcpTools', () => {
         expect(toClaudeAllowedHapiMcpTools(['display_media'])).not.toContain('mcp__hapi__display_media')
     })
 })
+
+describe('resolveMcpSpawnPeerCwd', () => {
+    it('prefers launcher workingDirectory over skillLookup and session path', async () => {
+        const { resolveMcpSpawnPeerCwd } = await import('./startHappyServer')
+        expect(resolveMcpSpawnPeerCwd({
+            workingDirectory: '/launcher/cwd',
+            skillWorkingDirectory: '/skill/cwd',
+            sessionPath: '/session/path',
+        })).toBe('/launcher/cwd')
+    })
+
+    it('prefers skillLookup workingDirectory over session metadata path', async () => {
+        const { resolveMcpSpawnPeerCwd } = await import('./startHappyServer')
+        expect(resolveMcpSpawnPeerCwd({
+            skillWorkingDirectory: '/skill/cwd',
+            sessionPath: '/session/path',
+        })).toBe('/skill/cwd')
+    })
+
+    it('falls back to session metadata.path when skillLookup is absent', async () => {
+        const { resolveMcpSpawnPeerCwd } = await import('./startHappyServer')
+        expect(resolveMcpSpawnPeerCwd({
+            skillWorkingDirectory: undefined,
+            sessionPath: '/session/path',
+        })).toBe('/session/path')
+        expect(resolveMcpSpawnPeerCwd({
+            skillWorkingDirectory: '  ',
+            sessionPath: '  /session/path  ',
+        })).toBe('/session/path')
+    })
+
+    it('returns undefined when neither cwd source is available', async () => {
+        const { resolveMcpSpawnPeerCwd } = await import('./startHappyServer')
+        expect(resolveMcpSpawnPeerCwd({})).toBeUndefined()
+    })
+})

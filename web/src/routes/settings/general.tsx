@@ -109,58 +109,65 @@ export default function SettingsGeneralPage() {
                                     hubSettingsMutation.mutate({ sessionSummaryInChat: checked })
                                 }}
                             />
-                            {peerDefaults ? (
-                                <>
-                                    <SettingsChoiceGroup
-                                        hideLabel
-                                        label={t('settings.general.peerSpawn.agent')}
-                                        description={t('settings.general.peerSpawn.agent.desc')}
-                                        value={peerDefaults.agent}
-                                        options={agentOptions}
-                                        columns={5}
-                                        onChange={(agent) => {
-                                            updatePeerSpawnDefaults({
-                                                ...peerDefaults,
-                                                agent: agent as AgentFlavor
-                                            })
-                                        }}
-                                    />
-                                    <SettingsChoiceGroup
-                                        hideLabel
-                                        label={t('settings.general.peerSpawn.permissionMode')}
-                                        description={t('settings.general.peerSpawn.permissionMode.desc')}
-                                        value={peerDefaults.permissionMode}
-                                        options={permissionOptions}
-                                        columns={4}
-                                        onChange={(permissionMode) => {
-                                            updatePeerSpawnDefaults({
-                                                ...peerDefaults,
-                                                permissionMode: permissionMode as PermissionMode
-                                            })
-                                        }}
-                                    />
-                                    <SettingsRow label={t('settings.general.peerSpawn.model')} description={t('settings.general.peerSpawn.model.desc')}>
-                                        <input
-                                            key={`${peerDefaults.agent}:${currentModel}`}
-                                            type="text"
-                                            defaultValue={currentModel}
-                                            onBlur={(event) => {
-                                                const model = event.target.value.trim()
-                                                if (model === currentModel) return
-                                                // Empty string is the clear sentinel for this flavor override.
-                                                updatePeerSpawnDefaults({
-                                                    ...peerDefaults,
-                                                    models: {
-                                                        ...peerDefaults.models,
-                                                        [peerDefaults.agent]: model
-                                                    }
-                                                })
-                                            }}
-                                            className="w-full max-w-xs rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm text-[var(--app-fg)]"
-                                        />
-                                    </SettingsRow>
-                                </>
-                            ) : null}
+                        </>
+                    ) : null}
+                </SettingsSection>
+            ) : null}
+            {isOwner ? (
+                <SettingsSection
+                    title={t('settings.general.agents.title')}
+                    description={t('settings.general.agents.description')}
+                >
+                    {peerDefaults ? (
+                        <>
+                            <SettingsChoiceGroup
+                                hideLabel
+                                label={t('settings.general.peerSpawn.agent')}
+                                description={t('settings.general.peerSpawn.agent.desc')}
+                                value={peerDefaults.agent}
+                                options={agentOptions}
+                                columns={5}
+                                onChange={(agent) => {
+                                    updatePeerSpawnDefaults({
+                                        ...peerDefaults,
+                                        agent: agent as AgentFlavor
+                                    })
+                                }}
+                            />
+                            <SettingsChoiceGroup
+                                hideLabel
+                                label={t('settings.general.peerSpawn.permissionMode')}
+                                description={t('settings.general.peerSpawn.permissionMode.desc')}
+                                value={peerDefaults.permissionMode}
+                                options={permissionOptions}
+                                columns={4}
+                                onChange={(permissionMode) => {
+                                    updatePeerSpawnDefaults({
+                                        ...peerDefaults,
+                                        permissionMode: permissionMode as PermissionMode
+                                    })
+                                }}
+                            />
+                            <SettingsRow label={t('settings.general.peerSpawn.model')} description={t('settings.general.peerSpawn.model.desc')}>
+                                <input
+                                    key={`${peerDefaults.agent}:${currentModel}`}
+                                    type="text"
+                                    defaultValue={currentModel}
+                                    onBlur={(event) => {
+                                        const model = event.target.value.trim()
+                                        if (model === currentModel) return
+                                        // Empty string is the clear sentinel for this flavor override.
+                                        updatePeerSpawnDefaults({
+                                            ...peerDefaults,
+                                            models: {
+                                                ...peerDefaults.models,
+                                                [peerDefaults.agent]: model
+                                            }
+                                        })
+                                    }}
+                                    className="w-full max-w-xs rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm text-[var(--app-fg)]"
+                                />
+                            </SettingsRow>
                         </>
                     ) : null}
                 </SettingsSection>

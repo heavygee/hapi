@@ -42,11 +42,36 @@ type StartHappyServerOptions = {
      */
     emitTitleSummary?: boolean;
     enableChangeTitle?: boolean;
+    /**
+     * Session project cwd for resolving relative `spawn_peer` directories.
+     * Prefer the launcher's effective cwd (including Codex `--cd` overrides).
+     * Falls back to `skillLookup.workingDirectory`, then hub metadata.path.
+     */
+    workingDirectory?: string;
     skillLookup?: {
         workingDirectory: string;
         flavor: string;
     };
 };
+
+/**
+ * Resolve the base cwd for MCP spawn_peer relative directories.
+ * Prefer launcher workingDirectory (Codex --cd), then skillLookup, then
+ * session metadata.path so bridges without skillLookup still anchor to the
+ * session tree instead of the long-lived HAPI process cwd.
+ */
+export function resolveMcpSpawnPeerCwd(options: {
+    workingDirectory?: string | null
+    skillWorkingDirectory?: string | null
+    sessionPath?: string | null
+}): string | undefined {
+    const fromLauncher = (options.workingDirectory ?? '').trim()
+    if (fromLauncher) return fromLauncher
+    const fromSkill = (options.skillWorkingDirectory ?? '').trim()
+    if (fromSkill) return fromSkill
+    const fromSession = (options.sessionPath ?? '').trim()
+    return fromSession || undefined
+}
 
 /** Registered on the MCP server, but never pre-approved via Claude --allowedTools. */
 const CLAUDE_MANUAL_APPROVAL_HAPI_TOOLS = new Set([
@@ -73,7 +98,8 @@ function createHapiMcpServer(
     client: ApiSessionClient,
     emitTitleSummary: boolean,
     enableChangeTitle: boolean,
-    skillLookup: StartHappyServerOptions['skillLookup']
+    skillLookup: StartHappyServerOptions['skillLookup'],
+    workingDirectory: string | undefined
 ): McpServer {
     const handler = async (title: string) => {
         logger.debug('[hapiMCP] Changing title to:', title);
@@ -382,7 +408,11 @@ function createHapiMcpServer(
             const summaryMeta = toSessionSummaryMetadata(metadata)
             const result = await spawnPeer({
                 directory: args.directory,
-                cwd: skillLookup?.workingDirectory,
+                cwd: resolveMcpSpawnPeerCwd({
+                    workingDirectory,
+                    skillWorkingDirectory: skillLookup?.workingDirectory,
+                    sessionPath: metadata?.path,
+                }),
                 message: args.message,
                 name: args.name,
                 agent: args.agent as Parameters<typeof spawnPeer>[0]['agent'],
@@ -574,7 +604,13 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
     const mcps = new Map<string, McpServer>();
 
     const createMcpTransport = () => {
-        const mcp = createHapiMcpServer(client, emitTitleSummary, enableChangeTitle, options.skillLookup);
+        const mcp = createHapiMcpServer(
+            client,
+            emitTitleSummary,
+            enableChangeTitle,
+            options.skillLookup,
+            options.workingDirectory
+        );
         const transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => randomUUID(),
             onsessioninitialized: (sessionId) => {
