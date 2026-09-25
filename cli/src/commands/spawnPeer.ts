@@ -40,6 +40,8 @@ ${chalk.bold('Notes:')}
   This command spawns, optionally renames, delivers via the ping-peer path,
   then exits non-zero if the new session still has no user message.
   Same hub token/namespace as this CLI. Prefer MCP spawn_peer in-session.
+  When HAPI_SESSION_ID is set, the remit is auto-stamped with a durable
+  Parent [title](/sessions/<uuid>) chip (rename-proof identity).
 
 ${chalk.bold('Options:')}
   --dir PATH              Working directory on this machine (required; relative paths resolve here, not in the runner)
@@ -55,6 +57,7 @@ ${chalk.bold('Options:')}
 ${chalk.bold('Env:')}
   HAPI_API_URL / CLI_API_TOKEN (or ~/.hapi/settings.json via \`hapi auth login\`)
   HAPI_WAIT_ACTIVE_SECS (default 60; overridable with --wait)
+  HAPI_SESSION_ID / HAPI_SESSION_NAME / HAPI_AGENT_SESSION_ID (Parent stamp when set)
 `)
 }
 

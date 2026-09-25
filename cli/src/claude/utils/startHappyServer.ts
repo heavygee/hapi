@@ -21,7 +21,7 @@ import {
 import type { InlineMediaSource } from "@/modules/common/inlineMediaSource";
 import { DISPLAY_IMAGE_PROMPT_CURSOR, DISPLAY_MEDIA_PROMPT_CURSOR, DISPLAY_VIDEO_PROMPT_CURSOR } from "@/modules/common/displayImagePrompt";
 import { resolveSkill } from "@/modules/common/skills";
-import { SESSION_NAME_MAX_LENGTH } from '@hapi/protocol'
+import { SESSION_NAME_MAX_LENGTH, toSessionSummaryMetadata } from '@hapi/protocol'
 import {
     INSPECT_PEER_TOOL_DESCRIPTION,
     PING_PEER_TOOL_DESCRIPTION,
@@ -378,6 +378,8 @@ function createHapiMcpServer(
     }) => {
         logger.debug('[hapiMCP] spawn_peer:', args.directory);
         try {
+            const metadata = client.getMetadata()
+            const summaryMeta = toSessionSummaryMetadata(metadata)
             const result = await spawnPeer({
                 directory: args.directory,
                 cwd: skillLookup?.workingDirectory,
@@ -388,6 +390,12 @@ function createHapiMcpServer(
                 effort: args.effort,
                 sessionType: args.sessionType,
                 permissionMode: args.permissionMode as Parameters<typeof spawnPeer>[0]['permissionMode'],
+                parent: {
+                    sessionId: client.sessionId,
+                    name: metadata?.name ?? null,
+                    agentSessionId: summaryMeta?.agentSessionId ?? null,
+                },
+                requireParent: true,
             });
             return {
                 content: [

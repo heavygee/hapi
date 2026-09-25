@@ -83,6 +83,10 @@ describe('spawnPeer', () => {
 
     beforeEach(() => {
         nowMs = 1_000_000
+        // Unit tests must not inherit the wrapping HAPI session identity.
+        delete process.env.HAPI_SESSION_ID
+        delete process.env.HAPI_SESSION_NAME
+        delete process.env.HAPI_AGENT_SESSION_ID
     })
 
     it('rejects an empty remit', async () => {
@@ -1510,6 +1514,83 @@ it('resolves relative directory against cwd (MCP session working directory)', as
             http: http as never
         })
         expect(spawnedBody).toMatchObject({ sessionType: 'worktree' })
+    })
+
+    it('stamps a durable Parent chip onto the remit before delivery', async () => {
+        const PARENT_ID = '4bd4d2b9-e114-4e03-af4c-03e9e4f7439e'
+        let deliveredText = ''
+        const http = createHttpMock({
+            post: (url, body) => {
+                if (url.endsWith('/api/auth')) {
+                    return { status: 200, data: { token: 'jwt' } }
+                }
+                if (url.endsWith(`/api/machines/${MACHINE_ID}/spawn`)) {
+                    return { status: 200, data: { type: 'success', sessionId: SESSION_ID } }
+                }
+                if (url.endsWith(`/api/sessions/${SESSION_ID}/messages`)) {
+                    deliveredText = String((body as { text?: string }).text ?? '')
+                    return { status: 200, data: { ok: true } }
+                }
+                throw new Error(`unexpected POST ${url}`)
+            },
+            get: (url) => {
+                if (url.endsWith(`/api/sessions/${SESSION_ID}`)) {
+                    return {
+                        status: 200,
+                        data: {
+                            session: {
+                                id: SESSION_ID,
+                                active: true,
+                                metadata: { name: 'Child', flavor: 'claude' }
+                            }
+                        }
+                    }
+                }
+                if (url.includes(`/api/sessions/${SESSION_ID}/messages`)) {
+                    return {
+                        status: 200,
+                        data: {
+                            messages: [userMessageRow(deliveredText)]
+                        }
+                    }
+                }
+                throw new Error(`unexpected GET ${url}`)
+            }
+        })
+
+        await spawnPeer({
+            directory: '/tmp/project',
+            message: 'Own steps: implement P0',
+            parent: {
+                sessionId: PARENT_ID,
+                name: 'Producer',
+                agentSessionId: 'cursor-agent-xyz',
+            },
+            machineId: MACHINE_ID,
+            accessToken: 'tok',
+            apiUrl: 'http://hub.test',
+            http: http as never,
+        })
+
+        expect(deliveredText).toContain(`## Parent`)
+        expect(deliveredText).toContain(`[Producer](/sessions/${PARENT_ID})`)
+        expect(deliveredText).toContain('agentSessionId: `cursor-agent-xyz`')
+        expect(deliveredText).toContain('Own steps: implement P0')
+    })
+
+    it('fail-closes in-session spawn when requireParent and parent id is missing', async () => {
+        await expect(spawnPeer({
+            directory: '/tmp/project',
+            message: 'do the work',
+            requireParent: true,
+            parent: null,
+            machineId: MACHINE_ID,
+            accessToken: 'tok',
+            apiUrl: 'http://hub.test',
+        })).rejects.toMatchObject({
+            code: 'bad_args',
+            message: expect.stringMatching(/parent session id/i),
+        })
     })
 
     it('maps exit codes', () => {
