@@ -65,7 +65,6 @@ describe('SessionList PR chip', () => {
                                 id: 'sess-pr',
                                 metadata: {
                                     path: '/tmp/demo',
-                                    host: 'localhost',
                                     name: 'PR linked session',
                                     externalRefs: [{
                                         kind: 'github_pr',
