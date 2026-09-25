@@ -1308,6 +1308,13 @@ export class ApiSessionClient extends EventEmitter {
                 sid: this.sessionId,
                 time: Date.now()
             })
+            // Runner spawnReadyGate needs HTTP /session-ready for cursor (#151/#171).
+            // Hub socket alone does not unblock it — tip absorb of #1911 dropped this once.
+            void import('@/runner/controlClient').then(({ notifyRunnerSessionReady }) =>
+                notifyRunnerSessionReady(this.sessionId)
+            ).catch(() => {
+                // Runner may not be running (terminal sessions).
+            })
         }, 'droppable')
     }
 

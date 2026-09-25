@@ -89,6 +89,18 @@ vi.mock('socket.io-client', () => ({
     }
 }))
 
+const runnerReadyHarness = vi.hoisted(() => ({
+    notifyRunnerSessionReady: vi.fn(async () => ({ status: 'ok' as const }))
+}))
+
+vi.mock('@/runner/controlClient', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('@/runner/controlClient')>()
+    return {
+        ...actual,
+        notifyRunnerSessionReady: runnerReadyHarness.notifyRunnerSessionReady
+    }
+})
+
 vi.mock('axios', () => ({
     default: {
         get: axiosHarness.get,
@@ -954,5 +966,27 @@ describe('IncomingMessageFilter (HAPI Bot R3 finding #1)', () => {
         expect(filter.accept({ id: 'pending', seq: 7 })).toBe(false)
         expect(filter.accept({ id: 'a', seq: 8 })).toBe(true)
         expect(filter.accept({ id: 'b', seq: 9 })).toBe(true)
+    })
+})
+
+describe('ApiSessionClient emitSessionReady → runner gate', () => {
+    it('POSTs /session-ready to the local runner when hub session-ready fires (#151/#171 regression)', async () => {
+        socketHarness.sockets.length = 0
+        runnerReadyHarness.notifyRunnerSessionReady.mockClear()
+
+        const client = new ApiSessionClient('token', createSession({ namespace: 'default' }))
+        client.sendUserMessage('wake')
+        expect(await client.materialize()).toBe(true)
+
+        client.emitSessionReady()
+        await vi.waitFor(() => {
+            expect(runnerReadyHarness.notifyRunnerSessionReady).toHaveBeenCalledWith(
+                '11111111-1111-4111-8111-111111111111'
+            )
+        })
+
+        const socket = socketHarness.sockets[0]
+        expect(socket?.emitted.some((entry) => entry.event === 'session-ready')).toBe(true)
+        client.close()
     })
 })
