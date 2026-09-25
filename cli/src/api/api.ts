@@ -118,6 +118,8 @@ export class ApiClient {
 
     private async postSession(opts: {
         id?: string
+        /** Bind a hub-preallocated stub (requires id). */
+        adopt?: boolean
         tag: string
         metadata: Metadata
         state: AgentState | null
