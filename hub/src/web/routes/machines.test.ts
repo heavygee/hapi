@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, mock } from 'bun:test'
 import { Hono } from 'hono'
 import type { Machine, SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
@@ -734,6 +734,36 @@ describe('machines routes', () => {
                 expect(response.status).toBe(400)
             }
         }
+    })
+
+    it('rejects non-remote startingMode when hub default agent is AGY and request omits agent', async () => {
+        const machine = createMachine()
+        const spawnSession = mock(async () => ({ type: 'success' as const, sessionId: 'session-1' }))
+        const engine = {
+            getMachine: () => machine,
+            getMachineByNamespace: () => machine,
+            spawnSession,
+        } as unknown as Partial<SyncEngine>
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => { c.set('namespace', 'default'); await next() })
+        app.route('/api', createMachinesRoutes(() => engine as SyncEngine, {
+            getPeerSpawnDefaults: () => ({
+                agent: 'agy',
+                permissionMode: 'default',
+                models: {}
+            })
+        }))
+
+        const response = await app.request('/api/machines/machine-1/spawn', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ directory: '/tmp/x', startingMode: 'pty' })
+        })
+        expect(response.status).toBe(400)
+        expect(await response.json()).toEqual({
+            error: 'AGY only supports remote mode'
+        })
+        expect(spawnSession).not.toHaveBeenCalled()
     })
 
     it('returns 400 when /opencode-models is called without cwd', async () => {

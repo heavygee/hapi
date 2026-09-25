@@ -140,13 +140,6 @@ export function createMachinesRoutes(
         if (!parsed.success) {
             return c.json({ error: 'Invalid body' }, 400)
         }
-        if (
-            (parsed.data.agent === 'agy' || parsed.data.agent === 'dsh')
-            && parsed.data.startingMode
-            && parsed.data.startingMode !== 'remote'
-        ) {
-            return c.json({ error: `${parsed.data.agent.toUpperCase()} only supports remote mode` }, 400)
-        }
         const startingMode = parsed.data.startingMode
         const namespace = c.get('namespace')
 
@@ -163,6 +156,15 @@ export function createMachinesRoutes(
         const effectiveAgent = parsed.data.agent
             ?? hubDefaults?.agent
             ?? STOCK_PEER_SPAWN_DEFAULTS.agent
+        // Validate startingMode against the resolved agent (hub default may be
+        // AGY/DSH even when the request omitted agent).
+        if (
+            (effectiveAgent === 'agy' || effectiveAgent === 'dsh')
+            && startingMode
+            && startingMode !== 'remote'
+        ) {
+            return c.json({ error: `${effectiveAgent.toUpperCase()} only supports remote mode` }, 400)
+        }
         if (
             parsed.data.permissionMode !== undefined
             && !getLaunchPermissionModesForFlavor(effectiveAgent).includes(parsed.data.permissionMode)

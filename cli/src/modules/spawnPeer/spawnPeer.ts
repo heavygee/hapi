@@ -47,6 +47,7 @@ export type SpawnPeerErrorCode =
     | 'auth_failed'
     | 'spawn_failed'
     | 'empty_session'
+    | 'verify_failed'
     | 'not_found'
     | 'ambiguous'
     | 'resume_failed'
@@ -261,16 +262,18 @@ function collapsedRemitNeedle(message: string): string {
     return message.replace(/\s+/g, ' ').trim().slice(0, 800)
 }
 
-async function sessionHasRemit(
+type RemitVerifyResult = 'found' | 'absent' | 'unavailable'
+
+async function verifySessionRemit(
     apiUrl: string,
     jwt: string,
     sessionId: string,
     message: string,
     http: AxiosInstance
-): Promise<boolean> {
+): Promise<RemitVerifyResult> {
     const needle = collapsedRemitNeedle(message)
     if (!needle) {
-        return false
+        return 'absent'
     }
     // Paginate oldest-ward: a busy child can push the remit off the latest
     // 50-row page before verification runs. Cap pages so a broken cursor cannot
@@ -307,17 +310,17 @@ async function sessionHasRemit(
                 }
             )
         } catch {
-            return false
+            return 'unavailable'
         }
         if (response.status < 200 || response.status >= 300) {
-            return false
+            return 'unavailable'
         }
         const rows = Array.isArray(response.data?.messages) ? response.data.messages : []
         for (const row of rows) {
             if (!isObject(row)) continue
             const snippet = extractInspectMessageSnippet(row.content)
             if (snippet?.role === 'user' && snippet.text.includes(needle)) {
-                return true
+                return 'found'
             }
         }
         const page = response.data?.page
@@ -325,12 +328,12 @@ async function sessionHasRemit(
         const nextBeforeAt = typeof page?.nextBeforeAt === 'number' ? page.nextBeforeAt : null
         const nextBeforeSeq = typeof page?.nextBeforeSeq === 'number' ? page.nextBeforeSeq : null
         if (!hasMore || nextBeforeAt === null || nextBeforeSeq === null) {
-            return false
+            return 'absent'
         }
         beforeAt = nextBeforeAt
         beforeSeq = nextBeforeSeq
     }
-    return false
+    return 'absent'
 }
 
 export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerResult> {
@@ -533,8 +536,12 @@ export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerRes
     }
 
     const deadline = now() + waitActiveSecs * 1000
+    // Only archive when we observed an empty transcript. Failed GETs must not
+    // look like "empty shell" — the child may already be working.
+    let observedAbsent = false
     while (now() <= deadline) {
-        if (await sessionHasRemit(apiUrl, jwt, sessionId, message, http)) {
+        const verify = await verifySessionRemit(apiUrl, jwt, sessionId, message, http)
+        if (verify === 'found') {
             return {
                 sessionId,
                 name: renamed
@@ -542,10 +549,21 @@ export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerRes
                     : pingResult?.name || sessionId.slice(0, 8)
             }
         }
+        if (verify === 'absent') {
+            observedAbsent = true
+        }
         if (now() >= deadline) {
             break
         }
         await sleep(POLL_VERIFY_MS)
+    }
+
+    if (!observedAbsent) {
+        throw new SpawnPeerError(
+            'verify_failed',
+            `could not verify remit for ${sessionId} (transcript unread); `
+            + `left child running - inspect or archive ${sessionId} before retrying spawn-peer`
+        )
     }
 
     const archived = await archiveFailedSpawn(apiUrl, jwt, sessionId, http)
@@ -581,6 +599,7 @@ export function exitCodeForSpawnPeerError(error: SpawnPeerError): number {
         case 'timeout':
         case 'send_failed':
         case 'empty_session':
+        case 'verify_failed':
             return 4
         default:
             return 1

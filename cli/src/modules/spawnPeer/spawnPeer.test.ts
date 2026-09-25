@@ -690,7 +690,7 @@ it('resolves relative directory against cwd (MCP session working directory)', as
         expect(spawnedBody?.directory).toBe(resolve('relative-peer-dir'))
     })
 
-    it('archives the child when ping-peer delivery throws after spawn', async () => {
+    it('does not archive when ping-peer delivery throws and transcript cannot be verified', async () => {
         const http = createHttpMock({
             post: (url) => {
                 if (url.endsWith('/api/auth')) {
@@ -700,7 +700,7 @@ it('resolves relative directory against cwd (MCP session working directory)', as
                     return { status: 200, data: { type: 'success', sessionId: SESSION_ID } }
                 }
                 if (url.endsWith(`/api/sessions/${SESSION_ID}/archive`)) {
-                    return { status: 200, data: { ok: true } }
+                    throw new Error('must not archive when transcript verification is unavailable')
                 }
                 throw new Error(`unexpected POST ${url}`)
             },
@@ -727,11 +727,11 @@ it('resolves relative directory against cwd (MCP session working directory)', as
             sleep: async (ms) => {
                 nowMs += ms
             }
-        })).rejects.toMatchObject({ code: 'not_found' })
+        })).rejects.toMatchObject({ code: 'verify_failed' })
 
-        expect(http.post).toHaveBeenCalledWith(
+        expect(http.post).not.toHaveBeenCalledWith(
             `http://hub.test/api/sessions/${SESSION_ID}/archive`,
-            {},
+            expect.anything(),
             expect.anything()
         )
     })
@@ -843,7 +843,7 @@ it('resolves relative directory against cwd (MCP session working directory)', as
         expect(result.name).not.toBe('Peer that was never renamed')
     })
 
-    it('retries a thrown transcript GET and still archives if it never succeeds', async () => {
+    it('retries a thrown transcript GET and does not archive when verification never succeeds', async () => {
         const http = createHttpMock({
             post: (url) => {
                 if (url.endsWith('/api/auth')) {
@@ -856,7 +856,7 @@ it('resolves relative directory against cwd (MCP session working directory)', as
                     return { status: 200, data: { ok: true } }
                 }
                 if (url.endsWith(`/api/sessions/${SESSION_ID}/archive`)) {
-                    return { status: 200, data: { ok: true } }
+                    throw new Error('must not archive when transcript verification failed')
                 }
                 throw new Error(`unexpected POST ${url}`)
             },
@@ -892,11 +892,14 @@ it('resolves relative directory against cwd (MCP session working directory)', as
             sleep: async (ms) => {
                 nowMs += ms
             }
-        })).rejects.toMatchObject({ code: 'empty_session' })
+        })).rejects.toMatchObject({
+            code: 'verify_failed',
+            message: expect.stringMatching(new RegExp(`left child running[\\s\\S]*${SESSION_ID}`, 'i'))
+        })
 
-        expect(http.post).toHaveBeenCalledWith(
+        expect(http.post).not.toHaveBeenCalledWith(
             `http://hub.test/api/sessions/${SESSION_ID}/archive`,
-            {},
+            expect.anything(),
             expect.anything()
         )
     })
@@ -1614,6 +1617,7 @@ it('resolves relative directory against cwd (MCP session working directory)', as
         expect(exitCodeForSpawnPeerError(new SpawnPeerError('bad_args', 'x'))).toBe(2)
         expect(exitCodeForSpawnPeerError(new SpawnPeerError('spawn_failed', 'x'))).toBe(3)
         expect(exitCodeForSpawnPeerError(new SpawnPeerError('empty_session', 'x'))).toBe(4)
+        expect(exitCodeForSpawnPeerError(new SpawnPeerError('verify_failed', 'x'))).toBe(4)
         expect(exitCodeForSpawnPeerError(new SpawnPeerError('send_failed', 'x'))).toBe(4)
     })
 })

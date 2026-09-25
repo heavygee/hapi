@@ -64,6 +64,8 @@ describe('buildHapiMcpBridge skill lookup config', () => {
 
         expect(harness.startOptions).toEqual({
             emitTitleSummary: undefined,
+            enableChangeTitle: undefined,
+            workingDirectory: '/repo',
             skillLookup
         })
         expect(harness.cliArgs).toEqual([
