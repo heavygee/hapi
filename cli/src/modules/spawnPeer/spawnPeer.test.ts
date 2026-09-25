@@ -967,6 +967,83 @@ it('resolves relative directory against cwd (MCP session working directory)', as
         expect(messageGets).toBeGreaterThan(1)
     })
 
+    it('does not archive when transcript pagination is exhausted while hasMore stays true', async () => {
+        // Cap is 40 pages; if every page says hasMore, remit may still exist older.
+        let messageGets = 0
+        const http = createHttpMock({
+            post: (url) => {
+                if (url.endsWith('/api/auth')) {
+                    return { status: 200, data: { token: 'jwt' } }
+                }
+                if (url.endsWith(`/api/machines/${MACHINE_ID}/spawn`)) {
+                    return { status: 200, data: { type: 'success', sessionId: SESSION_ID } }
+                }
+                if (url.endsWith(`/api/sessions/${SESSION_ID}/messages`)) {
+                    return { status: 200, data: { ok: true } }
+                }
+                if (url.endsWith(`/api/sessions/${SESSION_ID}/archive`)) {
+                    throw new Error('must not archive when pagination is inconclusive')
+                }
+                throw new Error(`unexpected POST ${url}`)
+            },
+            get: (url) => {
+                if (url.endsWith(`/api/sessions/${SESSION_ID}`)) {
+                    return {
+                        status: 200,
+                        data: {
+                            session: {
+                                id: SESSION_ID,
+                                active: true,
+                                metadata: { name: 'Busy', flavor: 'claude' }
+                            }
+                        }
+                    }
+                }
+                if (url.includes(`/api/sessions/${SESSION_ID}/messages`)) {
+                    messageGets += 1
+                    return {
+                        status: 200,
+                        data: {
+                            messages: [{
+                                content: {
+                                    role: 'user',
+                                    content: [{ type: 'text', text: 'unrelated noise' }]
+                                }
+                            }],
+                            page: {
+                                hasMore: true,
+                                nextBeforeAt: 1_000_000 - messageGets,
+                                nextBeforeSeq: messageGets
+                            }
+                        }
+                    }
+                }
+                throw new Error(`unexpected GET ${url}`)
+            }
+        })
+
+        await expect(spawnPeer({
+            directory: '/tmp/project',
+            message: 'this remit is buried past the page cap',
+            machineId: MACHINE_ID,
+            accessToken: 'tok',
+            apiUrl: 'http://hub.test',
+            waitActiveSecs: 2,
+            http: http as never,
+            now: () => nowMs,
+            sleep: async (ms) => {
+                nowMs += ms
+            }
+        })).rejects.toMatchObject({ code: 'verify_failed' })
+
+        expect(messageGets).toBeGreaterThanOrEqual(40)
+        expect(http.post).not.toHaveBeenCalledWith(
+            `http://hub.test/api/sessions/${SESSION_ID}/archive`,
+            expect.anything(),
+            expect.anything()
+        )
+    })
+
     it('finds the remit on an older messages page instead of archiving', async () => {
         const messageGets: Array<Record<string, unknown> | undefined> = []
         const http = createHttpMock({

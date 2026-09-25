@@ -333,7 +333,9 @@ async function verifySessionRemit(
         beforeAt = nextBeforeAt
         beforeSeq = nextBeforeSeq
     }
-    return 'absent'
+    // Page cap hit while hasMore remained true — remit may still exist older.
+    // Do not treat as observed-absent (would archive a live child).
+    return 'unavailable'
 }
 
 export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerResult> {
