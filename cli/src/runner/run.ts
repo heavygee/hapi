@@ -1208,14 +1208,50 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         || wrapperHasActiveSiblingRoots(liveRuntimes, id, pid)
       );
 
+      // Fail-closed only for Codex stop contexts; other flavors must not become
+      // permanently un-archivable on a single corrupt runtime JSON (#1911 Major).
+      const isCodexStopContext = (): boolean => {
+        for (const [, session] of pidToTrackedSession) {
+          if (session.sharedSessions?.[sessionId]) return true;
+        }
+        return false;
+      };
+
+      const readLiveRuntimesForStop = async () => {
+        try {
+          return (await readRuntimes({ strict: true })).filter(runtime =>
+            runtime.hub === configuration.apiUrl
+            && runtime.authHash === runtimeAuthHash()
+            && runtimeMayBeAlive(runtime)
+          );
+        } catch (error) {
+          logger.warn(
+            `[RUNNER RUN] Codex runtime registry unreadable during stop of ${sessionId}: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          );
+          // KillSession PID-* fallback cannot prove the OS pid is not a shared
+          // Codex wrapper when the registry is unreadable — soft [] would
+          // tree-kill sibling roots (#1911 Overseer B2).
+          if (sessionId.startsWith('PID-')) return null;
+          // findRuntime also soft-fails; if a shared Codex root may still exist,
+          // refuse the orphan sweep. Non-Codex stops proceed with [] so archive
+          // is not machine-wide blocked by schema drift.
+          try {
+            const { findRuntime } = await import('@/codex/shared/registry');
+            if (await findRuntime(sessionId) || isCodexStopContext()) return null;
+          } catch {
+            if (isCodexStopContext()) return null;
+          }
+          return [];
+        }
+      };
+
       const finishWithOrphanSweep = async (
         base: 'stopped' | 'already_gone' | 'unknown'
       ): Promise<'stopped' | 'already_gone' | 'still_alive' | 'unknown'> => {
-        const liveRuntimes = (await readRuntimes()).filter(runtime =>
-          runtime.hub === configuration.apiUrl
-          && runtime.authHash === runtimeAuthHash()
-          && runtimeMayBeAlive(runtime)
-        );
+        const liveRuntimes = await readLiveRuntimesForStop();
+        if (liveRuntimes === null) return 'still_alive';
         const protectedTrackedPids = trackedSharedWrapperPidsWithSiblings(
           pidToTrackedSession.entries(),
           sessionId
@@ -1256,11 +1292,8 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             }
           }
           // Post-restart: TrackedSession may be gone; registry still lists siblings.
-          const liveAfterStop = (await readRuntimes()).filter(runtime =>
-            runtime.hub === configuration.apiUrl
-            && runtime.authHash === runtimeAuthHash()
-            && runtimeMayBeAlive(runtime)
-          );
+          const liveAfterStop = await readLiveRuntimesForStop();
+          if (liveAfterStop === null) return 'still_alive';
           if (wrapperHasActiveSiblingRoots(liveAfterStop, sessionId, sharedRuntime.pid)) {
             logger.debug(
               `[RUNNER RUN] Shared runtime stopped root ${sessionId}; registry siblings keep PID ${sharedRuntime.pid}`
@@ -1270,19 +1303,21 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           return await finishWithOrphanSweep('stopped');
         } catch { return 'still_alive'; }
       }
-      if ((await readRuntimes()).some(runtime => runtime.hub === configuration.apiUrl && runtime.authHash === runtimeAuthHash()
-        && runtime.sessions[sessionId]?.active && runtimeMayBeAlive(runtime))) return 'still_alive';
+      {
+        const probeRuntimes = await readLiveRuntimesForStop();
+        if (probeRuntimes === null) return 'still_alive';
+        if (probeRuntimes.some(runtime => runtime.sessions[sessionId]?.active)) return 'still_alive';
+      }
 
       // Live Codex runtimes for this hub — used when in-memory sharedSessions
       // only knows the root being archived (post-restart adoption of a new root
       // while older roots remain active only in the durable registry).
-      const liveRegistryRuntimes = async () => (await readRuntimes()).filter(runtime =>
-        runtime.hub === configuration.apiUrl
-        && runtime.authHash === runtimeAuthHash()
-        && runtimeMayBeAlive(runtime)
-      );
-      const registrySiblingsKeepPid = async (pid: number): Promise<boolean> =>
-        wrapperHasActiveSiblingRoots(await liveRegistryRuntimes(), sessionId, pid);
+      const liveRegistryRuntimes = async () => readLiveRuntimesForStop();
+      const registrySiblingsKeepPid = async (pid: number): Promise<boolean | 'unreadable'> => {
+        const live = await liveRegistryRuntimes();
+        if (live === null) return 'unreadable';
+        return wrapperHasActiveSiblingRoots(live, sessionId, pid);
+      };
 
       // KillSession pid fallback must verify the start marker BEFORE any tracked
       // PID match can tree-kill a reused OS pid.
@@ -1290,6 +1325,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         const pid = parseInt(sessionId.slice(4), 10);
         if (Number.isFinite(pid) && pid > 0) {
           const liveForPid = await liveRegistryRuntimes();
+          if (liveForPid === null) return 'still_alive';
           const decision = decideRawPidStop({
             alive: isProcessAlive(pid),
             expectedMarker: opts?.processStartMarker,
@@ -1325,6 +1361,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       // the root); absent evidence stays unknown across retries.
       const finishKeepWrapperDetach = async (pid: number): Promise<'stopped' | 'already_gone' | 'still_alive' | 'unknown'> => {
         const live = await liveRegistryRuntimes();
+        if (live === null) return 'still_alive';
         const binding = sessionRegistryBindingState(live, sessionId, pid);
         if (binding === 'active') return 'still_alive';
         // Base unknown so an argv orphan reap returning stopped is distinguishable
@@ -1352,7 +1389,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         }
         // In-memory map had only this root (typical after restart adoption of a
         // newly reported root). Registry may still list older active siblings.
-        if (await registrySiblingsKeepPid(pid)) {
+        if (await registrySiblingsKeepPid(pid) !== false) {
           return await finishKeepWrapperDetach(pid);
         }
         // Last shared entry removed — fall through so the wrapper can be stopped.
@@ -1373,7 +1410,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           // Post-restart: TrackedSession may only list the newly reported root
           // while older roots remain active in the durable registry on this PID.
           // Archiving the new root must not tree-kill those siblings.
-          if (await registrySiblingsKeepPid(pid)) {
+          if (await registrySiblingsKeepPid(pid) !== false) {
             detachSharedRootFromWrapper(session, sessionId);
             return await finishKeepWrapperDetach(pid);
           }
@@ -1486,11 +1523,8 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             releaseRecoveredSpawnDedupe(pid, existingSessionIdByChildPid, spawnSession);
             continue;
           }
-          const liveForPid = (await readRuntimes()).filter(runtime =>
-            runtime.hub === configuration.apiUrl
-            && runtime.authHash === runtimeAuthHash()
-            && runtimeMayBeAlive(runtime)
-          );
+          const liveForPid = await liveRegistryRuntimes();
+          if (liveForPid === null) return 'still_alive';
           if (wrapperHasActiveSiblingRoots(liveForPid, sessionId, pid)) {
             // Keep this shared wrapper; siblings alone are not stop proof for
             // this root — require an inactive registry binding (KillSession ack).
@@ -1530,11 +1564,8 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       // excluding PIDs that still host active shared sibling roots (registry
       // and/or in-memory tracked wrappers).
       {
-        const liveRuntimes = (await readRuntimes()).filter(runtime =>
-          runtime.hub === configuration.apiUrl
-          && runtime.authHash === runtimeAuthHash()
-          && runtimeMayBeAlive(runtime)
-        );
+        const liveRuntimes = await readLiveRuntimesForStop();
+        if (liveRuntimes === null) return 'still_alive';
         const protectedTrackedPids = trackedSharedWrapperPidsWithSiblings(
           pidToTrackedSession.entries(),
           sessionId
