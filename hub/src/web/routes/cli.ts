@@ -17,7 +17,7 @@ import { mapExternalRefRouteError } from '../../sync/externalRefErrors'
 import { constantTimeEquals } from '../../utils/crypto'
 import { parseAccessToken } from '../../utils/accessToken'
 import type { Machine, Session, SyncEngine } from '../../sync/syncEngine'
-import { SessionIdentityConflictError } from '../../store/sessions'
+import { SessionIdentityConflictError, SessionNotAdoptableError } from '../../store/sessions'
 
 const bearerSchema = z.string().regex(/^Bearer\s+(.+)$/i)
 
@@ -131,16 +131,27 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
             if (!externalRefsInMetadataValid(metadata)) {
                 return c.json({ error: 'Invalid metadata.externalRefs' }, 400)
             }
-            const session = engine.getOrCreateSession(
-                parsed.data.tag,
-                metadata,
-                parsed.data.agentState ?? null,
-                namespace,
-                parsed.data.model,
-                parsed.data.effort,
-                parsed.data.modelReasoningEffort,
-                parsed.data.id
-            )
+            const session = parsed.data.adopt === true && parsed.data.id
+                ? engine.adoptPreallocatedSession(
+                    parsed.data.id,
+                    parsed.data.tag,
+                    metadata,
+                    parsed.data.agentState ?? null,
+                    namespace,
+                    parsed.data.model,
+                    parsed.data.effort,
+                    parsed.data.modelReasoningEffort
+                )
+                : engine.getOrCreateSession(
+                    parsed.data.tag,
+                    metadata,
+                    parsed.data.agentState ?? null,
+                    namespace,
+                    parsed.data.model,
+                    parsed.data.effort,
+                    parsed.data.modelReasoningEffort,
+                    parsed.data.id
+                )
             const sessionSummaryContract = await readSessionSummaryContractEnabled(
                 getConfiguration().dataDir
             )
@@ -148,6 +159,10 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
         } catch (error) {
             if (error instanceof SessionIdentityConflictError) {
                 return c.json({ error: error.message }, 409)
+            }
+            if (error instanceof SessionNotAdoptableError) {
+                const status = error.message === 'Session not found' ? 404 : 409
+                return c.json({ error: error.message }, status)
             }
             throw error
         }
