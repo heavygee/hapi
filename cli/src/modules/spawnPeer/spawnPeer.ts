@@ -36,6 +36,7 @@ import {
     pingPeer
 } from '@/modules/pingPeer/pingPeer'
 import {
+    AmbiguousSpawnMachineError,
     isUuidMachineSelector,
     resolveSpawnMachineIdFromList,
     type HubMachineListEntry,
@@ -244,14 +245,21 @@ async function resolveTargetMachineId(options: {
             return selector
         }
         const machines = await fetchHubMachines(options.apiUrl, options.jwt, options.http)
-        const resolved = resolveSpawnMachineIdFromList(selector, machines)
-        if (!resolved) {
-            throw new SpawnPeerError(
-                'bad_args',
-                `no hub machine matched machine=${selector} (try UUID or hostname from GET /api/machines)`
-            )
+        try {
+            const resolved = resolveSpawnMachineIdFromList(selector, machines)
+            if (!resolved) {
+                throw new SpawnPeerError(
+                    'bad_args',
+                    `no hub machine matched machine=${selector} (try UUID or hostname from GET /api/machines)`
+                )
+            }
+            return resolved
+        } catch (error) {
+            if (error instanceof AmbiguousSpawnMachineError) {
+                throw new SpawnPeerError('ambiguous', error.message)
+            }
+            throw error
         }
-        return resolved
     }
 
     if (options.localMachineId) {

@@ -1197,6 +1197,45 @@ describe('spawnPeer', () => {
         })
     })
 
+    it('rejects ambiguous machine hostnames before spawn', async () => {
+        const http = createHttpMock({
+            post: (url) => {
+                if (url.endsWith('/api/auth')) {
+                    return { status: 200, data: { token: 'jwt' } }
+                }
+                throw new Error(`spawn must not run; unexpected POST ${url}`)
+            },
+            get: (url) => {
+                if (url.endsWith('/api/machines')) {
+                    return {
+                        status: 200,
+                        data: {
+                            machines: [
+                                { id: 'id-a', metadata: { host: 'dup-lab' } },
+                                { id: 'id-b', metadata: { name: 'dup-lab' } },
+                            ]
+                        }
+                    }
+                }
+                throw new Error(`unexpected GET ${url}`)
+            }
+        })
+
+        await expect(spawnPeer({
+            directory: '/tmp/project',
+            message: 'do the work',
+            machine: 'dup-lab',
+            localMachineId: 'local-1',
+            accessToken: 'tok',
+            apiUrl: 'http://hub.test',
+            http: http as never,
+            hubPeerSpawnDefaults: null,
+        })).rejects.toMatchObject({
+            code: 'ambiguous',
+            message: expect.stringMatching(/matches 2 online runners/i),
+        })
+    })
+
     it('requires a local directory when targeting this machine', async () => {
         const LOCAL_ID = 'local-only-machine'
         const http = createHttpMock({

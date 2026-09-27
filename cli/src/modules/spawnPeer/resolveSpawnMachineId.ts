@@ -3,6 +3,8 @@
  *
  * Matches estate `hapi-spawn-peer.sh`: UUID (or exact id) passthrough; otherwise
  * hostname / metadata.host / metadata.name via GET /api/machines.
+ * Label matches that hit more than one online machine fail closed (hub does
+ * not enforce unique hostnames / display names).
  */
 
 export type HubMachineListEntry = {
@@ -18,6 +20,20 @@ export type HubMachineListEntry = {
 }
 
 const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/
+
+export class AmbiguousSpawnMachineError extends Error {
+    readonly matches: string[]
+
+    constructor(selector: string, matches: string[]) {
+        const unique = [...new Set(matches)]
+        super(
+            `machine=${selector} matches ${unique.length} online runners `
+            + `(${unique.join(', ')}). Use a machine UUID instead.`
+        )
+        this.name = 'AmbiguousSpawnMachineError'
+        this.matches = unique
+    }
+}
 
 function asNonEmptyString(value: unknown): string {
     return typeof value === 'string' ? value.trim() : ''
@@ -39,6 +55,7 @@ function machineLabelCandidates(entry: HubMachineListEntry): string[] {
 /**
  * Pure resolver against an already-fetched machine list.
  * Returns the machine id, or null when no match.
+ * Throws AmbiguousSpawnMachineError when a non-id label matches 2+ machines.
  */
 export function resolveSpawnMachineIdFromList(
     want: string,
@@ -63,13 +80,22 @@ export function resolveSpawnMachineIdFromList(
         return needle
     }
 
+    const matches: string[] = []
     for (const entry of machines) {
         const id = asNonEmptyString(entry.id)
         if (!id) continue
         const labels = machineLabelCandidates(entry)
         if (labels.some((label) => label === needle)) {
-            return id
+            matches.push(id)
         }
+    }
+
+    const unique = [...new Set(matches)]
+    if (unique.length > 1) {
+        throw new AmbiguousSpawnMachineError(needle, unique)
+    }
+    if (unique.length === 1) {
+        return unique[0]!
     }
 
     return null

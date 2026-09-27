@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+    AmbiguousSpawnMachineError,
     isUuidMachineSelector,
     resolveSpawnMachineIdFromList,
 } from './resolveSpawnMachineId'
@@ -53,6 +54,23 @@ describe('resolveSpawnMachineIdFromList', () => {
 
     it('returns null for unknown hostnames', () => {
         expect(resolveSpawnMachineIdFromList('no-such-host', MACHINES)).toBeNull()
+    })
+
+    it('rejects ambiguous hostname / displayName matches', () => {
+        const dupHosts = [
+            {
+                id: 'aaaaaaaa-bbbb-4ccc-8ddd-111111111111',
+                metadata: { host: 'shared-lab', displayName: 'lab' },
+            },
+            {
+                id: 'aaaaaaaa-bbbb-4ccc-8ddd-222222222222',
+                metadata: { host: 'other', name: 'shared-lab' },
+            },
+        ]
+        expect(() => resolveSpawnMachineIdFromList('shared-lab', dupHosts))
+            .toThrow(AmbiguousSpawnMachineError)
+        expect(() => resolveSpawnMachineIdFromList('shared-lab', dupHosts))
+            .toThrow(/matches 2 online runners/i)
     })
 
     it('trims whitespace', () => {
