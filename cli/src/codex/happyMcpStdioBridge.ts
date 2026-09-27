@@ -310,9 +310,15 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
     }
 
     const spawnPeerInputSchema: z.ZodTypeAny = z.object({
-      directory: z.string().trim().min(1).describe('Working directory for the new session on this machine'),
+      directory: z.string().trim().min(1)
+        .describe('Working directory for the new session on the target machine (must exist there)'),
       message: z.string().min(1).describe('Required first user message (the remit). Empty spawn is a failed spawn.'),
       name: z.string().trim().min(1).max(SESSION_NAME_MAX_LENGTH).optional().describe('Session display name'),
+      machine: z.string().trim().min(1).optional()
+        .describe(
+          'Optional target runner: hub machine UUID or hostname (metadata.host / displayName from GET /api/machines). '
+          + 'Omit to spawn on this host.'
+        ),
       agent: z.enum(CREATABLE_AGENT_FLAVORS as unknown as [string, ...string[]]).optional()
         .describe('Agent flavor override. When omitted, uses hub peerSpawnDefaults then stock claude.'),
       model: z.string().trim().min(1).optional()

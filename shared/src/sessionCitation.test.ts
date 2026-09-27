@@ -180,4 +180,25 @@ describe('SPAWN_PEER_TOOL_DESCRIPTION', () => {
             /pass permissionmode only when the operator asked/
         )
     })
+
+    it('forbids inventing peer titles and teaches Parent UUID stamp', () => {
+        expect(SPAWN_PEER_TOOL_DESCRIPTION.toLowerCase()).toMatch(/never invent/)
+        expect(SPAWN_PEER_TOOL_DESCRIPTION.toLowerCase()).toMatch(/parent/)
+        expect(SPAWN_PEER_TOOL_DESCRIPTION.toLowerCase()).toMatch(/uuid/)
+    })
+
+    it('documents optional machine targeting beyond this host only', () => {
+        expect(SPAWN_PEER_TOOL_DESCRIPTION.toLowerCase()).toMatch(/machine/)
+        expect(SPAWN_PEER_TOOL_DESCRIPTION.toLowerCase()).toMatch(/hostname|uuid/)
+        expect(SPAWN_PEER_TOOL_DESCRIPTION.toLowerCase()).not.toMatch(
+            /spawn a new hapi session on this machine and/
+        )
+    })
+})
+
+describe('PING_PEER_TOOL_DESCRIPTION identity rule', () => {
+    it('forbids inventing peer titles', async () => {
+        const { PING_PEER_TOOL_DESCRIPTION } = await import('./sessionCitation')
+        expect(PING_PEER_TOOL_DESCRIPTION.toLowerCase()).toMatch(/never invent/)
+    })
 })

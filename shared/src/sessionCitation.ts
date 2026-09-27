@@ -26,7 +26,9 @@ export const INSPECT_PEER_TOOL_DESCRIPTION =
 
 /** MCP `spawn_peer` tool description. Remit is required; empty shell is failure. */
 export const SPAWN_PEER_TOOL_DESCRIPTION =
-    'Spawn a new HAPI session on this machine and deliver a required first user message (the remit). ' +
+    'Spawn a new HAPI session and deliver a required first user message (the remit). ' +
+    'Optional machine selects the target runner (UUID or hostname from GET /api/machines); omit to use this host. ' +
+    'directory must exist on the target machine (local existence is not required for cross-host spawns). ' +
     'Creates the session, optionally names it, then uses the same delivery path as ping_peer. ' +
     'Returns the new sessionId + name. Fails if the remit does not land (a sessionId with 0 user messages is a failed spawn). ' +
     'Do not call POST /api/machines/.../spawn with a message field - the hub rejects it. Use spawn_peer to create and deliver the remit. ' +

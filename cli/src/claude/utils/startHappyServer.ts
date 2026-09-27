@@ -174,9 +174,15 @@ function createHapiMcpServer(
     });
 
     const spawnPeerInputSchema: z.ZodTypeAny = z.object({
-        directory: z.string().trim().min(1).describe('Working directory for the new session on this machine'),
+        directory: z.string().trim().min(1)
+            .describe('Working directory for the new session on the target machine (must exist there)'),
         message: z.string().min(1).describe('Required first user message (the remit). Empty spawn is a failed spawn.'),
         name: z.string().trim().min(1).max(SESSION_NAME_MAX_LENGTH).optional().describe('Session display name'),
+        machine: z.string().trim().min(1).optional()
+            .describe(
+                'Optional target runner: hub machine UUID or hostname (metadata.host / displayName from GET /api/machines). '
+                + 'Omit to spawn on this host.'
+            ),
         agent: z.enum(CREATABLE_AGENT_FLAVORS as unknown as [string, ...string[]]).optional()
             .describe('Agent flavor override. When omitted, uses hub peerSpawnDefaults then stock claude.'),
         model: z.string().trim().min(1).optional()
@@ -535,18 +541,20 @@ mcp.registerTool<any, any>('display_image', {
         directory: string
         message: string
         name?: string
+        machine?: string
         agent?: string
         model?: string
         effort?: string
         sessionType?: 'simple' | 'worktree'
         permissionMode?: string
     }) => {
-        logger.debug('[hapiMCP] spawn_peer:', args.directory);
+        logger.debug('[hapiMCP] spawn_peer:', args.directory, args.machine ? `machine=${args.machine}` : '');
         try {
             const result = await spawnPeer({
                 directory: args.directory,
                 message: args.message,
                 name: args.name,
+                machine: args.machine,
                 agent: args.agent as Parameters<typeof spawnPeer>[0]['agent'],
                 model: args.model,
                 effort: args.effort,

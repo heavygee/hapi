@@ -1098,4 +1098,128 @@ describe('spawnPeer', () => {
         expect(exitCodeForSpawnPeerError(new SpawnPeerError('empty_session', 'x'))).toBe(4)
         expect(exitCodeForSpawnPeerError(new SpawnPeerError('send_failed', 'x'))).toBe(4)
     })
+
+    it('resolves machine hostname via GET /api/machines and spawns there', async () => {
+        const REMOTE_ID = '5f5a87e8-25b2-4732-ba4c-aba95f695bd7'
+        const LOCAL_ID = 'local-machine-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+        let spawnedUrl = ''
+        const progress: string[] = []
+        const http = createHttpMock({
+            post: (url, body) => {
+                if (url.endsWith('/api/auth')) {
+                    return { status: 200, data: { token: 'jwt' } }
+                }
+                if (typeof url === 'string' && url.includes('/api/machines/') && url.endsWith('/spawn')) {
+                    spawnedUrl = url
+                    return { status: 200, data: { type: 'success', sessionId: SESSION_ID } }
+                }
+                if (url.endsWith(`/api/sessions/${SESSION_ID}/messages`)) {
+                    return { status: 200, data: { ok: true } }
+                }
+                throw new Error(`unexpected POST ${url} body=${JSON.stringify(body)}`)
+            },
+            get: (url) => {
+                if (url.endsWith('/api/machines')) {
+                    return {
+                        status: 200,
+                        data: {
+                            machines: [
+                                { id: REMOTE_ID, metadata: { host: 'oos-llm-lab' } },
+                                { id: LOCAL_ID, metadata: { host: 'oos-linux' } },
+                            ]
+                        }
+                    }
+                }
+                if (url.includes(`/api/sessions/${SESSION_ID}/messages`)) {
+                    return { status: 200, data: { messages: [userMessageRow('do the work')] } }
+                }
+                if (url.includes('/api/sessions')) {
+                    return {
+                        status: 200,
+                        data: {
+                            sessions: [{ id: SESSION_ID, active: true, metadata: { flavor: 'claude' } }],
+                            session: { id: SESSION_ID, active: true, metadata: { flavor: 'claude' } }
+                        }
+                    }
+                }
+                throw new Error(`unexpected GET ${url}`)
+            }
+        })
+
+        await spawnPeer({
+            directory: '/does/not/exist/on/this/host',
+            message: 'do the work',
+            machine: 'oos-llm-lab',
+            localMachineId: LOCAL_ID,
+            accessToken: 'tok',
+            apiUrl: 'http://hub.test',
+            http: http as never,
+            hubPeerSpawnDefaults: null,
+            onProgress: (line) => progress.push(line),
+        })
+
+        expect(spawnedUrl).toContain(`/api/machines/${REMOTE_ID}/spawn`)
+        expect(progress.some((line) => line.includes('cross-machine spawn'))).toBe(true)
+        expect(http.get).toHaveBeenCalledWith(
+            'http://hub.test/api/machines',
+            expect.objectContaining({ headers: expect.any(Object) })
+        )
+    })
+
+    it('rejects unknown machine hostnames before spawn', async () => {
+        const http = createHttpMock({
+            post: (url) => {
+                if (url.endsWith('/api/auth')) {
+                    return { status: 200, data: { token: 'jwt' } }
+                }
+                throw new Error(`spawn must not run; unexpected POST ${url}`)
+            },
+            get: (url) => {
+                if (url.endsWith('/api/machines')) {
+                    return { status: 200, data: { machines: [] } }
+                }
+                throw new Error(`unexpected GET ${url}`)
+            }
+        })
+
+        await expect(spawnPeer({
+            directory: '/tmp/project',
+            message: 'do the work',
+            machine: 'no-such-host',
+            localMachineId: 'local-1',
+            accessToken: 'tok',
+            apiUrl: 'http://hub.test',
+            http: http as never,
+            hubPeerSpawnDefaults: null,
+        })).rejects.toMatchObject({
+            code: 'bad_args',
+            message: expect.stringMatching(/no hub machine matched/i),
+        })
+    })
+
+    it('requires a local directory when targeting this machine', async () => {
+        const LOCAL_ID = 'local-only-machine'
+        const http = createHttpMock({
+            post: (url) => {
+                if (url.endsWith('/api/auth')) {
+                    return { status: 200, data: { token: 'jwt' } }
+                }
+                throw new Error(`spawn must not run; unexpected POST ${url}`)
+            }
+        })
+
+        await expect(spawnPeer({
+            directory: '/definitely/missing/spawn-peer-dir-1931',
+            message: 'do the work',
+            machineId: LOCAL_ID,
+            localMachineId: LOCAL_ID,
+            accessToken: 'tok',
+            apiUrl: 'http://hub.test',
+            http: http as never,
+            hubPeerSpawnDefaults: null,
+        })).rejects.toMatchObject({
+            code: 'bad_args',
+            message: expect.stringMatching(/directory not found on this host/i),
+        })
+    })
 })
