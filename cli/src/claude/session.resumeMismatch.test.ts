@@ -158,4 +158,32 @@ describe('Session.onSessionFound resume mismatch (#1933)', () => {
             message: expect.stringContaining('resume mismatch')
         }))
     })
+
+    it('accepts an explicit --resume id that differs from the stored id', () => {
+        const stored = 'aaaaaaaa-1111-4111-8111-111111111111'
+        const selected = 'bbbbbbbb-2222-4222-8222-222222222222'
+        const { session, metadata, updateMetadata } = makeSession({
+            sessionId: stored,
+            claudeArgs: ['--resume', selected]
+        })
+
+        session.onSessionFound(selected)
+
+        expect(metadata.claudeSessionId).toBe(selected)
+        expect(updateMetadata).toHaveBeenCalled()
+    })
+
+    it('does not guard when --continue overrides a stored id', () => {
+        const stored = 'aaaaaaaa-1111-4111-8111-111111111111'
+        const continued = 'cccccccc-3333-4333-8333-333333333333'
+        const { session, metadata, updateMetadata } = makeSession({
+            sessionId: stored,
+            claudeArgs: ['--continue']
+        })
+
+        session.onSessionFound(continued)
+
+        expect(metadata.claudeSessionId).toBe(continued)
+        expect(updateMetadata).toHaveBeenCalled()
+    })
 })

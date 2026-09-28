@@ -46,13 +46,21 @@ describe('decideClaudeSessionFound', () => {
 })
 
 describe('resolveClaudeResumeGuardId', () => {
-    it('prefers the in-memory session id', () => {
-        expect(resolveClaudeResumeGuardId('session-a', ['--resume', 'session-b'])).toBe('session-a')
+    it('uses an explicit --resume id over the stored session id', () => {
+        expect(resolveClaudeResumeGuardId('session-a', ['--resume', 'session-b'])).toBe('session-b')
     })
 
     it('falls back to --resume from claudeArgs when session id is null', () => {
         expect(resolveClaudeResumeGuardId(null, ['--resume', 'args-only-id'])).toBe('args-only-id')
         expect(extractResumeIdFromClaudeArgs(['--model', 'x', '--resume', 'aaaa-bbbb-cccc'])).toBe('aaaa-bbbb-cccc')
+    })
+
+    it('clears the guard when --continue overrides a stored id', () => {
+        expect(resolveClaudeResumeGuardId('session-a', ['--continue'])).toBeNull()
+    })
+
+    it('uses the stored session id when claudeArgs have no resume target', () => {
+        expect(resolveClaudeResumeGuardId('session-a', ['--verbose'])).toBe('session-a')
     })
 
     it('ignores --resume without a dashed session id value', () => {
