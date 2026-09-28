@@ -3,6 +3,7 @@ import { Session } from "./session";
 import { RemoteModeDisplay } from "@/ui/ink/RemoteModeDisplay";
 import { claudeRemote } from "./claudeRemote";
 import { ClaudeResumeUnavailableError } from "./utils/claudeResumeUnavailableError";
+import { resolveClaudeRemoteResumeTarget } from "./utils/claudeResumeGuard";
 import { PermissionHandler } from "./utils/permissionHandler";
 import { Future } from "@/utils/future";
 import { SDKAssistantMessage, SDKMessage, SDKUserMessage } from "./sdk";
@@ -382,6 +383,9 @@ class ClaudeRemoteLauncher extends RemoteLauncherBase {
                 // 'never'" (verified against `bun run typecheck`).
                 let inFlightMessage: InFlightMessage | null = null as InFlightMessage | null;
                 try {
+                    session.armResumeGuard(
+                        resolveClaudeRemoteResumeTarget(session.sessionId, session.claudeArgs)
+                    );
                     await claudeRemote({
                         sessionId: session.sessionId,
                         path: session.path,

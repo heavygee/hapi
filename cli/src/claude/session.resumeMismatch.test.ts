@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Session } from './session'
+import { resolveClaudeLocalResumeGuardId } from './utils/claudeResumeGuard'
 
 function makeSession(opts: {
     sessionId: string | null
@@ -159,7 +160,23 @@ describe('Session.onSessionFound resume mismatch (#1933)', () => {
         }))
     })
 
-    it('accepts an explicit --resume id that differs from the stored id', () => {
+    it('rearms the guard before a later launch so a mismatched relaunch cannot burn metadata', () => {
+        const requested = 'c66b46bc-7647-491a-9cd4-06ba640b9910'
+        const minted = '3e0eb081-1111-4111-8111-111111111111'
+        const { session, metadata, updateMetadata } = makeSession({ sessionId: requested })
+
+        session.onSessionFound(requested)
+        expect(metadata.claudeSessionId).toBe(requested)
+        updateMetadata.mockClear()
+
+        session.armResumeGuard(requested)
+        session.onSessionFound(minted)
+
+        expect(metadata.claudeSessionId).toBe(requested)
+        expect(updateMetadata).not.toHaveBeenCalled()
+    })
+
+    it('local arm accepts an explicit --resume id that differs from the stored id', () => {
         const stored = 'aaaaaaaa-1111-4111-8111-111111111111'
         const selected = 'bbbbbbbb-2222-4222-8222-222222222222'
         const { session, metadata, updateMetadata } = makeSession({
@@ -167,13 +184,14 @@ describe('Session.onSessionFound resume mismatch (#1933)', () => {
             claudeArgs: ['--resume', selected]
         })
 
+        session.armResumeGuard(resolveClaudeLocalResumeGuardId(stored, ['--resume', selected]))
         session.onSessionFound(selected)
 
         expect(metadata.claudeSessionId).toBe(selected)
         expect(updateMetadata).toHaveBeenCalled()
     })
 
-    it('does not guard when --continue overrides a stored id', () => {
+    it('local arm does not guard when --continue overrides a stored id', () => {
         const stored = 'aaaaaaaa-1111-4111-8111-111111111111'
         const continued = 'cccccccc-3333-4333-8333-333333333333'
         const { session, metadata, updateMetadata } = makeSession({
@@ -181,6 +199,7 @@ describe('Session.onSessionFound resume mismatch (#1933)', () => {
             claudeArgs: ['--continue']
         })
 
+        session.armResumeGuard(resolveClaudeLocalResumeGuardId(stored, ['--continue']))
         session.onSessionFound(continued)
 
         expect(metadata.claudeSessionId).toBe(continued)

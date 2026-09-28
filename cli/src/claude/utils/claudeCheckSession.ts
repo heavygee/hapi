@@ -43,7 +43,9 @@ function transcriptLooksValid(sessionFile: string): boolean {
                 offset += bytesRead;
                 const chunk = leftover + buf.toString('utf-8', 0, bytesRead);
                 const lines = chunk.split('\n');
-                leftover = bytesRead < buf.length ? '' : (lines.pop() ?? '');
+                // Always keep the final segment in leftover — at EOF it may be
+                // a complete JSONL row with no trailing newline.
+                leftover = lines.pop() ?? '';
                 for (const line of lines) {
                     if (lineHasUuid(line)) return true;
                 }

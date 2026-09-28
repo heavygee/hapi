@@ -94,10 +94,9 @@ export class Session extends AgentSessionBase<EnhancedMode> {
     /**
      * Adopt a Claude transcript id into durable metadata — unless we asked to
      * resume A on this spawn and Claude silently minted B (tiann/hapi#1933).
-     * The guard applies only until the first successful adopt / confirmed
-     * resume so `/clear` and other mid-session SessionStart events can mint
-     * a new id. Mismatch keeps the guard armed so a later relaunch cannot
-     * burn A to B via the live sessionId.
+     * Launchers rearm the guard before each spawn from the ID actually passed
+     * to Claude; a successful adopt / confirmed resume clears it so `/clear`
+     * can mint a new id. Mismatch keeps the guard armed.
      */
     override onSessionFound = (sessionId: string, extras?: Partial<Metadata>): void => {
         const forkRequested = Boolean(extras?.forkedFrom)
@@ -125,6 +124,16 @@ export class Session extends AgentSessionBase<EnhancedMode> {
         }
         this.commitSessionId(decision.sessionId, extras);
         this.resumeGuardId = null;
+    };
+
+    /**
+     * Arm the mismatch guard from the resume id about to be passed to Claude.
+     * Call immediately before each local/remote launch.
+     */
+    armResumeGuard = (requestedId: string | null): void => {
+        this.resumeGuardId = typeof requestedId === 'string' && requestedId.trim().length > 0
+            ? requestedId.trim()
+            : null;
     };
 
     /**

@@ -13,7 +13,7 @@ import { getHapiBlobsDir } from "@/constants/uploadPaths";
 import { getDefaultClaudeCodePath } from "./sdk/utils";
 import { filterCatalogAffectingClaudeArgs } from "./sdk/metadataExtractor";
 import { ClaudeResumeUnavailableError } from "./utils/claudeResumeUnavailableError";
-import { extractResumeIdFromClaudeArgs } from "./utils/claudeResumeGuard";
+import { resolveClaudeRemoteResumeTarget } from "./utils/claudeResumeGuard";
 
 export { ClaudeResumeUnavailableError } from "./utils/claudeResumeUnavailableError";
 
@@ -56,11 +56,8 @@ export async function claudeRemote(opts: {
     }
     process.env.DISABLE_AUTOUPDATER = '1';
 
-    // Resolve the resume target once. Prefer the in-memory session id; fall
-    // back to a one-shot --resume UUID in claudeArgs (runner reopen path).
-    const requestedResumeId = (opts.sessionId && opts.sessionId.trim())
-        || extractResumeIdFromClaudeArgs(opts.claudeArgs)
-        || null
+    // Resolve the resume target once (same helper the Session mismatch guard uses).
+    const requestedResumeId = resolveClaudeRemoteResumeTarget(opts.sessionId, opts.claudeArgs)
 
     let startFrom = requestedResumeId
     if (requestedResumeId) {

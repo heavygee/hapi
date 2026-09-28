@@ -30,13 +30,22 @@ export function extractResumeIdFromClaudeArgs(claudeArgs: string[] | undefined):
     return null
 }
 
+/** Resume target claudeRemote passes to the SDK (sessionId wins over args). */
+export function resolveClaudeRemoteResumeTarget(
+    sessionId: string | null | undefined,
+    claudeArgs?: string[]
+): string | null {
+    if (typeof sessionId === 'string' && sessionId.trim().length > 0) {
+        return sessionId.trim()
+    }
+    return extractResumeIdFromClaudeArgs(claudeArgs)
+}
+
 /**
- * Initial mismatch-guard id from the effective local/remote launch strategy.
- * Explicit `--resume <id>` wins over a stored session id (user deliberately
- * selected another transcript). `--continue` clears the guard so Claude's
- * "latest" id is not rejected against a stale stored pointer.
+ * Guard id for a local launch: explicit `--resume <id>` wins; `--continue`
+ * clears the guard; otherwise use the stored session id.
  */
-export function resolveClaudeResumeGuardId(
+export function resolveClaudeLocalResumeGuardId(
     sessionId: string | null | undefined,
     claudeArgs?: string[]
 ): string | null {
@@ -51,6 +60,17 @@ export function resolveClaudeResumeGuardId(
         return sessionId.trim()
     }
     return null
+}
+
+/**
+ * Initial mismatch-guard id. Matches the remote SDK resume target (sessionId
+ * preferred). Launchers rearm before each spawn for local vs remote rules.
+ */
+export function resolveClaudeResumeGuardId(
+    sessionId: string | null | undefined,
+    claudeArgs?: string[]
+): string | null {
+    return resolveClaudeRemoteResumeTarget(sessionId, claudeArgs)
 }
 
 export function decideClaudeSessionFound(opts: {
