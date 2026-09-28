@@ -12,21 +12,9 @@ import { PermissionResult } from "./sdk/types";
 import { getHapiBlobsDir } from "@/constants/uploadPaths";
 import { getDefaultClaudeCodePath } from "./sdk/utils";
 import { filterCatalogAffectingClaudeArgs } from "./sdk/metadataExtractor";
+import { ClaudeResumeUnavailableError } from "./utils/claudeResumeUnavailableError";
 
-/** Thrown when a resume id was requested but the on-disk transcript is gone. */
-export class ClaudeResumeUnavailableError extends Error {
-    readonly code = 'resume_unavailable' as const
-    readonly resumeSessionId: string
-
-    constructor(resumeSessionId: string) {
-        super(
-            `Claude resume unavailable: transcript for ${resumeSessionId} was not found ` +
-            `under ~/.claude/projects (refusing to mint a new session id)`
-        )
-        this.name = 'ClaudeResumeUnavailableError'
-        this.resumeSessionId = resumeSessionId
-    }
-}
+export { ClaudeResumeUnavailableError } from "./utils/claudeResumeUnavailableError";
 
 function extractResumeIdFromArgs(claudeArgs: string[] | undefined): string | null {
     if (!claudeArgs) return null

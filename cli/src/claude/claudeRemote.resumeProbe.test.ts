@@ -18,7 +18,8 @@ vi.mock('@/claude/sdk', () => ({
 }))
 
 import { claudeCheckSession } from './utils/claudeCheckSession'
-import { claudeRemote, ClaudeResumeUnavailableError } from './claudeRemote'
+import { ClaudeResumeUnavailableError } from './utils/claudeResumeUnavailableError'
+import { claudeRemote } from './claudeRemote'
 
 describe('claudeRemote resume probe (#1933)', () => {
     beforeEach(() => {

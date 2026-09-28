@@ -2,6 +2,7 @@ import React from "react";
 import { Session } from "./session";
 import { RemoteModeDisplay } from "@/ui/ink/RemoteModeDisplay";
 import { claudeRemote } from "./claudeRemote";
+import { ClaudeResumeUnavailableError } from "./utils/claudeResumeUnavailableError";
 import { PermissionHandler } from "./utils/permissionHandler";
 import { Future } from "@/utils/future";
 import { SDKAssistantMessage, SDKMessage, SDKUserMessage } from "./sdk";
@@ -567,6 +568,18 @@ class ClaudeRemoteLauncher extends RemoteLauncherBase {
                     }
                 } catch (e) {
                     logger.debug('[remote]: launch error', e);
+
+                    // Missing on-disk transcript is terminal for this process:
+                    // respawning just repeats the same probe failure and storms
+                    // session events (#1933). Surface once and exit the loop.
+                    if (e instanceof ClaudeResumeUnavailableError) {
+                        session.client.sendSessionEvent({
+                            type: 'message',
+                            message: e.message
+                        });
+                        this.exitReason = 'exit';
+                        break;
+                    }
 
                     // Restores a message batch that was already
                     // dequeued+acked from the queue (see
