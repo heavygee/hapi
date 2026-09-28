@@ -46,7 +46,8 @@ describe('Session.onSessionFound resume mismatch (#1933)', () => {
 
         session.onSessionFound(minted)
 
-        expect(session.sessionId).toBe(requested)
+        // Live process may be on B for transport; durable resume pointer stays A.
+        expect(session.sessionId).toBe(minted)
         expect(metadata.claudeSessionId).toBe(requested)
         expect(updateMetadata).not.toHaveBeenCalled()
         expect(sendSessionEvent).toHaveBeenCalledWith(expect.objectContaining({
@@ -95,5 +96,35 @@ describe('Session.onSessionFound resume mismatch (#1933)', () => {
         expect(session.sessionId).toBe(afterClear)
         expect(metadata.claudeSessionId).toBe(afterClear)
         expect(updateMetadata).toHaveBeenCalled()
+    })
+
+    it('releases the guard when local resume re-emits the same SessionStart id', () => {
+        const resumed = 'bbbbbbbb-2222-4222-8222-222222222222'
+        const afterClear = 'cccccccc-3333-4333-8333-333333333333'
+        const { session, metadata, updateMetadata } = makeSession({ sessionId: resumed })
+
+        // Local successful --resume often skips onSessionFound (same id).
+        session.confirmResumeSessionId(resumed)
+        updateMetadata.mockClear()
+        session.onSessionFound(afterClear)
+
+        expect(session.sessionId).toBe(afterClear)
+        expect(metadata.claudeSessionId).toBe(afterClear)
+        expect(updateMetadata).toHaveBeenCalled()
+    })
+
+    it('on mismatch still notifies listeners for local transport without burning metadata', () => {
+        const requested = 'c66b46bc-7647-491a-9cd4-06ba640b9910'
+        const minted = '3e0eb081-1111-4111-8111-111111111111'
+        const { session, metadata, updateMetadata } = makeSession({ sessionId: requested })
+        const found: string[] = []
+        session.addSessionFoundCallback((id) => found.push(id))
+
+        session.onSessionFound(minted)
+
+        expect(metadata.claudeSessionId).toBe(requested)
+        expect(updateMetadata).not.toHaveBeenCalled()
+        expect(session.sessionId).toBe(minted)
+        expect(found).toEqual([minted])
     })
 })
