@@ -300,6 +300,7 @@ describe('Session.onSessionFound resume mismatch (#1933)', () => {
             hookSettingsPath: '/tmp/hooks.json'
         })
 
+        session.armResumeGuard(null)
         session.onSessionFound(adopted)
 
         expect(session.getClaudeResumeSessionId()).toBe(adopted)
