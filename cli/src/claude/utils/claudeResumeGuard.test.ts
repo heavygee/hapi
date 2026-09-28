@@ -1,0 +1,42 @@
+import { describe, expect, it } from 'vitest'
+import { decideClaudeSessionFound } from './claudeResumeGuard'
+
+describe('decideClaudeSessionFound', () => {
+    it('accepts a fresh session when nothing was requested', () => {
+        expect(decideClaudeSessionFound({
+            requestedId: null,
+            reportedId: 'new-session-id'
+        })).toEqual({ action: 'accept', sessionId: 'new-session-id' })
+    })
+
+    it('accepts when Claude continues the requested resume id', () => {
+        expect(decideClaudeSessionFound({
+            requestedId: 'aaaa-bbbb',
+            reportedId: 'aaaa-bbbb'
+        })).toEqual({ action: 'accept', sessionId: 'aaaa-bbbb' })
+    })
+
+    it('rejects silent overwrite when resume requested A but Claude reports B', () => {
+        expect(decideClaudeSessionFound({
+            requestedId: 'c66b46bc-7647-491a-9cd4-06ba640b9910',
+            reportedId: '3e0eb081-1111-4111-8111-111111111111'
+        })).toEqual({
+            action: 'reject',
+            requestedId: 'c66b46bc-7647-491a-9cd4-06ba640b9910',
+            reportedId: '3e0eb081-1111-4111-8111-111111111111',
+            reason: 'resume_mismatch'
+        })
+    })
+
+    it('accepts a fork that mints a new id from the requested parent', () => {
+        expect(decideClaudeSessionFound({
+            requestedId: 'parent-id',
+            reportedId: 'child-id',
+            forkRequested: true
+        })).toEqual({
+            action: 'accept',
+            sessionId: 'child-id',
+            extras: { forkedFrom: 'parent-id' }
+        })
+    })
+})

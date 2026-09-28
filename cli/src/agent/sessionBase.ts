@@ -110,6 +110,11 @@ export class AgentSessionBase<Mode> {
     };
 
     onSessionFound = (sessionId: string, extras?: Partial<Metadata>) => {
+        this.commitSessionId(sessionId, extras);
+    };
+
+    /** Shared accept path for flavor overrides that gate onSessionFound. */
+    protected commitSessionId(sessionId: string, extras?: Partial<Metadata>): void {
         this.sessionId = sessionId;
         this.client.updateMetadata((metadata) => this.applySessionIdToMetadata(metadata, sessionId, extras));
         logger.debug(`[${this.sessionLabel}] ${this.sessionIdLabel} session ID ${sessionId} added to metadata`);
@@ -117,7 +122,7 @@ export class AgentSessionBase<Mode> {
         for (const callback of this.sessionFoundCallbacks) {
             callback(sessionId);
         }
-    };
+    }
 
     addSessionFoundCallback = (callback: (sessionId: string) => void): void => {
         this.sessionFoundCallbacks.push(callback);

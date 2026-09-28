@@ -3,10 +3,11 @@ import { ApiClient, ApiSessionClient } from '@/lib';
 import { MessageQueue2 } from '@/utils/MessageQueue2';
 import { logger } from '@/ui/logger';
 import { AgentSessionBase } from '@/agent/sessionBase';
-import type { SessionEffort, SessionModel } from '@/api/types';
+import type { Metadata, SessionEffort, SessionModel } from '@/api/types';
 import type { EnhancedMode } from './loop';
 import type { PermissionMode } from './loop';
 import type { LocalLaunchExitReason } from '@/agent/localLaunchPolicy';
+import { decideClaudeSessionFound } from './utils/claudeResumeGuard';
 
 type LocalLaunchFailure = {
     message: string;
@@ -59,8 +60,9 @@ export class Session extends AgentSessionBase<EnhancedMode> {
             mode: opts.mode,
             sessionLabel: 'Session',
             sessionIdLabel: 'Claude Code',
-            applySessionIdToMetadata: (metadata, sessionId) => ({
+            applySessionIdToMetadata: (metadata, sessionId, extras) => ({
                 ...metadata,
+                ...extras,
                 claudeSessionId: sessionId
             }),
             permissionMode: opts.permissionMode,
@@ -81,6 +83,35 @@ export class Session extends AgentSessionBase<EnhancedMode> {
         this.model = opts.model;
         this.effort = opts.effort;
     }
+
+    /**
+     * Adopt a Claude transcript id into durable metadata — unless we asked to
+     * resume A and Claude silently minted B (tiann/hapi#1933). In that case
+     * keep A, surface an operator-visible error, and refuse the overwrite.
+     */
+    override onSessionFound = (sessionId: string, extras?: Partial<Metadata>): void => {
+        const forkRequested = Boolean(extras?.forkedFrom)
+            || Boolean(this.claudeArgs?.includes('--fork-session'));
+        const decision = decideClaudeSessionFound({
+            requestedId: this.sessionId,
+            reportedId: sessionId,
+            forkRequested
+        });
+        if (decision.action === 'reject') {
+            const message =
+                `Claude resume mismatch: requested ${decision.requestedId} but Claude ` +
+                `reported ${decision.reportedId}. Keeping the prior resume pointer; ` +
+                `refusing to overwrite metadata.claudeSessionId. Reopen with an explicit ` +
+                `fork if a new native transcript is intended.`;
+            logger.warn(`[Session] ${message}`);
+            this.client.sendSessionEvent({ type: 'message', message });
+            return;
+        }
+        const acceptExtras = decision.extras
+            ? { ...extras, forkedFrom: decision.extras.forkedFrom }
+            : extras;
+        this.commitSessionId(decision.sessionId, acceptExtras);
+    };
 
     setPermissionMode = (mode: PermissionMode): void => {
         this.permissionMode = mode;
