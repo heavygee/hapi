@@ -405,4 +405,102 @@ describe('formatInspectPeerReport', () => {
         expect(result.messages).toHaveLength(1)
         expect(result.messages[0]?.text).toBe('what is the plan?')
     })
+
+    it('deduplicates a queued message that reappears on an older page', async () => {
+        const sessionId = 'dddddddd-5555-4555-8555-555555555555'
+        let messageCalls = 0
+        const http = createHttpMock({
+            post: async () => ({ status: 200, data: { token: 'jwt' } }),
+            get: async (url) => {
+                if (url.endsWith('/api/sessions')) {
+                    return {
+                        status: 200,
+                        data: {
+                            sessions: [{
+                                id: sessionId,
+                                active: true,
+                                metadata: { name: 'Queued', flavor: 'claude' }
+                            }]
+                        }
+                    }
+                }
+                if (url.endsWith(`/api/sessions/${sessionId}`)) {
+                    return {
+                        status: 200,
+                        data: {
+                            session: {
+                                id: sessionId,
+                                active: true,
+                                metadata: { name: 'Queued', flavor: 'claude' }
+                            }
+                        }
+                    }
+                }
+                if (url.endsWith(`/api/sessions/${sessionId}/messages`)) {
+                    messageCalls += 1
+                    if (messageCalls === 1) {
+                        return {
+                            status: 200,
+                            data: {
+                                messages: [
+                                    {
+                                        id: 'old-1',
+                                        createdAt: 1,
+                                        content: { role: 'user', content: { text: 'older prompt' } }
+                                    },
+                                    {
+                                        id: 'queued-1',
+                                        createdAt: 99,
+                                        content: { role: 'user', content: { text: 'queued prompt' } }
+                                    }
+                                ],
+                                page: {
+                                    hasMore: true,
+                                    nextBeforeAt: 1,
+                                    nextBeforeSeq: 1,
+                                    totalCount: 3,
+                                    snapshotHeadSeq: 3
+                                }
+                            }
+                        }
+                    }
+                    return {
+                        status: 200,
+                        data: {
+                            messages: [
+                                {
+                                    id: 'queued-1',
+                                    createdAt: 99,
+                                    content: { role: 'user', content: { text: 'queued prompt' } }
+                                },
+                                {
+                                    id: 'older-2',
+                                    createdAt: 0,
+                                    content: { role: 'user', content: { text: 'even older' } }
+                                }
+                            ],
+                            page: {
+                                hasMore: false,
+                                totalCount: 3,
+                                snapshotHeadSeq: 3
+                            }
+                        }
+                    }
+                }
+                throw new Error(`unexpected GET ${url}`)
+            }
+        })
+
+        const result = await inspectPeer({
+            sessionIdPrefix: sessionId,
+            messageLimit: 5,
+            accessToken: 'tok',
+            apiUrl: 'http://hub.test',
+            http: http as never
+        })
+
+        expect(messageCalls).toBe(2)
+        expect(result.messages.map((m) => m.id)).toEqual(['queued-1', 'old-1', 'older-2'])
+        expect(result.messages.filter((m) => m.id === 'queued-1')).toHaveLength(1)
+    })
 })
