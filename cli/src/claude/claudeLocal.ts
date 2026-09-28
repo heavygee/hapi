@@ -55,9 +55,15 @@ export async function claudeLocal(opts: {
     // Determine session strategy:
     // - If resuming an existing session: use --resume (unless user already supplied session control)
     // - If starting fresh: let Claude create a new session ID (reported via SessionStart hook)
+    // - If a resume id was requested but the transcript is gone: fail closed (do not mint B).
     let startFrom = opts.sessionId;
     if (opts.sessionId && !claudeCheckSession(opts.sessionId, opts.path)) {
-        startFrom = null;
+        const err = new Error(
+            `Claude resume unavailable: transcript for ${opts.sessionId} was not found ` +
+            `under ~/.claude/projects (refusing to mint a new session id)`
+        );
+        err.name = 'ClaudeResumeUnavailableError';
+        throw err;
     }
 
     if (opts.abort.aborted) {

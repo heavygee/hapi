@@ -13,6 +13,35 @@ import { getHapiBlobsDir } from "@/constants/uploadPaths";
 import { getDefaultClaudeCodePath } from "./sdk/utils";
 import { filterCatalogAffectingClaudeArgs } from "./sdk/metadataExtractor";
 
+/** Thrown when a resume id was requested but the on-disk transcript is gone. */
+export class ClaudeResumeUnavailableError extends Error {
+    readonly code = 'resume_unavailable' as const
+    readonly resumeSessionId: string
+
+    constructor(resumeSessionId: string) {
+        super(
+            `Claude resume unavailable: transcript for ${resumeSessionId} was not found ` +
+            `under ~/.claude/projects (refusing to mint a new session id)`
+        )
+        this.name = 'ClaudeResumeUnavailableError'
+        this.resumeSessionId = resumeSessionId
+    }
+}
+
+function extractResumeIdFromArgs(claudeArgs: string[] | undefined): string | null {
+    if (!claudeArgs) return null
+    for (let i = 0; i < claudeArgs.length; i++) {
+        if (claudeArgs[i] !== '--resume') continue
+        if (i + 1 >= claudeArgs.length) return null
+        const nextArg = claudeArgs[i + 1]
+        if (!nextArg.startsWith('-') && nextArg.includes('-')) {
+            return nextArg
+        }
+        return null
+    }
+    return null
+}
+
 export async function claudeRemote(opts: {
 
     // Fixed parameters
@@ -43,35 +72,20 @@ export async function claudeRemote(opts: {
 }) {
     const debugPrefix = '[claudeRemote][async-debug]';
 
-    // Check if session is valid
-    let startFrom = opts.sessionId;
-    if (opts.sessionId && !claudeCheckSession(opts.sessionId, opts.path)) {
-        startFrom = null;
-    }
-    
-    // Extract --resume from claudeArgs if present (for first spawn)
-    if (!startFrom && opts.claudeArgs) {
-        for (let i = 0; i < opts.claudeArgs.length; i++) {
-            if (opts.claudeArgs[i] === '--resume') {
-                // Check if next arg exists and looks like a session ID
-                if (i + 1 < opts.claudeArgs.length) {
-                    const nextArg = opts.claudeArgs[i + 1];
-                    // If next arg doesn't start with dash and contains dashes, it's likely a UUID
-                    if (!nextArg.startsWith('-') && nextArg.includes('-')) {
-                        startFrom = nextArg;
-                        logger.debug(`[claudeRemote] Found --resume with session ID: ${startFrom}`);
-                        break;
-                    } else {
-                        // Just --resume without UUID - SDK doesn't support this
-                        logger.debug('[claudeRemote] Found --resume without session ID - not supported in remote mode');
-                        break;
-                    }
-                } else {
-                    // --resume at end of args - SDK doesn't support this
-                    logger.debug('[claudeRemote] Found --resume without session ID - not supported in remote mode');
-                    break;
-                }
-            }
+    // Resolve the resume target once. Prefer the in-memory session id; fall
+    // back to a one-shot --resume UUID in claudeArgs (runner reopen path).
+    const requestedResumeId = (opts.sessionId && opts.sessionId.trim())
+        || extractResumeIdFromArgs(opts.claudeArgs)
+        || null
+
+    let startFrom = requestedResumeId
+    if (requestedResumeId) {
+        if (!claudeCheckSession(requestedResumeId, opts.path)) {
+            // Mirror Cursor #841: missing on-disk store must not silently mint B.
+            throw new ClaudeResumeUnavailableError(requestedResumeId)
+        }
+        if (requestedResumeId !== opts.sessionId) {
+            logger.debug(`[claudeRemote] Found --resume with session ID: ${startFrom}`);
         }
     }
 

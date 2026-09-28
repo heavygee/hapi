@@ -132,6 +132,9 @@ describe('inspectPeer', () => {
         expect(result.flavor).toBe('cursor')
         expect(result.path).toBe('/home/heavygee/coding/hapi')
         expect(result.messages).toHaveLength(2)
+        expect(result.messageTotal).toBeNull()
+        expect(result.rowsScanned).toBe(2)
+        expect(result.snippetsSkipped).toBe(0)
         expect(result.messages[0]).toMatchObject({
             role: 'user',
             text: 'status on runner versions?'
@@ -300,12 +303,106 @@ describe('formatInspectPeerReport', () => {
             messages: [
                 { id: '1', role: 'user', text: 'hello', createdAt: 1 },
                 { id: '2', role: 'agent', text: 'world', createdAt: 2 }
-            ]
+            ],
+            messageTotal: 649,
+            snapshotHeadSeq: 649,
+            rowsScanned: 40,
+            snippetsSkipped: 38,
+            hasMore: true
         })
         expect(report).toContain('7d55ed21-8a9f-4309-b4f8-30069df36b4b')
         expect(report).toContain('hub runner version governance')
         expect(report).toContain('[user] hello')
         expect(report).toContain('[agent] world')
         expect(report).toContain('/sessions/7d55ed21-8a9f-4309-b4f8-30069df36b4b')
+        expect(report).toContain('messageTotal: 649')
+        expect(report).toContain('snippetsSkipped: 38')
+        expect(report).toContain('rowsScanned: 40')
+    })
+
+    it('scans past non-text rows to fill text snippets and reports skips', async () => {
+        const sessionId = 'cccccccc-4444-4444-4444-444444444444'
+        const http = createHttpMock({
+            post: async () => ({ status: 200, data: { token: 'jwt' } }),
+            get: async (url) => {
+                if (url.endsWith('/api/sessions')) {
+                    return {
+                        status: 200,
+                        data: {
+                            sessions: [{
+                                id: sessionId,
+                                active: true,
+                                metadata: { name: 'Deep', flavor: 'claude' }
+                            }]
+                        }
+                    }
+                }
+                if (url.endsWith(`/api/sessions/${sessionId}`)) {
+                    return {
+                        status: 200,
+                        data: {
+                            session: {
+                                id: sessionId,
+                                active: true,
+                                metadata: { name: 'Deep', flavor: 'claude' }
+                            }
+                        }
+                    }
+                }
+                if (url.endsWith(`/api/sessions/${sessionId}/messages`)) {
+                    return {
+                        status: 200,
+                        data: {
+                            messages: [
+                                {
+                                    id: 'tool-1',
+                                    createdAt: 1,
+                                    content: {
+                                        role: 'agent',
+                                        content: { type: 'event', data: { type: 'tool_call' } }
+                                    }
+                                },
+                                {
+                                    id: 'ready-1',
+                                    createdAt: 2,
+                                    content: {
+                                        role: 'agent',
+                                        content: { type: 'event', data: { type: 'ready' } }
+                                    }
+                                },
+                                {
+                                    id: 'user-1',
+                                    createdAt: 3,
+                                    content: {
+                                        role: 'user',
+                                        content: { text: 'what is the plan?' }
+                                    }
+                                }
+                            ],
+                            page: {
+                                hasMore: false,
+                                totalCount: 649,
+                                snapshotHeadSeq: 649
+                            }
+                        }
+                    }
+                }
+                throw new Error(`unexpected GET ${url}`)
+            }
+        })
+
+        const result = await inspectPeer({
+            sessionIdPrefix: sessionId,
+            messageLimit: 5,
+            accessToken: 'tok',
+            apiUrl: 'http://hub.test',
+            http: http as never
+        })
+
+        expect(result.messageTotal).toBe(649)
+        expect(result.rowsScanned).toBe(3)
+        expect(result.snippetsSkipped).toBe(2)
+        expect(result.messages).toHaveLength(1)
+        expect(result.messages[0]?.text).toBe('what is the plan?')
     })
 })
