@@ -73,6 +73,10 @@ describe('resolveClaudeLocalResumeGuardId', () => {
         expect(resolveClaudeLocalResumeGuardId('session-a', ['--continue'])).toBeNull()
     })
 
+    it('clears the guard for bare --resume without a UUID', () => {
+        expect(resolveClaudeLocalResumeGuardId('session-a', ['--resume'])).toBeNull()
+    })
+
     it('uses the stored session id when claudeArgs have no resume target', () => {
         expect(resolveClaudeLocalResumeGuardId('session-a', ['--verbose'])).toBe('session-a')
     })

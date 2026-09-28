@@ -271,4 +271,38 @@ describe('Session.onSessionFound resume mismatch (#1933)', () => {
 
         expect(session.getClaudeResumeSessionId()).toBeNull()
     })
+
+    it('prefers a newly adopted id over stale metadata still returning A', () => {
+        const previous = 'aaaaaaaa-1111-4111-8111-111111111111'
+        const adopted = 'bbbbbbbb-2222-4222-8222-222222222222'
+        const metadata: Record<string, unknown> = { claudeSessionId: previous }
+        const session = new Session({
+            api: {} as never,
+            client: {
+                updateMetadata: vi.fn((handler: (meta: Record<string, unknown>) => Record<string, unknown>) => {
+                    // Delayed ACK: leave metadata at previous.
+                    void handler
+                    return metadata
+                }),
+                keepAlive() {},
+                emitMessagesConsumed() {},
+                sendSessionEvent: vi.fn(),
+                getMetadata: () => metadata
+            } as never,
+            path: '/tmp',
+            logPath: '/tmp/test.log',
+            sessionId: previous,
+            mcpServers: {},
+            messageQueue: { onBatchConsumed: null } as never,
+            onModeChange: () => {},
+            startedBy: 'runner',
+            startingMode: 'remote',
+            hookSettingsPath: '/tmp/hooks.json'
+        })
+
+        session.onSessionFound(adopted)
+
+        expect(session.getClaudeResumeSessionId()).toBe(adopted)
+        expect(metadata.claudeSessionId).toBe(previous)
+    })
 })

@@ -43,7 +43,8 @@ export function resolveClaudeRemoteResumeTarget(
 
 /**
  * Guard id for a local launch: explicit `--resume <id>` wins; `--continue`
- * clears the guard; otherwise use the stored session id.
+ * or bare `--resume` (picker / no UUID) clears the guard; otherwise use the
+ * stored session id.
  */
 export function resolveClaudeLocalResumeGuardId(
     sessionId: string | null | undefined,
@@ -52,8 +53,10 @@ export function resolveClaudeLocalResumeGuardId(
     if (claudeArgs?.includes('--continue')) {
         return null
     }
-    const fromArgs = extractResumeIdFromClaudeArgs(claudeArgs)
-    if (fromArgs) {
+    if (claudeArgs?.includes('--resume')) {
+        const fromArgs = extractResumeIdFromClaudeArgs(claudeArgs)
+        // Bare `--resume` (no UUID) is user session control — do not guard
+        // against a stored id the user is deliberately leaving.
         return fromArgs
     }
     if (typeof sessionId === 'string' && sessionId.trim().length > 0) {
