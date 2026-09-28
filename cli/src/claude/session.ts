@@ -7,7 +7,7 @@ import type { Metadata, SessionEffort, SessionModel } from '@/api/types';
 import type { EnhancedMode } from './loop';
 import type { PermissionMode } from './loop';
 import type { LocalLaunchExitReason } from '@/agent/localLaunchPolicy';
-import { decideClaudeSessionFound } from './utils/claudeResumeGuard';
+import { decideClaudeSessionFound, resolveClaudeResumeGuardId } from './utils/claudeResumeGuard';
 
 type LocalLaunchFailure = {
     message: string;
@@ -88,7 +88,7 @@ export class Session extends AgentSessionBase<EnhancedMode> {
         this.permissionMode = opts.permissionMode;
         this.model = opts.model;
         this.effort = opts.effort;
-        this.resumeGuardId = opts.sessionId;
+        this.resumeGuardId = resolveClaudeResumeGuardId(opts.sessionId, opts.claudeArgs);
     }
 
     /**
@@ -96,7 +96,8 @@ export class Session extends AgentSessionBase<EnhancedMode> {
      * resume A on this spawn and Claude silently minted B (tiann/hapi#1933).
      * The guard applies only until the first successful adopt / confirmed
      * resume so `/clear` and other mid-session SessionStart events can mint
-     * a new id.
+     * a new id. Mismatch keeps the guard armed so a later relaunch cannot
+     * burn A to B via the live sessionId.
      */
     override onSessionFound = (sessionId: string, extras?: Partial<Metadata>): void => {
         const forkRequested = Boolean(extras?.forkedFrom)
@@ -116,9 +117,10 @@ export class Session extends AgentSessionBase<EnhancedMode> {
             this.client.sendSessionEvent({ type: 'message', message });
             // Local transport tails registered ids only — still notify listeners
             // so the live process is followed, without burning the durable pointer.
+            // Keep resumeGuardId armed so a subsequent launch that reports B
+            // again cannot write B into metadata.
             this.sessionId = decision.reportedId;
             this.notifySessionFoundListeners(decision.reportedId);
-            this.resumeGuardId = null;
             return;
         }
         this.commitSessionId(decision.sessionId, extras);

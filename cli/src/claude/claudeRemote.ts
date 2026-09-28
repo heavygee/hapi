@@ -13,22 +13,9 @@ import { getHapiBlobsDir } from "@/constants/uploadPaths";
 import { getDefaultClaudeCodePath } from "./sdk/utils";
 import { filterCatalogAffectingClaudeArgs } from "./sdk/metadataExtractor";
 import { ClaudeResumeUnavailableError } from "./utils/claudeResumeUnavailableError";
+import { extractResumeIdFromClaudeArgs } from "./utils/claudeResumeGuard";
 
 export { ClaudeResumeUnavailableError } from "./utils/claudeResumeUnavailableError";
-
-function extractResumeIdFromArgs(claudeArgs: string[] | undefined): string | null {
-    if (!claudeArgs) return null
-    for (let i = 0; i < claudeArgs.length; i++) {
-        if (claudeArgs[i] !== '--resume') continue
-        if (i + 1 >= claudeArgs.length) return null
-        const nextArg = claudeArgs[i + 1]
-        if (!nextArg.startsWith('-') && nextArg.includes('-')) {
-            return nextArg
-        }
-        return null
-    }
-    return null
-}
 
 export async function claudeRemote(opts: {
 
@@ -60,10 +47,19 @@ export async function claudeRemote(opts: {
 }) {
     const debugPrefix = '[claudeRemote][async-debug]';
 
+    // Apply env first so claudeCheckSession sees the child's CLAUDE_CONFIG_DIR
+    // (transcripts live under that config root, not always ~/.claude).
+    if (opts.claudeEnvVars) {
+        Object.entries(opts.claudeEnvVars).forEach(([key, value]) => {
+            process.env[key] = value;
+        });
+    }
+    process.env.DISABLE_AUTOUPDATER = '1';
+
     // Resolve the resume target once. Prefer the in-memory session id; fall
     // back to a one-shot --resume UUID in claudeArgs (runner reopen path).
     const requestedResumeId = (opts.sessionId && opts.sessionId.trim())
-        || extractResumeIdFromArgs(opts.claudeArgs)
+        || extractResumeIdFromClaudeArgs(opts.claudeArgs)
         || null
 
     let startFrom = requestedResumeId
@@ -76,14 +72,6 @@ export async function claudeRemote(opts: {
             logger.debug(`[claudeRemote] Found --resume with session ID: ${startFrom}`);
         }
     }
-
-    // Set environment variables for Claude Code SDK
-    if (opts.claudeEnvVars) {
-        Object.entries(opts.claudeEnvVars).forEach(([key, value]) => {
-            process.env[key] = value;
-        });
-    }
-    process.env.DISABLE_AUTOUPDATER = '1';
 
     // Message-level Fork current passes `--fork-session` via claudeArgs from the runner.
     const forkSession = Boolean(opts.claudeArgs?.includes('--fork-session'));
