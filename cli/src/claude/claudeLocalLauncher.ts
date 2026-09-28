@@ -57,12 +57,13 @@ export async function claudeLocalLauncher(session: Session): Promise<'switch' | 
             session.localPermissionBridge.start(session.sessionId);
             abortSignal.addEventListener('abort', session.localPermissionBridge.stop, { once: true });
             try {
+                const resumeSessionId = session.getClaudeResumeSessionId();
                 session.armResumeGuard(
-                    resolveClaudeLocalResumeGuardId(session.sessionId, session.claudeArgs)
+                    resolveClaudeLocalResumeGuardId(resumeSessionId, session.claudeArgs)
                 );
                 await claudeLocal({
                     path: session.path,
-                    sessionId: session.sessionId,
+                    sessionId: resumeSessionId,
                     abort: abortSignal,
                     claudeEnvVars: session.claudeEnvVars,
                     claudeArgs: session.claudeArgs,
