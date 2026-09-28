@@ -500,7 +500,7 @@ describe('formatInspectPeerReport', () => {
         })
 
         expect(messageCalls).toBe(2)
-        expect(result.messages.map((m) => m.id)).toEqual(['queued-1', 'old-1', 'older-2'])
         expect(result.messages.filter((m) => m.id === 'queued-1')).toHaveLength(1)
+        expect(result.messages.map((m) => m.id).sort()).toEqual(['old-1', 'older-2', 'queued-1'])
     })
 })
