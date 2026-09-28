@@ -3278,17 +3278,11 @@ export class SyncEngine {
                     metadata.homeDir
                 )
                 if (!transcriptStatus.onDisk) {
-                    // Hub probe uses the runner's default Claude config root
-                    // (plus recorded homeDir). Sessions that set a custom
-                    // CLAUDE_CONFIG_DIR only on the child can false-negative
-                    // here while the transcript still exists. Soft-fail and let
-                    // the CLI spawn probe (which applies child env) decide.
-                    console.warn('[resume] Claude transcript probe returned onDisk:false; proceeding with reopen attempt', {
-                        sessionId: access.sessionId,
-                        machineId: targetMachine.id,
-                        directory,
-                        resumeToken
-                    })
+                    return {
+                        type: 'error',
+                        message: 'Claude session transcript is no longer available on the recorded machine',
+                        code: 'resume_unavailable'
+                    }
                 }
             } catch (error) {
                 // Soft-fail on probe skew / missing handler (same spirit as #1084).

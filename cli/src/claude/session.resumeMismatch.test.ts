@@ -223,4 +223,20 @@ describe('Session.onSessionFound resume mismatch (#1933)', () => {
         expect(metadata.claudeSessionId).toBe(continued)
         expect(updateMetadata).toHaveBeenCalled()
     })
+
+    it('clears durable metadata resume id on /clear so the next launch starts fresh', () => {
+        const requested = 'c66b46bc-7647-491a-9cd4-06ba640b9910'
+        const { session, metadata, updateMetadata } = makeSession({ sessionId: requested })
+
+        session.onSessionFound(requested)
+        expect(metadata.claudeSessionId).toBe(requested)
+        updateMetadata.mockClear()
+
+        session.clearSessionId()
+
+        expect(session.sessionId).toBeNull()
+        expect(metadata.claudeSessionId).toBeUndefined()
+        expect(session.getClaudeResumeSessionId()).toBeNull()
+        expect(updateMetadata).toHaveBeenCalled()
+    })
 })
