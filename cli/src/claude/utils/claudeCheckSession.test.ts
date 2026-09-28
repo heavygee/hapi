@@ -60,6 +60,19 @@ describe('claudeCheckSession / inspectClaudeTranscript', () => {
         expect(inspectClaudeTranscript({ sessionId, workspacePath: workspace })).toEqual({ onDisk: true })
     })
 
+    it('returns onDisk:true when the first row exceeds the probe byte cap', () => {
+        const workspace = join(root, 'proj-huge-row')
+        mkdirSync(workspace, { recursive: true })
+        const projectDir = getProjectPath(workspace)
+        mkdirSync(projectDir, { recursive: true })
+        const sessionId = '44444444-4444-4444-8444-444444444444'
+        // Oversized first JSONL row (no uuid in the first 2MB) then a valid row.
+        const hugePrefix = `{"type":"blob","data":"${'x'.repeat(2 * 1024 * 1024 + 100)}"}\n`
+        const valid = `${JSON.stringify({ type: 'user', uuid: 'u4' })}\n`
+        writeFileSync(join(projectDir, `${sessionId}.jsonl`), hugePrefix + valid)
+        expect(inspectClaudeTranscript({ sessionId, workspacePath: workspace })).toEqual({ onDisk: true })
+    })
+
     it('finds a transcript under another project slug (cross-project lookup)', () => {
         const workspace = join(root, 'logical-path')
         mkdirSync(workspace, { recursive: true })

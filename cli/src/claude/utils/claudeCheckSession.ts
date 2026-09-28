@@ -51,7 +51,14 @@ function transcriptLooksValid(sessionFile: string): boolean {
                 }
                 if (bytesRead < buf.length) break;
             }
-            return lineHasUuid(leftover);
+            if (lineHasUuid(leftover)) return true;
+            // Hit the byte cap without a complete UUID-bearing row: the file
+            // exists and is huge — treat as present rather than missing so a
+            // oversized first line does not cause false resume_unavailable.
+            if (offset >= TRANSCRIPT_PROBE_MAX_BYTES) {
+                return true;
+            }
+            return false;
         } finally {
             closeSync(fd);
         }

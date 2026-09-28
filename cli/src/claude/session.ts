@@ -127,6 +127,22 @@ export class Session extends AgentSessionBase<EnhancedMode> {
     };
 
     /**
+     * Durable Claude transcript id for the next `--resume` / SDK resume.
+     * After a mismatch the live `sessionId` may follow minted B for local
+     * transport while metadata still holds A — subsequent launches must use A.
+     */
+    getClaudeResumeSessionId = (): string | null => {
+        const fromMeta = this.client.getMetadata?.()?.claudeSessionId;
+        if (typeof fromMeta === 'string' && fromMeta.trim().length > 0) {
+            return fromMeta.trim();
+        }
+        if (typeof this.sessionId === 'string' && this.sessionId.trim().length > 0) {
+            return this.sessionId.trim();
+        }
+        return null;
+    };
+
+    /**
      * Arm the mismatch guard from the resume id about to be passed to Claude.
      * Call immediately before each local/remote launch.
      */

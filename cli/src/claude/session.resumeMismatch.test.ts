@@ -176,6 +176,24 @@ describe('Session.onSessionFound resume mismatch (#1933)', () => {
         expect(updateMetadata).not.toHaveBeenCalled()
     })
 
+    it('keeps the durable resume target after mismatch so a B-live relaunch cannot burn A', () => {
+        const requested = 'c66b46bc-7647-491a-9cd4-06ba640b9910'
+        const minted = '3e0eb081-1111-4111-8111-111111111111'
+        const { session, metadata, updateMetadata } = makeSession({ sessionId: requested })
+
+        session.onSessionFound(minted)
+        expect(session.sessionId).toBe(minted)
+        expect(metadata.claudeSessionId).toBe(requested)
+        expect(session.getClaudeResumeSessionId()).toBe(requested)
+        updateMetadata.mockClear()
+
+        session.armResumeGuard(session.getClaudeResumeSessionId())
+        session.onSessionFound(minted)
+
+        expect(metadata.claudeSessionId).toBe(requested)
+        expect(updateMetadata).not.toHaveBeenCalled()
+    })
+
     it('local arm accepts an explicit --resume id that differs from the stored id', () => {
         const stored = 'aaaaaaaa-1111-4111-8111-111111111111'
         const selected = 'bbbbbbbb-2222-4222-8222-222222222222'

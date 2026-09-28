@@ -383,11 +383,12 @@ class ClaudeRemoteLauncher extends RemoteLauncherBase {
                 // 'never'" (verified against `bun run typecheck`).
                 let inFlightMessage: InFlightMessage | null = null as InFlightMessage | null;
                 try {
+                    const resumeSessionId = session.getClaudeResumeSessionId();
                     session.armResumeGuard(
-                        resolveClaudeRemoteResumeTarget(session.sessionId, session.claudeArgs)
+                        resolveClaudeRemoteResumeTarget(resumeSessionId, session.claudeArgs)
                     );
                     await claudeRemote({
-                        sessionId: session.sessionId,
+                        sessionId: resumeSessionId,
                         path: session.path,
                         allowedTools: session.allowedTools ?? [],
                         mcpServers: session.mcpServers,
