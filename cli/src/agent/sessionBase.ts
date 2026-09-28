@@ -118,7 +118,10 @@ export class AgentSessionBase<Mode> {
         this.sessionId = sessionId;
         this.client.updateMetadata((metadata) => this.applySessionIdToMetadata(metadata, sessionId, extras));
         logger.debug(`[${this.sessionLabel}] ${this.sessionIdLabel} session ID ${sessionId} added to metadata`);
+        this.notifySessionFoundListeners(sessionId);
+    }
 
+    protected notifySessionFoundListeners(sessionId: string): void {
         for (const callback of this.sessionFoundCallbacks) {
             callback(sessionId);
         }

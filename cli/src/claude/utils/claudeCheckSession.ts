@@ -15,26 +15,41 @@ function claudeProjectsRoot(home?: string): string {
     return join(home || homedir(), '.claude', 'projects');
 }
 
+function lineHasUuid(line: string): boolean {
+    if (!line.trim()) return false;
+    try {
+        return typeof JSON.parse(line).uuid === 'string';
+    } catch {
+        return false;
+    }
+}
+
+/** Cap probe read so huge transcripts cannot stall the runner RPC thread. */
+const TRANSCRIPT_PROBE_MAX_BYTES = 2 * 1024 * 1024;
+
 function transcriptLooksValid(sessionFile: string): boolean {
     if (!existsSync(sessionFile)) {
         return false;
     }
     try {
-        // Only scan a prefix — Claude transcripts can be tens of MB and this
-        // probe runs on the runner RPC thread during reopen.
         const fd = openSync(sessionFile, 'r');
         try {
             const buf = Buffer.alloc(64 * 1024);
-            const bytesRead = readSync(fd, buf, 0, buf.length, 0);
-            const prefix = buf.toString('utf-8', 0, bytesRead);
-            return prefix.split('\n').some((line) => {
-                if (!line.trim()) return false;
-                try {
-                    return typeof JSON.parse(line).uuid === 'string';
-                } catch {
-                    return false;
+            let offset = 0;
+            let leftover = '';
+            while (offset < TRANSCRIPT_PROBE_MAX_BYTES) {
+                const bytesRead = readSync(fd, buf, 0, buf.length, offset);
+                if (bytesRead <= 0) break;
+                offset += bytesRead;
+                const chunk = leftover + buf.toString('utf-8', 0, bytesRead);
+                const lines = chunk.split('\n');
+                leftover = bytesRead < buf.length ? '' : (lines.pop() ?? '');
+                for (const line of lines) {
+                    if (lineHasUuid(line)) return true;
                 }
-            });
+                if (bytesRead < buf.length) break;
+            }
+            return lineHasUuid(leftover);
         } finally {
             closeSync(fd);
         }

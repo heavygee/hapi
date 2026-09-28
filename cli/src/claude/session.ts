@@ -94,8 +94,9 @@ export class Session extends AgentSessionBase<EnhancedMode> {
     /**
      * Adopt a Claude transcript id into durable metadata — unless we asked to
      * resume A on this spawn and Claude silently minted B (tiann/hapi#1933).
-     * The guard applies only until the first successful adopt so `/clear` and
-     * other mid-session SessionStart events can still mint a new id.
+     * The guard applies only until the first successful adopt / confirmed
+     * resume so `/clear` and other mid-session SessionStart events can mint
+     * a new id.
      */
     override onSessionFound = (sessionId: string, extras?: Partial<Metadata>): void => {
         const forkRequested = Boolean(extras?.forkedFrom)
@@ -113,12 +114,27 @@ export class Session extends AgentSessionBase<EnhancedMode> {
                 `fork if a new native transcript is intended.`;
             logger.warn(`[Session] ${message}`);
             this.client.sendSessionEvent({ type: 'message', message });
+            // Local transport tails registered ids only — still notify listeners
+            // so the live process is followed, without burning the durable pointer.
+            this.sessionId = decision.reportedId;
+            this.notifySessionFoundListeners(decision.reportedId);
+            this.resumeGuardId = null;
             return;
         }
         this.commitSessionId(decision.sessionId, extras);
-        // First successful adopt ends the resume-mismatch guard so later
-        // SessionStart hooks (clear/compact/…) can change the native id.
         this.resumeGuardId = null;
+    };
+
+    /**
+     * Successful local `--resume A` often re-emits SessionStart with the same
+     * id, so onSessionFound is skipped. Clear the mismatch guard anyway so a
+     * later `/clear` can mint B.
+     */
+    confirmResumeSessionId = (sessionId: string): void => {
+        if (this.resumeGuardId && this.resumeGuardId === sessionId) {
+            this.resumeGuardId = null;
+            logger.debug(`[Session] Resume confirmed for ${sessionId}; mismatch guard released`);
+        }
     };
 
     setPermissionMode = (mode: PermissionMode): void => {
