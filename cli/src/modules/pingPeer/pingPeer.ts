@@ -649,6 +649,7 @@ async function fetchSessionMessages(
     http: AxiosInstance
 ): Promise<InspectMessagesFetch> {
     const out: InspectPeerMessage[] = []
+    const seenIds = new Set<string>()
     let rowsScanned = 0
     let snippetsSkipped = 0
     let messageTotal: number | null = null
@@ -694,6 +695,11 @@ async function fetchSessionMessages(
             const row = rows[i]
             if (!isObject(row)) continue
             rowsScanned += 1
+            const rowId = typeof row.id === 'string' ? row.id : null
+            // Hub may re-include uninvoked queued messages on older pages.
+            if (rowId && seenIds.has(rowId)) {
+                continue
+            }
             const snippet = extractInspectMessageSnippet(row.content)
             if (!snippet) {
                 snippetsSkipped += 1
@@ -705,9 +711,12 @@ async function fetchSessionMessages(
                 hasMore = true
                 break
             }
+            if (rowId) {
+                seenIds.add(rowId)
+            }
             out.push({
                 ...snippet,
-                id: typeof row.id === 'string' ? row.id : snippet.id,
+                id: rowId ?? snippet.id,
                 createdAt: typeof row.createdAt === 'number' ? row.createdAt : null
             })
         }
