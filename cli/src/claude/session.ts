@@ -35,10 +35,10 @@ export class Session extends AgentSessionBase<EnhancedMode> {
      */
     private resumeGuardId: string | null;
     /**
-     * After /clear, ignore stale metadata.claudeSessionId until a new id is
-     * adopted. updateMetadata is async; getMetadata can still return A briefly.
+     * Synchronous durable resume target. Prefer this over getMetadata() because
+     * updateMetadata is async and can lag behind adopt /clear.
      */
-    private suppressDurableResume = false;
+    private durableResumeId: string | null = null;
 
     constructor(opts: {
         api: ApiClient;
@@ -94,6 +94,7 @@ export class Session extends AgentSessionBase<EnhancedMode> {
         this.model = opts.model;
         this.effort = opts.effort;
         this.resumeGuardId = resolveClaudeResumeGuardId(opts.sessionId, opts.claudeArgs);
+        this.durableResumeId = resolveClaudeResumeGuardId(opts.sessionId, opts.claudeArgs);
     }
 
     /**
@@ -128,26 +129,19 @@ export class Session extends AgentSessionBase<EnhancedMode> {
             return;
         }
         this.commitSessionId(decision.sessionId, extras);
+        this.durableResumeId = decision.sessionId;
         this.resumeGuardId = null;
-        this.suppressDurableResume = false;
     };
 
     /**
      * Durable Claude transcript id for the next `--resume` / SDK resume.
-     * After a mismatch the live `sessionId` may follow minted B for local
-     * transport while metadata still holds A — subsequent launches must use A.
-     * After /clear, suppressDurableResume wins over stale metadata until adopt.
+     * Backed by an in-memory pointer so async metadata ACK lag cannot resume
+     * a stale A after adopt or /clear. After mismatch, live sessionId may
+     * follow minted B for local transport while durableResumeId stays A.
      */
     getClaudeResumeSessionId = (): string | null => {
-        if (this.suppressDurableResume) {
-            return null;
-        }
-        const fromMeta = this.client.getMetadata?.()?.claudeSessionId;
-        if (typeof fromMeta === 'string' && fromMeta.trim().length > 0) {
-            return fromMeta.trim();
-        }
-        if (typeof this.sessionId === 'string' && this.sessionId.trim().length > 0) {
-            return this.sessionId.trim();
+        if (typeof this.durableResumeId === 'string' && this.durableResumeId.trim().length > 0) {
+            return this.durableResumeId.trim();
         }
         return null;
     };
@@ -170,7 +164,7 @@ export class Session extends AgentSessionBase<EnhancedMode> {
     confirmResumeSessionId = (sessionId: string): void => {
         if (this.resumeGuardId && this.resumeGuardId === sessionId) {
             this.resumeGuardId = null;
-            this.suppressDurableResume = false;
+            this.durableResumeId = sessionId;
             logger.debug(`[Session] Resume confirmed for ${sessionId}; mismatch guard released`);
         }
     };
@@ -217,7 +211,7 @@ export class Session extends AgentSessionBase<EnhancedMode> {
     clearSessionId = (): void => {
         this.sessionId = null;
         this.resumeGuardId = null;
-        this.suppressDurableResume = true;
+        this.durableResumeId = null;
         this.client.updateMetadata((metadata) => ({
             ...metadata,
             claudeSessionId: undefined
