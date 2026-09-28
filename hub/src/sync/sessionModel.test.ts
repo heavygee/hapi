@@ -3299,7 +3299,7 @@ describe('session model', () => {
         }
     })
 
-    it('refuses Claude resume before spawning when the transcript is missing on disk', async () => {
+    it('soft-fails Claude reopen when transcript probe returns onDisk:false (custom config dir may exist)', async () => {
         const store = new Store(':memory:')
         const engine = new SyncEngine(
             store,
@@ -3338,23 +3338,21 @@ describe('session model', () => {
             }
             ;(engine as any).rpcGateway.spawnSession = async () => {
                 spawnCalled = true
+                engine.handleSessionAlive({ sid: session.id, time: Date.now() })
                 return { type: 'success', sessionId: session.id }
             }
+            ;(engine as any).waitForSessionActive = async () => true
 
             const result = await engine.resumeSession(session.id, 'default')
 
-            expect(result).toEqual({
-                type: 'error',
-                message: 'Claude session transcript is no longer available on the recorded machine',
-                code: 'resume_unavailable'
-            })
+            expect(result).toEqual({ type: 'success', sessionId: session.id })
             expect(probeArgs as unknown).toEqual([
                 'claude-machine',
                 '/tmp/project',
                 'c66b46bc-7647-491a-9cd4-06ba640b9910',
                 '/home/claude-owner'
             ])
-            expect(spawnCalled).toBe(false)
+            expect(spawnCalled).toBe(true)
         } finally {
             engine.stop()
         }

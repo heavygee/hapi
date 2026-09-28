@@ -30,15 +30,27 @@ export function extractResumeIdFromClaudeArgs(claudeArgs: string[] | undefined):
     return null
 }
 
-/** Initial mismatch-guard id: in-memory resume id, else `--resume` from args. */
+/**
+ * Initial mismatch-guard id from the effective local/remote launch strategy.
+ * Explicit `--resume <id>` wins over a stored session id (user deliberately
+ * selected another transcript). `--continue` clears the guard so Claude's
+ * "latest" id is not rejected against a stale stored pointer.
+ */
 export function resolveClaudeResumeGuardId(
     sessionId: string | null | undefined,
     claudeArgs?: string[]
 ): string | null {
+    if (claudeArgs?.includes('--continue')) {
+        return null
+    }
+    const fromArgs = extractResumeIdFromClaudeArgs(claudeArgs)
+    if (fromArgs) {
+        return fromArgs
+    }
     if (typeof sessionId === 'string' && sessionId.trim().length > 0) {
         return sessionId.trim()
     }
-    return extractResumeIdFromClaudeArgs(claudeArgs)
+    return null
 }
 
 export function decideClaudeSessionFound(opts: {
