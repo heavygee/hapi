@@ -34,6 +34,11 @@ export class Session extends AgentSessionBase<EnhancedMode> {
      * silent overwrite of the resume pointer (#1933).
      */
     private resumeGuardId: string | null;
+    /**
+     * After /clear, ignore stale metadata.claudeSessionId until a new id is
+     * adopted. updateMetadata is async; getMetadata can still return A briefly.
+     */
+    private suppressDurableResume = false;
 
     constructor(opts: {
         api: ApiClient;
@@ -124,14 +129,19 @@ export class Session extends AgentSessionBase<EnhancedMode> {
         }
         this.commitSessionId(decision.sessionId, extras);
         this.resumeGuardId = null;
+        this.suppressDurableResume = false;
     };
 
     /**
      * Durable Claude transcript id for the next `--resume` / SDK resume.
      * After a mismatch the live `sessionId` may follow minted B for local
      * transport while metadata still holds A — subsequent launches must use A.
+     * After /clear, suppressDurableResume wins over stale metadata until adopt.
      */
     getClaudeResumeSessionId = (): string | null => {
+        if (this.suppressDurableResume) {
+            return null;
+        }
         const fromMeta = this.client.getMetadata?.()?.claudeSessionId;
         if (typeof fromMeta === 'string' && fromMeta.trim().length > 0) {
             return fromMeta.trim();
@@ -160,6 +170,7 @@ export class Session extends AgentSessionBase<EnhancedMode> {
     confirmResumeSessionId = (sessionId: string): void => {
         if (this.resumeGuardId && this.resumeGuardId === sessionId) {
             this.resumeGuardId = null;
+            this.suppressDurableResume = false;
             logger.debug(`[Session] Resume confirmed for ${sessionId}; mismatch guard released`);
         }
     };
@@ -206,6 +217,7 @@ export class Session extends AgentSessionBase<EnhancedMode> {
     clearSessionId = (): void => {
         this.sessionId = null;
         this.resumeGuardId = null;
+        this.suppressDurableResume = true;
         this.client.updateMetadata((metadata) => ({
             ...metadata,
             claudeSessionId: undefined
