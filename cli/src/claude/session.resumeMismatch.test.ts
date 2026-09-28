@@ -239,4 +239,36 @@ describe('Session.onSessionFound resume mismatch (#1933)', () => {
         expect(session.getClaudeResumeSessionId()).toBeNull()
         expect(updateMetadata).toHaveBeenCalled()
     })
+
+    it('ignores stale metadata.claudeSessionId immediately after /clear', () => {
+        const requested = 'c66b46bc-7647-491a-9cd4-06ba640b9910'
+        const metadata: Record<string, unknown> = { claudeSessionId: requested }
+        const updateMetadata = vi.fn((_handler: (meta: Record<string, unknown>) => Record<string, unknown>) => {
+            // Simulate delayed hub ACK: local metadata view still has A.
+            return metadata
+        })
+        const session = new Session({
+            api: {} as never,
+            client: {
+                updateMetadata,
+                keepAlive() {},
+                emitMessagesConsumed() {},
+                sendSessionEvent: vi.fn(),
+                getMetadata: () => metadata
+            } as never,
+            path: '/tmp',
+            logPath: '/tmp/test.log',
+            sessionId: requested,
+            mcpServers: {},
+            messageQueue: { onBatchConsumed: null } as never,
+            onModeChange: () => {},
+            startedBy: 'runner',
+            startingMode: 'remote',
+            hookSettingsPath: '/tmp/hooks.json'
+        })
+
+        session.clearSessionId()
+
+        expect(session.getClaudeResumeSessionId()).toBeNull()
+    })
 })
