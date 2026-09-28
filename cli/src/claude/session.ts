@@ -199,11 +199,17 @@ export class Session extends AgentSessionBase<EnhancedMode> {
     };
 
     /**
-     * Clear the current session ID (used by /clear command)
+     * Clear the current session ID (used by /clear command).
+     * Also drops durable metadata.claudeSessionId so the next launch does not
+     * resume the transcript the user just discarded.
      */
     clearSessionId = (): void => {
         this.sessionId = null;
         this.resumeGuardId = null;
+        this.client.updateMetadata((metadata) => ({
+            ...metadata,
+            claudeSessionId: undefined
+        }));
         logger.debug('[Session] Session ID cleared');
     };
 
