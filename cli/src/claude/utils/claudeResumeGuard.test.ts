@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
     decideClaudeSessionFound,
     extractResumeIdFromClaudeArgs,
+    resolveClaudeLocalResumeGuardId,
+    resolveClaudeRemoteResumeTarget,
     resolveClaudeResumeGuardId
 } from './claudeResumeGuard'
 
@@ -46,8 +48,9 @@ describe('decideClaudeSessionFound', () => {
 })
 
 describe('resolveClaudeResumeGuardId', () => {
-    it('uses an explicit --resume id over the stored session id', () => {
-        expect(resolveClaudeResumeGuardId('session-a', ['--resume', 'session-b'])).toBe('session-b')
+    it('prefers the in-memory session id (matches remote SDK target)', () => {
+        expect(resolveClaudeResumeGuardId('session-a', ['--resume', 'session-b'])).toBe('session-a')
+        expect(resolveClaudeRemoteResumeTarget('session-a', ['--resume', 'session-b'])).toBe('session-a')
     })
 
     it('falls back to --resume from claudeArgs when session id is null', () => {
@@ -55,16 +58,22 @@ describe('resolveClaudeResumeGuardId', () => {
         expect(extractResumeIdFromClaudeArgs(['--model', 'x', '--resume', 'aaaa-bbbb-cccc'])).toBe('aaaa-bbbb-cccc')
     })
 
-    it('clears the guard when --continue overrides a stored id', () => {
-        expect(resolveClaudeResumeGuardId('session-a', ['--continue'])).toBeNull()
-    })
-
-    it('uses the stored session id when claudeArgs have no resume target', () => {
-        expect(resolveClaudeResumeGuardId('session-a', ['--verbose'])).toBe('session-a')
-    })
-
     it('ignores --resume without a dashed session id value', () => {
         expect(extractResumeIdFromClaudeArgs(['--resume', '--verbose'])).toBeNull()
         expect(extractResumeIdFromClaudeArgs(['--resume'])).toBeNull()
+    })
+})
+
+describe('resolveClaudeLocalResumeGuardId', () => {
+    it('uses an explicit --resume id over the stored session id', () => {
+        expect(resolveClaudeLocalResumeGuardId('session-a', ['--resume', 'session-b'])).toBe('session-b')
+    })
+
+    it('clears the guard when --continue overrides a stored id', () => {
+        expect(resolveClaudeLocalResumeGuardId('session-a', ['--continue'])).toBeNull()
+    })
+
+    it('uses the stored session id when claudeArgs have no resume target', () => {
+        expect(resolveClaudeLocalResumeGuardId('session-a', ['--verbose'])).toBe('session-a')
     })
 })

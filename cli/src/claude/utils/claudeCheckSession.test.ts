@@ -47,6 +47,19 @@ describe('claudeCheckSession / inspectClaudeTranscript', () => {
         expect(claudeCheckSession(sessionId, workspace)).toBe(true)
     })
 
+    it('returns onDisk:true when the only uuid line has no trailing newline', () => {
+        const workspace = join(root, 'proj-no-nl')
+        mkdirSync(workspace, { recursive: true })
+        const projectDir = getProjectPath(workspace)
+        mkdirSync(projectDir, { recursive: true })
+        const sessionId = '33333333-3333-4333-8333-333333333333'
+        writeFileSync(
+            join(projectDir, `${sessionId}.jsonl`),
+            JSON.stringify({ type: 'user', uuid: 'u3', message: { content: 'eof' } })
+        )
+        expect(inspectClaudeTranscript({ sessionId, workspacePath: workspace })).toEqual({ onDisk: true })
+    })
+
     it('finds a transcript under another project slug (cross-project lookup)', () => {
         const workspace = join(root, 'logical-path')
         mkdirSync(workspace, { recursive: true })

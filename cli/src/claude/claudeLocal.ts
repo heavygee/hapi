@@ -11,7 +11,7 @@ import { stripNewlinesForWindowsShellArg } from "@/utils/shellEscape";
 import { getDefaultClaudeCodePath } from "./sdk/utils";
 import type { SessionModel } from "@/api/types";
 import { ClaudeResumeUnavailableError } from "./utils/claudeResumeUnavailableError";
-import { extractResumeIdFromClaudeArgs } from "./utils/claudeResumeGuard";
+import { extractResumeIdFromClaudeArgs, resolveClaudeLocalResumeGuardId } from "./utils/claudeResumeGuard";
 
 function withoutTrackedModelArgs(args: string[]): string[] {
     const filtered: string[] = [];
