@@ -15,6 +15,32 @@ export type ClaudeSessionFoundDecision =
         reason: 'resume_mismatch'
     }
 
+/** Pull a UUID-like `--resume <id>` value from Claude CLI args, if present. */
+export function extractResumeIdFromClaudeArgs(claudeArgs: string[] | undefined): string | null {
+    if (!claudeArgs) return null
+    for (let i = 0; i < claudeArgs.length; i++) {
+        if (claudeArgs[i] !== '--resume') continue
+        if (i + 1 >= claudeArgs.length) return null
+        const nextArg = claudeArgs[i + 1]
+        if (!nextArg.startsWith('-') && nextArg.includes('-')) {
+            return nextArg
+        }
+        return null
+    }
+    return null
+}
+
+/** Initial mismatch-guard id: in-memory resume id, else `--resume` from args. */
+export function resolveClaudeResumeGuardId(
+    sessionId: string | null | undefined,
+    claudeArgs?: string[]
+): string | null {
+    if (typeof sessionId === 'string' && sessionId.trim().length > 0) {
+        return sessionId.trim()
+    }
+    return extractResumeIdFromClaudeArgs(claudeArgs)
+}
+
 export function decideClaudeSessionFound(opts: {
     requestedId: string | null | undefined
     reportedId: string
@@ -25,8 +51,6 @@ export function decideClaudeSessionFound(opts: {
         : null
     const reported = opts.reportedId.trim()
     if (!reported) {
-        // Defensive: callers should not pass empty ids. Reject if we were
-        // trying to resume; otherwise accept is impossible without a value.
         if (requested) {
             return {
                 action: 'reject',

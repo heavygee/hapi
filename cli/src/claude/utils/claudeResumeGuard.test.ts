@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { decideClaudeSessionFound } from './claudeResumeGuard'
+import {
+    decideClaudeSessionFound,
+    extractResumeIdFromClaudeArgs,
+    resolveClaudeResumeGuardId
+} from './claudeResumeGuard'
 
 describe('decideClaudeSessionFound', () => {
     it('accepts a fresh session when nothing was requested', () => {
@@ -38,5 +42,21 @@ describe('decideClaudeSessionFound', () => {
             sessionId: 'child-id',
             extras: { forkedFrom: 'parent-id' }
         })
+    })
+})
+
+describe('resolveClaudeResumeGuardId', () => {
+    it('prefers the in-memory session id', () => {
+        expect(resolveClaudeResumeGuardId('session-a', ['--resume', 'session-b'])).toBe('session-a')
+    })
+
+    it('falls back to --resume from claudeArgs when session id is null', () => {
+        expect(resolveClaudeResumeGuardId(null, ['--resume', 'args-only-id'])).toBe('args-only-id')
+        expect(extractResumeIdFromClaudeArgs(['--model', 'x', '--resume', 'aaaa-bbbb-cccc'])).toBe('aaaa-bbbb-cccc')
+    })
+
+    it('ignores --resume without a dashed session id value', () => {
+        expect(extractResumeIdFromClaudeArgs(['--resume', '--verbose'])).toBeNull()
+        expect(extractResumeIdFromClaudeArgs(['--resume'])).toBeNull()
     })
 })

@@ -127,4 +127,35 @@ describe('Session.onSessionFound resume mismatch (#1933)', () => {
         expect(session.sessionId).toBe(minted)
         expect(found).toEqual([minted])
     })
+
+    it('keeps the guard armed after mismatch so a second B cannot burn metadata', () => {
+        const requested = 'c66b46bc-7647-491a-9cd4-06ba640b9910'
+        const minted = '3e0eb081-1111-4111-8111-111111111111'
+        const { session, metadata, updateMetadata } = makeSession({ sessionId: requested })
+
+        session.onSessionFound(minted)
+        updateMetadata.mockClear()
+        session.onSessionFound(minted)
+
+        expect(metadata.claudeSessionId).toBe(requested)
+        expect(updateMetadata).not.toHaveBeenCalled()
+    })
+
+    it('guards resumes supplied only via --resume in claudeArgs', () => {
+        const requested = 'aaaaaaaa-1111-4111-8111-111111111111'
+        const minted = 'bbbbbbbb-2222-4222-8222-222222222222'
+        const { session, metadata, updateMetadata, sendSessionEvent } = makeSession({
+            sessionId: null,
+            claudeArgs: ['--resume', requested]
+        })
+
+        session.onSessionFound(minted)
+
+        expect(metadata.claudeSessionId).toBeUndefined()
+        expect(updateMetadata).not.toHaveBeenCalled()
+        expect(sendSessionEvent).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'message',
+            message: expect.stringContaining('resume mismatch')
+        }))
+    })
 })

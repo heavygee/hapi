@@ -53,6 +53,12 @@ export async function claudeLocal(opts: {
     const hasResumeFlag = opts.claudeArgs?.includes('--resume');
     const hasUserSessionControl = Boolean(hasContinueFlag || hasResumeFlag);
 
+    // Probe under the child's config root so a custom CLAUDE_CONFIG_DIR is not
+    // reported missing against ~/.claude (same ordering as claudeRemote).
+    if (opts.claudeEnvVars?.CLAUDE_CONFIG_DIR) {
+        process.env.CLAUDE_CONFIG_DIR = opts.claudeEnvVars.CLAUDE_CONFIG_DIR;
+    }
+
     // Determine session strategy:
     // - If resuming an existing session: use --resume (unless user already supplied session control)
     // - If starting fresh: let Claude create a new session ID (reported via SessionStart hook)
