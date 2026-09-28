@@ -1,5 +1,5 @@
 import { logger } from "@/ui/logger";
-import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { closeSync, existsSync, openSync, readdirSync, readSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { getProjectPath } from "./path";
@@ -20,14 +20,24 @@ function transcriptLooksValid(sessionFile: string): boolean {
         return false;
     }
     try {
-        const sessionData = readFileSync(sessionFile, 'utf-8').split('\n');
-        return !!sessionData.find((v) => {
-            try {
-                return typeof JSON.parse(v).uuid === 'string'
-            } catch {
-                return false;
-            }
-        });
+        // Only scan a prefix — Claude transcripts can be tens of MB and this
+        // probe runs on the runner RPC thread during reopen.
+        const fd = openSync(sessionFile, 'r');
+        try {
+            const buf = Buffer.alloc(64 * 1024);
+            const bytesRead = readSync(fd, buf, 0, buf.length, 0);
+            const prefix = buf.toString('utf-8', 0, bytesRead);
+            return prefix.split('\n').some((line) => {
+                if (!line.trim()) return false;
+                try {
+                    return typeof JSON.parse(line).uuid === 'string';
+                } catch {
+                    return false;
+                }
+            });
+        } finally {
+            closeSync(fd);
+        }
     } catch {
         return false;
     }

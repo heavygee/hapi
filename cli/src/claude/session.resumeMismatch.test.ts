@@ -80,4 +80,20 @@ describe('Session.onSessionFound resume mismatch (#1933)', () => {
         expect(metadata.claudeSessionId).toBe(id)
         expect(updateMetadata).toHaveBeenCalled()
     })
+
+    it('allows a later /clear-style SessionStart to mint a new id after resume adopted', () => {
+        const resumed = 'c66b46bc-7647-491a-9cd4-06ba640b9910'
+        const afterClear = 'aaaaaaaa-1111-4111-8111-111111111111'
+        const { session, metadata, updateMetadata } = makeSession({ sessionId: resumed })
+
+        session.onSessionFound(resumed)
+        expect(metadata.claudeSessionId).toBe(resumed)
+
+        updateMetadata.mockClear()
+        session.onSessionFound(afterClear)
+
+        expect(session.sessionId).toBe(afterClear)
+        expect(metadata.claudeSessionId).toBe(afterClear)
+        expect(updateMetadata).toHaveBeenCalled()
+    })
 })

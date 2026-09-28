@@ -27,6 +27,13 @@ export class Session extends AgentSessionBase<EnhancedMode> {
     readonly startingMode: 'local' | 'remote';
     localLaunchFailure: LocalLaunchFailure | null = null;
     private nativeSkillNames = new Set<string>();
+    /**
+     * Resume id we asked Claude to continue on this spawn. Cleared after the
+     * first successful sessionFound adopt so later SessionStart events
+     * (`/clear`, compact, …) can mint a new id without being treated as a
+     * silent overwrite of the resume pointer (#1933).
+     */
+    private resumeGuardId: string | null;
 
     constructor(opts: {
         api: ApiClient;
@@ -60,9 +67,8 @@ export class Session extends AgentSessionBase<EnhancedMode> {
             mode: opts.mode,
             sessionLabel: 'Session',
             sessionIdLabel: 'Claude Code',
-            applySessionIdToMetadata: (metadata, sessionId, extras) => ({
+            applySessionIdToMetadata: (metadata, sessionId) => ({
                 ...metadata,
-                ...extras,
                 claudeSessionId: sessionId
             }),
             permissionMode: opts.permissionMode,
@@ -82,18 +88,20 @@ export class Session extends AgentSessionBase<EnhancedMode> {
         this.permissionMode = opts.permissionMode;
         this.model = opts.model;
         this.effort = opts.effort;
+        this.resumeGuardId = opts.sessionId;
     }
 
     /**
      * Adopt a Claude transcript id into durable metadata — unless we asked to
-     * resume A and Claude silently minted B (tiann/hapi#1933). In that case
-     * keep A, surface an operator-visible error, and refuse the overwrite.
+     * resume A on this spawn and Claude silently minted B (tiann/hapi#1933).
+     * The guard applies only until the first successful adopt so `/clear` and
+     * other mid-session SessionStart events can still mint a new id.
      */
     override onSessionFound = (sessionId: string, extras?: Partial<Metadata>): void => {
         const forkRequested = Boolean(extras?.forkedFrom)
             || Boolean(this.claudeArgs?.includes('--fork-session'));
         const decision = decideClaudeSessionFound({
-            requestedId: this.sessionId,
+            requestedId: this.resumeGuardId,
             reportedId: sessionId,
             forkRequested
         });
@@ -107,10 +115,10 @@ export class Session extends AgentSessionBase<EnhancedMode> {
             this.client.sendSessionEvent({ type: 'message', message });
             return;
         }
-        const acceptExtras = decision.extras
-            ? { ...extras, forkedFrom: decision.extras.forkedFrom }
-            : extras;
-        this.commitSessionId(decision.sessionId, acceptExtras);
+        this.commitSessionId(decision.sessionId, extras);
+        // First successful adopt ends the resume-mismatch guard so later
+        // SessionStart hooks (clear/compact/…) can change the native id.
+        this.resumeGuardId = null;
     };
 
     setPermissionMode = (mode: PermissionMode): void => {
@@ -152,6 +160,7 @@ export class Session extends AgentSessionBase<EnhancedMode> {
      */
     clearSessionId = (): void => {
         this.sessionId = null;
+        this.resumeGuardId = null;
         logger.debug('[Session] Session ID cleared');
     };
 
