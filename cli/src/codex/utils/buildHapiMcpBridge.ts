@@ -111,6 +111,10 @@ export async function buildHapiMcpBridge(
     tools.list_peers = {
         approval_mode: 'approve'
     };
+    // Transcript fleet search — read-only hub REST.
+    tools.search_content = {
+        approval_mode: 'approve'
+    };
     // ping_peer / inspect_peer are registered on the HTTP MCP server / stdio
     // bridge, but are not auto-approved: they target another session (resume +
     // inject, or read peer histories).

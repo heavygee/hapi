@@ -36,6 +36,12 @@ const AUTO_APPROVE_EXACT_TOOL_NAMES = new Set([
     'hapi_list_peers',
     'happy__list_peers',
     'mcp__hapi__list_peers',
+    // Transcript fleet search — read-only hub REST, same trust as list_peers.
+    'search_content',
+    'hapi_search_content',
+    'happy__search_content',
+    'mcp__hapi__search_content',
+    'search session transcripts',
     // ACP permission requests often surface MCP tool title, not the snake_case name.
     'list peer sessions'
 ]);
@@ -43,7 +49,7 @@ const AUTO_APPROVE_EXACT_TOOL_NAMES = new Set([
 // resume+inject into another session or read peer histories, so permission
 // modes must still gate them. Treat both as write-like in read-only so ACP
 // titles such as "Ping Peer Session" / "Inspect Peer Session" also require
-// approval. list_peers is discovery-only and is auto-approved above.
+// approval. list_peers / search_content are discovery-only and auto-approved above.
 const AUTO_APPROVE_TOOL_ID_HINTS = ['change_title', 'save_memory'];
 const SENSITIVE_TOOL_NAME_HINTS = [
     'ping_peer',
