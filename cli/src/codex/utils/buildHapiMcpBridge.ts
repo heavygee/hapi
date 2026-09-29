@@ -124,6 +124,10 @@ export async function buildHapiMcpBridge(
     tools.search_peers = {
         approval_mode: 'approve'
     };
+    // Transcript fleet search — same trust as search_peers (read-only hub REST).
+    tools.search_content = {
+        approval_mode: 'approve'
+    };
     // Own-session progress meter (tiann/hapi#1404) — hub REST, not peer inject.
     tools.session_job = {
         approval_mode: 'approve'
