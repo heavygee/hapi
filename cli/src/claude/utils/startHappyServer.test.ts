@@ -114,7 +114,8 @@ describe('startHappyServer skill_lookup', () => {
             'display_media',
             'ping_peer',
             'inspect_peer',
-            'list_peers'
+            'list_peers',
+            'search_content',
         ])
     })
 
@@ -189,7 +190,8 @@ describe('startHappyServer skill_lookup', () => {
             'display_media',
             'ping_peer',
             'inspect_peer',
-            'list_peers'
+            'list_peers',
+            'search_content',
         ])
     })
 
@@ -323,6 +325,7 @@ describe('toClaudeAllowedHapiMcpTools', () => {
             'mcp__hapi__change_title',
             'mcp__hapi__display_image',
             'mcp__hapi__list_peers',
+            'mcp__hapi__search_content',
             'mcp__hapi__skill_lookup'
         ])
         expect(toClaudeAllowedHapiMcpTools(['display_video'])).not.toContain('mcp__hapi__display_video')
