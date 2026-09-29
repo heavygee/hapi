@@ -27,7 +27,20 @@ import {
     SESSION_ID_PREFIX_PARAM_DESCRIPTION,
 } from '@hapi/protocol/sessionCitation'
 import { PingPeerError, formatInspectPeerReport, formatPeerSessionsList, inspectPeer, listPeerSessions, peerListFetchLimit, pingPeer } from "@/modules/pingPeer/pingPeer";
+import {
+    SearchContentError,
+    formatSearchContentMatches,
+    searchSessionContent,
+} from "@/modules/searchContent/searchContent";
 import { applySessionDisplayRename, normalizeSessionDisplayTitle } from "@/agent/sessionDisplayRename";
+
+const SEARCH_CONTENT_DESCRIPTION =
+    'Search transcript text across HAPI sessions on the same hub/namespace (what sessions actually said). ' +
+    'Uses this session\'s CLI credentials — never hand-mint a JWT (expired JWT previously returned an empty list, ' +
+    'indistinguishable from no matches). Optional sessionId scopes to one session. ' +
+    'Returns session id, name, timestamp, and snippet so you can inspect_peer / ping_peer next. ' +
+    'Query tip: short/common substrings match badly via trigram FTS (e.g. "Ian" hits Austral**ian**; ' +
+    '"home" hits every /home/ path) — prefer distinctive nouns. Auth/backend failures surface as errors, never [].';
 
 type StartHappyServerOptions = {
     /**
@@ -56,6 +69,7 @@ const CLAUDE_MANUAL_APPROVAL_HAPI_TOOLS = new Set([
  * Keeps `display_media` / `display_video` (arbitrary local-path readers), `ping_peer`, and
  * `inspect_peer` off the auto-allow list so they still prompt.
  * `list_peers` stays allowed (discovery shortlist only).
+ * `search_content` stays allowed (transcript search; read-only hub REST).
  */
 export function toClaudeAllowedHapiMcpTools(toolNames: string[]): string[] {
     return toolNames
@@ -131,6 +145,18 @@ function createHapiMcpServer(
     const listPeersInputSchema: z.ZodTypeAny = z.object({
         limit: z.number().int().min(1).max(100).optional().describe(
             'Max sessions to return (default 30, max 100). Newest updatedAt first.'
+        ),
+    });
+
+    const searchContentInputSchema: z.ZodTypeAny = z.object({
+        query: z.string().trim().min(2).max(200).describe(
+            'Distinctive noun/phrase from transcript text. Avoid short/common substrings (trigram FTS noise).'
+        ),
+        sessionId: z.string().min(1).optional().describe(
+            'Optional hub session id to scope search to one conversation.'
+        ),
+        limit: z.number().int().min(1).max(100).optional().describe(
+            'Max matches to return (default 50, hub max 100).'
         ),
     });
 
@@ -420,6 +446,50 @@ function createHapiMcpServer(
         }
     });
 
+    mcp.registerTool<any, any>('search_content', {
+        description: SEARCH_CONTENT_DESCRIPTION,
+        title: 'Search Session Transcripts',
+        inputSchema: searchContentInputSchema,
+    }, async (args: { query: string; sessionId?: string; limit?: number }) => {
+        logger.debug('[hapiMCP] search_content:', args.query);
+        try {
+            const limit = args.limit ?? 50;
+            const result = await searchSessionContent({
+                query: args.query,
+                sessionId: args.sessionId,
+                limit,
+            });
+            return {
+                content: [
+                    {
+                        type: 'text' as const,
+                        text: formatSearchContentMatches(result, {
+                            query: args.query,
+                            maxRows: limit,
+                        }),
+                    },
+                ],
+                isError: false,
+            };
+        } catch (error) {
+            const message = error instanceof SearchContentError
+                ? error.message
+                : error instanceof Error
+                    ? error.message
+                    : String(error);
+            logger.debug('[hapiMCP] search_content failed:', message);
+            return {
+                content: [
+                    {
+                        type: 'text' as const,
+                        text: `Failed to search content: ${message}`,
+                    },
+                ],
+                isError: true,
+            };
+        }
+    });
+
 
     if (skillLookup) {
         mcp.registerTool<any, any>('skill_lookup', {
@@ -541,8 +611,8 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
     }));
 
     const toolNames = enableChangeTitle
-        ? ['change_title', 'display_image', 'display_video', 'display_media', 'list_peers', 'ping_peer', 'inspect_peer']
-        : ['display_image', 'display_video', 'display_media', 'list_peers', 'ping_peer', 'inspect_peer'];
+        ? ['change_title', 'display_image', 'display_video', 'display_media', 'list_peers', 'search_content', 'ping_peer', 'inspect_peer']
+        : ['display_image', 'display_video', 'display_media', 'list_peers', 'search_content', 'ping_peer', 'inspect_peer'];
     if (options.skillLookup) {
         toolNames.push('skill_lookup');
     }
