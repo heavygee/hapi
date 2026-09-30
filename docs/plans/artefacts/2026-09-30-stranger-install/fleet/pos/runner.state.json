@@ -1,0 +1,19 @@
+{
+  "sharedCodexRuntime": true,
+  "pid": 16445,
+  "httpPort": 37125,
+  "startTime": "9/30/2026, 3:35:51 PM",
+  "startedWithCliVersion": "0.30.7",
+  "startedWithCliMtimeMs": 1790782548466.0796,
+  "startedWithApiUrl": "http://127.0.0.1:3006",
+  "startedWithMachineId": "1e3950b5-fdf3-4f9c-be18-d95bbd6bfa10",
+  "startedWithCliApiTokenHash":"REDACTED",
+  "startedWithArgv": [
+    "runner",
+    "start-sync",
+    "--workspace-root",
+    "/work"
+  ],
+  "startedWithVersionHandoffDisabled": true,
+  "runnerLogPath": "/var/lib/hapi/logs/2026-09-30-15-35-50-pid-16445-runner.log"
+}

@@ -1,0 +1,15 @@
+ok - runner unit exists (hapi-runner.service, scope=user)
+ok - runner KillMode=process (hapi-runner.service)
+ok - runner ExecStartPre runner-stop executable (/home/heavygee/.local/bin/hapi)
+ok - runner Restart policy (always)
+ok - watchdog N/A for user-pet scope (system timer not expected)
+ok - sudoers N/A for user-pet scope
+ok - no /usr/local/sbin/systemctl wrapper
+ok - runner unit active after restart
+not ok - MainPID equals runner.state.json pid (MainPID=16750 state=16670) — unsupervised runner class
+ok - live runner oom_score_adj=200 (matches unit)
+ok - hub /health ok (http://127.0.0.1:3006)
+
+# Explicit gap: agent CLI / Claude auth NOT tested (pet installer leaves login to the operator).
+# This check proves supervision + hub HTTP, not the ninja "sessions cascade on restart" class.
+# pass=10 fail=1

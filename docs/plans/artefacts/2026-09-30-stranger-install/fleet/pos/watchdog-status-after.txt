@@ -1,0 +1,12 @@
+○ hapi-runner-watchdog.service - HAPI runner liveness watchdog (restart service if machine drops off hub)
+     Loaded: loaded (/etc/systemd/system/hapi-runner-watchdog.service; static)
+     Active: inactive (dead) since Wed 2026-09-30 15:36:26 UTC; 2s ago
+TriggeredBy: ● hapi-runner-watchdog.timer
+    Process: 16618 ExecStart=/usr/local/lib/hapi/hapi-runner-watchdog.sh (code=exited, status=0/SUCCESS)
+   Main PID: 16618 (code=exited, status=0/SUCCESS)
+        CPU: 56ms
+
+Sep 30 15:36:26 oos-stranger-fleet-test systemd[1]: Starting hapi-runner-watchdog.service - HAPI runner liveness watchdog (restart service if machine drops off hub)...
+Sep 30 15:36:26 oos-stranger-fleet-test hapi-runner-watchdog.sh[16618]: 2026-09-30 15:36:26 [watchdog] machine 1e3950b5-fdf3-4f9c-be18-d95bbd6bfa10 present + runner running on http://127.0.0.1:3006; no action
+Sep 30 15:36:26 oos-stranger-fleet-test systemd[1]: hapi-runner-watchdog.service: Deactivated successfully.
+Sep 30 15:36:26 oos-stranger-fleet-test systemd[1]: Finished hapi-runner-watchdog.service - HAPI runner liveness watchdog (restart service if machine drops off hub).

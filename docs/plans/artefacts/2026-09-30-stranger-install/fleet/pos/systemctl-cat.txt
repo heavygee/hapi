@@ -1,0 +1,122 @@
+# /etc/systemd/system/hapi-hub.service
+[Unit]
+Description=HAPI hub (oos-stranger-fleet-test)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hapi
+Group=hapi
+Environment=HAPI_HOME=/var/lib/hapi
+Environment=PATH=/var/lib/hapi/.local/bin:/var/lib/hapi/.bun/bin:/var/lib/hapi/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HAPI_PORT=3006
+WorkingDirectory=/var/lib/hapi
+ExecStart=/opt/hapi/hapi hub
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/hapi-hub.service.d/90-oom-protect-hub.conf
+# Keep HAPI hub off the earlyoom kill list (Tier-1 primary hub).
+# Hub runs as comm=bun — same as agents; --avoid bun would protect everything
+# bun-shaped. OOMScoreAdjust is the precision knob.
+# docs/runbooks/earlyoom-avoid-prefer-tuning.md (server-setup)
+[Service]
+OOMScoreAdjust=-1000
+
+# /etc/systemd/system/hapi-runner.service
+[Unit]
+Description=HAPI runner (oos-stranger-fleet-test)
+After=network-online.target hapi-hub.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+KillMode=process
+User=hapi
+Group=hapi
+Environment=HAPI_HOME=/var/lib/hapi
+Environment=PATH=/var/lib/hapi/.local/bin:/var/lib/hapi/.bun/bin:/var/lib/hapi/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HAPI_API_URL=http://127.0.0.1:3006
+Environment=HAPI_RUNNER_SUPERVISED=1
+WorkingDirectory=/var/lib/hapi
+ExecStart=/opt/hapi/hapi runner start-sync --workspace-root /work
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/hapi-runner.service.d/10-resilience.conf
+# Drop-in TEMPLATE: runner resilience (Tier-1, any profile)
+#
+# Rendered and installed via: scripts/tooling/install-hapi-primary-hub-tier1.sh
+# Target: hapi-runner.service.d/ OR hapi-runner-oos.service.d/
+#
+# The ExecStartPre stop command MUST resolve to something valid ON THIS HOST.
+# It was previously hardcoded to the soup kitchen's bun invocation and installed
+# verbatim everywhere, so on fleet-binary/pet hosts the stop silently never ran
+# (`|| true` swallowed it) while the drop-in still looked correctly installed.
+# That matters because Restart=always below is only safe WITH a working stop:
+# without it a restart hits the runner's own dedup path (exit 0, "keeping
+# existing runner"), systemd restarts again, and the unit burns its start
+# limit and lands in `failed` with an unsupervised runner still alive.
+#
+# Restart=on-failure misses clean exit(0) (mtime self-restart). 2026-05-31
+# incident: runner stayed dead for minutes. Restart=always + burst limits.
+# HAPI_DISABLE_VERSION_HANDOFF=1: soup hosts must not chase hub Upgrade binaries.
+# KillMode=process: #915 — do not SIGTERM the agent cgroup on runner bounce.
+
+[Unit]
+StartLimitBurst=10
+StartLimitIntervalSec=300
+
+[Service]
+KillMode=process
+Environment=HAPI_DISABLE_VERSION_HANDOFF=1
+ExecStartPre=-/opt/hapi/hapi runner stop
+Restart=always
+RestartSec=5
+RestartPreventExitStatus=2
+
+# /etc/systemd/system/hapi-runner.service.d/90-oom-protect-runner.conf
+# Intentionally NO OOMScoreAdjust on the runner (Tier-1).
+# Linux inherits the parent's oom_score_adj into every forked agent child.
+# With -1000, earlyoom skips those PIDs and kills media/services instead.
+# Explicit 0 overrides any older drop-in that set -1000.
+[Service]
+OOMScoreAdjust=0
+# /etc/systemd/system/hapi-runner-watchdog.service
+# TEMPLATE: belt-and-braces watchdog for the HAPI runner (Tier-1, any profile).
+#
+# Rendered and installed via: scripts/tooling/install-hapi-primary-hub-tier1.sh
+# Enable: sudo systemctl enable --now hapi-runner-watchdog.timer
+#
+# Script resolves hapi-runner vs hapi-runner-oos via lib/hapi-systemd-units.sh.
+#
+# Every value below used to be hardcoded to the soup operator's account. On any
+# other host the ConditionPathExists could not be satisfied, so systemd SKIPPED
+# this service on every timer fire — while `systemctl list-timers` still showed
+# the timer enabled. A watchdog that reports healthy and never runs is worse
+# than a documented gap, so these are rendered per host now.
+#
+# ExecStart points at an INSTALLED copy, not a repo checkout: fleet and pet
+# hosts have the single-exe and no clone of this repository.
+
+[Unit]
+Description=HAPI runner liveness watchdog (restart service if machine drops off hub)
+After=network-online.target
+ConditionPathExists=/var/lib/hapi/settings.json
+
+[Service]
+Type=oneshot
+User=hapi
+Environment=HAPI_API_URL=http://127.0.0.1:3006
+Environment=HAPI_HOME=/var/lib/hapi
+EnvironmentFile=-/var/lib/hapi/runner-watchdog.env
+ExecStart=/usr/local/lib/hapi/hapi-runner-watchdog.sh
+StandardOutput=journal
+StandardError=journal

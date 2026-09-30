@@ -188,8 +188,8 @@ if [[ "$SCOPE" == system ]]; then
         set -e
         if grep -qE 'hapi-runner|NOPASSWD.*systemctl.*(restart|start).*hapi-runner' <<<"$sudo_l"; then
             ok "sudoers applies to $runner_user (runner-restart visible in sudo -l)"
-        elif [[ -f /etc/sudoers.d/hapi-watchdog ]] && grep -q "^${runner_user} " /etc/sudoers.d/hapi-watchdog; then
-            # File grants the right user even if sudo -l needs a TTY
+        elif [[ -f /etc/sudoers.d/hapi-watchdog ]] && grep -qE "^${runner_user}[[:space:]]" /etc/sudoers.d/hapi-watchdog; then
+            # File grants the right user even if sudo -l needs a password for the probe user
             ok "sudoers file grants $runner_user (/etc/sudoers.d/hapi-watchdog)"
         else
             not_ok "sudoers applies to $runner_user (sudo -l / sudoers.d miss)"
@@ -243,8 +243,11 @@ fi
 main_pid="$("${CTL[@]}" show "$RUNNER_UNIT" -p MainPID --value 2>/dev/null || true)"
 main_pid="${main_pid:-0}"
 state_pid=""
-if [[ -f "$state_file" ]]; then
+if [[ -r "$state_file" ]]; then
     state_pid="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("pid",""))' "$state_file" 2>/dev/null || true)"
+elif [[ -f "$state_file" ]]; then
+    # Fleet: state is owned by the runner user; probe may lack read.
+    state_pid="$(sudo -n cat "$state_file" 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("pid",""))' 2>/dev/null || true)"
 fi
 if [[ -n "$state_pid" && "$main_pid" != "0" && "$main_pid" == "$state_pid" ]]; then
     ok "MainPID equals runner.state.json pid ($main_pid)"
