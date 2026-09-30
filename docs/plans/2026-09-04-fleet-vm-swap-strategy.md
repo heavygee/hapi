@@ -99,6 +99,26 @@ This is a proposal, not a decision — flagging for operator confirmation before
 
 ---
 
+## 4a. Antevorta fact-find (2026-09-30) — operator decision: investigate, change nothing
+
+Prompted by the correction above (antevorta is daily-use, not idle) — re-checked every fact the earlier upgrade-readiness reasoning depended on, rather than continuing to reason from the 09-13 snapshot. Method: a narrowly-scoped, single-purpose temporary Tailscale grant (`lockhouse-janus/ansible/roles/tailscale/files/bring-up-temp-access.sh` — the remedy for exactly the "agent machine can't reach a newly-tagged `tag:in` host" wall this bring-up's own docs assumed away without checking), opened and closed twice, each in one pass with a shell trap guaranteeing close, state file confirmed removed both times. Read-only throughout — nothing on antevorta was changed.
+
+**Version — confirmed, not inferred.** `sha256sum /opt/hapi/hapi` on antevorta-in-linux matches the `linux-x64-baseline` entry in `hapi-soup-v2026.09.13-cd7d515`'s own published manifest exactly (`b2a0150d3618f8d8c6838a9a187000beb18df16eec12012809ca408d7eff7f13`). Antevorta is definitively still running `cd7d515` (58 layers, protocolVersion 1) — the box has not been upgraded again since the 09-13 test.
+
+**`hapi-restart-hub` — confirmed absent, not just undocumented.** `command -v hapi-restart-hub` and a full filesystem `find -iname "hapi-restart-hub*"` both came back completely empty. There is no patient-drain mechanism on this box at all.
+
+**`hapi-hub.service` — plain unit, no drain-aware stop.** `systemctl cat hapi-hub` shows default `Type=simple`, no drain-aware `ExecStop`. A `systemctl stop` here is a plain kill.
+
+**`hapi-runner.service` — `KillMode=control-group`, in violation of documented policy.** This is not a new bug: `docs/tooling/driver-soup.md` § "Hub restart must not cascade-archive the fleet (KillMode)" already documents the mechanism (runner spawns agents `detached: true`, which escapes the TTY but not the systemd cgroup, so `control-group` SIGTERMs every agent in the unit — **including idle ones, which patient drain does not protect**, since drain only waits for `WORKING` to hit zero) and the fix (`KillMode=process`, standing policy since upstream closed `tiann/hapi#915`, 2026-06-18). `docs/tooling/systemd-install.md` already says the fleet runbook must not recommend `control-group`. Antevorta was set up before this policy was enforced and never updated. **Operator decision (2026-09-30): investigate and report only — do not apply the fix, do not schedule it.** No change made.
+
+**`HAPI_HOME` externalization — confirmed genuinely real, not just configured.** `/var/lib/hapi` has an actively-growing `hapi.db` (67MB, live `-wal`/`-shm` files), real session/runner/machine state — not a fresh or idle directory.
+
+**`WORKING`-session poll — one real sample, not a demonstrated pattern.** Polled the hub's own `/api/sessions` (via `cliApiToken` → `/api/auth` → bearer JWT, the same auth path the hub itself uses) 9 times, 20s apart, 12:35:33–12:38:13 UTC on 2026-09-30: `WORKING=0` in every sample. `total_sessions` was 9 for the first 6 samples, 8 for the last 3 (one session ended/archived naturally mid-poll, unrelated to the poll itself). This confirms one specific 3-minute window was quiet — it does **not** establish that antevorta has a reliable quiet window in general. Doug's actual usage rhythm/timezone is unknown from this alone; asking him directly is faster and more reliable than inferring from a handful of samples.
+
+**Net effect:** every fact the upgrade-readiness question in §5 depends on is now confirmed by direct observation rather than inferred from a stale snapshot or assumed from the doc's own prior claims. The operator has chosen not to act on any of them yet — no `KillMode` fix, no upgrade attempt, no scheduling. This section exists so the next reader has the real picture without needing to re-derive it.
+
+---
+
 ## 5. Status
 
 **Reminder:** every `[x]` below marked "in-place upgrade" or "PASS" is Stage 1 / pet-path validation only — same VM, no swap. Stages 2 (generic), 3, and 4-9 (the actual VM-swap mechanism this doc's Goal describes) remain not started, full stop.
@@ -112,7 +132,8 @@ This is a proposal, not a decision — flagging for operator confirmation before
 - [x] Antevorta first install — complete 2026-09-11 (hub + runner healthy, Doug logged in). Runbook: `lockhouse/producer/docs/hapi-vm-bringup.md`
 - [x] Antevorta in-place upgrade test — **PASS 2026-09-13** (9622798 → cd7d515, state/token/login survived, see §4). Caveat: no active sessions during the swap — drain-under-load unproven. **Correction (2026-09-30):** this test's zero-usage snapshot was two days post-build, not a steady state — Doug uses this box daily now, so the caveat below is live, not theoretical
 - [ ] Antevorta VM swap rehearsal (full disk reattach to a new VM root) — not started
-- [ ] Drain-under-load test (upgrade with `WORKING` sessions in flight) — not started, **the real remaining gap on antevorta, now with an active daily user** — and `hapi-restart-hub` (the patient-drain mechanism every other upgrade relies on) has never been wired up on this box at all, so this may need building, not just testing
+- [ ] Drain-under-load test (upgrade with `WORKING` sessions in flight) — not started, **the real remaining gap on antevorta, now with an active daily user** — and `hapi-restart-hub` (the patient-drain mechanism every other upgrade relies on) is **confirmed absent** on this box (2026-09-30 fact-find, §4a — full filesystem search, not just "not on the fleet-machine list"), so this needs building, not just testing
+- [x] **Antevorta fact-find (2026-09-30)** — see §4a: version confirmed via sha256↔manifest match (still `cd7d515`), `hapi-restart-hub` confirmed absent, `hapi-hub` confirmed plain `Type=simple` with no drain-aware stop, `hapi-runner` confirmed `KillMode=control-group` (violates standing `tiann/hapi#915` policy — **operator decision: investigate only, no fix applied, none scheduled**), `HAPI_HOME` externalization confirmed genuinely active (growing `hapi.db` + WAL), one 3-minute `WORKING=0` poll (one sample, not a demonstrated quiet-window pattern)
 - [x] Janus `in-svc-01` in-place upgrade test — **PASS 2026-09-13**, same artifact bump as antevorta (9622798 → cd7d515), same result (state/token survived), see §4. Confirmed untangled from the blocked official IN-zone network rebuild (bridges/CIDR) — that's a separate host-network process, not touched. VM stopped again afterward, not running 24/7 yet. Same drain-under-load caveat as antevorta
 - [x] **Two-host proof (2026-09-13):** persistent-volume + in-place-upgrade design confirmed on two independent physical hosts (antevorta, janus), not just one
 - [x] Quiesce resolved 2026-09-11 (Gavin sign-off): reuse `hapi-restart-hub`'s existing patient drain unchanged
