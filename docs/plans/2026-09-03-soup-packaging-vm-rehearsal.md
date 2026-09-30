@@ -3,9 +3,11 @@
 **Date:** 2026-09-03  
 **Session:** soup packaging remat rehearsal on janus (VM 2097 `oos-soup-rehearsal-test`)  
 **Parent remit:** workmate version-parity / Doug Antevorta independent-hub packaging  
-**Verdict up front:** **does not reproduce** via clone + `hapi-driver-rebuild`. A **frozen snapshot** of `driver/integration` (git tip / tree export, optionally plus built `web/dist`) is the honest distribution unit — not the tip-forward recipe alone.
+**Verdict up front (2026-09-03, source-tree question):** **does not reproduce** via clone + `hapi-driver-rebuild`. A frozen composed `driver/integration` tip matched bit-for-bit; a tip-forward *recipe* did not.
 
-Related: [`2026-08-20-workmate-version-parity-recommendation.md`](./2026-08-20-workmate-version-parity-recommendation.md), [`../tooling/driver-soup.md`](../tooling/driver-soup.md).
+**Superseded for distribution (see §8 addendum, 2026-09-30):** ten days later soup **single-exe** publish landed (`dad451972`). What Doug actually runs is a **compiled binary** from `heavygee/hapi` GitHub Releases (`hapi-soup-v*`), not a composed source tree. The causal account below remains correct for the remat/recipe question; do **not** treat §5’s “ship a git bundle” as today’s packaging instruction.
+
+Related: [`2026-08-20-workmate-version-parity-recommendation.md`](./2026-08-20-workmate-version-parity-recommendation.md), [`../tooling/driver-soup.md`](../tooling/driver-soup.md), [`../guide/pet-install.md`](../guide/pet-install.md).
 
 ---
 
@@ -112,7 +114,9 @@ After localizing published branches + importing the six unpublished ones via bun
 | **Frozen `driver/integration` tip** (git bundle / mirror of known-good SHA + tree) | **Yes** for source parity — proven bit-identical in this rehearsal |
 | Tip + built `web/dist` (or image with deps installed) | Prefer for a runnable hub; this rehearsal stopped at source-tree parity by design |
 
-**Plain recommendation:** treat soup packaging as **export a known-good composed tip** (and preferably a verified web artifact), versioned/tagged at a dogfood-green moment. Do **not** tell Doug “rebuild from the manifest on your box” and expect oos parity. Shared-hub (Option C in the 2026-08-20 note) remains correct when organizational constraints allow it; when Doug must run an independent hub, ship a **snapshot**, not a **recipe**.
+**Plain recommendation (2026-09-03, for the remat question):** treat soup *source* packaging as **export a known-good composed tip**, not “rebuild from the manifest.” Shared-hub (Option C in the 2026-08-20 note) remains correct when organizational constraints allow it.
+
+**2026-09-30:** for *shipping* an independent hub, prefer the **single-exe Release** + install scripts — see §8. Do not hand someone a git bundle of `driver/integration` as the primary path anymore.
 
 Optional follow-ups (not done here):
 
@@ -143,3 +147,27 @@ oos dirty manifest: 50
 cold remat: conflict layer 1 feat/mermaid-parse-failure-feedback
 unpublished layers: 6 of 50 (see §3.1)
 ```
+
+---
+
+## 8. Addendum (2026-09-30) — distribution unit moved to single-exe
+
+**Why this note exists:** this plan’s §5 still read as if the packaging answer for Doug were “export `driver/integration`.” That was the right answer to *“can remat reproduce soup?”* It is no longer the right answer to *“what do we ship?”*
+
+| When | Distribution unit | Evidence |
+|---|---|---|
+| 2026-09-03 (this rehearsal) | Frozen composed tip (git tree OID) | §4.B — tip `46f333001…` / tree `d2a693b47…` matched oos bit-for-bit on a throwaway VM |
+| 2026-09-13 onward | **Compiled soup single-exe** on `heavygee/hapi` Releases | `dad451972` — mirror soup publish to Releases; tags `hapi-soup-vYYYY.MM.DD-<sha>` |
+| Live (2026-09-30) | Binary on disk | Doug’s antevorta: `/opt/hapi/hapi` = `hapi-soup-v2026.09.13-cd7d515` (sha256 vs release manifest) |
+
+Public pet path:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/heavygee/hapi/main/scripts/install-hapi-pet.sh | bash
+```
+
+Fleet / systemd profiles: `scripts/tooling/install-hapi-systemd-units.sh --profile fleet-binary|user-pet|primary-soup`.
+
+**What this rehearsal still correctly proved (unchanged):** tip-forward remat from a fresh clone is not a distributable recipe (unpublished layer refs, local-vs-`origin/` resolution, cold merge conflicts, fat-tip / heal warn-skips). Do not revive “just remat the manifest on their box.”
+
+**What this rehearsal deliberately left open (and later mattered):** §5’s “tip + built `web/dist` / runnable hub” row — we stopped at source-tree parity and destroyed the VM. The next throwaway-VM rehearsal is the *stranger install*: pet one-liner and `--profile fleet-binary` through a hub that survives restart, with live probes (installer runs, ExecStartPre binary exists, watchdog actually fired, sudoers applies to a real user, no surprise `/usr/local/sbin/systemctl` wrapper, `MainPID` ↔ `runner.state.json`, live `/proc/<pid>/oom_score_adj`). Pre-fix vs fixed SHAs: `a352a7804` / `b20204325` (heavygee/hapi#183). Executable check: extend `scripts/tooling/verify-hapi-systemd-units.sh` / `verify-hapi-install.sh` — not another markdown-only checklist.
