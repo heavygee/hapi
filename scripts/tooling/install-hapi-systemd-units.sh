@@ -172,30 +172,30 @@ render_pair() {
     )
 
     if [[ "$PROFILE" == primary-soup ]]; then
-        render-hapi-systemd-unit.sh "$hub_template" "$hub_out" \
+        render_hapi_systemd_unit "$hub_template" "$hub_out" \
             "${common[@]}" \
             "HAPI_DRIVER_DIR=$HAPI_DRIVER_DIR" \
             "BUN_BIN=$BUN_BIN"
-        render-hapi-systemd-unit.sh "$runner_template" "$runner_out" \
+        render_hapi_systemd_unit "$runner_template" "$runner_out" \
             "${common[@]}" \
             "HAPI_DRIVER_DIR=$HAPI_DRIVER_DIR" \
             "BUN_BIN=$BUN_BIN" \
             "HAPI_AGENT_ENV=$HAPI_AGENT_ENV" \
             "EXEC_START_PRE_LINE=$EXEC_START_PRE_LINE"
     elif [[ "$PROFILE" == fleet-binary ]]; then
-        render-hapi-systemd-unit.sh "$hub_template" "$hub_out" \
+        render_hapi_systemd_unit "$hub_template" "$hub_out" \
             "${common[@]}" \
             "HAPI_BIN=$HAPI_BIN"
-        render-hapi-systemd-unit.sh "$runner_template" "$runner_out" \
+        render_hapi_systemd_unit "$runner_template" "$runner_out" \
             "${common[@]}" \
             "HAPI_BIN=$HAPI_BIN"
     else
-        render-hapi-systemd-unit.sh "$hub_template" "$hub_out" \
+        render_hapi_systemd_unit "$hub_template" "$hub_out" \
             "HOST_LABEL=$HOST_LABEL" \
             "HAPI_HOME=$HAPI_HOME" \
             "HAPI_PATH=$HAPI_PATH" \
             "HAPI_BIN=$HAPI_BIN"
-        render-hapi-systemd-unit.sh "$runner_template" "$runner_out" \
+        render_hapi_systemd_unit "$runner_template" "$runner_out" \
             "HOST_LABEL=$HOST_LABEL" \
             "HAPI_HOME=$HAPI_HOME" \
             "HAPI_PATH=$HAPI_PATH" \
@@ -225,7 +225,34 @@ case "$PROFILE" in
             systemctl enable "$HUB_UNIT" "$RUNNER_UNIT"
         fi
         if [[ "$UNITS_ONLY" -eq 0 ]]; then
-            bash "$REPO_ROOT/scripts/tooling/install-hapi-primary-hub-tier1.sh"
+            # Pass the binary this profile just installed, so Tier-1's
+            # ExecStartPre stop is valid on THIS host. Without it Tier-1 would
+            # fall back to auto-detection, and historically shipped a
+            # soup-only stop verbatim to every profile (silently a no-op).
+            # This script already knows the exact layout it just rendered, so
+            # tell Tier-1 rather than making it guess. Its auto-detect only
+            # handles the single-exe shape and fails closed otherwise — which is
+            # correct, but would abort us mid-install (base units written,
+            # daemon-reload done, drop-ins and watchdog not).
+            # Everything Tier-1 would otherwise have to infer, we already know
+            # exactly — we just rendered the units from it. Passing it removes
+            # the guessing entirely, including the User= lookup that cannot
+            # distinguish "runs as root" from "unit does not exist".
+            TIER1_ARGS=(
+                --watchdog-user "$HAPI_USER"
+                --hapi-home "$HAPI_HOME"
+                --hapi-port "$HAPI_PORT"
+            )
+            case "$PROFILE" in
+                fleet-binary)
+                    TIER1_ARGS+=(--runner-bin "$HAPI_BIN")
+                    ;;
+                primary-soup)
+                    TIER1_ARGS+=(--runner-stop-cmd \
+                        "-/bin/bash -lc '$BUN_BIN run --cwd $HAPI_DRIVER_DIR/cli $HAPI_DRIVER_DIR/cli/src/index.ts runner stop'")
+                    ;;
+            esac
+            bash "$REPO_ROOT/scripts/tooling/install-hapi-primary-hub-tier1.sh" "${TIER1_ARGS[@]}"
         fi
         if [[ "$DO_RESTART" -eq 1 ]]; then
             if [[ -x /home/heavygee/.local/bin/hapi-restart-hub ]]; then

@@ -1,0 +1,30 @@
+# TEMPLATE: belt-and-braces watchdog for the HAPI runner (Tier-1, any profile).
+#
+# Rendered and installed via: scripts/tooling/install-hapi-primary-hub-tier1.sh
+# Enable: sudo systemctl enable --now hapi-runner-watchdog.timer
+#
+# Script resolves hapi-runner vs hapi-runner-oos via lib/hapi-systemd-units.sh.
+#
+# Every value below used to be hardcoded to the soup operator's account. On any
+# other host the ConditionPathExists could not be satisfied, so systemd SKIPPED
+# this service on every timer fire — while `systemctl list-timers` still showed
+# the timer enabled. A watchdog that reports healthy and never runs is worse
+# than a documented gap, so these are rendered per host now.
+#
+# ExecStart points at an INSTALLED copy, not a repo checkout: fleet and pet
+# hosts have the single-exe and no clone of this repository.
+
+[Unit]
+Description=HAPI runner liveness watchdog (restart service if machine drops off hub)
+After=network-online.target
+ConditionPathExists=@HAPI_HOME@/settings.json
+
+[Service]
+Type=oneshot
+User=@WATCHDOG_USER@
+Environment=HAPI_API_URL=http://127.0.0.1:@HAPI_PORT@
+Environment=HAPI_HOME=@HAPI_HOME@
+EnvironmentFile=-@HAPI_HOME@/runner-watchdog.env
+ExecStart=@WATCHDOG_SCRIPT@
+StandardOutput=journal
+StandardError=journal
