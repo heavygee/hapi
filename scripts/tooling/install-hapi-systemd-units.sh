@@ -229,10 +229,21 @@ case "$PROFILE" in
             # ExecStartPre stop is valid on THIS host. Without it Tier-1 would
             # fall back to auto-detection, and historically shipped a
             # soup-only stop verbatim to every profile (silently a no-op).
+            # This script already knows the exact layout it just rendered, so
+            # tell Tier-1 rather than making it guess. Its auto-detect only
+            # handles the single-exe shape and fails closed otherwise — which is
+            # correct, but would abort us mid-install (base units written,
+            # daemon-reload done, drop-ins and watchdog not).
             TIER1_ARGS=()
-            if [[ "$PROFILE" == fleet-binary ]]; then
-                TIER1_ARGS=(--runner-bin "$HAPI_BIN")
-            fi
+            case "$PROFILE" in
+                fleet-binary)
+                    TIER1_ARGS=(--runner-bin "$HAPI_BIN")
+                    ;;
+                primary-soup)
+                    TIER1_ARGS=(--runner-stop-cmd \
+                        "-/bin/bash -lc '$BUN_BIN run --cwd $HAPI_DRIVER_DIR/cli $HAPI_DRIVER_DIR/cli/src/index.ts runner stop'")
+                    ;;
+            esac
             bash "$REPO_ROOT/scripts/tooling/install-hapi-primary-hub-tier1.sh" "${TIER1_ARGS[@]}"
         fi
         if [[ "$DO_RESTART" -eq 1 ]]; then

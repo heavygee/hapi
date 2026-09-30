@@ -24,11 +24,13 @@ All runner base units set **`KillMode=process`** ([upstream #915](https://github
 
 `10-resilience.conf` used to hardcode the soup kitchen's `bun` invocation and was installed verbatim on every profile, so on `fleet-binary` and pet hosts the stop silently never ran (`|| true` hid it) while the drop-in looked correct. It is now `10-resilience.conf.in`, rendered per host. Resolution order:
 
-1. `--runner-stop-cmd '<command>'`
-2. `--runner-bin /path/to/hapi` → `-/path/to/hapi runner stop`
-3. auto-detect from the runner unit's own `ExecStart`, then `/opt/hapi/hapi`, then the soup `bun` entrypoint
+1. `--runner-stop-cmd '<command>'` — the escape hatch for wrapped entrypoints (`bun`, `env`, a shell). Deliberately **not** introspected, since the wrapper cannot be validated from outside, but systemd's ignore-failure `-` prefix is forced on: without it a failing stop leaves the unit cycling `activating` → `failed` and the runner never starts at all, which is worse than the silent no-op this guard exists to prevent.
+2. `--runner-bin /path/to/hapi` → `-/path/to/hapi runner stop`. Must be an executable **file** (`-x` alone is true for directories).
+3. auto-detect — **only** when the unit is the single-exe shape (`path=` is an executable file and argv reads `<bin> runner start-sync …`), then `/opt/hapi/hapi`.
 
-If none resolve it **fails closed** rather than installing a stop that cannot run. `install-hapi-systemd-units.sh --profile fleet-binary` passes `--runner-bin` automatically.
+Auto-detect deliberately refuses interpreter-style units. Reusing argv[0] from `bun run …/index.ts runner start-sync` would emit `bun runner stop`, which `bun` reads as a script name and fails — swallowed by the `-`, reproducing the original bug with a stop that looks present. There are **no hardcoded host paths** in the resolver; if it cannot be sure, it fails closed and names the flag to pass.
+
+`install-hapi-systemd-units.sh` passes the right thing per profile: `--runner-bin` for `fleet-binary`, an explicit `--runner-stop-cmd` built from `$BUN_BIN`/`$HAPI_DRIVER_DIR` for `primary-soup`. Running `install-hapi-primary-hub-tier1.sh` standalone on a soup host will fail closed — pass `--runner-stop-cmd`, or use the profile installer.
 
 `user-pet` gets no Tier-1, but its base unit does set `HAPI_DISABLE_VERSION_HANDOFF=1` and `Restart=always` — so the equivalent `ExecStartPre=-<bin> runner stop` lives directly in that template.
 
@@ -87,7 +89,9 @@ Expect:
 - Hub **`OOMScoreAdjust=-1000`** (system profiles with Tier-1)
 - Runner **`OOMScoreAdjust=0`** (never -1000 — agents inherit parent score)
 - Runner **`Restart=always`** or `on-failure` per profile
-- Runner **`ExecStartPre` runner-stop binary exists** — asserted, not just present; a stop pointing at a missing binary is worse than none (see above)
+- Runner **`ExecStartPre` runner-stop binary exists** — asserted, not just present; a stop pointing at a missing binary is worse than none (see above). For shell-wrapped stops the *interpreter inside* the wrapper is checked, not the shell, which always exists and would mask the failure
+
+Covered by `scripts/tooling/install-hapi-primary-hub-tier1.test.sh` (resolver branches + verifier parse, including the cases that must fail).
 - Watchdog timer enabled on primary/fleet system installs
 
 After `hapi-restart-hub`, archived session count should not spike from cgroup SIGTERM (see [`driver-soup.md`](./driver-soup.md) § KillMode).

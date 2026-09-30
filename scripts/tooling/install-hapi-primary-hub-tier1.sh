@@ -15,8 +15,8 @@
 #     template's own header). Resolution order:
 #       1. --runner-stop-cmd '<full command>'
 #       2. --runner-bin /path/to/hapi   ->  '-/path/to/hapi runner stop'
-#       3. auto-detect: the runner unit's own ExecStart binary, else
-#          /opt/hapi/hapi, else the soup bun invocation
+#       3. auto-detect: the runner unit's own ExecStart binary, but only when
+#          the unit is the single-exe shape, else /opt/hapi/hapi
 #     Fails closed if none resolve — never installs a stop that cannot run.
 #   - runner: 90-oom-protect-runner.conf (OOMScoreAdjust=0)
 #   - hub:    90-oom-protect-hub.conf (OOMScoreAdjust=-1000)
@@ -49,7 +49,7 @@ while [[ $# -gt 0 ]]; do
         --runner-bin) RUNNER_BIN="${2:?--runner-bin needs a path}"; shift 2 ;;
         --runner-stop-cmd) RUNNER_STOP_CMD="${2:?--runner-stop-cmd needs a command}"; shift 2 ;;
         -h|--help)
-            sed -n '2,40p' "$0"
+            sed -n '2,36p' "$0"
             exit 0
             ;;
         *)
@@ -84,45 +84,57 @@ echo "Tier-1 install: hub=$HUB_UNIT runner=$RUNNER_UNIT"
 # (stopping when nothing runs is fine) but no substitute for validating the
 # binary exists at INSTALL time, which is the check that was missing.
 resolve_runner_stop_cmd() {
+    # 1. Explicit command. Deliberately not introspected — the caller may need a
+    #    shell wrapper we cannot validate — but systemd's ignore-failure `-` is
+    #    forced on. Without it a stop that fails leaves the unit cycling
+    #    activating->failed and the runner never starts AT ALL, which is
+    #    strictly worse than the silent no-op this guard exists to prevent.
     if [[ -n "$RUNNER_STOP_CMD" ]]; then
+        [[ "$RUNNER_STOP_CMD" == -* ]] || RUNNER_STOP_CMD="-$RUNNER_STOP_CMD"
         printf '%s' "$RUNNER_STOP_CMD"
         return 0
     fi
+
+    # 2. Explicit binary.
     if [[ -n "$RUNNER_BIN" ]]; then
-        [[ -x "$RUNNER_BIN" ]] || {
-            echo "ERROR: --runner-bin $RUNNER_BIN is not executable" >&2
+        [[ -f "$RUNNER_BIN" && -x "$RUNNER_BIN" ]] || {
+            echo "ERROR: --runner-bin $RUNNER_BIN is not an executable file" >&2
             exit 1
         }
         printf -- '-%s runner stop' "$RUNNER_BIN"
         return 0
     fi
 
-    # Auto-detect: reuse whatever the installed unit already starts.
-    local exec_start bin
-    exec_start="$(systemctl show "$RUNNER_UNIT" -p ExecStart --value 2>/dev/null || true)"
-    bin="$(sed -n 's/.*argv\[\]=\([^ ]*\).*/\1/p' <<<"$exec_start" | head -n1)"
-    if [[ -n "$bin" && "$bin" != /bin/bash && "$bin" != /bin/sh && -x "$bin" ]]; then
-        printf -- '-%s runner stop' "$bin"
+    # 3. Auto-detect, ONLY for the single-exe shape. systemd reports the
+    #    executable in `path=` and the full command in `argv[]=`; require argv to
+    #    be `<bin> runner start-sync ...` before reusing <bin>. Matching on
+    #    "not a shell" instead would fail open: `bun run … runner start-sync`
+    #    would yield `bun runner stop`, which exits non-zero ("Script not found")
+    #    and is swallowed by the `-` — reproducing the exact bug being fixed.
+    local show path argv
+    show="$(systemctl show "$RUNNER_UNIT" -p ExecStart --value 2>/dev/null || true)"
+    path="$(sed -n 's/^{ path=\([^ ]*\) .*/\1/p' <<<"$show" | head -n1 || true)"
+    argv="${show#*argv[]=}"
+    argv="${argv%% ; *}"
+    if [[ -n "$path" && -f "$path" && -x "$path" && "$argv" == "$path runner start-sync"* ]]; then
+        printf -- '-%s runner stop' "$path"
         return 0
     fi
 
-    if [[ -x /opt/hapi/hapi ]]; then
+    # 4. Fleet/pet convention.
+    if [[ -f /opt/hapi/hapi && -x /opt/hapi/hapi ]]; then
         printf -- '-/opt/hapi/hapi runner stop'
         return 0
     fi
 
-    # Soup kitchen: the runner is a bun entrypoint, not a single executable.
-    local soup_cli="/home/heavygee/coding/hapi/active/cli"
-    local bun="/home/heavygee/.bun/bin/bun"
-    if [[ -x "$bun" && -d "$soup_cli" ]]; then
-        printf -- "-/bin/bash -lc '%s run --cwd %s %s/src/index.ts runner stop'" \
-            "$bun" "$soup_cli" "$soup_cli"
-        return 0
-    fi
-
+    # No host-path guesses beyond this point. The previous hardcoded soup paths
+    # are exactly what made this drop-in unportable; install-hapi-systemd-units.sh
+    # passes --runner-stop-cmd for primary-soup, which knows the real layout.
     echo "ERROR: cannot determine how to stop the runner on this host." >&2
-    echo "       Pass --runner-bin /path/to/hapi (single-exe installs) or" >&2
-    echo "       --runner-stop-cmd '<command>' (custom entrypoints)." >&2
+    echo "       The runner unit is not the single-exe shape and /opt/hapi/hapi" >&2
+    echo "       is absent, so any guess could silently no-op." >&2
+    echo "       Pass --runner-bin /path/to/hapi, or --runner-stop-cmd '<command>'" >&2
+    echo "       for a wrapped entrypoint (bun, env, a shell)." >&2
     echo "       Refusing to install Restart=always without a working stop." >&2
     exit 1
 }

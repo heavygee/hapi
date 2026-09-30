@@ -78,19 +78,37 @@ if [[ -z "$stop_entry" ]]; then
     fi
 else
     # The stop may be a direct binary (-/opt/hapi/hapi runner stop) or wrapped in
-    # a shell (bash -lc '<bun> ... runner stop'). For the wrapped form the shell
-    # always exists, so check the real interpreter inside the command instead.
+    # a shell (bash -lc '<bun> ... runner stop'). systemd reports the executable
+    # it will actually run in path=, so start there; for the wrapped form that is
+    # only the shell, so also check the real interpreter inside the command.
     argv="${stop_entry#*argv[]=}"
     argv="${argv%% ; *}"
-    pre_bin="$(awk '{print $1}' <<<"$argv")"
+    entry_path="$(sed -n 's/.*path=\([^ ]*\) .*/\1/p' <<<"$stop_entry" | head -n1 || true)"
+    pre_bin="${entry_path:-$(awk '{print $1}' <<<"${argv#-}")}"
     case "$pre_bin" in
-        /bin/bash|/bin/sh|/usr/bin/bash|/usr/bin/sh|/usr/bin/env)
-            # Wrapped: the first absolute path after the shell flags is the one
-            # that has to exist on this host.
-            pre_bin="$(grep -oE '(^| )/[^ ]+' <<<"$argv" | awk 'NR>1 {print $1; exit}' | tr -d ' ' || true)"
+        */bash|*/sh|*/env)
+            # Wrapped: find the first argument that is a real executable FILE.
+            # `-x` alone is not enough — it is true for directories, so a
+            # `cd /some/dir && <interp> ...` form would report OK while the
+            # interpreter itself is missing.
+            shell_bin="$pre_bin"
+            pre_bin=""
+            for cand in $argv; do
+                [[ "$cand" == "$shell_bin" ]] && continue   # skip the shell itself
+                case "$cand" in
+                    /*) if [[ -f "$cand" && -x "$cand" ]]; then pre_bin="$cand"; break; fi ;;
+                esac
+            done
+            # Nothing executable inside the wrapper: report the missing
+            # interpreter rather than falling back to the shell, which always
+            # exists and would mask exactly the failure we are looking for.
+            if [[ -z "$pre_bin" ]]; then
+                pre_bin="$(grep -oE '(^| )/[^ ]+' <<<"$argv" | awk 'NR>1 {print $1; exit}' | tr -d ' ' || true)"
+                pre_bin="${pre_bin:-unparsed}"
+            fi
             ;;
     esac
-    if [[ -n "$pre_bin" && -x "$pre_bin" ]]; then
+    if [[ -n "$pre_bin" && -f "$pre_bin" && -x "$pre_bin" ]]; then
         ok "runner ExecStartPre runner-stop executable ($pre_bin)"
     else
         fail "runner ExecStartPre runner-stop binary missing ($RUNNER_UNIT → ${pre_bin:-unparsed}) — stop silently no-ops"
