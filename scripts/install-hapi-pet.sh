@@ -120,6 +120,14 @@ Environment=HAPI_HOME=${HAPI_HOME}
 Environment=PATH=${hapi_path}
 Environment=HAPI_RUNNER_SUPERVISED=1
 Environment=HAPI_DISABLE_VERSION_HANDOFF=1
+# Must mirror scripts/tooling/systemd/units/user-pet/hapi-runner.service.in.
+# HAPI_DISABLE_VERSION_HANDOFF=1 stops a fresh invocation treating the running
+# runner as stale, so without this stop a restart hits the runner's dedup path
+# (exit 0, "keeping existing runner") and leaves the unit inactive with an
+# unsupervised runner alive — or, with Restart=always, cycling until the start
+# limit trips. The curl|bash path writes THIS unit, not the template, so the
+# guard has to exist in both places.
+ExecStartPre=-${hapi_bin} runner stop
 ExecStart=${hapi_bin} runner start-sync --workspace-root ${HAPI_WORKSPACE}
 Restart=always
 RestartSec=5

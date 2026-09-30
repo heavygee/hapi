@@ -60,60 +60,74 @@ fi
 # systemd's `-` prefix (and the older `|| true`) hide the failure at runtime
 # and the drop-in still *looks* installed. So assert the binary exists, not
 # merely that the directive is present.
-exec_start_pre="$(show_prop "$RUNNER_UNIT" ExecStartPre)"
-restart_policy="$(show_prop "$RUNNER_UNIT" Restart)"
+check_runner_stop_guard() {
+    exec_start_pre="$(show_prop "$RUNNER_UNIT" ExecStartPre)"
+    restart_policy="$(show_prop "$RUNNER_UNIT" Restart)"
 
-# A unit can carry several ExecStartPre entries (cursor-auth pinning, etc.), so
-# pick the one that actually performs the runner stop rather than the first —
-# validating the wrong entry would pass while the stop stays broken.
-# `|| true`: grep exits 1 when there is no stop entry, and under `set -o
-# pipefail` that would abort the whole verifier instead of reporting.
-stop_entry="$(tr '}' '\n' <<<"$exec_start_pre" | grep -F 'runner stop' | head -n1 || true)"
+    # A unit can carry several ExecStartPre entries (cursor-auth pinning, etc.), so
+    # pick the one that actually performs the runner stop rather than the first —
+    # validating the wrong entry would pass while the stop stays broken.
+    # `|| true`: grep exits 1 when there is no stop entry, and under `set -o
+    # pipefail` that would abort the whole verifier instead of reporting.
+    stop_entry="$(tr '}' '\n' <<<"$exec_start_pre" | grep -F 'runner stop' | head -n1 || true)"
 
-if [[ -z "$stop_entry" ]]; then
-    if [[ "$restart_policy" == always ]]; then
-        fail "runner ExecStartPre runner-stop present ($RUNNER_UNIT → none, with Restart=always)"
-    else
-        ok "runner ExecStartPre runner-stop not required ($RUNNER_UNIT, Restart=$restart_policy)"
+    # A custom --runner-stop-cmd (a wrapper script, say) need not contain the
+    # literal words "runner stop", and treating that as "no stop present" would fail
+    # every host using the documented escape hatch. When the resilience drop-in is
+    # installed, its ExecStartPre is applied after the base unit's, so the LAST
+    # entry is the stop. Only reachable when the content match found nothing.
+    if [[ -z "$stop_entry" ]] \
+        && systemctl cat "$RUNNER_UNIT" 2>/dev/null | grep -q '10-resilience\.conf'; then
+        stop_entry="$(tr '}' '\n' <<<"$exec_start_pre" | grep -F 'argv[]=' | tail -n1 || true)"
     fi
-else
-    # The stop may be a direct binary (-/opt/hapi/hapi runner stop) or wrapped in
-    # a shell (bash -lc '<bun> ... runner stop'). systemd reports the executable
-    # it will actually run in path=, so start there; for the wrapped form that is
-    # only the shell, so also check the real interpreter inside the command.
-    argv="${stop_entry#*argv[]=}"
-    argv="${argv%% ; *}"
-    entry_path="$(sed -n 's/.*path=\([^ ]*\) .*/\1/p' <<<"$stop_entry" | head -n1 || true)"
-    pre_bin="${entry_path:-$(awk '{print $1}' <<<"${argv#-}")}"
-    case "$pre_bin" in
-        */bash|*/sh|*/env)
-            # Wrapped: find the first argument that is a real executable FILE.
-            # `-x` alone is not enough — it is true for directories, so a
-            # `cd /some/dir && <interp> ...` form would report OK while the
-            # interpreter itself is missing.
-            shell_bin="$pre_bin"
-            pre_bin=""
-            for cand in $argv; do
-                [[ "$cand" == "$shell_bin" ]] && continue   # skip the shell itself
-                case "$cand" in
-                    /*) if [[ -f "$cand" && -x "$cand" ]]; then pre_bin="$cand"; break; fi ;;
-                esac
-            done
-            # Nothing executable inside the wrapper: report the missing
-            # interpreter rather than falling back to the shell, which always
-            # exists and would mask exactly the failure we are looking for.
-            if [[ -z "$pre_bin" ]]; then
-                pre_bin="$(grep -oE '(^| )/[^ ]+' <<<"$argv" | awk 'NR>1 {print $1; exit}' | tr -d ' ' || true)"
-                pre_bin="${pre_bin:-unparsed}"
-            fi
-            ;;
-    esac
-    if [[ -n "$pre_bin" && -f "$pre_bin" && -x "$pre_bin" ]]; then
-        ok "runner ExecStartPre runner-stop executable ($pre_bin)"
+
+    if [[ -z "$stop_entry" ]]; then
+        if [[ "$restart_policy" == always ]]; then
+            fail "runner ExecStartPre runner-stop present ($RUNNER_UNIT → none, with Restart=always)"
+        else
+            ok "runner ExecStartPre runner-stop not required ($RUNNER_UNIT, Restart=$restart_policy)"
+        fi
     else
-        fail "runner ExecStartPre runner-stop binary missing ($RUNNER_UNIT → ${pre_bin:-unparsed}) — stop silently no-ops"
+        # The stop may be a direct binary (-/opt/hapi/hapi runner stop) or wrapped in
+        # a shell (bash -lc '<bun> ... runner stop'). systemd reports the executable
+        # it will actually run in path=, so start there; for the wrapped form that is
+        # only the shell, so also check the real interpreter inside the command.
+        argv="${stop_entry#*argv[]=}"
+        argv="${argv%% ; *}"
+        entry_path="$(sed -n 's/.*path=\([^ ]*\) .*/\1/p' <<<"$stop_entry" | head -n1 || true)"
+        pre_bin="${entry_path:-$(awk '{print $1}' <<<"${argv#-}")}"
+        case "$pre_bin" in
+            */bash|*/sh|*/env)
+                # Wrapped: find the first argument that is a real executable FILE.
+                # `-x` alone is not enough — it is true for directories, so a
+                # `cd /some/dir && <interp> ...` form would report OK while the
+                # interpreter itself is missing.
+                shell_bin="$pre_bin"
+                pre_bin=""
+                for cand in $argv; do
+                    [[ "$cand" == "$shell_bin" ]] && continue   # skip the shell itself
+                    case "$cand" in
+                        /*) if [[ -f "$cand" && -x "$cand" ]]; then pre_bin="$cand"; break; fi ;;
+                    esac
+                done
+                # Nothing executable inside the wrapper: report the missing
+                # interpreter rather than falling back to the shell, which always
+                # exists and would mask exactly the failure we are looking for.
+                if [[ -z "$pre_bin" ]]; then
+                    pre_bin="$(grep -oE '(^| )/[^ ]+' <<<"$argv" | awk 'NR>1 {print $1; exit}' | tr -d ' ' || true)"
+                    pre_bin="${pre_bin:-unparsed}"
+                fi
+                ;;
+        esac
+        if [[ -n "$pre_bin" && -f "$pre_bin" && -x "$pre_bin" ]]; then
+            ok "runner ExecStartPre runner-stop executable ($pre_bin)"
+        else
+            fail "runner ExecStartPre runner-stop binary missing ($RUNNER_UNIT → ${pre_bin:-unparsed}) — stop silently no-ops"
+        fi
     fi
-fi
+}
+
+check_runner_stop_guard
 
 if [[ "$SCOPE" == system ]] && hapi_systemd_unit_exists "$HUB_UNIT"; then
     if [[ "$hub_oom" == -1000 ]]; then

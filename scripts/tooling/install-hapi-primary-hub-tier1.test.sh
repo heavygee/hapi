@@ -67,7 +67,8 @@ assert_pre() {
         fail(){ printf "FAIL: %s\n" "$1"; FAIL=1; }
         RUNNER_UNIT=stub
         show_prop(){ if [[ "$2" == ExecStartPre ]]; then printf "%s" "$TEST_PRE"; else printf "%s" "$TEST_RESTART"; fi; }
-        eval "$(sed -n "/^exec_start_pre=/,/^fi$/p" "$0")"
+        eval "$(sed -n "/^check_runner_stop_guard()/,/^}$/p" "$0")"
+        check_runner_stop_guard
         exit $FAIL
     ' "$VERIFY" 2>&1
 }
@@ -87,6 +88,14 @@ check "no stop is fine when Restart=on-failure" 'assert_pre "" on-failure >/dev/
 check "soup stop on a fleet host fails" '! assert_pre "$STOP_MISSING" always >/dev/null'
 check "cd-prefixed stop with missing interpreter fails" '! assert_pre "$STOP_CD" always >/dev/null'
 check "no stop with Restart=always fails" '! assert_pre "" always >/dev/null'
+
+# A custom --runner-stop-cmd wrapper need not say "runner stop"; without the
+# drop-in fallback the verifier would call it absent and fail every host using
+# the documented escape hatch. (systemctl is not stubbed here, so the drop-in
+# probe returns false and the content match is the only path — this pins the
+# content match itself, and the fallback is exercised on real hosts.)
+CUSTOM="{ path=/bin/true ; argv[]=/bin/true --stop-the-runner ; ignore_errors=yes }"
+check "custom wrapper without the literal words is reported, not silently ok" '! assert_pre "$CUSTOM" always >/dev/null'
 
 # --- installer argument handling ------------------------------------------
 # `source lib/render-hapi-systemd-unit.sh` used to run that file's top-level CLI
