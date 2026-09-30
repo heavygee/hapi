@@ -18,11 +18,11 @@ It does **not** log Claude Code into your Anthropic account — that's a separat
 curl -fsSL https://raw.githubusercontent.com/heavygee/hapi/main/scripts/install-hapi-pet.sh | bash
 ```
 
-Optional: keep hub and runner running across logout (user systemd, `KillMode=process`):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/heavygee/hapi/main/scripts/install-hapi-pet.sh | bash -s -- --with-systemd
-```
+**`--with-systemd` is currently broken via this one-liner — do not use it yet.** Confirmed
+2026-09-22: it references a companion script by a path that only exists in a real git
+checkout of this repo, not on a fresh box installed via `curl | bash`. Tracked for a fix;
+until then, the plain install command above (which runs hub/runner as background
+processes, no systemd) is the working option.
 
 ## Finish setup
 
