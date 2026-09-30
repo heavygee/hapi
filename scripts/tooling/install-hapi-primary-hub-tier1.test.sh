@@ -106,5 +106,35 @@ bash "$ROOT/scripts/tooling/lib/render-hapi-systemd-unit.sh" "$tmpl" "$outf" "K=
 check "render lib still runs as a CLI" '[[ "$(cat "$outf")" == "x=v" ]]'
 rm -f "$tmpl" "$outf"
 
+# --- watchdog / sudoers portability ---------------------------------------
+# These were hardcoded to the soup operator's account. On any other host the
+# watchdog's ConditionPathExists could not be satisfied, so systemd skipped the
+# service on every fire while the timer still reported enabled, and the sudoers
+# rules granted to a user that did not exist — valid syntax, applying to nobody.
+RENDER="$ROOT/scripts/tooling/lib/render-hapi-systemd-unit.sh"
+TD="$(mktemp -d)"
+bash "$RENDER" "$ROOT/scripts/tooling/systemd/hapi-runner-watchdog.service.in" "$TD/wd.service" \
+    "WATCHDOG_USER=hapi" "HAPI_HOME=/var/lib/hapi" "HAPI_PORT=3006" \
+    "WATCHDOG_SCRIPT=/usr/local/lib/hapi/hapi-runner-watchdog.sh"
+check "watchdog unit renders without operator paths" '! grep -q heavygee "$TD/wd.service"'
+check "watchdog condition follows HAPI_HOME" 'grep -q "^ConditionPathExists=/var/lib/hapi/settings.json$" "$TD/wd.service"'
+check "watchdog runs as the runner's own user" 'grep -q "^User=hapi$" "$TD/wd.service"'
+check "watchdog ExecStart is an installed path" 'grep -q "^ExecStart=/usr/local/lib/hapi/" "$TD/wd.service"'
+
+for f in hapi-protect hapi-watchdog; do
+    bash "$RENDER" "$ROOT/scripts/tooling/sudoers/$f.in" "$TD/$f" "SUDO_USER_NAME=hapi"
+    check "sudoers $f grants to the rendered user" 'grep -q "^hapi ALL=(root)" "$TD/$f"'
+    check "sudoers $f has no operator account" '! grep -q heavygee "$TD/$f"'
+done
+
+# The watchdog must work on a host with no clone of this repo — it is installed
+# next to its one library dependency rather than pointed at a checkout.
+mkdir -p "$TD/lib/lib"
+install -m 0755 "$ROOT/scripts/tooling/hapi-runner-watchdog.sh" "$TD/lib/hapi-runner-watchdog.sh"
+install -m 0644 "$ROOT/scripts/tooling/lib/hapi-systemd-units.sh" "$TD/lib/lib/hapi-systemd-units.sh"
+out="$(HAPI_HOME="$TD/nohome" HAPI_WATCHDOG_DRY_RUN=1 bash "$TD/lib/hapi-runner-watchdog.sh" 2>&1 || true)"
+check "watchdog runs from its installed layout" 'grep -q "settings.json missing" <<<"$out"'
+rm -rf "$TD"
+
 echo "# pass=$pass fail=$fail"
 [[ "$fail" -eq 0 ]]

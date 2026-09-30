@@ -57,4 +57,4 @@ Cmnd_Alias HAPI_DESTROY = \
     /usr/bin/systemctl mask hapi-hub.service, \
     /usr/bin/systemctl mask hapi-hub-oos.service
 
-heavygee ALL=(root) !HAPI_DESTROY
+@SUDO_USER_NAME@ ALL=(root) !HAPI_DESTROY

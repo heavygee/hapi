@@ -91,6 +91,20 @@ Expect:
 - Runner **`Restart=always`** or `on-failure` per profile
 - Runner **`ExecStartPre` runner-stop binary exists** — asserted, not just present; a stop pointing at a missing binary is worse than none (see above). For shell-wrapped stops the *interpreter inside* the wrapper is checked, not the shell, which always exists and would mask the failure
 
+### The watchdog, sudoers and the systemctl wrapper
+
+`hapi-runner-watchdog.service` and both sudoers files were hardcoded to the soup operator's account. On any other host:
+
+- the unit's `ConditionPathExists=/home/<operator>/.hapi/settings.json` could never be satisfied, so systemd **skipped the service on every timer fire while `systemctl list-timers` still reported the timer enabled** — a watchdog that looks healthy and has never run. Do not treat an enabled timer as evidence the watchdog works; check the unit's `ConditionResult` or its journal.
+- the sudoers rules granted to a user the host does not have. Valid syntax, passes `visudo -cf`, applies to nobody.
+- `ExecStart` pointed into a repo checkout. Fleet and pet hosts run the single-exe and never clone this repository.
+
+All three are rendered per host now. The watchdog user defaults to whatever the runner unit's `User=` is — the account whose `HAPI_HOME` holds `settings.json` and whose sudo rule has to exist — and the installer **fails closed** if that user is absent rather than installing a unit that will be skipped. `HAPI_HOME` is taken from the runner unit's own `Environment=`, falling back to the user's home. Override with `--watchdog-user`, `--hapi-home`, `--hapi-port`.
+
+The watchdog script and its one library dependency are installed to `/usr/local/lib/hapi/`, so the unit does not depend on a checkout existing.
+
+`install-systemctl-wrapper.sh` is now **opt-in** via `--with-systemctl-wrapper`. It installs a system-wide `/usr/local/sbin/systemctl` that intercepts every `sudo systemctl` call on the box — materially broader than hardening the HAPI units, and not something to inherit as a side effect.
+
 Covered by `scripts/tooling/install-hapi-primary-hub-tier1.test.sh` (resolver branches + verifier parse, including the cases that must fail).
 - Watchdog timer enabled on primary/fleet system installs
 
