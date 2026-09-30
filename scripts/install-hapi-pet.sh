@@ -14,7 +14,7 @@
 #
 # Usage:
 #   HAPI_ARTIFACT_URL=<url-or-path-to-hapi-binary> bash install-hapi-pet.sh
-#   bash install-hapi-pet.sh --with-systemd   # also install user systemd units
+#   curl -fsSL …/install-hapi-pet.sh | bash -s -- --with-systemd
 #
 # See docs/plans/2026-09-04-fleet-vm-swap-strategy.md §6 for the full history of what
 # this script encodes and why each step exists — every step here was a real bug found
@@ -31,13 +31,32 @@ NVM_VERSION="v0.39.7"
 NODE_MIN_MAJOR=22
 STOP_TIMEOUT_SECS=15
 WITH_SYSTEMD=0
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# curl|bash leaves BASH_SOURCE[0] empty under `set -u`. Never rely on a repo-relative
+# path for --with-systemd — that only works from a real git checkout.
+_script_src="${BASH_SOURCE[0]:-}"
+if [[ -n "$_script_src" && -f "$_script_src" ]]; then
+    SCRIPT_DIR="$(cd "$(dirname "$_script_src")" && pwd)"
+else
+    SCRIPT_DIR=""
+fi
+unset _script_src
 
 for arg in "$@"; do
     case "$arg" in
         --with-systemd) WITH_SYSTEMD=1 ;;
         -h|--help)
-            sed -n '2,22p' "$0" | sed 's/^# \?//'
+            cat <<'HELP'
+hapi-pet-install: one-shot install/upgrade for a standalone ("pet") HAPI instance.
+
+Usage:
+  HAPI_ARTIFACT_URL=<url-or-path> bash install-hapi-pet.sh
+  curl -fsSL …/install-hapi-pet.sh | bash
+  curl -fsSL …/install-hapi-pet.sh | bash -s -- --with-systemd
+
+--with-systemd  Install user-level systemd units (works via curl|bash; units are
+                embedded — no git checkout required).
+HELP
             exit 0
             ;;
     esac
@@ -45,6 +64,77 @@ done
 
 log()  { printf '==> %s\n' "$1"; }
 fail() { printf 'ERROR: %s\n' "$1" >&2; exit 1; }
+
+# User-level systemd units for pet installs. Embedded so curl|bash works without a
+# repo checkout. Keep in sync with scripts/tooling/systemd/units/user-pet/*.in —
+# the checkout path below prefers the companion installer when present.
+install_user_pet_systemd() {
+    local companion=""
+    if [[ -n "${SCRIPT_DIR}" && -x "${SCRIPT_DIR}/tooling/install-hapi-systemd-units.sh" ]]; then
+        companion="${SCRIPT_DIR}/tooling/install-hapi-systemd-units.sh"
+    fi
+    if [[ -n "$companion" ]]; then
+        log "Using companion systemd installer from checkout: $companion"
+        HAPI_WORKSPACE="$HAPI_WORKSPACE" HAPI_HOME="$HAPI_HOME" INSTALL_DIR="$INSTALL_DIR" \
+            bash "$companion" --profile user-pet --enable
+        return 0
+    fi
+
+    log "No git checkout — writing embedded user systemd units"
+    command -v systemctl >/dev/null 2>&1 || fail "systemctl not found — cannot install --with-systemd on this host"
+    local hapi_bin="$INSTALL_DIR/hapi"
+    local hapi_path="$INSTALL_DIR:$HOME/.bun/bin:$HOME/.npm-global/bin:/usr/local/bin:/usr/bin:/bin"
+    local host_label
+    host_label="$(hostname -s 2>/dev/null || hostname || echo pet)"
+    local unit_dir="$HOME/.config/systemd/user"
+    mkdir -p "$unit_dir"
+
+    cat >"$unit_dir/hapi-hub.service" <<EOF
+[Unit]
+Description=HAPI Hub (${host_label})
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=HAPI_HOME=${HAPI_HOME}
+Environment=PATH=${hapi_path}
+ExecStart=${hapi_bin} hub
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+EOF
+
+    cat >"$unit_dir/hapi-runner.service" <<EOF
+[Unit]
+Description=HAPI Runner (${host_label})
+After=network-online.target hapi-hub.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+KillMode=process
+Environment=HAPI_HOME=${HAPI_HOME}
+Environment=PATH=${hapi_path}
+Environment=HAPI_RUNNER_SUPERVISED=1
+Environment=HAPI_DISABLE_VERSION_HANDOFF=1
+ExecStart=${hapi_bin} runner start-sync --workspace-root ${HAPI_WORKSPACE}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+EOF
+
+    systemctl --user daemon-reload
+    loginctl enable-linger "$(id -un)" 2>/dev/null || true
+    systemctl --user enable hapi-hub.service hapi-runner.service
+    systemctl --user start hapi-hub.service hapi-runner.service
+    log "Installed: $unit_dir/hapi-hub.service"
+    log "Installed: $unit_dir/hapi-runner.service"
+}
 
 # --- 1. Architecture detection ---
 ARCH="$(uname -m)"
@@ -130,35 +220,42 @@ fi
 export HAPI_HOME
 
 # --- 7. Launch ---
-# Deliberately WITHOUT --relay: as of 2026-09-13 it fails silently (tunwg flag mismatch)
-# and falls back to a local-only hub with no visible error. Local-only is correct and
-# safe for same-machine use; flag this back to the meta-bot if you need remote reach
-# before that bug is fixed.
-nohup "$INSTALL_DIR/hapi" hub > "$HAPI_HOME/logs/hub.log" 2>&1 &
-sleep 2
-if ! curl -fsS localhost:3006/health >/dev/null; then
-    fail "hub did not come up — check $HAPI_HOME/logs/hub.log"
-fi
-log "Hub is up (localhost:3006, local-only for now)."
-
-# Runner, restricted to the workspace dir created above — without --workspace-root the
-# runner starts in "legacy mode" with no directory restriction, which defeats the point
-# of having a dedicated workspace dir at all.
-nohup "$INSTALL_DIR/hapi" runner start-sync --workspace-root "$HAPI_WORKSPACE" \
-    > "$HAPI_HOME/logs/runner.log" 2>&1 &
-RUNNER_PID=$!
-sleep 2
-if ! kill -0 "$RUNNER_PID" 2>/dev/null; then
-    fail "runner exited immediately — check $HAPI_HOME/logs/runner.log"
-fi
-log "Runner started, restricted to $HAPI_WORKSPACE."
-
+# With --with-systemd: systemd owns hub+runner (skip nohup so we do not race :3006).
+# Without: nohup background processes (local-only; --relay still broken as of 2026-09-13).
 if [[ "$WITH_SYSTEMD" -eq 1 ]]; then
-    log "Installing user systemd units (KillMode=process, Restart=always)"
-    HAPI_WORKSPACE="$HAPI_WORKSPACE" HAPI_HOME="$HAPI_HOME" INSTALL_DIR="$INSTALL_DIR" \
-        bash "$SCRIPT_DIR/tooling/install-hapi-systemd-units.sh" --profile user-pet --enable
-    log "systemd user units enabled — stop the nohup processes above if you want systemd to own the fleet:"
-    log "  kill $RUNNER_PID  # then: systemctl --user status hapi-hub hapi-runner"
+    install_user_pet_systemd
+    sleep 2
+    if ! curl -fsS localhost:3006/health >/dev/null; then
+        fail "hub did not come up under systemd — check: systemctl --user status hapi-hub; journalctl --user -u hapi-hub -n 50"
+    fi
+    log "Hub is up under systemd (localhost:3006)."
+    if ! systemctl --user is-active --quiet hapi-runner.service; then
+        fail "runner did not stay up under systemd — check: systemctl --user status hapi-runner; journalctl --user -u hapi-runner -n 50"
+    fi
+    log "Runner is up under systemd, restricted to $HAPI_WORKSPACE."
+else
+    # Deliberately WITHOUT --relay: as of 2026-09-13 it fails silently (tunwg flag mismatch)
+    # and falls back to a local-only hub with no visible error. Local-only is correct and
+    # safe for same-machine use; flag this back to the meta-bot if you need remote reach
+    # before that bug is fixed.
+    nohup "$INSTALL_DIR/hapi" hub > "$HAPI_HOME/logs/hub.log" 2>&1 &
+    sleep 2
+    if ! curl -fsS localhost:3006/health >/dev/null; then
+        fail "hub did not come up — check $HAPI_HOME/logs/hub.log"
+    fi
+    log "Hub is up (localhost:3006, local-only for now)."
+
+    # Runner, restricted to the workspace dir created above — without --workspace-root the
+    # runner starts in "legacy mode" with no directory restriction, which defeats the point
+    # of having a dedicated workspace dir at all.
+    nohup "$INSTALL_DIR/hapi" runner start-sync --workspace-root "$HAPI_WORKSPACE" \
+        > "$HAPI_HOME/logs/runner.log" 2>&1 &
+    RUNNER_PID=$!
+    sleep 2
+    if ! kill -0 "$RUNNER_PID" 2>/dev/null; then
+        fail "runner exited immediately — check $HAPI_HOME/logs/runner.log"
+    fi
+    log "Runner started, restricted to $HAPI_WORKSPACE."
 fi
 
 # --- 8. Node.js (via nvm, no sudo needed) + Claude Code CLI ---
