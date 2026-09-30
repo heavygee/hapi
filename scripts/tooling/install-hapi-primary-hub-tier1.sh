@@ -10,6 +10,14 @@
 # Installs:
 #   - runner: 10-resilience.conf (Restart=always, KillMode=process,
 #     HAPI_DISABLE_VERSION_HANDOFF=1, ExecStartPre=runner stop)
+#     Rendered per host from 10-resilience.conf.in — the stop command must be
+#     valid HERE. Restart=always is only safe with a working stop (see the
+#     template's own header). Resolution order:
+#       1. --runner-stop-cmd '<full command>'
+#       2. --runner-bin /path/to/hapi   ->  '-/path/to/hapi runner stop'
+#       3. auto-detect: the runner unit's own ExecStart binary, else
+#          /opt/hapi/hapi, else the soup bun invocation
+#     Fails closed if none resolve — never installs a stop that cannot run.
 #   - runner: 90-oom-protect-runner.conf (OOMScoreAdjust=0)
 #   - hub:    90-oom-protect-hub.conf (OOMScoreAdjust=-1000)
 #   - hapi-runner-watchdog.service + .timer
@@ -24,6 +32,7 @@
 # Usage:
 #   sudo bash scripts/tooling/install-hapi-primary-hub-tier1.sh
 #   sudo bash scripts/tooling/install-hapi-primary-hub-tier1.sh --restart
+#   sudo bash scripts/tooling/install-hapi-primary-hub-tier1.sh --runner-bin /opt/hapi/hapi
 
 set -euo pipefail
 
@@ -32,15 +41,19 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$REPO_ROOT/scripts/tooling/lib/hapi-systemd-units.sh"
 
 DO_RESTART=0
-for arg in "$@"; do
-    case "$arg" in
-        --restart) DO_RESTART=1 ;;
+RUNNER_BIN=""
+RUNNER_STOP_CMD=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --restart) DO_RESTART=1; shift ;;
+        --runner-bin) RUNNER_BIN="${2:?--runner-bin needs a path}"; shift 2 ;;
+        --runner-stop-cmd) RUNNER_STOP_CMD="${2:?--runner-stop-cmd needs a command}"; shift 2 ;;
         -h|--help)
-            sed -n '2,30p' "$0"
+            sed -n '2,40p' "$0"
             exit 0
             ;;
         *)
-            echo "Unknown arg: $arg" >&2
+            echo "Unknown arg: $1" >&2
             exit 2
             ;;
     esac
@@ -59,9 +72,70 @@ SYS_D="$REPO_ROOT/scripts/tooling/systemd"
 
 echo "Tier-1 install: hub=$HUB_UNIT runner=$RUNNER_UNIT"
 
+# --- Resolve the runner stop command for THIS host -------------------------
+#
+# Restart=always in the resilience drop-in is only safe if this command really
+# stops the running runner. A stop that cannot execute is worse than none: the
+# restart hits the runner's dedup path (exit 0), systemd retries, and the unit
+# burns StartLimitBurst and lands in `failed`. So resolve explicitly and fail
+# closed rather than shipping something that silently no-ops.
+#
+# The leading `-` is systemd's own "ignore failure" prefix — correct at RUNTIME
+# (stopping when nothing runs is fine) but no substitute for validating the
+# binary exists at INSTALL time, which is the check that was missing.
+resolve_runner_stop_cmd() {
+    if [[ -n "$RUNNER_STOP_CMD" ]]; then
+        printf '%s' "$RUNNER_STOP_CMD"
+        return 0
+    fi
+    if [[ -n "$RUNNER_BIN" ]]; then
+        [[ -x "$RUNNER_BIN" ]] || {
+            echo "ERROR: --runner-bin $RUNNER_BIN is not executable" >&2
+            exit 1
+        }
+        printf -- '-%s runner stop' "$RUNNER_BIN"
+        return 0
+    fi
+
+    # Auto-detect: reuse whatever the installed unit already starts.
+    local exec_start bin
+    exec_start="$(systemctl show "$RUNNER_UNIT" -p ExecStart --value 2>/dev/null || true)"
+    bin="$(sed -n 's/.*argv\[\]=\([^ ]*\).*/\1/p' <<<"$exec_start" | head -n1)"
+    if [[ -n "$bin" && "$bin" != /bin/bash && "$bin" != /bin/sh && -x "$bin" ]]; then
+        printf -- '-%s runner stop' "$bin"
+        return 0
+    fi
+
+    if [[ -x /opt/hapi/hapi ]]; then
+        printf -- '-/opt/hapi/hapi runner stop'
+        return 0
+    fi
+
+    # Soup kitchen: the runner is a bun entrypoint, not a single executable.
+    local soup_cli="/home/heavygee/coding/hapi/active/cli"
+    local bun="/home/heavygee/.bun/bin/bun"
+    if [[ -x "$bun" && -d "$soup_cli" ]]; then
+        printf -- "-/bin/bash -lc '%s run --cwd %s %s/src/index.ts runner stop'" \
+            "$bun" "$soup_cli" "$soup_cli"
+        return 0
+    fi
+
+    echo "ERROR: cannot determine how to stop the runner on this host." >&2
+    echo "       Pass --runner-bin /path/to/hapi (single-exe installs) or" >&2
+    echo "       --runner-stop-cmd '<command>' (custom entrypoints)." >&2
+    echo "       Refusing to install Restart=always without a working stop." >&2
+    exit 1
+}
+
+RESOLVED_STOP_CMD="$(resolve_runner_stop_cmd)"
+echo "Tier-1 runner stop command: $RESOLVED_STOP_CMD"
+
 mkdir -p "$HUB_D" "$RUNNER_D"
 
-install -m 0644 "$SYS_D/10-resilience.conf" "$RUNNER_D/10-resilience.conf"
+bash "$REPO_ROOT/scripts/tooling/lib/render-hapi-systemd-unit.sh" \
+    "$SYS_D/10-resilience.conf.in" "$RUNNER_D/10-resilience.conf" \
+    "RUNNER_STOP_CMD=$RESOLVED_STOP_CMD"
+chmod 0644 "$RUNNER_D/10-resilience.conf"
 install -m 0644 "$SYS_D/90-oom-protect-runner.conf" "$RUNNER_D/90-oom-protect-runner.conf"
 install -m 0644 "$SYS_D/90-oom-protect-hub.conf" "$HUB_D/90-oom-protect-hub.conf"
 

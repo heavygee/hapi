@@ -53,6 +53,50 @@ else
     fail "runner KillMode=process ($RUNNER_UNIT → $kill_mode)"
 fi
 
+# A runner-stop ExecStartPre that cannot execute is worse than none: with
+# Restart=always the restart hits the runner's dedup path (exit 0), systemd
+# retries, and the unit burns its start limit and lands in `failed` with an
+# unsupervised runner still alive. This went unnoticed for months because
+# systemd's `-` prefix (and the older `|| true`) hide the failure at runtime
+# and the drop-in still *looks* installed. So assert the binary exists, not
+# merely that the directive is present.
+exec_start_pre="$(show_prop "$RUNNER_UNIT" ExecStartPre)"
+restart_policy="$(show_prop "$RUNNER_UNIT" Restart)"
+
+# A unit can carry several ExecStartPre entries (cursor-auth pinning, etc.), so
+# pick the one that actually performs the runner stop rather than the first —
+# validating the wrong entry would pass while the stop stays broken.
+# `|| true`: grep exits 1 when there is no stop entry, and under `set -o
+# pipefail` that would abort the whole verifier instead of reporting.
+stop_entry="$(tr '}' '\n' <<<"$exec_start_pre" | grep -F 'runner stop' | head -n1 || true)"
+
+if [[ -z "$stop_entry" ]]; then
+    if [[ "$restart_policy" == always ]]; then
+        fail "runner ExecStartPre runner-stop present ($RUNNER_UNIT → none, with Restart=always)"
+    else
+        ok "runner ExecStartPre runner-stop not required ($RUNNER_UNIT, Restart=$restart_policy)"
+    fi
+else
+    # The stop may be a direct binary (-/opt/hapi/hapi runner stop) or wrapped in
+    # a shell (bash -lc '<bun> ... runner stop'). For the wrapped form the shell
+    # always exists, so check the real interpreter inside the command instead.
+    argv="${stop_entry#*argv[]=}"
+    argv="${argv%% ; *}"
+    pre_bin="$(awk '{print $1}' <<<"$argv")"
+    case "$pre_bin" in
+        /bin/bash|/bin/sh|/usr/bin/bash|/usr/bin/sh|/usr/bin/env)
+            # Wrapped: the first absolute path after the shell flags is the one
+            # that has to exist on this host.
+            pre_bin="$(grep -oE '(^| )/[^ ]+' <<<"$argv" | awk 'NR>1 {print $1; exit}' | tr -d ' ' || true)"
+            ;;
+    esac
+    if [[ -n "$pre_bin" && -x "$pre_bin" ]]; then
+        ok "runner ExecStartPre runner-stop executable ($pre_bin)"
+    else
+        fail "runner ExecStartPre runner-stop binary missing ($RUNNER_UNIT → ${pre_bin:-unparsed}) — stop silently no-ops"
+    fi
+fi
+
 if [[ "$SCOPE" == system ]] && hapi_systemd_unit_exists "$HUB_UNIT"; then
     if [[ "$hub_oom" == -1000 ]]; then
         ok "hub OOMScoreAdjust=-1000 ($HUB_UNIT)"

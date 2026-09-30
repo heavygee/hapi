@@ -661,7 +661,7 @@ Canon: [`systemd-install.md`](./systemd-install.md). Drop-ins only (base units a
 
 | Piece | Effect |
 |-------|--------|
-| `10-resilience.conf` | `Restart=always`, burst limits, `KillMode=process`, `HAPI_DISABLE_VERSION_HANDOFF=1`, `ExecStartPre=runner stop` |
+| `10-resilience.conf.in` | `Restart=always`, burst limits, `KillMode=process`, `HAPI_DISABLE_VERSION_HANDOFF=1`, `ExecStartPre=runner stop`. **Rendered per host** — the stop command must be valid locally, so the installer resolves it (`--runner-bin` / `--runner-stop-cmd` / auto-detect) and fails closed rather than installing one that cannot run |
 | `90-oom-protect-hub.conf` | hub `OOMScoreAdjust=-1000` (earlyoom must not murder hub) |
 | `90-oom-protect-runner.conf` | runner explicit `0` (never -1000 - agents inherit) |
 | `hapi-runner-watchdog.{service,timer}` | 60s probe; restarts runner unit if machine drops off hub |

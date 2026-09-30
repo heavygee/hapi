@@ -1,0 +1,30 @@
+# Drop-in TEMPLATE: runner resilience (Tier-1, any profile)
+#
+# Rendered and installed via: scripts/tooling/install-hapi-primary-hub-tier1.sh
+# Target: hapi-runner.service.d/ OR hapi-runner-oos.service.d/
+#
+# The ExecStartPre stop command MUST resolve to something valid ON THIS HOST.
+# It was previously hardcoded to the soup kitchen's bun invocation and installed
+# verbatim everywhere, so on fleet-binary/pet hosts the stop silently never ran
+# (`|| true` swallowed it) while the drop-in still looked correctly installed.
+# That matters because Restart=always below is only safe WITH a working stop:
+# without it a restart hits the runner's own dedup path (exit 0, "keeping
+# existing runner"), systemd restarts again, and the unit burns its start
+# limit and lands in `failed` with an unsupervised runner still alive.
+#
+# Restart=on-failure misses clean exit(0) (mtime self-restart). 2026-05-31
+# incident: runner stayed dead for minutes. Restart=always + burst limits.
+# HAPI_DISABLE_VERSION_HANDOFF=1: soup hosts must not chase hub Upgrade binaries.
+# KillMode=process: #915 — do not SIGTERM the agent cgroup on runner bounce.
+
+[Unit]
+StartLimitBurst=10
+StartLimitIntervalSec=300
+
+[Service]
+KillMode=process
+Environment=HAPI_DISABLE_VERSION_HANDOFF=1
+ExecStartPre=@RUNNER_STOP_CMD@
+Restart=always
+RestartSec=5
+RestartPreventExitStatus=2

@@ -18,6 +18,20 @@
 
 All runner base units set **`KillMode=process`** ([upstream #915](https://github.com/tiann/hapi/issues/915)). System profiles also install **Tier-1 drop-ins** (`install-hapi-primary-hub-tier1.sh`): `Restart=always`, hub `OOMScoreAdjust=-1000`, runner explicit `0`, watchdog timer.
 
+### `Restart=always` requires a working runner stop
+
+`Restart=always` is only safe alongside an `ExecStartPre` that genuinely stops the running runner. Without one, a restart hits the runner's own dedup path — with `HAPI_DISABLE_VERSION_HANDOFF=1` set, `isRunnerRunningCurrentlyInstalledHappyVersion()` skips the mtime check, so a matching identity makes the new process log `keeping existing runner` and `exit(0)`. systemd then retries, burns `StartLimitBurst`, and parks the unit in **`failed`** with an unsupervised runner still alive.
+
+`10-resilience.conf` used to hardcode the soup kitchen's `bun` invocation and was installed verbatim on every profile, so on `fleet-binary` and pet hosts the stop silently never ran (`|| true` hid it) while the drop-in looked correct. It is now `10-resilience.conf.in`, rendered per host. Resolution order:
+
+1. `--runner-stop-cmd '<command>'`
+2. `--runner-bin /path/to/hapi` → `-/path/to/hapi runner stop`
+3. auto-detect from the runner unit's own `ExecStart`, then `/opt/hapi/hapi`, then the soup `bun` entrypoint
+
+If none resolve it **fails closed** rather than installing a stop that cannot run. `install-hapi-systemd-units.sh --profile fleet-binary` passes `--runner-bin` automatically.
+
+`user-pet` gets no Tier-1, but its base unit does set `HAPI_DISABLE_VERSION_HANDOFF=1` and `Restart=always` — so the equivalent `ExecStartPre=-<bin> runner stop` lives directly in that template.
+
 ---
 
 ## Install
@@ -73,6 +87,7 @@ Expect:
 - Hub **`OOMScoreAdjust=-1000`** (system profiles with Tier-1)
 - Runner **`OOMScoreAdjust=0`** (never -1000 — agents inherit parent score)
 - Runner **`Restart=always`** or `on-failure` per profile
+- Runner **`ExecStartPre` runner-stop binary exists** — asserted, not just present; a stop pointing at a missing binary is worse than none (see above)
 - Watchdog timer enabled on primary/fleet system installs
 
 After `hapi-restart-hub`, archived session count should not spike from cgroup SIGTERM (see [`driver-soup.md`](./driver-soup.md) § KillMode).

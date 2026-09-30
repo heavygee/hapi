@@ -225,7 +225,15 @@ case "$PROFILE" in
             systemctl enable "$HUB_UNIT" "$RUNNER_UNIT"
         fi
         if [[ "$UNITS_ONLY" -eq 0 ]]; then
-            bash "$REPO_ROOT/scripts/tooling/install-hapi-primary-hub-tier1.sh"
+            # Pass the binary this profile just installed, so Tier-1's
+            # ExecStartPre stop is valid on THIS host. Without it Tier-1 would
+            # fall back to auto-detection, and historically shipped a
+            # soup-only stop verbatim to every profile (silently a no-op).
+            TIER1_ARGS=()
+            if [[ "$PROFILE" == fleet-binary ]]; then
+                TIER1_ARGS=(--runner-bin "$HAPI_BIN")
+            fi
+            bash "$REPO_ROOT/scripts/tooling/install-hapi-primary-hub-tier1.sh" "${TIER1_ARGS[@]}"
         fi
         if [[ "$DO_RESTART" -eq 1 ]]; then
             if [[ -x /home/heavygee/.local/bin/hapi-restart-hub ]]; then
