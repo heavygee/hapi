@@ -58,5 +58,29 @@ check "pre-fix: verify --installer-smoke fails" '[[ "$probe_rc" -ne 0 ]]'
 check "pre-fix: verify reports not ok for installer smoke" \
     'grep -q "not ok - installer --profile reaches validation" <<<"$probe_out"'
 
+# Standalone Tier-1 on a fresh box: empty User= from `systemctl show` is
+# indistinguishable from "unit does not exist" on systemd 252, so the installer
+# must demand --watchdog-user rather than guessing root. (Covered in depth by
+# install-hapi-primary-hub-tier1.test.sh; this harness case keeps the stranger
+# path from drifting.)
+TIER1="$ROOT/scripts/tooling/install-hapi-primary-hub-tier1.sh"
+empty_user_out="$(
+    STUB_USER="" bash -c '
+        set -euo pipefail
+        WATCHDOG_USER=""; WATCHDOG_HAPI_HOME=""; WATCHDOG_PORT=""; RUNNER_UNIT=stub
+        systemctl() {
+            case "$*" in
+                *"-p User"*) printf "%s" "$STUB_USER" ;;
+                *) : ;;
+            esac
+        }
+        getent() { :; }
+        eval "$(sed -n "/^resolve_watchdog_identity()/,/^}$/p" "$0")"
+        resolve_watchdog_identity
+    ' "$TIER1" 2>&1 || true
+)"
+check "standalone Tier-1 empty User= demands --watchdog-user" \
+    'grep -q "could not determine\|Pass --watchdog-user" <<<"$empty_user_out"'
+
 echo "# pass=$pass fail=$fail"
 exit "$fail"

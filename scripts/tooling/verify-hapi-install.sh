@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # verify-hapi-install.sh — live assertions for a stranger-standing HAPI install.
 #
-# Extends (and calls) verify-hapi-systemd-units.sh. Adds the probes that unit
-# *configuration* alone cannot prove: installer argument parse, watchdog
-# actually fired, sudoers applies to a real account, no surprise systemctl
-# wrapper, MainPID ↔ runner.state.json after restart, live oom_score_adj, hub
-# /health.
+# Extends (and calls) verify-hapi-systemd-units.sh for KillMode / ExecStartPre
+# binary / configured OOM / Restart / watchdog ConditionPathExists-from-unit-text.
+# Owns only what that verifier cannot prove: installer argument parse, watchdog
+# journal fire, sudoers applies to a real account, systemctl wrapper present
+# (default; HAPI_EXPECT_NO_SYSTEMCTL_WRAPPER=1 if --no-systemctl-wrapper),
+# MainPID ↔ runner.state.json after restart, live /proc oom_score_adj, hub /health.
 #
 # Trap: `systemctl show` returns defaults for units that do not exist (exit 0).
 # Always prove the unit exists via `systemctl cat` / list-unit-files first.
@@ -122,21 +123,12 @@ if [[ -x "$VERIFY_UNITS" || -f "$VERIFY_UNITS" ]]; then
         bash "$VERIFY_UNITS" 2>&1)"
     units_rc=$?
     set -e
+    # Pass through #183's unit-text ConditionPathExists checks unchanged —
+    # do not filter or re-implement them here.
     while IFS= read -r line; do
         case "$line" in
-            OK:*)
-                # Drop the obsolete "watchdog timer enabled" line — replaced below.
-                if grep -qi 'watchdog timer enabled' <<<"$line"; then
-                    continue
-                fi
-                ok "${line#OK: }"
-                ;;
-            FAIL:*)
-                if grep -qi 'watchdog timer' <<<"$line"; then
-                    continue
-                fi
-                not_ok "${line#FAIL: }"
-                ;;
+            OK:*) ok "${line#OK: }" ;;
+            FAIL:*) not_ok "${line#FAIL: }" ;;
         esac
     done <<<"$units_out"
     # If verify-hapi-systemd-units exited non-zero but produced no FAIL lines, surface it.
@@ -145,22 +137,32 @@ if [[ -x "$VERIFY_UNITS" || -f "$VERIFY_UNITS" ]]; then
     fi
 fi
 
-# --- 3. Watchdog actually executed (system scope only) ---------------------
-# NEVER trust `systemctl list-timers` / is-enabled alone — a failing
-# ConditionPathExists skips the service every fire while the timer stays enabled.
+# --- 3. Watchdog journal fire (system scope) -------------------------------
+# verify-hapi-systemd-units.sh already asserts ConditionPathExists from unit
+# text. This layer only proves a live start left journal evidence. Fresh-box
+# skip while settings.json is still absent (parent home exists) is a NOTE —
+# the hub writes it on first start; the condition exists to keep the watchdog
+# dormant until then.
 if [[ "$SCOPE" == system ]]; then
     if "${CTL[@]}" cat hapi-runner-watchdog.service >/dev/null 2>&1; then
         cond="$("${CTL[@]}" show hapi-runner-watchdog.service -p ConditionResult --value 2>/dev/null || true)"
+        wd_path="$("${CTL[@]}" cat hapi-runner-watchdog.service 2>/dev/null \
+            | sed -n 's/^ConditionPathExists=//p' | tail -n1 || true)"
+        wd_path="${wd_path#!}"
         # Kick once so a fresh install has journal evidence (idempotent).
         "${CTL[@]}" start hapi-runner-watchdog.service 2>/dev/null || true
         sleep 1
-        # journalctl --unit may need root for system journals on some hosts
         set +e
         journal="$("${CTL[@]}" status hapi-runner-watchdog.service --no-pager -n 20 2>&1)"
         jlog="$(journalctl -u hapi-runner-watchdog.service -n 30 --no-pager 2>&1)"
         set -e
         if grep -qiE 'Condition.*failed|start condition failed' <<<"$journal$jlog"; then
-            not_ok "watchdog executed (condition failed — service skipped every fire)"
+            if [[ -n "$wd_path" && "$wd_path" == */settings.json \
+                && -d "$(dirname "$wd_path")" && ! -e "$wd_path" ]]; then
+                ok "watchdog dormant until settings.json (NOTE: first fire skip expected on fresh box; $wd_path)"
+            else
+                not_ok "watchdog executed (condition failed — service skipped every fire; path=$wd_path)"
+            fi
         elif grep -qiE 'Main PID:|Started |code=exited|status=0' <<<"$journal$jlog" \
             || [[ "$cond" == "yes" ]]; then
             ok "watchdog executed (journal/ConditionResult=$cond)"
@@ -199,15 +201,19 @@ else
     ok "sudoers N/A for user-pet scope"
 fi
 
-# --- 5. No surprise systemctl wrapper --------------------------------------
-if [[ -x /usr/local/sbin/systemctl ]]; then
-    if [[ "${HAPI_EXPECT_SYSTEMCTL_WRAPPER:-0}" == "1" ]]; then
-        ok "systemctl wrapper present (explicitly expected)"
+# --- 5. Systemctl wrapper (default install; --no-systemctl-wrapper to opt out)
+# Flipped 2026-09-30: opt-in broke verify-hapi-operator-lock.sh, so the wrapper
+# installs by default again. Assert present unless the operator opted out.
+if [[ "$SCOPE" == system ]]; then
+    if [[ -x /usr/local/sbin/systemctl ]]; then
+        ok "systemctl wrapper present (/usr/local/sbin/systemctl)"
+    elif [[ "${HAPI_EXPECT_NO_SYSTEMCTL_WRAPPER:-0}" == "1" ]]; then
+        ok "systemctl wrapper absent (HAPI_EXPECT_NO_SYSTEMCTL_WRAPPER=1)"
     else
-        not_ok "no /usr/local/sbin/systemctl wrapper (found; set HAPI_EXPECT_SYSTEMCTL_WRAPPER=1 if intentional)"
+        not_ok "systemctl wrapper present (/usr/local/sbin/systemctl missing; set HAPI_EXPECT_NO_SYSTEMCTL_WRAPPER=1 if --no-systemctl-wrapper)"
     fi
 else
-    ok "no /usr/local/sbin/systemctl wrapper"
+    ok "systemctl wrapper N/A for user-pet scope"
 fi
 
 # --- 6 + 7. Restart → active + MainPID match + live OOM + /health ----------
