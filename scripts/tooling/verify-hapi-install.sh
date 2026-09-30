@@ -68,9 +68,13 @@ if [[ "$INSTALLER_SMOKE" -eq 1 ]]; then
     set -e
     if grep -q 'template not found: --profile' <<<"$out2"; then
         not_ok "installer --profile reaches validation (got template-not-found:--profile — source-\$@ bug)"
-    elif grep -qE "unknown profile|requires root|ERROR: --profile required" <<<"$out2" \
+    elif grep -qE "unknown profile|requires root|ERROR: --profile required|^Profile: |^Installed:" <<<"$out2" \
         || [[ "$rc2" -eq 0 ]]; then
         ok "installer --profile reaches validation (profile=$PROFILE)"
+    elif grep -q 'Failed to connect to bus' <<<"$out2"; then
+        # user-pet got past parse/render into systemctl --user; bus missing in
+        # this environment is not the source-\$@ bug.
+        ok "installer --profile reaches validation (profile=$PROFILE, past parse into systemctl --user)"
     else
         not_ok "installer --profile reaches validation (unexpected: $(head -c 200 <<<"$out2"))"
     fi
