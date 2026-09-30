@@ -106,6 +106,16 @@ calling the instance done.**
       earlier report said so
 - [ ] Instance's tag/version, IP, hostname, and what's still open (if anything) recorded
       somewhere durable — a plan doc, a handoff, this checklist copied into one
+- [ ] If any unit was hand-authored rather than installed via
+      `install-hapi-systemd-units.sh` + `install-hapi-primary-hub-tier1.sh`: confirm what
+      actually happens if the runner's underlying process dies, not just that the unit
+      file looks right. `Restart=on-failure` does **not** fire on a clean exit (code 0) —
+      and HAPI's own runner self-deduplicates on a matching CLI mtime, exiting 0 rather
+      than restarting, when it detects an already-running instance (see gotcha below). A
+      unit sitting `inactive` after a "successful" restart is not evidence of health; check
+      `runner.state.json`'s own `pid` + `lastHeartbeat` for the real answer, and confirm a
+      watchdog timer (`systemctl list-timers 'hapi-*'`) actually exists if this instance is
+      meant to self-heal unattended
 
 ---
 
@@ -119,6 +129,7 @@ calling the instance done.**
 | VM won't boot after OS install | UEFI/SeaBIOS mismatch between the VM's firmware config and what the installer wrote | ninja (fixed by matching `in-svc-01`'s known fixup) |
 | Hub/runner report healthy but agent sessions fail | Nobody actually installed/authenticated an agent CLI — health checks don't cover this | ninja |
 | `install-hapi-pet.sh`'s `--relay` silently falls back to local-only | `tunwg` binary version mismatch on `-log_level` flag; hub swallows the failure | tracked as [#148](https://github.com/heavygee/hapi/issues/148) |
+| Runner unit sits `inactive` after a "successful"-looking restart, and nothing brings it back if it later dies for real | `Restart=on-failure` never fires on a clean exit(0) — and HAPI's own runner self-deduplicates on a matching CLI mtime (`cli/src/runner/run.ts`, `controlClient.ts`), exiting 0 rather than double-running when it detects an already-live instance. The OLD process keeps serving underneath, still in the unit's cgroup but no longer tracked as its `MainPID`, so systemd has nothing to react to if that survivor dies later. Compounds badly if Tier-1 was never installed: no OOM protection on the hub (`OOMScoreAdjust=0` instead of `-1000`) *and* no watchdog timer to notice the runner going dark — either alone is survivable, together they're how a box dies silently overnight | ninja (2026-09-30) — confirmed via `runner.state.json` (`lastHeartbeat` on a PID from 4 days earlier), `systemctl show` (`Restart=on-failure`, `NRestarts=0`, unit `inactive`), and `systemctl list-timers 'hapi-*'` (zero timers, no Tier-1) |
 
 ## Related
 
@@ -128,5 +139,8 @@ calling the instance done.**
   different flow, not covered by this checklist
 - `docs/tooling/cursor-auth-fleet-sync.md` — full Cursor credential sync procedure
 - Canonical VM bring-up runbook (separate repo): `lockhouse/producer/docs/hapi-vm-bringup.md`
-  — **this checklist's Phase 5 (agent CLI) is not yet reflected there as of 2026-09-22;
-  needs reconciling by whoever has write access to that repo.**
+  — Phase 5 (agent CLI) reconciled there as §5a (2026-09-22), alongside a `KillMode=process`
+  fix to that doc's own runner template (it previously recommended `control-group`, which
+  cascade-archives sessions on restart — a real, separate bug this checklist's Phase 6
+  supervision gotcha above is not the same class of issue as, though both concern runner
+  restarts)
