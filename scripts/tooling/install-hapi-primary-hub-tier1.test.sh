@@ -121,11 +121,12 @@ check "watchdog condition follows HAPI_HOME" 'grep -q "^ConditionPathExists=/var
 check "watchdog runs as the runner's own user" 'grep -q "^User=hapi$" "$TD/wd.service"'
 check "watchdog ExecStart is an installed path" 'grep -q "^ExecStart=/usr/local/lib/hapi/" "$TD/wd.service"'
 
-for f in hapi-protect hapi-watchdog; do
-    bash "$RENDER" "$ROOT/scripts/tooling/sudoers/$f.in" "$TD/$f" "SUDO_USER_NAME=hapi"
-    check "sudoers $f grants to the rendered user" 'grep -q "^hapi ALL=(root)" "$TD/$f"'
-    check "sudoers $f has no operator account" '! grep -q heavygee "$TD/$f"'
-done
+# Only hapi-watchdog is host-identity. hapi-protect denies destructive verbs to
+# the OPERATOR account agents shell out from — a different identity from the
+# service account the runner runs as — so it stays static.
+bash "$RENDER" "$ROOT/scripts/tooling/sudoers/hapi-watchdog.in" "$TD/hapi-watchdog" "SUDO_USER_NAME=hapi"
+check "watchdog sudoers grants to the rendered user" 'grep -q "^hapi ALL=(root)" "$TD/hapi-watchdog"'
+check "watchdog sudoers has no operator account" '! grep -q heavygee "$TD/hapi-watchdog"'
 
 # The watchdog must work on a host with no clone of this repo — it is installed
 # next to its one library dependency rather than pointed at a checkout.
@@ -133,8 +134,68 @@ mkdir -p "$TD/lib/lib"
 install -m 0755 "$ROOT/scripts/tooling/hapi-runner-watchdog.sh" "$TD/lib/hapi-runner-watchdog.sh"
 install -m 0644 "$ROOT/scripts/tooling/lib/hapi-systemd-units.sh" "$TD/lib/lib/hapi-systemd-units.sh"
 out="$(HAPI_HOME="$TD/nohome" HAPI_WATCHDOG_DRY_RUN=1 bash "$TD/lib/hapi-runner-watchdog.sh" 2>&1 || true)"
-check "watchdog runs from its installed layout" 'grep -q "settings.json missing" <<<"$out"'
+check "watchdog exits cleanly with no settings.json" 'grep -q "settings.json missing" <<<"$out"'
+
+# The early-exit above happens ~95 lines BEFORE the `source lib/...` that the
+# /usr/local/lib/hapi move has to get right, so it passes even with the library
+# deleted. Drive it far enough to reach that source: a stub settings.json and a
+# dead API port gets us to the dry-run line, which only prints after sourcing.
+mkdir -p "$TD/withhome"
+printf '{"cliApiToken":"t","machineId":"m"}' >"$TD/withhome/settings.json"
+# Executing far enough to hit that `source` needs a live hub — the watchdog
+# exits at the probe first — so assert the structural invariant instead of
+# pretending to exercise it: the path the script sources must be the path the
+# installer writes to, relative to the installed script.
+src_rel="$(grep -oE 'SCRIPT_DIR\}?/[a-z/.-]+hapi-systemd-units\.sh' "$ROOT/scripts/tooling/hapi-runner-watchdog.sh" | head -n1)"
+src_rel="${src_rel#*SCRIPT_DIR\}}"; src_rel="${src_rel#*SCRIPT_DIR}"
+check "watchdog sources a path under its own directory" '[[ "$src_rel" == /lib/hapi-systemd-units.sh ]]'
+check "installer writes the lib to exactly that path" 'grep -q "WATCHDOG_LIBDIR/lib/hapi-systemd-units.sh" "$TIER1"'
+check "installer writes the script to the dir that path is relative to" 'grep -q "WATCHDOG_LIBDIR/hapi-runner-watchdog.sh" "$TIER1"'
+check "installed layout satisfies the source" '[[ -f "$TD/lib/lib/hapi-systemd-units.sh" && -x "$TD/lib/hapi-runner-watchdog.sh" ]]'
 rm -rf "$TD"
+
+# --- watchdog identity resolution -----------------------------------------
+# The logic that decides which account the watchdog runs as, and where its
+# HAPI_HOME is. Every failure here installs a unit that is silently skipped.
+resolve_id() {
+    STUB_USER="$1" STUB_ENV="${2:-}" STUB_PASSWD="${3:-}" \
+    ARG_USER="${4:-}" ARG_HOME="${5:-}" \
+    bash -c '
+        set -euo pipefail
+        WATCHDOG_USER="$ARG_USER"; WATCHDOG_HAPI_HOME="$ARG_HOME"
+        WATCHDOG_PORT=""; RUNNER_UNIT=stub
+        systemctl() {
+            case "$*" in
+                *"-p User"*) printf "%s" "$STUB_USER" ;;
+                *"-p Environment"*) printf "%s" "$STUB_ENV" ;;
+                *) : ;;
+            esac
+        }
+        getent() { printf "%s" "$STUB_PASSWD"; }
+        eval "$(sed -n "/^resolve_watchdog_identity()/,/^}$/p" "$0")"
+        resolve_watchdog_identity
+        echo "user=$WATCHDOG_USER home=$WATCHDOG_HAPI_HOME"
+    ' "$TIER1" 2>&1
+}
+out="$(resolve_id "" "" "" || true)"
+check "empty User= fails closed instead of defaulting to root" 'grep -q "could not determine" <<<"$out"'
+check "empty User= never yields root" '! grep -q "user=root" <<<"$out"'
+out="$(resolve_id "hapi" "HAPI_HOME=/var/lib/hapi" "hapi:x:1:1::/var/lib/hapi:/bin/sh" || true)"
+check "User= is taken from the runner unit" 'grep -q "user=hapi" <<<"$out"'
+check "HAPI_HOME is taken from the unit Environment" 'grep -q "home=/var/lib/hapi" <<<"$out"'
+out="$(resolve_id "1000" "" "someuser:x:1000:1000::/home/someuser:/bin/sh" || true)"
+check "numeric UID is rejected as a sudoers username" 'grep -q "not a login name" <<<"$out"'
+out="$(resolve_id "weird" "" "weird:x:1:1:::/bin/sh" || true)"
+check "empty passwd home fails closed rather than yielding /.hapi" 'grep -q "no usable home" <<<"$out"'
+
+# --- orphaned-reference guard ---------------------------------------------
+# hapi-protect is operator identity, not host identity, so it stays a static
+# file. Renaming it to .in broke install-hapi-sudoers.sh and, through it,
+# install-hapi-operator-lock.sh --with-sudo.
+check "hapi-protect is still a static file" '[[ -f "$ROOT/scripts/tooling/sudoers/hapi-protect" ]]'
+check "hapi-protect carries no render placeholder" '! grep -q "@SUDO_USER_NAME@" "$ROOT/scripts/tooling/sudoers/hapi-protect"'
+check "install-hapi-sudoers.sh finds its source file" '! bash "$ROOT/scripts/tooling/install-hapi-sudoers.sh" --help 2>&1 | grep -q "source file missing"'
+
 
 echo "# pass=$pass fail=$fail"
 [[ "$fail" -eq 0 ]]

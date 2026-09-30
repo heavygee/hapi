@@ -234,13 +234,21 @@ case "$PROFILE" in
             # handles the single-exe shape and fails closed otherwise — which is
             # correct, but would abort us mid-install (base units written,
             # daemon-reload done, drop-ins and watchdog not).
-            TIER1_ARGS=()
+            # Everything Tier-1 would otherwise have to infer, we already know
+            # exactly — we just rendered the units from it. Passing it removes
+            # the guessing entirely, including the User= lookup that cannot
+            # distinguish "runs as root" from "unit does not exist".
+            TIER1_ARGS=(
+                --watchdog-user "$HAPI_USER"
+                --hapi-home "$HAPI_HOME"
+                --hapi-port "$HAPI_PORT"
+            )
             case "$PROFILE" in
                 fleet-binary)
-                    TIER1_ARGS=(--runner-bin "$HAPI_BIN")
+                    TIER1_ARGS+=(--runner-bin "$HAPI_BIN")
                     ;;
                 primary-soup)
-                    TIER1_ARGS=(--runner-stop-cmd \
+                    TIER1_ARGS+=(--runner-stop-cmd \
                         "-/bin/bash -lc '$BUN_BIN run --cwd $HAPI_DRIVER_DIR/cli $HAPI_DRIVER_DIR/cli/src/index.ts runner stop'")
                     ;;
             esac

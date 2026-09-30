@@ -22,7 +22,8 @@
 #   - hub:    90-oom-protect-hub.conf (OOMScoreAdjust=-1000)
 #   - hapi-runner-watchdog.service + .timer
 #   - /etc/sudoers.d/hapi-watchdog (NOPASSWD runner restart)
-#   - refreshes hapi-protect + systemctl wrapper (runner restart allowed)
+#   - refreshes hapi-protect (static: operator identity, not host identity)
+#   - refreshes the systemctl wrapper unless --no-systemctl-wrapper
 #
 # Detects hapi-*-oos vs hapi-* unit names via lib/hapi-systemd-units.sh.
 #
@@ -33,6 +34,12 @@
 #   sudo bash scripts/tooling/install-hapi-primary-hub-tier1.sh
 #   sudo bash scripts/tooling/install-hapi-primary-hub-tier1.sh --restart
 #   sudo bash scripts/tooling/install-hapi-primary-hub-tier1.sh --runner-bin /opt/hapi/hapi
+#   sudo bash scripts/tooling/install-hapi-primary-hub-tier1.sh \
+#       --watchdog-user hapi --hapi-home /var/lib/hapi --hapi-port 3006
+#
+# Watchdog flags: --watchdog-user (default: the runner unit's own User=),
+# --hapi-home (default: from the runner unit's Environment=, else the user's
+# home), --hapi-port (default 3006), --no-systemctl-wrapper.
 
 set -euo pipefail
 
@@ -46,7 +53,7 @@ RUNNER_STOP_CMD=""
 WATCHDOG_USER=""
 WATCHDOG_HAPI_HOME=""
 WATCHDOG_PORT=""
-WITH_WRAPPER=0
+WITH_WRAPPER=1
 WATCHDOG_LIBDIR="/usr/local/lib/hapi"
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -57,6 +64,7 @@ while [[ $# -gt 0 ]]; do
         --hapi-home) WATCHDOG_HAPI_HOME="${2:?--hapi-home needs a path}"; shift 2 ;;
         --hapi-port) WATCHDOG_PORT="${2:?--hapi-port needs a port}"; shift 2 ;;
         --with-systemctl-wrapper) WITH_WRAPPER=1; shift ;;
+        --no-systemctl-wrapper) WITH_WRAPPER=0; shift ;;
         -h|--help)
             sed -n '2,36p' "$0"
             exit 0
@@ -165,37 +173,77 @@ install -m 0644 "$SYS_D/90-oom-protect-hub.conf" "$HUB_D/90-oom-protect-hub.conf
 # KillMode drop-in from earlier wave is redundant once 10-resilience is present;
 # leave it if present (harmless duplicate KillMode=process).
 
-# --- Watchdog identity ------------------------------------------------------
-#
-# All of this used to be hardcoded to the soup operator's account. On any other
-# host ConditionPathExists could never be satisfied, so systemd SKIPPED the
-# service on every fire while `systemctl list-timers` still showed the timer
-# enabled — a watchdog that reports healthy and never runs.
-#
-# Default to the account the runner unit itself runs as; that is the account
-# whose HAPI_HOME holds settings.json and whose sudo rule needs to exist.
-if [[ -z "$WATCHDOG_USER" ]]; then
-    WATCHDOG_USER="$(systemctl show "$RUNNER_UNIT" -p User --value 2>/dev/null || true)"
-    WATCHDOG_USER="${WATCHDOG_USER:-root}"
-fi
-id -u "$WATCHDOG_USER" >/dev/null 2>&1 || {
-    echo "ERROR: watchdog user '$WATCHDOG_USER' does not exist on this host." >&2
-    echo "       Pass --watchdog-user. Installing a unit for a missing user" >&2
-    echo "       would be skipped silently on every timer fire." >&2
-    exit 1
+resolve_watchdog_identity() {
+    # --- Watchdog identity ------------------------------------------------------
+    #
+    # All of this used to be hardcoded to the soup operator's account. On any other
+    # host ConditionPathExists could never be satisfied, so systemd SKIPPED the
+    # service on every fire while `systemctl list-timers` still showed the timer
+    # enabled — a watchdog that reports healthy and never runs.
+    #
+    # Default to the account the runner unit itself runs as; that is the account
+    # whose HAPI_HOME holds settings.json and whose sudo rule needs to exist.
+    if [[ -z "$WATCHDOG_USER" ]]; then
+        # `systemctl show -p User --value` returns empty with rc=0 for BOTH "unit
+        # does not exist" and "unit exists and runs as root" — indistinguishable.
+        # Defaulting to root on that is unsafe, so treat empty as undetermined.
+        WATCHDOG_USER="$(systemctl show "$RUNNER_UNIT" -p User --value 2>/dev/null || true)"
+    fi
+    if [[ -z "$WATCHDOG_USER" ]]; then
+        echo "ERROR: could not determine which account the runner runs as." >&2
+        echo "       '$RUNNER_UNIT' reports an empty User=, which means either the" >&2
+        echo "       unit does not exist or it runs as root — systemd does not" >&2
+        echo "       distinguish them. Guessing would install a watchdog that is" >&2
+        echo "       silently skipped on every fire. Pass --watchdog-user." >&2
+        exit 1
+    fi
+    # `id -u 1000` succeeds, but sudoers reads a bare number as a USERNAME (the UID
+    # form is `#1000`), so a numeric argument would install a rule matching nobody.
+    # Require the literal login name.
+    if [[ "$(getent passwd "$WATCHDOG_USER" | cut -d: -f1)" != "$WATCHDOG_USER" ]]; then
+        echo "ERROR: watchdog user '$WATCHDOG_USER' is not a login name on this host." >&2
+        echo "       Pass --watchdog-user with the account name (not a UID)." >&2
+        exit 1
+    fi
+    if [[ -z "$WATCHDOG_HAPI_HOME" ]]; then
+        WATCHDOG_HAPI_HOME="$(systemctl show-environment 2>/dev/null | sed -n 's/^HAPI_HOME=//p' | head -n1 || true)"
+    fi
+    if [[ -z "$WATCHDOG_HAPI_HOME" ]]; then
+        # The runner unit carries HAPI_HOME in its own Environment=.
+        WATCHDOG_HAPI_HOME="$(systemctl show "$RUNNER_UNIT" -p Environment --value 2>/dev/null \
+            | tr ' ' '\n' | sed -n 's/^HAPI_HOME=//p' | head -n1 || true)"
+    fi
+    if [[ -z "$WATCHDOG_HAPI_HOME" ]]; then
+        _home="$(getent passwd "$WATCHDOG_USER" | cut -d: -f6 || true)"
+        if [[ -z "$_home" || ! -d "$_home" ]]; then
+            echo "ERROR: no usable home for '$WATCHDOG_USER' and no --hapi-home given." >&2
+            echo "       Appending to an empty home would yield /.hapi and install a" >&2
+            echo "       unit whose ConditionPathExists can never be satisfied." >&2
+            exit 1
+        fi
+        WATCHDOG_HAPI_HOME="$_home/.hapi"
+        unset _home
+    fi
+    WATCHDOG_PORT="${WATCHDOG_PORT:-3006}"
 }
-if [[ -z "$WATCHDOG_HAPI_HOME" ]]; then
-    WATCHDOG_HAPI_HOME="$(systemctl show-environment 2>/dev/null | sed -n 's/^HAPI_HOME=//p' | head -n1 || true)"
+
+resolve_watchdog_identity
+
+# The unit's ConditionPathExists is what actually gets skipped, so validate the
+# path itself — not merely that the user exists. An existing user with no HAPI
+# install would otherwise get a permanently-skipped unit and a success message.
+# A missing settings.json here is NOT an error: the hub writes it on first
+# start, and the unit's ConditionPathExists exists precisely so the watchdog
+# stays dormant until then. Confirmed on a fresh VM — the first timer fire
+# legitimately skips. What was broken on the fleet was the condition pointing at
+# a home that would never exist; that is caught above by requiring a real login
+# name with a real home. So warn, loudly, and carry on.
+if [[ ! -f "$WATCHDOG_HAPI_HOME/settings.json" ]]; then
+    echo "NOTE: no settings.json at $WATCHDOG_HAPI_HOME yet."
+    echo "      The watchdog will be SKIPPED on every timer fire until the hub"
+    echo "      writes it on first start. That is expected on a fresh install."
+    echo "      Re-run verify-hapi-systemd-units.sh once the hub has started."
 fi
-if [[ -z "$WATCHDOG_HAPI_HOME" ]]; then
-    # The runner unit carries HAPI_HOME in its own Environment=.
-    WATCHDOG_HAPI_HOME="$(systemctl show "$RUNNER_UNIT" -p Environment --value 2>/dev/null \
-        | tr ' ' '\n' | sed -n 's/^HAPI_HOME=//p' | head -n1 || true)"
-fi
-if [[ -z "$WATCHDOG_HAPI_HOME" ]]; then
-    WATCHDOG_HAPI_HOME="$(getent passwd "$WATCHDOG_USER" | cut -d: -f6 || true)/.hapi"
-fi
-WATCHDOG_PORT="${WATCHDOG_PORT:-3006}"
 
 # Install the watchdog where it will still exist on a host with no checkout of
 # this repository — fleet and pet boxes run the single-exe and never clone it.
@@ -214,16 +262,30 @@ render_hapi_systemd_unit \
 chmod 0644 /etc/systemd/system/hapi-runner-watchdog.service
 install -m 0644 "$SYS_D/hapi-runner-watchdog.timer" /etc/systemd/system/hapi-runner-watchdog.timer
 
-# Sudoers: protect (deny hub destroy; allow runner restart) + watchdog NOPASSWD.
-# Rendered for the same account — granting to a user the host does not have
-# installs cleanly, passes visudo, and applies to nobody.
+# Sudoers.
+#
+# hapi-protect is deliberately NOT rendered from $WATCHDOG_USER. It denies
+# destructive verbs to the *operator* account that agents shell out from — a
+# different identity from the service account the runner unit runs as.
+# Rendering it from the watchdog user would overwrite the operator's deny with
+# a rule for an account that never runs an agent, silently disarming it.
+install -m 0440 "$REPO_ROOT/scripts/tooling/sudoers/hapi-protect" /etc/sudoers.d/hapi-protect
+
+# hapi-watchdog IS host-identity: it must grant the account the watchdog unit
+# runs as. Render to a temp file and validate BEFORE replacing the live one —
+# writing in place truncates first, and a zero-byte sudoers file passes
+# visudo -cf while granting nothing.
+SUDOERS_TMP="$(mktemp)"
 render_hapi_systemd_unit \
-    "$REPO_ROOT/scripts/tooling/sudoers/hapi-protect.in" /etc/sudoers.d/hapi-protect \
+    "$REPO_ROOT/scripts/tooling/sudoers/hapi-watchdog.in" "$SUDOERS_TMP" \
     "SUDO_USER_NAME=$WATCHDOG_USER"
-render_hapi_systemd_unit \
-    "$REPO_ROOT/scripts/tooling/sudoers/hapi-watchdog.in" /etc/sudoers.d/hapi-watchdog \
-    "SUDO_USER_NAME=$WATCHDOG_USER"
-chmod 0440 /etc/sudoers.d/hapi-protect /etc/sudoers.d/hapi-watchdog
+visudo -cf "$SUDOERS_TMP" >/dev/null || {
+    echo "ERROR: rendered hapi-watchdog sudoers failed visudo -cf" >&2
+    rm -f "$SUDOERS_TMP"
+    exit 1
+}
+install -m 0440 -o root -g root "$SUDOERS_TMP" /etc/sudoers.d/hapi-watchdog
+rm -f "$SUDOERS_TMP"
 chown root:root /etc/sudoers.d/hapi-protect /etc/sudoers.d/hapi-watchdog
 if ! visudo -cf /etc/sudoers.d/hapi-protect || ! visudo -cf /etc/sudoers.d/hapi-watchdog; then
     echo "ERROR: sudoers failed visudo -cf" >&2
@@ -231,13 +293,16 @@ if ! visudo -cf /etc/sudoers.d/hapi-protect || ! visudo -cf /etc/sudoers.d/hapi-
 fi
 
 # Refresh systemctl wrapper (runner-restart allow path).
-# Opt-in: this installs a system-wide /usr/local/sbin/systemctl that intercepts
-# every sudo systemctl call on the box — materially broader than "harden the
-# hapi units", and not something to inherit as a side effect of this script.
+#
+# Stays ON by default: verify-hapi-operator-lock.sh asserts
+# /usr/local/sbin/systemctl exists, so skipping it silently breaks the operator
+# lock on every newly-installed host. It is a broad change — a system-wide
+# interceptor for every sudo systemctl call — so --no-systemctl-wrapper exists
+# for hosts that deliberately do not want it, but the default must not regress.
 if [[ "$WITH_WRAPPER" -eq 1 ]]; then
     bash "$REPO_ROOT/scripts/tooling/install-systemctl-wrapper.sh"
 else
-    echo "Skipping systemctl wrapper (pass --with-systemctl-wrapper to install it)"
+    echo "Skipping systemctl wrapper (--no-systemctl-wrapper); note verify-hapi-operator-lock.sh expects it"
 fi
 
 systemctl daemon-reload

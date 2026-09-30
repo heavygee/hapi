@@ -135,10 +135,28 @@ else
 fi
 
 if [[ "$SCOPE" == system ]] && systemctl is-enabled hapi-runner-watchdog.timer >/dev/null 2>&1; then
-    if systemctl is-enabled hapi-runner-watchdog.timer >/dev/null 2>&1; then
-        ok "watchdog timer enabled"
+    ok "watchdog timer enabled"
+
+    # An enabled timer is NOT evidence the watchdog runs. The service gates on
+    # ConditionPathExists=<HAPI_HOME>/settings.json; when that fails systemd
+    # skips the service on every fire while the timer still reports enabled and
+    # `list-timers` still shows it scheduled. That is the failure this check
+    # exists for, so assert the condition itself.
+    # Read the condition from the unit TEXT: systemd does not expose
+    # ConditionPathExists via `systemctl show` (ConditionResult is exposed, but
+    # only reflects the last start, so it reads `yes` on a unit never started).
+    wd_condition="$(systemctl show hapi-runner-watchdog.service -p ConditionResult --value 2>/dev/null || true)"
+    wd_path="$(systemctl cat hapi-runner-watchdog.service 2>/dev/null \
+        | sed -n 's/^ConditionPathExists=//p' | tail -n1 || true)"
+    wd_path="${wd_path#!}"
+    if [[ -n "$wd_path" && ! -e "$wd_path" ]]; then
+        fail "watchdog condition path missing ($wd_path) — timer fires, service is skipped every time"
+    elif [[ "$wd_condition" == no ]]; then
+        fail "watchdog service last start was skipped (ConditionResult=no)"
+    elif [[ -n "$wd_path" ]]; then
+        ok "watchdog condition path present ($wd_path)"
     else
-        fail "watchdog timer not enabled"
+        ok "watchdog service has no path condition"
     fi
 fi
 
