@@ -8,7 +8,7 @@
 **Verdict up front:**  
 - **Negative control works:** on `a352a7804`, `install-hapi-systemd-units.sh --profile <x>` dies immediately with `ERROR: template not found: --profile` — assertions 2–7 unreachable; recorded as **could not proceed**.  
 - **Fleet-binary on the fixed tip mostly works** through `/health` + live OOM + ExecStartPre binary; watchdog fires once `settings.json` exists. Wrapper is **default-on** again (`--no-systemctl-wrapper` to opt out) — rehearsal artefacts recorded the earlier opt-in-absent state.  
-- **Pet one-liner on the fixed tip was broken by a real remaining bug:** global `HAPI_BIN` default `/opt/hapi/hapi` before the profile switch made `user-pet` units `ExecStart` a missing path (`status=203/EXEC`). Fixed in this wave on `feat/verify-hapi-install`. After rebinding `HAPI_BIN` to `~/.local/bin/hapi`, pet hub+runner came up and `/health` passed.
+- **Pet one-liner on the fixed tip was broken for anyone without `/opt/hapi/hapi`:** global `HAPI_BIN` default `/opt/hapi/hapi` before the profile switch made `user-pet` units `ExecStart` a missing path (`status=203/EXEC`). Public curl|bash / companion path. Fixed on `feat/verify-hapi-install` (+ `install-hapi-pet.sh --hapi-bin` defence in depth). After rebinding `HAPI_BIN` to `~/.local/bin/hapi`, pet hub+runner came up and `/health` passed.
 
 Executable deliverable: `scripts/tooling/verify-hapi-install.sh` (+ `.test.sh`), extending `verify-hapi-systemd-units.sh`. Artefacts: `docs/plans/artefacts/2026-09-30-stranger-install/{pet,fleet}/`.
 
@@ -70,9 +70,9 @@ Positive control for the probe: `scripts/tooling/verify-hapi-install.test.sh` �
 1. Installer source-`$@` bug (neg SHA).  
 2. ExecStartPre path that is not an executable **file** (delegated to `verify-hapi-systemd-units.sh`).  
 3. Watchdog **ConditionPathExists from unit text** (delegated) + journal fire (ours); missing `settings.json` with parent home present is a NOTE on fresh box.  
-4. Sudoers grants the **runner User=**, not a hardcoded operator account.  
+4. Sudoers: **`/etc/sudoers.d/hapi-watchdog` primary** — grants runner User= or not; unreadable → inconclusive (not a false red).  
 5. Systemctl wrapper **present by default** (`--no-systemctl-wrapper` / `HAPI_EXPECT_NO_SYSTEMCTL_WRAPPER=1` to opt out).  
-6. `MainPID` == `runner.state.json` pid after restart (ninja’s unsupervised runner).  
+6. `MainPID` ↔ `runner.state.json` pid — **three outcomes**: match → ok; readable mismatch → not ok (ninja class); unreadable/absent/no-pid after bounded retry → **inconclusive** (not FAIL).  
 7. Live `/proc/<pid>/oom_score_adj`, not only unit properties.  
 8. Standalone Tier-1 with empty `User=` demands `--watchdog-user` (systemd 252).
 
@@ -80,11 +80,9 @@ Positive control for the probe: `scripts/tooling/verify-hapi-install.test.sh` �
 
 ## 4. Follow-ups / coordination (Overseer 2026-09-30)
 
-- **Keep `HAPI_BIN` profile-default fix** on `feat/verify-hapi-install` (public one-liner / pet path).  
-- **Rebase onto main after #183 merges** (done onto tip `863b33893` while waiting; re-rebase when main advances).  
-- **Fold, don’t fork:** `verify-hapi-install.sh` calls #183’s `verify-hapi-systemd-units.sh` for KillMode / ExecStartPre-binary / configured OOM / Restart / ConditionPathExists; owns live oom / MainPID / `/health` / wrapper / installer-smoke / `--watchdog-user` harness.  
-- `install-hapi-pet.sh` should pass `--hapi-bin` explicitly when invoking the companion installer (defence in depth).  
-- Verify: read `runner.state.json` via `sudo -n` when not readable (fleet) — already attempted.
+- **`HAPI_BIN` profile-default fix** + `install-hapi-pet.sh --hapi-bin` defence in depth on this PR.  
+- Rebased onto #183 squash `8924ef04d`; fold not fork.  
+- Verifier failure semantics fixed per #185 review (false red → inconclusive).
 
 ---
 

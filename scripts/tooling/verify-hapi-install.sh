@@ -4,9 +4,17 @@
 # Extends (and calls) verify-hapi-systemd-units.sh for KillMode / ExecStartPre
 # binary / configured OOM / Restart / watchdog ConditionPathExists-from-unit-text.
 # Owns only what that verifier cannot prove: installer argument parse, watchdog
-# journal fire, sudoers applies to a real account, systemctl wrapper present
+# journal fire, sudoers grants the runner account, systemctl wrapper present
 # (default; HAPI_EXPECT_NO_SYSTEMCTL_WRAPPER=1 if --no-systemctl-wrapper),
 # MainPID ↔ runner.state.json after restart, live /proc oom_score_adj, hub /health.
+#
+# Failure semantics (MainPID / sudoers): three outcomes, not two.
+#   ok           — property under test held
+#   not ok       — property under test failed (real mismatch / wrong grant)
+#   inconclusive — could not observe the property (unreadable state, probe
+#                  lacks privilege, async write not yet present). Loud, and
+#                  does NOT increment FAIL. A false red here gets the check
+#                  muted — same inverted disease as an enabled-timer false green.
 #
 # Trap: `systemctl show` returns defaults for units that do not exist (exit 0).
 # Always prove the unit exists via `systemctl cat` / list-unit-files first.
@@ -16,7 +24,7 @@
 #   bash scripts/tooling/verify-hapi-install.sh --installer-smoke --profile fleet-binary
 #   bash scripts/tooling/verify-hapi-install.sh --skip-restart   # config-only
 #
-# Exit 0 = all applicable assertions passed; 1 = at least one failed.
+# Exit 0 = no hard failures (inconclusive allowed); 1 = at least one not-ok.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -25,10 +33,14 @@ source "$REPO_ROOT/scripts/tooling/lib/hapi-systemd-units.sh"
 
 PASS=0
 FAIL=0
+INCONCLUSIVE=0
 SKIP_RESTART=0
 INSTALLER_SMOKE=0
 PROFILE=""
 HUB_URL="${HAPI_VERIFY_HUB_URL:-http://127.0.0.1:3006}"
+# runner.state.json is written asynchronously after restart; bound the wait.
+STATE_PID_RETRIES="${HAPI_VERIFY_STATE_PID_RETRIES:-15}"
+STATE_PID_SLEEP_S="${HAPI_VERIFY_STATE_PID_SLEEP_S:-1}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -37,7 +49,7 @@ while [[ $# -gt 0 ]]; do
         --profile) PROFILE="${2:?}"; shift 2 ;;
         --hub-url) HUB_URL="${2:?}"; shift 2 ;;
         -h|--help)
-            sed -n '2,20p' "$0" | sed 's/^# \?//'
+            sed -n '2,25p' "$0" | sed 's/^# \?//'
             exit 0
             ;;
         *) echo "unknown arg: $1" >&2; exit 2 ;;
@@ -52,6 +64,51 @@ ok() {
 not_ok() {
     printf 'not ok - %s\n' "$1" >&2
     FAIL=$((FAIL + 1))
+}
+
+inconclusive() {
+    printf 'inconclusive - %s\n' "$1" >&2
+    INCONCLUSIVE=$((INCONCLUSIVE + 1))
+}
+
+# Read runner.state.json pid into STATE_PID (not stdout — status must survive
+# the call). Prefers direct read; falls through to `sudo -n cat` as part of the
+# same check (not a follow-up). Sets STATE_READ_STATUS to:
+#   got | empty | missing | unreadable
+STATE_PID=""
+STATE_READ_STATUS=""
+read_runner_state_pid() {
+    local f="$1"
+    local raw=""
+    STATE_PID=""
+    STATE_READ_STATUS=missing
+    if [[ ! -e "$f" ]]; then
+        STATE_READ_STATUS=missing
+        return 0
+    fi
+    if [[ -r "$f" ]]; then
+        raw="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("pid",""))' "$f" 2>/dev/null || true)"
+    else
+        # Fleet: state owned by runner user; probe may lack read. sudo -n is the
+        # check, not a recovery path after a not_ok.
+        local sudo_out="" sudo_rc=0
+        set +e
+        sudo_out="$(sudo -n cat "$f" 2>/dev/null)"
+        sudo_rc=$?
+        set -e
+        if [[ "$sudo_rc" -ne 0 ]]; then
+            STATE_READ_STATUS=unreadable
+            return 0
+        fi
+        raw="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("pid",""))' <<<"$sudo_out" 2>/dev/null || true)"
+    fi
+    raw="${raw//$'\n'/}"
+    if [[ -z "$raw" ]]; then
+        STATE_READ_STATUS=empty
+        return 0
+    fi
+    STATE_PID="$raw"
+    STATE_READ_STATUS=got
 }
 
 # --- 1. Installer smoke (optional; used for neg/pos SHA matrix) -------------
@@ -176,25 +233,31 @@ else
     ok "watchdog N/A for user-pet scope (system timer not expected)"
 fi
 
-# --- 4. Sudoers applies to a real account (system scope) -------------------
+# --- 4. Sudoers grants the runner account (system scope) -------------------
+# Primary path: read /etc/sudoers.d/hapi-watchdog directly. The file either
+# names the runner User= or it does not. `sudo -l` needing a password for the
+# probe user is environmental noise — not the property under test.
 if [[ "$SCOPE" == system ]]; then
     runner_user="$("${CTL[@]}" show "$RUNNER_UNIT" -p User --value 2>/dev/null || true)"
-    runner_user="${runner_user:-root}"
+    # Empty User= on an existing unit means root (systemd); we already proved
+    # the unit exists via cat above.
     if [[ -z "$runner_user" ]]; then
-        not_ok "sudoers applies to runner user (empty User= on $RUNNER_UNIT)"
-    elif ! id -u "$runner_user" >/dev/null 2>&1; then
-        not_ok "sudoers applies to runner user ($runner_user does not exist)"
+        runner_user=root
+    fi
+    if ! id -u "$runner_user" >/dev/null 2>&1; then
+        not_ok "sudoers grants runner user ($runner_user does not exist on this host)"
     else
-        set +e
-        sudo_l="$(sudo -n -l -U "$runner_user" 2>&1)"
-        set -e
-        if grep -qE 'hapi-runner|NOPASSWD.*systemctl.*(restart|start).*hapi-runner' <<<"$sudo_l"; then
-            ok "sudoers applies to $runner_user (runner-restart visible in sudo -l)"
-        elif [[ -f /etc/sudoers.d/hapi-watchdog ]] && grep -qE "^${runner_user}[[:space:]]" /etc/sudoers.d/hapi-watchdog; then
-            # File grants the right user even if sudo -l needs a password for the probe user
-            ok "sudoers file grants $runner_user (/etc/sudoers.d/hapi-watchdog)"
+        sudoers_file=/etc/sudoers.d/hapi-watchdog
+        if [[ -r "$sudoers_file" ]]; then
+            if grep -qE "^${runner_user}[[:space:]]" "$sudoers_file"; then
+                ok "sudoers file grants $runner_user ($sudoers_file)"
+            else
+                not_ok "sudoers file grants $runner_user ($sudoers_file has no rule for that account)"
+            fi
+        elif [[ -f "$sudoers_file" ]]; then
+            inconclusive "sudoers file grants $runner_user ($sudoers_file unreadable to probe — not a grant miss)"
         else
-            not_ok "sudoers applies to $runner_user (sudo -l / sudoers.d miss)"
+            not_ok "sudoers file grants $runner_user ($sudoers_file missing)"
         fi
     fi
 else
@@ -248,21 +311,39 @@ fi
 
 main_pid="$("${CTL[@]}" show "$RUNNER_UNIT" -p MainPID --value 2>/dev/null || true)"
 main_pid="${main_pid:-0}"
-state_pid=""
-if [[ -r "$state_file" ]]; then
-    state_pid="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("pid",""))' "$state_file" 2>/dev/null || true)"
-elif [[ -f "$state_file" ]]; then
-    # Fleet: state is owned by the runner user; probe may lack read.
-    state_pid="$(sudo -n cat "$state_file" 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("pid",""))' 2>/dev/null || true)"
+
+# Bounded retry: state is written asynchronously after restart. An immediate
+# read can legitimately find no pid — that is inconclusive, not a mismatch.
+# Distinguish "could not observe" from "observed different pid" (ninja class).
+STATE_PID=""
+STATE_READ_STATUS=missing
+if [[ "$main_pid" != "0" ]]; then
+    for _ in $(seq 1 "$STATE_PID_RETRIES"); do
+        read_runner_state_pid "$state_file"
+        if [[ "$STATE_READ_STATUS" == got ]]; then
+            break
+        fi
+        if [[ "$STATE_READ_STATUS" == unreadable ]]; then
+            # Privilege miss will not clear on retry — stop early.
+            break
+        fi
+        # missing / empty: wait for async write
+        sleep "$STATE_PID_SLEEP_S"
+    done
 fi
-if [[ -n "$state_pid" && "$main_pid" != "0" && "$main_pid" == "$state_pid" ]]; then
-    ok "MainPID equals runner.state.json pid ($main_pid)"
-elif [[ "$main_pid" == "0" ]]; then
+
+if [[ "$main_pid" == "0" ]]; then
     not_ok "MainPID equals runner.state.json pid (MainPID=0; unit not running)"
-elif [[ -z "$state_pid" ]]; then
-    not_ok "MainPID equals runner.state.json pid (no pid in $state_file; MainPID=$main_pid)"
+elif [[ "$STATE_READ_STATUS" == got && "$main_pid" == "$STATE_PID" ]]; then
+    ok "MainPID equals runner.state.json pid ($main_pid)"
+elif [[ "$STATE_READ_STATUS" == got ]]; then
+    not_ok "MainPID equals runner.state.json pid (MainPID=$main_pid state=$STATE_PID) — unsupervised runner class"
+elif [[ "$STATE_READ_STATUS" == unreadable ]]; then
+    inconclusive "MainPID vs runner.state.json (state unreadable via sudo -n; MainPID=$main_pid) — not a mismatch"
+elif [[ "$STATE_READ_STATUS" == missing ]]; then
+    inconclusive "MainPID vs runner.state.json (no $state_file after ${STATE_PID_RETRIES}s; MainPID=$main_pid) — not a mismatch"
 else
-    not_ok "MainPID equals runner.state.json pid (MainPID=$main_pid state=$state_pid) — unsupervised runner class"
+    inconclusive "MainPID vs runner.state.json (no pid field after ${STATE_PID_RETRIES}s; MainPID=$main_pid) — not a mismatch"
 fi
 
 # Live OOM — config updates on daemon-reload; running processes do not.
@@ -301,5 +382,5 @@ fi
 
 printf '\n# Explicit gap: agent CLI / Claude auth NOT tested (pet installer leaves login to the operator).\n'
 printf '# This check proves supervision + hub HTTP, not the ninja "sessions cascade on restart" class.\n'
-printf '# pass=%d fail=%d\n' "$PASS" "$FAIL"
+printf '# pass=%d fail=%d inconclusive=%d\n' "$PASS" "$FAIL" "$INCONCLUSIVE"
 exit "$FAIL"

@@ -26,7 +26,7 @@ check "fixed tree: no template-not-found" '! grep -q "template not found: --prof
 
 # Pre-fix tree a352a7804: smoke must FAIL (positive control for the probe).
 PRE_TMP="$(mktemp -d)"
-trap 'rm -rf "$PRE_TMP"' EXIT
+trap 'rm -rf "$PRE_TMP" "${SEM_TMP:-}"' EXIT
 git -C "$ROOT" archive a352a7804 \
     scripts/tooling/install-hapi-systemd-units.sh \
     scripts/tooling/lib/render-hapi-systemd-unit.sh \
@@ -81,6 +81,64 @@ empty_user_out="$(
 )"
 check "standalone Tier-1 empty User= demands --watchdog-user" \
     'grep -q "could not determine\|Pass --watchdog-user" <<<"$empty_user_out"'
+
+# Three-outcome MainPID / state-read semantics: unreadable or absent must NOT
+# count as fail (false red mutes the ninja-class check). Mismatch must.
+SEM_TMP="$(mktemp -d)"
+trap 'rm -rf "$PRE_TMP" "$SEM_TMP"' EXIT
+# Extract helpers by function name (not ^fi$ line range — same trap as #183).
+eval "$(
+    sed -n \
+        -e '/^ok()/,/^}$/p' \
+        -e '/^not_ok()/,/^}$/p' \
+        -e '/^inconclusive()/,/^}$/p' \
+        -e '/^read_runner_state_pid()/,/^}$/p' \
+        "$VERIFY"
+)"
+PASS=0; FAIL=0; INCONCLUSIVE=0
+STATE_PID=""; STATE_READ_STATUS=""
+
+# Readable match → would be ok path
+printf '{"pid":12345}\n' >"$SEM_TMP/match.json"
+chmod 644 "$SEM_TMP/match.json"
+read_runner_state_pid "$SEM_TMP/match.json"
+check "state read: readable match status=got" '[[ "$STATE_READ_STATUS" == got && "$STATE_PID" == 12345 ]]'
+
+# Readable mismatch inputs (classification inline mirrors verify script)
+main_pid=999; STATE_PID=12345; STATE_READ_STATUS=got
+if [[ "$main_pid" == "0" ]]; then not_ok "x"
+elif [[ "$STATE_READ_STATUS" == got && "$main_pid" == "$STATE_PID" ]]; then ok "match"
+elif [[ "$STATE_READ_STATUS" == got ]]; then not_ok "mismatch — unsupervised runner class"
+elif [[ "$STATE_READ_STATUS" == unreadable ]]; then inconclusive "unreadable"
+else inconclusive "missing"
+fi
+check "classify: readable mismatch is not_ok (FAIL++)" '[[ "$FAIL" -eq 1 ]]'
+FAIL=0; PASS=0; INCONCLUSIVE=0
+
+# Unreadable → inconclusive, not fail
+STATE_READ_STATUS=unreadable; STATE_PID=""; main_pid=16445
+if [[ "$main_pid" == "0" ]]; then not_ok "x"
+elif [[ "$STATE_READ_STATUS" == got && "$main_pid" == "$STATE_PID" ]]; then ok "match"
+elif [[ "$STATE_READ_STATUS" == got ]]; then not_ok "mismatch"
+elif [[ "$STATE_READ_STATUS" == unreadable ]]; then inconclusive "unreadable — not a mismatch"
+else inconclusive "missing — not a mismatch"
+fi
+check "classify: unreadable is inconclusive (FAIL stays 0)" '[[ "$FAIL" -eq 0 && "$INCONCLUSIVE" -eq 1 ]]'
+FAIL=0; PASS=0; INCONCLUSIVE=0
+
+# Missing after retry → inconclusive
+STATE_READ_STATUS=missing; STATE_PID=""; main_pid=16445
+if [[ "$main_pid" == "0" ]]; then not_ok "x"
+elif [[ "$STATE_READ_STATUS" == got && "$main_pid" == "$STATE_PID" ]]; then ok "match"
+elif [[ "$STATE_READ_STATUS" == got ]]; then not_ok "mismatch"
+elif [[ "$STATE_READ_STATUS" == unreadable ]]; then inconclusive "unreadable"
+else inconclusive "missing — not a mismatch"
+fi
+check "classify: missing state is inconclusive (FAIL stays 0)" '[[ "$FAIL" -eq 0 && "$INCONCLUSIVE" -eq 1 ]]'
+
+# Companion pet path passes --hapi-bin (defence in depth for 203/EXEC)
+check "install-hapi-pet companion path passes --hapi-bin" \
+    'grep -q -- "--hapi-bin \"\${INSTALL_DIR}/hapi\"" "$ROOT/scripts/install-hapi-pet.sh"'
 
 echo "# pass=$pass fail=$fail"
 exit "$fail"
