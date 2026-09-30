@@ -172,30 +172,30 @@ render_pair() {
     )
 
     if [[ "$PROFILE" == primary-soup ]]; then
-        render-hapi-systemd-unit.sh "$hub_template" "$hub_out" \
+        render_hapi_systemd_unit "$hub_template" "$hub_out" \
             "${common[@]}" \
             "HAPI_DRIVER_DIR=$HAPI_DRIVER_DIR" \
             "BUN_BIN=$BUN_BIN"
-        render-hapi-systemd-unit.sh "$runner_template" "$runner_out" \
+        render_hapi_systemd_unit "$runner_template" "$runner_out" \
             "${common[@]}" \
             "HAPI_DRIVER_DIR=$HAPI_DRIVER_DIR" \
             "BUN_BIN=$BUN_BIN" \
             "HAPI_AGENT_ENV=$HAPI_AGENT_ENV" \
             "EXEC_START_PRE_LINE=$EXEC_START_PRE_LINE"
     elif [[ "$PROFILE" == fleet-binary ]]; then
-        render-hapi-systemd-unit.sh "$hub_template" "$hub_out" \
+        render_hapi_systemd_unit "$hub_template" "$hub_out" \
             "${common[@]}" \
             "HAPI_BIN=$HAPI_BIN"
-        render-hapi-systemd-unit.sh "$runner_template" "$runner_out" \
+        render_hapi_systemd_unit "$runner_template" "$runner_out" \
             "${common[@]}" \
             "HAPI_BIN=$HAPI_BIN"
     else
-        render-hapi-systemd-unit.sh "$hub_template" "$hub_out" \
+        render_hapi_systemd_unit "$hub_template" "$hub_out" \
             "HOST_LABEL=$HOST_LABEL" \
             "HAPI_HOME=$HAPI_HOME" \
             "HAPI_PATH=$HAPI_PATH" \
             "HAPI_BIN=$HAPI_BIN"
-        render-hapi-systemd-unit.sh "$runner_template" "$runner_out" \
+        render_hapi_systemd_unit "$runner_template" "$runner_out" \
             "HOST_LABEL=$HOST_LABEL" \
             "HAPI_HOME=$HAPI_HOME" \
             "HAPI_PATH=$HAPI_PATH" \

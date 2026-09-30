@@ -88,5 +88,23 @@ check "soup stop on a fleet host fails" '! assert_pre "$STOP_MISSING" always >/d
 check "cd-prefixed stop with missing interpreter fails" '! assert_pre "$STOP_CD" always >/dev/null'
 check "no stop with Restart=always fails" '! assert_pre "" always >/dev/null'
 
+# --- installer argument handling ------------------------------------------
+# `source lib/render-hapi-systemd-unit.sh` used to run that file's top-level CLI
+# against the CALLER's unconsumed "$@", so every invocation died on
+# `ERROR: template not found: --profile` before parsing anything. The lib now
+# keeps its work in a function and guards the CLI behind BASH_SOURCE == $0.
+UNITS="$ROOT/scripts/tooling/install-hapi-systemd-units.sh"
+out="$(bash "$UNITS" --profile bogus 2>&1 || true)"
+check "installer parses args before sourcing the render lib" '! grep -q "template not found" <<<"$out"'
+check "installer reaches profile validation" 'grep -q "unknown profile: bogus" <<<"$out"'
+out="$(bash "$UNITS" 2>&1 || true)"
+check "installer reports a missing --profile" 'grep -q "profile required" <<<"$out"'
+
+# The lib must still work as a standalone CLI.
+tmpl="$(mktemp)"; outf="$(mktemp)"; printf 'x=@K@\n' >"$tmpl"
+bash "$ROOT/scripts/tooling/lib/render-hapi-systemd-unit.sh" "$tmpl" "$outf" "K=v" 2>/dev/null
+check "render lib still runs as a CLI" '[[ "$(cat "$outf")" == "x=v" ]]'
+rm -f "$tmpl" "$outf"
+
 echo "# pass=$pass fail=$fail"
 [[ "$fail" -eq 0 ]]

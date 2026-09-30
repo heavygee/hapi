@@ -144,7 +144,9 @@ echo "Tier-1 runner stop command: $RESOLVED_STOP_CMD"
 
 mkdir -p "$HUB_D" "$RUNNER_D"
 
-bash "$REPO_ROOT/scripts/tooling/lib/render-hapi-systemd-unit.sh" \
+# shellcheck source=lib/render-hapi-systemd-unit.sh
+source "$REPO_ROOT/scripts/tooling/lib/render-hapi-systemd-unit.sh"
+render_hapi_systemd_unit \
     "$SYS_D/10-resilience.conf.in" "$RUNNER_D/10-resilience.conf" \
     "RUNNER_STOP_CMD=$RESOLVED_STOP_CMD"
 chmod 0644 "$RUNNER_D/10-resilience.conf"
