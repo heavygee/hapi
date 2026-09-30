@@ -124,6 +124,20 @@ calling the instance done.**
       in `systemctl show <watchdog-service> -p ConditionResult`), or check its own log/journal
       for real fire evidence, not just the timer's own enablement
 
+**On the systemctl wrapper (`install-systemctl-wrapper.sh`, installed by Tier-1 by
+default):** it looks invasive — a system-wide interceptor for every `sudo systemctl`
+call — and it is reasonable to want it opt-in. Concrete evidence against that, from
+ninja's own hardening (2026-09-30): the wrapper blocked a plain `sudo systemctl restart
+hapi-hub.service` from a non-interactive SSH session, and **also blocked
+`HAPI_OPERATOR_SYSTEMCTL_OVERRIDE=1`** from that same non-tty shell, citing the
+2026-06-13 incident this exact gap caused (an agent's env-var-only override stopped the
+hub, cascade-killing the runner via `Requires=` and taking active sessions with it). Had
+the wrapper been opt-in, ninja would have installed with no guard at all, and that
+protection simply would not have existed there — the config alone (Tier-1's other
+drop-ins) does not provide it. The correct route past a real tty gate is `ssh -tt` (a
+genuine controlling terminal), not the file-level bypass the wrapper also documents for
+actual emergencies.
+
 ---
 
 ## Known gotchas (from real incidents, not hypothetical)
