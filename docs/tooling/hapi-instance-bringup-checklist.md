@@ -113,9 +113,16 @@ calling the instance done.**
       and HAPI's own runner self-deduplicates on a matching CLI mtime, exiting 0 rather
       than restarting, when it detects an already-running instance (see gotcha below). A
       unit sitting `inactive` after a "successful" restart is not evidence of health; check
-      `runner.state.json`'s own `pid` + `lastHeartbeat` for the real answer, and confirm a
-      watchdog timer (`systemctl list-timers 'hapi-*'`) actually exists if this instance is
-      meant to self-heal unattended
+      `runner.state.json`'s own `pid` + `lastHeartbeat` for the real answer
+- [ ] **`systemctl list-timers` showing a watchdog timer enabled is not evidence it ever
+      runs.** A unit `Condition*=` (e.g. `ConditionPathExists=`) that fails makes systemd
+      silently *skip* the service every time the timer fires — the timer itself keeps
+      reporting `enabled`/`active` throughout, with no failure signal anywhere in
+      `list-timers`. This is a real check that was handed over as sufficient and wasn't
+      (2026-09-30). Confirm actual execution instead: `systemctl status
+      <watchdog-service>` (look for `Condition: start condition failed` / `ConditionResult=no`
+      in `systemctl show <watchdog-service> -p ConditionResult`), or check its own log/journal
+      for real fire evidence, not just the timer's own enablement
 
 ---
 
