@@ -1,0 +1,44 @@
+# /home/heavygee/.config/systemd/user/hapi-hub.service
+[Unit]
+Description=HAPI Hub (oos-stranger-pet-test)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=HAPI_HOME=/home/heavygee/.hapi
+Environment=PATH=/home/heavygee/.local/bin:/home/heavygee/.bun/bin:/home/heavygee/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/opt/hapi/hapi hub
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+
+# /home/heavygee/.config/systemd/user/hapi-runner.service
+[Unit]
+Description=HAPI Runner (oos-stranger-pet-test)
+After=network-online.target hapi-hub.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+KillMode=process
+Environment=HAPI_HOME=/home/heavygee/.hapi
+Environment=PATH=/home/heavygee/.local/bin:/home/heavygee/.bun/bin:/home/heavygee/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HAPI_RUNNER_SUPERVISED=1
+Environment=HAPI_DISABLE_VERSION_HANDOFF=1
+# HAPI_DISABLE_VERSION_HANDOFF=1 above means a fresh invocation will NOT treat
+# the running runner as stale, so without this stop a `systemctl --user restart`
+# hits the runner's dedup path (exit 0, "keeping existing runner"), leaving the
+# unit inactive with an unsupervised runner still alive — or, with Restart=always,
+# cycling until the start limit trips. The leading `-` ignores the expected
+# failure when nothing is running yet. System profiles get the equivalent from
+# Tier-1's 10-resilience drop-in; pet installs have no Tier-1, so it lives here.
+ExecStartPre=-/opt/hapi/hapi runner stop
+ExecStart=/opt/hapi/hapi runner start-sync --workspace-root /home/heavygee/.hapi-workspace
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

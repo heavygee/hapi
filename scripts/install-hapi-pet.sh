@@ -75,8 +75,11 @@ install_user_pet_systemd() {
     fi
     if [[ -n "$companion" ]]; then
         log "Using companion systemd installer from checkout: $companion"
+        # Defence in depth for the 2026-09-30 HAPI_BIN poisoning: pass the pet
+        # binary explicitly so a stale global default cannot point ExecStart at
+        # /opt/hapi/hapi (203/EXEC on any host without that path).
         HAPI_WORKSPACE="$HAPI_WORKSPACE" HAPI_HOME="$HAPI_HOME" INSTALL_DIR="$INSTALL_DIR" \
-            bash "$companion" --profile user-pet --enable
+            bash "$companion" --profile user-pet --enable --hapi-bin "${INSTALL_DIR}/hapi"
         return 0
     fi
 

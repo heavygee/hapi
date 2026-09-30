@@ -1,0 +1,14 @@
+● hapi-hub.service - HAPI Hub (oos-stranger-pet-test)
+     Loaded: loaded (/home/heavygee/.config/systemd/user/hapi-hub.service; enabled; preset: enabled)
+     Active: activating (auto-restart) (Result: exit-code) since Wed 2026-09-30 15:36:10 UTC; 17ms ago
+    Process: 16549 ExecStart=/opt/hapi/hapi hub (code=exited, status=203/EXEC)
+   Main PID: 16549 (code=exited, status=203/EXEC)
+        CPU: 347us
+
+● hapi-runner.service - HAPI Runner (oos-stranger-pet-test)
+     Loaded: loaded (/home/heavygee/.config/systemd/user/hapi-runner.service; enabled; preset: enabled)
+     Active: activating (auto-restart) (Result: exit-code) since Wed 2026-09-30 15:36:10 UTC; 24ms ago
+    Process: 16550 ExecStartPre=/opt/hapi/hapi runner stop (code=exited, status=0/SUCCESS)
+    Process: 16551 ExecStart=/opt/hapi/hapi runner start-sync --workspace-root /home/heavygee/.hapi-workspace (code=exited, status=203/EXEC)
+   Main PID: 16551 (code=exited, status=203/EXEC)
+        CPU: 782us

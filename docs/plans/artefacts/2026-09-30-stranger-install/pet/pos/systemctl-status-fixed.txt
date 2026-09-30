@@ -1,0 +1,56 @@
+● hapi-hub.service - HAPI Hub (oos-stranger-pet-test)
+     Loaded: loaded (/home/heavygee/.config/systemd/user/hapi-hub.service; enabled; preset: enabled)
+     Active: active (running) since Wed 2026-09-30 15:36:32 UTC; 8s ago
+   Main PID: 16656 (hapi)
+      Tasks: 8 (limit: 4686)
+     Memory: 88.4M
+        CPU: 357ms
+     CGroup: /user.slice/user-1000.slice/user@1000.service/app.slice/hapi-hub.service
+             └─16656 /home/heavygee/.local/bin/hapi hub
+
+Sep 30 15:36:32 oos-stranger-pet-test systemd[16327]: Started hapi-hub.service - HAPI Hub (oos-stranger-pet-test).
+Sep 30 15:36:32 oos-stranger-pet-test hapi[16656]: HAPI Hub starting...
+Sep 30 15:36:32 oos-stranger-pet-test hapi[16656]: ======================================================================
+Sep 30 15:36:32 oos-stranger-pet-test hapi[16656]:   NEW CLI_API_TOKEN GENERATED
+Sep 30 15:36:32 oos-stranger-pet-test hapi[16656]: ======================================================================
+Sep 30 15:36:32 oos-stranger-pet-test hapi[16656]:   Token: REDACTED
+Sep 30 15:36:32 oos-stranger-pet-test hapi[16656]:   Saved to: /home/heavygee/.hapi/settings.json
+Sep 30 15:36:32 oos-stranger-pet-test hapi[16656]: ======================================================================
+Sep 30 15:36:32 oos-stranger-pet-test hapi[16656]: [Hub] HAPI_LISTEN_HOST: 127.0.0.1 (default)
+Sep 30 15:36:32 oos-stranger-pet-test hapi[16656]: [Hub] HAPI_LISTEN_PORT: 3006 (default)
+Sep 30 15:36:32 oos-stranger-pet-test hapi[16656]: [Hub] HAPI_PUBLIC_URL: http://localhost:3006 (default)
+Sep 30 15:36:32 oos-stranger-pet-test hapi[16656]: [Hub] Fleet upgrade policy: alert
+Sep 30 15:36:32 oos-stranger-pet-test hapi[16656]: [Hub] Telegram: disabled (no TELEGRAM_BOT_TOKEN)
+Sep 30 15:36:32 oos-stranger-pet-test hapi[16656]: [Hub] ServerChan: disabled (no SERVERCHAN_SENDKEY)
+Sep 30 15:36:32 oos-stranger-pet-test hapi[16656]: [Hub] Tunnel: disabled (default)
+Sep 30 15:36:32 oos-stranger-pet-test hapi[16656]: [Hub] fleet upgrade channel=npm target=0.30.7
+Sep 30 15:36:32 oos-stranger-pet-test hapi[16656]: [Hub] Android push: relay (url: https://push.hapi.run)
+Sep 30 15:36:33 oos-stranger-pet-test hapi[16656]: [Hub] iOS push: relay (default, url: https://push.hapi.run)
+Sep 30 15:36:33 oos-stranger-pet-test hapi[16656]: [Web] hub listening on 127.0.0.1:3006
+Sep 30 15:36:33 oos-stranger-pet-test hapi[16656]: [Web] public URL: http://localhost:3006
+Sep 30 15:36:33 oos-stranger-pet-test hapi[16656]: [Web] Hub listening on :3006
+Sep 30 15:36:33 oos-stranger-pet-test hapi[16656]: [Web] Local:  http://localhost:3006
+Sep 30 15:36:33 oos-stranger-pet-test hapi[16656]: HAPI Hub is ready!
+Sep 30 15:36:33 oos-stranger-pet-test hapi[16656]: <-- POST /cli/machines
+Sep 30 15:36:33 oos-stranger-pet-test hapi[16656]: --> POST /cli/machines 200 10ms
+
+● hapi-runner.service - HAPI Runner (oos-stranger-pet-test)
+     Loaded: loaded (/home/heavygee/.config/systemd/user/hapi-runner.service; enabled; preset: enabled)
+     Active: active (running) since Wed 2026-09-30 15:36:32 UTC; 8s ago
+    Process: 16657 ExecStartPre=/home/heavygee/.local/bin/hapi runner stop (code=exited, status=0/SUCCESS)
+   Main PID: 16670 (hapi)
+      Tasks: 9 (limit: 4686)
+     Memory: 86.6M
+        CPU: 607ms
+     CGroup: /user.slice/user-1000.slice/user@1000.service/app.slice/hapi-runner.service
+             └─16670 /home/heavygee/.local/bin/hapi runner start-sync --workspace-root /home/heavygee/.hapi-workspace
+
+Sep 30 15:36:32 oos-stranger-pet-test systemd[16327]: Starting hapi-runner.service - HAPI Runner (oos-stranger-pet-test)...
+Sep 30 15:36:32 oos-stranger-pet-test systemd[16327]: Started hapi-runner.service - HAPI Runner (oos-stranger-pet-test).
+Sep 30 15:36:33 oos-stranger-pet-test hapi[16670]: Hapi runner started.
+Sep 30 15:36:33 oos-stranger-pet-test hapi[16670]:   Workspace roots: /home/heavygee/.hapi-workspace
+Sep 30 15:36:33 oos-stranger-pet-test hapi[16670]:   Hub URL:        http://localhost:3006
+Sep 30 15:36:33 oos-stranger-pet-test hapi[16670]:   Machine ID:     78f79be5-91a5-406e-95a1-4b10249481ab
+Sep 30 15:36:33 oos-stranger-pet-test hapi[16670]:   Control port:   41707
+Sep 30 15:36:33 oos-stranger-pet-test hapi[16670]: Waiting for sessions. Press Ctrl+C to stop.
+Sep 30 15:36:33 oos-stranger-pet-test hapi[16670]: [HAPI] Workspace roots already up to date on hub: /home/heavygee/.hapi-workspace

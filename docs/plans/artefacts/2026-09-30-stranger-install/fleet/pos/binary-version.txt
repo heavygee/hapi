@@ -1,0 +1,1 @@
+hapi version: 0.30.7

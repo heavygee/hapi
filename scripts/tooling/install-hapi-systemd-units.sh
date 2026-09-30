@@ -37,7 +37,11 @@ HAPI_USER="${HAPI_USER:-}"
 HAPI_GROUP="${HAPI_GROUP:-}"
 HAPI_HOME="${HAPI_HOME:-}"
 HAPI_DRIVER_DIR="${HAPI_DRIVER_DIR:-}"
-HAPI_BIN="${HAPI_BIN:-/opt/hapi/hapi}"
+# Do NOT default to /opt/hapi/hapi here — that is fleet-binary's default.
+# A global default made user-pet units ExecStart a missing path (203/EXEC) on
+# the 2026-09-30 stranger-install rehearsal. Profile cases below set defaults;
+# --hapi-bin still wins when the caller exports/passes it.
+HAPI_BIN="${HAPI_BIN:-}"
 BUN_BIN="${BUN_BIN:-$HOME/.bun/bin/bun}"
 HAPI_PORT="${HAPI_PORT:-3006}"
 HOST_LABEL="${HOST_LABEL:-$(hostname -s)}"
@@ -114,6 +118,7 @@ case "$PROFILE" in
         HAPI_USER="${HAPI_USER:-hapi}"
         HAPI_GROUP="${HAPI_GROUP:-hapi}"
         HAPI_HOME="${HAPI_HOME:-/var/lib/hapi}"
+        HAPI_BIN="${HAPI_BIN:-/opt/hapi/hapi}"
         if [[ ${#WORKSPACE_ROOTS[@]} -eq 0 ]]; then
             WORKSPACE_ROOTS=(/work)
         fi

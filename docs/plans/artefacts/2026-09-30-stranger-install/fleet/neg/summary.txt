@@ -1,0 +1,2 @@
+NEG_RESULT=could_not_proceed (expected)
+NEG_RC=1
