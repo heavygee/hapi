@@ -396,12 +396,10 @@ else
     not_ok "runner EnvironmentFiles references claude-setup-token.env (got: ${env_files:-empty})"
 fi
 
-# Prefer the path the unit actually loads; fall back to HAPI_HOME convention.
+# Prefer the path the unit actually loads; fall back to HAPI_HOME canonical only.
 token_file="${token_file_from_unit:-}"
 if [[ -z "$token_file" ]]; then
     token_file="$hapi_home/claude-setup-token.env"
-    [[ -f "$hapi_home/.hapi/claude-setup-token.env" && ! -f "$token_file" ]] \
-        && token_file="$hapi_home/.hapi/claude-setup-token.env"
 fi
 
 token_file_has_value=0

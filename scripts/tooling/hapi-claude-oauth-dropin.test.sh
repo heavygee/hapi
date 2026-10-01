@@ -22,24 +22,61 @@ check() {
 got="$(hapi_claude_oauth_default_token_file "$TMP/hapi-home")"
 check "canonical path" "[[ \"$got\" == \"$TMP/hapi-home/claude-setup-token.env\" ]]"
 
-# Legacy antevorta hotfix path wins when present and canonical is absent.
+# Legacy antevorta hotfix path must NOT win - migrate is operational, not dual-path.
 mkdir -p "$TMP/legacy/.hapi"
 touch "$TMP/legacy/.hapi/claude-setup-token.env"
 got="$(hapi_claude_oauth_default_token_file "$TMP/legacy")"
-check "legacy path preferred" "[[ \"$got\" == \"$TMP/legacy/.hapi/claude-setup-token.env\" ]]"
+check "canonical even when legacy exists" "[[ \"$got\" == \"$TMP/legacy/claude-setup-token.env\" ]]"
 
-# User-scope drop-in write (no systemctl root needed — daemon-reload may fail
-# in CI/sandbox without a user bus; tolerate that by stubbing systemctl).
-export XDG_CONFIG_HOME="$TMP/xdg"
+# Fresh token parent is created 0700; pre-existing parents keep their mode.
+fresh_parent="$TMP/fresh-home"
+fresh_token="$fresh_parent/claude-setup-token.env"
+export XDG_CONFIG_HOME="$TMP/xdg-fresh"
 mkdir -p "$XDG_CONFIG_HOME"
 PATH_STUB="$TMP/bin"
 mkdir -p "$PATH_STUB"
 cat >"$PATH_STUB/systemctl" <<'EOF'
 #!/usr/bin/env bash
-# stub — drop-in install only needs daemon-reload to be non-fatal
 exit 0
 EOF
 chmod +x "$PATH_STUB/systemctl"
+PATH="$PATH_STUB:$PATH"
+hapi_install_claude_oauth_dropin \
+    --scope user \
+    --runner-unit hapi-runner.service \
+    --token-file "$fresh_token" >/tmp/hapi-claude-oauth-fresh-parent.out 2>/tmp/hapi-claude-oauth-fresh-parent.err
+fresh_mode="$(stat -c '%a' "$fresh_parent")"
+check "fresh token parent is 0700" "[[ \"$fresh_mode\" == \"700\" ]]"
+
+existing_parent="$TMP/existing-home"
+mkdir -m 0755 -p "$existing_parent"
+existing_token="$existing_parent/claude-setup-token.env"
+hapi_install_claude_oauth_dropin \
+    --scope user \
+    --runner-unit hapi-runner.service \
+    --token-file "$existing_token" >/tmp/hapi-claude-oauth-existing-parent.out 2>/tmp/hapi-claude-oauth-existing-parent.err
+existing_mode="$(stat -c '%a' "$existing_parent")"
+check "existing token parent mode preserved" "[[ \"$existing_mode\" == \"755\" ]]"
+
+# Legacy-only file prints migrate WARN; drop-in still points at canonical.
+legacy_home="$TMP/migrate-home"
+mkdir -p "$legacy_home/.hapi"
+printf 'CLAUDE_CODE_OAUTH_TOKEN=legacy\n' >"$legacy_home/.hapi/claude-setup-token.env"
+chmod 600 "$legacy_home/.hapi/claude-setup-token.env"
+canon_token="$legacy_home/claude-setup-token.env"
+hapi_install_claude_oauth_dropin \
+    --scope user \
+    --runner-unit hapi-runner.service \
+    --token-file "$canon_token" >/tmp/hapi-claude-oauth-migrate.out 2>/tmp/hapi-claude-oauth-migrate.err
+check "legacy migrate WARN printed" "grep -q 'legacy token' /tmp/hapi-claude-oauth-migrate.err"
+dropin_migrate="$XDG_CONFIG_HOME/systemd/user/hapi-runner.service.d/42-claude-oauth-token.conf"
+check "drop-in stays on canonical despite legacy" \
+    "grep -q \"EnvironmentFile=-$canon_token\" \"$dropin_migrate\""
+
+# User-scope drop-in write (no systemctl root needed — daemon-reload may fail
+# in CI/sandbox without a user bus; tolerate that by stubbing systemctl).
+export XDG_CONFIG_HOME="$TMP/xdg"
+mkdir -p "$XDG_CONFIG_HOME"
 PATH="$PATH_STUB:$PATH"
 
 token="$TMP/pet/claude-setup-token.env"

@@ -24,16 +24,10 @@
 
 hapi_claude_oauth_default_token_file() {
     local hapi_home="${1:?hapi_home}"
-    # Prefer $HAPI_HOME/claude-setup-token.env. Accept legacy
-    # $HAPI_HOME/.hapi/claude-setup-token.env if that already exists (antevorta
-    # 2026-10-01 hotfix path) so re-running the installer does not strand it.
-    local canonical="$hapi_home/claude-setup-token.env"
-    local legacy="$hapi_home/.hapi/claude-setup-token.env"
-    if [[ -f "$legacy" && ! -f "$canonical" ]]; then
-        printf '%s' "$legacy"
-        return 0
-    fi
-    printf '%s' "$canonical"
+    # Canonical only: $HAPI_HOME/claude-setup-token.env.
+    # The antevorta 2026-10-01 hotfix under $HAPI_HOME/.hapi/ is a one-time
+    # operational migrate (cp to canonical), not a retained dual-path.
+    printf '%s' "$hapi_home/claude-setup-token.env"
 }
 
 hapi_print_claude_oauth_setup_instructions() {
@@ -102,6 +96,10 @@ owner = sys.argv[2] if len(sys.argv) > 2 else ""
 flags = os.O_RDONLY
 if hasattr(os, "O_NOFOLLOW"):
     flags |= os.O_NOFOLLOW
+# FIFO/socket races: O_RDONLY alone can block forever on a FIFO planted after
+# the regular-file check; NONBLOCK lets fstat reject non-regular files.
+if hasattr(os, "O_NONBLOCK"):
+    flags |= os.O_NONBLOCK
 
 try:
     fd = os.open(path, flags)
@@ -241,11 +239,28 @@ hapi_install_claude_oauth_dropin() {
 
     mkdir -p "$dropin_dir"
     # Parent of the token file (may not exist yet on a fresh box).
-    mkdir -p "$(dirname "$token_file")"
+    local token_parent
+    token_parent="$(dirname "$token_file")"
+    if [[ ! -d "$token_parent" ]]; then
+        # Fresh parent: private to the service account (hub DB etc. live under
+        # HAPI_HOME). Do not chmod an existing mount/dir - only create new.
+        mkdir -m 0700 -p "$token_parent"
+    fi
     if [[ -n "$owner" && "$scope" == system ]]; then
-        # Fail closed if we cannot make the parent writable by the runner user —
+        # Fail closed if we cannot make the parent writable by the runner user -
         # otherwise the printed setup steps cannot create the token file.
-        hapi_claude_oauth_secure_chown_parent "$(dirname "$token_file")" "$owner" || return 1
+        hapi_claude_oauth_secure_chown_parent "$token_parent" "$owner" || return 1
+    fi
+
+    # One-time estate migrate hint (antevorta hotfix under .hapi/) - never keep
+    # dual drop-in paths in the installer.
+    if [[ "$(basename "$token_file")" == "claude-setup-token.env" ]]; then
+        local legacy_token="${token_parent}/.hapi/claude-setup-token.env"
+        if [[ -f "$legacy_token" && ! -f "$token_file" ]]; then
+            echo "WARN: legacy token at $legacy_token - migrate once to canonical path:" >&2
+            echo "       cp -a $(printf '%q' "$legacy_token") $(printf '%q' "$token_file") && chmod 600 $(printf '%q' "$token_file")" >&2
+            echo "       then: systemctl restart ${runner_unit}" >&2
+        fi
     fi
 
     cat >"$dropin" <<EOF
