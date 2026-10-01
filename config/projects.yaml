@@ -1,0 +1,55 @@
+# Project registry for multi-repo PR classification
+# 
+# This file defines which repositories should be monitored for PR state
+# classification and how they should be handled.
+
+projects:
+  hapi:
+    name: "HAPI Platform"
+    description: "Local-first AI agent platform"
+    targets:
+      - id: upstream
+        repo: tiann/hapi
+        host: github.com
+        control: theirs
+        primary: true
+      - id: fork
+        repo: heavygee/hapi
+        host: github.com
+        control: ours
+        primary: false
+  
+  lockhouse:
+    name: "Lockhouse"
+    description: "Security and compliance platform" 
+    targets:
+      - id: upstream
+        repo: lockhouse/producer
+        host: lhs.ghe.com
+        control: theirs
+        primary: true
+      - id: fork
+        repo: heavygee/lockhouse-producer
+        host: lhs.ghe.com
+        control: ours
+        primary: false
+
+# Global settings
+settings:
+  # Valid GitHub hosts for externalRefs parsing
+  valid_hosts:
+    - "github.com"
+    - "lhs.ghe.com"
+  
+  # Default GitHub host when not specified
+  default_host: github.com
+  
+  # Discovery rules
+  discovery:
+    merged_lookback_days: 7
+    min_pr_number: 100
+    
+  # Classification settings  
+  classification:
+    stale_ms: 10800000  # 3h
+    emit_events: false

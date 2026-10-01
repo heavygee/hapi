@@ -23,6 +23,11 @@
 #
 # Lives on fork main under scripts/tooling/lib/ — commit here; never hand-edit driver.
 
+# Load project registry for multi-repo support
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=project-registry.sh
+source "$SCRIPT_DIR/project-registry.sh"
+
 # ---------------------------------------------------------------------------
 # Title helpers
 # ---------------------------------------------------------------------------
@@ -711,11 +716,18 @@ pec_resolve_tool() {
 }
 
 pec_pr_target_for_repo() {
-    case "$1" in
-        tiann/hapi) printf '%s\t%s' "upstream" "theirs" ;;
-        heavygee/hapi) printf '%s\t%s' "fork" "ours" ;;
-        *) printf '%s\t%s' "upstream" "theirs" ;;
-    esac
+    local repo="$1"
+    
+    # Use project registry to determine target and control
+    local target_info
+    target_info=$(pr_get_target_for_repo "$repo" 2>/dev/null) || {
+        # Fallback to default if registry fails
+        printf '%s\t%s' "upstream" "theirs"
+        return 0
+    }
+    
+    # Extract target_id and control (first two fields)
+    echo "$target_info" | cut -f1-2
 }
 
 pec_severity_for_emoji() {
