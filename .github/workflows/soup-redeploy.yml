@@ -115,42 +115,44 @@ jobs:
       - name: Fresh install, then re-run to exercise the upgrade path
         run: |
           set -euo pipefail
-          docker exec hapi-pet-ci bash -c '
-            set -euo pipefail
-            useradd -m -s /bin/bash testuser
-            loginctl enable-linger testuser
-            for _ in $(seq 1 30); do
-              [[ -d /run/user/$(id -u testuser) ]] && break
-              sleep 1
-            done
-            [[ -d /run/user/$(id -u testuser) ]] \
-              || { echo "FAIL: user manager runtime dir never appeared for testuser"; exit 1; }
-            echo "OK: linger + /run/user/$(id -u testuser) ready"
+          # Heredoc into docker exec -i (not bash -c '...') so inner single quotes
+          # (pgrep pattern, etc.) cannot terminate the host shell string.
+          docker exec -i hapi-pet-ci bash <<'EOS'
+          set -euo pipefail
+          useradd -m -s /bin/bash testuser
+          loginctl enable-linger testuser
+          for _ in $(seq 1 30); do
+            [[ -d /run/user/$(id -u testuser) ]] && break
+            sleep 1
+          done
+          [[ -d /run/user/$(id -u testuser) ]] \
+            || { echo "FAIL: user manager runtime dir never appeared for testuser"; exit 1; }
+          echo "OK: linger + /run/user/$(id -u testuser) ready"
 
-            as_testuser() {
-              # install-hapi-pet.sh --with-systemd calls systemctl --user; that
-              # needs XDG_RUNTIME_DIR + the user dbus socket from linger.
-              su - testuser -c "export XDG_RUNTIME_DIR=/run/user/\$(id -u); export DBUS_SESSION_BUS_ADDRESS=unix:path=\$XDG_RUNTIME_DIR/bus; $*"
-            }
+          as_testuser() {
+            # install-hapi-pet.sh --with-systemd calls systemctl --user; that
+            # needs XDG_RUNTIME_DIR + the user dbus socket from linger.
+            su - testuser -c "export XDG_RUNTIME_DIR=/run/user/\$(id -u); export DBUS_SESSION_BUS_ADDRESS=unix:path=\$XDG_RUNTIME_DIR/bus; $*"
+          }
 
-            echo "=== fresh install with --with-systemd ==="
-            as_testuser "bash /repo/scripts/install-hapi-pet.sh --with-systemd"
-            as_testuser "curl -fsS localhost:3006/health"
-            FIRST_SHA=$(as_testuser "sha256sum ~/.local/bin/hapi" | awk "{print \$1}")
-            echo "binary sha256: $FIRST_SHA"
+          echo "=== fresh install with --with-systemd ==="
+          as_testuser "bash /repo/scripts/install-hapi-pet.sh --with-systemd"
+          as_testuser "curl -fsS localhost:3006/health"
+          FIRST_SHA=$(as_testuser "sha256sum ~/.local/bin/hapi" | awk '{print $1}')
+          echo "binary sha256: $FIRST_SHA"
 
-            echo "=== Claude OAuth drop-in must exist (token itself is operator-minted) ==="
-            as_testuser "test -f ~/.config/systemd/user/hapi-runner.service.d/42-claude-oauth-token.conf"
-            as_testuser "grep -q claude-setup-token.env ~/.config/systemd/user/hapi-runner.service.d/42-claude-oauth-token.conf"
-            echo "OK: pet installer provisioned 42-claude-oauth-token.conf"
+          echo "=== Claude OAuth drop-in must exist (token itself is operator-minted) ==="
+          as_testuser "test -f ~/.config/systemd/user/hapi-runner.service.d/42-claude-oauth-token.conf"
+          as_testuser "grep -q claude-setup-token.env ~/.config/systemd/user/hapi-runner.service.d/42-claude-oauth-token.conf"
+          echo "OK: pet installer provisioned 42-claude-oauth-token.conf"
 
-            echo "=== re-run (upgrade path): must stop the old process, swap, relaunch ==="
-            as_testuser "bash /repo/scripts/install-hapi-pet.sh --with-systemd"
-            sleep 2
-            as_testuser "curl -fsS localhost:3006/health"
-            as_testuser "pgrep -fa 'hapi (hub|runner)'" || { echo "FAIL: no hapi processes survived the re-run"; exit 1; }
-            echo "OK: pet install + upgrade re-run both healthy"
-          '
+          echo "=== re-run (upgrade path): must stop the old process, swap, relaunch ==="
+          as_testuser "bash /repo/scripts/install-hapi-pet.sh --with-systemd"
+          sleep 2
+          as_testuser "curl -fsS localhost:3006/health"
+          as_testuser "pgrep -fa 'hapi (hub|runner)'" || { echo "FAIL: no hapi processes survived the re-run"; exit 1; }
+          echo "OK: pet install + upgrade re-run both healthy"
+          EOS
       - name: Cleanup
         if: always()
         run: |
@@ -266,30 +268,31 @@ jobs:
             echo "::notice::CLAUDE_CODE_OAUTH_TOKEN secret not set — skipping live Anthropic spawn assertion (EnvironmentFile load already proven above)"
             exit 0
           fi
-          docker exec -e CLAUDE_CODE_OAUTH_TOKEN hapi-fleet-ci bash -c '
-            set -euo pipefail
-            # Runner PATH includes $HAPI_HOME/.local/bin (hapi_systemd_default_path).
-            # Native Claude install puts the binary there for the service user.
-            if ! runuser -u hapi -- bash -c 'command -v claude >/dev/null'; then
-              echo "=== installing Claude Code CLI for hapi service user ==="
-              runuser -u hapi -- bash -c 'curl -fsSL https://claude.ai/install.sh | bash'
-              runuser -u hapi -- bash -c 'command -v claude && claude --version'
-            fi
-            TOKEN_FILE=/var/lib/hapi/claude-setup-token.env
-            if grep -q "\.hapi/claude-setup-token\.env" /etc/systemd/system/hapi-runner.service.d/42-claude-oauth-token.conf; then
-              TOKEN_FILE=/var/lib/hapi/.hapi/claude-setup-token.env
-            fi
-            umask 077
-            printf "CLAUDE_CODE_OAUTH_TOKEN=%s\n" "$CLAUDE_CODE_OAUTH_TOKEN" > "$TOKEN_FILE"
-            chown hapi:hapi "$TOKEN_FILE"
-            chmod 600 "$TOKEN_FILE"
-            systemctl restart hapi-runner.service
-            sleep 3
-            python3 - <<'"'"'PY'"'"'
+          # Heredoc + docker exec -i keeps runuser/claude install quotes inside the
+          # container script (bash -c '...' nesting previously terminated the host string).
+          docker exec -i -e CLAUDE_CODE_OAUTH_TOKEN hapi-fleet-ci bash <<'EOS'
+          set -euo pipefail
+          # Runner PATH includes $HAPI_HOME/.local/bin (hapi_systemd_default_path).
+          # Native Claude install puts the binary there for the service user.
+          if ! runuser -u hapi -- bash -c 'command -v claude >/dev/null'; then
+            echo "=== installing Claude Code CLI for hapi service user ==="
+            runuser -u hapi -- bash -c 'curl -fsSL https://claude.ai/install.sh | bash'
+            runuser -u hapi -- bash -c 'command -v claude && claude --version'
+          fi
+          TOKEN_FILE=/var/lib/hapi/claude-setup-token.env
+          if grep -q "\.hapi/claude-setup-token\.env" /etc/systemd/system/hapi-runner.service.d/42-claude-oauth-token.conf; then
+            TOKEN_FILE=/var/lib/hapi/.hapi/claude-setup-token.env
+          fi
+          umask 077
+          printf "CLAUDE_CODE_OAUTH_TOKEN=%s\n" "$CLAUDE_CODE_OAUTH_TOKEN" > "$TOKEN_FILE"
+          chown hapi:hapi "$TOKEN_FILE"
+          chmod 600 "$TOKEN_FILE"
+          systemctl restart hapi-runner.service
+          sleep 3
+          python3 - <<'PY'
           import json, time, urllib.request
           base="http://127.0.0.1:3006"
-          # Unique reply token — must only appear in agent text, never as a false
-          # positive from the user prompt substring (Codex P2).
+          # Unique reply token — require it in agent-role text only (Codex P2).
           PROBE="AUTHPROBEOK"
           token=json.load(open("/var/lib/hapi/settings.json"))["cliApiToken"]
           jwt=json.load(urllib.request.urlopen(urllib.request.Request(
@@ -349,7 +352,7 @@ jobs:
               raise SystemExit(f"FAIL: fresh spawn did not produce agent reply containing {PROBE} (auth may still be broken)")
           print("OK: fresh non-resume spawn authenticated")
           PY
-          '
+          EOS
       - name: Cleanup
         if: always()
         run: |
