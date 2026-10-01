@@ -1,0 +1,190 @@
+name: Soup redeploy verification
+#
+# Fork-local CI: proves the fork's own deployment tooling actually redeploys,
+# not just that the application code is correct (that's test.yml's job).
+#
+# Why this exists: the 2026-09-30 antevorta/ninja hardening pass found that
+# scripts/tooling/install-hapi-systemd-units.sh had been broken for *any*
+# arguments, on *every* profile, for an unknown period — nothing caught it
+# because nothing ran it. The 29 existing scripts/**/*.test.sh regression
+# tests were real but manual-only (run by whoever happened to touch that
+# code, never re-run after). This workflow is the fix: wire the existing
+# tests into CI, and add real end-to-end redeploy tests for both
+# distribution paths this fork maintains — the standalone/pet path
+# (install-hapi-pet.sh, no Lockhouse dependency, usable by anyone) and the
+# fleet-VM path (install-hapi-systemd-units.sh --profile fleet-binary +
+# Tier-1, what Doug's upgrade path uses).
+#
+# Runs on the self-hosted `hapi` runner (oos-linux), not GitHub-hosted —
+# deliberate, to not spend the shared Actions-minutes budget on jobs that
+# spin up containers and do real network fetches. See the runner setup:
+# /home/heavygee/actions-runner-hapi, service
+# actions.runner.heavygee-hapi.oos-linux-hapi-ci.service.
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/tooling/**'
+      - 'scripts/install-hapi-pet.sh'
+      - 'scripts/*.test.sh'
+      - '.github/workflows/soup-redeploy.yml'
+  release:
+    types: [published]
+  workflow_dispatch: {}
+
+concurrency:
+  group: soup-redeploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Fast, cheap, runs on every relevant PR: the existing bash-level regression
+  # tests, which today run exactly nowhere automatically.
+  tooling-tests:
+    runs-on: [self-hosted, hapi]
+    timeout-minutes: 15
+    steps:
+      # fetch-depth: 0 (full history), not the default shallow clone -
+      # verify-hapi-install.test.sh git-archives a specific historical commit
+      # to replay the pre-#183 bug and confirm the test harness detects it.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run every scripts/**/*.test.sh
+        run: |
+          set -euo pipefail
+          # hapi-meta-daily.test.sh hangs indefinitely as of 2026-10-01 (confirmed:
+          # reproduces standalone, prints its hapi-hold-ack lines then never
+          # returns) - pre-existing, unrelated to this workflow. Excluded rather
+          # than silently masked; needs its own fix, tracked separately.
+          SKIP='scripts/tooling/hapi-meta-daily.test.sh'
+          fail=0
+          while IFS= read -r -d '' f; do
+            if [[ "$f" == "$SKIP" ]]; then
+              echo "::group::$f (SKIPPED - known hang, see comment above)"
+              echo "::endgroup::"
+              continue
+            fi
+            echo "::group::$f"
+            if timeout 60 bash "$f"; then
+              echo "OK: $f"
+            else
+              echo "FAIL: $f"
+              fail=1
+            fi
+            echo "::endgroup::"
+          done < <(find scripts -iname '*.test.sh' -print0 | sort -z)
+          exit "$fail"
+
+  # Heavier, slower: only on an actual soup release (or manual dispatch) —
+  # the moment this workflow exists to react to. Proves the standalone path
+  # with zero pre-existing state, zero Lockhouse dependency, exactly as
+  # anyone else running this script would experience it.
+  redeploy-pet:
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, hapi]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fresh install, then re-run to exercise the upgrade path
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD":/repo:ro debian:trixie bash -c '
+            set -euo pipefail
+            apt-get update -qq >/dev/null
+            apt-get install -y -qq curl ca-certificates procps >/dev/null
+            useradd -m testuser
+
+            echo "=== fresh install ==="
+            su - testuser -c "bash /repo/scripts/install-hapi-pet.sh"
+            su - testuser -c "curl -fsS localhost:3006/health"
+            FIRST_SHA=$(su - testuser -c "sha256sum ~/.local/bin/hapi" | awk "{print \$1}")
+            echo "binary sha256: $FIRST_SHA"
+
+            echo "=== re-run (upgrade path): must stop the old process, swap, relaunch ==="
+            su - testuser -c "bash /repo/scripts/install-hapi-pet.sh"
+            sleep 2
+            su - testuser -c "curl -fsS localhost:3006/health"
+            su - testuser -c "pgrep -fa \"hapi (hub|runner)\"" || { echo "FAIL: no hapi processes survived the re-run"; exit 1; }
+            echo "OK: pet install + upgrade re-run both healthy"
+          '
+
+  # Also only on release/dispatch. Needs real systemd as PID 1 to test the
+  # actual units Tier-1 installs (KillMode, OOMScoreAdjust, the watchdog) —
+  # not just that the render logic produces correct-looking text.
+  redeploy-fleet:
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, hapi]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build a throwaway systemd-capable test image
+        run: |
+          set -euo pipefail
+          cat > /tmp/hapi-fleet-test.Dockerfile <<'EOF'
+          FROM debian:trixie
+          RUN apt-get update -qq && apt-get install -y -qq \
+              systemd systemd-sysv curl ca-certificates sudo procps \
+              && rm -rf /var/lib/apt/lists/*
+          EOF
+          docker build -f /tmp/hapi-fleet-test.Dockerfile -t hapi-fleet-test:ci /tmp
+      - name: Boot it with systemd as init
+        run: |
+          set -euo pipefail
+          docker rm -f hapi-fleet-ci >/dev/null 2>&1 || true
+          docker run -d --name hapi-fleet-ci \
+            --privileged \
+            --tmpfs /tmp --tmpfs /run --tmpfs /run/lock \
+            -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
+            -v "$PWD":/repo:ro \
+            hapi-fleet-test:ci /lib/systemd/systemd --log-target=console --log-level=info
+          sleep 3
+          docker exec hapi-fleet-ci systemctl is-system-running || true
+      - name: Stage the hapi binary and the hapi system user
+        run: |
+          set -euo pipefail
+          docker exec hapi-fleet-ci bash -c '
+            set -euo pipefail
+            useradd --system --create-home --home-dir /var/lib/hapi --shell /usr/sbin/nologin hapi
+            mkdir -p /opt/hapi /work
+            curl -fsSL "https://github.com/heavygee/hapi/releases/latest/download/hapi-linux-x64-baseline" -o /opt/hapi/hapi
+            chmod +x /opt/hapi/hapi
+            chown hapi:hapi /opt/hapi/hapi /work
+            /opt/hapi/hapi --version
+          '
+      - name: Run the real installer (fleet-binary + Tier-1), with a real TTY
+        run: |
+          set -euo pipefail
+          docker exec -t hapi-fleet-ci bash -c '
+            cd /repo
+            bash scripts/tooling/install-hapi-systemd-units.sh --profile fleet-binary --hapi-user hapi --workspace-root /work
+          '
+      - name: Start hub + runner, let the watchdog fire once, then verify
+        run: |
+          set -euo pipefail
+          docker exec -t hapi-fleet-ci bash -c '
+            set -euo pipefail
+            systemctl start hapi-hub.service
+            sleep 2
+            systemctl start hapi-runner.service
+            sleep 3
+            systemctl is-active hapi-hub.service
+            systemctl is-active hapi-runner.service
+            curl -sf http://127.0.0.1:3006/health
+
+            # A brand-new install watchdog fires once before settings.json
+            # exists and correctly skips (documented, expected) — give it one
+            # more real chance now that the hub has written it, same as the
+            # install script own guidance ("re-run verify once the hub has
+            # started"), rather than asserting on a known-stale first fire.
+            systemctl start hapi-runner-watchdog.service || true
+            sleep 2
+          '
+      - name: verify-hapi-install.sh
+        run: |
+          set -euo pipefail
+          docker exec hapi-fleet-ci bash /repo/scripts/tooling/verify-hapi-install.sh
+      - name: Cleanup
+        if: always()
+        run: |
+          docker rm -f hapi-fleet-ci >/dev/null 2>&1 || true
+          docker rmi hapi-fleet-test:ci >/dev/null 2>&1 || true
