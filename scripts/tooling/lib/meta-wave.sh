@@ -276,13 +276,15 @@ mw_member_complete() {
 }
 
 # mw_wave_id_from_prs <pr pr pr...> — stable id for a member set
+# Dedupes PR numbers: two sessions both chipping #1821 must not become
+# w-1821-1821 (oscillates vs w-1821 → hourly re-unlock forever).
 mw_wave_id_from_prs() {
     if [[ $# -eq 0 ]]; then
         echo "w-empty"
         return 0
     fi
     local sorted
-    sorted="$(printf '%s\n' "$@" | sort -n | paste -sd- -)"
+    sorted="$(printf '%s\n' "$@" | sort -n | uniq | paste -sd- -)"
     echo "w-${sorted}"
 }
 
@@ -303,7 +305,36 @@ mw_advance_wave() {
     dirty_count="$(printf '%s' "$members" | jq '[.[] | select(.clean != true)] | length')"
     clean_count="$(printf '%s' "$members" | jq '[.[] | select(.clean == true)] | length')"
 
+    local prev_status prev_id prev_started prev_deadline
+    prev_status="$(printf '%s' "$prev" | jq -r '.status // "idle"')"
+    prev_id="$(printf '%s' "$prev" | jq -r '.id // ""')"
+    prev_started="$(printf '%s' "$prev" | jq -r '.collect_started_at // empty')"
+    prev_deadline="$(printf '%s' "$prev" | jq -r '.collect_deadline_at // empty')"
+
+    # Empty members: do NOT wipe a dispatched wave. Hub list blips that drop
+    # archived 🔧 sessions for one tick used to save w-empty/idle, then the next
+    # hour re-unlocked the same PR set (w-1821 spam Oct 2026). Keep the latch.
     if [[ "$count" -eq 0 ]]; then
+        if [[ "$prev_status" == "dispatched" && -n "$prev_id" && "$prev_id" != "w-empty" ]]; then
+            jq -cn \
+                --arg id "$prev_id" \
+                --arg started "${prev_started:-}" \
+                --arg deadline "${prev_deadline:-}" \
+                '{
+                    wave: {
+                        id: $id,
+                        members: [],
+                        collect_started_at: (if $started == "" then null else ($started | tonumber) end),
+                        collect_deadline_at: (if $deadline == "" then null else ($deadline | tonumber) end),
+                        status: "dispatched"
+                    },
+                    unlock: false,
+                    emit_collect: false,
+                    emit_ready: false,
+                    defer_reason: "already_dispatched"
+                }'
+            return 0
+        fi
         jq -cn '{
             wave: {id: "w-empty", members: [], collect_started_at: null, collect_deadline_at: null, status: "idle"},
             unlock: false, emit_collect: false, emit_ready: false, defer_reason: "no_owned_merged"
@@ -319,17 +350,21 @@ mw_advance_wave() {
     local wid
     wid="$(mw_wave_id_from_prs "${prs_args[@]}")"
 
-    local prev_status prev_id prev_started prev_deadline
-    prev_status="$(printf '%s' "$prev" | jq -r '.status // "idle"')"
-    prev_id="$(printf '%s' "$prev" | jq -r '.id // ""')"
-    prev_started="$(printf '%s' "$prev" | jq -r '.collect_started_at // empty')"
-    prev_deadline="$(printf '%s' "$prev" | jq -r '.collect_deadline_at // empty')"
-
     # New member set → fresh wave (unless empty handled above).
+    # Exception: a dispatched latch must survive PR-row duplication that only
+    # changes multiplicity (w-1821 ↔ w-1821-1821 before uniq). Compare unique ids.
     if [[ "$prev_id" != "$wid" ]]; then
-        prev_status="idle"
-        prev_started=""
-        prev_deadline=""
+        # If previous id sorts to the same unique PR set, treat as same wave.
+        local prev_norm wid_norm
+        prev_norm="$(mw_wave_id_from_prs $(echo "${prev_id#w-}" | tr '-' ' '))"
+        wid_norm="$wid"
+        if [[ "$prev_norm" == "$wid_norm" && "$prev_status" == "dispatched" ]]; then
+            prev_id="$wid"
+        else
+            prev_status="idle"
+            prev_started=""
+            prev_deadline=""
+        fi
     fi
 
     # Terminal: this wave id already unlocked once. Never re-unlock — even if

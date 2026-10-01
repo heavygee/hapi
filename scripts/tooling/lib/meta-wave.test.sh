@@ -194,7 +194,29 @@ out="$(mw_advance_wave "$(jq -c '.wave' <<<"$flicker")" '[{"pr":896,"sid":"aaaa"
 eq "dispatched after re-clean" "$(jq -r '.wave.status' <<<"$out")" "dispatched"
 eq "dispatched after re-clean no unlock" "$(jq -r '.unlock' <<<"$out")" "false"
 
-# --- orphans never in members (caller contract) — empty members → idle ---
+# --- dispatched survives empty-member blip (hub drops archived 🔧) ---
+empty_blip="$(mw_advance_wave "$prev" '[]' 4500 1800 0)"
+eq "empty after dispatched stays dispatched" "$(jq -r '.wave.status' <<<"$empty_blip")" "dispatched"
+eq "empty after dispatched keeps id" "$(jq -r '.wave.id' <<<"$empty_blip")" "w-896"
+eq "empty after dispatched no unlock" "$(jq -r '.unlock' <<<"$empty_blip")" "false"
+out="$(mw_advance_wave "$(jq -c '.wave' <<<"$empty_blip")" '[{"pr":896,"sid":"aaaa","clean":true}]' 4600 1800 1)"
+eq "after empty blip still dispatched" "$(jq -r '.wave.status' <<<"$out")" "dispatched"
+eq "after empty blip no re-unlock" "$(jq -r '.unlock' <<<"$out")" "false"
+
+# --- duplicate PR rows must not change wave id / re-unlock (w-1821 spam) ---
+eq "wave id dedupes" "$(mw_wave_id_from_prs 1821 1821)" "w-1821"
+dup_members='[{"pr":1821,"sid":"a","clean":true,"path":"/x","reason":"clean"},{"pr":1821,"sid":"b","clean":true,"path":"/y","reason":"clean"}]'
+prev_1821='{"id":"w-1821","members":[{"pr":1821,"sid":"a","clean":true,"path":"/x","reason":"clean"}],"collect_started_at":1,"collect_deadline_at":2,"status":"dispatched"}'
+out="$(mw_advance_wave "$prev_1821" "$dup_members" 4700 1800 1)"
+eq "dup rows same id" "$(jq -r '.wave.id' <<<"$out")" "w-1821"
+eq "dup rows no re-unlock" "$(jq -r '.unlock' <<<"$out")" "false"
+# Legacy stored id w-1821-1821 vs unique members → still latch
+prev_legacy='{"id":"w-1821-1821","members":[],"collect_started_at":1,"collect_deadline_at":2,"status":"dispatched"}'
+out="$(mw_advance_wave "$prev_legacy" '[{"pr":1821,"sid":"a","clean":true,"path":"/x","reason":"clean"}]' 4800 1800 1)"
+eq "legacy dup id normalizes" "$(jq -r '.wave.id' <<<"$out")" "w-1821"
+eq "legacy dup id no re-unlock" "$(jq -r '.unlock' <<<"$out")" "false"
+
+# --- orphans never in members (caller contract) — empty members → idle (when not dispatched) ---
 out="$(mw_advance_wave '{"status":"ready"}' '[]' 1000 1800 0)"
 eq "empty members idle" "$(jq -r '.wave.status' <<<"$out")" "idle"
 
