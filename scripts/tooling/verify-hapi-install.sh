@@ -6,7 +6,8 @@
 # Owns only what that verifier cannot prove: installer argument parse, watchdog
 # journal fire, sudoers grants the runner account, systemctl wrapper present
 # (default; HAPI_EXPECT_NO_SYSTEMCTL_WRAPPER=1 if --no-systemctl-wrapper),
-# MainPID ↔ runner.state.json after restart, live /proc oom_score_adj, hub /health.
+# MainPID ↔ runner.state.json after restart, live /proc oom_score_adj, hub /health,
+# runner-vs-child Claude OAuth presence (token values never printed).
 #
 # Failure semantics (MainPID / sudoers): three outcomes, not two.
 #   ok           — property under test held
@@ -279,7 +280,7 @@ else
     ok "systemctl wrapper N/A for user-pet scope"
 fi
 
-# --- 6 + 7. Restart → active + MainPID match + live OOM + /health ----------
+# --- 6 + 7. Restart → active + MainPID match + live OOM + Claude auth + /health ----------
 hapi_home="$("${CTL[@]}" show "$RUNNER_UNIT" -p Environment --value 2>/dev/null \
     | tr ' ' '\n' | sed -n 's/^HAPI_HOME=//p' | head -n1 || true)"
 if [[ -z "$hapi_home" ]]; then
@@ -359,6 +360,53 @@ else
     not_ok "live runner oom_score_adj (no /proc/$main_pid)"
 fi
 
+# UI POST /api/machines/:id/spawn does not send a per-spawn Claude token.
+# New sessions inherit the runner ambient login (EnvironmentFile / credentials).
+# Split-brain: live children still have CLAUDE_CODE_OAUTH_TOKEN, post-restart
+# runner does not → existing --resume keeps working, new UI sessions /login.
+if [[ "$main_pid" != "0" && -r "/proc/$main_pid/environ" ]]; then
+    set +e
+    auth_out="$(python3 - "$main_pid" <<'PY'
+import sys, glob
+pid = sys.argv[1]
+runner_has = False
+try:
+    for item in open(f"/proc/{pid}/environ", "rb").read().split(b"\0"):
+        if item.startswith(b"CLAUDE_CODE_OAUTH_TOKEN="):
+            runner_has = True
+            break
+except OSError:
+    sys.exit(2)
+child_has = 0
+for path in glob.glob("/proc/[0-9]*/environ"):
+    try:
+        comm = open(path.replace("environ", "comm")).read().strip()
+        if comm not in ("hapi", "claude"):
+            continue
+        env = open(path, "rb").read().split(b"\0")
+    except OSError:
+        continue
+    if any(x.startswith(b"CLAUDE_CODE_OAUTH_TOKEN=") for x in env):
+        child_has += 1
+print(f"runner={int(runner_has)} children={child_has}")
+if child_has and not runner_has:
+    sys.exit(1)
+sys.exit(0)
+PY
+)"
+    auth_rc=$?
+    set -e
+    if [[ "$auth_rc" -eq 0 ]]; then
+        ok "runner Claude ambient token vs live children ($auth_out)"
+    elif [[ "$auth_rc" -eq 1 ]]; then
+        not_ok "runner missing CLAUDE_CODE_OAUTH_TOKEN while live Claude children still have it ($auth_out; new UI spawns will /login)"
+    else
+        inconclusive "runner Claude ambient token (could not read /proc/$main_pid/environ)"
+    fi
+else
+    inconclusive "runner Claude ambient token (no readable /proc/$main_pid/environ)"
+fi
+
 hub_pid="$("${CTL[@]}" show "$HUB_UNIT" -p MainPID --value 2>/dev/null || true)"
 hub_pid="${hub_pid:-0}"
 if [[ "$SCOPE" == system && "$hub_pid" != "0" && -r "/proc/$hub_pid/oom_score_adj" ]]; then
@@ -380,7 +428,7 @@ else
     not_ok "hub /health ok ($HUB_URL → rc=$health_rc $(head -c 120 <<<"$health"))"
 fi
 
-printf '\n# Explicit gap: agent CLI / Claude auth NOT tested (pet installer leaves login to the operator).\n'
-printf '# This check proves supervision + hub HTTP, not the ninja "sessions cascade on restart" class.\n'
+printf '\n# Claude auth: presence-only runner-vs-child CLAUDE_CODE_OAUTH_TOKEN check above.\n'
+printf '# Does not call Anthropic or print token values. Fresh box with no live children can still lack login.\n'
 printf '# pass=%d fail=%d inconclusive=%d\n' "$PASS" "$FAIL" "$INCONCLUSIVE"
 exit "$FAIL"
