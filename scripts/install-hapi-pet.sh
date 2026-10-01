@@ -283,9 +283,19 @@ else
     # Runner, restricted to the workspace dir created above — without --workspace-root the
     # runner starts in "legacy mode" with no directory restriction, which defeats the point
     # of having a dedicated workspace dir at all.
-    nohup "$INSTALL_DIR/hapi" runner start-sync --workspace-root "$HAPI_WORKSPACE" \
-        > "$HAPI_HOME/logs/runner.log" 2>&1 &
-    RUNNER_PID=$!
+    # Source Claude OAuth env if present (non-systemd path has no EnvironmentFile drop-in).
+    (
+        set -a
+        if [[ -f "$HAPI_HOME/claude-setup-token.env" && ! -L "$HAPI_HOME/claude-setup-token.env" ]]; then
+            # shellcheck disable=SC1090
+            . "$HAPI_HOME/claude-setup-token.env"
+        fi
+        set +a
+        nohup "$INSTALL_DIR/hapi" runner start-sync --workspace-root "$HAPI_WORKSPACE" \
+            > "$HAPI_HOME/logs/runner.log" 2>&1 &
+        echo $! > "$HAPI_HOME/runner.pid"
+    )
+    RUNNER_PID="$(cat "$HAPI_HOME/runner.pid" 2>/dev/null || true)"
     sleep 2
     if ! kill -0 "$RUNNER_PID" 2>/dev/null; then
         fail "runner exited immediately — check $HAPI_HOME/logs/runner.log"
@@ -333,12 +343,20 @@ cat <<EOF
       claude                # interactive OAuth login (needs a browser/display)
 
     For HAPI runner-spawned / UI sessions (required — interactive login alone is
-    not enough when the runner is a systemd service):
+    not enough for the runner process):
       claude setup-token    # headless: prints a URL, waits for a code
       umask 077
       printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\\n' '<token>' > '${HAPI_HOME}/claude-setup-token.env'
       chmod 600 '${HAPI_HOME}/claude-setup-token.env'
-      systemctl --user restart hapi-runner.service   # if you used --with-systemd
+    Then reload the runner so it picks up the token:
+      # if you used --with-systemd:
+      systemctl --user restart hapi-runner.service
+      # if you did NOT (nohup path): kill the runner and re-run this installer,
+      # or restart it with the env sourced:
+      kill "\$(cat ${HAPI_HOME}/runner.pid 2>/dev/null)" 2>/dev/null || pkill -u "\$USER" -f 'hapi runner' || true
+      set -a; . '${HAPI_HOME}/claude-setup-token.env'; set +a
+      nohup ${INSTALL_DIR}/hapi runner start-sync --workspace-root ${HAPI_WORKSPACE} \\
+        > '${HAPI_HOME}/logs/runner.log' 2>&1 & echo \$! > '${HAPI_HOME}/runner.pid'
 
     After that, confirm end-to-end:
 
@@ -348,6 +366,6 @@ cat <<EOF
                                             (see above), or install genuinely didn't
                                             complete — re-check the log above
     "Not logged in - Please run /login"  -> runner ambient token missing/stale —
-                                            redo the setup-token + EnvironmentFile
-                                            steps above, then restart the runner
+                                            redo the setup-token steps above, then
+                                            restart the runner (systemd or nohup)
 EOF

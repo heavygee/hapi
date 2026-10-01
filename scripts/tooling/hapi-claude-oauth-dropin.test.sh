@@ -63,4 +63,29 @@ hapi_install_claude_oauth_dropin \
 check "token present message" "grep -q 'token file present' /tmp/hapi-claude-oauth-dropin-test2.out"
 check "no setup banner when token present" "! grep -q 'NOT configured yet' /tmp/hapi-claude-oauth-dropin-test2.out"
 
+# Symlink token file must be refused before chmod/chown (Codex P1 / antevorta threat).
+symlink_target="$TMP/symlink-target"
+symlink_token="$TMP/symlink-token.env"
+printf 'CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-symlink\n' >"$symlink_target"
+ln -s "$symlink_target" "$symlink_token"
+set +e
+hapi_install_claude_oauth_dropin \
+    --scope user \
+    --runner-unit hapi-runner.service \
+    --token-file "$symlink_token" >/tmp/hapi-claude-oauth-dropin-symlink.out 2>/tmp/hapi-claude-oauth-dropin-symlink.err
+symlink_rc=$?
+set -e
+check "symlink token file refused" "[[ $symlink_rc -ne 0 ]]"
+check "symlink refusal mentions symlink" "grep -qi symlink /tmp/hapi-claude-oauth-dropin-symlink.err"
+
+# Direct assert helper too.
+set +e
+hapi_claude_oauth_assert_safe_token_file "$symlink_token" 2>/dev/null
+assert_rc=$?
+set -e
+check "assert_safe rejects symlink" "[[ $assert_rc -ne 0 ]]"
+regular="$TMP/regular.env"
+printf 'CLAUDE_CODE_OAUTH_TOKEN=x\n' >"$regular"
+check "assert_safe accepts regular file" "hapi_claude_oauth_assert_safe_token_file \"$regular\""
+
 echo "ALL OK"

@@ -416,37 +416,92 @@ fi
 
 if [[ "$main_pid" != "0" && -r "/proc/$main_pid/environ" ]]; then
     set +e
-    auth_out="$(python3 - "$main_pid" "$token_file_has_value" <<'PY'
-import sys, glob
+    auth_out="$(python3 - "$main_pid" "$token_file_has_value" "${token_file:-}" <<'PY'
+import hashlib, os, sys
 pid = sys.argv[1]
 expect_load = sys.argv[2] == "1"
-runner_has = False
+token_file = sys.argv[3] if len(sys.argv) > 3 else ""
+
+def read_oauth_from_environ(path):
+    try:
+        for item in open(path, "rb").read().split(b"\0"):
+            if item.startswith(b"CLAUDE_CODE_OAUTH_TOKEN="):
+                return item.split(b"=", 1)[1]
+    except OSError:
+        return None
+    return None
+
+def sha12(raw: bytes) -> str:
+    return hashlib.sha256(raw).hexdigest()[:12]
+
+def descendants(root: int) -> set[int]:
+    """PIDs whose ancestry reaches root (inclusive), via /proc/*/status PPid."""
+    children: dict[int, list[int]] = {}
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit():
+            continue
+        p = int(entry)
+        try:
+            for line in open(f"/proc/{p}/status", "r", encoding="utf-8", errors="replace"):
+                if line.startswith("PPid:"):
+                    pp = int(line.split()[1])
+                    children.setdefault(pp, []).append(p)
+                    break
+        except OSError:
+            continue
+    out = {root}
+    stack = [root]
+    while stack:
+        cur = stack.pop()
+        for kid in children.get(cur, []):
+            if kid not in out:
+                out.add(kid)
+                stack.append(kid)
+    return out
+
 try:
-    for item in open(f"/proc/{pid}/environ", "rb").read().split(b"\0"):
-        if item.startswith(b"CLAUDE_CODE_OAUTH_TOKEN="):
-            runner_has = True
-            break
+    runner_tok = read_oauth_from_environ(f"/proc/{pid}/environ")
 except OSError:
     sys.exit(2)
-child_has = 0
-for path in glob.glob("/proc/[0-9]*/environ"):
+runner_has = runner_tok is not None
+
+file_tok = None
+if token_file and os.path.isfile(token_file) and not os.path.islink(token_file):
     try:
-        comm = open(path.replace("environ", "comm")).read().strip()
-        if comm not in ("hapi", "claude"):
-            continue
-        env = open(path, "rb").read().split(b"\0")
+        for line in open(token_file, "rb"):
+            if line.startswith(b"CLAUDE_CODE_OAUTH_TOKEN="):
+                file_tok = line.split(b"=", 1)[1].rstrip(b"\r\n")
+                break
+    except OSError:
+        file_tok = None
+
+tree = descendants(int(pid))
+child_has = 0
+for cpid in tree:
+    if cpid == int(pid):
+        continue
+    try:
+        comm = open(f"/proc/{cpid}/comm", encoding="utf-8", errors="replace").read().strip()
     except OSError:
         continue
-    if any(x.startswith(b"CLAUDE_CODE_OAUTH_TOKEN=") for x in env):
+    if comm not in ("hapi", "claude"):
+        continue
+    if read_oauth_from_environ(f"/proc/{cpid}/environ") is not None:
         child_has += 1
-print(f"runner={int(runner_has)} children={child_has} expect_load={int(expect_load)}")
-# Split-brain: children have it, runner does not.
+
+file_h = sha12(file_tok) if file_tok else "-"
+run_h = sha12(runner_tok) if runner_tok else "-"
+print(f"runner={int(runner_has)} children={child_has} expect_load={int(expect_load)} file_sha12={file_h} runner_sha12={run_h}")
+
+# Split-brain: this runner's descendants have a token, runner itself does not.
 if child_has and not runner_has:
     sys.exit(1)
-# Token file claims a value but the running runner never loaded it (drop-in
-# missing from the live process — needs restart, or wrong EnvironmentFile path).
+# Token file claims a value but the running runner never loaded it.
 if expect_load and not runner_has:
     sys.exit(3)
+# Stale runner: file rotated but process still has the old value.
+if expect_load and runner_has and file_tok is not None and runner_tok != file_tok:
+    sys.exit(4)
 sys.exit(0)
 PY
 )"
@@ -455,9 +510,11 @@ PY
     if [[ "$auth_rc" -eq 0 ]]; then
         ok "runner Claude ambient token loaded ($auth_out)"
     elif [[ "$auth_rc" -eq 1 ]]; then
-        not_ok "runner missing CLAUDE_CODE_OAUTH_TOKEN while live Claude children still have it ($auth_out; new UI spawns will /login)"
+        not_ok "runner missing CLAUDE_CODE_OAUTH_TOKEN while this runner's Claude children still have it ($auth_out; new UI spawns will /login)"
     elif [[ "$auth_rc" -eq 3 ]]; then
         not_ok "token file has CLAUDE_CODE_OAUTH_TOKEN but runner process did not load it ($auth_out; restart runner after installing drop-in)"
+    elif [[ "$auth_rc" -eq 4 ]]; then
+        not_ok "runner CLAUDE_CODE_OAUTH_TOKEN does not match EnvironmentFile ($auth_out; restart runner after rotating the token)"
     else
         inconclusive "runner Claude ambient token (could not read /proc/$main_pid/environ)"
     fi

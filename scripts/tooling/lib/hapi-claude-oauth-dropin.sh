@@ -58,6 +58,23 @@ hapi_print_claude_oauth_setup_instructions() {
 EOF
 }
 
+hapi_claude_oauth_assert_safe_token_file() {
+    # Refuse symlinks / non-regular files before root chmod/chown. A compromised
+    # runner account could point claude-setup-token.env at /etc/sudoers; [[ -f ]],
+    # chmod, and chown all follow symlinks.
+    local token_file="${1:?token_file}"
+    if [[ -L "$token_file" ]]; then
+        echo "ERROR: refusing symlink token file: $token_file" >&2
+        echo "       Remove the symlink and write a regular file (0600)." >&2
+        return 1
+    fi
+    if [[ -e "$token_file" && ! -f "$token_file" ]]; then
+        echo "ERROR: refusing non-regular token file: $token_file" >&2
+        return 1
+    fi
+    return 0
+}
+
 # Install drop-in. Returns 0 always when drop-in written; prints instructions
 # (and returns 0) when the token file is absent — absence is expected on a
 # stranger pet install until the operator mints a token.
@@ -101,7 +118,12 @@ hapi_install_claude_oauth_dropin() {
     if [[ -n "$owner" && "$scope" == system ]]; then
         # Best-effort chown of the parent dir so the runner user can write the
         # token later without root. Ignore failure on exotic layouts.
-        chown "$owner" "$(dirname "$token_file")" 2>/dev/null || true
+        # Do not follow a symlinked parent — refuse and continue without chown.
+        if [[ -L "$(dirname "$token_file")" ]]; then
+            echo "WARN: token parent dir is a symlink; skipping chown of $(dirname "$token_file")" >&2
+        else
+            chown "$owner" "$(dirname "$token_file")" 2>/dev/null || true
+        fi
     fi
 
     cat >"$dropin" <<EOF
@@ -115,10 +137,11 @@ EOF
     chmod 0644 "$dropin"
     echo "Installed: $dropin -> EnvironmentFile=-$token_file"
 
-    if [[ -f "$token_file" ]]; then
-        chmod 600 "$token_file" 2>/dev/null || true
+    if [[ -e "$token_file" || -L "$token_file" ]]; then
+        hapi_claude_oauth_assert_safe_token_file "$token_file" || return 1
+        chmod 600 "$token_file"
         if [[ -n "$owner" && "$scope" == system ]]; then
-            chown "$owner" "$token_file" 2>/dev/null || true
+            chown "$owner" "$token_file"
         fi
         if grep -q '^CLAUDE_CODE_OAUTH_TOKEN=.' "$token_file" 2>/dev/null; then
             echo "Claude OAuth token file present: $token_file"
