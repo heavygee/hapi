@@ -101,8 +101,7 @@ hapi_claude_oauth_secure_chmod_chown "$regular"
 mode="$(stat -c '%a' "$regular")"
 check "secure_chmod sets 600" "[[ \"$mode\" == \"600\" ]]"
 
-# Shell fallback must work when python3 is unavailable (pet minimal hosts).
-# HAPI_CLAUDE_OAUTH_FORCE_SHELL exercises that path without nuking PATH/coreutils.
+# Shell fallback must work for user-scope (no --owner) when python3 is forced off.
 chmod 0644 "$regular"
 HAPI_CLAUDE_OAUTH_FORCE_SHELL=1 hapi_claude_oauth_secure_chmod_chown "$regular"
 mode="$(stat -c '%a' "$regular")"
@@ -112,6 +111,16 @@ HAPI_CLAUDE_OAUTH_FORCE_SHELL=1 hapi_claude_oauth_secure_chmod_chown "$symlink_t
 shell_symlink_rc=$?
 set -e
 check "secure_chmod shell fallback rejects symlink" "[[ $shell_symlink_rc -ne 0 ]]"
+
+# System-profile (owner set) must fail closed without python — never path chown as root.
+set +e
+HAPI_CLAUDE_OAUTH_FORCE_SHELL=1 hapi_claude_oauth_secure_chmod_chown "$regular" "hapi:hapi" \
+    >/tmp/hapi-claude-oauth-force-shell-owner.out 2>/tmp/hapi-claude-oauth-force-shell-owner.err
+owner_shell_rc=$?
+set -e
+check "secure_chmod system shell path fails closed" "[[ $owner_shell_rc -ne 0 ]]"
+check "secure_chmod system shell path mentions python3" \
+    "grep -qi python3 /tmp/hapi-claude-oauth-force-shell-owner.err"
 
 # System-scope instructions use systemctl restart (not --user).
 hapi_print_claude_oauth_setup_instructions "$token" "hapi-runner.service" "system" \

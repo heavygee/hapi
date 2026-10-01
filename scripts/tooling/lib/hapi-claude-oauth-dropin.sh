@@ -83,8 +83,9 @@ hapi_claude_oauth_assert_safe_token_file() {
 }
 
 # chmod 0600 (+ optional chown) without following a symlink final component.
-# Prefer python3 O_NOFOLLOW + fchmod/fchown when available; otherwise a shell
-# inode-stable fallback so pet hosts without python3 still complete upgrades.
+# Prefer python3 O_NOFOLLOW + fchmod/fchown. Path-based shell chmod/chown is
+# only allowed for user-scope (no --owner): system-profile as root must fail
+# closed without python3 rather than risk a TOCTOU symlink retarget.
 hapi_claude_oauth_secure_chmod_chown() {
     local token_file="${1:?token_file}"
     local owner="${2:-}"
@@ -135,30 +136,68 @@ PY
         return $?
     fi
 
-    # Shell fallback (no python3): refuse symlink, chmod/chown, then require the
-    # same device+inode and still-not-a-symlink so a mid-flight swap fails closed.
-    local before after
-    before="$(stat -c '%d:%i' "$token_file" 2>/dev/null)" || {
-        echo "ERROR: cannot stat token file: $token_file" >&2
-        return 1
-    }
-    chmod 600 "$token_file" || return 1
+    # System profile (owner set) runs as root — never path-based chmod/chown.
     if [[ -n "$owner" ]]; then
-        chown "$owner" "$token_file" || return 1
+        echo "ERROR: python3 required to securely chmod/chown token file as root: $token_file" >&2
+        echo "       Install python3, or write the token as the runner user after drop-in install." >&2
+        return 1
     fi
+
+    # User-scope pet fallback (not root): operator owns the file; TOCTOU cannot
+    # retarget a root-owned path. Still refuse symlinks up front.
+    chmod 600 "$token_file" || return 1
     if [[ -L "$token_file" ]]; then
-        echo "ERROR: token file became a symlink during chmod/chown: $token_file" >&2
-        return 1
-    fi
-    after="$(stat -c '%d:%i' "$token_file" 2>/dev/null)" || {
-        echo "ERROR: cannot re-stat token file: $token_file" >&2
-        return 1
-    }
-    if [[ "$before" != "$after" ]]; then
-        echo "ERROR: token file inode changed during chmod/chown (possible symlink swap): $token_file" >&2
+        echo "ERROR: token file became a symlink during chmod: $token_file" >&2
         return 1
     fi
     return 0
+}
+
+# Best-effort chown of the token parent dir via O_DIRECTORY|O_NOFOLLOW + fchown.
+# Skips (WARN) when python3 is missing or the parent is a symlink.
+hapi_claude_oauth_secure_chown_parent() {
+    local parent_dir="${1:?parent_dir}"
+    local owner="${2:?owner}"
+    if [[ -L "$parent_dir" ]]; then
+        echo "WARN: token parent dir is a symlink; skipping chown of $parent_dir" >&2
+        return 0
+    fi
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "WARN: python3 missing; skipping chown of token parent $parent_dir" >&2
+        return 0
+    fi
+    python3 - "$parent_dir" "$owner" <<'PY'
+import grp, os, pwd, stat, sys
+
+path = sys.argv[1]
+owner = sys.argv[2]
+flags = os.O_RDONLY
+if hasattr(os, "O_DIRECTORY"):
+    flags |= os.O_DIRECTORY
+if hasattr(os, "O_NOFOLLOW"):
+    flags |= os.O_NOFOLLOW
+try:
+    fd = os.open(path, flags)
+except OSError as exc:
+    sys.stderr.write("WARN: cannot open token parent without following symlink: %s: %s\n" % (path, exc))
+    sys.exit(0)
+try:
+    mode = os.fstat(fd).st_mode
+    if not stat.S_ISDIR(mode):
+        sys.stderr.write("WARN: token parent is not a directory; skipping chown: %s\n" % path)
+        sys.exit(0)
+    user, sep, group = owner.partition(":")
+    try:
+        uid = pwd.getpwnam(user).pw_uid
+        gid = grp.getgrnam(group).gr_gid if sep and group else pwd.getpwnam(user).pw_gid
+    except KeyError as exc:
+        sys.stderr.write("WARN: unknown owner %r for parent chown: %s\n" % (owner, exc))
+        sys.exit(0)
+    os.fchown(fd, uid, gid)
+finally:
+    os.close(fd)
+sys.exit(0)
+PY
 }
 
 # Install drop-in. Returns 0 always when drop-in written; prints instructions
@@ -203,13 +242,8 @@ hapi_install_claude_oauth_dropin() {
     mkdir -p "$(dirname "$token_file")"
     if [[ -n "$owner" && "$scope" == system ]]; then
         # Best-effort chown of the parent dir so the runner user can write the
-        # token later without root. Ignore failure on exotic layouts.
-        # Do not follow a symlinked parent — refuse and continue without chown.
-        if [[ -L "$(dirname "$token_file")" ]]; then
-            echo "WARN: token parent dir is a symlink; skipping chown of $(dirname "$token_file")" >&2
-        else
-            chown "$owner" "$(dirname "$token_file")" 2>/dev/null || true
-        fi
+        # token later without root. FD-based (O_NOFOLLOW) — never path chown.
+        hapi_claude_oauth_secure_chown_parent "$(dirname "$token_file")" "$owner"
     fi
 
     cat >"$dropin" <<EOF

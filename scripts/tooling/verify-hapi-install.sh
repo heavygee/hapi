@@ -405,18 +405,52 @@ if [[ -z "$token_file" ]]; then
 fi
 
 token_file_has_value=0
-if [[ -n "$token_file" && -f "$token_file" ]] && grep -q '^CLAUDE_CODE_OAUTH_TOKEN=.' "$token_file" 2>/dev/null; then
-    token_file_has_value=1
-    ok "Claude OAuth token file has CLAUDE_CODE_OAUTH_TOKEN= ($token_file)"
+token_file_readable=0
+if [[ -n "$token_file" ]]; then
+    # Fleet tokens are 0600 hapi-owned; operator verify needs sudo -n (same as runner.state.json).
+    token_line=""
+    if [[ -r "$token_file" ]]; then
+        token_line="$(grep -m1 '^CLAUDE_CODE_OAUTH_TOKEN=.' "$token_file" 2>/dev/null || true)"
+        token_file_readable=1
+    else
+        set +e
+        token_line="$(sudo -n grep -m1 '^CLAUDE_CODE_OAUTH_TOKEN=.' "$token_file" 2>/dev/null)"
+        token_rc=$?
+        set -e
+        if [[ "$token_rc" -eq 0 ]]; then
+            token_file_readable=1
+        fi
+    fi
+    if [[ -n "$token_line" ]]; then
+        token_file_has_value=1
+        ok "Claude OAuth token file has CLAUDE_CODE_OAUTH_TOKEN= ($token_file)"
+    elif [[ "$token_file_readable" -eq 0 && -e "$token_file" ]]; then
+        inconclusive "Claude OAuth token file unreadable without sudo -n ($token_file) — re-run verify as root or with passwordless sudo"
+    else
+        # Fresh stranger install before setup-token — loud but not a hard fail unless
+        # live peers prove the machine previously had a working token.
+        inconclusive "Claude OAuth token file missing or empty (${token_file:-unknown}) — run claude setup-token and write CLAUDE_CODE_OAUTH_TOKEN=... then restart the runner"
+    fi
 else
-    # Fresh stranger install before setup-token — loud but not a hard fail unless
-    # live children prove the machine previously had a working token.
-    inconclusive "Claude OAuth token file missing or empty (${token_file:-unknown}) — run claude setup-token and write CLAUDE_CODE_OAUTH_TOKEN=... then restart the runner"
+    inconclusive "Claude OAuth token file missing or empty (unknown) — run claude setup-token and write CLAUDE_CODE_OAUTH_TOKEN=... then restart the runner"
 fi
 
-if [[ "$main_pid" != "0" && -r "/proc/$main_pid/environ" ]]; then
+auth_probe_cmd=(python3)
+if [[ "$main_pid" != "0" ]]; then
+    if [[ ! -r "/proc/$main_pid/environ" ]]; then
+        # Fleet: /proc/<hapi-pid>/environ is unreadable to the operator; sudo -n
+        # is the check (same pattern as runner.state.json), not a recovery path.
+        if sudo -n test -r "/proc/$main_pid/environ" 2>/dev/null; then
+            auth_probe_cmd=(sudo -n python3)
+        else
+            auth_probe_cmd=()
+        fi
+    fi
+fi
+
+if [[ "$main_pid" != "0" && ${#auth_probe_cmd[@]} -gt 0 ]]; then
     set +e
-    auth_out="$(python3 - "$main_pid" "$token_file_has_value" "${token_file:-}" <<'PY'
+    auth_out="$("${auth_probe_cmd[@]}" - "$main_pid" "$token_file_has_value" "${token_file:-}" <<'PY'
 import hashlib, os, sys
 pid = sys.argv[1]
 expect_load = sys.argv[2] == "1"
@@ -434,36 +468,21 @@ def read_oauth_from_environ(path):
 def sha12(raw):
     return hashlib.sha256(raw).hexdigest()[:12]
 
-def descendants(root):
-    """PIDs whose ancestry reaches root (inclusive), via /proc/*/status PPid."""
-    children = {}
-    for entry in os.listdir("/proc"):
-        if not entry.isdigit():
-            continue
-        p = int(entry)
-        try:
-            for line in open("/proc/%d/status" % p, "r", encoding="utf-8", errors="replace"):
-                if line.startswith("PPid:"):
-                    pp = int(line.split()[1])
-                    children.setdefault(pp, []).append(p)
-                    break
-        except OSError:
-            continue
-    out = {root}
-    stack = [root]
-    while stack:
-        cur = stack.pop()
-        for kid in children.get(cur, []):
-            if kid not in out:
-                out.add(kid)
-                stack.append(kid)
-    return out
+def real_uid(p):
+    try:
+        for line in open("/proc/%d/status" % p, "r", encoding="utf-8", errors="replace"):
+            if line.startswith("Uid:"):
+                return int(line.split()[1])
+    except OSError:
+        return None
+    return None
 
 try:
-    runner_tok = read_oauth_from_environ(f"/proc/{pid}/environ")
+    runner_tok = read_oauth_from_environ("/proc/%s/environ" % pid)
 except OSError:
     sys.exit(2)
 runner_has = runner_tok is not None
+runner_uid = real_uid(int(pid))
 
 file_tok = None
 if token_file and os.path.isfile(token_file) and not os.path.islink(token_file):
@@ -475,26 +494,34 @@ if token_file and os.path.isfile(token_file) and not os.path.islink(token_file):
     except OSError:
         file_tok = None
 
-tree = descendants(int(pid))
-child_has = 0
-for cpid in tree:
-    if cpid == int(pid):
-        continue
-    try:
-        comm = open(f"/proc/{cpid}/comm", encoding="utf-8", errors="replace").read().strip()
-    except OSError:
-        continue
-    if comm not in ("hapi", "claude"):
-        continue
-    if read_oauth_from_environ(f"/proc/{cpid}/environ") is not None:
-        child_has += 1
+# KillMode=process reparents surviving session wrappers to init, so ancestry
+# alone misses the antevorta orphans. Scope by the runner's real uid instead.
+peer_has = 0
+if runner_uid is not None:
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit():
+            continue
+        cpid = int(entry)
+        if cpid == int(pid):
+            continue
+        if real_uid(cpid) != runner_uid:
+            continue
+        try:
+            comm = open("/proc/%d/comm" % cpid, encoding="utf-8", errors="replace").read().strip()
+        except OSError:
+            continue
+        if comm not in ("hapi", "claude"):
+            continue
+        if read_oauth_from_environ("/proc/%d/environ" % cpid) is not None:
+            peer_has += 1
 
 file_h = sha12(file_tok) if file_tok else "-"
 run_h = sha12(runner_tok) if runner_tok else "-"
-print(f"runner={int(runner_has)} children={child_has} expect_load={int(expect_load)} file_sha12={file_h} runner_sha12={run_h}")
+print("runner=%d peers=%d expect_load=%d file_sha12=%s runner_sha12=%s" % (
+    int(runner_has), peer_has, int(expect_load), file_h, run_h))
 
-# Split-brain: this runner's descendants have a token, runner itself does not.
-if child_has and not runner_has:
+# Split-brain: same-uid hapi/claude peers still carry a token, runner does not.
+if peer_has and not runner_has:
     sys.exit(1)
 # Token file claims a value but the running runner never loaded it.
 if expect_load and not runner_has:
@@ -510,7 +537,7 @@ PY
     if [[ "$auth_rc" -eq 0 ]]; then
         ok "runner Claude ambient token loaded ($auth_out)"
     elif [[ "$auth_rc" -eq 1 ]]; then
-        not_ok "runner missing CLAUDE_CODE_OAUTH_TOKEN while this runner's Claude children still have it ($auth_out; new UI spawns will /login)"
+        not_ok "runner missing CLAUDE_CODE_OAUTH_TOKEN while same-uid Claude/hapi peers still have it ($auth_out; new UI spawns will /login)"
     elif [[ "$auth_rc" -eq 3 ]]; then
         not_ok "token file has CLAUDE_CODE_OAUTH_TOKEN but runner process did not load it ($auth_out; restart runner after installing drop-in)"
     elif [[ "$auth_rc" -eq 4 ]]; then
@@ -519,7 +546,7 @@ PY
         inconclusive "runner Claude ambient token (could not read /proc/$main_pid/environ)"
     fi
 else
-    inconclusive "runner Claude ambient token (no readable /proc/$main_pid/environ)"
+    inconclusive "runner Claude ambient token (no readable /proc/$main_pid/environ even via sudo -n)"
 fi
 
 hub_pid="$("${CTL[@]}" show "$HUB_UNIT" -p MainPID --value 2>/dev/null || true)"
@@ -543,7 +570,8 @@ else
     not_ok "hub /health ok ($HUB_URL → rc=$health_rc $(head -c 120 <<<"$health"))"
 fi
 
-printf '\n# Claude auth: drop-in + EnvironmentFiles + /proc load + runner-vs-child split-brain.\n'
+printf '\n# Claude auth: drop-in + EnvironmentFiles + /proc load + same-uid peer split-brain.\n'
 printf '# Does not call Anthropic or print token values. Missing token file on a fresh box is inconclusive.\n'
+printf '# Fleet reads use sudo -n (token file + /proc environ) like runner.state.json.\n'
 printf '# pass=%d fail=%d inconclusive=%d\n' "$PASS" "$FAIL" "$INCONCLUSIVE"
 exit "$FAIL"
