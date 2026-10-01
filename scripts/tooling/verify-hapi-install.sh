@@ -360,15 +360,66 @@ else
     not_ok "live runner oom_score_adj (no /proc/$main_pid)"
 fi
 
+# --- Claude OAuth ambient token (drop-in + load + split-brain) ---------------
 # UI POST /api/machines/:id/spawn does not send a per-spawn Claude token.
-# New sessions inherit the runner ambient login (EnvironmentFile / credentials).
-# Split-brain: live children still have CLAUDE_CODE_OAUTH_TOKEN, post-restart
-# runner does not → existing --resume keeps working, new UI sessions /login.
+# New sessions inherit the runner ambient login. Missing EnvironmentFile load
+# is the antevorta 2026-10-01 failure mode: --resume children still have the
+# token, new UI sessions print Not logged in.
+dropin_paths=()
+if [[ "$SCOPE" == system ]]; then
+    dropin_paths+=("/etc/systemd/system/${RUNNER_UNIT}.d/42-claude-oauth-token.conf")
+else
+    dropin_paths+=("${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/${RUNNER_UNIT}.d/42-claude-oauth-token.conf")
+    dropin_paths+=("$HOME/.config/systemd/user/${RUNNER_UNIT}.d/42-claude-oauth-token.conf")
+fi
+dropin_found=""
+for d in "${dropin_paths[@]}"; do
+    if [[ -f "$d" ]]; then
+        dropin_found="$d"
+        break
+    fi
+done
+if [[ -n "$dropin_found" ]]; then
+    ok "Claude OAuth drop-in present ($dropin_found)"
+else
+    not_ok "Claude OAuth drop-in present (expected 42-claude-oauth-token.conf under ${RUNNER_UNIT}.d)"
+fi
+
+env_files="$("${CTL[@]}" show "$RUNNER_UNIT" -p EnvironmentFiles --value 2>/dev/null || true)"
+token_file_from_unit=""
+if [[ "$env_files" == *claude-setup-token.env* ]]; then
+    ok "runner EnvironmentFiles references claude-setup-token.env"
+    # Extract path: systemd prints "path (ignore_errors=yes)" lines.
+    token_file_from_unit="$(printf '%s\n' "$env_files" | tr ' ' '\n' | grep 'claude-setup-token\.env' | head -n1 || true)"
+    token_file_from_unit="${token_file_from_unit%% (*}"
+else
+    not_ok "runner EnvironmentFiles references claude-setup-token.env (got: ${env_files:-empty})"
+fi
+
+# Prefer the path the unit actually loads; fall back to HAPI_HOME convention.
+token_file="${token_file_from_unit:-}"
+if [[ -z "$token_file" ]]; then
+    token_file="$hapi_home/claude-setup-token.env"
+    [[ -f "$hapi_home/.hapi/claude-setup-token.env" && ! -f "$token_file" ]] \
+        && token_file="$hapi_home/.hapi/claude-setup-token.env"
+fi
+
+token_file_has_value=0
+if [[ -n "$token_file" && -f "$token_file" ]] && grep -q '^CLAUDE_CODE_OAUTH_TOKEN=.' "$token_file" 2>/dev/null; then
+    token_file_has_value=1
+    ok "Claude OAuth token file has CLAUDE_CODE_OAUTH_TOKEN= ($token_file)"
+else
+    # Fresh stranger install before setup-token — loud but not a hard fail unless
+    # live children prove the machine previously had a working token.
+    inconclusive "Claude OAuth token file missing or empty (${token_file:-unknown}) — run claude setup-token and write CLAUDE_CODE_OAUTH_TOKEN=... then restart the runner"
+fi
+
 if [[ "$main_pid" != "0" && -r "/proc/$main_pid/environ" ]]; then
     set +e
-    auth_out="$(python3 - "$main_pid" <<'PY'
+    auth_out="$(python3 - "$main_pid" "$token_file_has_value" <<'PY'
 import sys, glob
 pid = sys.argv[1]
+expect_load = sys.argv[2] == "1"
 runner_has = False
 try:
     for item in open(f"/proc/{pid}/environ", "rb").read().split(b"\0"):
@@ -388,18 +439,25 @@ for path in glob.glob("/proc/[0-9]*/environ"):
         continue
     if any(x.startswith(b"CLAUDE_CODE_OAUTH_TOKEN=") for x in env):
         child_has += 1
-print(f"runner={int(runner_has)} children={child_has}")
+print(f"runner={int(runner_has)} children={child_has} expect_load={int(expect_load)}")
+# Split-brain: children have it, runner does not.
 if child_has and not runner_has:
     sys.exit(1)
+# Token file claims a value but the running runner never loaded it (drop-in
+# missing from the live process — needs restart, or wrong EnvironmentFile path).
+if expect_load and not runner_has:
+    sys.exit(3)
 sys.exit(0)
 PY
 )"
     auth_rc=$?
     set -e
     if [[ "$auth_rc" -eq 0 ]]; then
-        ok "runner Claude ambient token vs live children ($auth_out)"
+        ok "runner Claude ambient token loaded ($auth_out)"
     elif [[ "$auth_rc" -eq 1 ]]; then
         not_ok "runner missing CLAUDE_CODE_OAUTH_TOKEN while live Claude children still have it ($auth_out; new UI spawns will /login)"
+    elif [[ "$auth_rc" -eq 3 ]]; then
+        not_ok "token file has CLAUDE_CODE_OAUTH_TOKEN but runner process did not load it ($auth_out; restart runner after installing drop-in)"
     else
         inconclusive "runner Claude ambient token (could not read /proc/$main_pid/environ)"
     fi
@@ -428,7 +486,7 @@ else
     not_ok "hub /health ok ($HUB_URL → rc=$health_rc $(head -c 120 <<<"$health"))"
 fi
 
-printf '\n# Claude auth: presence-only runner-vs-child CLAUDE_CODE_OAUTH_TOKEN check above.\n'
-printf '# Does not call Anthropic or print token values. Fresh box with no live children can still lack login.\n'
+printf '\n# Claude auth: drop-in + EnvironmentFiles + /proc load + runner-vs-child split-brain.\n'
+printf '# Does not call Anthropic or print token values. Missing token file on a fresh box is inconclusive.\n'
 printf '# pass=%d fail=%d inconclusive=%d\n' "$PASS" "$FAIL" "$INCONCLUSIVE"
 exit "$FAIL"

@@ -18,6 +18,10 @@
 #       --hapi-user hapi --workspace-root /work
 #   bash scripts/tooling/install-hapi-systemd-units.sh --profile user-pet
 #
+# Also installs the Claude OAuth EnvironmentFile drop-in (42-claude-oauth-token.conf)
+# so runner-spawned Claude sessions inherit CLAUDE_CODE_OAUTH_TOKEN. UI spawn does
+# not inject options.token — see lib/hapi-claude-oauth-dropin.sh.
+#
 # Estate-local drop-ins (cursor auth, work-cache, upload-heal) stay in
 # /etc/systemd/system/*.service.d/ and are never overwritten by this script.
 
@@ -28,6 +32,8 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$REPO_ROOT/scripts/tooling/lib/render-hapi-systemd-unit.sh"
 # shellcheck source=lib/hapi-systemd-units.sh
 source "$REPO_ROOT/scripts/tooling/lib/hapi-systemd-units.sh"
+# shellcheck source=lib/hapi-claude-oauth-dropin.sh
+source "$REPO_ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh"
 
 PROFILE=""
 UNITS_ONLY=0
@@ -259,6 +265,20 @@ case "$PROFILE" in
             esac
             bash "$REPO_ROOT/scripts/tooling/install-hapi-primary-hub-tier1.sh" "${TIER1_ARGS[@]}"
         fi
+        # Claude OAuth ambient token for runner-spawned sessions (fleet + soup).
+        # primary-soup (oos): token lives at $OPERATOR_HOME/.hapi/claude-setup-token.env
+        #   (matches the 2026-08-25 hand-install on oos-linux).
+        # fleet-binary: token lives at $HAPI_HOME/claude-setup-token.env (service home).
+        if [[ "$PROFILE" == primary-soup ]]; then
+            CLAUDE_TOKEN_FILE="${OOS_OPERATOR_HOME}/.hapi/claude-setup-token.env"
+        else
+            CLAUDE_TOKEN_FILE="$(hapi_claude_oauth_default_token_file "$HAPI_HOME")"
+        fi
+        hapi_install_claude_oauth_dropin \
+            --scope system \
+            --runner-unit "$RUNNER_UNIT" \
+            --token-file "$CLAUDE_TOKEN_FILE" \
+            --owner "$HAPI_USER:$HAPI_GROUP"
         if [[ "$DO_RESTART" -eq 1 ]]; then
             if [[ -x /home/heavygee/.local/bin/hapi-restart-hub ]]; then
                 sudo -u heavygee -H /home/heavygee/.local/bin/hapi-restart-hub
@@ -280,6 +300,11 @@ case "$PROFILE" in
         systemctl --user daemon-reload
         echo "Installed: $USER_UNIT_DIR/hapi-hub.service"
         echo "Installed: $USER_UNIT_DIR/hapi-runner.service"
+        CLAUDE_TOKEN_FILE="$(hapi_claude_oauth_default_token_file "$HAPI_HOME")"
+        hapi_install_claude_oauth_dropin \
+            --scope user \
+            --runner-unit hapi-runner.service \
+            --token-file "$CLAUDE_TOKEN_FILE"
         if [[ "$DO_ENABLE" -eq 1 ]]; then
             loginctl enable-linger "$(id -un)" 2>/dev/null || true
             systemctl --user enable hapi-hub.service hapi-runner.service
@@ -291,3 +316,4 @@ esac
 echo
 echo "Profile: $PROFILE"
 echo "Verify: bash $REPO_ROOT/scripts/tooling/verify-hapi-systemd-units.sh"
+echo "        bash $REPO_ROOT/scripts/tooling/verify-hapi-install.sh --skip-restart"

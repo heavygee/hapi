@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Unit test for lib/hapi-claude-oauth-dropin.sh — path defaults + drop-in write.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# shellcheck source=lib/hapi-claude-oauth-dropin.sh
+source "$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh"
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+check() {
+    local name="$1" cond="$2"
+    if eval "$cond"; then
+        echo "OK: $name"
+    else
+        echo "FAIL: $name" >&2
+        exit 1
+    fi
+}
+
+# Canonical path when nothing exists yet.
+got="$(hapi_claude_oauth_default_token_file "$TMP/hapi-home")"
+check "canonical path" "[[ \"$got\" == \"$TMP/hapi-home/claude-setup-token.env\" ]]"
+
+# Legacy antevorta hotfix path wins when present and canonical is absent.
+mkdir -p "$TMP/legacy/.hapi"
+touch "$TMP/legacy/.hapi/claude-setup-token.env"
+got="$(hapi_claude_oauth_default_token_file "$TMP/legacy")"
+check "legacy path preferred" "[[ \"$got\" == \"$TMP/legacy/.hapi/claude-setup-token.env\" ]]"
+
+# User-scope drop-in write (no systemctl root needed — daemon-reload may fail
+# in CI/sandbox without a user bus; tolerate that by stubbing systemctl).
+export XDG_CONFIG_HOME="$TMP/xdg"
+mkdir -p "$XDG_CONFIG_HOME"
+PATH_STUB="$TMP/bin"
+mkdir -p "$PATH_STUB"
+cat >"$PATH_STUB/systemctl" <<'EOF'
+#!/usr/bin/env bash
+# stub — drop-in install only needs daemon-reload to be non-fatal
+exit 0
+EOF
+chmod +x "$PATH_STUB/systemctl"
+PATH="$PATH_STUB:$PATH"
+
+token="$TMP/pet/claude-setup-token.env"
+hapi_install_claude_oauth_dropin \
+    --scope user \
+    --runner-unit hapi-runner.service \
+    --token-file "$token" >/tmp/hapi-claude-oauth-dropin-test.out
+
+dropin="$XDG_CONFIG_HOME/systemd/user/hapi-runner.service.d/42-claude-oauth-token.conf"
+check "drop-in created" "[[ -f \"$dropin\" ]]"
+check "drop-in points at token file" "grep -q \"EnvironmentFile=-$token\" \"$dropin\""
+check "instructions printed when token missing" "grep -q 'Not logged in' /tmp/hapi-claude-oauth-dropin-test.out"
+
+# With a real token line, no setup banner.
+printf 'CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-test\n' >"$token"
+chmod 600 "$token"
+hapi_install_claude_oauth_dropin \
+    --scope user \
+    --runner-unit hapi-runner.service \
+    --token-file "$token" >/tmp/hapi-claude-oauth-dropin-test2.out
+check "token present message" "grep -q 'token file present' /tmp/hapi-claude-oauth-dropin-test2.out"
+check "no setup banner when token present" "! grep -q 'NOT configured yet' /tmp/hapi-claude-oauth-dropin-test2.out"
+
+echo "ALL OK"

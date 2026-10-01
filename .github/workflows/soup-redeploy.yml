@@ -91,17 +91,22 @@ jobs:
           docker run --rm -v "$PWD":/repo:ro debian:trixie bash -c '
             set -euo pipefail
             apt-get update -qq >/dev/null
-            apt-get install -y -qq curl ca-certificates procps >/dev/null
+            apt-get install -y -qq curl ca-certificates procps systemd systemd-sysv >/dev/null
             useradd -m testuser
 
-            echo "=== fresh install ==="
-            su - testuser -c "bash /repo/scripts/install-hapi-pet.sh"
+            echo "=== fresh install with --with-systemd ==="
+            su - testuser -c "bash /repo/scripts/install-hapi-pet.sh --with-systemd"
             su - testuser -c "curl -fsS localhost:3006/health"
             FIRST_SHA=$(su - testuser -c "sha256sum ~/.local/bin/hapi" | awk "{print \$1}")
             echo "binary sha256: $FIRST_SHA"
 
+            echo "=== Claude OAuth drop-in must exist (token itself is operator-minted) ==="
+            su - testuser -c "test -f ~/.config/systemd/user/hapi-runner.service.d/42-claude-oauth-token.conf"
+            su - testuser -c "grep -q claude-setup-token.env ~/.config/systemd/user/hapi-runner.service.d/42-claude-oauth-token.conf"
+            echo "OK: pet installer provisioned 42-claude-oauth-token.conf"
+
             echo "=== re-run (upgrade path): must stop the old process, swap, relaunch ==="
-            su - testuser -c "bash /repo/scripts/install-hapi-pet.sh"
+            su - testuser -c "bash /repo/scripts/install-hapi-pet.sh --with-systemd"
             sleep 2
             su - testuser -c "curl -fsS localhost:3006/health"
             su - testuser -c "pgrep -fa \"hapi (hub|runner)\"" || { echo "FAIL: no hapi processes survived the re-run"; exit 1; }
@@ -145,10 +150,10 @@ jobs:
           docker exec hapi-fleet-ci bash -c '
             set -euo pipefail
             useradd --system --create-home --home-dir /var/lib/hapi --shell /usr/sbin/nologin hapi
-            mkdir -p /opt/hapi /work
+            mkdir -p /opt/hapi /work /var/lib/hapi
             curl -fsSL "https://github.com/heavygee/hapi/releases/latest/download/hapi-linux-x64-baseline" -o /opt/hapi/hapi
             chmod +x /opt/hapi/hapi
-            chown hapi:hapi /opt/hapi/hapi /work
+            chown hapi:hapi /opt/hapi/hapi /work /var/lib/hapi
             /opt/hapi/hapi --version
           '
       - name: Run the real installer (fleet-binary + Tier-1), with a real TTY
@@ -158,11 +163,36 @@ jobs:
             cd /repo
             bash scripts/tooling/install-hapi-systemd-units.sh --profile fleet-binary --hapi-user hapi --workspace-root /work
           '
+      - name: Plant a probe Claude OAuth token (proves EnvironmentFile loads)
+        run: |
+          set -euo pipefail
+          docker exec hapi-fleet-ci bash -c '
+            set -euo pipefail
+            # Installer must have created the drop-in. Plant a known probe value
+            # so we can assert the runner process actually loaded it — the
+            # antevorta 2026-10-01 failure mode was drop-in/file missing after upgrade.
+            test -f /etc/systemd/system/hapi-runner.service.d/42-claude-oauth-token.conf \
+              || { echo "FAIL: Claude OAuth drop-in not installed by fleet-binary profile"; exit 1; }
+            install -d -o hapi -g hapi -m 0700 /var/lib/hapi
+            # Canonical path preferred; accept legacy .hapi/ subdir if drop-in points there.
+            TOKEN_FILE=/var/lib/hapi/claude-setup-token.env
+            if grep -q "\.hapi/claude-setup-token\.env" /etc/systemd/system/hapi-runner.service.d/42-claude-oauth-token.conf; then
+              mkdir -p /var/lib/hapi/.hapi
+              chown hapi:hapi /var/lib/hapi/.hapi
+              TOKEN_FILE=/var/lib/hapi/.hapi/claude-setup-token.env
+            fi
+            umask 077
+            printf "CLAUDE_CODE_OAUTH_TOKEN=%s\n" "probe-ci-token-do-not-use-against-anthropic" > "$TOKEN_FILE"
+            chown hapi:hapi "$TOKEN_FILE"
+            chmod 600 "$TOKEN_FILE"
+            echo "planted probe token at $TOKEN_FILE"
+          '
       - name: Start hub + runner, let the watchdog fire once, then verify
         run: |
           set -euo pipefail
           docker exec -t hapi-fleet-ci bash -c '
             set -euo pipefail
+            systemctl daemon-reload
             systemctl start hapi-hub.service
             sleep 2
             systemctl start hapi-runner.service
@@ -171,18 +201,85 @@ jobs:
             systemctl is-active hapi-runner.service
             curl -sf http://127.0.0.1:3006/health
 
-            # A brand-new install watchdog fires once before settings.json
-            # exists and correctly skips (documented, expected) — give it one
-            # more real chance now that the hub has written it, same as the
-            # install script own guidance ("re-run verify once the hub has
-            # started"), rather than asserting on a known-stale first fire.
+            RPID=$(systemctl show -p MainPID --value hapi-runner.service)
+            tr "\0" "\n" < /proc/$RPID/environ | grep -q "^CLAUDE_CODE_OAUTH_TOKEN=probe-ci-token-do-not-use-against-anthropic$" \
+              || { echo "FAIL: runner did not load Claude OAuth EnvironmentFile"; tr "\0" "\n" < /proc/$RPID/environ | grep -E "CLAUDE|HAPI_HOME" || true; exit 1; }
+            echo "OK: runner loaded probe CLAUDE_CODE_OAUTH_TOKEN from EnvironmentFile"
+
             systemctl start hapi-runner-watchdog.service || true
             sleep 2
           '
       - name: verify-hapi-install.sh
         run: |
           set -euo pipefail
-          docker exec hapi-fleet-ci bash /repo/scripts/tooling/verify-hapi-install.sh
+          docker exec hapi-fleet-ci bash /repo/scripts/tooling/verify-hapi-install.sh --skip-restart
+      - name: Fresh non-resume spawn must not show Not logged in (when secret present)
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
+            echo "::notice::CLAUDE_CODE_OAUTH_TOKEN secret not set — skipping live Anthropic spawn assertion (EnvironmentFile load already proven above)"
+            exit 0
+          fi
+          docker exec -e CLAUDE_CODE_OAUTH_TOKEN hapi-fleet-ci bash -c '
+            set -euo pipefail
+            TOKEN_FILE=/var/lib/hapi/claude-setup-token.env
+            if grep -q "\.hapi/claude-setup-token\.env" /etc/systemd/system/hapi-runner.service.d/42-claude-oauth-token.conf; then
+              TOKEN_FILE=/var/lib/hapi/.hapi/claude-setup-token.env
+            fi
+            umask 077
+            printf "CLAUDE_CODE_OAUTH_TOKEN=%s\n" "$CLAUDE_CODE_OAUTH_TOKEN" > "$TOKEN_FILE"
+            chown hapi:hapi "$TOKEN_FILE"
+            chmod 600 "$TOKEN_FILE"
+            systemctl restart hapi-runner.service
+            sleep 3
+            python3 - <<'"'"'PY'"'"'
+          import json, glob, time, urllib.request, urllib.error, os
+          base="http://127.0.0.1:3006"
+          token=json.load(open("/var/lib/hapi/settings.json"))["cliApiToken"]
+          jwt=json.load(urllib.request.urlopen(urllib.request.Request(
+              base+"/api/auth", data=json.dumps({"accessToken":token}).encode(),
+              headers={"Content-Type":"application/json"}, method="POST")))["token"]
+          def http(path, method="GET", body=None):
+              data=None if body is None else json.dumps(body).encode()
+              req=urllib.request.Request(base+path, data=data, headers={"Authorization":f"Bearer {jwt}","Content-Type":"application/json"}, method=method)
+              with urllib.request.urlopen(req, timeout=90) as r:
+                  raw=r.read().decode()
+                  try: return r.status, json.loads(raw)
+                  except: return r.status, raw
+          st, machines = http("/api/machines")
+          arr = machines if isinstance(machines, list) else (machines.get("machines") or [])
+          mid = arr[0]["id"]
+          st, spawn = http(f"/api/machines/{mid}/spawn", "POST", {
+              "directory": "/work", "agent": "claude", "model": "sonnet",
+              "permissionMode": "bypassPermissions", "sessionType": "simple",
+          })
+          sid = spawn.get("sessionId")
+          assert sid, spawn
+          print("spawned", sid)
+          time.sleep(2)
+          st, _ = http(f"/api/sessions/{sid}/messages", "POST", {"text": "reply with exactly: redeploy-auth-ok"})
+          assert st == 200
+          saw_login=False; saw_ok=False
+          for i in range(20):
+              time.sleep(2)
+              st, resp = http(f"/api/sessions/{sid}/messages?limit=40")
+              text = resp if isinstance(resp, str) else json.dumps(resp)
+              if "Not logged in" in text: saw_login=True
+              if "redeploy-auth-ok" in text: saw_ok=True
+              print(f"poll[{i}] login={saw_login} ok={saw_ok}")
+              if saw_login or saw_ok: break
+          # archive smoke session
+          try: http(f"/api/sessions/{sid}/archive", "POST", {})
+          except Exception: pass
+          if saw_login:
+              raise SystemExit("FAIL: fresh spawn showed Not logged in")
+          if not saw_ok:
+              raise SystemExit("FAIL: fresh spawn did not produce redeploy-auth-ok (auth may still be broken)")
+          print("OK: fresh non-resume spawn authenticated")
+          PY
+          '
       - name: Cleanup
         if: always()
         run: |

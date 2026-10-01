@@ -139,12 +139,36 @@ RestartSec=5
 WantedBy=default.target
 EOF
 
+    # Claude OAuth EnvironmentFile drop-in (same shape as fleet/oos). Leading
+    # '-' means the unit still starts before the operator mints a setup-token.
+    local token_file="${HAPI_HOME}/claude-setup-token.env"
+    mkdir -p "$unit_dir/hapi-runner.service.d" "$HAPI_HOME"
+    cat >"$unit_dir/hapi-runner.service.d/42-claude-oauth-token.conf" <<EOF
+[Service]
+EnvironmentFile=-${token_file}
+EOF
+    chmod 0644 "$unit_dir/hapi-runner.service.d/42-claude-oauth-token.conf"
+    log "Installed: $unit_dir/hapi-runner.service.d/42-claude-oauth-token.conf -> $token_file"
+
     systemctl --user daemon-reload
     loginctl enable-linger "$(id -un)" 2>/dev/null || true
     systemctl --user enable hapi-hub.service hapi-runner.service
     systemctl --user start hapi-hub.service hapi-runner.service
     log "Installed: $unit_dir/hapi-hub.service"
     log "Installed: $unit_dir/hapi-runner.service"
+    if [[ ! -f "$token_file" ]] || ! grep -q '^CLAUDE_CODE_OAUTH_TOKEN=.' "$token_file" 2>/dev/null; then
+        cat <<EOF
+
+==> Claude OAuth for runner-spawned sessions is NOT configured yet.
+    New UI sessions will print "Not logged in · Please run /login" until you:
+      claude setup-token
+      umask 077
+      printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\\n' '<token>' > '$token_file'
+      chmod 600 '$token_file'
+      systemctl --user restart hapi-runner.service
+    Existing --resume sessions can keep working and hide this gap — do not skip it.
+EOF
+    fi
 }
 
 # --- 1. Architecture detection ---
@@ -296,8 +320,7 @@ fi
 
 cat <<EOF
 
-==> Install complete. Everything is set up EXCEPT Claude Code authentication —
-    that needs a real interactive login or account token, done deliberately by hand.
+==> Install complete. Claude Code authentication is still a deliberate one-time step.
 
     IMPORTANT — open a NEW terminal (or run 'source ~/.bashrc') before the commands
     below. This script ran in its own subprocess; the PATH/nvm changes it made
@@ -306,15 +329,25 @@ cat <<EOF
     "Claude Code CLI not found on PATH" even though the install above succeeded —
     that failure mode means "wrong shell," not "broken install."
 
+    For interactive CLI use:
       claude                # interactive OAuth login (needs a browser/display)
-      claude setup-token    # headless: prints a URL, waits for a code
 
-    After that, confirm the whole thing actually works end-to-end:
+    For HAPI runner-spawned / UI sessions (required — interactive login alone is
+    not enough when the runner is a systemd service):
+      claude setup-token    # headless: prints a URL, waits for a code
+      umask 077
+      printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\\n' '<token>' > '${HAPI_HOME}/claude-setup-token.env'
+      chmod 600 '${HAPI_HOME}/claude-setup-token.env'
+      systemctl --user restart hapi-runner.service   # if you used --with-systemd
+
+    After that, confirm end-to-end:
 
       hapi --print "hello"
 
     "Claude Code CLI not found on PATH"  -> either you're still in the old shell
                                             (see above), or install genuinely didn't
                                             complete — re-check the log above
-    "Not logged in - Please run /login"  -> installed fine, just do the auth step
+    "Not logged in - Please run /login"  -> runner ambient token missing/stale —
+                                            redo the setup-token + EnvironmentFile
+                                            steps above, then restart the runner
 EOF
