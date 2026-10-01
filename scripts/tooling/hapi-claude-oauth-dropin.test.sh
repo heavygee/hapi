@@ -52,6 +52,8 @@ dropin="$XDG_CONFIG_HOME/systemd/user/hapi-runner.service.d/42-claude-oauth-toke
 check "drop-in created" "[[ -f \"$dropin\" ]]"
 check "drop-in points at token file" "grep -q \"EnvironmentFile=-$token\" \"$dropin\""
 check "instructions printed when token missing" "grep -q 'Not logged in' /tmp/hapi-claude-oauth-dropin-test.out"
+check "instructions name concrete user unit" "grep -q 'systemctl --user restart hapi-runner.service' /tmp/hapi-claude-oauth-dropin-test.out"
+check "instructions have no placeholder unit" "! grep -q '<runner-unit>' /tmp/hapi-claude-oauth-dropin-test.out"
 
 # With a real token line, no setup banner.
 printf 'CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-test\n' >"$token"
@@ -98,5 +100,23 @@ chmod 0644 "$regular"
 hapi_claude_oauth_secure_chmod_chown "$regular"
 mode="$(stat -c '%a' "$regular")"
 check "secure_chmod sets 600" "[[ \"$mode\" == \"600\" ]]"
+
+# Shell fallback must work when python3 is unavailable (pet minimal hosts).
+# HAPI_CLAUDE_OAUTH_FORCE_SHELL exercises that path without nuking PATH/coreutils.
+chmod 0644 "$regular"
+HAPI_CLAUDE_OAUTH_FORCE_SHELL=1 hapi_claude_oauth_secure_chmod_chown "$regular"
+mode="$(stat -c '%a' "$regular")"
+check "secure_chmod shell fallback sets 600" "[[ \"$mode\" == \"600\" ]]"
+set +e
+HAPI_CLAUDE_OAUTH_FORCE_SHELL=1 hapi_claude_oauth_secure_chmod_chown "$symlink_token" 2>/dev/null
+shell_symlink_rc=$?
+set -e
+check "secure_chmod shell fallback rejects symlink" "[[ $shell_symlink_rc -ne 0 ]]"
+
+# System-scope instructions use systemctl restart (not --user).
+hapi_print_claude_oauth_setup_instructions "$token" "hapi-runner.service" "system" \
+    >/tmp/hapi-claude-oauth-dropin-system-instr.out
+check "system instructions use systemctl restart" \
+    "grep -q 'systemctl restart hapi-runner.service' /tmp/hapi-claude-oauth-dropin-system-instr.out"
 
 echo "ALL OK"

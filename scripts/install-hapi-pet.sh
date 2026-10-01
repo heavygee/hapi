@@ -295,6 +295,7 @@ else
     (
         set -a
         if [[ -f "$HAPI_HOME/claude-setup-token.env" && ! -L "$HAPI_HOME/claude-setup-token.env" ]]; then
+            chmod 600 "$HAPI_HOME/claude-setup-token.env"
             # shellcheck disable=SC1090
             . "$HAPI_HOME/claude-setup-token.env"
         fi

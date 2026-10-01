@@ -38,6 +38,13 @@ hapi_claude_oauth_default_token_file() {
 
 hapi_print_claude_oauth_setup_instructions() {
     local token_file="${1:?token_file}"
+    local runner_unit="${2:-hapi-runner.service}"
+    local scope="${3:-system}"
+    local restart_cmd
+    case "$scope" in
+        user) restart_cmd="systemctl --user restart ${runner_unit}" ;;
+        *)    restart_cmd="systemctl restart ${runner_unit}" ;;
+    esac
     cat <<EOF
 
 ==> Claude OAuth for runner-spawned sessions is NOT configured yet.
@@ -52,7 +59,7 @@ hapi_print_claude_oauth_setup_instructions() {
       printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\\n' '<token>' > '$token_file'
       chmod 600 '$token_file'
     And reload the runner:
-      systemctl restart <runner-unit>     # or systemctl --user restart ...
+      $restart_cmd
 
     Drop-in already points at: $token_file
 EOF
@@ -75,12 +82,17 @@ hapi_claude_oauth_assert_safe_token_file() {
     return 0
 }
 
-# chmod 0600 (+ optional chown) via O_NOFOLLOW + fchmod/fchown so a TOCTOU
-# symlink swap between check and chmod cannot retarget a root-owned file.
+# chmod 0600 (+ optional chown) without following a symlink final component.
+# Prefer python3 O_NOFOLLOW + fchmod/fchown when available; otherwise a shell
+# inode-stable fallback so pet hosts without python3 still complete upgrades.
 hapi_claude_oauth_secure_chmod_chown() {
     local token_file="${1:?token_file}"
     local owner="${2:-}"
-    python3 - "$token_file" "$owner" <<'PY'
+
+    hapi_claude_oauth_assert_safe_token_file "$token_file" || return 1
+
+    if [[ -z "${HAPI_CLAUDE_OAUTH_FORCE_SHELL:-}" ]] && command -v python3 >/dev/null 2>&1; then
+        python3 - "$token_file" "$owner" <<'PY'
 import grp, os, pwd, stat, sys
 
 path = sys.argv[1]
@@ -120,6 +132,33 @@ finally:
     os.close(fd)
 sys.exit(0)
 PY
+        return $?
+    fi
+
+    # Shell fallback (no python3): refuse symlink, chmod/chown, then require the
+    # same device+inode and still-not-a-symlink so a mid-flight swap fails closed.
+    local before after
+    before="$(stat -c '%d:%i' "$token_file" 2>/dev/null)" || {
+        echo "ERROR: cannot stat token file: $token_file" >&2
+        return 1
+    }
+    chmod 600 "$token_file" || return 1
+    if [[ -n "$owner" ]]; then
+        chown "$owner" "$token_file" || return 1
+    fi
+    if [[ -L "$token_file" ]]; then
+        echo "ERROR: token file became a symlink during chmod/chown: $token_file" >&2
+        return 1
+    fi
+    after="$(stat -c '%d:%i' "$token_file" 2>/dev/null)" || {
+        echo "ERROR: cannot re-stat token file: $token_file" >&2
+        return 1
+    }
+    if [[ "$before" != "$after" ]]; then
+        echo "ERROR: token file inode changed during chmod/chown (possible symlink swap): $token_file" >&2
+        return 1
+    fi
+    return 0
 }
 
 # Install drop-in. Returns 0 always when drop-in written; prints instructions
@@ -197,10 +236,10 @@ EOF
             echo "Claude OAuth token file present: $token_file"
         else
             echo "WARN: $token_file exists but has no CLAUDE_CODE_OAUTH_TOKEN= line" >&2
-            hapi_print_claude_oauth_setup_instructions "$token_file"
+            hapi_print_claude_oauth_setup_instructions "$token_file" "$runner_unit" "$scope"
         fi
     else
-        hapi_print_claude_oauth_setup_instructions "$token_file"
+        hapi_print_claude_oauth_setup_instructions "$token_file" "$runner_unit" "$scope"
     fi
 
     case "$scope" in
