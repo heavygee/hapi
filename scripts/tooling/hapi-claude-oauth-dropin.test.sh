@@ -64,6 +64,8 @@ hapi_install_claude_oauth_dropin \
     --token-file "$token" >/tmp/hapi-claude-oauth-dropin-test2.out
 check "token present message" "grep -q 'token file present' /tmp/hapi-claude-oauth-dropin-test2.out"
 check "no setup banner when token present" "! grep -q 'NOT configured yet' /tmp/hapi-claude-oauth-dropin-test2.out"
+check "token present prompts runner restart" \
+    "grep -q 'systemctl --user restart hapi-runner.service' /tmp/hapi-claude-oauth-dropin-test2.out"
 
 # Symlink token file must be refused before chmod/chown (Codex P1 / antevorta threat).
 symlink_target="$TMP/symlink-target"

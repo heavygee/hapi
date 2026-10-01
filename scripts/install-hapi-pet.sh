@@ -154,6 +154,8 @@ EOF
     # path does not go through hapi_install_claude_oauth_dropin).
     if [[ -L "$token_file" ]]; then
         fail "refusing symlink token file: $token_file (write a regular 0600 file)"
+    elif [[ -e "$token_file" && ! -f "$token_file" ]]; then
+        fail "refusing non-regular token file: $token_file (write a regular 0600 file)"
     elif [[ -f "$token_file" ]]; then
         chmod 600 "$token_file"
     fi
@@ -360,12 +362,11 @@ cat <<EOF
     Then reload the runner so it picks up the token:
       # if you used --with-systemd:
       systemctl --user restart hapi-runner.service
-      # if you did NOT (nohup path): kill the runner and re-run this installer,
-      # or restart it with the env sourced:
-      kill "\$(cat ${HAPI_HOME}/runner.pid 2>/dev/null)" 2>/dev/null || pkill -u "\$USER" -f 'hapi runner' || true
+      # if you did NOT (nohup path): stop+wait+restart with the env sourced.
+      # Prefer 'hapi runner start' (stops the old runner and waits) over a raw
+      # kill + start-sync race that can leave you with no runner at all.
       set -a; . '${HAPI_HOME}/claude-setup-token.env'; set +a
-      nohup ${INSTALL_DIR}/hapi runner start-sync --workspace-root ${HAPI_WORKSPACE} \\
-        > '${HAPI_HOME}/logs/runner.log' 2>&1 & echo \$! > '${HAPI_HOME}/runner.pid'
+      ${INSTALL_DIR}/hapi runner start --workspace-root ${HAPI_WORKSPACE}
 
     After that, confirm end-to-end:
 

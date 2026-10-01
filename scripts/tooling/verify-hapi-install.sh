@@ -450,17 +450,28 @@ fi
 
 if [[ "$main_pid" != "0" && ${#auth_probe_cmd[@]} -gt 0 ]]; then
     set +e
-    auth_out="$("${auth_probe_cmd[@]}" - "$main_pid" "$token_file_has_value" "${token_file:-}" <<'PY'
+    auth_out="$("${auth_probe_cmd[@]}" - "$main_pid" "$token_file_has_value" "${token_file:-}" "${hapi_home:-}" <<'PY'
 import hashlib, os, sys
 pid = sys.argv[1]
 expect_load = sys.argv[2] == "1"
 token_file = sys.argv[3] if len(sys.argv) > 3 else ""
+expected_home = sys.argv[4] if len(sys.argv) > 4 else ""
 
 def read_oauth_from_environ(path):
     try:
         for item in open(path, "rb").read().split(b"\0"):
             if item.startswith(b"CLAUDE_CODE_OAUTH_TOKEN="):
                 return item.split(b"=", 1)[1]
+    except OSError:
+        return None
+    return None
+
+def read_env_var(path, key):
+    prefix = key.encode("utf-8") + b"="
+    try:
+        for item in open(path, "rb").read().split(b"\0"):
+            if item.startswith(prefix):
+                return item.split(b"=", 1)[1].decode("utf-8", "replace")
     except OSError:
         return None
     return None
@@ -477,12 +488,38 @@ def real_uid(p):
         return None
     return None
 
+def descendants(root):
+    children = {}
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit():
+            continue
+        p = int(entry)
+        try:
+            for line in open("/proc/%d/status" % p, "r", encoding="utf-8", errors="replace"):
+                if line.startswith("PPid:"):
+                    pp = int(line.split()[1])
+                    children.setdefault(pp, []).append(p)
+                    break
+        except OSError:
+            continue
+    out = {root}
+    stack = [root]
+    while stack:
+        cur = stack.pop()
+        for kid in children.get(cur, []):
+            if kid not in out:
+                out.add(kid)
+                stack.append(kid)
+    return out
+
 try:
     runner_tok = read_oauth_from_environ("/proc/%s/environ" % pid)
 except OSError:
     sys.exit(2)
 runner_has = runner_tok is not None
 runner_uid = real_uid(int(pid))
+runner_home = read_env_var("/proc/%s/environ" % pid, "HAPI_HOME") or expected_home
+tree = descendants(int(pid))
 
 file_tok = None
 if token_file and os.path.isfile(token_file) and not os.path.islink(token_file):
@@ -494,8 +531,9 @@ if token_file and os.path.isfile(token_file) and not os.path.islink(token_file):
     except OSError:
         file_tok = None
 
-# KillMode=process reparents surviving session wrappers to init, so ancestry
-# alone misses the antevorta orphans. Scope by the runner's real uid instead.
+# KillMode=process reparents session wrappers to init. Count same-uid hapi/claude
+# peers that share this runner's HAPI_HOME (excludes interactive claude on
+# primary-soup) OR are still in the MainPID descendant tree.
 peer_has = 0
 if runner_uid is not None:
     for entry in os.listdir("/proc"):
@@ -512,15 +550,20 @@ if runner_uid is not None:
             continue
         if comm not in ("hapi", "claude"):
             continue
+        in_tree = cpid in tree
+        peer_home = read_env_var("/proc/%d/environ" % cpid, "HAPI_HOME")
+        same_instance = bool(runner_home) and peer_home == runner_home
+        if not in_tree and not same_instance:
+            continue
         if read_oauth_from_environ("/proc/%d/environ" % cpid) is not None:
             peer_has += 1
 
 file_h = sha12(file_tok) if file_tok else "-"
 run_h = sha12(runner_tok) if runner_tok else "-"
-print("runner=%d peers=%d expect_load=%d file_sha12=%s runner_sha12=%s" % (
-    int(runner_has), peer_has, int(expect_load), file_h, run_h))
+print("runner=%d peers=%d expect_load=%d file_sha12=%s runner_sha12=%s home=%s" % (
+    int(runner_has), peer_has, int(expect_load), file_h, run_h, runner_home or "-"))
 
-# Split-brain: same-uid hapi/claude peers still carry a token, runner does not.
+# Split-brain: instance peers still carry a token, runner does not.
 if peer_has and not runner_has:
     sys.exit(1)
 # Token file claims a value but the running runner never loaded it.
@@ -537,7 +580,7 @@ PY
     if [[ "$auth_rc" -eq 0 ]]; then
         ok "runner Claude ambient token loaded ($auth_out)"
     elif [[ "$auth_rc" -eq 1 ]]; then
-        not_ok "runner missing CLAUDE_CODE_OAUTH_TOKEN while same-uid Claude/hapi peers still have it ($auth_out; new UI spawns will /login)"
+        not_ok "runner missing CLAUDE_CODE_OAUTH_TOKEN while same-instance Claude/hapi peers still have it ($auth_out; new UI spawns will /login)"
     elif [[ "$auth_rc" -eq 3 ]]; then
         not_ok "token file has CLAUDE_CODE_OAUTH_TOKEN but runner process did not load it ($auth_out; restart runner after installing drop-in)"
     elif [[ "$auth_rc" -eq 4 ]]; then
@@ -570,7 +613,7 @@ else
     not_ok "hub /health ok ($HUB_URL → rc=$health_rc $(head -c 120 <<<"$health"))"
 fi
 
-printf '\n# Claude auth: drop-in + EnvironmentFiles + /proc load + same-uid peer split-brain.\n'
+printf '\n# Claude auth: drop-in + EnvironmentFiles + /proc load + HAPI_HOME/descendant peer split-brain.\n'
 printf '# Does not call Anthropic or print token values. Missing token file on a fresh box is inconclusive.\n'
 printf '# Fleet reads use sudo -n (token file + /proc environ) like runner.state.json.\n'
 printf '# pass=%d fail=%d inconclusive=%d\n' "$PASS" "$FAIL" "$INCONCLUSIVE"

@@ -154,17 +154,19 @@ PY
 }
 
 # Best-effort chown of the token parent dir via O_DIRECTORY|O_NOFOLLOW + fchown.
-# Skips (WARN) when python3 is missing or the parent is a symlink.
+# Returns 1 when ownership cannot be applied (caller must fail closed on system
+# installs so the runner account can still write the token file).
 hapi_claude_oauth_secure_chown_parent() {
     local parent_dir="${1:?parent_dir}"
     local owner="${2:?owner}"
     if [[ -L "$parent_dir" ]]; then
-        echo "WARN: token parent dir is a symlink; skipping chown of $parent_dir" >&2
-        return 0
+        echo "ERROR: token parent dir is a symlink; refusing chown of $parent_dir" >&2
+        return 1
     fi
     if ! command -v python3 >/dev/null 2>&1; then
-        echo "WARN: python3 missing; skipping chown of token parent $parent_dir" >&2
-        return 0
+        echo "ERROR: python3 is required to securely chown token parent $parent_dir" >&2
+        echo "       Install python3, or pre-create $parent_dir owned by $owner." >&2
+        return 1
     fi
     python3 - "$parent_dir" "$owner" <<'PY'
 import grp, os, pwd, stat, sys
@@ -179,20 +181,20 @@ if hasattr(os, "O_NOFOLLOW"):
 try:
     fd = os.open(path, flags)
 except OSError as exc:
-    sys.stderr.write("WARN: cannot open token parent without following symlink: %s: %s\n" % (path, exc))
-    sys.exit(0)
+    sys.stderr.write("ERROR: cannot open token parent without following symlink: %s: %s\n" % (path, exc))
+    sys.exit(1)
 try:
     mode = os.fstat(fd).st_mode
     if not stat.S_ISDIR(mode):
-        sys.stderr.write("WARN: token parent is not a directory; skipping chown: %s\n" % path)
-        sys.exit(0)
+        sys.stderr.write("ERROR: token parent is not a directory: %s\n" % path)
+        sys.exit(1)
     user, sep, group = owner.partition(":")
     try:
         uid = pwd.getpwnam(user).pw_uid
         gid = grp.getgrnam(group).gr_gid if sep and group else pwd.getpwnam(user).pw_gid
     except KeyError as exc:
-        sys.stderr.write("WARN: unknown owner %r for parent chown: %s\n" % (owner, exc))
-        sys.exit(0)
+        sys.stderr.write("ERROR: unknown owner %r for parent chown: %s\n" % (owner, exc))
+        sys.exit(1)
     os.fchown(fd, uid, gid)
 finally:
     os.close(fd)
@@ -241,9 +243,9 @@ hapi_install_claude_oauth_dropin() {
     # Parent of the token file (may not exist yet on a fresh box).
     mkdir -p "$(dirname "$token_file")"
     if [[ -n "$owner" && "$scope" == system ]]; then
-        # Best-effort chown of the parent dir so the runner user can write the
-        # token later without root. FD-based (O_NOFOLLOW) — never path chown.
-        hapi_claude_oauth_secure_chown_parent "$(dirname "$token_file")" "$owner"
+        # Fail closed if we cannot make the parent writable by the runner user —
+        # otherwise the printed setup steps cannot create the token file.
+        hapi_claude_oauth_secure_chown_parent "$(dirname "$token_file")" "$owner" || return 1
     fi
 
     cat >"$dropin" <<EOF
@@ -268,6 +270,18 @@ EOF
         fi
         if grep -q '^CLAUDE_CODE_OAUTH_TOKEN=.' "$token_file" 2>/dev/null; then
             echo "Claude OAuth token file present: $token_file"
+            # daemon-reload alone does not reload EnvironmentFile into a live
+            # process — operator must restart the runner to pick up the token.
+            local restart_cmd
+            case "$scope" in
+                user) restart_cmd="systemctl --user restart ${runner_unit}" ;;
+                *)    restart_cmd="systemctl restart ${runner_unit}" ;;
+            esac
+            cat <<EOF
+==> If the runner is already running, reload it so new UI sessions inherit the token:
+      $restart_cmd
+    (daemon-reload alone does not update the running process environment.)
+EOF
         else
             echo "WARN: $token_file exists but has no CLAUDE_CODE_OAUTH_TOKEN= line" >&2
             hapi_print_claude_oauth_setup_instructions "$token_file" "$runner_unit" "$scope"
