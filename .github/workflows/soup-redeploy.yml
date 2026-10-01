@@ -310,7 +310,7 @@ jobs:
                   try: return r.status, json.loads(raw)
                   except: return r.status, raw
           def agent_blob(resp):
-              """Flatten agent-role message content (role lives on content, not top-level)."""
+              """Flatten real assistant output; skip Claude user-echo envelopes."""
               if not isinstance(resp, dict):
                   return str(resp)
               parts=[]
@@ -318,14 +318,22 @@ jobs:
                   if not isinstance(m, dict):
                       continue
                   content = m.get("content")
-                  role = None
-                  if isinstance(content, dict):
-                      role = content.get("role")
-                      inner = content.get("message")
-                      if role is None and isinstance(inner, dict):
-                          role = inner.get("role")
+                  if not isinstance(content, dict):
+                      continue
+                  # DecryptedMessage.content is usually {role, content: ...}
+                  role = content.get("role")
+                  body = content.get("content")
+                  if role is None and isinstance(content.get("message"), dict):
+                      role = content["message"].get("role")
+                      body = content["message"].get("content", body)
                   if role not in ("agent", "assistant"):
                       continue
+                  # Claude stream-json: user prompts are re-emitted as
+                  # role=agent / type=output / data.type=user — ignore those.
+                  if isinstance(body, dict) and body.get("type") == "output":
+                      data = body.get("data")
+                      if isinstance(data, dict) and data.get("type") != "assistant":
+                          continue
                   parts.append(json.dumps(content, default=str))
               return "\n".join(parts)
           st, machines = http("/api/machines")

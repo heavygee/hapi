@@ -339,6 +339,9 @@ if ! command -v claude >/dev/null 2>&1; then
     rm -f /tmp/hapi-pet-npm-err.log
 fi
 
+q_token_file="$(printf '%q' "${HAPI_HOME}/claude-setup-token.env")"
+q_hapi_bin="$(printf '%q' "${INSTALL_DIR}/hapi")"
+q_workspace="$(printf '%q' "${HAPI_WORKSPACE}")"
 cat <<EOF
 
 ==> Install complete. Claude Code authentication is still a deliberate one-time step.
@@ -357,16 +360,16 @@ cat <<EOF
     not enough for the runner process):
       claude setup-token    # headless: prints a URL, waits for a code
       umask 077
-      printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\\n' '<token>' > '${HAPI_HOME}/claude-setup-token.env'
-      chmod 600 '${HAPI_HOME}/claude-setup-token.env'
+      printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\\n' '<token>' > ${q_token_file}
+      chmod 600 ${q_token_file}
     Then reload the runner so it picks up the token:
       # if you used --with-systemd:
       systemctl --user restart hapi-runner.service
       # if you did NOT (nohup path): stop+wait+restart with the env sourced.
       # Prefer 'hapi runner start' (stops the old runner and waits) over a raw
       # kill + start-sync race that can leave you with no runner at all.
-      set -a; . '${HAPI_HOME}/claude-setup-token.env'; set +a
-      ${INSTALL_DIR}/hapi runner start --workspace-root ${HAPI_WORKSPACE}
+      set -a; . ${q_token_file}; set +a
+      ${q_hapi_bin} runner start --workspace-root ${q_workspace}
 
     After that, confirm end-to-end:
 

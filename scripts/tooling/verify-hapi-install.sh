@@ -461,7 +461,9 @@ def read_oauth_from_environ(path):
     try:
         for item in open(path, "rb").read().split(b"\0"):
             if item.startswith(b"CLAUDE_CODE_OAUTH_TOKEN="):
-                return item.split(b"=", 1)[1]
+                val = item.split(b"=", 1)[1]
+                # Empty CLAUDE_CODE_OAUTH_TOKEN= is not a loaded ambient login.
+                return val if val else None
     except OSError:
         return None
     return None
@@ -516,7 +518,7 @@ try:
     runner_tok = read_oauth_from_environ("/proc/%s/environ" % pid)
 except OSError:
     sys.exit(2)
-runner_has = runner_tok is not None
+runner_has = bool(runner_tok)
 runner_uid = real_uid(int(pid))
 runner_home = read_env_var("/proc/%s/environ" % pid, "HAPI_HOME") or expected_home
 tree = descendants(int(pid))
