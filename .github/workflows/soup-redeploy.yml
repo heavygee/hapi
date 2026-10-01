@@ -120,13 +120,20 @@ jobs:
       - name: Build a throwaway systemd-capable test image
         run: |
           set -euo pipefail
-          cat > /tmp/hapi-fleet-test.Dockerfile <<'EOF'
+          # Dedicated, empty build context - NOT /tmp. This is a shared,
+          # busy host; /tmp as build context tries to package the whole
+          # directory (other processes' sockets etc.) and fails with
+          # "no permission to read from '/tmp/dotnet-diagnostic-...-socket'"
+          # (confirmed live, 2026-10-01).
+          CTX="$(mktemp -d)"
+          trap 'rm -rf "$CTX"' EXIT
+          cat > "$CTX/Dockerfile" <<'EOF'
           FROM debian:trixie
           RUN apt-get update -qq && apt-get install -y -qq \
               systemd systemd-sysv curl ca-certificates sudo procps \
               && rm -rf /var/lib/apt/lists/*
           EOF
-          docker build -f /tmp/hapi-fleet-test.Dockerfile -t hapi-fleet-test:ci /tmp
+          docker build -t hapi-fleet-test:ci "$CTX"
       - name: Boot it with systemd as init
         run: |
           set -euo pipefail
