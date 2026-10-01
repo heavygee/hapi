@@ -43,7 +43,12 @@ jobs:
     runs-on: [self-hosted, hapi]
     timeout-minutes: 15
     steps:
+      # fetch-depth: 0 (full history), not the default shallow clone -
+      # verify-hapi-install.test.sh git-archives a specific historical commit
+      # to replay the pre-#183 bug and confirm the test harness detects it.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Run every scripts/**/*.test.sh
         run: |
           set -euo pipefail
