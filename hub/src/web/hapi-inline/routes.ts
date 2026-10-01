@@ -120,8 +120,13 @@ function maybeRewriteUpstreamAuthFailure(hubRes: Response, body: ArrayBuffer): R
 }
 
 function publicConfigBody(config: HapiInlineHostConfig) {
+    // #189: publish privilege explicitly. After LEGACY_EXECUTE_UNTIL (2026-09-30),
+    // dock resolveDockPrivilege({ enabled: true }) with no privilege → off (dark H).
+    // Do not use HAPI_INLINE_PRIVILEGE / privilegeFromEnv — that stand-in also sunsets.
+    // This hub is the execute host: gate secret + /hapi proxy is the execute lock.
     const hapiInline = {
         enabled: true,
+        privilege: 'execute' as const,
         appId: config.appId,
         mode: 'proxy' as const,
         hapiProxy: '/hapi',

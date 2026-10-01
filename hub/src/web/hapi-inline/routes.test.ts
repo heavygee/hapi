@@ -47,6 +47,7 @@ describe('hapi-inline host routes', () => {
         expect(res.status).toBe(200)
         const body = await res.json() as { hapiInline: Record<string, unknown> }
         expect(body.hapiInline.enabled).toBe(true)
+        expect(body.hapiInline.privilege).toBe('execute')
         expect(body.hapiInline.mode).toBe('proxy')
         expect(body.hapiInline.hapiProxy).toBe('/hapi')
         expect(body.hapiInline.projectPath).toBe(PROJECT)
@@ -56,6 +57,7 @@ describe('hapi-inline host routes', () => {
         expect(body.hapiInline.sttUrl).toBe('/api/stt')
         expect(body.hapiInline.sttAuth).toBe('hub-jwt')
         expect(JSON.stringify(body)).not.toContain(SECRET)
+        expect(JSON.stringify(body)).not.toContain('privilegeFromEnv')
     })
 
     it('exposes overridden spawnAgent/spawnYolo on public config', async () => {
