@@ -75,6 +75,53 @@ hapi_claude_oauth_assert_safe_token_file() {
     return 0
 }
 
+# chmod 0600 (+ optional chown) via O_NOFOLLOW + fchmod/fchown so a TOCTOU
+# symlink swap between check and chmod cannot retarget a root-owned file.
+hapi_claude_oauth_secure_chmod_chown() {
+    local token_file="${1:?token_file}"
+    local owner="${2:-}"
+    python3 - "$token_file" "$owner" <<'PY'
+import grp, os, pwd, stat, sys
+
+path = sys.argv[1]
+owner = sys.argv[2] if len(sys.argv) > 2 else ""
+
+flags = os.O_RDONLY
+if hasattr(os, "O_NOFOLLOW"):
+    flags |= os.O_NOFOLLOW
+
+try:
+    fd = os.open(path, flags)
+except OSError as exc:
+    sys.stderr.write(
+        "ERROR: cannot open token file without following symlink: %s: %s\n" % (path, exc)
+    )
+    sys.exit(1)
+
+try:
+    mode = os.fstat(fd).st_mode
+    if not stat.S_ISREG(mode):
+        sys.stderr.write("ERROR: refusing non-regular token file: %s\n" % path)
+        sys.exit(1)
+    os.fchmod(fd, 0o600)
+    if owner:
+        user, sep, group = owner.partition(":")
+        try:
+            uid = pwd.getpwnam(user).pw_uid
+            if sep and group:
+                gid = grp.getgrnam(group).gr_gid
+            else:
+                gid = pwd.getpwnam(user).pw_gid
+        except KeyError as exc:
+            sys.stderr.write("ERROR: unknown owner %r: %s\n" % (owner, exc))
+            sys.exit(1)
+        os.fchown(fd, uid, gid)
+finally:
+    os.close(fd)
+sys.exit(0)
+PY
+}
+
 # Install drop-in. Returns 0 always when drop-in written; prints instructions
 # (and returns 0) when the token file is absent — absence is expected on a
 # stranger pet install until the operator mints a token.
@@ -138,10 +185,13 @@ EOF
     echo "Installed: $dropin -> EnvironmentFile=-$token_file"
 
     if [[ -e "$token_file" || -L "$token_file" ]]; then
+        # Fast-path clear error for an obvious symlink; the secure helper also
+        # refuses via O_NOFOLLOW so a TOCTOU swap cannot retarget chmod/chown.
         hapi_claude_oauth_assert_safe_token_file "$token_file" || return 1
-        chmod 600 "$token_file"
         if [[ -n "$owner" && "$scope" == system ]]; then
-            chown "$owner" "$token_file"
+            hapi_claude_oauth_secure_chmod_chown "$token_file" "$owner" || return 1
+        else
+            hapi_claude_oauth_secure_chmod_chown "$token_file" || return 1
         fi
         if grep -q '^CLAUDE_CODE_OAUTH_TOKEN=.' "$token_file" 2>/dev/null; then
             echo "Claude OAuth token file present: $token_file"

@@ -150,6 +150,14 @@ EOF
     chmod 0644 "$unit_dir/hapi-runner.service.d/42-claude-oauth-token.conf"
     log "Installed: $unit_dir/hapi-runner.service.d/42-claude-oauth-token.conf -> $token_file"
 
+    # Tighten an existing token even when the setup banner is skipped (curl/embedded
+    # path does not go through hapi_install_claude_oauth_dropin).
+    if [[ -L "$token_file" ]]; then
+        fail "refusing symlink token file: $token_file (write a regular 0600 file)"
+    elif [[ -f "$token_file" ]]; then
+        chmod 600 "$token_file"
+    fi
+
     systemctl --user daemon-reload
     loginctl enable-linger "$(id -un)" 2>/dev/null || true
     systemctl --user enable hapi-hub.service hapi-runner.service

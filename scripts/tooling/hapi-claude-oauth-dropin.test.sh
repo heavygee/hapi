@@ -88,4 +88,15 @@ regular="$TMP/regular.env"
 printf 'CLAUDE_CODE_OAUTH_TOKEN=x\n' >"$regular"
 check "assert_safe accepts regular file" "hapi_claude_oauth_assert_safe_token_file \"$regular\""
 
+# Secure chmod/chown must refuse symlink via O_NOFOLLOW (not check-then-use).
+set +e
+hapi_claude_oauth_secure_chmod_chown "$symlink_token" 2>/tmp/hapi-claude-oauth-secure-symlink.err
+secure_rc=$?
+set -e
+check "secure_chmod rejects symlink" "[[ $secure_rc -ne 0 ]]"
+chmod 0644 "$regular"
+hapi_claude_oauth_secure_chmod_chown "$regular"
+mode="$(stat -c '%a' "$regular")"
+check "secure_chmod sets 600" "[[ \"$mode\" == \"600\" ]]"
+
 echo "ALL OK"

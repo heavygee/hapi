@@ -272,12 +272,16 @@ jobs:
           # container script (bash -c '...' nesting previously terminated the host string).
           docker exec -i -e CLAUDE_CODE_OAUTH_TOKEN hapi-fleet-ci bash <<'EOS'
           set -euo pipefail
-          # Runner PATH includes $HAPI_HOME/.local/bin (hapi_systemd_default_path).
-          # Native Claude install puts the binary there for the service user.
-          if ! runuser -u hapi -- bash -c 'command -v claude >/dev/null'; then
+          # Native Claude install lands in $HOME/.local/bin; runuser -u is not a
+          # login shell so inherit an explicit PATH that includes it.
+          HAPI_CLAUDE_PATH="/var/lib/hapi/.local/bin:/usr/local/bin:/usr/bin:/bin"
+          if ! runuser -u hapi -- env HOME=/var/lib/hapi PATH="$HAPI_CLAUDE_PATH" \
+              bash -c 'command -v claude >/dev/null'; then
             echo "=== installing Claude Code CLI for hapi service user ==="
-            runuser -u hapi -- bash -c 'curl -fsSL https://claude.ai/install.sh | bash'
-            runuser -u hapi -- bash -c 'command -v claude && claude --version'
+            runuser -u hapi -- env HOME=/var/lib/hapi PATH="$HAPI_CLAUDE_PATH" \
+              bash -c 'curl -fsSL https://claude.ai/install.sh | bash'
+            runuser -u hapi -- env HOME=/var/lib/hapi PATH="$HAPI_CLAUDE_PATH" \
+              bash -c 'command -v claude && claude --version'
           fi
           TOKEN_FILE=/var/lib/hapi/claude-setup-token.env
           if grep -q "\.hapi/claude-setup-token\.env" /etc/systemd/system/hapi-runner.service.d/42-claude-oauth-token.conf; then
@@ -306,16 +310,23 @@ jobs:
                   try: return r.status, json.loads(raw)
                   except: return r.status, raw
           def agent_blob(resp):
-              """Flatten only agent-role message content (ignore echoed user prompts)."""
+              """Flatten agent-role message content (role lives on content, not top-level)."""
               if not isinstance(resp, dict):
                   return str(resp)
               parts=[]
               for m in resp.get("messages") or []:
                   if not isinstance(m, dict):
                       continue
-                  if m.get("role") not in ("agent", "assistant"):
+                  content = m.get("content")
+                  role = None
+                  if isinstance(content, dict):
+                      role = content.get("role")
+                      inner = content.get("message")
+                      if role is None and isinstance(inner, dict):
+                          role = inner.get("role")
+                  if role not in ("agent", "assistant"):
                       continue
-                  parts.append(json.dumps(m.get("content"), default=str))
+                  parts.append(json.dumps(content, default=str))
               return "\n".join(parts)
           st, machines = http("/api/machines")
           arr = machines if isinstance(machines, list) else (machines.get("machines") or [])

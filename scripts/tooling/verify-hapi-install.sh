@@ -431,18 +431,18 @@ def read_oauth_from_environ(path):
         return None
     return None
 
-def sha12(raw: bytes) -> str:
+def sha12(raw):
     return hashlib.sha256(raw).hexdigest()[:12]
 
-def descendants(root: int) -> set[int]:
+def descendants(root):
     """PIDs whose ancestry reaches root (inclusive), via /proc/*/status PPid."""
-    children: dict[int, list[int]] = {}
+    children = {}
     for entry in os.listdir("/proc"):
         if not entry.isdigit():
             continue
         p = int(entry)
         try:
-            for line in open(f"/proc/{p}/status", "r", encoding="utf-8", errors="replace"):
+            for line in open("/proc/%d/status" % p, "r", encoding="utf-8", errors="replace"):
                 if line.startswith("PPid:"):
                     pp = int(line.split()[1])
                     children.setdefault(pp, []).append(p)
