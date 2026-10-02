@@ -371,6 +371,10 @@ check "toggle validates credentials JSON before mutation" \
     "grep -q 'invalid JSON in slot credentials' \"$ROOT/scripts/tooling/hapi-claude-account-toggle.sh\""
 check "toggle rolls back canon on credentials failure" \
     "grep -q 'hapi_claude_oauth_rollback_canon_from_bak' \"$ROOT/scripts/tooling/hapi-claude-account-toggle.sh\""
+check "toggle removes newly created canon on rollback" \
+    "grep -q 'secure_unlink_regular_file' \"$ROOT/scripts/tooling/hapi-claude-account-toggle.sh\""
+check "toggle tracks canon_existed_before" \
+    "grep -q 'canon_existed_before=0' \"$ROOT/scripts/tooling/hapi-claude-account-toggle.sh\""
 # Invocation-only: the wrong helper name must not appear as a call site.
 check "retired remigrate uses hapi_install_claude_oauth_dropin" \
     "grep -n 'hapi_install_claude_oauth_dropin' \"$ROOT/scripts/tooling/hapi-claude-oauth-dropin.test.sh\" | grep -q remigrate"
@@ -388,6 +392,23 @@ check "drop-in install returns on write failure" \
     "grep -q 'failed to write temporary drop-in' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\""
 check "drop-in install returns on install failure" \
     "grep -q 'failed to install drop-in' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\""
+
+# Secure unlink (new-canon rollback path).
+unlink_target="$TMP/unlink-me.env"
+printf 'CLAUDE_CODE_OAUTH_TOKEN=bye\n' >"$unlink_target"
+chmod 600 "$unlink_target"
+hapi_claude_oauth_secure_unlink_regular_file "$unlink_target"
+check "secure_unlink removes regular file" "[[ ! -e \"$unlink_target\" ]]"
+unlink_sym="$TMP/unlink-sym.env"
+printf 'CLAUDE_CODE_OAUTH_TOKEN=keep\n' >"$TMP/unlink-real.env"
+ln -s "$TMP/unlink-real.env" "$unlink_sym"
+set +e
+hapi_claude_oauth_secure_unlink_regular_file "$unlink_sym" \
+    >/tmp/hapi-claude-oauth-unlink-sym.out 2>/tmp/hapi-claude-oauth-unlink-sym.err
+unlink_sym_rc=$?
+set -e
+check "secure_unlink refuses symlink" "[[ $unlink_sym_rc -ne 0 ]]"
+check "secure_unlink leaves symlink target" "grep -qx 'CLAUDE_CODE_OAUTH_TOKEN=keep' \"$TMP/unlink-real.env\""
 
 # Drop-in write failure must surface even when caller uses set +e (installer pattern).
 ro_home="$TMP/ro-dropin-home"

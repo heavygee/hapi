@@ -210,6 +210,96 @@ PY
     echo "Retired legacy Claude OAuth token: $src -> $dest"
 }
 
+# Unlink a regular file without following a final-component symlink.
+# Used to roll back a newly created canonical token when no backup exists.
+hapi_claude_oauth_secure_unlink_regular_file() {
+    local path="${1:?path}"
+    if [[ -L "$path" ]]; then
+        echo "ERROR: refusing to unlink symlink token: $path" >&2
+        return 1
+    fi
+    if [[ ! -e "$path" ]]; then
+        return 0
+    fi
+    if [[ ! -f "$path" ]]; then
+        echo "ERROR: refusing to unlink non-regular token: $path" >&2
+        return 1
+    fi
+    python3 - "$path" <<'PY'
+import os, stat, sys
+path = sys.argv[1]
+flags = 0
+if hasattr(os, "O_PATH"):
+    flags |= os.O_PATH
+elif hasattr(os, "O_RDONLY"):
+    flags |= os.O_RDONLY
+if hasattr(os, "O_NOFOLLOW"):
+    flags |= os.O_NOFOLLOW
+try:
+    fd = os.open(path, flags)
+except OSError as exc:
+    sys.stderr.write("ERROR: cannot open token to unlink: %s: %s\n" % (path, exc))
+    sys.exit(1)
+try:
+    mode = os.fstat(fd).st_mode
+    if not stat.S_ISREG(mode):
+        sys.stderr.write("ERROR: refusing non-regular token unlink: %s\n" % path)
+        sys.exit(1)
+finally:
+    os.close(fd)
+try:
+    os.unlink(path)
+except OSError as exc:
+    sys.stderr.write("ERROR: cannot unlink token %s: %s\n" % (path, exc))
+    sys.exit(1)
+sys.exit(0)
+PY
+}
+
+# Privileged unlink: absolute python3 + sanitized env (same constraints as install).
+hapi_claude_oauth_secure_unlink_regular_file_via_sudo() {
+    local path="${1:?path}"
+    local py
+    py="$(hapi_claude_oauth_absolute_python3)" || {
+        echo "ERROR: absolute python3 required for privileged token unlink" >&2
+        return 1
+    }
+    sudo /usr/bin/env -i PATH=/usr/bin:/bin LC_ALL=C "$py" - "$path" <<'PY'
+import os, stat, sys
+path = sys.argv[1]
+if os.path.islink(path):
+    sys.stderr.write("ERROR: refusing to unlink symlink token: %s\n" % path)
+    sys.exit(1)
+if not os.path.exists(path):
+    sys.exit(0)
+flags = 0
+if hasattr(os, "O_PATH"):
+    flags |= os.O_PATH
+elif hasattr(os, "O_RDONLY"):
+    flags |= os.O_RDONLY
+if hasattr(os, "O_NOFOLLOW"):
+    flags |= os.O_NOFOLLOW
+try:
+    fd = os.open(path, flags)
+except OSError as exc:
+    sys.stderr.write("ERROR: cannot open token to unlink: %s: %s\n" % (path, exc))
+    sys.exit(1)
+try:
+    mode = os.fstat(fd).st_mode
+    if not stat.S_ISREG(mode):
+        sys.stderr.write("ERROR: refusing non-regular token unlink: %s\n" % path)
+        sys.exit(1)
+finally:
+    os.close(fd)
+try:
+    os.unlink(path)
+except OSError as exc:
+    sys.stderr.write("ERROR: cannot unlink token %s: %s\n" % (path, exc))
+    sys.exit(1)
+sys.exit(0)
+PY
+}
+
 # Emit src bytes to stdout (O_NOFOLLOW). Used so privileged writers consume an
 # already-opened pipe instead of reopening a mutable pathname as root.
 hapi_claude_oauth_cat_regular_file() {

@@ -89,7 +89,9 @@ done
 # cp into a user-controlled path (symlink TOCTOU). Root only reads CANON via
 # O_NOFOLLOW; the operator process creates the backup with O_EXCL|O_NOFOLLOW.
 bak="$ROOT/auth-bak/claude-setup-token.env.bak-toggle-$TS"
+canon_existed_before=0
 if [[ -e "$CANON" || -L "$CANON" ]]; then
+    canon_existed_before=1
     if [[ -r "$CANON" && ! -L "$CANON" ]]; then
         hapi_claude_oauth_secure_copy_regular_file "$CANON" "$bak"
     else
@@ -149,9 +151,10 @@ fi
 
 # Restore CANON from pre-toggle backup if interactive credentials cannot be
 # committed (avoids runner/interactive account split after canonical-first write).
+# If CANON was newly created this run (no prior file / no backup), unlink it.
 hapi_claude_oauth_rollback_canon_from_bak() {
     local why="${1:-credentials update failed}"
-    echo "ERROR: $why — rolling back canonical token at $CANON" >&2
+    echo "ERROR: $why - rolling back canonical token at $CANON" >&2
     if [[ -f "$bak" && ! -L "$bak" ]]; then
         if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
             hapi_claude_oauth_secure_copy_regular_file "$bak" "$CANON" || {
@@ -168,7 +171,22 @@ hapi_claude_oauth_rollback_canon_from_bak() {
         echo "Restored canonical token from $bak"
         return 0
     fi
-    echo "WARN: no prior canonical backup at $bak — cannot roll back $CANON" >&2
+    if [[ "$canon_existed_before" -eq 0 ]]; then
+        if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+            hapi_claude_oauth_secure_unlink_regular_file "$CANON" || {
+                echo "ERROR: failed to remove newly created $CANON" >&2
+                return 1
+            }
+        else
+            hapi_claude_oauth_secure_unlink_regular_file_via_sudo "$CANON" || {
+                echo "ERROR: failed to remove newly created $CANON (sudo)" >&2
+                return 1
+            }
+        fi
+        echo "Removed newly created canonical token $CANON (no prior backup)"
+        return 0
+    fi
+    echo "WARN: no prior canonical backup at $bak and CANON existed before toggle - cannot safely roll back $CANON" >&2
     return 1
 }
 
