@@ -526,6 +526,47 @@ runner_uid = real_uid(int(pid))
 runner_home = read_env_var("/proc/%s/environ" % pid, "HAPI_HOME") or expected_home
 tree = descendants(int(pid))
 
+def parse_env_file_value(raw):
+    # Mirror systemd EnvironmentFile quoting (systemd.exec(5) / env-file.c):
+    # strip outer whitespace, then unquote '...' / "..." so file_tok matches
+    # what lands in the process environ (quotes are not part of the value).
+    if raw is None:
+        return None
+    val = raw.strip()
+    if not val:
+        return None
+    if len(val) >= 2 and val[0:1] == val[-1:] == b"'":
+        return val[1:-1] or None
+    if len(val) >= 2 and val[0:1] == val[-1:] == b'"':
+        inner = val[1:-1]
+        out = bytearray()
+        i = 0
+        while i < len(inner):
+            if inner[i:i+1] == b"\\" and i + 1 < len(inner):
+                nxt = inner[i+1:i+2]
+                if nxt in (b"\\", b'"', b"`", b"$"):
+                    out.extend(nxt)
+                else:
+                    out.extend(b"\\")
+                    out.extend(nxt)
+                i += 2
+                continue
+            out.extend(inner[i:i+1])
+            i += 1
+        return bytes(out) or None
+    # Unquoted: leading/trailing whitespace already stripped; keep interior.
+    # Minimal \\ escape so "\\n" stays two chars unless we see \\X keep X.
+    out = bytearray()
+    i = 0
+    while i < len(val):
+        if val[i:i+1] == b"\\" and i + 1 < len(val):
+            out.extend(val[i+1:i+2])
+            i += 2
+            continue
+        out.extend(val[i:i+1])
+        i += 1
+    return bytes(out) or None
+
 file_tok = None
 file_key_seen = False
 if token_file and os.path.isfile(token_file) and not os.path.islink(token_file):
@@ -533,10 +574,9 @@ if token_file and os.path.isfile(token_file) and not os.path.islink(token_file):
         for line in open(token_file, "rb"):
             if line.startswith(b"CLAUDE_CODE_OAUTH_TOKEN="):
                 file_key_seen = True
-                # Same nonempty rule as the shell probe: strip CR/LF/space so
-                # CLAUDE_CODE_OAUTH_TOKEN=\r\n is missing, not a value.
-                raw = line.split(b"=", 1)[1].strip()
-                file_tok = raw if raw else None
+                # Same nonempty rule as the shell probe after systemd unquote:
+                # CLAUDE_CODE_OAUTH_TOKEN=\r\n / "" / '' are missing, not a value.
+                file_tok = parse_env_file_value(line.split(b"=", 1)[1])
                 break
     except OSError:
         file_tok = None

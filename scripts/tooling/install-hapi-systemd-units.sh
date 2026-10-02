@@ -308,7 +308,13 @@ case "$PROFILE" in
         if [[ "$DO_ENABLE" -eq 1 ]]; then
             loginctl enable-linger "$(id -un)" 2>/dev/null || true
             systemctl --user enable hapi-hub.service hapi-runner.service
-            systemctl --user start hapi-hub.service hapi-runner.service
+            systemctl --user start hapi-hub.service
+            # Same race as the embedded pet path: pgrep kill + Restart=always can
+            # leave an already-active pre-drop-in runner; start is then a no-op.
+            systemctl --user restart hapi-runner.service
+        elif systemctl --user is-active --quiet hapi-runner.service 2>/dev/null; then
+            # Drop-in/token rotate without --enable: still reload ambient env.
+            systemctl --user restart hapi-runner.service
         fi
         ;;
 esac
