@@ -770,6 +770,10 @@ layers:
   # Worktree: ~/coding/hapi/worktrees/cursor-spawn-mailbox-worktree
   - branch: fix/cursor-spawn-auto-worktree
 
+  # Steer + CLI help for search_content discoverability (#197 / PR #198)
+  # Worktree: ~/coding/hapi/worktrees/search-content-mcp-steer
+  - branch: fix/search-content-mcp-steer
+
   # DROPPED 2026-08-17 with #1473: fix/peer-cap-inject-early-connect was estate
   # upload-blindness soup for the fortress path (inject on a2a-p05 stack).
   # Was: tip 4ff262ba6 @ ~/coding/hapi/worktrees/peer-cap-inject-early-connect
