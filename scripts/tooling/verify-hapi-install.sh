@@ -461,13 +461,16 @@ if [[ -n "$token_file" ]]; then
     fi
     # Parent dir must stay root-owned + not group/other-writable; otherwise the
     # service account can unlink/replace a root:root 0600 token after verify.
+    # Capture helper stderr in-memory (or a private mktemp dir) — never fixed
+    # /tmp paths that root could truncate through a planted symlink.
     if [[ "$SCOPE" == system ]]; then
         token_parent="$(dirname "$token_file")"
         if [[ -d "$token_parent" || -L "$token_parent" ]]; then
-            if hapi_claude_oauth_assert_root_controlled_parent "$token_parent" >/tmp/hapi-verify-oauth-parent.out 2>/tmp/hapi-verify-oauth-parent.err; then
+            parent_err=""
+            if parent_err="$(hapi_claude_oauth_assert_root_controlled_parent "$token_parent" 2>&1)"; then
                 ok "Claude OAuth token parent is root-controlled ($token_parent)"
             else
-                not_ok "Claude OAuth token parent must be root-owned and not group/other-writable ($token_parent; $(head -c 200 /tmp/hapi-verify-oauth-parent.err 2>/dev/null || true))"
+                not_ok "Claude OAuth token parent must be root-owned and not group/other-writable ($token_parent; ${parent_err:0:200})"
             fi
         fi
     fi

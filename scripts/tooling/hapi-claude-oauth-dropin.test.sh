@@ -389,6 +389,41 @@ check "pet does not source oauth env file" \
     "! grep -E '\\. \\\"\\\$HAPI_HOME/claude-setup-token|set -a; \\. ' \"$ROOT/scripts/install-hapi-pet.sh\""
 check "pet exports oauth via parser helper" \
     "grep -q 'hapi_pet_export_oauth_from_env_file' \"$ROOT/scripts/install-hapi-pet.sh\""
+check "pet embedded path migrates legacy oauth before drop-in" \
+    "grep -q 'hapi_pet_migrate_legacy_oauth_if_needed' \"$ROOT/scripts/install-hapi-pet.sh\""
+check "verify parent check does not use fixed /tmp paths" \
+    "! grep -E '/tmp/hapi-verify-oauth-parent\\.(out|err)' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
+
+# Embedded pet migrate (curl|bash shape — no drop-in helpers).
+pet_home="$TMP/pet-migrate-home"
+mkdir -p "$pet_home/.hapi"
+printf 'CLAUDE_CODE_OAUTH_TOKEN=pet-legacy\n' >"$pet_home/.hapi/claude-setup-token.env"
+chmod 600 "$pet_home/.hapi/claude-setup-token.env"
+pet_frag="$TMP/pet-migrate-frag.sh"
+{
+    cat <<'FRAG'
+set -euo pipefail
+fail() { printf 'ERROR: %s\n' "$1" >&2; exit 1; }
+log() { printf '==> %s\n' "$1"; }
+FRAG
+    # Extract helpers without executing the install body that follows them.
+    awk '
+      /^hapi_pet_export_oauth_from_env_file\(\)/ {keep=1}
+      /^hapi_pet_migrate_legacy_oauth_if_needed\(\)/ {keep=1}
+      /^install_user_pet_systemd\(\)/ {keep=0}
+      keep {print}
+    ' "$ROOT/scripts/install-hapi-pet.sh"
+    printf 'hapi_pet_migrate_legacy_oauth_if_needed %q\n' "$pet_home/claude-setup-token.env"
+} >"$pet_frag"
+bash "$pet_frag" >"$TMP/pet-migrate-test.out" 2>"$TMP/pet-migrate-test.err"
+check "pet migrate copies legacy to canonical" \
+    "grep -q 'CLAUDE_CODE_OAUTH_TOKEN=pet-legacy' \"$pet_home/claude-setup-token.env\""
+check "pet migrate retires legacy source" \
+    "[[ ! -e \"$pet_home/.hapi/claude-setup-token.env\" ]]"
+check "pet migrate archives retired legacy" \
+    "ls \"$pet_home/.hapi/claude-setup-token.env.migrated.\"* >/dev/null 2>&1"
+check "pet migrate logs Migrated" \
+    "grep -q 'Migrated Claude OAuth token' \"$TMP/pet-migrate-test.out\""
 check "systemd install blocks ambient-only restart" \
     "grep -q 'ambient CLAUDE_CODE_OAUTH_TOKEN' \"$ROOT/scripts/tooling/install-hapi-systemd-units.sh\""
 check "retire function returns 1 on python failure" \

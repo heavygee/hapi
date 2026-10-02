@@ -118,6 +118,68 @@ hapi_pet_export_oauth_from_env_file() {
     return 0
 }
 
+# Migrate ${HAPI_HOME}/.hapi/claude-setup-token.env → canonical before the
+# embedded drop-in points EnvironmentFile at the (otherwise missing) canon.
+# Companion path uses hapi_install_claude_oauth_dropin; curl|bash must do this
+# itself or upgrades wipe ambient auth on the next runner restart.
+hapi_pet_migrate_legacy_oauth_if_needed() {
+    local token_file="${1:?token_file}"
+    local hapi_home legacy_token dest tmp
+    hapi_home="$(dirname "$token_file")"
+    legacy_token="${hapi_home}/.hapi/claude-setup-token.env"
+
+    # Subshell: export helper must not pollute the installer environment.
+    if ( hapi_pet_export_oauth_from_env_file "$token_file" >/dev/null 2>&1 ); then
+        return 0
+    fi
+    [[ -e "$legacy_token" || -L "$legacy_token" ]] || return 0
+
+    if [[ -L "$legacy_token" ]]; then
+        fail "refusing symlink legacy token: $legacy_token (write a regular 0600 file)"
+    fi
+    if [[ ! -f "$legacy_token" ]]; then
+        fail "refusing non-regular legacy token: $legacy_token (write a regular 0600 file)"
+    fi
+
+    if declare -F hapi_claude_oauth_secure_copy_regular_file >/dev/null 2>&1; then
+        hapi_claude_oauth_secure_copy_regular_file "$legacy_token" "$token_file" \
+            || fail "could not migrate legacy Claude OAuth token: $legacy_token -> $token_file"
+        log "Migrated Claude OAuth token: $legacy_token -> $token_file"
+        if declare -F hapi_claude_oauth_retire_legacy_token_source >/dev/null 2>&1; then
+            hapi_claude_oauth_retire_legacy_token_source "$legacy_token" \
+                || fail "migrated but could not retire legacy source: $legacy_token"
+        fi
+        return 0
+    fi
+
+    # curl|bash (no checkout helpers): bash copy under $HAPI_HOME only — never /etc.
+    /bin/mkdir -p "$hapi_home" || fail "mkdir $hapi_home failed during legacy OAuth migrate"
+    if [[ -L "$token_file" ]]; then
+        fail "refusing to overwrite symlink canonical token: $token_file"
+    fi
+    tmp="$(/usr/bin/mktemp "${hapi_home}/.claude-oauth-copy.XXXXXX")" \
+        || fail "mktemp failed during legacy OAuth migrate"
+    if ! /bin/cp -f -- "$legacy_token" "$tmp"; then
+        /bin/rm -f -- "$tmp"
+        fail "could not copy legacy Claude OAuth token: $legacy_token"
+    fi
+    if [[ -L "$tmp" ]]; then
+        /bin/rm -f -- "$tmp"
+        fail "temp copy became a symlink during legacy OAuth migrate: $tmp"
+    fi
+    /bin/chmod 600 "$tmp" || { /bin/rm -f -- "$tmp"; fail "chmod 600 failed on migrate temp"; }
+    if ! /bin/mv -f -- "$tmp" "$token_file"; then
+        /bin/rm -f -- "$tmp"
+        fail "could not install migrated Claude OAuth token at $token_file"
+    fi
+    log "Migrated Claude OAuth token: $legacy_token -> $token_file"
+    dest="${legacy_token}.migrated.$(date +%s)"
+    mv -n -- "$legacy_token" "$dest" \
+        || fail "migrated but could not retire legacy source: $legacy_token"
+    log "Retired legacy Claude OAuth token: $legacy_token -> $dest"
+    return 0
+}
+
 # User-level systemd units for pet installs. Embedded so curl|bash works without a
 # repo checkout. Keep in sync with scripts/tooling/systemd/units/user-pet/*.in —
 # the checkout path below prefers the companion installer when present.
@@ -196,6 +258,9 @@ EOF
     # '-' means the unit still starts before the operator mints a setup-token.
     local token_file="${HAPI_HOME}/claude-setup-token.env"
     mkdir -p "$unit_dir/hapi-runner.service.d" "$HAPI_HOME"
+    # Migrate legacy nohup path BEFORE writing the drop-in / restarting — otherwise
+    # EnvironmentFile points at a missing canon and the runner loses ambient auth.
+    hapi_pet_migrate_legacy_oauth_if_needed "$token_file"
     cat >"$unit_dir/hapi-runner.service.d/42-claude-oauth-token.conf" <<EOF
 [Service]
 EnvironmentFile=-${token_file}
