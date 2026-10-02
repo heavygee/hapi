@@ -299,36 +299,85 @@ state_file="$hapi_home/runner.state.json"
 # shellcheck source=lib/hapi-claude-oauth-dropin.sh
 source "$REPO_ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh"
 
-SYSTEM_DROPIN_SAFE=1
+SYSTEM_OAUTH_SAFE=1
 SYSTEM_DROPIN_VALIDATED=""
+SYSTEM_TOKEN_PRECHECKED=0
+SYSTEM_TOKEN_NODE_CHECKED=0
 if [[ "$SCOPE" == system ]]; then
-    sys_dropin="/etc/systemd/system/${RUNNER_UNIT}.d/42-claude-oauth-token.conf"
+    sys_dropin_dir="/etc/systemd/system/${RUNNER_UNIT}.d"
+    sys_dropin="${sys_dropin_dir}/42-claude-oauth-token.conf"
+    # Always validate the .d directory when it exists — a missing expected file
+    # must not skip the gate (runner can plant 99-owned.conf before we restart).
+    if [[ -e "$sys_dropin_dir" || -L "$sys_dropin_dir" ]]; then
+        if ! hapi_claude_oauth_assert_root_controlled_parent "$sys_dropin_dir" >/dev/null 2>&1; then
+            not_ok "Claude OAuth drop-in directory must be root-controlled ($sys_dropin_dir) — refusing restart"
+            SYSTEM_OAUTH_SAFE=0
+        else
+            ok "Claude OAuth drop-in directory is root-controlled ($sys_dropin_dir)"
+        fi
+    fi
     if [[ -L "$sys_dropin" ]]; then
         not_ok "Claude OAuth drop-in is a symlink ($sys_dropin) — refusing restart"
-        SYSTEM_DROPIN_SAFE=0
+        SYSTEM_OAUTH_SAFE=0
     elif [[ -e "$sys_dropin" && ! -f "$sys_dropin" ]]; then
         not_ok "Claude OAuth drop-in is not a regular file ($sys_dropin) — refusing restart"
-        SYSTEM_DROPIN_SAFE=0
+        SYSTEM_OAUTH_SAFE=0
     elif [[ -f "$sys_dropin" ]]; then
         dropin_owner="$(stat -c '%U:%G' "$sys_dropin" 2>/dev/null || true)"
         dropin_mode="$(stat -c '%a' "$sys_dropin" 2>/dev/null || true)"
-        dropin_parent="$(dirname "$sys_dropin")"
         if [[ "$dropin_owner" != "root:root" || "$dropin_mode" != "644" ]]; then
             not_ok "Claude OAuth drop-in must be root:root 0644 (got ${dropin_owner:-unknown} mode ${dropin_mode:-unknown} at $sys_dropin) — refusing restart"
-            SYSTEM_DROPIN_SAFE=0
-        elif ! hapi_claude_oauth_assert_root_controlled_parent "$dropin_parent" >/dev/null 2>&1; then
-            not_ok "Claude OAuth drop-in parent must be root-controlled ($dropin_parent) — refusing restart"
-            SYSTEM_DROPIN_SAFE=0
+            SYSTEM_OAUTH_SAFE=0
         else
-            ok "Claude OAuth drop-in is root:root 0644 under root-controlled dir ($sys_dropin)"
+            ok "Claude OAuth drop-in is root:root 0644 ($sys_dropin)"
             SYSTEM_DROPIN_VALIDATED="$sys_dropin"
+        fi
+    fi
+
+    # Canonical token node + parent before restart: systemd reads EnvironmentFile
+    # as root; a symlink or service-writable /etc/hapi must not be loaded first.
+    pre_token="/etc/hapi/claude-setup-token.env"
+    pre_env_files="$("${CTL[@]}" show "$RUNNER_UNIT" -p EnvironmentFiles --value 2>/dev/null || true)"
+    if [[ "$pre_env_files" == *claude-setup-token.env* ]]; then
+        pre_from_unit="$(printf '%s\n' "$pre_env_files" | tr ' ' '\n' | grep 'claude-setup-token\.env' | head -n1 || true)"
+        pre_from_unit="${pre_from_unit%% (*}"
+        [[ -n "$pre_from_unit" ]] && pre_token="$pre_from_unit"
+    fi
+    pre_token_parent="$(dirname "$pre_token")"
+    if [[ -d "$pre_token_parent" || -L "$pre_token_parent" ]]; then
+        if ! hapi_claude_oauth_assert_root_controlled_parent "$pre_token_parent" >/dev/null 2>&1; then
+            not_ok "Claude OAuth token parent must be root-controlled before restart ($pre_token_parent) — refusing restart"
+            SYSTEM_OAUTH_SAFE=0
+        else
+            ok "Claude OAuth token parent is root-controlled before restart ($pre_token_parent)"
+            SYSTEM_TOKEN_PRECHECKED=1
+        fi
+    fi
+    if [[ -L "$pre_token" ]]; then
+        not_ok "Claude OAuth token file is a symlink ($pre_token) — refusing restart"
+        SYSTEM_OAUTH_SAFE=0
+        SYSTEM_TOKEN_NODE_CHECKED=1
+    elif [[ -e "$pre_token" && ! -f "$pre_token" ]]; then
+        not_ok "Claude OAuth token file is not a regular file ($pre_token) — refusing restart"
+        SYSTEM_OAUTH_SAFE=0
+        SYSTEM_TOKEN_NODE_CHECKED=1
+    elif [[ -f "$pre_token" ]]; then
+        SYSTEM_TOKEN_NODE_CHECKED=1
+        pre_owner="$(stat -c '%U:%G' "$pre_token" 2>/dev/null || true)"
+        pre_mode="$(stat -c '%a' "$pre_token" 2>/dev/null || true)"
+        if [[ "$pre_owner" != "root:root" || "$pre_mode" != "600" ]]; then
+            not_ok "Claude OAuth token file must be root:root 0600 before restart (got ${pre_owner:-unknown} mode ${pre_mode:-unknown} at $pre_token) — refusing restart"
+            SYSTEM_OAUTH_SAFE=0
+        else
+            ok "Claude OAuth token file is root:root 0600 before restart ($pre_token)"
+            SYSTEM_TOKEN_PRECHECKED=1
         fi
     fi
 fi
 
 if [[ "$SKIP_RESTART" -eq 0 ]]; then
-    if [[ "$SYSTEM_DROPIN_SAFE" -eq 0 ]]; then
-        inconclusive "skipped hub/runner restart — system OAuth drop-in failed safety checks"
+    if [[ "$SYSTEM_OAUTH_SAFE" -eq 0 ]]; then
+        inconclusive "skipped hub/runner restart — system OAuth drop-in/token failed safety checks"
     else
         "${CTL[@]}" restart "$HUB_UNIT" 2>/dev/null || true
         "${CTL[@]}" restart "$RUNNER_UNIT" 2>/dev/null || true
@@ -415,7 +464,7 @@ dropin_found=""
 if [[ -n "${SYSTEM_DROPIN_VALIDATED:-}" ]]; then
     dropin_found="$SYSTEM_DROPIN_VALIDATED"
     # Presence + ownership already ok'd before restart — do not double-count.
-elif [[ "$SCOPE" == system && "$SYSTEM_DROPIN_SAFE" -eq 0 ]]; then
+elif [[ "$SCOPE" == system && "$SYSTEM_OAUTH_SAFE" -eq 0 ]]; then
     dropin_found=""  # already not_ok'd; skip a second presence failure
 else
     for d in "${dropin_paths[@]}"; do
@@ -435,7 +484,7 @@ else
     done
     if [[ -n "$dropin_found" ]]; then
         ok "Claude OAuth drop-in present ($dropin_found)"
-    elif [[ "$SCOPE" != system || "$SYSTEM_DROPIN_SAFE" -eq 1 ]]; then
+    elif [[ "$SCOPE" != system || "$SYSTEM_OAUTH_SAFE" -eq 1 ]]; then
         not_ok "Claude OAuth drop-in present (expected 42-claude-oauth-token.conf under ${RUNNER_UNIT}.d)"
     fi
 fi
@@ -478,7 +527,10 @@ if [[ -n "$token_file" ]]; then
     # grant runner restart (hapi-watchdog.in) — not grep/test/python3. Do not
     # fake a sudo -n read. System-scope verify must run as root.
     # Symlink / non-regular nodes are hard failures (not "missing/empty").
-    if [[ -L "$token_file" ]]; then
+    # System-scope already gated these before restart — do not double-count.
+    if [[ "$SCOPE" == system && "${SYSTEM_TOKEN_NODE_CHECKED:-0}" -eq 1 && ( -L "$token_file" || ( -e "$token_file" && ! -f "$token_file" ) ) ]]; then
+        : # already not_ok'd in pre-restart gate
+    elif [[ -L "$token_file" ]]; then
         not_ok "Claude OAuth token file is a symlink ($token_file) — replace with a regular root:root 0600 file"
     elif [[ -e "$token_file" && ! -f "$token_file" ]]; then
         not_ok "Claude OAuth token file is not a regular file ($token_file) — replace with a regular root:root 0600 file"
@@ -487,7 +539,7 @@ if [[ -n "$token_file" ]]; then
         if hapi_claude_oauth_has_effective_token "$token_file"; then
             token_file_has_value=1
             ok "Claude OAuth token file has CLAUDE_CODE_OAUTH_TOKEN= ($token_file)"
-            if [[ "$SCOPE" == system ]]; then
+            if [[ "$SCOPE" == system && "${SYSTEM_TOKEN_PRECHECKED:-0}" -eq 0 ]]; then
                 token_owner="$(stat -c '%U:%G' "$token_file" 2>/dev/null || true)"
                 token_mode="$(stat -c '%a' "$token_file" 2>/dev/null || true)"
                 if [[ "$token_owner" == "root:root" && "$token_mode" == "600" ]]; then
@@ -512,9 +564,9 @@ if [[ -n "$token_file" ]]; then
     fi
     # Parent dir must stay root-owned + not group/other-writable; otherwise the
     # service account can unlink/replace a root:root 0600 token after verify.
-    # Capture helper stderr in-memory (or a private mktemp dir) — never fixed
-    # /tmp paths that root could truncate through a planted symlink.
-    if [[ "$SCOPE" == system ]]; then
+    # Capture helper stderr in-memory — never fixed /tmp paths.
+    # Skip re-check when the pre-restart gate already validated the parent.
+    if [[ "$SCOPE" == system && "${SYSTEM_TOKEN_PRECHECKED:-0}" -eq 0 ]]; then
         token_parent="$(dirname "$token_file")"
         if [[ -d "$token_parent" || -L "$token_parent" ]]; then
             parent_err=""

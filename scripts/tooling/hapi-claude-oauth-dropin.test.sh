@@ -398,7 +398,15 @@ check "secure_copy retries short writes" \
 check "companion passes --unit-dir for user-pet drop-in" \
     "grep -A6 'hapi_install_claude_oauth_dropin' \"$ROOT/scripts/tooling/install-hapi-systemd-units.sh\" | grep -q -- '--unit-dir'"
 check "verify validates system drop-in before restart" \
-    "awk '/SYSTEM_DROPIN_SAFE=1/,/SKIP_RESTART/ {print}' \"$ROOT/scripts/tooling/verify-hapi-install.sh\" | grep -q 'refusing restart'"
+    "awk '/SYSTEM_OAUTH_SAFE=1/,/SKIP_RESTART/ {print}' \"$ROOT/scripts/tooling/verify-hapi-install.sh\" | grep -q 'refusing restart'"
+check "verify validates drop-in directory even when file absent" \
+    "grep -q 'drop-in directory must be root-controlled' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
+check "verify validates token before restart" \
+    "grep -q 'token file must be root:root 0600 before restart' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
+check "secure_copy uses no-follow dirfds" \
+    "grep -q 'open_via_nofollow_dirfds' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\""
+check "secure_copy bounds legacy token size" \
+    "grep -q 'MAX_TOKEN_BYTES' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\""
 
 # Symlink ancestor on legacy migrate source must fail closed.
 anc_root="$TMP/anc-root"
@@ -421,6 +429,24 @@ anc_copy_rc=$?
 set -e
 check "secure_copy refuses symlink ancestor source" "[[ $anc_copy_rc -ne 0 ]]"
 check "secure_copy did not create canon from symlink ancestor" "[[ ! -e \"$anc_root/canon.env\" ]]"
+
+# Oversized legacy source must fail before buffering into privileged migrate.
+big_src="$TMP/big-legacy.env"
+# Sparse-ish: write >64KiB of filler with a token assignment prefix.
+{
+    printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "$(head -c 200 </dev/urandom | base64 | tr -d '\n')"
+    head -c $((70 * 1024)) </dev/zero | tr '\0' 'x'
+    printf '\n'
+} >"$big_src"
+chmod 600 "$big_src"
+set +e
+hapi_claude_oauth_secure_copy_regular_file "$big_src" "$TMP/big-canon.env" \
+    >"$TMP/big.out" 2>"$TMP/big.err"
+big_rc=$?
+set -e
+check "oversized legacy token refused" "[[ $big_rc -ne 0 ]]"
+check "oversized legacy names size limit" "grep -Eiq 'too large|exceeded' \"$TMP/big.err\""
+check "oversized legacy did not create destination" "[[ ! -e \"$TMP/big-canon.env\" ]]"
 
 # --unit-dir overrides XDG_CONFIG_HOME for user drop-in placement.
 unit_home="$TMP/unit-dir-home"

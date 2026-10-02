@@ -144,6 +144,9 @@ hapi_claude_oauth_secure_copy_regular_file() {
         python3 - "$src" "$dst" <<'PY'
 import os, stat, sys
 
+# Credential-sized bound: OAuth setup-tokens are a few KB; refuse multi-MB traps.
+MAX_TOKEN_BYTES = 64 * 1024
+
 def write_all(fd, data):
     mv = memoryview(data)
     while len(mv):
@@ -152,28 +155,50 @@ def write_all(fd, data):
             raise OSError("write returned %d with %d bytes remaining" % (n, len(mv)))
         mv = mv[n:]
 
-def reject_symlink_components(path):
+def open_via_nofollow_dirfds(path, flags, mode=0o600):
+    """Open path relative to no-follow directory descriptors (no symlink TOCTOU)."""
     path = os.path.abspath(path)
     parts = [p for p in path.split(os.sep) if p]
-    cur = os.sep if path.startswith(os.sep) else ""
-    for part in parts:
-        if cur in ("", os.sep):
-            cur = (os.sep + part) if path.startswith(os.sep) else part
-        else:
-            cur = os.path.join(cur, part)
-        if os.path.lexists(cur) and os.path.islink(cur):
-            sys.stderr.write("ERROR: refusing symlink path component: %s (in %s)\n" % (cur, path))
-            sys.exit(1)
+    if not parts:
+        raise OSError("empty path")
+    if any(p in (".", "..") for p in parts):
+        raise OSError("refusing . or .. path component in %s" % path)
+    o_nofollow = getattr(os, "O_NOFOLLOW", 0)
+    o_directory = getattr(os, "O_DIRECTORY", 0)
+    o_path = getattr(os, "O_PATH", 0)
+    dir_fd = os.open("/", os.O_RDONLY | o_directory)
+    try:
+        for part in parts[:-1]:
+            # O_PATH|O_NOFOLLOW opens the component itself; fstat catches symlinks
+            # even when the target is a directory (O_DIRECTORY|O_NOFOLLOW alone
+            # can still follow a symlink-to-dir on some kernels).
+            if o_path:
+                next_fd = os.open(part, o_path | o_nofollow, dir_fd=dir_fd)
+            else:
+                next_fd = os.open(part, os.O_RDONLY | o_directory | o_nofollow, dir_fd=dir_fd)
+            try:
+                st = os.fstat(next_fd)
+                if stat.S_ISLNK(st.st_mode):
+                    raise OSError("refusing symlink path component: %s (in %s)" % (part, path))
+                if not stat.S_ISDIR(st.st_mode):
+                    raise OSError("path component is not a directory: %s (in %s)" % (part, path))
+            except Exception:
+                os.close(next_fd)
+                raise
+            os.close(dir_fd)
+            dir_fd = next_fd
+        leaf = parts[-1]
+        return os.open(leaf, flags | o_nofollow, mode, dir_fd=dir_fd), dir_fd
+    except Exception:
+        os.close(dir_fd)
+        raise
 
 src, dst = sys.argv[1], sys.argv[2]
-reject_symlink_components(src)
 rd_flags = os.O_RDONLY
-if hasattr(os, "O_NOFOLLOW"):
-    rd_flags |= os.O_NOFOLLOW
 if hasattr(os, "O_NONBLOCK"):
     rd_flags |= os.O_NONBLOCK
 try:
-    sfd = os.open(src, rd_flags)
+    sfd, src_dir_fd = open_via_nofollow_dirfds(src, rd_flags)
 except OSError as exc:
     sys.stderr.write("ERROR: cannot open source token without following symlink: %s: %s\n" % (src, exc))
     sys.exit(1)
@@ -182,14 +207,28 @@ try:
     if not stat.S_ISREG(mode):
         sys.stderr.write("ERROR: refusing non-regular source token: %s\n" % src)
         sys.exit(1)
+    size = os.fstat(sfd).st_size
+    if size > MAX_TOKEN_BYTES:
+        sys.stderr.write(
+            "ERROR: legacy token too large (%d bytes > %d); refusing migrate of %s\n"
+            % (size, MAX_TOKEN_BYTES, src)
+        )
+        sys.exit(1)
     data = b""
     while True:
-        chunk = os.read(sfd, 65536)
+        chunk = os.read(sfd, 8192)
         if not chunk:
             break
+        if len(data) + len(chunk) > MAX_TOKEN_BYTES:
+            sys.stderr.write(
+                "ERROR: legacy token read exceeded %d bytes; refusing migrate of %s\n"
+                % (MAX_TOKEN_BYTES, src)
+            )
+            sys.exit(1)
         data += chunk
 finally:
     os.close(sfd)
+    os.close(src_dir_fd)
 
 parent = os.path.dirname(dst) or "."
 os.makedirs(parent, mode=0o755, exist_ok=True)
@@ -281,40 +320,74 @@ hapi_claude_oauth_retire_legacy_token_source() {
         if ! python3 - "$src" "$dest" <<'PY'
 import os, stat, sys
 
-def reject_symlink_components(path):
+def open_parent_dirfd(path):
+    """Return (dir_fd, leaf) after walking ancestors with no-follow dirfds."""
     path = os.path.abspath(path)
     parts = [p for p in path.split(os.sep) if p]
-    cur = os.sep if path.startswith(os.sep) else ""
-    for part in parts:
-        if cur in ("", os.sep):
-            cur = (os.sep + part) if path.startswith(os.sep) else part
-        else:
-            cur = os.path.join(cur, part)
-        if os.path.lexists(cur) and os.path.islink(cur):
-            sys.stderr.write("ERROR: refusing symlink path component: %s (in %s)\n" % (cur, path))
-            sys.exit(1)
+    if not parts:
+        raise OSError("empty path")
+    if any(p in (".", "..") for p in parts):
+        raise OSError("refusing . or .. path component in %s" % path)
+    o_nofollow = getattr(os, "O_NOFOLLOW", 0)
+    o_directory = getattr(os, "O_DIRECTORY", 0)
+    o_path = getattr(os, "O_PATH", 0)
+    dir_fd = os.open("/", os.O_RDONLY | o_directory)
+    try:
+        for part in parts[:-1]:
+            if o_path:
+                next_fd = os.open(part, o_path | o_nofollow, dir_fd=dir_fd)
+            else:
+                next_fd = os.open(part, os.O_RDONLY | o_directory | o_nofollow, dir_fd=dir_fd)
+            try:
+                st = os.fstat(next_fd)
+                if stat.S_ISLNK(st.st_mode):
+                    raise OSError("refusing symlink path component: %s (in %s)" % (part, path))
+                if not stat.S_ISDIR(st.st_mode):
+                    raise OSError("path component is not a directory: %s (in %s)" % (part, path))
+            except Exception:
+                os.close(next_fd)
+                raise
+            os.close(dir_fd)
+            dir_fd = next_fd
+        return dir_fd, parts[-1]
+    except Exception:
+        os.close(dir_fd)
+        raise
 
 src, dest = sys.argv[1], sys.argv[2]
-reject_symlink_components(src)
-flags = os.O_RDONLY
-if hasattr(os, "O_NOFOLLOW"):
-    flags |= os.O_NOFOLLOW
 try:
-    fd = os.open(src, flags)
+    dir_fd, leaf = open_parent_dirfd(src)
 except OSError as exc:
     sys.stderr.write("ERROR: cannot open legacy token to retire: %s: %s\n" % (src, exc))
     sys.exit(1)
 try:
-    mode = os.fstat(fd).st_mode
-    if not stat.S_ISREG(mode):
-        sys.stderr.write("ERROR: refusing non-regular legacy token: %s\n" % src)
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(leaf, flags, dir_fd=dir_fd)
+    except OSError as exc:
+        sys.stderr.write("ERROR: cannot open legacy token to retire: %s: %s\n" % (src, exc))
         sys.exit(1)
+    try:
+        mode = os.fstat(fd).st_mode
+        if not stat.S_ISREG(mode):
+            sys.stderr.write("ERROR: refusing non-regular legacy token: %s\n" % src)
+            sys.exit(1)
+    finally:
+        os.close(fd)
+    dest_leaf = os.path.basename(os.path.abspath(dest))
+    # Dest must stay in the same verified parent (no cross-dir retire).
+    if os.path.dirname(os.path.abspath(dest)) != os.path.dirname(os.path.abspath(src)):
+        sys.stderr.write("ERROR: retire destination must share parent with source: %s\n" % dest)
+        sys.exit(1)
+    try:
+        os.stat(dest_leaf, dir_fd=dir_fd, follow_symlinks=False)
+        sys.stderr.write("ERROR: retire destination already exists: %s\n" % dest)
+        sys.exit(1)
+    except FileNotFoundError:
+        pass
+    os.rename(leaf, dest_leaf, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
 finally:
-    os.close(fd)
-if os.path.lexists(dest):
-    sys.stderr.write("ERROR: retire destination already exists: %s\n" % dest)
-    sys.exit(1)
-os.rename(src, dest)
+    os.close(dir_fd)
 sys.exit(0)
 PY
         then
