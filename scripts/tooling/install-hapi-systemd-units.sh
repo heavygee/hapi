@@ -320,10 +320,30 @@ case "$PROFILE" in
                         break
                     fi
                 done < <(hapi_claude_oauth_legacy_system_token_candidates "$PROFILE" "$HAPI_HOME" "$op_home")
+                # Ambient-only: runner process still carries a token but no file
+                # exists to reload it. Restart would discard the only credential.
+                if [[ "$block_restart" -eq 0 ]]; then
+                    runner_main_pid="$(systemctl show -p MainPID --value "$RUNNER_UNIT" 2>/dev/null || echo 0)"
+                    if [[ "$runner_main_pid" != "0" && -r "/proc/$runner_main_pid/environ" ]]; then
+                        ambient_tok=""
+                        while IFS= read -r -d '' env_line || [[ -n "$env_line" ]]; do
+                            case "$env_line" in
+                                CLAUDE_CODE_OAUTH_TOKEN=*)
+                                    ambient_tok="${env_line#CLAUDE_CODE_OAUTH_TOKEN=}"
+                                    ;;
+                            esac
+                        done <"/proc/$runner_main_pid/environ"
+                        if [[ -n "$ambient_tok" ]]; then
+                            block_restart=1
+                            echo "ERROR: runner MainPID=$runner_main_pid has ambient CLAUDE_CODE_OAUTH_TOKEN but $CLAUDE_TOKEN_FILE is missing/empty" >&2
+                            echo "       Persist the token to $CLAUDE_TOKEN_FILE before --restart or you will discard the only credential." >&2
+                        fi
+                    fi
+                fi
             fi
             if [[ "$block_restart" -eq 1 ]]; then
                 echo "ERROR: refusing --restart until Claude OAuth token is effective at $CLAUDE_TOKEN_FILE" >&2
-                echo "       Legacy path still present, empty canonical, or migrate failed." >&2
+                echo "       Legacy path still present, empty canonical, ambient-only token, or migrate failed." >&2
                 echo "       Migrate with: hapi_claude_oauth_secure_copy_regular_file <legacy> $CLAUDE_TOKEN_FILE" >&2
                 exit 1
             fi

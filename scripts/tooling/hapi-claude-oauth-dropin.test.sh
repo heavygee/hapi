@@ -379,6 +379,18 @@ check "toggle restores empty canon via restore_bytes" \
     "grep -q 'hapi_claude_oauth_restore_bytes_via_sudo' \"$ROOT/scripts/tooling/hapi-claude-account-toggle.sh\""
 check "toggle rolls back interactive credentials" \
     "grep -q 'hapi_claude_oauth_rollback_credentials' \"$ROOT/scripts/tooling/hapi-claude-account-toggle.sh\""
+check "toggle continues credentials rollback after canon rollback" \
+    "grep -B1 'rollback_canon_from_bak \"cannot replace' \"$ROOT/scripts/tooling/hapi-claude-account-toggle.sh\" | grep -q 'set +e'"
+check "retire failure marks migrate pending" \
+    "grep -A3 'could not retire legacy source' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\" | grep -q 'MIGRATE_PENDING=1'"
+check "secure_copy has bash fallback for non-/etc" \
+    "grep -q 'Bash fallback for same-user pet hosts' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\""
+check "pet does not source oauth env file" \
+    "! grep -E '\\. \\\"\\\$HAPI_HOME/claude-setup-token|set -a; \\. ' \"$ROOT/scripts/install-hapi-pet.sh\""
+check "pet exports oauth via parser helper" \
+    "grep -q 'hapi_pet_export_oauth_from_env_file' \"$ROOT/scripts/install-hapi-pet.sh\""
+check "systemd install blocks ambient-only restart" \
+    "grep -q 'ambient CLAUDE_CODE_OAUTH_TOKEN' \"$ROOT/scripts/tooling/install-hapi-systemd-units.sh\""
 check "retire function returns 1 on python failure" \
     "awk '/^hapi_claude_oauth_retire_legacy_token_source/,/^}/ {print}' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\" | grep -q 'return 1'"
 
@@ -396,23 +408,39 @@ check "restore_bytes accepts blank assignment" "grep -q 'CLAUDE_CODE_OAUTH_TOKEN
 retire_src="$TMP/retire-src.env"
 printf 'CLAUDE_CODE_OAUTH_TOKEN=legacy\n' >"$retire_src"
 chmod 600 "$retire_src"
-# Force python path to fail by pre-creating every possible dest? Better: make src a directory after opening...
-# Simpler: patch via calling with a src that disappears - use unwritable parent for dest.
+# Force rename failure via read-only parent.
 retire_ro="$TMP/retire-ro"
 mkdir -p "$retire_ro"
 printf 'CLAUDE_CODE_OAUTH_TOKEN=x\n' >"$retire_ro/token.env"
 chmod 600 "$retire_ro/token.env"
 chmod a-w "$retire_ro"
 set +e
-(
-  # Invoke retire; rename into same dir will fail on read-only parent.
-  hapi_claude_oauth_retire_legacy_token_source "$retire_ro/token.env"
-)
+hapi_claude_oauth_retire_legacy_token_source "$retire_ro/token.env" \
+    >/tmp/hapi-claude-oauth-retire-ro.out 2>/tmp/hapi-claude-oauth-retire-ro.err
 retire_rc=$?
 set -e
 chmod u+w "$retire_ro" 2>/dev/null || true
 check "retire returns nonzero when archive rename fails" "[[ $retire_rc -ne 0 ]]"
 check "retire leaves source when rename fails" "[[ -f \"$retire_ro/token.env\" ]]"
+
+# Bash secure_copy fallback (no python3 on PATH) for user-pet migrate.
+bash_copy_src="$TMP/bash-copy-src.env"
+bash_copy_dst="$TMP/bash-copy-dst.env"
+printf 'CLAUDE_CODE_OAUTH_TOKEN=bash-copy\n' >"$bash_copy_src"
+chmod 600 "$bash_copy_src"
+no_py2="$TMP/no-python-bin2"
+mkdir -p "$no_py2"
+PATH="$no_py2" hapi_claude_oauth_secure_copy_regular_file "$bash_copy_src" "$bash_copy_dst"
+check "bash secure_copy copies token" "grep -qx 'CLAUDE_CODE_OAUTH_TOKEN=bash-copy' \"$bash_copy_dst\""
+mode_bash="$(stat -c '%a' "$bash_copy_dst")"
+check "bash secure_copy sets 600" "[[ \"$mode_bash\" == \"600\" ]]"
+set +e
+PATH="$no_py2" hapi_claude_oauth_secure_copy_regular_file "$bash_copy_src" /etc/hapi/should-fail.env \
+    >/tmp/hapi-claude-oauth-bash-etc.out 2>/tmp/hapi-claude-oauth-bash-etc.err
+bash_etc_rc=$?
+set -e
+check "bash secure_copy refuses /etc without python3" "[[ $bash_etc_rc -ne 0 ]]"
+
 # Invocation-only: the wrong helper name must not appear as a call site.
 check "retired remigrate uses hapi_install_claude_oauth_dropin" \
     "grep -n 'hapi_install_claude_oauth_dropin' \"$ROOT/scripts/tooling/hapi-claude-oauth-dropin.test.sh\" | grep -q remigrate"

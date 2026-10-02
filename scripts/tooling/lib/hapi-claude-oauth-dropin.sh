@@ -108,11 +108,16 @@ hapi_claude_oauth_assert_safe_token_file() {
 hapi_claude_oauth_secure_copy_regular_file() {
     local src="${1:?src}"
     local dst="${2:?dst}"
-    if ! command -v python3 >/dev/null 2>&1; then
-        echo "ERROR: python3 required for secure token copy ($src -> $dst)" >&2
+    if [[ -L "$src" ]]; then
+        echo "ERROR: refusing to copy symlink source token: $src" >&2
         return 1
     fi
-    python3 - "$src" "$dst" <<'PY'
+    if [[ ! -f "$src" ]]; then
+        echo "ERROR: source token is not a regular file: $src" >&2
+        return 1
+    fi
+    if command -v python3 >/dev/null 2>&1; then
+        python3 - "$src" "$dst" <<'PY'
 import os, stat, sys
 
 src, dst = sys.argv[1], sys.argv[2]
@@ -164,6 +169,44 @@ finally:
 os.replace(tmp, dst)
 sys.exit(0)
 PY
+        return $?
+    fi
+
+    # Bash fallback for same-user pet hosts without python3. Never for /etc
+    # (system migrate requires python3 for O_NOFOLLOW root writes).
+    case "$dst" in
+        /etc/*)
+            echo "ERROR: python3 required for secure token copy into /etc ($src -> $dst)" >&2
+            return 1
+            ;;
+    esac
+    if [[ -L "$dst" ]]; then
+        echo "ERROR: refusing to overwrite symlink destination: $dst" >&2
+        return 1
+    fi
+    local parent tmp
+    parent="${dst%/*}"
+    if [[ -z "$parent" || "$parent" == "$dst" ]]; then
+        parent="."
+    fi
+    # Absolute coreutils: pet PATH may omit /usr/bin while still lacking python3.
+    /bin/mkdir -p "$parent" || return 1
+    tmp="$(/usr/bin/mktemp "${parent}/.claude-oauth-copy.XXXXXX")" || return 1
+    if ! /bin/cp -f -- "$src" "$tmp"; then
+        /bin/rm -f -- "$tmp"
+        return 1
+    fi
+    if [[ -L "$tmp" ]]; then
+        /bin/rm -f -- "$tmp"
+        echo "ERROR: temp copy became a symlink: $tmp" >&2
+        return 1
+    fi
+    /bin/chmod 600 "$tmp" || { /bin/rm -f -- "$tmp"; return 1; }
+    if ! /bin/mv -f -- "$tmp" "$dst"; then
+        /bin/rm -f -- "$tmp"
+        return 1
+    fi
+    return 0
 }
 
 # After a verified migrate, archive the legacy source so a later empty/missing
@@ -1112,7 +1155,8 @@ hapi_install_claude_oauth_dropin() {
                     echo "Migrated Claude OAuth token: $legacy_token -> $token_file (regular file, 0600)"
                     if hapi_claude_oauth_has_effective_token "$token_file" 2>/dev/null; then
                         hapi_claude_oauth_retire_legacy_token_source "$legacy_token" || {
-                            echo "WARN: migrated but could not retire legacy source $legacy_token" >&2
+                            echo "ERROR: migrated but could not retire legacy source $legacy_token" >&2
+                            HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=1
                         }
                     fi
                 else
@@ -1137,7 +1181,8 @@ hapi_install_claude_oauth_dropin() {
                     echo "Migrated Claude OAuth token: $legacy_token -> $token_file"
                     if hapi_claude_oauth_has_effective_token "$token_file" 2>/dev/null; then
                         hapi_claude_oauth_retire_legacy_token_source "$legacy_token" || {
-                            echo "WARN: migrated but could not retire legacy source $legacy_token" >&2
+                            echo "ERROR: migrated but could not retire legacy source $legacy_token" >&2
+                            HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=1
                         }
                     fi
                 else

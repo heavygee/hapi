@@ -65,6 +65,59 @@ done
 log()  { printf '==> %s\n' "$1"; }
 fail() { printf 'ERROR: %s\n' "$1" >&2; exit 1; }
 
+# Prefer the checkout OAuth helpers when present (curl|bash has none).
+if [[ -n "${SCRIPT_DIR}" && -f "${SCRIPT_DIR}/tooling/lib/hapi-claude-oauth-dropin.sh" ]]; then
+    # shellcheck source=tooling/lib/hapi-claude-oauth-dropin.sh
+    source "${SCRIPT_DIR}/tooling/lib/hapi-claude-oauth-dropin.sh"
+fi
+
+# Export CLAUDE_CODE_OAUTH_TOKEN from an EnvironmentFile literally (never `source`
+# the file — shell would expand $, backticks, and abort under set -u).
+hapi_pet_export_oauth_from_env_file() {
+    local token_file="${1:?token_file}"
+    local eff=""
+    [[ -f "$token_file" && ! -L "$token_file" ]] || return 1
+    if declare -F hapi_claude_oauth_effective_token_value >/dev/null 2>&1; then
+        set +e
+        eff="$(hapi_claude_oauth_effective_token_value "$token_file")"
+        local rc=$?
+        set -e
+        [[ "$rc" -eq 0 && -n "$eff" ]] || return 1
+    else
+        # Minimal last-assignment parser (mirrors systemd strip-quotes; no source).
+        local line raw last=""
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            case "$line" in
+                CLAUDE_CODE_OAUTH_TOKEN=*)
+                    raw="${line#CLAUDE_CODE_OAUTH_TOKEN=}"
+                    raw="${raw%$'\r'}"
+                    if declare -F hapi_claude_oauth_parse_env_file_value >/dev/null 2>&1; then
+                        if parsed="$(hapi_claude_oauth_parse_env_file_value "$raw")"; then
+                            last="$parsed"
+                        else
+                            last=""
+                        fi
+                    else
+                        if [[ ${#raw} -ge 2 ]]; then
+                            if [[ "${raw:0:1}" == '"' && "${raw: -1}" == '"' ]] || \
+                               [[ "${raw:0:1}" == "'" && "${raw: -1}" == "'" ]]; then
+                                raw="${raw:1:${#raw}-2}"
+                            fi
+                        fi
+                        raw="${raw#"${raw%%[![:space:]]*}"}"
+                        raw="${raw%"${raw##*[![:space:]]}"}"
+                        last="$raw"
+                    fi
+                    ;;
+            esac
+        done <"$token_file"
+        [[ -n "$last" ]] || return 1
+        eff="$last"
+    fi
+    export CLAUDE_CODE_OAUTH_TOKEN="$eff"
+    return 0
+}
+
 # User-level systemd units for pet installs. Embedded so curl|bash works without a
 # repo checkout. Keep in sync with scripts/tooling/systemd/units/user-pet/*.in —
 # the checkout path below prefers the companion installer when present.
@@ -334,15 +387,12 @@ else
     # Runner, restricted to the workspace dir created above — without --workspace-root the
     # runner starts in "legacy mode" with no directory restriction, which defeats the point
     # of having a dedicated workspace dir at all.
-    # Source Claude OAuth env if present (non-systemd path has no EnvironmentFile drop-in).
+    # Load Claude OAuth literally from EnvironmentFile (do NOT source the file).
     (
-        set -a
         if [[ -f "$HAPI_HOME/claude-setup-token.env" && ! -L "$HAPI_HOME/claude-setup-token.env" ]]; then
             chmod 600 "$HAPI_HOME/claude-setup-token.env"
-            # shellcheck disable=SC1090
-            . "$HAPI_HOME/claude-setup-token.env"
+            hapi_pet_export_oauth_from_env_file "$HAPI_HOME/claude-setup-token.env" || true
         fi
-        set +a
         nohup "$INSTALL_DIR/hapi" runner start-sync --workspace-root "$HAPI_WORKSPACE" \
             > "$HAPI_HOME/logs/runner.log" 2>&1 &
         echo $! > "$HAPI_HOME/runner.pid"
@@ -406,10 +456,11 @@ cat <<EOF
     Then reload the runner so it picks up the token:
       # if you used --with-systemd:
       systemctl --user restart hapi-runner.service
-      # if you did NOT (nohup path): stop+wait+restart with the env sourced.
+      # if you did NOT (nohup path): stop+wait+restart with the token exported
+      # literally (do NOT `source` the env file — shell expands $, backticks, etc).
       # Prefer 'hapi runner start' (stops the old runner and waits) over a raw
       # kill + start-sync race that can leave you with no runner at all.
-      set -a; . ${q_token_file}; set +a
+      export CLAUDE_CODE_OAUTH_TOKEN='<token>'
       ${q_hapi_bin} runner start --workspace-root ${q_workspace}
 
     After that, confirm end-to-end:

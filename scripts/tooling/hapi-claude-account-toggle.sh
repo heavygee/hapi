@@ -215,19 +215,27 @@ hapi_claude_oauth_rollback_credentials() {
 }
 
 # Only after canonical token is installed: switch interactive credentials.
+# Capture both rollback statuses independently — canon rollback must not
+# prevent credentials rollback under set -e.
 if ! cp -a "$CRED" "$HOME/.claude/.credentials.json"; then
+    set +e
     hapi_claude_oauth_rollback_canon_from_bak "cannot replace $HOME/.claude/.credentials.json"
-    hapi_claude_oauth_rollback_credentials || true
+    hapi_claude_oauth_rollback_credentials
+    set -e
     exit 1
 fi
 if ! chmod 600 "$HOME/.claude/.credentials.json"; then
+    set +e
     hapi_claude_oauth_rollback_canon_from_bak "cannot chmod 600 $HOME/.claude/.credentials.json"
-    hapi_claude_oauth_rollback_credentials || true
+    hapi_claude_oauth_rollback_credentials
+    set -e
     exit 1
 fi
 if ! echo "$SLOT" > "$ROOT/active"; then
+    set +e
     hapi_claude_oauth_rollback_canon_from_bak "cannot write $ROOT/active"
-    hapi_claude_oauth_rollback_credentials || true
+    hapi_claude_oauth_rollback_credentials
+    set -e
     exit 1
 fi
 
