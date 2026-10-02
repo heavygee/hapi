@@ -292,15 +292,53 @@ if [[ -z "$hapi_home" ]]; then
 fi
 state_file="$hapi_home/runner.state.json"
 
+# Claude OAuth helpers needed before restart: a compromised runner with
+# passwordless restart can plant a drop-in (User=root / ExecStart=…) that this
+# verifier would otherwise execute. Source here (not at top) so --installer-smoke
+# on archived trees still works.
+# shellcheck source=lib/hapi-claude-oauth-dropin.sh
+source "$REPO_ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh"
+
+SYSTEM_DROPIN_SAFE=1
+SYSTEM_DROPIN_VALIDATED=""
+if [[ "$SCOPE" == system ]]; then
+    sys_dropin="/etc/systemd/system/${RUNNER_UNIT}.d/42-claude-oauth-token.conf"
+    if [[ -L "$sys_dropin" ]]; then
+        not_ok "Claude OAuth drop-in is a symlink ($sys_dropin) — refusing restart"
+        SYSTEM_DROPIN_SAFE=0
+    elif [[ -e "$sys_dropin" && ! -f "$sys_dropin" ]]; then
+        not_ok "Claude OAuth drop-in is not a regular file ($sys_dropin) — refusing restart"
+        SYSTEM_DROPIN_SAFE=0
+    elif [[ -f "$sys_dropin" ]]; then
+        dropin_owner="$(stat -c '%U:%G' "$sys_dropin" 2>/dev/null || true)"
+        dropin_mode="$(stat -c '%a' "$sys_dropin" 2>/dev/null || true)"
+        dropin_parent="$(dirname "$sys_dropin")"
+        if [[ "$dropin_owner" != "root:root" || "$dropin_mode" != "644" ]]; then
+            not_ok "Claude OAuth drop-in must be root:root 0644 (got ${dropin_owner:-unknown} mode ${dropin_mode:-unknown} at $sys_dropin) — refusing restart"
+            SYSTEM_DROPIN_SAFE=0
+        elif ! hapi_claude_oauth_assert_root_controlled_parent "$dropin_parent" >/dev/null 2>&1; then
+            not_ok "Claude OAuth drop-in parent must be root-controlled ($dropin_parent) — refusing restart"
+            SYSTEM_DROPIN_SAFE=0
+        else
+            ok "Claude OAuth drop-in is root:root 0644 under root-controlled dir ($sys_dropin)"
+            SYSTEM_DROPIN_VALIDATED="$sys_dropin"
+        fi
+    fi
+fi
+
 if [[ "$SKIP_RESTART" -eq 0 ]]; then
-    "${CTL[@]}" restart "$HUB_UNIT" 2>/dev/null || true
-    "${CTL[@]}" restart "$RUNNER_UNIT" 2>/dev/null || true
-    # Give hub+runner a moment to write state
-    for _ in $(seq 1 30); do
-        active="$("${CTL[@]}" is-active "$RUNNER_UNIT" 2>/dev/null || true)"
-        [[ "$active" == active ]] && break
-        sleep 1
-    done
+    if [[ "$SYSTEM_DROPIN_SAFE" -eq 0 ]]; then
+        inconclusive "skipped hub/runner restart — system OAuth drop-in failed safety checks"
+    else
+        "${CTL[@]}" restart "$HUB_UNIT" 2>/dev/null || true
+        "${CTL[@]}" restart "$RUNNER_UNIT" 2>/dev/null || true
+        # Give hub+runner a moment to write state
+        for _ in $(seq 1 30); do
+            active="$("${CTL[@]}" is-active "$RUNNER_UNIT" 2>/dev/null || true)"
+            [[ "$active" == active ]] && break
+            sleep 1
+        done
+    fi
 fi
 
 active="$("${CTL[@]}" is-active "$RUNNER_UNIT" 2>/dev/null || true)"
@@ -365,10 +403,7 @@ fi
 # New sessions inherit the runner ambient login. Missing EnvironmentFile load
 # is the antevorta 2026-10-01 failure mode: --resume children still have the
 # token, new UI sessions print Not logged in.
-# Sourced here (not at top) so --installer-smoke on archived pre-fix trees
-# does not require lib/hapi-claude-oauth-dropin.sh to exist yet.
-# shellcheck source=lib/hapi-claude-oauth-dropin.sh
-source "$REPO_ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh"
+# Drop-in lib already sourced before restart (system safety gate).
 dropin_paths=()
 if [[ "$SCOPE" == system ]]; then
     dropin_paths+=("/etc/systemd/system/${RUNNER_UNIT}.d/42-claude-oauth-token.conf")
@@ -377,16 +412,32 @@ else
     dropin_paths+=("$HOME/.config/systemd/user/${RUNNER_UNIT}.d/42-claude-oauth-token.conf")
 fi
 dropin_found=""
-for d in "${dropin_paths[@]}"; do
-    if [[ -f "$d" ]]; then
-        dropin_found="$d"
-        break
-    fi
-done
-if [[ -n "$dropin_found" ]]; then
-    ok "Claude OAuth drop-in present ($dropin_found)"
+if [[ -n "${SYSTEM_DROPIN_VALIDATED:-}" ]]; then
+    dropin_found="$SYSTEM_DROPIN_VALIDATED"
+    # Presence + ownership already ok'd before restart — do not double-count.
+elif [[ "$SCOPE" == system && "$SYSTEM_DROPIN_SAFE" -eq 0 ]]; then
+    dropin_found=""  # already not_ok'd; skip a second presence failure
 else
-    not_ok "Claude OAuth drop-in present (expected 42-claude-oauth-token.conf under ${RUNNER_UNIT}.d)"
+    for d in "${dropin_paths[@]}"; do
+        # Prefer -e/-L over -f: -f follows symlinks and would accept a planted link.
+        if [[ -L "$d" ]]; then
+            not_ok "Claude OAuth drop-in is a symlink ($d)"
+            dropin_found=""
+            break
+        elif [[ -e "$d" && ! -f "$d" ]]; then
+            not_ok "Claude OAuth drop-in is not a regular file ($d)"
+            dropin_found=""
+            break
+        elif [[ -f "$d" ]]; then
+            dropin_found="$d"
+            break
+        fi
+    done
+    if [[ -n "$dropin_found" ]]; then
+        ok "Claude OAuth drop-in present ($dropin_found)"
+    elif [[ "$SCOPE" != system || "$SYSTEM_DROPIN_SAFE" -eq 1 ]]; then
+        not_ok "Claude OAuth drop-in present (expected 42-claude-oauth-token.conf under ${RUNNER_UNIT}.d)"
+    fi
 fi
 
 env_files="$("${CTL[@]}" show "$RUNNER_UNIT" -p EnvironmentFiles --value 2>/dev/null || true)"

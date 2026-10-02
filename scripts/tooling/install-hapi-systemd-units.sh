@@ -371,7 +371,8 @@ case "$PROFILE" in
         hapi_install_claude_oauth_dropin \
             --scope user \
             --runner-unit hapi-runner.service \
-            --token-file "$CLAUDE_TOKEN_FILE"
+            --token-file "$CLAUDE_TOKEN_FILE" \
+            --unit-dir "$USER_UNIT_DIR"
         if [[ "$DO_ENABLE" -eq 1 ]]; then
             loginctl enable-linger "$(id -un)" 2>/dev/null || true
             systemctl --user enable hapi-hub.service hapi-runner.service

@@ -102,6 +102,29 @@ hapi_claude_oauth_assert_safe_token_file() {
     return 0
 }
 
+# O_NOFOLLOW only protects the final component. Reject any symlink ancestor so a
+# fleet account cannot point .../.hapi at an operator directory before migrate.
+hapi_claude_oauth_assert_no_symlink_ancestors() {
+    local path="${1:?path}"
+    local cur="" part
+    if [[ "$path" != /* ]]; then
+        path="$(pwd -P 2>/dev/null || pwd)/$path"
+    fi
+    cur=""
+    IFS=/ read -r -a _hapi_oauth_parts <<<"${path#/}" || true
+    for part in "${_hapi_oauth_parts[@]}"; do
+        [[ -n "$part" ]] || continue
+        cur="${cur}/${part}"
+        if [[ -L "$cur" ]]; then
+            echo "ERROR: refusing symlink path component: $cur (in $path)" >&2
+            unset _hapi_oauth_parts
+            return 1
+        fi
+    done
+    unset _hapi_oauth_parts
+    return 0
+}
+
 # Copy src → dst without preserving symlinks. Opens src with O_NOFOLLOW, writes a
 # brand-new regular file at dst (O_CREAT|O_EXCL|O_NOFOLLOW on a temp, then rename).
 # Never use `cp -a` for legacy migrate — that re-creates attacker symlinks under /etc.
@@ -116,11 +139,34 @@ hapi_claude_oauth_secure_copy_regular_file() {
         echo "ERROR: source token is not a regular file: $src" >&2
         return 1
     fi
+    hapi_claude_oauth_assert_no_symlink_ancestors "$src" || return 1
     if command -v python3 >/dev/null 2>&1; then
         python3 - "$src" "$dst" <<'PY'
 import os, stat, sys
 
+def write_all(fd, data):
+    mv = memoryview(data)
+    while len(mv):
+        n = os.write(fd, mv)
+        if n <= 0:
+            raise OSError("write returned %d with %d bytes remaining" % (n, len(mv)))
+        mv = mv[n:]
+
+def reject_symlink_components(path):
+    path = os.path.abspath(path)
+    parts = [p for p in path.split(os.sep) if p]
+    cur = os.sep if path.startswith(os.sep) else ""
+    for part in parts:
+        if cur in ("", os.sep):
+            cur = (os.sep + part) if path.startswith(os.sep) else part
+        else:
+            cur = os.path.join(cur, part)
+        if os.path.lexists(cur) and os.path.islink(cur):
+            sys.stderr.write("ERROR: refusing symlink path component: %s (in %s)\n" % (cur, path))
+            sys.exit(1)
+
 src, dst = sys.argv[1], sys.argv[2]
+reject_symlink_components(src)
 rd_flags = os.O_RDONLY
 if hasattr(os, "O_NOFOLLOW"):
     rd_flags |= os.O_NOFOLLOW
@@ -162,10 +208,17 @@ except OSError as exc:
     sys.stderr.write("ERROR: cannot create destination token: %s: %s\n" % (tmp, exc))
     sys.exit(1)
 try:
-    os.write(dfd, data)
+    write_all(dfd, data)
     os.fchmod(dfd, 0o600)
-finally:
+except OSError as exc:
     os.close(dfd)
+    try:
+        os.unlink(tmp)
+    except OSError:
+        pass
+    sys.stderr.write("ERROR: incomplete write to %s: %s\n" % (tmp, exc))
+    sys.exit(1)
+os.close(dfd)
 os.replace(tmp, dst)
 sys.exit(0)
 PY
@@ -220,13 +273,29 @@ hapi_claude_oauth_retire_legacy_token_source() {
     if [[ ! -f "$src" ]]; then
         return 0
     fi
+    hapi_claude_oauth_assert_no_symlink_ancestors "$src" || return 1
     local dest="${src}.migrated.$(date +%s)"
     if command -v python3 >/dev/null 2>&1; then
         # Explicit status check: callers may invoke us under `cmd || warn`, which
         # suppresses errexit so a failed rename must not fall through to success.
         if ! python3 - "$src" "$dest" <<'PY'
 import os, stat, sys
+
+def reject_symlink_components(path):
+    path = os.path.abspath(path)
+    parts = [p for p in path.split(os.sep) if p]
+    cur = os.sep if path.startswith(os.sep) else ""
+    for part in parts:
+        if cur in ("", os.sep):
+            cur = (os.sep + part) if path.startswith(os.sep) else part
+        else:
+            cur = os.path.join(cur, part)
+        if os.path.lexists(cur) and os.path.islink(cur):
+            sys.stderr.write("ERROR: refusing symlink path component: %s (in %s)\n" % (cur, path))
+            sys.exit(1)
+
 src, dest = sys.argv[1], sys.argv[2]
+reject_symlink_components(src)
 flags = os.O_RDONLY
 if hasattr(os, "O_NOFOLLOW"):
     flags |= os.O_NOFOLLOW
@@ -430,10 +499,22 @@ except OSError as exc:
     sys.stderr.write("ERROR: cannot create destination token: %s: %s\n" % (tmp, exc))
     sys.exit(1)
 try:
-    os.write(fd, data)
+    mv = memoryview(data)
+    while len(mv):
+        n = os.write(fd, mv)
+        if n <= 0:
+            raise OSError("write returned %d with %d bytes remaining" % (n, len(mv)))
+        mv = mv[n:]
     os.fchmod(fd, 0o600)
-finally:
+except OSError as exc:
     os.close(fd)
+    try:
+        os.unlink(tmp)
+    except OSError:
+        pass
+    sys.stderr.write("ERROR: incomplete write to %s: %s\n" % (tmp, exc))
+    sys.exit(1)
+os.close(fd)
 os.replace(tmp, dst)
 sys.exit(0)
 PY
@@ -502,10 +583,22 @@ except OSError as exc:
     sys.exit(1)
 try:
     if data:
-        os.write(fd, data)
+        mv = memoryview(data)
+        while len(mv):
+            n = os.write(fd, mv)
+            if n <= 0:
+                raise OSError("write returned %d with %d bytes remaining" % (n, len(mv)))
+            mv = mv[n:]
     os.fchmod(fd, 0o600)
-finally:
+except OSError as exc:
     os.close(fd)
+    try:
+        os.unlink(tmp)
+    except OSError:
+        pass
+    sys.stderr.write("ERROR: incomplete restore write to %s: %s\n" % (tmp, exc))
+    sys.exit(1)
+os.close(fd)
 os.replace(tmp, dst)
 sys.exit(0)
 PY
@@ -842,10 +935,22 @@ except OSError as exc:
     sys.stderr.write("ERROR: cannot create exclusive backup file: %s: %s\n" % (dst, exc))
     sys.exit(1)
 try:
-    os.write(fd, data)
+    mv = memoryview(data)
+    while len(mv):
+        n = os.write(fd, mv)
+        if n <= 0:
+            raise OSError("write returned %d with %d bytes remaining" % (n, len(mv)))
+        mv = mv[n:]
     os.fchmod(fd, 0o600)
-finally:
+except OSError as exc:
     os.close(fd)
+    try:
+        os.unlink(dst)
+    except OSError:
+        pass
+    sys.stderr.write("ERROR: incomplete write to %s: %s\n" % (dst, exc))
+    sys.exit(1)
+os.close(fd)
 sys.exit(0)
 PY
 }
@@ -1038,13 +1143,14 @@ PY
 # (and returns 0) when the token file is absent — absence is expected on a
 # stranger pet install until the operator mints a token.
 hapi_install_claude_oauth_dropin() {
-    local scope="" runner_unit="" token_file="" owner="" migrate_profile="" migrate_hapi_home="" migrate_operator_home=""
+    local scope="" runner_unit="" token_file="" owner="" migrate_profile="" migrate_hapi_home="" migrate_operator_home="" unit_dir=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --scope) scope="${2:?}"; shift 2 ;;
             --runner-unit) runner_unit="${2:?}"; shift 2 ;;
             --token-file) token_file="${2:?}"; shift 2 ;;
             --owner) owner="${2:?}"; shift 2 ;;
+            --unit-dir) unit_dir="${2:?}"; shift 2 ;;
             --migrate-profile) migrate_profile="${2:?}"; shift 2 ;;
             --migrate-hapi-home) migrate_hapi_home="${2:?}"; shift 2 ;;
             --migrate-operator-home) migrate_operator_home="${2:?}"; shift 2 ;;
@@ -1065,7 +1171,14 @@ hapi_install_claude_oauth_dropin() {
             dropin_dir="/etc/systemd/system/${runner_unit}.d"
             ;;
         user)
-            dropin_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/${runner_unit}.d"
+            # Prefer --unit-dir from the companion installer (always $HOME/.config/...)
+            # so a stray XDG_CONFIG_HOME cannot land the drop-in beside a different
+            # search root than the unit files.
+            if [[ -n "$unit_dir" ]]; then
+                dropin_dir="${unit_dir}/${runner_unit}.d"
+            else
+                dropin_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/${runner_unit}.d"
+            fi
             ;;
         *)
             echo "hapi_install_claude_oauth_dropin: --scope must be system|user" >&2

@@ -393,6 +393,52 @@ check "pet embedded path migrates legacy oauth before drop-in" \
     "grep -q 'hapi_pet_migrate_legacy_oauth_if_needed' \"$ROOT/scripts/install-hapi-pet.sh\""
 check "verify parent check does not use fixed /tmp paths" \
     "! grep -E '/tmp/hapi-verify-oauth-parent\\.(out|err)' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
+check "secure_copy retries short writes" \
+    "grep -q 'write returned %d with %d bytes remaining' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\""
+check "companion passes --unit-dir for user-pet drop-in" \
+    "grep -A6 'hapi_install_claude_oauth_dropin' \"$ROOT/scripts/tooling/install-hapi-systemd-units.sh\" | grep -q -- '--unit-dir'"
+check "verify validates system drop-in before restart" \
+    "awk '/SYSTEM_DROPIN_SAFE=1/,/SKIP_RESTART/ {print}' \"$ROOT/scripts/tooling/verify-hapi-install.sh\" | grep -q 'refusing restart'"
+
+# Symlink ancestor on legacy migrate source must fail closed.
+anc_root="$TMP/anc-root"
+mkdir -p "$anc_root/real/.hapi" "$anc_root/fleet"
+printf 'CLAUDE_CODE_OAUTH_TOKEN=stolen\n' >"$anc_root/real/.hapi/claude-setup-token.env"
+chmod 600 "$anc_root/real/.hapi/claude-setup-token.env"
+ln -s "$anc_root/real/.hapi" "$anc_root/fleet/.hapi"
+set +e
+hapi_claude_oauth_assert_no_symlink_ancestors "$anc_root/fleet/.hapi/claude-setup-token.env" \
+    >"$TMP/anc.out" 2>"$TMP/anc.err"
+anc_rc=$?
+set -e
+check "symlink ancestor rejected" "[[ $anc_rc -ne 0 ]]"
+check "symlink ancestor names component" "grep -q 'refusing symlink path component' \"$TMP/anc.err\""
+set +e
+hapi_claude_oauth_secure_copy_regular_file \
+    "$anc_root/fleet/.hapi/claude-setup-token.env" "$anc_root/canon.env" \
+    >"$TMP/anc-copy.out" 2>"$TMP/anc-copy.err"
+anc_copy_rc=$?
+set -e
+check "secure_copy refuses symlink ancestor source" "[[ $anc_copy_rc -ne 0 ]]"
+check "secure_copy did not create canon from symlink ancestor" "[[ ! -e \"$anc_root/canon.env\" ]]"
+
+# --unit-dir overrides XDG_CONFIG_HOME for user drop-in placement.
+unit_home="$TMP/unit-dir-home"
+mkdir -p "$unit_home/.config/systemd/user"
+export XDG_CONFIG_HOME="$TMP/xdg-wrong"
+mkdir -p "$XDG_CONFIG_HOME"
+unit_token="$TMP/unit-dir-token.env"
+printf 'CLAUDE_CODE_OAUTH_TOKEN=unitdir\n' >"$unit_token"
+chmod 600 "$unit_token"
+hapi_install_claude_oauth_dropin \
+    --scope user --runner-unit hapi-runner.service \
+    --token-file "$unit_token" \
+    --unit-dir "$unit_home/.config/systemd/user" \
+    >"$TMP/unit-dir.out" 2>"$TMP/unit-dir.err"
+check "unit-dir drop-in beside HOME unit root" \
+    "[[ -f \"$unit_home/.config/systemd/user/hapi-runner.service.d/42-claude-oauth-token.conf\" ]]"
+check "unit-dir ignores XDG_CONFIG_HOME" \
+    "[[ ! -e \"$XDG_CONFIG_HOME/systemd/user/hapi-runner.service.d/42-claude-oauth-token.conf\" ]]"
 
 # Embedded pet migrate (curl|bash shape — no drop-in helpers).
 pet_home="$TMP/pet-migrate-home"
