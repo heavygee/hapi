@@ -18,9 +18,13 @@ check() {
     fi
 }
 
-# Canonical path when nothing exists yet.
+# User/pet canonical path when nothing exists yet.
 got="$(hapi_claude_oauth_default_token_file "$TMP/hapi-home")"
 check "canonical path" "[[ \"$got\" == \"$TMP/hapi-home/claude-setup-token.env\" ]]"
+
+# System fleet path is root-controlled under /etc/hapi (not service home).
+got="$(hapi_claude_oauth_system_token_file)"
+check "system token path" "[[ \"$got\" == \"/etc/hapi/claude-setup-token.env\" ]]"
 
 # Legacy antevorta hotfix path must NOT win - migrate is operational, not dual-path.
 mkdir -p "$TMP/legacy/.hapi"
@@ -174,9 +178,11 @@ check "secure_chmod system shell path mentions python3" \
     "grep -qi python3 /tmp/hapi-claude-oauth-force-shell-owner.err"
 
 # System-scope instructions use systemctl restart (not --user).
-hapi_print_claude_oauth_setup_instructions "$token" "hapi-runner.service" "system" \
+hapi_print_claude_oauth_setup_instructions "/etc/hapi/claude-setup-token.env" "hapi-runner.service" "system" \
     >/tmp/hapi-claude-oauth-dropin-system-instr.out
 check "system instructions use systemctl restart" \
     "grep -q 'systemctl restart hapi-runner.service' /tmp/hapi-claude-oauth-dropin-system-instr.out"
+check "system instructions use privileged write" \
+    "grep -q 'sudo tee' /tmp/hapi-claude-oauth-dropin-system-instr.out"
 
 echo "ALL OK"

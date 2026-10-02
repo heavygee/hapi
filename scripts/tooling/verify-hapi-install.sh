@@ -396,16 +396,20 @@ else
     not_ok "runner EnvironmentFiles references claude-setup-token.env (got: ${env_files:-empty})"
 fi
 
-# Prefer the path the unit actually loads; fall back to HAPI_HOME canonical only.
+# Prefer the path the unit actually loads; fall back by scope.
 token_file="${token_file_from_unit:-}"
 if [[ -z "$token_file" ]]; then
-    token_file="$hapi_home/claude-setup-token.env"
+    if [[ "$SCOPE" == system ]]; then
+        token_file="/etc/hapi/claude-setup-token.env"
+    else
+        token_file="$hapi_home/claude-setup-token.env"
+    fi
 fi
 
 token_file_has_value=0
 token_file_readable=0
 if [[ -n "$token_file" ]]; then
-    # Fleet tokens are 0600 hapi-owned; operator verify needs sudo -n (same as runner.state.json).
+    # Fleet tokens are root:root 0600 under /etc/hapi; operator verify needs sudo -n.
     # Require a non-whitespace value: CLAUDE_CODE_OAUTH_TOKEN=\r\n must NOT count as loaded
     # (grep '.' would treat CR as a value and disagree with Python's rstrip).
     token_line=""
@@ -571,13 +575,13 @@ file_tok = None
 file_key_seen = False
 if token_file and os.path.isfile(token_file) and not os.path.islink(token_file):
     try:
+        # systemd applies the *last* assignment for a key; scan all lines.
         for line in open(token_file, "rb"):
             if line.startswith(b"CLAUDE_CODE_OAUTH_TOKEN="):
                 file_key_seen = True
                 # Same nonempty rule as the shell probe after systemd unquote:
                 # CLAUDE_CODE_OAUTH_TOKEN=\r\n / "" / '' are missing, not a value.
                 file_tok = parse_env_file_value(line.split(b"=", 1)[1])
-                break
     except OSError:
         file_tok = None
         file_key_seen = False
@@ -620,14 +624,11 @@ if peer_has and not runner_has:
 # Token file claims a value but the running runner never loaded it.
 if expect_load and not runner_has:
     sys.exit(3)
-# Stale/empty file vs live runner: restart would drop or change ambient auth.
-# Cover expect_load and empty assignments (=\r\n) even when shell no longer
-# sets expect_load — never PASS when the file cannot reproduce runner_tok.
-if runner_has and (expect_load or file_key_seen):
+# Loaded ambient token must have a durable matching backing file — missing file,
+# empty assignment, or mismatch all mean the next restart loses/changes auth.
+if runner_has:
     if file_tok is None or runner_tok != file_tok:
         sys.exit(4)
-# Reserve exit 0 for a real loaded ambient token — never PASS on runner=0.
-if runner_has:
     sys.exit(0)
 # Fresh install / token not configured yet (no peers proving prior auth).
 sys.exit(5)

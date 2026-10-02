@@ -15,18 +15,23 @@
 #   hapi_install_claude_oauth_dropin \
 #       --scope system|user \
 #       --runner-unit hapi-runner.service \
-#       --token-file /var/lib/hapi/claude-setup-token.env \
-#       [--owner hapi:hapi]
+#       --token-file /etc/hapi/claude-setup-token.env \
+#       [--owner hapi:hapi]   # only for non-/etc paths; ignored under /etc/
 #
 # Idempotent. Does not mint Anthropic tokens. If the env file is missing, prints
 # a clear one-time setup instruction and still installs the drop-in (systemd's
 # EnvironmentFile=- form ignores a missing file so the unit still starts).
 
+# System-scope fleet: root-controlled path. systemd reads EnvironmentFile as root
+# before dropping to User=; the service account must NOT be able to replace this
+# file with a symlink to other root-readable secrets (Codex P1).
+hapi_claude_oauth_system_token_file() {
+    printf '%s' "/etc/hapi/claude-setup-token.env"
+}
+
+# User-scope / pet: token lives next to HAPI_HOME (operator-owned tree).
 hapi_claude_oauth_default_token_file() {
     local hapi_home="${1:?hapi_home}"
-    # Canonical only: $HAPI_HOME/claude-setup-token.env.
-    # The antevorta 2026-10-01 hotfix under $HAPI_HOME/.hapi/ is a one-time
-    # operational migrate (cp to canonical), not a retained dual-path.
     printf '%s' "$hapi_home/claude-setup-token.env"
 }
 
@@ -39,7 +44,26 @@ hapi_print_claude_oauth_setup_instructions() {
         user) restart_cmd="systemctl --user restart ${runner_unit}" ;;
         *)    restart_cmd="systemctl restart ${runner_unit}" ;;
     esac
-    cat <<EOF
+    if [[ "$scope" == system ]]; then
+        cat <<EOF
+
+==> Claude OAuth for runner-spawned sessions is NOT configured yet.
+    New UI / machine-spawn Claude sessions will print:
+      Not logged in · Please run /login
+    Existing --resume sessions can keep working and hide this gap.
+
+    One-time setup (privileged write - file stays root:root 0600 under /etc):
+      claude setup-token
+      sudo install -d -m 0755 "$(dirname "$token_file")"
+      printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\\n' '<token>' | sudo tee '$token_file' >/dev/null
+      sudo chmod 600 '$token_file'
+    And reload the runner:
+      $restart_cmd
+
+    Drop-in already points at: $token_file
+EOF
+    else
+        cat <<EOF
 
 ==> Claude OAuth for runner-spawned sessions is NOT configured yet.
     New UI / machine-spawn Claude sessions will print:
@@ -57,6 +81,7 @@ hapi_print_claude_oauth_setup_instructions() {
 
     Drop-in already points at: $token_file
 EOF
+    fi
 }
 
 hapi_claude_oauth_assert_safe_token_file() {
@@ -239,27 +264,50 @@ hapi_install_claude_oauth_dropin() {
 
     mkdir -p "$dropin_dir"
     # Parent of the token file (may not exist yet on a fresh box).
-    local token_parent
+    local token_parent root_controlled=0
     token_parent="$(dirname "$token_file")"
-    if [[ ! -d "$token_parent" ]]; then
-        # Fresh parent: private to the service account (hub DB etc. live under
-        # HAPI_HOME). Do not chmod an existing mount/dir - only create new.
-        mkdir -m 0700 -p "$token_parent"
+    # /etc/hapi/... stays root-controlled - never chown to the service account.
+    if [[ "$scope" == system && "$token_file" == /etc/* ]]; then
+        root_controlled=1
     fi
-    if [[ -n "$owner" && "$scope" == system ]]; then
-        # Fail closed if we cannot make the parent writable by the runner user -
-        # otherwise the printed setup steps cannot create the token file.
+    if [[ ! -d "$token_parent" ]]; then
+        if [[ "$root_controlled" -eq 1 ]]; then
+            # Root-owned config dir (matches /etc/hapi sentinel layout).
+            mkdir -m 0755 -p "$token_parent"
+        else
+            # User/pet HAPI_HOME parent: private when freshly created.
+            mkdir -m 0700 -p "$token_parent"
+        fi
+    fi
+    if [[ -n "$owner" && "$scope" == system && "$root_controlled" -eq 0 ]]; then
+        # Legacy non-/etc system paths only. Fail closed so setup can write.
         hapi_claude_oauth_secure_chown_parent "$token_parent" "$owner" || return 1
+    elif [[ -n "$owner" && "$root_controlled" -eq 1 ]]; then
+        echo "NOTE: ignoring --owner=$owner for root-controlled token path $token_file" >&2
     fi
 
-    # One-time estate migrate hint (antevorta hotfix under .hapi/) - never keep
-    # dual drop-in paths in the installer.
-    if [[ "$(basename "$token_file")" == "claude-setup-token.env" ]]; then
-        local legacy_token="${token_parent}/.hapi/claude-setup-token.env"
-        if [[ -f "$legacy_token" && ! -f "$token_file" ]]; then
-            echo "WARN: legacy token at $legacy_token - migrate once to canonical path:" >&2
-            echo "       cp -a $(printf '%q' "$legacy_token") $(printf '%q' "$token_file") && chmod 600 $(printf '%q' "$token_file")" >&2
-            echo "       then: systemctl restart ${runner_unit}" >&2
+    # Migrate hints: service-home / .hapi/ -> /etc/hapi (system) or canonical pet path.
+    if [[ "$(basename "$token_file")" == "claude-setup-token.env" && ! -f "$token_file" ]]; then
+        local legacy_token
+        if [[ "$root_controlled" -eq 1 ]]; then
+            for legacy_token in \
+                /var/lib/hapi/claude-setup-token.env \
+                /var/lib/hapi/.hapi/claude-setup-token.env; do
+                if [[ -f "$legacy_token" ]]; then
+                    echo "WARN: legacy token at $legacy_token - migrate once to root-controlled path:" >&2
+                    echo "       sudo install -d -m 0755 $(printf '%q' "$token_parent")" >&2
+                    echo "       sudo cp -a $(printf '%q' "$legacy_token") $(printf '%q' "$token_file") && sudo chmod 600 $(printf '%q' "$token_file")" >&2
+                    echo "       then: systemctl restart ${runner_unit}" >&2
+                    break
+                fi
+            done
+        else
+            legacy_token="${token_parent}/.hapi/claude-setup-token.env"
+            if [[ -f "$legacy_token" ]]; then
+                echo "WARN: legacy token at $legacy_token - migrate once to canonical path:" >&2
+                echo "       cp -a $(printf '%q' "$legacy_token") $(printf '%q' "$token_file") && chmod 600 $(printf '%q' "$token_file")" >&2
+                echo "       then: systemctl restart ${runner_unit}" >&2
+            fi
         fi
     fi
 
@@ -278,7 +326,10 @@ EOF
         # Fast-path clear error for an obvious symlink; the secure helper also
         # refuses via O_NOFOLLOW so a TOCTOU swap cannot retarget chmod/chown.
         hapi_claude_oauth_assert_safe_token_file "$token_file" || return 1
-        if [[ -n "$owner" && "$scope" == system ]]; then
+        if [[ "$root_controlled" -eq 1 ]]; then
+            # Keep root:root 0600 - never hand the file to the service UID.
+            hapi_claude_oauth_secure_chmod_chown "$token_file" || return 1
+        elif [[ -n "$owner" && "$scope" == system ]]; then
             hapi_claude_oauth_secure_chmod_chown "$token_file" "$owner" || return 1
         else
             hapi_claude_oauth_secure_chmod_chown "$token_file" || return 1

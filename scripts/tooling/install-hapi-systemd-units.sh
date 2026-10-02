@@ -268,17 +268,23 @@ case "$PROFILE" in
         # Claude OAuth ambient token for runner-spawned sessions (fleet + soup).
         # primary-soup (oos): token lives at $OPERATOR_HOME/.hapi/claude-setup-token.env
         #   (matches the 2026-08-25 hand-install on oos-linux).
-        # fleet-binary: token lives at $HAPI_HOME/claude-setup-token.env (service home).
+        # fleet-binary: root-controlled /etc/hapi/claude-setup-token.env (NOT under
+        #   service-writable HAPI_HOME - compromised runner + Restart must not be
+        #   able to retarget EnvironmentFile at other root-readable secrets).
         if [[ "$PROFILE" == primary-soup ]]; then
             CLAUDE_TOKEN_FILE="${OOS_OPERATOR_HOME}/.hapi/claude-setup-token.env"
+            hapi_install_claude_oauth_dropin \
+                --scope system \
+                --runner-unit "$RUNNER_UNIT" \
+                --token-file "$CLAUDE_TOKEN_FILE" \
+                --owner "$HAPI_USER:$HAPI_GROUP"
         else
-            CLAUDE_TOKEN_FILE="$(hapi_claude_oauth_default_token_file "$HAPI_HOME")"
+            CLAUDE_TOKEN_FILE="$(hapi_claude_oauth_system_token_file)"
+            hapi_install_claude_oauth_dropin \
+                --scope system \
+                --runner-unit "$RUNNER_UNIT" \
+                --token-file "$CLAUDE_TOKEN_FILE"
         fi
-        hapi_install_claude_oauth_dropin \
-            --scope system \
-            --runner-unit "$RUNNER_UNIT" \
-            --token-file "$CLAUDE_TOKEN_FILE" \
-            --owner "$HAPI_USER:$HAPI_GROUP"
         if [[ "$DO_RESTART" -eq 1 ]]; then
             if [[ -x /home/heavygee/.local/bin/hapi-restart-hub ]]; then
                 sudo -u heavygee -H /home/heavygee/.local/bin/hapi-restart-hub

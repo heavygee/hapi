@@ -219,11 +219,11 @@ jobs:
             # antevorta 2026-10-01 failure mode was drop-in/file missing after upgrade.
             test -f /etc/systemd/system/hapi-runner.service.d/42-claude-oauth-token.conf \
               || { echo "FAIL: Claude OAuth drop-in not installed by fleet-binary profile"; exit 1; }
-            install -d -o hapi -g hapi -m 0700 /var/lib/hapi
-            TOKEN_FILE=/var/lib/hapi/claude-setup-token.env
+            install -d -m 0755 /etc/hapi
+            TOKEN_FILE=/etc/hapi/claude-setup-token.env
             umask 077
             printf "CLAUDE_CODE_OAUTH_TOKEN=%s\n" "probe-ci-token-do-not-use-against-anthropic" > "$TOKEN_FILE"
-            chown hapi:hapi "$TOKEN_FILE"
+            chown root:root "$TOKEN_FILE"
             chmod 600 "$TOKEN_FILE"
             echo "planted probe token at $TOKEN_FILE"
           '
@@ -269,18 +269,20 @@ jobs:
           # Native Claude install lands in $HOME/.local/bin; runuser -u is not a
           # login shell so inherit an explicit PATH that includes it.
           HAPI_CLAUDE_PATH="/var/lib/hapi/.local/bin:/usr/local/bin:/usr/bin:/bin"
-          if ! runuser -u hapi -- env HOME=/var/lib/hapi PATH="$HAPI_CLAUDE_PATH" \
+          # Never leak the live OAuth secret into network install.sh / npm.
+          if ! runuser -u hapi -- env -u CLAUDE_CODE_OAUTH_TOKEN HOME=/var/lib/hapi PATH="$HAPI_CLAUDE_PATH" \
               bash -c 'command -v claude >/dev/null'; then
             echo "=== installing Claude Code CLI for hapi service user ==="
-            runuser -u hapi -- env HOME=/var/lib/hapi PATH="$HAPI_CLAUDE_PATH" \
+            runuser -u hapi -- env -u CLAUDE_CODE_OAUTH_TOKEN HOME=/var/lib/hapi PATH="$HAPI_CLAUDE_PATH" \
               bash -c 'curl -fsSL https://claude.ai/install.sh | bash'
-            runuser -u hapi -- env HOME=/var/lib/hapi PATH="$HAPI_CLAUDE_PATH" \
+            runuser -u hapi -- env -u CLAUDE_CODE_OAUTH_TOKEN HOME=/var/lib/hapi PATH="$HAPI_CLAUDE_PATH" \
               bash -c 'command -v claude && claude --version'
           fi
-          TOKEN_FILE=/var/lib/hapi/claude-setup-token.env
+          install -d -m 0755 /etc/hapi
+          TOKEN_FILE=/etc/hapi/claude-setup-token.env
           umask 077
           printf "CLAUDE_CODE_OAUTH_TOKEN=%s\n" "$CLAUDE_CODE_OAUTH_TOKEN" > "$TOKEN_FILE"
-          chown hapi:hapi "$TOKEN_FILE"
+          chown root:root "$TOKEN_FILE"
           chmod 600 "$TOKEN_FILE"
           systemctl restart hapi-runner.service
           sleep 3
