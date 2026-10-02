@@ -101,6 +101,81 @@ hapi_claude_oauth_assert_safe_token_file() {
     return 0
 }
 
+# Copy src → dst without preserving symlinks. Opens src with O_NOFOLLOW, writes a
+# brand-new regular file at dst (O_CREAT|O_EXCL|O_NOFOLLOW on a temp, then rename).
+# Never use `cp -a` for legacy migrate — that re-creates attacker symlinks under /etc.
+hapi_claude_oauth_secure_copy_regular_file() {
+    local src="${1:?src}"
+    local dst="${2:?dst}"
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "ERROR: python3 required for secure token copy ($src -> $dst)" >&2
+        return 1
+    fi
+    python3 - "$src" "$dst" <<'PY'
+import os, stat, sys
+
+src, dst = sys.argv[1], sys.argv[2]
+rd_flags = os.O_RDONLY
+if hasattr(os, "O_NOFOLLOW"):
+    rd_flags |= os.O_NOFOLLOW
+if hasattr(os, "O_NONBLOCK"):
+    rd_flags |= os.O_NONBLOCK
+try:
+    sfd = os.open(src, rd_flags)
+except OSError as exc:
+    sys.stderr.write("ERROR: cannot open source token without following symlink: %s: %s\n" % (src, exc))
+    sys.exit(1)
+try:
+    mode = os.fstat(sfd).st_mode
+    if not stat.S_ISREG(mode):
+        sys.stderr.write("ERROR: refusing non-regular source token: %s\n" % src)
+        sys.exit(1)
+    data = b""
+    while True:
+        chunk = os.read(sfd, 65536)
+        if not chunk:
+            break
+        data += chunk
+finally:
+    os.close(sfd)
+
+parent = os.path.dirname(dst) or "."
+os.makedirs(parent, mode=0o755, exist_ok=True)
+tmp = dst + ".tmp.%d" % os.getpid()
+try:
+    if os.path.lexists(tmp):
+        os.unlink(tmp)
+except OSError:
+    pass
+wr_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+if hasattr(os, "O_NOFOLLOW"):
+    wr_flags |= os.O_NOFOLLOW
+try:
+    dfd = os.open(tmp, wr_flags, 0o600)
+except OSError as exc:
+    sys.stderr.write("ERROR: cannot create destination token: %s: %s\n" % (tmp, exc))
+    sys.exit(1)
+try:
+    os.write(dfd, data)
+    os.fchmod(dfd, 0o600)
+finally:
+    os.close(dfd)
+os.replace(tmp, dst)
+sys.exit(0)
+PY
+}
+
+# Known pre-/etc locations (fleet service home + primary-soup operator hand-install).
+hapi_claude_oauth_legacy_system_token_candidates() {
+    printf '%s\n' \
+        /var/lib/hapi/claude-setup-token.env \
+        /var/lib/hapi/.hapi/claude-setup-token.env \
+        /home/heavygee/.hapi/claude-setup-token.env
+    if [[ -n "${HOME:-}" && "$HOME" != /home/heavygee ]]; then
+        printf '%s\n' "${HOME}/.hapi/claude-setup-token.env"
+    fi
+}
+
 # chmod 0600 (+ optional chown) without following a symlink final component.
 # Prefer python3 O_NOFOLLOW + fchmod/fchown. Path-based shell chmod/chown is
 # only allowed for user-scope (no --owner): system-profile as root must fail
@@ -286,32 +361,58 @@ hapi_install_claude_oauth_dropin() {
         echo "NOTE: ignoring --owner=$owner for root-controlled token path $token_file" >&2
     fi
 
-    # Migrate hints: service-home / .hapi/ -> /etc/hapi (system) or canonical pet path.
+    # Migrate: service-home / operator .hapi/ -> /etc/hapi (system) or pet canonical.
+    # Exported for callers that must fail closed before --restart.
+    HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=0
     if [[ "$(basename "$token_file")" == "claude-setup-token.env" && ! -f "$token_file" ]]; then
         local legacy_token
         if [[ "$root_controlled" -eq 1 ]]; then
-            for legacy_token in \
-                /var/lib/hapi/claude-setup-token.env \
-                /var/lib/hapi/.hapi/claude-setup-token.env \
-                /home/heavygee/.hapi/claude-setup-token.env \
-                "${HOME:-}/.hapi/claude-setup-token.env"; do
-                if [[ -f "$legacy_token" ]]; then
-                    echo "WARN: legacy token at $legacy_token - migrate once to root-controlled path:" >&2
-                    echo "       sudo install -d -m 0755 $(printf '%q' "$token_parent")" >&2
-                    echo "       sudo cp -a $(printf '%q' "$legacy_token") $(printf '%q' "$token_file") && sudo chmod 600 $(printf '%q' "$token_file")" >&2
-                    echo "       then: sudo systemctl restart ${runner_unit}" >&2
+            while IFS= read -r legacy_token; do
+                [[ -n "$legacy_token" ]] || continue
+                [[ -e "$legacy_token" || -L "$legacy_token" ]] || continue
+                if [[ -L "$legacy_token" ]]; then
+                    echo "ERROR: refusing to migrate symlink legacy token: $legacy_token" >&2
+                    echo "       Replace with a regular file, then re-run install (never sudo cp -a)." >&2
+                    HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=1
                     break
                 fi
-            done
+                if hapi_claude_oauth_secure_copy_regular_file "$legacy_token" "$token_file"; then
+                    echo "Migrated Claude OAuth token: $legacy_token -> $token_file (regular file, 0600)"
+                    break
+                fi
+                echo "WARN: could not migrate legacy token at $legacy_token" >&2
+                HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=1
+                echo "       Fix the source (must be a regular file), then:" >&2
+                echo "       source scripts/tooling/lib/hapi-claude-oauth-dropin.sh" >&2
+                echo "       hapi_claude_oauth_secure_copy_regular_file $(printf '%q' "$legacy_token") $(printf '%q' "$token_file")" >&2
+                echo "       then: sudo systemctl restart ${runner_unit}" >&2
+                break
+            done < <(hapi_claude_oauth_legacy_system_token_candidates)
+            if [[ ! -f "$token_file" ]]; then
+                # Still missing: if any legacy path exists we owe a migrate before restart.
+                while IFS= read -r legacy_token; do
+                    if [[ -e "$legacy_token" || -L "$legacy_token" ]]; then
+                        HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=1
+                        break
+                    fi
+                done < <(hapi_claude_oauth_legacy_system_token_candidates)
+            fi
         else
             legacy_token="${token_parent}/.hapi/claude-setup-token.env"
-            if [[ -f "$legacy_token" ]]; then
-                echo "WARN: legacy token at $legacy_token - migrate once to canonical path:" >&2
-                echo "       cp -a $(printf '%q' "$legacy_token") $(printf '%q' "$token_file") && chmod 600 $(printf '%q' "$token_file")" >&2
-                echo "       then: systemctl restart ${runner_unit}" >&2
+            if [[ -e "$legacy_token" || -L "$legacy_token" ]]; then
+                if [[ -L "$legacy_token" ]]; then
+                    echo "ERROR: refusing to migrate symlink legacy token: $legacy_token" >&2
+                    HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=1
+                elif hapi_claude_oauth_secure_copy_regular_file "$legacy_token" "$token_file"; then
+                    echo "Migrated Claude OAuth token: $legacy_token -> $token_file"
+                else
+                    HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=1
+                    echo "WARN: could not migrate legacy token at $legacy_token" >&2
+                fi
             fi
         fi
     fi
+    export HAPI_CLAUDE_OAUTH_MIGRATE_PENDING
 
     cat >"$dropin" <<EOF
 # Installed by hapi_install_claude_oauth_dropin (scripts/tooling/lib/hapi-claude-oauth-dropin.sh).

@@ -271,11 +271,31 @@ case "$PROFILE" in
         # root-readable secrets. primary-soup 2026-08-25 hand-install under
         # $OPERATOR_HOME/.hapi/ is a one-time migrate (WARN from the drop-in).
         CLAUDE_TOKEN_FILE="$(hapi_claude_oauth_system_token_file)"
+        HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=0
         hapi_install_claude_oauth_dropin \
             --scope system \
             --runner-unit "$RUNNER_UNIT" \
             --token-file "$CLAUDE_TOKEN_FILE"
         if [[ "$DO_RESTART" -eq 1 ]]; then
+            # Fail closed: dropping EnvironmentFile onto missing /etc path while a
+            # legacy token still exists would restart without OAuth (primary-soup).
+            block_restart=0
+            if [[ "${HAPI_CLAUDE_OAUTH_MIGRATE_PENDING:-0}" -eq 1 ]]; then
+                block_restart=1
+            elif [[ ! -f "$CLAUDE_TOKEN_FILE" ]]; then
+                while IFS= read -r legacy_probe; do
+                    if [[ -e "$legacy_probe" || -L "$legacy_probe" ]]; then
+                        block_restart=1
+                        break
+                    fi
+                done < <(hapi_claude_oauth_legacy_system_token_candidates)
+            fi
+            if [[ "$block_restart" -eq 1 ]]; then
+                echo "ERROR: refusing --restart until Claude OAuth token is at $CLAUDE_TOKEN_FILE" >&2
+                echo "       Legacy path still present or migrate failed (never sudo cp -a of a symlink)." >&2
+                echo "       Migrate with: hapi_claude_oauth_secure_copy_regular_file <legacy> $CLAUDE_TOKEN_FILE" >&2
+                exit 1
+            fi
             if [[ -x /home/heavygee/.local/bin/hapi-restart-hub ]]; then
                 sudo -u heavygee -H /home/heavygee/.local/bin/hapi-restart-hub
             else

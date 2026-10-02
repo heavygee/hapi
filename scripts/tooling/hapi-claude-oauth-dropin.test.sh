@@ -62,7 +62,7 @@ hapi_install_claude_oauth_dropin \
 existing_mode="$(stat -c '%a' "$existing_parent")"
 check "existing token parent mode preserved" "[[ \"$existing_mode\" == \"755\" ]]"
 
-# Legacy-only file prints migrate WARN; drop-in still points at canonical.
+# Legacy-only file is auto-copied to canonical (never cp -a); drop-in stays canonical.
 legacy_home="$TMP/migrate-home"
 mkdir -p "$legacy_home/.hapi"
 printf 'CLAUDE_CODE_OAUTH_TOKEN=legacy\n' >"$legacy_home/.hapi/claude-setup-token.env"
@@ -72,10 +72,26 @@ hapi_install_claude_oauth_dropin \
     --scope user \
     --runner-unit hapi-runner.service \
     --token-file "$canon_token" >/tmp/hapi-claude-oauth-migrate.out 2>/tmp/hapi-claude-oauth-migrate.err
-check "legacy migrate WARN printed" "grep -q 'legacy token' /tmp/hapi-claude-oauth-migrate.err"
+check "legacy auto-migrated to canonical" "grep -q 'Migrated Claude OAuth token' /tmp/hapi-claude-oauth-migrate.out"
+check "canonical has migrated value" "grep -q 'CLAUDE_CODE_OAUTH_TOKEN=legacy' \"$canon_token\""
+check "canonical is not a symlink" "[[ ! -L \"$canon_token\" ]]"
 dropin_migrate="$XDG_CONFIG_HOME/systemd/user/hapi-runner.service.d/42-claude-oauth-token.conf"
 check "drop-in stays on canonical despite legacy" \
     "grep -q \"EnvironmentFile=-$canon_token\" \"$dropin_migrate\""
+
+# Symlink legacy must be refused (not copied into canonical).
+symlink_legacy_home="$TMP/symlink-migrate"
+mkdir -p "$symlink_legacy_home/.hapi"
+printf 'CLAUDE_CODE_OAUTH_TOKEN=evil\n' >"$symlink_legacy_home/.hapi/real.env"
+ln -s "$symlink_legacy_home/.hapi/real.env" "$symlink_legacy_home/.hapi/claude-setup-token.env"
+symlink_canon="$symlink_legacy_home/claude-setup-token.env"
+hapi_install_claude_oauth_dropin \
+    --scope user \
+    --runner-unit hapi-runner.service \
+    --token-file "$symlink_canon" >/tmp/hapi-claude-oauth-symlink-mig.out 2>/tmp/hapi-claude-oauth-symlink-mig.err || true
+check "symlink legacy refused" "grep -qi 'refusing.*symlink' /tmp/hapi-claude-oauth-symlink-mig.err"
+check "symlink legacy leaves canonical absent" "[[ ! -e \"$symlink_canon\" ]]"
+check "migrate pending after symlink refuse" "[[ \"${HAPI_CLAUDE_OAUTH_MIGRATE_PENDING:-0}\" -eq 1 ]]"
 
 # User-scope drop-in write (no systemctl root needed — daemon-reload may fail
 # in CI/sandbox without a user bus; tolerate that by stubbing systemctl).
