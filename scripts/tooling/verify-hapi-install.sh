@@ -31,8 +31,6 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=lib/hapi-systemd-units.sh
 source "$REPO_ROOT/scripts/tooling/lib/hapi-systemd-units.sh"
-# shellcheck source=lib/hapi-claude-oauth-dropin.sh
-source "$REPO_ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh"
 
 PASS=0
 FAIL=0
@@ -367,6 +365,10 @@ fi
 # New sessions inherit the runner ambient login. Missing EnvironmentFile load
 # is the antevorta 2026-10-01 failure mode: --resume children still have the
 # token, new UI sessions print Not logged in.
+# Sourced here (not at top) so --installer-smoke on archived pre-fix trees
+# does not require lib/hapi-claude-oauth-dropin.sh to exist yet.
+# shellcheck source=lib/hapi-claude-oauth-dropin.sh
+source "$REPO_ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh"
 dropin_paths=()
 if [[ "$SCOPE" == system ]]; then
     dropin_paths+=("/etc/systemd/system/${RUNNER_UNIT}.d/42-claude-oauth-token.conf")
