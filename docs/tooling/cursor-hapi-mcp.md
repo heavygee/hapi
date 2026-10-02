@@ -69,6 +69,8 @@ hapi-prune-stale-cursor-mcp
 
 ## Friction / kill-criteria
 
+- **`hapi doctor inline-media` must fail closed** on Cursor invoke-path breakage (agent cwd, project mailbox, listen, stdio child) — not green on HappyServer alone ([#194](https://github.com/heavygee/hapi/issues/194) / [tiann#1953](https://github.com/tiann/hapi/pull/1953)).
+
 - If Cursor native MCP tools work after overlay install **and** `hapiMcpUrl` answers on loopback → wiring is correct.
 - If someone "fixes" MCP by setting `--url` to `:3006` → reject; that is the wrong layer.
 - If project mcp.json is the only place live `hapi-*` appears on oos → user-level overlay is still broken (symlink refuse / missing follow); do not normalize on project files.

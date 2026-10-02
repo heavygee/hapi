@@ -1003,6 +1003,11 @@ layers:
   # CLI-only → remat needs hapi-restart-hub (no --build-web required for the fix itself).
   - branch: fix/cursor-mcp-agent-spawn-cwd
 
+  # Thin tip on upstream/main: fix/doctor-cursor-mcp-path @ 3fd285fe9 / tiann#1953
+  # Worktree: ~/coding/hapi/worktrees/doctor-cursor-mcp-path
+  # Doctor fails closed when Cursor ACP invoke path is broken (cwd/mailbox/stdio) — #194.
+  - branch: fix/doctor-cursor-mcp-path
+
   # DROPPED 2026-09-22: tooling/hapi-tick-v1 MERGED fork main as heavygee/hapi#159
   # (squash baf1893b6). Gate A cleanup — rematerialize once wave done. Tick stays on
   # fork main + PATH (~/.local/bin/hapi-tick → mirror scripts/tooling/hapi-tick.sh).
