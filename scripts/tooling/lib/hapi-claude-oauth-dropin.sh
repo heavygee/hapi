@@ -179,7 +179,9 @@ hapi_claude_oauth_retire_legacy_token_source() {
     fi
     local dest="${src}.migrated.$(date +%s)"
     if command -v python3 >/dev/null 2>&1; then
-        python3 - "$src" "$dest" <<'PY'
+        # Explicit status check: callers may invoke us under `cmd || warn`, which
+        # suppresses errexit so a failed rename must not fall through to success.
+        if ! python3 - "$src" "$dest" <<'PY'
 import os, stat, sys
 src, dest = sys.argv[1], sys.argv[2]
 flags = os.O_RDONLY
@@ -203,11 +205,15 @@ if os.path.lexists(dest):
 os.rename(src, dest)
 sys.exit(0)
 PY
+        then
+            return 1
+        fi
     else
         # Pet / minimal hosts: already refused symlinks; mv is enough.
-        mv -n -- "$src" "$dest"
+        mv -n -- "$src" "$dest" || return 1
     fi
     echo "Retired legacy Claude OAuth token: $src -> $dest"
+    return 0
 }
 
 # Unlink a regular file without following a final-component symlink.
@@ -425,6 +431,58 @@ hapi_claude_oauth_install_bytes_via_sudo() {
     }
     prog="$(_hapi_claude_oauth_install_bytes_py)"
     # stdin (token bytes) is preserved across sudo; env is scrubbed.
+    sudo /usr/bin/env -i PATH=/usr/bin:/bin LC_ALL=C "$py" -c "$prog" "$dst"
+}
+
+# Restore stdin bytes at dst without requiring a nonempty OAuth assignment.
+# Used for toggle rollback of empty/ineffective prior canonical files.
+_hapi_claude_oauth_restore_bytes_py() {
+    cat <<'PY'
+import os, sys
+dst = sys.argv[1]
+data = sys.stdin.buffer.read()
+parent = os.path.dirname(dst) or "."
+os.makedirs(parent, mode=0o755, exist_ok=True)
+tmp = dst + ".tmp.%d" % os.getpid()
+try:
+    if os.path.lexists(tmp):
+        os.unlink(tmp)
+except OSError:
+    pass
+flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+if hasattr(os, "O_NOFOLLOW"):
+    flags |= os.O_NOFOLLOW
+try:
+    fd = os.open(tmp, flags, 0o600)
+except OSError as exc:
+    sys.stderr.write("ERROR: cannot create restore destination: %s: %s\n" % (tmp, exc))
+    sys.exit(1)
+try:
+    if data:
+        os.write(fd, data)
+    os.fchmod(fd, 0o600)
+finally:
+    os.close(fd)
+os.replace(tmp, dst)
+sys.exit(0)
+PY
+}
+
+hapi_claude_oauth_restore_bytes() {
+    local dst="${1:?dst}"
+    local prog
+    prog="$(_hapi_claude_oauth_restore_bytes_py)"
+    python3 -c "$prog" "$dst"
+}
+
+hapi_claude_oauth_restore_bytes_via_sudo() {
+    local dst="${1:?dst}"
+    local py prog
+    py="$(hapi_claude_oauth_absolute_python3)" || {
+        echo "ERROR: absolute python3 required for privileged token restore" >&2
+        return 1
+    }
+    prog="$(_hapi_claude_oauth_restore_bytes_py)"
     sudo /usr/bin/env -i PATH=/usr/bin:/bin LC_ALL=C "$py" -c "$prog" "$dst"
 }
 

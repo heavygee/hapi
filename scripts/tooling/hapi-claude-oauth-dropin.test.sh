@@ -375,6 +375,44 @@ check "toggle removes newly created canon on rollback" \
     "grep -q 'secure_unlink_regular_file' \"$ROOT/scripts/tooling/hapi-claude-account-toggle.sh\""
 check "toggle tracks canon_existed_before" \
     "grep -q 'canon_existed_before=0' \"$ROOT/scripts/tooling/hapi-claude-account-toggle.sh\""
+check "toggle restores empty canon via restore_bytes" \
+    "grep -q 'hapi_claude_oauth_restore_bytes_via_sudo' \"$ROOT/scripts/tooling/hapi-claude-account-toggle.sh\""
+check "toggle rolls back interactive credentials" \
+    "grep -q 'hapi_claude_oauth_rollback_credentials' \"$ROOT/scripts/tooling/hapi-claude-account-toggle.sh\""
+check "retire function returns 1 on python failure" \
+    "awk '/^hapi_claude_oauth_retire_legacy_token_source/,/^}/ {print}' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\" | grep -q 'return 1'"
+
+# restore_bytes must accept empty/ineffective payloads (toggle rollback of empty canon).
+restore_dst="$TMP/restore-empty.env"
+printf 'CLAUDE_CODE_OAUTH_TOKEN=new\n' >"$restore_dst"
+chmod 600 "$restore_dst"
+: | hapi_claude_oauth_restore_bytes "$restore_dst"
+check "restore_bytes accepts empty payload" "[[ -f \"$restore_dst\" ]]"
+check "restore_bytes empty clears prior content" "! grep -q 'CLAUDE_CODE_OAUTH_TOKEN=new' \"$restore_dst\""
+printf 'CLAUDE_CODE_OAUTH_TOKEN=\n' | hapi_claude_oauth_restore_bytes "$restore_dst"
+check "restore_bytes accepts blank assignment" "grep -q 'CLAUDE_CODE_OAUTH_TOKEN=' \"$restore_dst\""
+
+# retire must return nonzero when rename cannot succeed (dest already exists).
+retire_src="$TMP/retire-src.env"
+printf 'CLAUDE_CODE_OAUTH_TOKEN=legacy\n' >"$retire_src"
+chmod 600 "$retire_src"
+# Force python path to fail by pre-creating every possible dest? Better: make src a directory after opening...
+# Simpler: patch via calling with a src that disappears - use unwritable parent for dest.
+retire_ro="$TMP/retire-ro"
+mkdir -p "$retire_ro"
+printf 'CLAUDE_CODE_OAUTH_TOKEN=x\n' >"$retire_ro/token.env"
+chmod 600 "$retire_ro/token.env"
+chmod a-w "$retire_ro"
+set +e
+(
+  # Invoke retire; rename into same dir will fail on read-only parent.
+  hapi_claude_oauth_retire_legacy_token_source "$retire_ro/token.env"
+)
+retire_rc=$?
+set -e
+chmod u+w "$retire_ro" 2>/dev/null || true
+check "retire returns nonzero when archive rename fails" "[[ $retire_rc -ne 0 ]]"
+check "retire leaves source when rename fails" "[[ -f \"$retire_ro/token.env\" ]]"
 # Invocation-only: the wrong helper name must not appear as a call site.
 check "retired remigrate uses hapi_install_claude_oauth_dropin" \
     "grep -n 'hapi_install_claude_oauth_dropin' \"$ROOT/scripts/tooling/hapi-claude-oauth-dropin.test.sh\" | grep -q remigrate"

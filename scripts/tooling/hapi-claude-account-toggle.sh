@@ -81,9 +81,12 @@ fi
 
 TS="$(date -u +%Y%m%d%H%M%S)"
 mkdir -p "$HOME/.claude" "$HOME/.hapi" "$ROOT/auth-bak"
-for f in "$HOME/.claude/.credentials.json"; do
-    [[ -f "$f" ]] && cp -f "$f" "$ROOT/auth-bak/$(basename "$f").bak-toggle-$TS"
-done
+prev_cred="$ROOT/auth-bak/.credentials.json.bak-toggle-$TS"
+cred_existed_before=0
+if [[ -f "$HOME/.claude/.credentials.json" && ! -L "$HOME/.claude/.credentials.json" ]]; then
+    cred_existed_before=1
+    cp -f "$HOME/.claude/.credentials.json" "$prev_cred"
+fi
 
 # Backup prior canonical token into operator-owned auth-bak WITHOUT privileged
 # cp into a user-controlled path (symlink TOCTOU). Root only reads CANON via
@@ -152,6 +155,7 @@ fi
 # Restore CANON from pre-toggle backup if interactive credentials cannot be
 # committed (avoids runner/interactive account split after canonical-first write).
 # If CANON was newly created this run (no prior file / no backup), unlink it.
+# Restore uses restore_bytes (not install_bytes) so empty prior tokens can return.
 hapi_claude_oauth_rollback_canon_from_bak() {
     local why="${1:-credentials update failed}"
     echo "ERROR: $why - rolling back canonical token at $CANON" >&2
@@ -163,7 +167,7 @@ hapi_claude_oauth_rollback_canon_from_bak() {
             }
         else
             hapi_claude_oauth_cat_regular_file "$bak" \
-                | hapi_claude_oauth_install_bytes_via_sudo "$CANON" || {
+                | hapi_claude_oauth_restore_bytes_via_sudo "$CANON" || {
                 echo "ERROR: failed to restore $CANON from $bak (sudo)" >&2
                 return 1
             }
@@ -190,23 +194,40 @@ hapi_claude_oauth_rollback_canon_from_bak() {
     return 1
 }
 
+# Restore interactive credentials after a failed copy/chmod/active write.
+hapi_claude_oauth_rollback_credentials() {
+    if [[ -f "$prev_cred" && ! -L "$prev_cred" ]]; then
+        if ! cp -a "$prev_cred" "$HOME/.claude/.credentials.json"; then
+            echo "ERROR: failed to restore interactive credentials from $prev_cred" >&2
+            return 1
+        fi
+        chmod 600 "$HOME/.claude/.credentials.json" 2>/dev/null || true
+        echo "Restored interactive credentials from $prev_cred"
+        return 0
+    fi
+    if [[ "$cred_existed_before" -eq 0 ]]; then
+        rm -f "$HOME/.claude/.credentials.json"
+        echo "Removed partial interactive credentials (none existed before toggle)"
+        return 0
+    fi
+    echo "WARN: no prior credentials backup at $prev_cred - cannot restore interactive credentials" >&2
+    return 1
+}
+
 # Only after canonical token is installed: switch interactive credentials.
 if ! cp -a "$CRED" "$HOME/.claude/.credentials.json"; then
     hapi_claude_oauth_rollback_canon_from_bak "cannot replace $HOME/.claude/.credentials.json"
+    hapi_claude_oauth_rollback_credentials || true
     exit 1
 fi
 if ! chmod 600 "$HOME/.claude/.credentials.json"; then
     hapi_claude_oauth_rollback_canon_from_bak "cannot chmod 600 $HOME/.claude/.credentials.json"
+    hapi_claude_oauth_rollback_credentials || true
     exit 1
 fi
 if ! echo "$SLOT" > "$ROOT/active"; then
     hapi_claude_oauth_rollback_canon_from_bak "cannot write $ROOT/active"
-    # Best-effort: also restore previous interactive credentials if we backed them up.
-    prev_cred="$ROOT/auth-bak/.credentials.json.bak-toggle-$TS"
-    if [[ -f "$prev_cred" && ! -L "$prev_cred" ]]; then
-        cp -a "$prev_cred" "$HOME/.claude/.credentials.json" 2>/dev/null || true
-        chmod 600 "$HOME/.claude/.credentials.json" 2>/dev/null || true
-    fi
+    hapi_claude_oauth_rollback_credentials || true
     exit 1
 fi
 
