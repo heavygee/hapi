@@ -406,16 +406,21 @@ token_file_has_value=0
 token_file_readable=0
 if [[ -n "$token_file" ]]; then
     # Fleet tokens are 0600 hapi-owned; operator verify needs sudo -n (same as runner.state.json).
+    # Require a non-whitespace value: CLAUDE_CODE_OAUTH_TOKEN=\r\n must NOT count as loaded
+    # (grep '.' would treat CR as a value and disagree with Python's rstrip).
     token_line=""
     if [[ -r "$token_file" ]]; then
-        token_line="$(grep -m1 '^CLAUDE_CODE_OAUTH_TOKEN=.' "$token_file" 2>/dev/null || true)"
+        token_line="$(grep -m1 $'^CLAUDE_CODE_OAUTH_TOKEN=[^[:space:]]' "$token_file" 2>/dev/null || true)"
         token_file_readable=1
     else
         set +e
-        token_line="$(sudo -n grep -m1 '^CLAUDE_CODE_OAUTH_TOKEN=.' "$token_file" 2>/dev/null)"
+        token_line="$(sudo -n grep -m1 $'^CLAUDE_CODE_OAUTH_TOKEN=[^[:space:]]' "$token_file" 2>/dev/null)"
         token_rc=$?
         set -e
         if [[ "$token_rc" -eq 0 ]]; then
+            token_file_readable=1
+        elif sudo -n test -e "$token_file" 2>/dev/null; then
+            # File exists but value empty/whitespace — still readable via sudo.
             token_file_readable=1
         fi
     fi
@@ -522,14 +527,20 @@ runner_home = read_env_var("/proc/%s/environ" % pid, "HAPI_HOME") or expected_ho
 tree = descendants(int(pid))
 
 file_tok = None
+file_key_seen = False
 if token_file and os.path.isfile(token_file) and not os.path.islink(token_file):
     try:
         for line in open(token_file, "rb"):
             if line.startswith(b"CLAUDE_CODE_OAUTH_TOKEN="):
-                file_tok = line.split(b"=", 1)[1].rstrip(b"\r\n")
+                file_key_seen = True
+                # Same nonempty rule as the shell probe: strip CR/LF/space so
+                # CLAUDE_CODE_OAUTH_TOKEN=\r\n is missing, not a value.
+                raw = line.split(b"=", 1)[1].strip()
+                file_tok = raw if raw else None
                 break
     except OSError:
         file_tok = None
+        file_key_seen = False
 
 # KillMode=process reparents session wrappers to init. Count same-uid hapi/claude
 # peers that share this runner's HAPI_HOME (excludes interactive claude on
@@ -569,9 +580,12 @@ if peer_has and not runner_has:
 # Token file claims a value but the running runner never loaded it.
 if expect_load and not runner_has:
     sys.exit(3)
-# Stale runner: file rotated but process still has the old value.
-if expect_load and runner_has and file_tok is not None and file_tok and runner_tok != file_tok:
-    sys.exit(4)
+# Stale/empty file vs live runner: restart would drop or change ambient auth.
+# Cover expect_load and empty assignments (=\r\n) even when shell no longer
+# sets expect_load — never PASS when the file cannot reproduce runner_tok.
+if runner_has and (expect_load or file_key_seen):
+    if file_tok is None or runner_tok != file_tok:
+        sys.exit(4)
 # Reserve exit 0 for a real loaded ambient token — never PASS on runner=0.
 if runner_has:
     sys.exit(0)
