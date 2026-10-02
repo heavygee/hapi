@@ -363,8 +363,13 @@ hapi_claude_oauth_legacy_system_token_candidates() {
         primary-soup|soup)
             local soup_op="${operator_home:-/home/heavygee}"
             paths=("${soup_op}/.hapi/claude-setup-token.env")
-            # Soup HAPI_HOME defaults to /var/lib/hapi — only add when distinct.
-            if [[ -n "$hapi_home" && "$hapi_home" != "${soup_op}/.hapi" && "$hapi_home" != "$soup_op" ]]; then
+            # Soup HAPI_HOME defaults to /var/lib/hapi (fleet service home). Never
+            # treat that default as a soup migrate source — only a genuinely
+            # custom soup home (distinct from operator home AND fleet default).
+            if [[ -n "$hapi_home" \
+                && "$hapi_home" != /var/lib/hapi \
+                && "$hapi_home" != "${soup_op}/.hapi" \
+                && "$hapi_home" != "$soup_op" ]]; then
                 paths+=(
                     "$hapi_home/claude-setup-token.env"
                     "$hapi_home/.hapi/claude-setup-token.env"
@@ -887,28 +892,29 @@ hapi_install_claude_oauth_dropin() {
     fi
 
     # System drop-in dir must be root-owned and not service-writable before we write.
+    # Explicit || return 1: callers may wrap us in `set +e` to capture status.
     if [[ "$scope" == system ]]; then
         if [[ ! -d "$dropin_dir" ]]; then
             if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
                 echo "ERROR: creating $dropin_dir requires root" >&2
                 return 1
             fi
-            mkdir -m 0755 -p "$dropin_dir"
+            mkdir -m 0755 -p "$dropin_dir" || return 1
         fi
         hapi_claude_oauth_assert_root_controlled_parent "$dropin_dir" || return 1
     else
-        mkdir -p "$dropin_dir"
+        mkdir -p "$dropin_dir" || return 1
     fi
 
     if [[ ! -d "$token_parent" ]]; then
         if [[ "$root_controlled" -eq 1 ]]; then
-            mkdir -m 0755 -p "$token_parent"
+            mkdir -m 0755 -p "$token_parent" || return 1
             if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
                 echo "ERROR: creating $token_parent requires root (got euid=${EUID:-$(id -u)})" >&2
                 return 1
             fi
         else
-            mkdir -m 0700 -p "$token_parent"
+            mkdir -m 0700 -p "$token_parent" || return 1
         fi
     fi
     if [[ "$root_controlled" -eq 1 ]]; then
@@ -1015,8 +1021,8 @@ hapi_install_claude_oauth_dropin() {
     fi
 
     local dropin_tmp
-    dropin_tmp="$(mktemp "${dropin_dir}/.42-claude-oauth-token.conf.XXXXXX")"
-    cat >"$dropin_tmp" <<EOF
+    dropin_tmp="$(mktemp "${dropin_dir}/.42-claude-oauth-token.conf.XXXXXX")" || return 1
+    if ! cat >"$dropin_tmp" <<EOF
 # Installed by hapi_install_claude_oauth_dropin (scripts/tooling/lib/hapi-claude-oauth-dropin.sh).
 # Leading '-' = ignore missing file so the unit still starts before the operator
 # mints a setup-token. verify-hapi-install.sh fails the ambient-token check when
@@ -1024,19 +1030,36 @@ hapi_install_claude_oauth_dropin() {
 [Service]
 EnvironmentFile=-${token_file}
 EOF
+    then
+        rm -f "$dropin_tmp"
+        echo "ERROR: failed to write temporary drop-in $dropin_tmp" >&2
+        return 1
+    fi
     if [[ "$scope" == system ]]; then
         # Atomic install as root so a prior service-owned drop-in cannot retain owner.
         if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
-            install -m 0644 -o root -g root "$dropin_tmp" "$dropin"
+            install -m 0644 -o root -g root "$dropin_tmp" "$dropin" || {
+                rm -f "$dropin_tmp"
+                echo "ERROR: failed to install drop-in $dropin" >&2
+                return 1
+            }
             rm -f "$dropin_tmp"
         else
-            sudo install -m 0644 -o root -g root "$dropin_tmp" "$dropin"
+            sudo install -m 0644 -o root -g root "$dropin_tmp" "$dropin" || {
+                rm -f "$dropin_tmp"
+                echo "ERROR: failed to install drop-in $dropin (sudo)" >&2
+                return 1
+            }
             rm -f "$dropin_tmp"
         fi
         hapi_claude_oauth_secure_chown_mode "$dropin" "root:root" "0644" || return 1
     else
-        mv -f "$dropin_tmp" "$dropin"
-        chmod 0644 "$dropin"
+        mv -f "$dropin_tmp" "$dropin" || {
+            rm -f "$dropin_tmp"
+            echo "ERROR: failed to install drop-in $dropin" >&2
+            return 1
+        }
+        chmod 0644 "$dropin" || return 1
     fi
     echo "Installed: $dropin -> EnvironmentFile=-$token_file"
 
@@ -1070,7 +1093,17 @@ EOF
     fi
 
     case "$scope" in
-        system) systemctl daemon-reload ;;
-        user) systemctl --user daemon-reload ;;
+        system)
+            systemctl daemon-reload || {
+                echo "ERROR: systemctl daemon-reload failed after installing $dropin" >&2
+                return 1
+            }
+            ;;
+        user)
+            systemctl --user daemon-reload || {
+                echo "ERROR: systemctl --user daemon-reload failed after installing $dropin" >&2
+                return 1
+            }
+            ;;
     esac
 }

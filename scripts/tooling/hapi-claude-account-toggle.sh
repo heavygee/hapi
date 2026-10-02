@@ -44,7 +44,32 @@ CANON="$(hapi_claude_oauth_system_token_file)"
 [[ -f "$TOKEN" ]] || { echo "missing $TOKEN" >&2; exit 1; }
 hapi_claude_oauth_assert_safe_token_file "$TOKEN" || exit 1
 
-# systemd last-assignment-wins — require the *final* value to be nonempty.
+# Validate slot credentials JSON BEFORE any backup or auth-surface mutation
+# (malformed JSON must not leave active/credentials/canon half-switched).
+TIER="$(python3 - "$CRED" <<'PY'
+import json, sys
+path = sys.argv[1]
+try:
+    with open(path, "r", encoding="utf-8") as fh:
+        data = json.load(fh)
+except OSError as exc:
+    sys.stderr.write("ERROR: cannot read slot credentials %s: %s\n" % (path, exc))
+    sys.exit(1)
+except json.JSONDecodeError as exc:
+    sys.stderr.write("ERROR: invalid JSON in slot credentials %s: %s\n" % (path, exc))
+    sys.exit(1)
+if not isinstance(data, dict):
+    sys.stderr.write("ERROR: slot credentials must be a JSON object: %s\n" % path)
+    sys.exit(1)
+oauth = data.get("claudeAiOauth")
+if oauth is not None and not isinstance(oauth, dict):
+    sys.stderr.write("ERROR: claudeAiOauth must be an object in %s\n" % path)
+    sys.exit(1)
+print((oauth or {}).get("rateLimitTier", "?"))
+PY
+)" || exit 1
+
+# systemd last-assignment-wins - require the *final* value to be nonempty.
 set +e
 EFFECTIVE="$(hapi_claude_oauth_effective_token_value "$TOKEN")"
 eff_rc=$?
@@ -127,11 +152,6 @@ cp -a "$CRED" "$HOME/.claude/.credentials.json"
 chmod 600 "$HOME/.claude/.credentials.json"
 echo "$SLOT" > "$ROOT/active"
 
-TIER="$(python3 - <<PY
-import json
-print(json.load(open("$CRED")).get("claudeAiOauth", {}).get("rateLimitTier", "?"))
-PY
-)"
 SHA12="$(printf '%s' "$EFFECTIVE" | sha256sum | cut -c1-12)"
 echo "== claude auth → slot '$SLOT' tier=$TIER token_sha12=$SHA12 canon=$CANON =="
 

@@ -300,6 +300,16 @@ check "soup --migrate-operator-home uses configured home" \
     "[[ \"$soup_op_joined\" == *$'\n'/home/otherop/.hapi/claude-setup-token.env$'\n'* ]]"
 check "soup operator-home does not use sudoer HOME=/root" \
     "[[ \"$soup_op_joined\" != *$'\n'/root/.hapi/claude-setup-token.env$'\n'* ]]"
+# Real primary-soup caller always passes HAPI_HOME=/var/lib/hapi — must NOT
+# reintroduce fleet legacy paths into the soup candidate set.
+check "soup with default HAPI_HOME excludes fleet /var/lib/hapi" \
+    "[[ \"$soup_op_joined\" != *$'\n'/var/lib/hapi/claude-setup-token.env$'\n'* ]]"
+check "soup with default HAPI_HOME excludes fleet /var/lib/hapi/.hapi" \
+    "[[ \"$soup_op_joined\" != *$'\n'/var/lib/hapi/.hapi/claude-setup-token.env$'\n'* ]]"
+mapfile -t soup_custom < <(hapi_claude_oauth_legacy_system_token_candidates primary-soup /srv/soup-custom /home/otherop)
+soup_custom_joined=$'\n'"$(printf '%s\n' "${soup_custom[@]}")"$'\n'
+check "soup custom HAPI_HOME is included" \
+    "[[ \"$soup_custom_joined\" == *$'\n'/srv/soup-custom/claude-setup-token.env$'\n'* ]]"
 
 # cat|install_bytes pipe (privileged-install pattern without mktemp SOURCE).
 pipe_src="$TMP/pipe-src.env"
@@ -353,10 +363,35 @@ check "toggle uses install_bytes_via_sudo" \
     "grep -q 'hapi_claude_oauth_install_bytes_via_sudo' \"$ROOT/scripts/tooling/hapi-claude-account-toggle.sh\""
 check "toggle does not PATH-inject bash under sudo" \
     "! grep -E 'sudo.*PATH=.*bash' \"$ROOT/scripts/tooling/hapi-claude-account-toggle.sh\""
+check "toggle validates credentials JSON before mutation" \
+    "grep -q 'invalid JSON in slot credentials' \"$ROOT/scripts/tooling/hapi-claude-account-toggle.sh\""
+toggle_json_line="$(grep -n 'invalid JSON in slot credentials' "$ROOT/scripts/tooling/hapi-claude-account-toggle.sh" | head -1 | cut -d: -f1)"
+toggle_cp_line="$(grep -n 'cp -a "$CRED"' "$ROOT/scripts/tooling/hapi-claude-account-toggle.sh" | head -1 | cut -d: -f1)"
+check "toggle JSON validate precedes credentials cp" \
+    "[[ -n \"$toggle_json_line\" && -n \"$toggle_cp_line\" && \"$toggle_json_line\" -lt \"$toggle_cp_line\" ]]"
 check "install_bytes_via_sudo uses absolute python3" \
     "grep -q 'hapi_claude_oauth_absolute_python3' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\""
 check "install_bytes_via_sudo sanitizes env" \
     "grep -q 'env -i PATH=/usr/bin:/bin' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\""
+check "drop-in install returns on write failure" \
+    "grep -q 'failed to write temporary drop-in' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\""
+check "drop-in install returns on install failure" \
+    "grep -q 'failed to install drop-in' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\""
+
+# Drop-in write failure must surface even when caller uses set +e (installer pattern).
+ro_home="$TMP/ro-dropin-home"
+mkdir -p "$ro_home/systemd/user"
+chmod a-w "$ro_home/systemd/user"
+export XDG_CONFIG_HOME="$ro_home"
+set +e
+hapi_install_claude_oauth_dropin \
+    --scope user --runner-unit hapi-runner.service \
+    --token-file "$TMP/missing-token.env" \
+    >/tmp/hapi-claude-oauth-ro-dropin.out 2>/tmp/hapi-claude-oauth-ro-dropin.err
+ro_rc=$?
+set -e
+chmod u+w "$ro_home/systemd/user" 2>/dev/null || true
+check "drop-in write failure returns nonzero under set +e" "[[ $ro_rc -ne 0 ]]"
 
 # Existing non-root-owned "system" parent must fail closed.
 bad_parent="$TMP/fake-etc-hapi"
