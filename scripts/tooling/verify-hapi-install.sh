@@ -31,6 +31,8 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=lib/hapi-systemd-units.sh
 source "$REPO_ROOT/scripts/tooling/lib/hapi-systemd-units.sh"
+# shellcheck source=lib/hapi-claude-oauth-dropin.sh
+source "$REPO_ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh"
 
 PASS=0
 FAIL=0
@@ -412,35 +414,69 @@ if [[ -n "$token_file" ]]; then
     # Fleet tokens are root:root 0600 under /etc/hapi. Installed sudoers only
     # grant runner restart (hapi-watchdog.in) — not grep/test/python3. Do not
     # fake a sudo -n read. System-scope verify must run as root.
-    token_line=""
     if [[ -r "$token_file" ]]; then
-        token_line="$(grep -m1 $'^CLAUDE_CODE_OAUTH_TOKEN=[^[:space:]]' "$token_file" 2>/dev/null || true)"
         token_file_readable=1
+        if hapi_claude_oauth_has_effective_token "$token_file"; then
+            token_file_has_value=1
+            ok "Claude OAuth token file has CLAUDE_CODE_OAUTH_TOKEN= ($token_file)"
+        else
+            inconclusive "Claude OAuth token file missing or empty (${token_file:-unknown}) — run claude setup-token and write CLAUDE_CODE_OAUTH_TOKEN=... then restart the runner"
+        fi
     elif [[ "$SCOPE" == system && "${EUID:-$(id -u)}" -ne 0 ]]; then
         if [[ -e "$token_file" ]]; then
             not_ok "Claude OAuth token file unreadable as $(id -un) ($token_file) — re-run as root: sudo bash $REPO_ROOT/scripts/tooling/verify-hapi-install.sh"
         else
-            inconclusive "Claude OAuth token file missing or empty (${token_file:-unknown}) — run claude setup-token (sudo tee) then sudo systemctl restart the runner"
+            inconclusive "Claude OAuth token file missing or empty (${token_file:-unknown}) — run claude setup-token then: printf 'CLAUDE_CODE_OAUTH_TOKEN=...\\n' | sudo install -m 0600 /dev/stdin $token_file && sudo systemctl restart the runner"
         fi
     elif [[ -e "$token_file" ]]; then
         inconclusive "Claude OAuth token file unreadable ($token_file)"
     else
         inconclusive "Claude OAuth token file missing or empty (${token_file:-unknown}) — run claude setup-token and write CLAUDE_CODE_OAUTH_TOKEN=... then restart the runner"
     fi
-    if [[ "$token_file_readable" -eq 1 ]]; then
-        if [[ -n "$token_line" ]]; then
-            token_file_has_value=1
-            ok "Claude OAuth token file has CLAUDE_CODE_OAUTH_TOKEN= ($token_file)"
-        else
-            inconclusive "Claude OAuth token file missing or empty (${token_file:-unknown}) — run claude setup-token and write CLAUDE_CODE_OAUTH_TOKEN=... then restart the runner"
-        fi
-    fi
 else
     inconclusive "Claude OAuth token file missing or empty (unknown) — run claude setup-token and write CLAUDE_CODE_OAUTH_TOKEN=... then restart the runner"
 fi
 
+# Bash fallback when python3 is absent (user-pet minimal hosts). Covers runner
+# load + EnvironmentFile match; peer split-brain still needs python3 (hard-fail).
+hapi_verify_claude_ambient_bash() {
+    local pid="$1" expect_load="$2" token_path="$3"
+    local runner_tok="" file_tok="" line=""
+    if [[ ! -r "/proc/$pid/environ" ]]; then
+        return 2
+    fi
+    # Last assignment wins in the process environ too (rare duplicates).
+    while IFS= read -r -d '' line || [[ -n "$line" ]]; do
+        case "$line" in
+            CLAUDE_CODE_OAUTH_TOKEN=*)
+                runner_tok="${line#CLAUDE_CODE_OAUTH_TOKEN=}"
+                ;;
+        esac
+    done <"/proc/$pid/environ"
+    if [[ -n "$token_path" && -f "$token_path" && ! -L "$token_path" ]]; then
+        set +e
+        file_tok="$(hapi_claude_oauth_effective_token_value "$token_path" 2>/dev/null)"
+        set -e
+    fi
+    local runner_has=0
+    [[ -n "$runner_tok" ]] && runner_has=1
+    printf 'runner=%d peers=- expect_load=%d file_sha12=bash runner_sha12=bash home=bash\n' \
+        "$runner_has" "$expect_load"
+    if [[ "$expect_load" -eq 1 && "$runner_has" -eq 0 ]]; then
+        return 3
+    fi
+    if [[ "$runner_has" -eq 1 ]]; then
+        if [[ -z "$file_tok" || "$runner_tok" != "$file_tok" ]]; then
+            return 4
+        fi
+        return 0
+    fi
+    return 5
+}
+
 auth_probe_cmd=(python3)
 auth_probe_need_root=0
+auth_probe_mode=python
 if [[ "$main_pid" != "0" ]]; then
     if [[ ! -r "/proc/$main_pid/environ" ]]; then
         # Do not sudo -n python3: watchdog sudoers does not grant it.
@@ -451,10 +487,36 @@ if [[ "$main_pid" != "0" ]]; then
         else
             auth_probe_cmd=()
         fi
+    elif ! command -v python3 >/dev/null 2>&1; then
+        if [[ "$SCOPE" == user ]]; then
+            auth_probe_mode=bash
+            auth_probe_cmd=()
+        else
+            # System verify already requires python3 for secure OAuth tooling.
+            not_ok "python3 required to verify runner Claude ambient token (install python3 and re-run)"
+            auth_probe_cmd=()
+            auth_probe_need_root=1
+        fi
     fi
 fi
 
-if [[ "$main_pid" != "0" && ${#auth_probe_cmd[@]} -gt 0 ]]; then
+if [[ "$main_pid" != "0" && "$auth_probe_mode" == bash ]]; then
+    set +e
+    auth_out="$(hapi_verify_claude_ambient_bash "$main_pid" "$token_file_has_value" "${token_file:-}")"
+    auth_rc=$?
+    set -e
+    if [[ "$auth_rc" -eq 0 ]]; then
+        ok "runner Claude ambient token loaded ($auth_out)"
+    elif [[ "$auth_rc" -eq 3 ]]; then
+        not_ok "token file has CLAUDE_CODE_OAUTH_TOKEN but runner process did not load it ($auth_out; restart runner after installing drop-in)"
+    elif [[ "$auth_rc" -eq 4 ]]; then
+        not_ok "runner CLAUDE_CODE_OAUTH_TOKEN does not match EnvironmentFile ($auth_out; restart runner after rotating the token)"
+    elif [[ "$auth_rc" -eq 5 ]]; then
+        inconclusive "runner Claude ambient token not loaded yet ($auth_out) — write CLAUDE_CODE_OAUTH_TOKEN and restart the runner"
+    else
+        not_ok "runner Claude ambient token probe failed without python3 (rc=$auth_rc)"
+    fi
+elif [[ "$main_pid" != "0" && ${#auth_probe_cmd[@]} -gt 0 ]]; then
     set +e
     auth_out="$("${auth_probe_cmd[@]}" - "$main_pid" "$token_file_has_value" "${token_file:-}" "${hapi_home:-}" <<'PY'
 import hashlib, os, sys

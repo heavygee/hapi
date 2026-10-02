@@ -284,7 +284,8 @@ case "$PROFILE" in
             --scope system \
             --runner-unit "$RUNNER_UNIT" \
             --token-file "$CLAUDE_TOKEN_FILE" \
-            --migrate-profile "$PROFILE"
+            --migrate-profile "$PROFILE" \
+            --migrate-hapi-home "$HAPI_HOME"
         if [[ "$DO_RESTART" -eq 1 ]]; then
             # Fail closed: dropping EnvironmentFile onto missing /etc path while a
             # legacy token still exists would restart without OAuth (primary-soup).
@@ -297,7 +298,7 @@ case "$PROFILE" in
                         block_restart=1
                         break
                     fi
-                done < <(hapi_claude_oauth_legacy_system_token_candidates "$PROFILE")
+                done < <(hapi_claude_oauth_legacy_system_token_candidates "$PROFILE" "$HAPI_HOME")
             fi
             if [[ "$block_restart" -eq 1 ]]; then
                 echo "ERROR: refusing --restart until Claude OAuth token is at $CLAUDE_TOKEN_FILE" >&2

@@ -265,11 +265,17 @@ check "fleet candidates include /var/lib/hapi" \
     "[[ \"$fleet_joined\" == *$'\n'/var/lib/hapi/claude-setup-token.env$'\n'* ]]"
 check "fleet candidates exclude operator home" \
     "[[ \"$fleet_joined\" != *$'\n'/home/heavygee/.hapi/claude-setup-token.env$'\n'* ]]"
+mapfile -t fleet_custom < <(hapi_claude_oauth_legacy_system_token_candidates fleet-binary /srv/hapi-custom)
+fleet_custom_joined=$'\n'"$(printf '%s\n' "${fleet_custom[@]}")"$'\n'
+check "fleet --hapi-home candidates include custom home" \
+    "[[ \"$fleet_custom_joined\" == *$'\n'/srv/hapi-custom/claude-setup-token.env$'\n'* ]]"
+check "fleet --hapi-home still includes default /var/lib/hapi" \
+    "[[ \"$fleet_custom_joined\" == *$'\n'/var/lib/hapi/claude-setup-token.env$'\n'* ]]"
 mapfile -t soup_arr < <(hapi_claude_oauth_legacy_system_token_candidates primary-soup)
 soup_joined=$'\n'"$(printf '%s\n' "${soup_arr[@]}")"$'\n'
 check "soup candidates include operator home" \
     "[[ \"$soup_joined\" == *$'\n'/home/heavygee/.hapi/claude-setup-token.env$'\n'* ]]"
-check "soup candidates exclude /var/lib/hapi" \
+check "soup candidates exclude /var/lib/hapi by default" \
     "[[ \"$soup_joined\" != *$'\n'/var/lib/hapi/claude-setup-token.env$'\n'* ]]"
 
 # Existing non-root-owned "system" parent must fail closed.

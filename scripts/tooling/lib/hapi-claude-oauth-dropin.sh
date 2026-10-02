@@ -167,32 +167,65 @@ PY
 }
 
 # Known pre-/etc locations, scoped by install profile so fleet cannot silently
-# import the primary-soup operator token (and vice versa).
+# import the primary-soup operator token (and vice versa). Optional second arg is
+# the configured HAPI_HOME (fleet --hapi-home) so custom homes are migrate sources.
 hapi_claude_oauth_legacy_system_token_candidates() {
     local profile="${1:-}"
+    local hapi_home="${2:-}"
+    local -a paths=()
     case "$profile" in
         fleet-binary|fleet)
-            printf '%s\n' \
-                /var/lib/hapi/claude-setup-token.env \
+            paths=(
+                /var/lib/hapi/claude-setup-token.env
                 /var/lib/hapi/.hapi/claude-setup-token.env
+            )
+            if [[ -n "$hapi_home" && "$hapi_home" != /var/lib/hapi ]]; then
+                paths+=(
+                    "$hapi_home/claude-setup-token.env"
+                    "$hapi_home/.hapi/claude-setup-token.env"
+                )
+            fi
             ;;
         primary-soup|soup)
-            printf '%s\n' /home/heavygee/.hapi/claude-setup-token.env
+            paths=(/home/heavygee/.hapi/claude-setup-token.env)
             if [[ -n "${HOME:-}" && "$HOME" != /home/heavygee ]]; then
-                printf '%s\n' "${HOME}/.hapi/claude-setup-token.env"
+                paths+=("${HOME}/.hapi/claude-setup-token.env")
+            fi
+            # Soup HAPI_HOME defaults to /var/lib/hapi — only add when distinct and set.
+            if [[ -n "$hapi_home" && "$hapi_home" != /home/heavygee/.hapi ]]; then
+                paths+=(
+                    "$hapi_home/claude-setup-token.env"
+                    "$hapi_home/.hapi/claude-setup-token.env"
+                )
             fi
             ;;
         ""|*)
             # No profile: emit both classes. Caller must fail closed on ambiguity.
-            printf '%s\n' \
-                /var/lib/hapi/claude-setup-token.env \
-                /var/lib/hapi/.hapi/claude-setup-token.env \
+            paths=(
+                /var/lib/hapi/claude-setup-token.env
+                /var/lib/hapi/.hapi/claude-setup-token.env
                 /home/heavygee/.hapi/claude-setup-token.env
+            )
             if [[ -n "${HOME:-}" && "$HOME" != /home/heavygee ]]; then
-                printf '%s\n' "${HOME}/.hapi/claude-setup-token.env"
+                paths+=("${HOME}/.hapi/claude-setup-token.env")
+            fi
+            if [[ -n "$hapi_home" ]]; then
+                paths+=(
+                    "$hapi_home/claude-setup-token.env"
+                    "$hapi_home/.hapi/claude-setup-token.env"
+                )
             fi
             ;;
     esac
+    # De-dupe while preserving order (custom home may equal a default).
+    local p seen=$'\n'
+    for p in "${paths[@]}"; do
+        [[ -n "$p" ]] || continue
+        if [[ "$seen" != *$'\n'"$p"$'\n'* ]]; then
+            printf '%s\n' "$p"
+            seen+="$p"$'\n'
+        fi
+    done
 }
 
 # Last effective CLAUDE_CODE_OAUTH_TOKEN= value (systemd last-assignment-wins),
@@ -513,7 +546,7 @@ PY
 # (and returns 0) when the token file is absent — absence is expected on a
 # stranger pet install until the operator mints a token.
 hapi_install_claude_oauth_dropin() {
-    local scope="" runner_unit="" token_file="" owner="" migrate_profile=""
+    local scope="" runner_unit="" token_file="" owner="" migrate_profile="" migrate_hapi_home=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --scope) scope="${2:?}"; shift 2 ;;
@@ -521,6 +554,7 @@ hapi_install_claude_oauth_dropin() {
             --token-file) token_file="${2:?}"; shift 2 ;;
             --owner) owner="${2:?}"; shift 2 ;;
             --migrate-profile) migrate_profile="${2:?}"; shift 2 ;;
+            --migrate-hapi-home) migrate_hapi_home="${2:?}"; shift 2 ;;
             *)
                 echo "hapi_install_claude_oauth_dropin: unknown arg: $1" >&2
                 return 2
@@ -591,7 +625,7 @@ hapi_install_claude_oauth_dropin() {
                 if [[ -e "$legacy_token" || -L "$legacy_token" ]]; then
                     present+=("$legacy_token")
                 fi
-            done < <(hapi_claude_oauth_legacy_system_token_candidates "$migrate_profile")
+            done < <(hapi_claude_oauth_legacy_system_token_candidates "$migrate_profile" "$migrate_hapi_home")
 
             if [[ ${#present[@]} -gt 1 ]]; then
                 echo "ERROR: multiple legacy Claude OAuth tokens for profile '${migrate_profile:-unset}'; refuse to guess" >&2
