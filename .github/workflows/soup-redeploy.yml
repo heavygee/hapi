@@ -135,8 +135,19 @@ jobs:
             su - testuser -c "export XDG_RUNTIME_DIR=/run/user/\$(id -u); export DBUS_SESSION_BUS_ADDRESS=unix:path=\$XDG_RUNTIME_DIR/bus; $*"
           }
 
-          echo "=== fresh install with --with-systemd ==="
-          as_testuser "bash /repo/scripts/install-hapi-pet.sh --with-systemd"
+          # Isolate the installer so SCRIPT_DIR has no tooling/ companion —
+          # same shape as curl|bash. Running /repo/scripts/... always prefers
+          # install-hapi-systemd-units.sh and never hits the embedded units.
+          install -m 0755 /repo/scripts/install-hapi-pet.sh /home/testuser/install-hapi-pet.sh
+          chown testuser:testuser /home/testuser/install-hapi-pet.sh
+
+          echo "=== fresh install with --with-systemd (embedded curl|bash path) ==="
+          as_testuser "bash ~/install-hapi-pet.sh --with-systemd" \
+            | tee /tmp/hapi-pet-fresh-install.log
+          grep -q 'No git checkout — writing embedded user systemd units' \
+            /tmp/hapi-pet-fresh-install.log \
+            || { echo "FAIL: expected embedded units path (no companion SCRIPT_DIR)"; exit 1; }
+          echo "OK: exercised embedded install_user_pet_systemd branch"
           as_testuser "curl -fsS localhost:3006/health"
           FIRST_SHA=$(as_testuser "sha256sum ~/.local/bin/hapi" | awk '{print $1}')
           echo "binary sha256: $FIRST_SHA"
@@ -147,7 +158,7 @@ jobs:
           echo "OK: pet installer provisioned 42-claude-oauth-token.conf"
 
           echo "=== re-run (upgrade path): must stop the old process, swap, relaunch ==="
-          as_testuser "bash /repo/scripts/install-hapi-pet.sh --with-systemd"
+          as_testuser "bash ~/install-hapi-pet.sh --with-systemd"
           sleep 2
           as_testuser "curl -fsS localhost:3006/health"
           as_testuser "pgrep -fa 'hapi (hub|runner)'" || { echo "FAIL: no hapi processes survived the re-run"; exit 1; }
@@ -339,7 +350,20 @@ jobs:
           sid = spawn.get("sessionId")
           assert sid, spawn
           print("spawned", sid)
-          time.sleep(2)
+          # Spawn HTTP 200 only means the runner accepted the RPC. Poll active
+          # like pingPeer.waitUntilActive before POST /messages (else 409).
+          deadline = time.time() + 90
+          while time.time() < deadline:
+              st, sess = http(f"/api/sessions/{sid}")
+              active = False
+              if isinstance(sess, dict):
+                  active = bool((sess.get("session") or sess).get("active"))
+              print(f"wait-active status={st} active={active}")
+              if active:
+                  break
+              time.sleep(1)
+          else:
+              raise SystemExit(f"FAIL: session {sid} never became active within 90s")
           # Prompt names the expected token; we still require it in an agent-role
           # message so the echoed user prompt cannot pass the assertion alone.
           st, _ = http(f"/api/sessions/{sid}/messages", "POST", {

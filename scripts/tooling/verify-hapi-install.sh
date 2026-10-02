@@ -426,7 +426,12 @@ if [[ -n "$token_file" ]]; then
     # Fleet tokens are root:root 0600 under /etc/hapi. Installed sudoers only
     # grant runner restart (hapi-watchdog.in) — not grep/test/python3. Do not
     # fake a sudo -n read. System-scope verify must run as root.
-    if [[ -r "$token_file" ]]; then
+    # Symlink / non-regular nodes are hard failures (not "missing/empty").
+    if [[ -L "$token_file" ]]; then
+        not_ok "Claude OAuth token file is a symlink ($token_file) — replace with a regular root:root 0600 file"
+    elif [[ -e "$token_file" && ! -f "$token_file" ]]; then
+        not_ok "Claude OAuth token file is not a regular file ($token_file) — replace with a regular root:root 0600 file"
+    elif [[ -r "$token_file" ]]; then
         token_file_readable=1
         if hapi_claude_oauth_has_effective_token "$token_file"; then
             token_file_has_value=1
@@ -453,6 +458,18 @@ if [[ -n "$token_file" ]]; then
         inconclusive "Claude OAuth token file unreadable ($token_file)"
     else
         inconclusive "Claude OAuth token file missing or empty (${token_file:-unknown}) — run claude setup-token and write CLAUDE_CODE_OAUTH_TOKEN=... then restart the runner"
+    fi
+    # Parent dir must stay root-owned + not group/other-writable; otherwise the
+    # service account can unlink/replace a root:root 0600 token after verify.
+    if [[ "$SCOPE" == system ]]; then
+        token_parent="$(dirname "$token_file")"
+        if [[ -d "$token_parent" || -L "$token_parent" ]]; then
+            if hapi_claude_oauth_assert_root_controlled_parent "$token_parent" >/tmp/hapi-verify-oauth-parent.out 2>/tmp/hapi-verify-oauth-parent.err; then
+                ok "Claude OAuth token parent is root-controlled ($token_parent)"
+            else
+                not_ok "Claude OAuth token parent must be root-owned and not group/other-writable ($token_parent; $(head -c 200 /tmp/hapi-verify-oauth-parent.err 2>/dev/null || true))"
+            fi
+        fi
     fi
 else
     inconclusive "Claude OAuth token file missing or empty (unknown) — run claude setup-token and write CLAUDE_CODE_OAUTH_TOKEN=... then restart the runner"
