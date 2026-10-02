@@ -277,6 +277,22 @@ check "soup candidates include operator home" \
     "[[ \"$soup_joined\" == *$'\n'/home/heavygee/.hapi/claude-setup-token.env$'\n'* ]]"
 check "soup candidates exclude /var/lib/hapi by default" \
     "[[ \"$soup_joined\" != *$'\n'/var/lib/hapi/claude-setup-token.env$'\n'* ]]"
+mapfile -t soup_op < <(hapi_claude_oauth_legacy_system_token_candidates primary-soup /var/lib/hapi /home/otherop)
+soup_op_joined=$'\n'"$(printf '%s\n' "${soup_op[@]}")"$'\n'
+check "soup --migrate-operator-home uses configured home" \
+    "[[ \"$soup_op_joined\" == *$'\n'/home/otherop/.hapi/claude-setup-token.env$'\n'* ]]"
+check "soup operator-home does not use sudoer HOME=/root" \
+    "[[ \"$soup_op_joined\" != *$'\n'/root/.hapi/claude-setup-token.env$'\n'* ]]"
+
+# cat|install_bytes pipe (privileged-install pattern without mktemp SOURCE).
+pipe_src="$TMP/pipe-src.env"
+pipe_dst="$TMP/pipe-dst.env"
+printf 'CLAUDE_CODE_OAUTH_TOKEN=from-pipe\n' >"$pipe_src"
+chmod 600 "$pipe_src"
+hapi_claude_oauth_cat_regular_file "$pipe_src" | hapi_claude_oauth_install_bytes "$pipe_dst"
+check "cat|install_bytes copies token" "grep -qx 'CLAUDE_CODE_OAUTH_TOKEN=from-pipe' \"$pipe_dst\""
+mode_pipe="$(stat -c '%a' "$pipe_dst")"
+check "install_bytes sets 600" "[[ \"$mode_pipe\" == \"600\" ]]"
 
 # Existing non-root-owned "system" parent must fail closed.
 bad_parent="$TMP/fake-etc-hapi"

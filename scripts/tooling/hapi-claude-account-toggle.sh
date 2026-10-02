@@ -100,31 +100,56 @@ if [[ -f "$HOME/.hapi/claude-setup-token.env" && ! -L "$HOME/.hapi/claude-setup-
         "$ROOT/auth-bak/claude-setup-token.env.legacy-home.bak-toggle-$TS"
 fi
 
-cp -a "$CRED" "$HOME/.claude/.credentials.json"
-chmod 600 "$HOME/.claude/.credentials.json"
-
-# Install slot token to root-controlled canonical path (never cp -a into /etc).
+# Install canonical token FIRST (both OAuth surfaces must switch together).
+# Privileged path: pipe bytes from an already-opened O_NOFOLLOW read into a
+# root writer that never reopens a user-writable pathname (mktemp race).
 canon_parent="$(dirname "$CANON")"
 if [[ ! -d "$canon_parent" ]]; then
     sudo install -d -m 0755 "$canon_parent"
 fi
 hapi_claude_oauth_assert_root_controlled_parent "$canon_parent" || exit 1
+if [[ -L "$CANON" ]]; then
+    echo "ERROR: refusing to install over symlink $CANON" >&2
+    exit 1
+fi
 if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
     hapi_claude_oauth_secure_copy_regular_file "$TOKEN" "$CANON"
 else
-    tmp="$(mktemp)"
-    trap 'rm -f "$tmp"' EXIT
-    hapi_claude_oauth_secure_copy_regular_file "$TOKEN" "$tmp"
-    # install -T replaces a non-directory dest without following a symlink name
-    # when --backup is unset; still refuse if CANON is currently a symlink.
-    if [[ -L "$CANON" ]]; then
-        echo "ERROR: refusing to install over symlink $CANON" >&2
-        exit 1
-    fi
-    sudo install -m 0600 -o root -g root "$tmp" "$CANON"
-    rm -f "$tmp"
-    trap - EXIT
+    # Unprivileged O_NOFOLLOW cat → privileged install_bytes via stdin (no sudo SOURCE path).
+    hapi_claude_oauth_cat_regular_file "$TOKEN" \
+        | sudo python3 /dev/fd/3 "$CANON" 3<<'PY'
+import os, sys
+dst = sys.argv[1]
+data = sys.stdin.buffer.read()
+parent = os.path.dirname(dst) or "."
+os.makedirs(parent, mode=0o755, exist_ok=True)
+tmp = dst + ".tmp.%d" % os.getpid()
+try:
+    if os.path.lexists(tmp):
+        os.unlink(tmp)
+except OSError:
+    pass
+flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+if hasattr(os, "O_NOFOLLOW"):
+    flags |= os.O_NOFOLLOW
+try:
+    fd = os.open(tmp, flags, 0o600)
+except OSError as exc:
+    sys.stderr.write("ERROR: cannot create destination token: %s: %s\n" % (tmp, exc))
+    sys.exit(1)
+try:
+    os.write(fd, data)
+    os.fchmod(fd, 0o600)
+finally:
+    os.close(fd)
+os.replace(tmp, dst)
+sys.exit(0)
+PY
 fi
+
+# Only after canonical token is installed: switch interactive credentials.
+cp -a "$CRED" "$HOME/.claude/.credentials.json"
+chmod 600 "$HOME/.claude/.credentials.json"
 echo "$SLOT" > "$ROOT/active"
 
 TIER="$(python3 - <<PY

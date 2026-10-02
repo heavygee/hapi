@@ -280,29 +280,50 @@ case "$PROFILE" in
         # $OPERATOR_HOME/.hapi/ is a one-time migrate (WARN from the drop-in).
         CLAUDE_TOKEN_FILE="$(hapi_claude_oauth_system_token_file)"
         HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=0
-        hapi_install_claude_oauth_dropin \
-            --scope system \
-            --runner-unit "$RUNNER_UNIT" \
-            --token-file "$CLAUDE_TOKEN_FILE" \
-            --migrate-profile "$PROFILE" \
+        # primary-soup: pass configured operator home (not sudoer's HOME=/root).
+        DROPIN_ARGS=(
+            --scope system
+            --runner-unit "$RUNNER_UNIT"
+            --token-file "$CLAUDE_TOKEN_FILE"
+            --migrate-profile "$PROFILE"
             --migrate-hapi-home "$HAPI_HOME"
+        )
+        if [[ "$PROFILE" == primary-soup ]]; then
+            DROPIN_ARGS+=(--migrate-operator-home "${OOS_OPERATOR_HOME:-/home/heavygee}")
+        fi
+        set +e
+        hapi_install_claude_oauth_dropin "${DROPIN_ARGS[@]}"
+        dropin_rc=$?
+        set -e
+        # Fail closed on config-only installs too: pending migrate must not leave
+        # a drop-in pointed at an empty/missing /etc/hapi token.
+        if [[ "$dropin_rc" -ne 0 || "${HAPI_CLAUDE_OAUTH_MIGRATE_PENDING:-0}" -eq 1 ]]; then
+            echo "ERROR: Claude OAuth drop-in install failed or migrate still pending ($CLAUDE_TOKEN_FILE)" >&2
+            echo "       Resolve legacy token ambiguity / symlink, then re-run." >&2
+            exit 1
+        fi
         if [[ "$DO_RESTART" -eq 1 ]]; then
-            # Fail closed: dropping EnvironmentFile onto missing /etc path while a
-            # legacy token still exists would restart without OAuth (primary-soup).
+            # Fail closed: missing/ineffective canonical while a legacy token still
+            # exists, OR an empty canonical file that systemd would load as blank.
             block_restart=0
-            if [[ "${HAPI_CLAUDE_OAUTH_MIGRATE_PENDING:-0}" -eq 1 ]]; then
-                block_restart=1
-            elif [[ ! -f "$CLAUDE_TOKEN_FILE" ]]; then
+            op_home=""
+            [[ "$PROFILE" == primary-soup ]] && op_home="${OOS_OPERATOR_HOME:-/home/heavygee}"
+            if hapi_claude_oauth_has_effective_token "$CLAUDE_TOKEN_FILE" 2>/dev/null; then
+                :
+            else
+                if [[ -e "$CLAUDE_TOKEN_FILE" || -L "$CLAUDE_TOKEN_FILE" ]]; then
+                    block_restart=1
+                fi
                 while IFS= read -r legacy_probe; do
                     if [[ -e "$legacy_probe" || -L "$legacy_probe" ]]; then
                         block_restart=1
                         break
                     fi
-                done < <(hapi_claude_oauth_legacy_system_token_candidates "$PROFILE" "$HAPI_HOME")
+                done < <(hapi_claude_oauth_legacy_system_token_candidates "$PROFILE" "$HAPI_HOME" "$op_home")
             fi
             if [[ "$block_restart" -eq 1 ]]; then
-                echo "ERROR: refusing --restart until Claude OAuth token is at $CLAUDE_TOKEN_FILE" >&2
-                echo "       Legacy path still present or migrate failed (never sudo cp -a of a symlink)." >&2
+                echo "ERROR: refusing --restart until Claude OAuth token is effective at $CLAUDE_TOKEN_FILE" >&2
+                echo "       Legacy path still present, empty canonical, or migrate failed." >&2
                 echo "       Migrate with: hapi_claude_oauth_secure_copy_regular_file <legacy> $CLAUDE_TOKEN_FILE" >&2
                 exit 1
             fi
