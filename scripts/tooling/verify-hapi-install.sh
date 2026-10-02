@@ -409,46 +409,45 @@ fi
 token_file_has_value=0
 token_file_readable=0
 if [[ -n "$token_file" ]]; then
-    # Fleet tokens are root:root 0600 under /etc/hapi; operator verify needs sudo -n.
-    # Require a non-whitespace value: CLAUDE_CODE_OAUTH_TOKEN=\r\n must NOT count as loaded
-    # (grep '.' would treat CR as a value and disagree with Python's rstrip).
+    # Fleet tokens are root:root 0600 under /etc/hapi. Installed sudoers only
+    # grant runner restart (hapi-watchdog.in) — not grep/test/python3. Do not
+    # fake a sudo -n read. System-scope verify must run as root.
     token_line=""
     if [[ -r "$token_file" ]]; then
         token_line="$(grep -m1 $'^CLAUDE_CODE_OAUTH_TOKEN=[^[:space:]]' "$token_file" 2>/dev/null || true)"
         token_file_readable=1
-    else
-        set +e
-        token_line="$(sudo -n grep -m1 $'^CLAUDE_CODE_OAUTH_TOKEN=[^[:space:]]' "$token_file" 2>/dev/null)"
-        token_rc=$?
-        set -e
-        if [[ "$token_rc" -eq 0 ]]; then
-            token_file_readable=1
-        elif sudo -n test -e "$token_file" 2>/dev/null; then
-            # File exists but value empty/whitespace — still readable via sudo.
-            token_file_readable=1
+    elif [[ "$SCOPE" == system && "${EUID:-$(id -u)}" -ne 0 ]]; then
+        if [[ -e "$token_file" ]]; then
+            not_ok "Claude OAuth token file unreadable as $(id -un) ($token_file) — re-run as root: sudo bash $REPO_ROOT/scripts/tooling/verify-hapi-install.sh"
+        else
+            inconclusive "Claude OAuth token file missing or empty (${token_file:-unknown}) — run claude setup-token (sudo tee) then sudo systemctl restart the runner"
         fi
-    fi
-    if [[ -n "$token_line" ]]; then
-        token_file_has_value=1
-        ok "Claude OAuth token file has CLAUDE_CODE_OAUTH_TOKEN= ($token_file)"
-    elif [[ "$token_file_readable" -eq 0 && -e "$token_file" ]]; then
-        inconclusive "Claude OAuth token file unreadable without sudo -n ($token_file) — re-run verify as root or with passwordless sudo"
+    elif [[ -e "$token_file" ]]; then
+        inconclusive "Claude OAuth token file unreadable ($token_file)"
     else
-        # Fresh stranger install before setup-token — loud but not a hard fail unless
-        # live peers prove the machine previously had a working token.
         inconclusive "Claude OAuth token file missing or empty (${token_file:-unknown}) — run claude setup-token and write CLAUDE_CODE_OAUTH_TOKEN=... then restart the runner"
+    fi
+    if [[ "$token_file_readable" -eq 1 ]]; then
+        if [[ -n "$token_line" ]]; then
+            token_file_has_value=1
+            ok "Claude OAuth token file has CLAUDE_CODE_OAUTH_TOKEN= ($token_file)"
+        else
+            inconclusive "Claude OAuth token file missing or empty (${token_file:-unknown}) — run claude setup-token and write CLAUDE_CODE_OAUTH_TOKEN=... then restart the runner"
+        fi
     fi
 else
     inconclusive "Claude OAuth token file missing or empty (unknown) — run claude setup-token and write CLAUDE_CODE_OAUTH_TOKEN=... then restart the runner"
 fi
 
 auth_probe_cmd=(python3)
+auth_probe_need_root=0
 if [[ "$main_pid" != "0" ]]; then
     if [[ ! -r "/proc/$main_pid/environ" ]]; then
-        # Fleet: /proc/<hapi-pid>/environ is unreadable to the operator; sudo -n
-        # is the check (same pattern as runner.state.json), not a recovery path.
-        if sudo -n test -r "/proc/$main_pid/environ" 2>/dev/null; then
-            auth_probe_cmd=(sudo -n python3)
+        # Do not sudo -n python3: watchdog sudoers does not grant it.
+        if [[ "$SCOPE" == system && "${EUID:-$(id -u)}" -ne 0 ]]; then
+            not_ok "runner Claude ambient token unreadable as $(id -un) (/proc/$main_pid/environ) — re-run as root: sudo bash $REPO_ROOT/scripts/tooling/verify-hapi-install.sh"
+            auth_probe_cmd=()
+            auth_probe_need_root=1
         else
             auth_probe_cmd=()
         fi
@@ -650,7 +649,9 @@ PY
         inconclusive "runner Claude ambient token (could not read /proc/$main_pid/environ)"
     fi
 else
-    inconclusive "runner Claude ambient token (no readable /proc/$main_pid/environ even via sudo -n)"
+    if [[ "$auth_probe_need_root" -eq 0 ]]; then
+        inconclusive "runner Claude ambient token (no readable /proc/$main_pid/environ)"
+    fi
 fi
 
 hub_pid="$("${CTL[@]}" show "$HUB_UNIT" -p MainPID --value 2>/dev/null || true)"
@@ -676,6 +677,6 @@ fi
 
 printf '\n# Claude auth: drop-in + EnvironmentFiles + /proc load + HAPI_HOME/descendant peer split-brain.\n'
 printf '# Does not call Anthropic or print token values. Missing token file on a fresh box is inconclusive.\n'
-printf '# Fleet reads use sudo -n (token file + /proc environ) like runner.state.json.\n'
+printf '# System-scope OAuth file is root:root 0600; run verify as root (sudoers does not grant grep/python3).\n'
 printf '# pass=%d fail=%d inconclusive=%d\n' "$PASS" "$FAIL" "$INCONCLUSIVE"
 exit "$FAIL"

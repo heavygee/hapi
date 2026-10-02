@@ -42,7 +42,7 @@ hapi_print_claude_oauth_setup_instructions() {
     local restart_cmd
     case "$scope" in
         user) restart_cmd="systemctl --user restart ${runner_unit}" ;;
-        *)    restart_cmd="systemctl restart ${runner_unit}" ;;
+        *)    restart_cmd="sudo systemctl restart ${runner_unit}" ;;
     esac
     if [[ "$scope" == system ]]; then
         cat <<EOF
@@ -292,12 +292,14 @@ hapi_install_claude_oauth_dropin() {
         if [[ "$root_controlled" -eq 1 ]]; then
             for legacy_token in \
                 /var/lib/hapi/claude-setup-token.env \
-                /var/lib/hapi/.hapi/claude-setup-token.env; do
+                /var/lib/hapi/.hapi/claude-setup-token.env \
+                /home/heavygee/.hapi/claude-setup-token.env \
+                "${HOME:-}/.hapi/claude-setup-token.env"; do
                 if [[ -f "$legacy_token" ]]; then
                     echo "WARN: legacy token at $legacy_token - migrate once to root-controlled path:" >&2
                     echo "       sudo install -d -m 0755 $(printf '%q' "$token_parent")" >&2
                     echo "       sudo cp -a $(printf '%q' "$legacy_token") $(printf '%q' "$token_file") && sudo chmod 600 $(printf '%q' "$token_file")" >&2
-                    echo "       then: systemctl restart ${runner_unit}" >&2
+                    echo "       then: sudo systemctl restart ${runner_unit}" >&2
                     break
                 fi
             done
@@ -343,7 +345,7 @@ EOF
             local restart_cmd
             case "$scope" in
                 user) restart_cmd="systemctl --user restart ${runner_unit}" ;;
-                *)    restart_cmd="systemctl restart ${runner_unit}" ;;
+                *)    restart_cmd="sudo systemctl restart ${runner_unit}" ;;
             esac
             cat <<EOF
 ==> If the runner is already running, reload it so new UI sessions inherit the token:

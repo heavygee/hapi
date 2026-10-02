@@ -180,8 +180,8 @@ check "secure_chmod system shell path mentions python3" \
 # System-scope instructions use systemctl restart (not --user).
 hapi_print_claude_oauth_setup_instructions "/etc/hapi/claude-setup-token.env" "hapi-runner.service" "system" \
     >/tmp/hapi-claude-oauth-dropin-system-instr.out
-check "system instructions use systemctl restart" \
-    "grep -q 'systemctl restart hapi-runner.service' /tmp/hapi-claude-oauth-dropin-system-instr.out"
+check "system instructions use sudo systemctl restart" \
+    "grep -q 'sudo systemctl restart hapi-runner.service' /tmp/hapi-claude-oauth-dropin-system-instr.out"
 check "system instructions use privileged write" \
     "grep -q 'sudo tee' /tmp/hapi-claude-oauth-dropin-system-instr.out"
 
