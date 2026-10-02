@@ -995,6 +995,14 @@ layers:
   # Wave slot 1 (before #1607 / #1772). Remat owner: tooling/meta — no self-remat.
   - branch: driver/claude-model-catalog
 
+  # heavygee/hapi#193 / tiann/hapi#1951 — Cursor ACP spawn cwd = session.path so
+  # MCP loads project <.cursor/mcp.json> instead of inheriting …/driver/cli and
+  # latching a dead shared bare `hapi` mailbox (Unable to connect on inspect_peer).
+  # Thin tip on upstream/main: fix/cursor-mcp-agent-spawn-cwd @ 2e40d38f9
+  # Worktree: ~/coding/hapi/worktrees/cursor-mcp-agent-cwd
+  # CLI-only → remat needs hapi-restart-hub (no --build-web required for the fix itself).
+  - branch: fix/cursor-mcp-agent-spawn-cwd
+
   # DROPPED 2026-09-22: tooling/hapi-tick-v1 MERGED fork main as heavygee/hapi#159
   # (squash baf1893b6). Gate A cleanup — rematerialize once wave done. Tick stays on
   # fork main + PATH (~/.local/bin/hapi-tick → mirror scripts/tooling/hapi-tick.sh).
