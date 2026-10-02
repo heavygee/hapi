@@ -87,10 +87,14 @@ check "drop-in stays on canonical despite legacy" \
 : >"$canon_token"
 chmod 600 "$canon_token"
 set +e
-hapi_claude_oauth_install_dropin \
+hapi_install_claude_oauth_dropin \
     --scope user --runner-unit hapi-runner.service \
     --token-file "$canon_token" >/tmp/hapi-claude-oauth-remigrate.out 2>/tmp/hapi-claude-oauth-remigrate.err
+remigrate_rc=$?
 set -e
+check "retired remigrate invokes real installer" "[[ $remigrate_rc -eq 0 || $remigrate_rc -ne 127 ]]"
+check "retired remigrate did not command-not-found" \
+    "! grep -qi 'command not found' /tmp/hapi-claude-oauth-remigrate.err"
 check "retired archive not re-copied into empty canon" \
     "! grep -q 'CLAUDE_CODE_OAUTH_TOKEN=legacy' \"$canon_token\""
 check "retired archive file still present" \
@@ -365,6 +369,13 @@ check "toggle does not PATH-inject bash under sudo" \
     "! grep -E 'sudo.*PATH=.*bash' \"$ROOT/scripts/tooling/hapi-claude-account-toggle.sh\""
 check "toggle validates credentials JSON before mutation" \
     "grep -q 'invalid JSON in slot credentials' \"$ROOT/scripts/tooling/hapi-claude-account-toggle.sh\""
+check "toggle rolls back canon on credentials failure" \
+    "grep -q 'hapi_claude_oauth_rollback_canon_from_bak' \"$ROOT/scripts/tooling/hapi-claude-account-toggle.sh\""
+# Invocation-only: the wrong helper name must not appear as a call site.
+check "retired remigrate uses hapi_install_claude_oauth_dropin" \
+    "grep -n 'hapi_install_claude_oauth_dropin' \"$ROOT/scripts/tooling/hapi-claude-oauth-dropin.test.sh\" | grep -q remigrate"
+check "no call to nonexistent hapi_claude_oauth_install_dropin" \
+    "! grep -E '^[[:space:]]*hapi_claude_oauth_install_dropin([[:space:]]|$)' \"$ROOT/scripts/tooling/hapi-claude-oauth-dropin.test.sh\""
 toggle_json_line="$(grep -n 'invalid JSON in slot credentials' "$ROOT/scripts/tooling/hapi-claude-account-toggle.sh" | head -1 | cut -d: -f1)"
 toggle_cp_line="$(grep -n 'cp -a "$CRED"' "$ROOT/scripts/tooling/hapi-claude-account-toggle.sh" | head -1 | cut -d: -f1)"
 check "toggle JSON validate precedes credentials cp" \

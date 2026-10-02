@@ -147,10 +147,50 @@ else
         | hapi_claude_oauth_install_bytes_via_sudo "$CANON"
 fi
 
+# Restore CANON from pre-toggle backup if interactive credentials cannot be
+# committed (avoids runner/interactive account split after canonical-first write).
+hapi_claude_oauth_rollback_canon_from_bak() {
+    local why="${1:-credentials update failed}"
+    echo "ERROR: $why — rolling back canonical token at $CANON" >&2
+    if [[ -f "$bak" && ! -L "$bak" ]]; then
+        if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+            hapi_claude_oauth_secure_copy_regular_file "$bak" "$CANON" || {
+                echo "ERROR: failed to restore $CANON from $bak" >&2
+                return 1
+            }
+        else
+            hapi_claude_oauth_cat_regular_file "$bak" \
+                | hapi_claude_oauth_install_bytes_via_sudo "$CANON" || {
+                echo "ERROR: failed to restore $CANON from $bak (sudo)" >&2
+                return 1
+            }
+        fi
+        echo "Restored canonical token from $bak"
+        return 0
+    fi
+    echo "WARN: no prior canonical backup at $bak — cannot roll back $CANON" >&2
+    return 1
+}
+
 # Only after canonical token is installed: switch interactive credentials.
-cp -a "$CRED" "$HOME/.claude/.credentials.json"
-chmod 600 "$HOME/.claude/.credentials.json"
-echo "$SLOT" > "$ROOT/active"
+if ! cp -a "$CRED" "$HOME/.claude/.credentials.json"; then
+    hapi_claude_oauth_rollback_canon_from_bak "cannot replace $HOME/.claude/.credentials.json"
+    exit 1
+fi
+if ! chmod 600 "$HOME/.claude/.credentials.json"; then
+    hapi_claude_oauth_rollback_canon_from_bak "cannot chmod 600 $HOME/.claude/.credentials.json"
+    exit 1
+fi
+if ! echo "$SLOT" > "$ROOT/active"; then
+    hapi_claude_oauth_rollback_canon_from_bak "cannot write $ROOT/active"
+    # Best-effort: also restore previous interactive credentials if we backed them up.
+    prev_cred="$ROOT/auth-bak/.credentials.json.bak-toggle-$TS"
+    if [[ -f "$prev_cred" && ! -L "$prev_cred" ]]; then
+        cp -a "$prev_cred" "$HOME/.claude/.credentials.json" 2>/dev/null || true
+        chmod 600 "$HOME/.claude/.credentials.json" 2>/dev/null || true
+    fi
+    exit 1
+fi
 
 SHA12="$(printf '%s' "$EFFECTIVE" | sha256sum | cut -c1-12)"
 echo "== claude auth → slot '$SLOT' tier=$TIER token_sha12=$SHA12 canon=$CANON =="
