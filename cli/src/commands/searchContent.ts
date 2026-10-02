@@ -28,7 +28,11 @@ ${chalk.bold('Usage:')}
 ${chalk.bold('Notes:')}
   Uses CLI_API_TOKEN → JWT (same as search-peers / ping-peer). Never hand-mint a JWT —
   an expired token used to return an empty list, indistinguishable from no matches.
-  Prefer MCP search_content inside a session.
+  Prefer MCP search_content inside a session when that tool is listed (fresh Claude/Cursor
+  HappyServer). Long-lived sessions started before the tool shipped need a session restart
+  to register it — until then use this CLI.
+  Invoke via PATH hapi (~/.local/bin/hapi → hapi-from-active). Do not use
+  driver/cli/node_modules/.bin/hapi (vendored @twsxtd binary; returns Unknown command).
   Short/common substrings match badly (trigram FTS): prefer distinctive nouns.
 
 ${chalk.bold('Env:')}
