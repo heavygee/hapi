@@ -55,12 +55,13 @@ hapi_print_claude_oauth_setup_instructions() {
     One-time setup (privileged write - file stays root:root 0600 under /etc):
       claude setup-token
       sudo install -d -m 0755 "$(dirname "$token_file")"
-      printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\\n' '<token>' | sudo tee '$token_file' >/dev/null
-      sudo chmod 600 '$token_file'
+      printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\\n' '<token>' \\
+        | sudo install -m 0600 /dev/stdin '$token_file'
     And reload the runner:
       $restart_cmd
 
     Drop-in already points at: $token_file
+    Prerequisite: python3 on PATH (system install uses it for O_NOFOLLOW migrate/chmod).
 EOF
     else
         cat <<EOF
@@ -195,10 +196,18 @@ hapi_claude_oauth_legacy_system_token_candidates() {
 }
 
 # Last effective CLAUDE_CODE_OAUTH_TOKEN= value (systemd last-assignment-wins),
-# after stripping quotes/whitespace. Empty / whitespace-only → unset.
+# after stripping quotes/whitespace. Empty / whitespace-only → unset (exit 2).
 hapi_claude_oauth_effective_token_value() {
     local token_file="${1:?token_file}"
-    python3 - "$token_file" <<'PY'
+    if [[ -L "$token_file" ]]; then
+        echo "ERROR: refusing symlink token file: $token_file" >&2
+        return 1
+    fi
+    if [[ ! -f "$token_file" ]]; then
+        return 1
+    fi
+    if command -v python3 >/dev/null 2>&1; then
+        python3 - "$token_file" <<'PY'
 import os, stat, sys
 
 path = sys.argv[1]
@@ -244,6 +253,44 @@ if last is None:
 sys.stdout.buffer.write(last)
 sys.exit(0)
 PY
+        return $?
+    fi
+
+    # Bash fallback (pet / minimal hosts without python3).
+    local line raw last=""
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        case "$line" in
+            CLAUDE_CODE_OAUTH_TOKEN=*)
+                raw="${line#CLAUDE_CODE_OAUTH_TOKEN=}"
+                raw="${raw%$'\r'}"
+                if [[ ${#raw} -ge 2 ]]; then
+                    if [[ "${raw:0:1}" == '"' && "${raw: -1}" == '"' ]] || \
+                       [[ "${raw:0:1}" == "'" && "${raw: -1}" == "'" ]]; then
+                        raw="${raw:1:${#raw}-2}"
+                    fi
+                fi
+                raw="${raw#"${raw%%[![:space:]]*}"}"
+                raw="${raw%"${raw##*[![:space:]]}"}"
+                last="$raw"
+                ;;
+        esac
+    done <"$token_file"
+    if [[ -z "$last" ]]; then
+        return 2
+    fi
+    printf '%s' "$last"
+    return 0
+}
+
+# True when the final EnvironmentFile assignment is a nonempty token.
+hapi_claude_oauth_has_effective_token() {
+    local token_file="${1:?token_file}"
+    local eff=""
+    set +e
+    eff="$(hapi_claude_oauth_effective_token_value "$token_file" 2>/dev/null)"
+    local rc=$?
+    set -e
+    [[ "$rc" -eq 0 && -n "$eff" ]]
 }
 
 # Write stdin to dst as a brand-new regular file (O_CREAT|O_EXCL|O_NOFOLLOW on the
@@ -279,6 +326,8 @@ PY
 }
 
 # Assert /etc/... token parent is root-owned and not group/other-writable.
+# Prefer python3 lstat; bash `stat -c` fallback when python3 is absent (preflight
+# should still require python3 for system migrate/chmod before units change).
 hapi_claude_oauth_assert_root_controlled_parent() {
     local parent_dir="${1:?parent_dir}"
     if [[ -L "$parent_dir" ]]; then
@@ -288,7 +337,8 @@ hapi_claude_oauth_assert_root_controlled_parent() {
     if [[ ! -d "$parent_dir" ]]; then
         return 0
     fi
-    python3 - "$parent_dir" <<'PY'
+    if command -v python3 >/dev/null 2>&1; then
+        python3 - "$parent_dir" <<'PY'
 import os, stat, sys
 path = sys.argv[1]
 st = os.lstat(path)
@@ -314,6 +364,25 @@ if st.st_mode & 0o022:
     sys.exit(1)
 sys.exit(0)
 PY
+        return $?
+    fi
+    local uid mode
+    uid="$(stat -c '%u' "$parent_dir" 2>/dev/null || true)"
+    mode="$(stat -c '%a' "$parent_dir" 2>/dev/null || true)"
+    if [[ -z "$uid" || -z "$mode" ]]; then
+        echo "ERROR: cannot stat token parent $parent_dir (need python3 or GNU stat)" >&2
+        return 1
+    fi
+    if [[ "$uid" != 0 ]]; then
+        echo "ERROR: token parent $parent_dir is owned by uid $uid (must be root) — service-writable /etc/hapi defeats EnvironmentFile root-control" >&2
+        return 1
+    fi
+    # mode is octal like 755; reject group/other write (022).
+    if (( (8#$mode & 8#022) != 0 )); then
+        echo "ERROR: token parent $parent_dir is group/other-writable (mode $mode) — fix ownership/mode before installing the OAuth drop-in" >&2
+        return 1
+    fi
+    return 0
 }
 
 # chmod 0600 (+ optional chown) without following a symlink final component.
@@ -524,16 +593,13 @@ hapi_install_claude_oauth_dropin() {
                 fi
             done < <(hapi_claude_oauth_legacy_system_token_candidates "$migrate_profile")
 
-            if [[ -z "$migrate_profile" && ${#present[@]} -gt 1 ]]; then
-                echo "ERROR: multiple legacy Claude OAuth tokens found; pass --migrate-profile fleet-binary|primary-soup" >&2
+            if [[ ${#present[@]} -gt 1 ]]; then
+                echo "ERROR: multiple legacy Claude OAuth tokens for profile '${migrate_profile:-unset}'; refuse to guess" >&2
                 printf '       - %s\n' "${present[@]}" >&2
+                echo "       Pick one source, remove or rename the others, then re-run install." >&2
                 HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=1
-            elif [[ ${#present[@]} -gt 0 ]]; then
+            elif [[ ${#present[@]} -eq 1 ]]; then
                 legacy_token="${present[0]}"
-                if [[ ${#present[@]} -gt 1 ]]; then
-                    echo "NOTE: multiple legacy tokens for profile '${migrate_profile:-?}'; migrating first: $legacy_token" >&2
-                    printf '       also present: %s\n' "${present[@]:1}" >&2
-                fi
                 if [[ -L "$legacy_token" ]]; then
                     echo "ERROR: refusing to migrate symlink legacy token: $legacy_token" >&2
                     echo "       Replace with a regular file, then re-run install (never sudo cp -a)." >&2
@@ -585,16 +651,17 @@ EOF
         # refuses via O_NOFOLLOW so a TOCTOU swap cannot retarget chmod/chown.
         hapi_claude_oauth_assert_safe_token_file "$token_file" || return 1
         if [[ "$root_controlled" -eq 1 ]]; then
-            # Keep root:root 0600 - never hand the file to the service UID.
-            hapi_claude_oauth_secure_chmod_chown "$token_file" || return 1
+            # Keep root:root 0600 - reclaim ownership if a prior install left the
+            # file service-owned (idempotent enforce of the root-control promise).
+            hapi_claude_oauth_secure_chmod_chown "$token_file" "root:root" || return 1
         elif [[ -n "$owner" && "$scope" == system ]]; then
             hapi_claude_oauth_secure_chmod_chown "$token_file" "$owner" || return 1
         else
             hapi_claude_oauth_secure_chmod_chown "$token_file" || return 1
         fi
-        # Non-whitespace value only — CLAUDE_CODE_OAUTH_TOKEN=\r\n is unconfigured
-        # (grep '.' treats CR as a value; systemd would load an empty credential).
-        if grep -q $'^CLAUDE_CODE_OAUTH_TOKEN=[^[:space:]]' "$token_file" 2>/dev/null; then
+        # systemd last-assignment-wins — a nonempty early line then
+        # CLAUDE_CODE_OAUTH_TOKEN= means unconfigured.
+        if hapi_claude_oauth_has_effective_token "$token_file"; then
             echo "Claude OAuth token file present: $token_file"
             # daemon-reload alone does not reload EnvironmentFile into a live
             # process — operator must restart the runner to pick up the token.
@@ -609,7 +676,7 @@ EOF
     (daemon-reload alone does not update the running process environment.)
 EOF
         else
-            echo "WARN: $token_file exists but has no CLAUDE_CODE_OAUTH_TOKEN= line" >&2
+            echo "WARN: $token_file exists but has no effective CLAUDE_CODE_OAUTH_TOKEN= value" >&2
             hapi_print_claude_oauth_setup_instructions "$token_file" "$runner_unit" "$scope"
         fi
     else

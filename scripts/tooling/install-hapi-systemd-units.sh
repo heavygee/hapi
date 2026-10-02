@@ -21,6 +21,7 @@
 # Also installs the Claude OAuth EnvironmentFile drop-in (42-claude-oauth-token.conf)
 # so runner-spawned Claude sessions inherit CLAUDE_CODE_OAUTH_TOKEN. UI spawn does
 # not inject options.token — see lib/hapi-claude-oauth-dropin.sh.
+# System profiles require python3 on PATH (O_NOFOLLOW migrate/chmod of /etc/hapi).
 #
 # Estate-local drop-ins (cursor auth, work-cache, upload-heal) stay in
 # /etc/systemd/system/*.service.d/ and are never overwritten by this script.
@@ -153,6 +154,13 @@ esac
 
 if [[ "$NEED_ROOT" -eq 1 ]] && [[ "$(id -u)" -ne 0 ]]; then
     echo "ERROR: profile $PROFILE requires root (sudo bash $0 ...)" >&2
+    exit 1
+fi
+
+# Fail before touching units: system OAuth migrate/chmod needs python3 O_NOFOLLOW.
+if [[ "$NEED_ROOT" -eq 1 ]] && ! command -v python3 >/dev/null 2>&1; then
+    echo "ERROR: python3 is required for profile $PROFILE (Claude OAuth drop-in under /etc/hapi)" >&2
+    echo "       Install python3, then re-run: sudo bash $0 --profile $PROFILE ..." >&2
     exit 1
 fi
 
@@ -329,8 +337,8 @@ case "$PROFILE" in
             # Same race as the embedded pet path: pgrep kill + Restart=always can
             # leave an already-active pre-drop-in runner; start is then a no-op.
             systemctl --user restart hapi-runner.service
-        elif systemctl --user is-active --quiet hapi-runner.service 2>/dev/null; then
-            # Drop-in/token rotate without --enable: still reload ambient env.
+        elif [[ "$DO_RESTART" -eq 1 ]] && systemctl --user is-active --quiet hapi-runner.service 2>/dev/null; then
+            # Config-only reruns must not yank MainPID unless the operator asked.
             systemctl --user restart hapi-runner.service
         fi
         ;;

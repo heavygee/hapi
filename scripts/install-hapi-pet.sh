@@ -170,8 +170,31 @@ EOF
     systemctl --user restart hapi-runner.service
     log "Installed: $unit_dir/hapi-hub.service"
     log "Installed: $unit_dir/hapi-runner.service"
-    # Non-whitespace value only — CLAUDE_CODE_OAUTH_TOKEN=\r\n is unconfigured.
-    if [[ ! -f "$token_file" ]] || ! grep -q $'^CLAUDE_CODE_OAUTH_TOKEN=[^[:space:]]' "$token_file" 2>/dev/null; then
+    # Last-assignment-wins (systemd EnvironmentFile): a nonempty early line then
+    # CLAUDE_CODE_OAUTH_TOKEN= still means unconfigured.
+    local token_configured=0
+    if [[ -f "$token_file" && ! -L "$token_file" ]]; then
+        local line raw last=""
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            case "$line" in
+                CLAUDE_CODE_OAUTH_TOKEN=*)
+                    raw="${line#CLAUDE_CODE_OAUTH_TOKEN=}"
+                    raw="${raw%$'\r'}"
+                    if [[ ${#raw} -ge 2 ]]; then
+                        if [[ "${raw:0:1}" == '"' && "${raw: -1}" == '"' ]] || \
+                           [[ "${raw:0:1}" == "'" && "${raw: -1}" == "'" ]]; then
+                            raw="${raw:1:${#raw}-2}"
+                        fi
+                    fi
+                    raw="${raw#"${raw%%[![:space:]]*}"}"
+                    raw="${raw%"${raw##*[![:space:]]}"}"
+                    last="$raw"
+                    ;;
+            esac
+        done <"$token_file"
+        [[ -n "$last" ]] && token_configured=1
+    fi
+    if [[ "$token_configured" -eq 0 ]]; then
         cat <<EOF
 
 ==> Claude OAuth for runner-spawned sessions is NOT configured yet.

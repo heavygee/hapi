@@ -30,7 +30,7 @@ for arg in "${@:2}"; do
     esac
 done
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=lib/hapi-claude-oauth-dropin.sh
 source "$SCRIPT_DIR/lib/hapi-claude-oauth-dropin.sh"
 

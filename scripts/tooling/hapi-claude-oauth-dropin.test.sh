@@ -198,8 +198,32 @@ hapi_print_claude_oauth_setup_instructions "/etc/hapi/claude-setup-token.env" "h
     >/tmp/hapi-claude-oauth-dropin-system-instr.out
 check "system instructions use sudo systemctl restart" \
     "grep -q 'sudo systemctl restart hapi-runner.service' /tmp/hapi-claude-oauth-dropin-system-instr.out"
-check "system instructions use privileged write" \
-    "grep -q 'sudo tee' /tmp/hapi-claude-oauth-dropin-system-instr.out"
+check "system instructions use privileged install -m 0600" \
+    "grep -q 'sudo install -m 0600 /dev/stdin' /tmp/hapi-claude-oauth-dropin-system-instr.out"
+check "system instructions do not use tee+chmod race" \
+    "! grep -q 'sudo tee' /tmp/hapi-claude-oauth-dropin-system-instr.out"
+
+# Last-assignment empty final must not claim token present.
+printf 'CLAUDE_CODE_OAUTH_TOKEN=first\nCLAUDE_CODE_OAUTH_TOKEN=\n' >"$token"
+chmod 600 "$token"
+hapi_install_claude_oauth_dropin \
+    --scope user \
+    --runner-unit hapi-runner.service \
+    --token-file "$token" >/tmp/hapi-claude-oauth-dropin-lastempty.out 2>/tmp/hapi-claude-oauth-dropin-lastempty.err
+check "empty final assignment not reported present" \
+    "! grep -q 'token file present' /tmp/hapi-claude-oauth-dropin-lastempty.out"
+check "empty final assignment prints setup instructions" \
+    "grep -q 'NOT configured yet' /tmp/hapi-claude-oauth-dropin-lastempty.out"
+
+# Toggle resolves through ~/.local/bin symlink to the real scripts/tooling path.
+toggle_link="$TMP/bin/hapi-claude-account-toggle"
+ln -sf "$ROOT/scripts/tooling/hapi-claude-account-toggle.sh" "$toggle_link"
+resolved_dir="$(cd "$(dirname "$(readlink -f "$toggle_link")")" && pwd)"
+tooling_real="$(cd "$ROOT/scripts/tooling" && pwd -P)"
+check "toggle symlink resolves to scripts/tooling" \
+    "[[ \"$resolved_dir\" == \"$tooling_real\" ]]"
+check "toggle symlink finds dropin lib" \
+    "[[ -f \"$resolved_dir/lib/hapi-claude-oauth-dropin.sh\" ]]"
 
 # Last-assignment-wins: empty final CLAUDE_CODE_OAUTH_TOKEN= is unconfigured.
 dup="$TMP/dup-assign.env"
