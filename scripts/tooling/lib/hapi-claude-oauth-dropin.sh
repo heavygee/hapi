@@ -165,15 +165,155 @@ sys.exit(0)
 PY
 }
 
-# Known pre-/etc locations (fleet service home + primary-soup operator hand-install).
+# Known pre-/etc locations, scoped by install profile so fleet cannot silently
+# import the primary-soup operator token (and vice versa).
 hapi_claude_oauth_legacy_system_token_candidates() {
-    printf '%s\n' \
-        /var/lib/hapi/claude-setup-token.env \
-        /var/lib/hapi/.hapi/claude-setup-token.env \
-        /home/heavygee/.hapi/claude-setup-token.env
-    if [[ -n "${HOME:-}" && "$HOME" != /home/heavygee ]]; then
-        printf '%s\n' "${HOME}/.hapi/claude-setup-token.env"
+    local profile="${1:-}"
+    case "$profile" in
+        fleet-binary|fleet)
+            printf '%s\n' \
+                /var/lib/hapi/claude-setup-token.env \
+                /var/lib/hapi/.hapi/claude-setup-token.env
+            ;;
+        primary-soup|soup)
+            printf '%s\n' /home/heavygee/.hapi/claude-setup-token.env
+            if [[ -n "${HOME:-}" && "$HOME" != /home/heavygee ]]; then
+                printf '%s\n' "${HOME}/.hapi/claude-setup-token.env"
+            fi
+            ;;
+        ""|*)
+            # No profile: emit both classes. Caller must fail closed on ambiguity.
+            printf '%s\n' \
+                /var/lib/hapi/claude-setup-token.env \
+                /var/lib/hapi/.hapi/claude-setup-token.env \
+                /home/heavygee/.hapi/claude-setup-token.env
+            if [[ -n "${HOME:-}" && "$HOME" != /home/heavygee ]]; then
+                printf '%s\n' "${HOME}/.hapi/claude-setup-token.env"
+            fi
+            ;;
+    esac
+}
+
+# Last effective CLAUDE_CODE_OAUTH_TOKEN= value (systemd last-assignment-wins),
+# after stripping quotes/whitespace. Empty / whitespace-only → unset.
+hapi_claude_oauth_effective_token_value() {
+    local token_file="${1:?token_file}"
+    python3 - "$token_file" <<'PY'
+import os, stat, sys
+
+path = sys.argv[1]
+flags = os.O_RDONLY
+if hasattr(os, "O_NOFOLLOW"):
+    flags |= os.O_NOFOLLOW
+if hasattr(os, "O_NONBLOCK"):
+    flags |= os.O_NONBLOCK
+try:
+    fd = os.open(path, flags)
+except OSError as exc:
+    sys.stderr.write("ERROR: cannot open token file: %s: %s\n" % (path, exc))
+    sys.exit(1)
+try:
+    mode = os.fstat(fd).st_mode
+    if not stat.S_ISREG(mode):
+        sys.stderr.write("ERROR: refusing non-regular token file: %s\n" % path)
+        sys.exit(1)
+    data = b""
+    while True:
+        chunk = os.read(fd, 65536)
+        if not chunk:
+            break
+        data += chunk
+finally:
+    os.close(fd)
+
+def parse_value(raw):
+    val = raw.strip()
+    if not val:
+        return None
+    if len(val) >= 2 and val[0:1] == val[-1:] and val[0:1] in (b"'", b'"'):
+        val = val[1:-1]
+    val = val.strip()
+    return val if val else None
+
+last = None
+for line in data.splitlines():
+    if line.startswith(b"CLAUDE_CODE_OAUTH_TOKEN="):
+        last = parse_value(line.split(b"=", 1)[1])
+if last is None:
+    sys.exit(2)
+sys.stdout.buffer.write(last)
+sys.exit(0)
+PY
+}
+
+# Write stdin to dst as a brand-new regular file (O_CREAT|O_EXCL|O_NOFOLLOW on the
+# final path). Never follows a pre-planted symlink at dst — used for operator-owned
+# backups of root-read tokens (privileged process must not write into auth-bak).
+# Program is on fd 3 so caller stdin (piped token bytes) stays available.
+hapi_claude_oauth_secure_write_new_file() {
+    local dst="${1:?dst}"
+    python3 /dev/fd/3 "$dst" 3<<'PY'
+import os, sys
+
+dst = sys.argv[1]
+parent = os.path.dirname(dst) or "."
+os.makedirs(parent, mode=0o700, exist_ok=True)
+data = sys.stdin.buffer.read()
+# POSIX: O_CREAT|O_EXCL fails if dst exists OR is a dangling/present symlink —
+# privileged apps writing into user-writable dirs must use this, not check-then-create.
+flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+if hasattr(os, "O_NOFOLLOW"):
+    flags |= os.O_NOFOLLOW
+try:
+    fd = os.open(dst, flags, 0o600)
+except OSError as exc:
+    sys.stderr.write("ERROR: cannot create exclusive backup file: %s: %s\n" % (dst, exc))
+    sys.exit(1)
+try:
+    os.write(fd, data)
+    os.fchmod(fd, 0o600)
+finally:
+    os.close(fd)
+sys.exit(0)
+PY
+}
+
+# Assert /etc/... token parent is root-owned and not group/other-writable.
+hapi_claude_oauth_assert_root_controlled_parent() {
+    local parent_dir="${1:?parent_dir}"
+    if [[ -L "$parent_dir" ]]; then
+        echo "ERROR: token parent is a symlink: $parent_dir" >&2
+        return 1
     fi
+    if [[ ! -d "$parent_dir" ]]; then
+        return 0
+    fi
+    python3 - "$parent_dir" <<'PY'
+import os, stat, sys
+path = sys.argv[1]
+st = os.lstat(path)
+if stat.S_ISLNK(st.st_mode):
+    sys.stderr.write("ERROR: token parent is a symlink: %s\n" % path)
+    sys.exit(1)
+if not stat.S_ISDIR(st.st_mode):
+    sys.stderr.write("ERROR: token parent is not a directory: %s\n" % path)
+    sys.exit(1)
+if st.st_uid != 0:
+    sys.stderr.write(
+        "ERROR: token parent %s is owned by uid %d (must be root) — "
+        "service-writable /etc/hapi defeats EnvironmentFile root-control\n"
+        % (path, st.st_uid)
+    )
+    sys.exit(1)
+if st.st_mode & 0o022:
+    sys.stderr.write(
+        "ERROR: token parent %s is group/other-writable (mode %04o) — "
+        "fix ownership/mode before installing the OAuth drop-in\n"
+        % (path, stat.S_IMODE(st.st_mode))
+    )
+    sys.exit(1)
+sys.exit(0)
+PY
 }
 
 # chmod 0600 (+ optional chown) without following a symlink final component.
@@ -304,13 +444,14 @@ PY
 # (and returns 0) when the token file is absent — absence is expected on a
 # stranger pet install until the operator mints a token.
 hapi_install_claude_oauth_dropin() {
-    local scope="" runner_unit="" token_file="" owner=""
+    local scope="" runner_unit="" token_file="" owner="" migrate_profile=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --scope) scope="${2:?}"; shift 2 ;;
             --runner-unit) runner_unit="${2:?}"; shift 2 ;;
             --token-file) token_file="${2:?}"; shift 2 ;;
             --owner) owner="${2:?}"; shift 2 ;;
+            --migrate-profile) migrate_profile="${2:?}"; shift 2 ;;
             *)
                 echo "hapi_install_claude_oauth_dropin: unknown arg: $1" >&2
                 return 2
@@ -349,10 +490,18 @@ hapi_install_claude_oauth_dropin() {
         if [[ "$root_controlled" -eq 1 ]]; then
             # Root-owned config dir (matches /etc/hapi sentinel layout).
             mkdir -m 0755 -p "$token_parent"
+            # mkdir as non-root would create wrong owner — refuse that case.
+            if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+                echo "ERROR: creating $token_parent requires root (got euid=${EUID:-$(id -u)})" >&2
+                return 1
+            fi
         else
             # User/pet HAPI_HOME parent: private when freshly created.
             mkdir -m 0700 -p "$token_parent"
         fi
+    fi
+    if [[ "$root_controlled" -eq 1 ]]; then
+        hapi_claude_oauth_assert_root_controlled_parent "$token_parent" || return 1
     fi
     if [[ -n "$owner" && "$scope" == system && "$root_controlled" -eq 0 ]]; then
         # Legacy non-/etc system paths only. Fail closed so setup can write.
@@ -367,35 +516,41 @@ hapi_install_claude_oauth_dropin() {
     if [[ "$(basename "$token_file")" == "claude-setup-token.env" && ! -f "$token_file" ]]; then
         local legacy_token
         if [[ "$root_controlled" -eq 1 ]]; then
+            local -a present=()
             while IFS= read -r legacy_token; do
                 [[ -n "$legacy_token" ]] || continue
-                [[ -e "$legacy_token" || -L "$legacy_token" ]] || continue
+                if [[ -e "$legacy_token" || -L "$legacy_token" ]]; then
+                    present+=("$legacy_token")
+                fi
+            done < <(hapi_claude_oauth_legacy_system_token_candidates "$migrate_profile")
+
+            if [[ -z "$migrate_profile" && ${#present[@]} -gt 1 ]]; then
+                echo "ERROR: multiple legacy Claude OAuth tokens found; pass --migrate-profile fleet-binary|primary-soup" >&2
+                printf '       - %s\n' "${present[@]}" >&2
+                HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=1
+            elif [[ ${#present[@]} -gt 0 ]]; then
+                legacy_token="${present[0]}"
+                if [[ ${#present[@]} -gt 1 ]]; then
+                    echo "NOTE: multiple legacy tokens for profile '${migrate_profile:-?}'; migrating first: $legacy_token" >&2
+                    printf '       also present: %s\n' "${present[@]:1}" >&2
+                fi
                 if [[ -L "$legacy_token" ]]; then
                     echo "ERROR: refusing to migrate symlink legacy token: $legacy_token" >&2
                     echo "       Replace with a regular file, then re-run install (never sudo cp -a)." >&2
                     HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=1
-                    break
-                fi
-                if hapi_claude_oauth_secure_copy_regular_file "$legacy_token" "$token_file"; then
+                elif hapi_claude_oauth_secure_copy_regular_file "$legacy_token" "$token_file"; then
                     echo "Migrated Claude OAuth token: $legacy_token -> $token_file (regular file, 0600)"
-                    break
+                else
+                    echo "WARN: could not migrate legacy token at $legacy_token" >&2
+                    HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=1
+                    echo "       Fix the source (must be a regular file), then:" >&2
+                    echo "       source scripts/tooling/lib/hapi-claude-oauth-dropin.sh" >&2
+                    echo "       hapi_claude_oauth_secure_copy_regular_file $(printf '%q' "$legacy_token") $(printf '%q' "$token_file")" >&2
+                    echo "       then: sudo systemctl restart ${runner_unit}" >&2
                 fi
-                echo "WARN: could not migrate legacy token at $legacy_token" >&2
+            fi
+            if [[ ! -f "$token_file" && ${#present[@]} -gt 0 ]]; then
                 HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=1
-                echo "       Fix the source (must be a regular file), then:" >&2
-                echo "       source scripts/tooling/lib/hapi-claude-oauth-dropin.sh" >&2
-                echo "       hapi_claude_oauth_secure_copy_regular_file $(printf '%q' "$legacy_token") $(printf '%q' "$token_file")" >&2
-                echo "       then: sudo systemctl restart ${runner_unit}" >&2
-                break
-            done < <(hapi_claude_oauth_legacy_system_token_candidates)
-            if [[ ! -f "$token_file" ]]; then
-                # Still missing: if any legacy path exists we owe a migrate before restart.
-                while IFS= read -r legacy_token; do
-                    if [[ -e "$legacy_token" || -L "$legacy_token" ]]; then
-                        HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=1
-                        break
-                    fi
-                done < <(hapi_claude_oauth_legacy_system_token_candidates)
             fi
         else
             legacy_token="${token_parent}/.hapi/claude-setup-token.env"

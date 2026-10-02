@@ -201,4 +201,63 @@ check "system instructions use sudo systemctl restart" \
 check "system instructions use privileged write" \
     "grep -q 'sudo tee' /tmp/hapi-claude-oauth-dropin-system-instr.out"
 
+# Last-assignment-wins: empty final CLAUDE_CODE_OAUTH_TOKEN= is unconfigured.
+dup="$TMP/dup-assign.env"
+printf 'CLAUDE_CODE_OAUTH_TOKEN=first\nCLAUDE_CODE_OAUTH_TOKEN=\n' >"$dup"
+chmod 600 "$dup"
+set +e
+hapi_claude_oauth_effective_token_value "$dup" >/tmp/hapi-claude-oauth-eff-empty.out 2>/tmp/hapi-claude-oauth-eff-empty.err
+eff_empty_rc=$?
+set -e
+check "effective token rejects empty final assignment" "[[ $eff_empty_rc -ne 0 ]]"
+printf 'CLAUDE_CODE_OAUTH_TOKEN=first\nCLAUDE_CODE_OAUTH_TOKEN=second\n' >"$dup"
+got_eff="$(hapi_claude_oauth_effective_token_value "$dup")"
+check "effective token uses last assignment" "[[ \"$got_eff\" == \"second\" ]]"
+
+# Secure exclusive write refuses a pre-planted symlink destination.
+bak_symlink="$TMP/auth-bak-symlink"
+printf 'real\n' >"$TMP/auth-bak-real"
+ln -s "$TMP/auth-bak-real" "$bak_symlink"
+set +e
+printf 'token-bytes\n' | hapi_claude_oauth_secure_write_new_file "$bak_symlink" \
+    >/tmp/hapi-claude-oauth-excl.out 2>/tmp/hapi-claude-oauth-excl.err
+excl_rc=$?
+set -e
+check "secure_write refuses symlink dst" "[[ $excl_rc -ne 0 ]]"
+check "symlink dst target unchanged" "grep -qx real \"$TMP/auth-bak-real\""
+bak_ok="$TMP/auth-bak-ok.env"
+printf 'token-bytes\n' | hapi_claude_oauth_secure_write_new_file "$bak_ok"
+check "secure_write creates exclusive file" "grep -qx token-bytes \"$bak_ok\""
+set +e
+printf 'again\n' | hapi_claude_oauth_secure_write_new_file "$bak_ok" 2>/tmp/hapi-claude-oauth-excl2.err
+excl2_rc=$?
+set -e
+check "secure_write refuses existing dst" "[[ $excl2_rc -ne 0 ]]"
+
+# Profile-scoped legacy candidates (fleet vs soup).
+mapfile -t fleet_arr < <(hapi_claude_oauth_legacy_system_token_candidates fleet-binary)
+fleet_joined=$'\n'"$(printf '%s\n' "${fleet_arr[@]}")"$'\n'
+check "fleet candidates include /var/lib/hapi" \
+    "[[ \"$fleet_joined\" == *$'\n'/var/lib/hapi/claude-setup-token.env$'\n'* ]]"
+check "fleet candidates exclude operator home" \
+    "[[ \"$fleet_joined\" != *$'\n'/home/heavygee/.hapi/claude-setup-token.env$'\n'* ]]"
+mapfile -t soup_arr < <(hapi_claude_oauth_legacy_system_token_candidates primary-soup)
+soup_joined=$'\n'"$(printf '%s\n' "${soup_arr[@]}")"$'\n'
+check "soup candidates include operator home" \
+    "[[ \"$soup_joined\" == *$'\n'/home/heavygee/.hapi/claude-setup-token.env$'\n'* ]]"
+check "soup candidates exclude /var/lib/hapi" \
+    "[[ \"$soup_joined\" != *$'\n'/var/lib/hapi/claude-setup-token.env$'\n'* ]]"
+
+# Existing non-root-owned "system" parent must fail closed.
+bad_parent="$TMP/fake-etc-hapi"
+mkdir -m 0775 -p "$bad_parent"
+set +e
+hapi_claude_oauth_assert_root_controlled_parent "$bad_parent" \
+    >/tmp/hapi-claude-oauth-parent.out 2>/tmp/hapi-claude-oauth-parent.err
+parent_rc=$?
+set -e
+check "assert_root_controlled rejects non-root parent" "[[ $parent_rc -ne 0 ]]"
+check "assert_root_controlled mentions ownership or writable" \
+    "grep -Eiq 'owned by uid|group/other-writable' /tmp/hapi-claude-oauth-parent.err"
+
 echo "ALL OK"
