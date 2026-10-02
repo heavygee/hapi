@@ -570,9 +570,13 @@ if peer_has and not runner_has:
 if expect_load and not runner_has:
     sys.exit(3)
 # Stale runner: file rotated but process still has the old value.
-if expect_load and runner_has and file_tok is not None and runner_tok != file_tok:
+if expect_load and runner_has and file_tok is not None and file_tok and runner_tok != file_tok:
     sys.exit(4)
-sys.exit(0)
+# Reserve exit 0 for a real loaded ambient token — never PASS on runner=0.
+if runner_has:
+    sys.exit(0)
+# Fresh install / token not configured yet (no peers proving prior auth).
+sys.exit(5)
 PY
 )"
     auth_rc=$?
@@ -585,6 +589,8 @@ PY
         not_ok "token file has CLAUDE_CODE_OAUTH_TOKEN but runner process did not load it ($auth_out; restart runner after installing drop-in)"
     elif [[ "$auth_rc" -eq 4 ]]; then
         not_ok "runner CLAUDE_CODE_OAUTH_TOKEN does not match EnvironmentFile ($auth_out; restart runner after rotating the token)"
+    elif [[ "$auth_rc" -eq 5 ]]; then
+        inconclusive "runner Claude ambient token not loaded yet ($auth_out) — write CLAUDE_CODE_OAUTH_TOKEN and restart the runner"
     else
         inconclusive "runner Claude ambient token (could not read /proc/$main_pid/environ)"
     fi
