@@ -25,9 +25,11 @@ import {
     HAPI_MCP_GIT_EXCLUDE_MARKER_PREFIX,
     appendExcludeLease,
     appendExcludeLeaseUnlocked,
+    findLiveProjectHapiMcpMailboxSession,
     hapiMcpGitExcludeMarker,
     installCursorMcpOverlay,
     isProcessAlive,
+    resolveCursorSpawnSessionType,
     readLockOwner,
     removeExcludeLease,
     resolveCursorMcpConfigDir,
@@ -215,6 +217,49 @@ describe('installCursorMcpOverlay', () => {
             enableCursorMcp: noopEnable,
             mcpConfigDir: join(cwd, '.cursor'),
         })).toThrow(/second live HAPI MCP mailbox/);
+    });
+
+    it('findLiveProjectHapiMcpMailboxSession reports the holding session', () => {
+        const cwd = makeProjectDir();
+        installCursorMcpOverlay(cwd, {
+            command: '/bin/hapi',
+            args: ['mcp', '--url', 'http://127.0.0.1:1111/'],
+        }, {
+            serverId: CURSOR_HAPI_MCP_SERVER_ID,
+            overlaySessionId: 'session-a',
+            enableCursorMcp: noopEnable,
+            mcpConfigDir: join(cwd, '.cursor'),
+        });
+        expect(findLiveProjectHapiMcpMailboxSession(cwd, {
+            mcpConfigDir: join(cwd, '.cursor'),
+        })).toBe('session-a');
+    });
+
+    it('resolveCursorSpawnSessionType escalates simple→worktree when mailbox is held', () => {
+        expect(resolveCursorSpawnSessionType(
+            'cursor',
+            'simple',
+            '/tmp/project',
+            () => 'session-a',
+        )).toBe('worktree');
+        expect(resolveCursorSpawnSessionType(
+            'cursor',
+            'simple',
+            '/tmp/project',
+            () => null,
+        )).toBe('simple');
+        expect(resolveCursorSpawnSessionType(
+            'claude',
+            'simple',
+            '/tmp/project',
+            () => 'session-a',
+        )).toBe('simple');
+        expect(resolveCursorSpawnSessionType(
+            'cursor',
+            'worktree',
+            '/tmp/project',
+            () => 'session-a',
+        )).toBe('worktree');
     });
 
     it('preserves mcpServers keys added during the session on cleanup', () => {

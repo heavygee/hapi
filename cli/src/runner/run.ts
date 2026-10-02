@@ -25,6 +25,7 @@ import { startRunnerControlServer } from './controlServer';
 import { createWorktree, removeWorktree, type WorktreeInfo } from './worktree';
 import { validateWorkspaceDirectory } from './validateWorkspaceDirectory';
 import { join } from 'path';
+import { resolveCursorSpawnSessionType } from '@/cursor/utils/cursorMcpOverlay';
 import { buildMachineMetadata } from '@/agent/sessionFactory';
 import { resolveWorkspaceRoots } from '@/utils/workspaceRoot';
 import { hashRunnerCliApiToken, hashRunnerExtraHeaders } from './runnerIdentity';
@@ -503,7 +504,20 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         throw new Error('Gemini CLI is no longer supported and cannot be launched (Google sunset the consumer Gemini CLI on 2026-06-18). Existing Gemini sessions remain viewable in the web UI.');
       }
       const yolo = options.yolo === true;
-      const sessionType = options.sessionType ?? 'simple';
+      // Cursor project MCP isolation refuses a second live bare `hapi` mailbox in
+      // the same cwd. Dock/machine spawn uses sessionType=simple into the project
+      // path — escalate to worktree so the new session gets its own mcp.json
+      // instead of dying immediately and timing out after ~30s (heavygee/hapi#195).
+      const sessionType = resolveCursorSpawnSessionType(
+        agent,
+        options.sessionType,
+        directory,
+      );
+      if (sessionType === 'worktree' && (options.sessionType ?? 'simple') === 'simple') {
+        logger.debug(
+          `[RUNNER RUN] Cursor MCP mailbox held in ${directory}; escalating spawn to worktree`,
+        );
+      }
       const worktreeName = options.worktreeName;
       let directoryCreated = false;
       let spawnDirectory = directory;

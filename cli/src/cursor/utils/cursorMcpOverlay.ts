@@ -633,6 +633,67 @@ function sameMcpEntry(a: McpServerEntry | undefined, b: McpServerEntry | undefin
 }
 
 /**
+ * Return the session id holding a live project HAPI MCP mailbox in `cwd`, or null.
+ * Used by the runner to auto-escalate Cursor spawns to worktree isolation when
+ * dock/machine spawn would otherwise die on the second-mailbox fail-closed lock.
+ */
+export function findLiveProjectHapiMcpMailboxSession(
+    cwd: string,
+    options?: {
+        serverId?: string;
+        mcpConfigDir?: string;
+    },
+): string | null {
+    const serverId = (options?.serverId ?? CURSOR_HAPI_MCP_SERVER_ID).trim() || CURSOR_HAPI_MCP_SERVER_ID;
+    let cursorDir: string;
+    try {
+        cursorDir = resolveProjectCursorConfigDir(
+            cwd,
+            options?.mcpConfigDir ?? join(cwd, '.cursor'),
+        );
+    } catch {
+        return null;
+    }
+    const mcpJsonPath = join(cursorDir, 'mcp.json');
+    if (!existsSync(mcpJsonPath)) {
+        return null;
+    }
+    try {
+        const config = readMcpJson(mcpJsonPath);
+        const existing = config.mcpServers?.[serverId];
+        const pid = overlayPid(existing);
+        if (pid === null || !isProcessAlive(pid)) {
+            return null;
+        }
+        const sessionId = existing?.env?.[HAPI_MCP_OVERLAY_SESSION_ENV];
+        if (typeof sessionId !== 'string' || sessionId.trim() === '') {
+            return null;
+        }
+        return sessionId.trim();
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Resolve sessionType for a Cursor spawn. When a live project mailbox already
+ * exists, escalate `simple` → `worktree` so dock/machine spawn does not hit the
+ * second-mailbox fail-closed lock (heavygee/hapi#195).
+ */
+export function resolveCursorSpawnSessionType(
+    agent: string,
+    sessionType: 'simple' | 'worktree' | undefined,
+    directory: string,
+    findHolder: (cwd: string) => string | null = findLiveProjectHapiMcpMailboxSession,
+): 'simple' | 'worktree' {
+    const resolved = sessionType ?? 'simple';
+    if (agent === 'cursor' && resolved === 'simple' && findHolder(directory)) {
+        return 'worktree';
+    }
+    return resolved;
+}
+
+/**
  * Write one HAPI stdio bridge into the **project** `.cursor/mcp.json` and approve it.
  * When `userMcpConfigDir` is set, strip PID-stamped `hapi` / `hapi-*` keys from that
  * user-level file so Cursor cannot merge sibling session mailboxes into this agent.
