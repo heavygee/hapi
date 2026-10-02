@@ -30,6 +30,7 @@ export const TITLE_INSTRUCTION = trimIdent(`
         listPeersTool: 'functions.hapi__list_peers',
         spawnTool: 'functions.hapi__spawn_peer',
         searchPeersTool: 'functions.hapi__search_peers',
+        searchContentTool: 'functions.hapi__search_content',
     })}
 `);
 

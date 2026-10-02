@@ -28,6 +28,7 @@ export const TITLE_INSTRUCTION = trimIdent(`
         listPeersTool: 'hapi_list_peers',
         spawnTool: 'hapi_spawn_peer',
         searchPeersTool: 'hapi_search_peers',
+        searchContentTool: 'hapi_search_content',
     })}
     ${SKILL_LOOKUP_INSTRUCTION}
 `);
@@ -50,6 +51,7 @@ export const OPENCODE_NATIVE_TOOL_INSTRUCTION = trimIdent(`
         listPeersTool: 'hapi_list_peers',
         spawnTool: 'hapi_spawn_peer',
         searchPeersTool: 'hapi_search_peers',
+        searchContentTool: 'hapi_search_content',
     })}
     ${SKILL_LOOKUP_INSTRUCTION}
 `);
