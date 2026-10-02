@@ -63,6 +63,24 @@ describe('doctorCursorMcpPath', () => {
         expect(result.failures.map((f) => f.code)).toContain('agent_cwd_mismatch')
     })
 
+    it('treats /home/heavygee/coding and /work/coding path aliases as equal when resolvable', () => {
+        // On oos these are the same bind mount; string inequality must not fail closed.
+        const home = '/home/heavygee/coding/hapi'
+        const work = '/work/coding/hapi'
+        const result = evaluateCursorMcpPath({
+            id: '028d0a86-262e-4538-a735-92247d17cb5f',
+            path: home,
+            hapiMcpUrl: 'http://127.0.0.1:46489/',
+        }, deps({
+            readCwd: () => work,
+            readProjectMcpServers: () => ({
+                'hapi-028d0a86-262e-4538-a735-92247d17cb5f': { url: 'http://127.0.0.1:46489/' },
+            }),
+            findMcpChildUrl: () => 'http://127.0.0.1:46489/',
+        }))
+        expect(result.failures.map((f) => f.code)).not.toContain('agent_cwd_mismatch')
+    })
+
     it('fails closed when project mailbox URL is dead', () => {
         const result = evaluateCursorMcpPath({
             id: '94f945c2-1fed-4b87-9f3f-017f4fffe22b',

@@ -7,7 +7,7 @@
  * (heavygee/hapi#193 / #194).
  */
 
-import { existsSync, readFileSync, readdirSync, readlinkSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, readlinkSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { CURSOR_HAPI_MCP_SERVER_ID, cursorHapiMcpServerId } from '@/cursor/utils/cursorMcpOverlay'
 
@@ -89,6 +89,18 @@ export function pickSessionMailbox(
     return null
 }
 
+function samePath(a: string, b: string): boolean {
+    const normalize = (p: string): string => {
+        const trimmed = p.replace(/\/$/, '')
+        try {
+            return realpathSync(trimmed)
+        } catch {
+            return trimmed
+        }
+    }
+    return normalize(a) === normalize(b)
+}
+
 export function evaluateCursorMcpPath(
     session: CursorMcpPathSession,
     deps: CursorMcpPathDeps,
@@ -122,15 +134,11 @@ export function evaluateCursorMcpPath(
         })
     } else {
         agentCwd = deps.readCwd(agentPid)
-        if (session.path && agentCwd) {
-            const expected = session.path.replace(/\/$/, '')
-            const actual = agentCwd.replace(/\/$/, '')
-            if (actual !== expected) {
-                failures.push({
-                    code: 'agent_cwd_mismatch',
-                    detail: `agent cwd=${actual} expected=${expected} (Cursor MCP loads from process PWD)`,
-                })
-            }
+        if (session.path && agentCwd && !samePath(agentCwd, session.path)) {
+            failures.push({
+                code: 'agent_cwd_mismatch',
+                detail: `agent cwd=${agentCwd} expected=${session.path} (Cursor MCP loads from process PWD)`,
+            })
         }
         stdioChildUrl = deps.findMcpChildUrl(agentPid)
     }
