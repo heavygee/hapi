@@ -71,10 +71,49 @@ if [[ -n "$FIRST" && "$FIRST" == */.npm-global/bin/hapi ]]; then
 fi
 if [[ -n "$FIRST" && "$FIRST" == */node_modules/.bin/hapi ]]; then
     # Cannot safely delete cwd node_modules bins; flag for agents.
+    # Soup trees can heal .bin → bin/hapi.cjs (see heal_soup_bin_shims).
     WARN=1
-    report "WARN — PATH resolves hapi to node_modules/.bin (published shim): $FIRST"
-    report "WARN — use ~/.local/bin/hapi, hapi-from-active, or hapi-spawn-peer (absolute)"
+    report "WARN — PATH resolves hapi to node_modules/.bin (may be published platform binary): $FIRST"
+    report "WARN — prefer ~/.local/bin/hapi / hapi-from-active; soup checkouts: ensure .bin → bin/hapi.cjs"
 fi
+
+# Heal soup checkouts where bun linked the platform binary as .bin/hapi.
+# That link false-negatives soup-only commands (search-content, spawn-peer, …).
+heal_soup_bin_shims() {
+    local root launcher link desired
+    for root in \
+        "${HOME}/coding/hapi/driver/cli" \
+        "${HOME}/coding/hapi/active/cli" \
+        "${HOME}/coding/hapi/upstream/cli"
+    do
+        launcher="${root}/bin/hapi.cjs"
+        link="${root}/node_modules/.bin/hapi"
+        [[ -f "$launcher" && -d "${root}/src" ]] || continue
+        mkdir -p "$(dirname "$link")"
+        desired="$(realpath --relative-to="$(dirname "$link")" "$launcher" 2>/dev/null || true)"
+        if [[ -z "$desired" ]]; then
+            desired="../../bin/hapi.cjs"
+        fi
+        if [[ -L "$link" ]]; then
+            local cur
+            cur="$(readlink "$link" 2>/dev/null || true)"
+            if [[ "$cur" == "$desired" || "$cur" == */bin/hapi.cjs ]]; then
+                continue
+            fi
+        fi
+        if [[ "$MODE" == check ]]; then
+            DIRTY=1
+            report "DIRTY — soup .bin/hapi not launcher at $link (→ $(readlink "$link" 2>/dev/null || echo missing))"
+            continue
+        fi
+        rm -f "$link"
+        ln -s "$desired" "$link"
+        chmod +x "$launcher" 2>/dev/null || true
+        report "healed soup bin shim: $link → $desired"
+    done
+}
+
+heal_soup_bin_shims
 
 if [[ "$MODE" == check ]]; then
     if [[ "$DIRTY" -eq 0 && "$WARN" -eq 0 ]]; then
