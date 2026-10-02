@@ -243,6 +243,19 @@ chmod +x "$TMP_BIN"
 "$TMP_BIN" --version >/dev/null 2>&1 || fail "fetched file at $TMP_BIN does not run (--version failed) — corrupt download or wrong architecture, nothing has been touched"
 log "New binary fetched and verified runnable."
 
+# --- 3b. Preflight Claude OAuth token shape BEFORE stopping anything.
+#     On --with-systemd upgrade, a symlink/non-regular token must fail here —
+#     not after section 4 killed the nohup hub/runner and left nothing to respawn.
+if [[ "$WITH_SYSTEMD" -eq 1 ]]; then
+    _pre_token="${HAPI_HOME}/claude-setup-token.env"
+    if [[ -L "$_pre_token" ]]; then
+        fail "refusing symlink token file: $_pre_token (write a regular 0600 file) — refusing before stop so the old install stays up"
+    elif [[ -e "$_pre_token" && ! -f "$_pre_token" ]]; then
+        fail "refusing non-regular token file: $_pre_token (write a regular 0600 file) — refusing before stop so the old install stays up"
+    fi
+    unset _pre_token
+fi
+
 # --- 4. Stop an already-running hub/runner, if any (upgrade path; no-op on fresh
 #     install). Only reached after step 3's new binary is confirmed good. Waits for
 #     the old process(es) to actually exit (not a blind sleep) before proceeding, so

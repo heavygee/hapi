@@ -115,36 +115,16 @@ fi
 if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
     hapi_claude_oauth_secure_copy_regular_file "$TOKEN" "$CANON"
 else
-    # Unprivileged O_NOFOLLOW cat → privileged install_bytes via stdin (no sudo SOURCE path).
+    # Unprivileged O_NOFOLLOW cat → privileged install_bytes via stdin.
+    # python3 -c (not /dev/fd/N): sudo closes fds >= 3 before exec.
+    # install_bytes refuses empty/ineffective payload before os.replace.
     hapi_claude_oauth_cat_regular_file "$TOKEN" \
-        | sudo python3 /dev/fd/3 "$CANON" 3<<'PY'
-import os, sys
-dst = sys.argv[1]
-data = sys.stdin.buffer.read()
-parent = os.path.dirname(dst) or "."
-os.makedirs(parent, mode=0o755, exist_ok=True)
-tmp = dst + ".tmp.%d" % os.getpid()
-try:
-    if os.path.lexists(tmp):
-        os.unlink(tmp)
-except OSError:
-    pass
-flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-if hasattr(os, "O_NOFOLLOW"):
-    flags |= os.O_NOFOLLOW
-try:
-    fd = os.open(tmp, flags, 0o600)
-except OSError as exc:
-    sys.stderr.write("ERROR: cannot create destination token: %s: %s\n" % (tmp, exc))
-    sys.exit(1)
-try:
-    os.write(fd, data)
-    os.fchmod(fd, 0o600)
-finally:
-    os.close(fd)
-os.replace(tmp, dst)
-sys.exit(0)
-PY
+        | sudo -E env PATH="$PATH" bash -c '
+            set -euo pipefail
+            # shellcheck source=/dev/null
+            source "$1"
+            hapi_claude_oauth_install_bytes "$2"
+          ' bash "$SCRIPT_DIR/lib/hapi-claude-oauth-dropin.sh" "$CANON"
 fi
 
 # Only after canonical token is installed: switch interactive credentials.

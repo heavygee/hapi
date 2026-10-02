@@ -293,6 +293,22 @@ hapi_claude_oauth_cat_regular_file "$pipe_src" | hapi_claude_oauth_install_bytes
 check "cat|install_bytes copies token" "grep -qx 'CLAUDE_CODE_OAUTH_TOKEN=from-pipe' \"$pipe_dst\""
 mode_pipe="$(stat -c '%a' "$pipe_dst")"
 check "install_bytes sets 600" "[[ \"$mode_pipe\" == \"600\" ]]"
+# Empty / ineffective payload must not wipe an existing destination.
+printf 'CLAUDE_CODE_OAUTH_TOKEN=keep-me\n' >"$pipe_dst"
+chmod 600 "$pipe_dst"
+set +e
+: | hapi_claude_oauth_install_bytes "$pipe_dst" >/tmp/hapi-claude-oauth-empty-pipe.out 2>/tmp/hapi-claude-oauth-empty-pipe.err
+empty_pipe_rc=$?
+set -e
+check "empty pipe refuses replace" "[[ $empty_pipe_rc -ne 0 ]]"
+check "empty pipe preserves destination" "grep -qx 'CLAUDE_CODE_OAUTH_TOKEN=keep-me' \"$pipe_dst\""
+set +e
+printf 'CLAUDE_CODE_OAUTH_TOKEN=\n' | hapi_claude_oauth_install_bytes "$pipe_dst" \
+    >/tmp/hapi-claude-oauth-blank-assign.out 2>/tmp/hapi-claude-oauth-blank-assign.err
+blank_rc=$?
+set -e
+check "blank assignment refuses replace" "[[ $blank_rc -ne 0 ]]"
+check "blank assignment preserves destination" "grep -qx 'CLAUDE_CODE_OAUTH_TOKEN=keep-me' \"$pipe_dst\""
 
 # Existing non-root-owned "system" parent must fail closed.
 bad_parent="$TMP/fake-etc-hapi"

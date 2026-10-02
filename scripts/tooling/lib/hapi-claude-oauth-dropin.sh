@@ -201,13 +201,39 @@ PY
 
 # Install stdin bytes at dst (temp + os.replace, 0600). Reads already-opened
 # stdin so a privileged caller never reopens a user-controlled source path.
-# Program is on fd 3 so piped token bytes stay on stdin.
+# Uses python3 -c (not /dev/fd/N) so `sudo` can close fds >= 3 and still work.
+# Refuses empty / ineffective payloads before os.replace so a failed producer
+# cannot wipe a valid destination.
 hapi_claude_oauth_install_bytes() {
     local dst="${1:?dst}"
-    python3 /dev/fd/3 "$dst" 3<<'PY'
+    python3 -c '
 import os, sys
 dst = sys.argv[1]
 data = sys.stdin.buffer.read()
+if not data:
+    sys.stderr.write("ERROR: empty token payload; refusing to replace %s\n" % dst)
+    sys.exit(1)
+
+def parse_value(raw):
+    val = raw.strip()
+    if not val:
+        return None
+    if len(val) >= 2 and val[0:1] == val[-1:] and val[0:1] in (b"\x27", b"\x22"):
+        val = val[1:-1]
+    val = val.strip()
+    return val if val else None
+
+last = None
+for line in data.splitlines():
+    if line.startswith(b"CLAUDE_CODE_OAUTH_TOKEN="):
+        last = parse_value(line.split(b"=", 1)[1])
+if last is None:
+    sys.stderr.write(
+        "ERROR: piped payload has no nonempty CLAUDE_CODE_OAUTH_TOKEN=; "
+        "refusing to replace %s\n" % dst
+    )
+    sys.exit(1)
+
 parent = os.path.dirname(dst) or "."
 os.makedirs(parent, mode=0o755, exist_ok=True)
 tmp = dst + ".tmp.%d" % os.getpid()
@@ -231,7 +257,7 @@ finally:
     os.close(fd)
 os.replace(tmp, dst)
 sys.exit(0)
-PY
+' "$dst"
 }
 
 # Known pre-/etc locations, scoped by install profile so fleet cannot silently
@@ -804,6 +830,18 @@ hapi_install_claude_oauth_dropin() {
     # EnvironmentFile at missing/empty /etc/hapi breaks the next restart.
     if [[ "${HAPI_CLAUDE_OAUTH_MIGRATE_PENDING:-0}" -eq 1 ]]; then
         echo "ERROR: Claude OAuth token migrate still pending; refusing to install drop-in for ${runner_unit}" >&2
+        return 1
+    fi
+
+    # Reject a symlink/non-regular canonical path before persisting the drop-in.
+    # systemd EnvironmentFile follows the symlink on later reload/reboot.
+    if [[ -L "$token_file" ]]; then
+        echo "ERROR: refusing symlink token file before drop-in: $token_file" >&2
+        echo "       Replace with a regular root:root 0600 file, then re-run install." >&2
+        return 1
+    fi
+    if [[ -e "$token_file" && ! -f "$token_file" ]]; then
+        echo "ERROR: refusing non-regular token file before drop-in: $token_file" >&2
         return 1
     fi
 
