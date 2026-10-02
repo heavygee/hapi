@@ -283,7 +283,9 @@ EOF
         else
             hapi_claude_oauth_secure_chmod_chown "$token_file" || return 1
         fi
-        if grep -q '^CLAUDE_CODE_OAUTH_TOKEN=.' "$token_file" 2>/dev/null; then
+        # Non-whitespace value only — CLAUDE_CODE_OAUTH_TOKEN=\r\n is unconfigured
+        # (grep '.' treats CR as a value; systemd would load an empty credential).
+        if grep -q $'^CLAUDE_CODE_OAUTH_TOKEN=[^[:space:]]' "$token_file" 2>/dev/null; then
             echo "Claude OAuth token file present: $token_file"
             # daemon-reload alone does not reload EnvironmentFile into a live
             # process — operator must restart the runner to pick up the token.

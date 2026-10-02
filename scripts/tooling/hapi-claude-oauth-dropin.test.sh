@@ -104,6 +104,18 @@ check "no setup banner when token present" "! grep -q 'NOT configured yet' /tmp/
 check "token present prompts runner restart" \
     "grep -q 'systemctl --user restart hapi-runner.service' /tmp/hapi-claude-oauth-dropin-test2.out"
 
+# Whitespace-only / CRLF-empty assignment is unconfigured (not "present").
+printf 'CLAUDE_CODE_OAUTH_TOKEN=\r\n' >"$token"
+chmod 600 "$token"
+hapi_install_claude_oauth_dropin \
+    --scope user \
+    --runner-unit hapi-runner.service \
+    --token-file "$token" >/tmp/hapi-claude-oauth-dropin-ws.out 2>/tmp/hapi-claude-oauth-dropin-ws.err
+check "CRLF-empty not reported present" \
+    "! grep -q 'token file present' /tmp/hapi-claude-oauth-dropin-ws.out"
+check "CRLF-empty prints setup instructions" \
+    "grep -q 'NOT configured yet' /tmp/hapi-claude-oauth-dropin-ws.out"
+
 # Symlink token file must be refused before chmod/chown (Codex P1 / antevorta threat).
 symlink_target="$TMP/symlink-target"
 symlink_token="$TMP/symlink-token.env"

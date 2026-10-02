@@ -163,10 +163,15 @@ EOF
     systemctl --user daemon-reload
     loginctl enable-linger "$(id -un)" 2>/dev/null || true
     systemctl --user enable hapi-hub.service hapi-runner.service
-    systemctl --user start hapi-hub.service hapi-runner.service
+    systemctl --user start hapi-hub.service
+    # Always restart the runner AFTER the drop-in is written. On upgrades the
+    # earlier pgrep kill + Restart=always can respawn a pre-drop-in process;
+    # systemctl start is then a no-op and fresh UI sessions never see OAuth.
+    systemctl --user restart hapi-runner.service
     log "Installed: $unit_dir/hapi-hub.service"
     log "Installed: $unit_dir/hapi-runner.service"
-    if [[ ! -f "$token_file" ]] || ! grep -q '^CLAUDE_CODE_OAUTH_TOKEN=.' "$token_file" 2>/dev/null; then
+    # Non-whitespace value only — CLAUDE_CODE_OAUTH_TOKEN=\r\n is unconfigured.
+    if [[ ! -f "$token_file" ]] || ! grep -q $'^CLAUDE_CODE_OAUTH_TOKEN=[^[:space:]]' "$token_file" 2>/dev/null; then
         cat <<EOF
 
 ==> Claude OAuth for runner-spawned sessions is NOT configured yet.
@@ -176,7 +181,7 @@ EOF
       printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\\n' '<token>' > '$token_file'
       chmod 600 '$token_file'
       systemctl --user restart hapi-runner.service
-    Existing --resume sessions can keep working and hide this gap — do not skip it.
+    Existing --resume sessions can keep working and hide this gap - do not skip it.
 EOF
     fi
 }
