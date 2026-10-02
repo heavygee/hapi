@@ -392,10 +392,20 @@ fi
 env_files="$("${CTL[@]}" show "$RUNNER_UNIT" -p EnvironmentFiles --value 2>/dev/null || true)"
 token_file_from_unit=""
 if [[ "$env_files" == *claude-setup-token.env* ]]; then
-    ok "runner EnvironmentFiles references claude-setup-token.env"
     # Extract path: systemd prints "path (ignore_errors=yes)" lines.
     token_file_from_unit="$(printf '%s\n' "$env_files" | tr ' ' '\n' | grep 'claude-setup-token\.env' | head -n1 || true)"
     token_file_from_unit="${token_file_from_unit%% (*}"
+    if [[ "$SCOPE" == system ]]; then
+        # System scope must use the root-controlled canonical path — a legacy
+        # /var/lib/hapi/... basename match is not success for this change.
+        if [[ "$token_file_from_unit" == "/etc/hapi/claude-setup-token.env" ]]; then
+            ok "runner EnvironmentFiles uses canonical /etc/hapi/claude-setup-token.env"
+        else
+            not_ok "system runner EnvironmentFile must be /etc/hapi/claude-setup-token.env (got: ${token_file_from_unit:-empty})"
+        fi
+    else
+        ok "runner EnvironmentFiles references claude-setup-token.env"
+    fi
 else
     not_ok "runner EnvironmentFiles references claude-setup-token.env (got: ${env_files:-empty})"
 fi
@@ -421,6 +431,15 @@ if [[ -n "$token_file" ]]; then
         if hapi_claude_oauth_has_effective_token "$token_file"; then
             token_file_has_value=1
             ok "Claude OAuth token file has CLAUDE_CODE_OAUTH_TOKEN= ($token_file)"
+            if [[ "$SCOPE" == system ]]; then
+                token_owner="$(stat -c '%U:%G' "$token_file" 2>/dev/null || true)"
+                token_mode="$(stat -c '%a' "$token_file" 2>/dev/null || true)"
+                if [[ "$token_owner" == "root:root" && "$token_mode" == "600" ]]; then
+                    ok "Claude OAuth token file is root:root 0600 ($token_file)"
+                else
+                    not_ok "Claude OAuth token file must be root:root 0600 (got ${token_owner:-unknown} mode ${token_mode:-unknown} at $token_file)"
+                fi
+            fi
         else
             inconclusive "Claude OAuth token file missing or empty (${token_file:-unknown}) — run claude setup-token and write CLAUDE_CODE_OAUTH_TOKEN=... then restart the runner"
         fi

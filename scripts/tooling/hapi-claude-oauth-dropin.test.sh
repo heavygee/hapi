@@ -75,9 +75,26 @@ hapi_install_claude_oauth_dropin \
 check "legacy auto-migrated to canonical" "grep -q 'Migrated Claude OAuth token' /tmp/hapi-claude-oauth-migrate.out"
 check "canonical has migrated value" "grep -q 'CLAUDE_CODE_OAUTH_TOKEN=legacy' \"$canon_token\""
 check "canonical is not a symlink" "[[ ! -L \"$canon_token\" ]]"
+check "legacy source retired after migrate" "[[ ! -e \"$legacy_home/.hapi/claude-setup-token.env\" ]]"
+check "legacy archive exists after migrate" \
+    "ls \"$legacy_home/.hapi/claude-setup-token.env.migrated.\"* >/dev/null 2>&1"
+check "retire message logged" "grep -q 'Retired legacy Claude OAuth token' /tmp/hapi-claude-oauth-migrate.out"
 dropin_migrate="$XDG_CONFIG_HOME/systemd/user/hapi-runner.service.d/42-claude-oauth-token.conf"
 check "drop-in stays on canonical despite legacy" \
     "grep -q \"EnvironmentFile=-$canon_token\" \"$dropin_migrate\""
+
+# Empty canonical must NOT re-import a retired legacy archive on reinstall.
+: >"$canon_token"
+chmod 600 "$canon_token"
+set +e
+hapi_claude_oauth_install_dropin \
+    --scope user --runner-unit hapi-runner.service \
+    --token-file "$canon_token" >/tmp/hapi-claude-oauth-remigrate.out 2>/tmp/hapi-claude-oauth-remigrate.err
+set -e
+check "retired archive not re-copied into empty canon" \
+    "! grep -q 'CLAUDE_CODE_OAUTH_TOKEN=legacy' \"$canon_token\""
+check "retired archive file still present" \
+    "ls \"$legacy_home/.hapi/claude-setup-token.env.migrated.\"* >/dev/null 2>&1"
 
 # Symlink legacy must be refused (not copied into canonical).
 symlink_legacy_home="$TMP/symlink-migrate"
@@ -309,6 +326,37 @@ blank_rc=$?
 set -e
 check "blank assignment refuses replace" "[[ $blank_rc -ne 0 ]]"
 check "blank assignment preserves destination" "grep -qx 'CLAUDE_CODE_OAUTH_TOKEN=keep-me' \"$pipe_dst\""
+
+# Bash EnvironmentFile unescape (pet hosts without python3).
+got_esc="$(hapi_claude_oauth_parse_env_file_value '"abc\$def"')"
+if [[ "$got_esc" == 'abc$def' ]]; then echo "OK: double-quoted \\\$ unescapes to \$"; else
+    echo "FAIL: double-quoted \\\$ unescapes to \$ (got=$got_esc)" >&2; exit 1
+fi
+raw_sq="$(python3 -c 'print(chr(39) + "abc\\$def" + chr(39))')"
+got_esc2="$(hapi_claude_oauth_parse_env_file_value "$raw_sq")"
+if [[ "$got_esc2" == 'abc\$def' ]]; then echo "OK: single-quoted keeps backslash"; else
+    echo "FAIL: single-quoted keeps backslash (got=$got_esc2)" >&2; exit 1
+fi
+# Force bash path of effective_token_value (PATH with no python3).
+esc_file="$TMP/esc-token.env"
+printf '%s\n' 'CLAUDE_CODE_OAUTH_TOKEN="abc\$def"' >"$esc_file"
+chmod 600 "$esc_file"
+no_py="$TMP/no-python-bin"
+mkdir -p "$no_py"
+got_eff_esc="$(PATH="$no_py" hapi_claude_oauth_effective_token_value "$esc_file")"
+if [[ "$got_eff_esc" == 'abc$def' ]]; then echo "OK: bash effective_token_value unescapes quoted \\\$"; else
+    echo "FAIL: bash effective_token_value unescapes (got=$got_eff_esc)" >&2; exit 1
+fi
+
+# Toggle must not PATH-inject bash / source checkout under sudo.
+check "toggle uses install_bytes_via_sudo" \
+    "grep -q 'hapi_claude_oauth_install_bytes_via_sudo' \"$ROOT/scripts/tooling/hapi-claude-account-toggle.sh\""
+check "toggle does not PATH-inject bash under sudo" \
+    "! grep -E 'sudo.*PATH=.*bash' \"$ROOT/scripts/tooling/hapi-claude-account-toggle.sh\""
+check "install_bytes_via_sudo uses absolute python3" \
+    "grep -q 'hapi_claude_oauth_absolute_python3' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\""
+check "install_bytes_via_sudo sanitizes env" \
+    "grep -q 'env -i PATH=/usr/bin:/bin' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\""
 
 # Existing non-root-owned "system" parent must fail closed.
 bad_parent="$TMP/fake-etc-hapi"

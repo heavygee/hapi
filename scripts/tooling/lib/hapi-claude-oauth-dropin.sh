@@ -166,6 +166,50 @@ sys.exit(0)
 PY
 }
 
+# After a verified migrate, archive the legacy source so a later empty/missing
+# canonical cannot silently re-import a revoked credential on reinstall.
+hapi_claude_oauth_retire_legacy_token_source() {
+    local src="${1:?src}"
+    if [[ -L "$src" ]]; then
+        echo "ERROR: refusing to retire symlink legacy token: $src" >&2
+        return 1
+    fi
+    if [[ ! -f "$src" ]]; then
+        return 0
+    fi
+    local dest="${src}.migrated.$(date +%s)"
+    if command -v python3 >/dev/null 2>&1; then
+        python3 - "$src" "$dest" <<'PY'
+import os, stat, sys
+src, dest = sys.argv[1], sys.argv[2]
+flags = os.O_RDONLY
+if hasattr(os, "O_NOFOLLOW"):
+    flags |= os.O_NOFOLLOW
+try:
+    fd = os.open(src, flags)
+except OSError as exc:
+    sys.stderr.write("ERROR: cannot open legacy token to retire: %s: %s\n" % (src, exc))
+    sys.exit(1)
+try:
+    mode = os.fstat(fd).st_mode
+    if not stat.S_ISREG(mode):
+        sys.stderr.write("ERROR: refusing non-regular legacy token: %s\n" % src)
+        sys.exit(1)
+finally:
+    os.close(fd)
+if os.path.lexists(dest):
+    sys.stderr.write("ERROR: retire destination already exists: %s\n" % dest)
+    sys.exit(1)
+os.rename(src, dest)
+sys.exit(0)
+PY
+    else
+        # Pet / minimal hosts: already refused symlinks; mv is enough.
+        mv -n -- "$src" "$dest"
+    fi
+    echo "Retired legacy Claude OAuth token: $src -> $dest"
+}
+
 # Emit src bytes to stdout (O_NOFOLLOW). Used so privileged writers consume an
 # already-opened pipe instead of reopening a mutable pathname as root.
 hapi_claude_oauth_cat_regular_file() {
@@ -199,14 +243,10 @@ sys.exit(0)
 PY
 }
 
-# Install stdin bytes at dst (temp + os.replace, 0600). Reads already-opened
-# stdin so a privileged caller never reopens a user-controlled source path.
-# Uses python3 -c (not /dev/fd/N) so `sudo` can close fds >= 3 and still work.
-# Refuses empty / ineffective payloads before os.replace so a failed producer
-# cannot wipe a valid destination.
-hapi_claude_oauth_install_bytes() {
-    local dst="${1:?dst}"
-    python3 -c '
+# Python program for install_bytes (shared by unprivileged + sudo paths).
+# Kept as a function so privileged install never re-sources this checkout.
+_hapi_claude_oauth_install_bytes_py() {
+    cat <<'PY'
 import os, sys
 dst = sys.argv[1]
 data = sys.stdin.buffer.read()
@@ -257,7 +297,45 @@ finally:
     os.close(fd)
 os.replace(tmp, dst)
 sys.exit(0)
-' "$dst"
+PY
+}
+
+# Absolute python3 for privileged paths (never PATH-resolve under sudo).
+hapi_claude_oauth_absolute_python3() {
+    local cand
+    for cand in /usr/bin/python3 /bin/python3; do
+        if [[ -x "$cand" ]]; then
+            printf '%s' "$cand"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Install stdin bytes at dst (temp + os.replace, 0600). Reads already-opened
+# stdin so a privileged caller never reopens a user-controlled source path.
+# Uses python3 -c (not /dev/fd/N) so `sudo` can close fds >= 3 and still work.
+# Refuses empty / ineffective payloads before os.replace so a failed producer
+# cannot wipe a valid destination.
+hapi_claude_oauth_install_bytes() {
+    local dst="${1:?dst}"
+    local prog
+    prog="$(_hapi_claude_oauth_install_bytes_py)"
+    python3 -c "$prog" "$dst"
+}
+
+# Privileged install: absolute python3 + sanitized env. Never PATH-resolve bash
+# and never source the operator-writable checkout as root.
+hapi_claude_oauth_install_bytes_via_sudo() {
+    local dst="${1:?dst}"
+    local py prog
+    py="$(hapi_claude_oauth_absolute_python3)" || {
+        echo "ERROR: absolute python3 (/usr/bin/python3 or /bin/python3) required for privileged token install" >&2
+        return 1
+    }
+    prog="$(_hapi_claude_oauth_install_bytes_py)"
+    # stdin (token bytes) is preserved across sudo; env is scrubbed.
+    sudo /usr/bin/env -i PATH=/usr/bin:/bin LC_ALL=C "$py" -c "$prog" "$dst"
 }
 
 # Known pre-/etc locations, scoped by install profile so fleet cannot silently
@@ -319,8 +397,66 @@ hapi_claude_oauth_legacy_system_token_candidates() {
     done
 }
 
+# Mirror systemd EnvironmentFile value parsing (systemd.exec(5) / env-file.c):
+# strip outer whitespace; single-quoted = literal; double-quoted unescapes
+# \, ", `, $; unquoted backslash escapes the next character.
+hapi_claude_oauth_parse_env_file_value() {
+    local raw="${1-}"
+    raw="${raw%$'\r'}"
+    raw="${raw#"${raw%%[![:space:]]*}"}"
+    raw="${raw%"${raw##*[![:space:]]}"}"
+    [[ -n "$raw" ]] || return 1
+
+    local quote=""
+    if [[ ${#raw} -ge 2 ]]; then
+        if [[ "${raw:0:1}" == '"' && "${raw: -1}" == '"' ]]; then
+            quote=double
+            raw="${raw:1:${#raw}-2}"
+        elif [[ "${raw:0:1}" == "'" && "${raw: -1}" == "'" ]]; then
+            printf '%s' "${raw:1:${#raw}-2}"
+            return 0
+        fi
+    fi
+
+    local out="" i=0 c nxt
+    if [[ "$quote" == "double" ]]; then
+        while (( i < ${#raw} )); do
+            c="${raw:i:1}"
+            if [[ "$c" == '\' && $((i + 1)) -lt ${#raw} ]]; then
+                nxt="${raw:i+1:1}"
+                case "$nxt" in
+                    '\\'|'"'|'`'|'$') out+="$nxt" ;;
+                    *) out+="\\$nxt" ;;
+                esac
+                i=$((i + 2))
+                continue
+            fi
+            out+="$c"
+            i=$((i + 1))
+        done
+        [[ -n "$out" ]] || return 1
+        printf '%s' "$out"
+        return 0
+    fi
+
+    # Unquoted: \X → X (including \\ → \).
+    while (( i < ${#raw} )); do
+        c="${raw:i:1}"
+        if [[ "$c" == '\' && $((i + 1)) -lt ${#raw} ]]; then
+            out+="${raw:i+1:1}"
+            i=$((i + 2))
+            continue
+        fi
+        out+="$c"
+        i=$((i + 1))
+    done
+    [[ -n "$out" ]] || return 1
+    printf '%s' "$out"
+    return 0
+}
+
 # Last effective CLAUDE_CODE_OAUTH_TOKEN= value (systemd last-assignment-wins),
-# after stripping quotes/whitespace. Empty / whitespace-only → unset (exit 2).
+# after systemd-compatible unquote/unescape. Empty / whitespace-only → unset (exit 2).
 hapi_claude_oauth_effective_token_value() {
     local token_file="${1:?token_file}"
     if [[ -L "$token_file" ]]; then
@@ -360,13 +496,41 @@ finally:
     os.close(fd)
 
 def parse_value(raw):
+    # Mirror verify-hapi-install.sh parse_env_file_value / systemd env-file.c.
+    if raw is None:
+        return None
     val = raw.strip()
     if not val:
         return None
-    if len(val) >= 2 and val[0:1] == val[-1:] and val[0:1] in (b"'", b'"'):
-        val = val[1:-1]
-    val = val.strip()
-    return val if val else None
+    if len(val) >= 2 and val[0:1] == val[-1:] == b"'":
+        return val[1:-1] or None
+    if len(val) >= 2 and val[0:1] == val[-1:] == b'"':
+        inner = val[1:-1]
+        out = bytearray()
+        i = 0
+        while i < len(inner):
+            if inner[i:i+1] == b"\\" and i + 1 < len(inner):
+                nxt = inner[i+1:i+2]
+                if nxt in (b"\\", b'"', b"`", b"$"):
+                    out.extend(nxt)
+                else:
+                    out.extend(b"\\")
+                    out.extend(nxt)
+                i += 2
+                continue
+            out.extend(inner[i:i+1])
+            i += 1
+        return bytes(out) or None
+    out = bytearray()
+    i = 0
+    while i < len(val):
+        if val[i:i+1] == b"\\" and i + 1 < len(val):
+            out.extend(val[i+1:i+2])
+            i += 2
+            continue
+        out.extend(val[i:i+1])
+        i += 1
+    return bytes(out) or None
 
 last = None
 for line in data.splitlines():
@@ -386,16 +550,11 @@ PY
         case "$line" in
             CLAUDE_CODE_OAUTH_TOKEN=*)
                 raw="${line#CLAUDE_CODE_OAUTH_TOKEN=}"
-                raw="${raw%$'\r'}"
-                if [[ ${#raw} -ge 2 ]]; then
-                    if [[ "${raw:0:1}" == '"' && "${raw: -1}" == '"' ]] || \
-                       [[ "${raw:0:1}" == "'" && "${raw: -1}" == "'" ]]; then
-                        raw="${raw:1:${#raw}-2}"
-                    fi
+                if parsed="$(hapi_claude_oauth_parse_env_file_value "$raw")"; then
+                    last="$parsed"
+                else
+                    last=""
                 fi
-                raw="${raw#"${raw%%[![:space:]]*}"}"
-                raw="${raw%"${raw##*[![:space:]]}"}"
-                last="$raw"
                 ;;
         esac
     done <"$token_file"
@@ -797,6 +956,11 @@ hapi_install_claude_oauth_dropin() {
                     HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=1
                 elif hapi_claude_oauth_secure_copy_regular_file "$legacy_token" "$token_file"; then
                     echo "Migrated Claude OAuth token: $legacy_token -> $token_file (regular file, 0600)"
+                    if hapi_claude_oauth_has_effective_token "$token_file" 2>/dev/null; then
+                        hapi_claude_oauth_retire_legacy_token_source "$legacy_token" || {
+                            echo "WARN: migrated but could not retire legacy source $legacy_token" >&2
+                        }
+                    fi
                 else
                     echo "WARN: could not migrate legacy token at $legacy_token" >&2
                     HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=1
@@ -817,6 +981,11 @@ hapi_install_claude_oauth_dropin() {
                     HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=1
                 elif hapi_claude_oauth_secure_copy_regular_file "$legacy_token" "$token_file"; then
                     echo "Migrated Claude OAuth token: $legacy_token -> $token_file"
+                    if hapi_claude_oauth_has_effective_token "$token_file" 2>/dev/null; then
+                        hapi_claude_oauth_retire_legacy_token_source "$legacy_token" || {
+                            echo "WARN: migrated but could not retire legacy source $legacy_token" >&2
+                        }
+                    fi
                 else
                     HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=1
                     echo "WARN: could not migrate legacy token at $legacy_token" >&2

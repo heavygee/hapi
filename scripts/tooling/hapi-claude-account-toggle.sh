@@ -115,16 +115,11 @@ fi
 if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
     hapi_claude_oauth_secure_copy_regular_file "$TOKEN" "$CANON"
 else
-    # Unprivileged O_NOFOLLOW cat → privileged install_bytes via stdin.
-    # python3 -c (not /dev/fd/N): sudo closes fds >= 3 before exec.
+    # Unprivileged O_NOFOLLOW cat → privileged install via absolute python3.
+    # Never PATH-resolve bash under sudo or source this checkout as root.
     # install_bytes refuses empty/ineffective payload before os.replace.
     hapi_claude_oauth_cat_regular_file "$TOKEN" \
-        | sudo -E env PATH="$PATH" bash -c '
-            set -euo pipefail
-            # shellcheck source=/dev/null
-            source "$1"
-            hapi_claude_oauth_install_bytes "$2"
-          ' bash "$SCRIPT_DIR/lib/hapi-claude-oauth-dropin.sh" "$CANON"
+        | hapi_claude_oauth_install_bytes_via_sudo "$CANON"
 fi
 
 # Only after canonical token is installed: switch interactive credentials.
