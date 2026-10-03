@@ -765,5 +765,7 @@ check "account toggle validates merged oauth env before switch" \
     "python3 -c 't=open(\"$ROOT/scripts/tooling/hapi-claude-account-toggle.sh\").read(); a=t.find(\"hapi_claude_oauth_merged_env_discards_token hapi-runner-oos.service\"); b=t.find(\"sudo -E systemctl restart hapi-runner-oos.service\"); raise SystemExit(0 if 0<=a<b else 1)'"
 check "nohup launch unsets inherited oauth before parse" \
     "python3 -c 't=open(\"$ROOT/scripts/install-hapi-pet.sh\").read(); a=t.find(\"Without: nohup\"); b=t.find(\"Runner started\"); chunk=t[a:b]; i=chunk.find(\"unset CLAUDE_CODE_OAUTH_TOKEN\"); j=chunk.find(\"hapi_pet_export_oauth_from_env_file\"); raise SystemExit(0 if 0<=i<j else 1)'"
+check "verify accepts strict modes on preserved drop-ins" \
+    "grep -q 'is group/other-writable mode' \"$ROOT/scripts/tooling/verify-hapi-install.sh\" && ! grep -q 'must be root:root 0644' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
 
 echo "ALL OK"

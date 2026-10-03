@@ -262,15 +262,22 @@ if [[ "$SCOPE" == system ]]; then
                 OAUTH_RESTART_SAFE=0
                 continue
             fi
+            dropin_uid="$(stat -c '%u' "$conf" 2>/dev/null || true)"
             dropin_owner="$(stat -c '%U:%G' "$conf" 2>/dev/null || true)"
             dropin_mode="$(stat -c '%a' "$conf" 2>/dev/null || true)"
-            if [[ "$dropin_owner" != "root:root" || "$dropin_mode" != "644" ]]; then
-                not_ok "Claude OAuth drop-in dir has unsafe drop-in ($conf must be root:root 0644; got ${dropin_owner:-unknown} mode ${dropin_mode:-unknown}) — refusing restart"
+            if [[ "$dropin_uid" != "0" ]]; then
+                not_ok "Claude OAuth drop-in dir has unsafe drop-in ($conf is not root-owned; got ${dropin_owner:-unknown}) — refusing restart"
                 SYSTEM_OAUTH_SAFE=0
                 OAUTH_RESTART_SAFE=0
                 continue
             fi
-            ok "Claude OAuth drop-in is root:root 0644 ($conf)"
+            if [[ -n "$dropin_mode" ]] && (( (8#$dropin_mode & 022) != 0 )); then
+                not_ok "Claude OAuth drop-in dir has unsafe drop-in ($conf is group/other-writable mode ${dropin_mode}) — refusing restart"
+                SYSTEM_OAUTH_SAFE=0
+                OAUTH_RESTART_SAFE=0
+                continue
+            fi
+            ok "Claude OAuth drop-in is root-owned non-writable ($conf mode ${dropin_mode:-unknown})"
             if [[ "$(basename "$conf")" == "42-claude-oauth-token.conf" ]]; then
                 SYSTEM_DROPIN_VALIDATED="$conf"
             fi
