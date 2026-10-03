@@ -48,7 +48,7 @@ PATH="$PATH_STUB:$PATH"
 hapi_install_claude_oauth_dropin \
     --scope user \
     --runner-unit hapi-runner.service \
-    --token-file "$fresh_token" >/tmp/hapi-claude-oauth-fresh-parent.out 2>/tmp/hapi-claude-oauth-fresh-parent.err
+    --token-file "$fresh_token" >$TMP/hapi-claude-oauth-fresh-parent.out 2>$TMP/hapi-claude-oauth-fresh-parent.err
 fresh_mode="$(stat -c '%a' "$fresh_parent")"
 check "fresh token parent is 0700" "[[ \"$fresh_mode\" == \"700\" ]]"
 
@@ -58,7 +58,7 @@ existing_token="$existing_parent/claude-setup-token.env"
 hapi_install_claude_oauth_dropin \
     --scope user \
     --runner-unit hapi-runner.service \
-    --token-file "$existing_token" >/tmp/hapi-claude-oauth-existing-parent.out 2>/tmp/hapi-claude-oauth-existing-parent.err
+    --token-file "$existing_token" >$TMP/hapi-claude-oauth-existing-parent.out 2>$TMP/hapi-claude-oauth-existing-parent.err
 existing_mode="$(stat -c '%a' "$existing_parent")"
 check "existing token parent mode preserved" "[[ \"$existing_mode\" == \"755\" ]]"
 
@@ -71,14 +71,14 @@ canon_token="$legacy_home/claude-setup-token.env"
 hapi_install_claude_oauth_dropin \
     --scope user \
     --runner-unit hapi-runner.service \
-    --token-file "$canon_token" >/tmp/hapi-claude-oauth-migrate.out 2>/tmp/hapi-claude-oauth-migrate.err
-check "legacy auto-migrated to canonical" "grep -q 'Migrated Claude OAuth token' /tmp/hapi-claude-oauth-migrate.out"
+    --token-file "$canon_token" >$TMP/hapi-claude-oauth-migrate.out 2>$TMP/hapi-claude-oauth-migrate.err
+check "legacy auto-migrated to canonical" "grep -q 'Migrated Claude OAuth token' $TMP/hapi-claude-oauth-migrate.out"
 check "canonical has migrated value" "grep -q 'CLAUDE_CODE_OAUTH_TOKEN=legacy' \"$canon_token\""
 check "canonical is not a symlink" "[[ ! -L \"$canon_token\" ]]"
 check "legacy source retired after migrate" "[[ ! -e \"$legacy_home/.hapi/claude-setup-token.env\" ]]"
 check "legacy archive exists after migrate" \
     "ls \"$legacy_home/.hapi/claude-setup-token.env.migrated.\"* >/dev/null 2>&1"
-check "retire message logged" "grep -q 'Retired legacy Claude OAuth token' /tmp/hapi-claude-oauth-migrate.out"
+check "retire message logged" "grep -q 'Retired legacy Claude OAuth token' $TMP/hapi-claude-oauth-migrate.out"
 dropin_migrate="$XDG_CONFIG_HOME/systemd/user/hapi-runner.service.d/42-claude-oauth-token.conf"
 check "drop-in stays on canonical despite legacy" \
     "grep -q \"EnvironmentFile=-$canon_token\" \"$dropin_migrate\""
@@ -89,12 +89,12 @@ chmod 600 "$canon_token"
 set +e
 hapi_install_claude_oauth_dropin \
     --scope user --runner-unit hapi-runner.service \
-    --token-file "$canon_token" >/tmp/hapi-claude-oauth-remigrate.out 2>/tmp/hapi-claude-oauth-remigrate.err
+    --token-file "$canon_token" >$TMP/hapi-claude-oauth-remigrate.out 2>$TMP/hapi-claude-oauth-remigrate.err
 remigrate_rc=$?
 set -e
 check "retired remigrate invokes real installer" "[[ $remigrate_rc -eq 0 || $remigrate_rc -ne 127 ]]"
 check "retired remigrate did not command-not-found" \
-    "! grep -qi 'command not found' /tmp/hapi-claude-oauth-remigrate.err"
+    "! grep -qi 'command not found' $TMP/hapi-claude-oauth-remigrate.err"
 check "retired archive not re-copied into empty canon" \
     "! grep -q 'CLAUDE_CODE_OAUTH_TOKEN=legacy' \"$canon_token\""
 check "retired archive file still present" \
@@ -109,8 +109,8 @@ symlink_canon="$symlink_legacy_home/claude-setup-token.env"
 hapi_install_claude_oauth_dropin \
     --scope user \
     --runner-unit hapi-runner.service \
-    --token-file "$symlink_canon" >/tmp/hapi-claude-oauth-symlink-mig.out 2>/tmp/hapi-claude-oauth-symlink-mig.err || true
-check "symlink legacy refused" "grep -qi 'refusing.*symlink' /tmp/hapi-claude-oauth-symlink-mig.err"
+    --token-file "$symlink_canon" >$TMP/hapi-claude-oauth-symlink-mig.out 2>$TMP/hapi-claude-oauth-symlink-mig.err || true
+check "symlink legacy refused" "grep -qi 'refusing.*symlink' $TMP/hapi-claude-oauth-symlink-mig.err"
 check "symlink legacy leaves canonical absent" "[[ ! -e \"$symlink_canon\" ]]"
 check "migrate pending after symlink refuse" "[[ \"${HAPI_CLAUDE_OAUTH_MIGRATE_PENDING:-0}\" -eq 1 ]]"
 
@@ -124,14 +124,14 @@ token="$TMP/pet/claude-setup-token.env"
 hapi_install_claude_oauth_dropin \
     --scope user \
     --runner-unit hapi-runner.service \
-    --token-file "$token" >/tmp/hapi-claude-oauth-dropin-test.out
+    --token-file "$token" >$TMP/hapi-claude-oauth-dropin-test.out
 
 dropin="$XDG_CONFIG_HOME/systemd/user/hapi-runner.service.d/42-claude-oauth-token.conf"
 check "drop-in created" "[[ -f \"$dropin\" ]]"
 check "drop-in points at token file" "grep -q \"EnvironmentFile=-$token\" \"$dropin\""
-check "instructions printed when token missing" "grep -q 'Not logged in' /tmp/hapi-claude-oauth-dropin-test.out"
-check "instructions name concrete user unit" "grep -q 'systemctl --user restart hapi-runner.service' /tmp/hapi-claude-oauth-dropin-test.out"
-check "instructions have no placeholder unit" "! grep -q '<runner-unit>' /tmp/hapi-claude-oauth-dropin-test.out"
+check "instructions printed when token missing" "grep -q 'Not logged in' $TMP/hapi-claude-oauth-dropin-test.out"
+check "instructions name concrete user unit" "grep -q 'systemctl --user restart hapi-runner.service' $TMP/hapi-claude-oauth-dropin-test.out"
+check "instructions have no placeholder unit" "! grep -q '<runner-unit>' $TMP/hapi-claude-oauth-dropin-test.out"
 
 # With a real token line, no setup banner.
 printf 'CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-test\n' >"$token"
@@ -139,11 +139,11 @@ chmod 600 "$token"
 hapi_install_claude_oauth_dropin \
     --scope user \
     --runner-unit hapi-runner.service \
-    --token-file "$token" >/tmp/hapi-claude-oauth-dropin-test2.out
-check "token present message" "grep -q 'token file present' /tmp/hapi-claude-oauth-dropin-test2.out"
-check "no setup banner when token present" "! grep -q 'NOT configured yet' /tmp/hapi-claude-oauth-dropin-test2.out"
+    --token-file "$token" >$TMP/hapi-claude-oauth-dropin-test2.out
+check "token present message" "grep -q 'token file present' $TMP/hapi-claude-oauth-dropin-test2.out"
+check "no setup banner when token present" "! grep -q 'NOT configured yet' $TMP/hapi-claude-oauth-dropin-test2.out"
 check "token present prompts runner restart" \
-    "grep -q 'systemctl --user restart hapi-runner.service' /tmp/hapi-claude-oauth-dropin-test2.out"
+    "grep -q 'systemctl --user restart hapi-runner.service' $TMP/hapi-claude-oauth-dropin-test2.out"
 
 # Whitespace-only / CRLF-empty assignment is unconfigured (not "present").
 printf 'CLAUDE_CODE_OAUTH_TOKEN=\r\n' >"$token"
@@ -151,11 +151,11 @@ chmod 600 "$token"
 hapi_install_claude_oauth_dropin \
     --scope user \
     --runner-unit hapi-runner.service \
-    --token-file "$token" >/tmp/hapi-claude-oauth-dropin-ws.out 2>/tmp/hapi-claude-oauth-dropin-ws.err
+    --token-file "$token" >$TMP/hapi-claude-oauth-dropin-ws.out 2>$TMP/hapi-claude-oauth-dropin-ws.err
 check "CRLF-empty not reported present" \
-    "! grep -q 'token file present' /tmp/hapi-claude-oauth-dropin-ws.out"
+    "! grep -q 'token file present' $TMP/hapi-claude-oauth-dropin-ws.out"
 check "CRLF-empty prints setup instructions" \
-    "grep -q 'NOT configured yet' /tmp/hapi-claude-oauth-dropin-ws.out"
+    "grep -q 'NOT configured yet' $TMP/hapi-claude-oauth-dropin-ws.out"
 
 # Symlink token file must be refused before chmod/chown (Codex P1 / antevorta threat).
 symlink_target="$TMP/symlink-target"
@@ -166,11 +166,11 @@ set +e
 hapi_install_claude_oauth_dropin \
     --scope user \
     --runner-unit hapi-runner.service \
-    --token-file "$symlink_token" >/tmp/hapi-claude-oauth-dropin-symlink.out 2>/tmp/hapi-claude-oauth-dropin-symlink.err
+    --token-file "$symlink_token" >$TMP/hapi-claude-oauth-dropin-symlink.out 2>$TMP/hapi-claude-oauth-dropin-symlink.err
 symlink_rc=$?
 set -e
 check "symlink token file refused" "[[ $symlink_rc -ne 0 ]]"
-check "symlink refusal mentions symlink" "grep -qi symlink /tmp/hapi-claude-oauth-dropin-symlink.err"
+check "symlink refusal mentions symlink" "grep -qi symlink $TMP/hapi-claude-oauth-dropin-symlink.err"
 
 # Direct assert helper too.
 set +e
@@ -184,7 +184,7 @@ check "assert_safe accepts regular file" "hapi_claude_oauth_assert_safe_token_fi
 
 # Secure chmod/chown must refuse symlink via O_NOFOLLOW (not check-then-use).
 set +e
-hapi_claude_oauth_secure_chmod_chown "$symlink_token" 2>/tmp/hapi-claude-oauth-secure-symlink.err
+hapi_claude_oauth_secure_chmod_chown "$symlink_token" 2>$TMP/hapi-claude-oauth-secure-symlink.err
 secure_rc=$?
 set -e
 check "secure_chmod rejects symlink" "[[ $secure_rc -ne 0 ]]"
@@ -207,22 +207,22 @@ check "secure_chmod shell fallback rejects symlink" "[[ $shell_symlink_rc -ne 0 
 # System-profile (owner set) must fail closed without python — never path chown as root.
 set +e
 HAPI_CLAUDE_OAUTH_FORCE_SHELL=1 hapi_claude_oauth_secure_chmod_chown "$regular" "hapi:hapi" \
-    >/tmp/hapi-claude-oauth-force-shell-owner.out 2>/tmp/hapi-claude-oauth-force-shell-owner.err
+    >$TMP/hapi-claude-oauth-force-shell-owner.out 2>$TMP/hapi-claude-oauth-force-shell-owner.err
 owner_shell_rc=$?
 set -e
 check "secure_chmod system shell path fails closed" "[[ $owner_shell_rc -ne 0 ]]"
 check "secure_chmod system shell path mentions python3" \
-    "grep -qi python3 /tmp/hapi-claude-oauth-force-shell-owner.err"
+    "grep -qi python3 $TMP/hapi-claude-oauth-force-shell-owner.err"
 
 # System-scope instructions use systemctl restart (not --user).
 hapi_print_claude_oauth_setup_instructions "/etc/hapi/claude-setup-token.env" "hapi-runner.service" "system" \
-    >/tmp/hapi-claude-oauth-dropin-system-instr.out
+    >$TMP/hapi-claude-oauth-dropin-system-instr.out
 check "system instructions use sudo systemctl restart" \
-    "grep -q 'sudo systemctl restart hapi-runner.service' /tmp/hapi-claude-oauth-dropin-system-instr.out"
+    "grep -q 'sudo systemctl restart hapi-runner.service' $TMP/hapi-claude-oauth-dropin-system-instr.out"
 check "system instructions use privileged install -m 0600" \
-    "grep -q 'sudo install -m 0600 /dev/stdin' /tmp/hapi-claude-oauth-dropin-system-instr.out"
+    "grep -q 'sudo install -m 0600 /dev/stdin' $TMP/hapi-claude-oauth-dropin-system-instr.out"
 check "system instructions do not use tee+chmod race" \
-    "! grep -q 'sudo tee' /tmp/hapi-claude-oauth-dropin-system-instr.out"
+    "! grep -q 'sudo tee' $TMP/hapi-claude-oauth-dropin-system-instr.out"
 
 # Last-assignment empty final must not claim token present.
 printf 'CLAUDE_CODE_OAUTH_TOKEN=first\nCLAUDE_CODE_OAUTH_TOKEN=\n' >"$token"
@@ -230,11 +230,11 @@ chmod 600 "$token"
 hapi_install_claude_oauth_dropin \
     --scope user \
     --runner-unit hapi-runner.service \
-    --token-file "$token" >/tmp/hapi-claude-oauth-dropin-lastempty.out 2>/tmp/hapi-claude-oauth-dropin-lastempty.err
+    --token-file "$token" >$TMP/hapi-claude-oauth-dropin-lastempty.out 2>$TMP/hapi-claude-oauth-dropin-lastempty.err
 check "empty final assignment not reported present" \
-    "! grep -q 'token file present' /tmp/hapi-claude-oauth-dropin-lastempty.out"
+    "! grep -q 'token file present' $TMP/hapi-claude-oauth-dropin-lastempty.out"
 check "empty final assignment prints setup instructions" \
-    "grep -q 'NOT configured yet' /tmp/hapi-claude-oauth-dropin-lastempty.out"
+    "grep -q 'NOT configured yet' $TMP/hapi-claude-oauth-dropin-lastempty.out"
 
 # Toggle resolves through ~/.local/bin symlink to the real scripts/tooling path.
 toggle_link="$TMP/bin/hapi-claude-account-toggle"
@@ -251,7 +251,7 @@ dup="$TMP/dup-assign.env"
 printf 'CLAUDE_CODE_OAUTH_TOKEN=first\nCLAUDE_CODE_OAUTH_TOKEN=\n' >"$dup"
 chmod 600 "$dup"
 set +e
-hapi_claude_oauth_effective_token_value "$dup" >/tmp/hapi-claude-oauth-eff-empty.out 2>/tmp/hapi-claude-oauth-eff-empty.err
+hapi_claude_oauth_effective_token_value "$dup" >$TMP/hapi-claude-oauth-eff-empty.out 2>$TMP/hapi-claude-oauth-eff-empty.err
 eff_empty_rc=$?
 set -e
 check "effective token rejects empty final assignment" "[[ $eff_empty_rc -ne 0 ]]"
@@ -265,7 +265,7 @@ printf 'real\n' >"$TMP/auth-bak-real"
 ln -s "$TMP/auth-bak-real" "$bak_symlink"
 set +e
 printf 'token-bytes\n' | hapi_claude_oauth_secure_write_new_file "$bak_symlink" \
-    >/tmp/hapi-claude-oauth-excl.out 2>/tmp/hapi-claude-oauth-excl.err
+    >$TMP/hapi-claude-oauth-excl.out 2>$TMP/hapi-claude-oauth-excl.err
 excl_rc=$?
 set -e
 check "secure_write refuses symlink dst" "[[ $excl_rc -ne 0 ]]"
@@ -274,7 +274,7 @@ bak_ok="$TMP/auth-bak-ok.env"
 printf 'token-bytes\n' | hapi_claude_oauth_secure_write_new_file "$bak_ok"
 check "secure_write creates exclusive file" "grep -qx token-bytes \"$bak_ok\""
 set +e
-printf 'again\n' | hapi_claude_oauth_secure_write_new_file "$bak_ok" 2>/tmp/hapi-claude-oauth-excl2.err
+printf 'again\n' | hapi_claude_oauth_secure_write_new_file "$bak_ok" 2>$TMP/hapi-claude-oauth-excl2.err
 excl2_rc=$?
 set -e
 check "secure_write refuses existing dst" "[[ $excl2_rc -ne 0 ]]"
@@ -328,14 +328,14 @@ check "install_bytes sets 600" "[[ \"$mode_pipe\" == \"600\" ]]"
 printf 'CLAUDE_CODE_OAUTH_TOKEN=keep-me\n' >"$pipe_dst"
 chmod 600 "$pipe_dst"
 set +e
-: | hapi_claude_oauth_install_bytes "$pipe_dst" >/tmp/hapi-claude-oauth-empty-pipe.out 2>/tmp/hapi-claude-oauth-empty-pipe.err
+: | hapi_claude_oauth_install_bytes "$pipe_dst" >$TMP/hapi-claude-oauth-empty-pipe.out 2>$TMP/hapi-claude-oauth-empty-pipe.err
 empty_pipe_rc=$?
 set -e
 check "empty pipe refuses replace" "[[ $empty_pipe_rc -ne 0 ]]"
 check "empty pipe preserves destination" "grep -qx 'CLAUDE_CODE_OAUTH_TOKEN=keep-me' \"$pipe_dst\""
 set +e
 printf 'CLAUDE_CODE_OAUTH_TOKEN=\n' | hapi_claude_oauth_install_bytes "$pipe_dst" \
-    >/tmp/hapi-claude-oauth-blank-assign.out 2>/tmp/hapi-claude-oauth-blank-assign.err
+    >$TMP/hapi-claude-oauth-blank-assign.out 2>$TMP/hapi-claude-oauth-blank-assign.err
 blank_rc=$?
 set -e
 check "blank assignment refuses replace" "[[ $blank_rc -ne 0 ]]"
@@ -396,7 +396,13 @@ check "verify parent check does not use fixed /tmp paths" \
 check "secure_copy retries short writes" \
     "grep -q 'write returned %d with %d bytes remaining' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\""
 check "companion passes --unit-dir for user-pet drop-in" \
-    "grep -A6 'hapi_install_claude_oauth_dropin' \"$ROOT/scripts/tooling/install-hapi-systemd-units.sh\" | grep -q -- '--unit-dir'"
+    "grep -q -- '--unit-dir' \"$ROOT/scripts/tooling/install-hapi-systemd-units.sh\""
+check "oauth drop-in install precedes watchdog tier1" \
+    "awk '/^[[:space:]]+hapi_install_claude_oauth_dropin/ && !d {d=NR} /^[[:space:]]+bash .*install-hapi-primary-hub-tier1\\.sh/ {t=NR} END {exit !(d && t && d<t)}' \"$ROOT/scripts/tooling/install-hapi-systemd-units.sh\""
+check "toggle rejects symlink slot credentials" \
+    "grep -q 'refusing symlink slot credentials' \"$ROOT/scripts/tooling/hapi-claude-account-toggle.sh\""
+check "effective token parser joins EnvironmentFile continuations" \
+    "grep -q 'coalesce_env_lines' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\""
 check "verify validates system drop-in before restart" \
     "awk '/SYSTEM_OAUTH_SAFE=1/,/SKIP_RESTART/ { if (/refusing restart/) { found=1; exit } } END { exit !found }' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
 check "verify validates drop-in directory even when file absent" \
@@ -542,21 +548,23 @@ printf 'CLAUDE_CODE_OAUTH_TOKEN=\n' | hapi_claude_oauth_restore_bytes "$restore_
 check "restore_bytes accepts blank assignment" "grep -q 'CLAUDE_CODE_OAUTH_TOKEN=' \"$restore_dst\""
 
 # retire must return nonzero when rename cannot succeed (dest already exists).
+# Root ignores chmod a-w on the parent; collide dest with a frozen `date +%s`.
 retire_src="$TMP/retire-src.env"
 printf 'CLAUDE_CODE_OAUTH_TOKEN=legacy\n' >"$retire_src"
 chmod 600 "$retire_src"
-# Force rename failure via read-only parent.
 retire_ro="$TMP/retire-ro"
 mkdir -p "$retire_ro"
 printf 'CLAUDE_CODE_OAUTH_TOKEN=x\n' >"$retire_ro/token.env"
 chmod 600 "$retire_ro/token.env"
-chmod a-w "$retire_ro"
+touch "$retire_ro/token.env.migrated.9999999999"
+mkdir -p "$TMP/datebin"
+printf '%s\n' '#!/usr/bin/env bash' 'echo 9999999999' >"$TMP/datebin/date"
+chmod +x "$TMP/datebin/date"
 set +e
-hapi_claude_oauth_retire_legacy_token_source "$retire_ro/token.env" \
-    >/tmp/hapi-claude-oauth-retire-ro.out 2>/tmp/hapi-claude-oauth-retire-ro.err
+PATH="$TMP/datebin:$PATH" hapi_claude_oauth_retire_legacy_token_source "$retire_ro/token.env" \
+    >"$TMP/hapi-claude-oauth-retire-ro.out" 2>"$TMP/hapi-claude-oauth-retire-ro.err"
 retire_rc=$?
 set -e
-chmod u+w "$retire_ro" 2>/dev/null || true
 check "retire returns nonzero when archive rename fails" "[[ $retire_rc -ne 0 ]]"
 check "retire leaves source when rename fails" "[[ -f \"$retire_ro/token.env\" ]]"
 
@@ -573,7 +581,7 @@ mode_bash="$(stat -c '%a' "$bash_copy_dst")"
 check "bash secure_copy sets 600" "[[ \"$mode_bash\" == \"600\" ]]"
 set +e
 PATH="$no_py2" hapi_claude_oauth_secure_copy_regular_file "$bash_copy_src" /etc/hapi/should-fail.env \
-    >/tmp/hapi-claude-oauth-bash-etc.out 2>/tmp/hapi-claude-oauth-bash-etc.err
+    >$TMP/hapi-claude-oauth-bash-etc.out 2>$TMP/hapi-claude-oauth-bash-etc.err
 bash_etc_rc=$?
 set -e
 check "bash secure_copy refuses /etc without python3" "[[ $bash_etc_rc -ne 0 ]]"
@@ -607,25 +615,24 @@ printf 'CLAUDE_CODE_OAUTH_TOKEN=keep\n' >"$TMP/unlink-real.env"
 ln -s "$TMP/unlink-real.env" "$unlink_sym"
 set +e
 hapi_claude_oauth_secure_unlink_regular_file "$unlink_sym" \
-    >/tmp/hapi-claude-oauth-unlink-sym.out 2>/tmp/hapi-claude-oauth-unlink-sym.err
+    >$TMP/hapi-claude-oauth-unlink-sym.out 2>$TMP/hapi-claude-oauth-unlink-sym.err
 unlink_sym_rc=$?
 set -e
 check "secure_unlink refuses symlink" "[[ $unlink_sym_rc -ne 0 ]]"
 check "secure_unlink leaves symlink target" "grep -qx 'CLAUDE_CODE_OAUTH_TOKEN=keep' \"$TMP/unlink-real.env\""
 
 # Drop-in write failure must surface even when caller uses set +e (installer pattern).
-ro_home="$TMP/ro-dropin-home"
-mkdir -p "$ro_home/systemd/user"
-chmod a-w "$ro_home/systemd/user"
-export XDG_CONFIG_HOME="$ro_home"
+# Root ignores chmod a-w; a regular file as --unit-dir makes mkdir -p fail for anyone.
+ro_unit="$TMP/ro-unit-dir-file"
+printf 'not-a-directory\n' >"$ro_unit"
 set +e
 hapi_install_claude_oauth_dropin \
     --scope user --runner-unit hapi-runner.service \
+    --unit-dir "$ro_unit" \
     --token-file "$TMP/missing-token.env" \
-    >/tmp/hapi-claude-oauth-ro-dropin.out 2>/tmp/hapi-claude-oauth-ro-dropin.err
+    >"$TMP/hapi-claude-oauth-ro-dropin.out" 2>"$TMP/hapi-claude-oauth-ro-dropin.err"
 ro_rc=$?
 set -e
-chmod u+w "$ro_home/systemd/user" 2>/dev/null || true
 check "drop-in write failure returns nonzero under set +e" "[[ $ro_rc -ne 0 ]]"
 
 # Existing non-root-owned "system" parent must fail closed.
@@ -633,12 +640,12 @@ bad_parent="$TMP/fake-etc-hapi"
 mkdir -m 0775 -p "$bad_parent"
 set +e
 hapi_claude_oauth_assert_root_controlled_parent "$bad_parent" \
-    >/tmp/hapi-claude-oauth-parent.out 2>/tmp/hapi-claude-oauth-parent.err
+    >$TMP/hapi-claude-oauth-parent.out 2>$TMP/hapi-claude-oauth-parent.err
 parent_rc=$?
 set -e
 check "assert_root_controlled rejects non-root parent" "[[ $parent_rc -ne 0 ]]"
 check "assert_root_controlled mentions ownership or writable" \
-    "grep -Eiq 'owned by uid|group/other-writable' /tmp/hapi-claude-oauth-parent.err"
+    "grep -Eiq 'owned by uid|group/other-writable' $TMP/hapi-claude-oauth-parent.err"
 
 # systemd EnvironmentFile unescape (unquoted \X → X; whitespace then quotes).
 got="$(hapi_claude_oauth_parse_env_file_value 'abc\def')"
@@ -657,7 +664,7 @@ set +e
 hapi_install_claude_oauth_dropin \
     --scope user --runner-unit hapi-runner.service \
     --token-file "$retry_home/claude-setup-token.env" \
-    >/tmp/hapi-claude-oauth-retry-retire.out 2>/tmp/hapi-claude-oauth-retry-retire.err
+    >$TMP/hapi-claude-oauth-retry-retire.out 2>$TMP/hapi-claude-oauth-retry-retire.err
 retry_rc=$?
 set -e
 check "retry retirement succeeds with effective canon" "[[ $retry_rc -eq 0 ]]"
@@ -666,6 +673,14 @@ check "retry retirement archives leftover legacy" \
 check "retry retirement keeps canon value" \
     "grep -q 'CLAUDE_CODE_OAUTH_TOKEN=canon' \"$retry_home/claude-setup-token.env\""
 check "retry retirement logs Retired" \
-    "grep -q 'Retired legacy Claude OAuth token' /tmp/hapi-claude-oauth-retry-retire.out"
+    "grep -q 'Retired legacy Claude OAuth token' $TMP/hapi-claude-oauth-retry-retire.out"
+
+# systemd EnvironmentFile line continuation (unquoted trailing \ eats newline).
+cont_file="$TMP/cont-token.env"
+printf '%s\n' 'CLAUDE_CODE_OAUTH_TOKEN=abc\' 'def' >"$cont_file"
+chmod 600 "$cont_file"
+got="$(hapi_claude_oauth_effective_token_value "$cont_file")"
+check "effective token joins unquoted continuation" "[[ \"$got\" == \"abcdef\" ]]"
+check "continuation file is treated as durable" "hapi_claude_oauth_has_effective_token \"$cont_file\""
 
 echo "ALL OK"

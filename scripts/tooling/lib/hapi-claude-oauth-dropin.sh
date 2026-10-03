@@ -894,8 +894,74 @@ def parse_value(raw):
         i += 1
     return bytes(out) or None
 
+def env_line_state(buf):
+    """(open_quote or None, trailing unquoted/double-quote backslash continuation)."""
+    eq = buf.find(b"=")
+    if eq < 0:
+        return None, False
+    val = buf[eq + 1:].lstrip(b" \t")
+    quote = None
+    i = 0
+    while i < len(val):
+        c = val[i:i+1]
+        if quote is None:
+            if c == b"'":
+                quote = b"'"
+            elif c == b'"':
+                quote = b'"'
+            elif c == b"\\":
+                if i + 1 >= len(val):
+                    return None, True
+                i += 2
+                continue
+            i += 1
+            continue
+        if quote == b"'":
+            if c == b"'":
+                quote = None
+            i += 1
+            continue
+        if c == b"\\":
+            if i + 1 >= len(val):
+                return b'"', True
+            i += 2
+            continue
+        if c == b'"':
+            quote = None
+        i += 1
+    return quote, False
+
+def coalesce_env_lines(blob):
+    # systemd.exec(5): unquoted \\newline and quoted \\newline eat the newline;
+    # unclosed quotes span physical lines (newline kept).
+    physical = [ln.rstrip(b"\r") for ln in blob.splitlines()]
+    logical = []
+    buf = b""
+    join_nl = False
+    for piece in physical:
+        if not buf:
+            buf = piece
+        elif join_nl:
+            buf += b"\n" + piece
+        else:
+            buf += piece
+        quote, cont_bs = env_line_state(buf)
+        if cont_bs and buf.endswith(b"\\"):
+            buf = buf[:-1]
+            join_nl = False
+            continue
+        if quote is not None:
+            join_nl = True
+            continue
+        logical.append(buf)
+        buf = b""
+        join_nl = False
+    if buf:
+        logical.append(buf)
+    return logical
+
 last = None
-for line in data.splitlines():
+for line in coalesce_env_lines(data):
     if line.startswith(b"CLAUDE_CODE_OAUTH_TOKEN="):
         last = parse_value(line.split(b"=", 1)[1])
 if last is None:
@@ -907,11 +973,24 @@ PY
     fi
 
     # Bash fallback (pet / minimal hosts without python3).
-    local line raw last=""
+    # Join unquoted EnvironmentFile continuations (trailing \ eats newline).
+    local line raw last="" parsed logical="" cont=0
     while IFS= read -r line || [[ -n "$line" ]]; do
-        case "$line" in
+        line="${line%$'\r'}"
+        if [[ "$cont" -eq 1 ]]; then
+            logical+="$line"
+        else
+            logical="$line"
+        fi
+        if [[ "$logical" == *\\ ]]; then
+            logical="${logical%\\}"
+            cont=1
+            continue
+        fi
+        cont=0
+        case "$logical" in
             CLAUDE_CODE_OAUTH_TOKEN=*)
-                raw="${line#CLAUDE_CODE_OAUTH_TOKEN=}"
+                raw="${logical#CLAUDE_CODE_OAUTH_TOKEN=}"
                 if parsed="$(hapi_claude_oauth_parse_env_file_value "$raw")"; then
                     last="$parsed"
                 else
@@ -920,6 +999,18 @@ PY
                 ;;
         esac
     done <"$token_file"
+    if [[ "$cont" -eq 1 ]]; then
+        case "$logical" in
+            CLAUDE_CODE_OAUTH_TOKEN=*)
+                raw="${logical#CLAUDE_CODE_OAUTH_TOKEN=}"
+                if parsed="$(hapi_claude_oauth_parse_env_file_value "$raw")"; then
+                    last="$parsed"
+                else
+                    last=""
+                fi
+                ;;
+        esac
+    fi
     if [[ -z "$last" ]]; then
         return 2
     fi

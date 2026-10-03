@@ -143,12 +143,25 @@ hapi_pet_export_oauth_from_env_file() {
         set -e
         [[ "$rc" -eq 0 && -n "$eff" ]] || return 1
     else
-        # Last-assignment parser with full systemd EnvironmentFile unescape.
-        local line raw last="" parsed
+        # Last-assignment parser with full systemd EnvironmentFile unescape
+        # and trailing-backslash line continuation (systemd.exec(5)).
+        local line raw last="" parsed logical="" cont=0
         while IFS= read -r line || [[ -n "$line" ]]; do
-            case "$line" in
+            line="${line%$'\r'}"
+            if [[ "$cont" -eq 1 ]]; then
+                logical+="$line"
+            else
+                logical="$line"
+            fi
+            if [[ "$logical" == *\\ ]]; then
+                logical="${logical%\\}"
+                cont=1
+                continue
+            fi
+            cont=0
+            case "$logical" in
                 CLAUDE_CODE_OAUTH_TOKEN=*)
-                    raw="${line#CLAUDE_CODE_OAUTH_TOKEN=}"
+                    raw="${logical#CLAUDE_CODE_OAUTH_TOKEN=}"
                     if parsed="$(hapi_claude_oauth_parse_env_file_value "$raw")"; then
                         last="$parsed"
                     else

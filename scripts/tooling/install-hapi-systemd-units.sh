@@ -243,6 +243,38 @@ case "$PROFILE" in
         if [[ "$DO_ENABLE" -eq 1 ]]; then
             systemctl enable "$HUB_UNIT" "$RUNNER_UNIT"
         fi
+        # System-scope token is always root-controlled /etc/hapi/claude-setup-token.env
+        # (NOT under service-writable HAPI_HOME or operator ~/.hapi). Compromised
+        # runner + passwordless Restart must not retarget EnvironmentFile at other
+        # root-readable secrets. primary-soup 2026-08-25 hand-install under
+        # $OPERATOR_HOME/.hapi/ is a one-time migrate (WARN from the drop-in).
+        # Run migrate/drop-in BEFORE Tier-1: the watchdog timer can restart the
+        # runner; a failed migrate must not leave watchdog able to discard ambient
+        # auth before EnvironmentFile exists.
+        CLAUDE_TOKEN_FILE="$(hapi_claude_oauth_system_token_file)"
+        HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=0
+        # primary-soup: pass configured operator home (not sudoer's HOME=/root).
+        DROPIN_ARGS=(
+            --scope system
+            --runner-unit "$RUNNER_UNIT"
+            --token-file "$CLAUDE_TOKEN_FILE"
+            --migrate-profile "$PROFILE"
+            --migrate-hapi-home "$HAPI_HOME"
+        )
+        if [[ "$PROFILE" == primary-soup ]]; then
+            DROPIN_ARGS+=(--migrate-operator-home "${OOS_OPERATOR_HOME:-/home/heavygee}")
+        fi
+        set +e
+        hapi_install_claude_oauth_dropin "${DROPIN_ARGS[@]}"
+        dropin_rc=$?
+        set -e
+        # Fail closed on config-only installs too: pending migrate must not leave
+        # a drop-in pointed at an empty/missing /etc/hapi token.
+        if [[ "$dropin_rc" -ne 0 || "${HAPI_CLAUDE_OAUTH_MIGRATE_PENDING:-0}" -eq 1 ]]; then
+            echo "ERROR: Claude OAuth drop-in install failed or migrate still pending ($CLAUDE_TOKEN_FILE)" >&2
+            echo "       Resolve legacy token ambiguity / symlink, then re-run." >&2
+            exit 1
+        fi
         if [[ "$UNITS_ONLY" -eq 0 ]]; then
             # Pass the binary this profile just installed, so Tier-1's
             # ExecStartPre stop is valid on THIS host. Without it Tier-1 would
@@ -272,35 +304,6 @@ case "$PROFILE" in
                     ;;
             esac
             bash "$REPO_ROOT/scripts/tooling/install-hapi-primary-hub-tier1.sh" "${TIER1_ARGS[@]}"
-        fi
-        # System-scope token is always root-controlled /etc/hapi/claude-setup-token.env
-        # (NOT under service-writable HAPI_HOME or operator ~/.hapi). Compromised
-        # runner + passwordless Restart must not retarget EnvironmentFile at other
-        # root-readable secrets. primary-soup 2026-08-25 hand-install under
-        # $OPERATOR_HOME/.hapi/ is a one-time migrate (WARN from the drop-in).
-        CLAUDE_TOKEN_FILE="$(hapi_claude_oauth_system_token_file)"
-        HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=0
-        # primary-soup: pass configured operator home (not sudoer's HOME=/root).
-        DROPIN_ARGS=(
-            --scope system
-            --runner-unit "$RUNNER_UNIT"
-            --token-file "$CLAUDE_TOKEN_FILE"
-            --migrate-profile "$PROFILE"
-            --migrate-hapi-home "$HAPI_HOME"
-        )
-        if [[ "$PROFILE" == primary-soup ]]; then
-            DROPIN_ARGS+=(--migrate-operator-home "${OOS_OPERATOR_HOME:-/home/heavygee}")
-        fi
-        set +e
-        hapi_install_claude_oauth_dropin "${DROPIN_ARGS[@]}"
-        dropin_rc=$?
-        set -e
-        # Fail closed on config-only installs too: pending migrate must not leave
-        # a drop-in pointed at an empty/missing /etc/hapi token.
-        if [[ "$dropin_rc" -ne 0 || "${HAPI_CLAUDE_OAUTH_MIGRATE_PENDING:-0}" -eq 1 ]]; then
-            echo "ERROR: Claude OAuth drop-in install failed or migrate still pending ($CLAUDE_TOKEN_FILE)" >&2
-            echo "       Resolve legacy token ambiguity / symlink, then re-run." >&2
-            exit 1
         fi
         if [[ "$DO_RESTART" -eq 1 ]]; then
             # Fail closed: missing/ineffective canonical while a legacy token still

@@ -40,6 +40,18 @@ TOKEN="$ROOT/$SLOT/claude-setup-token.env"
 # Canonical EnvironmentFile for hapi-runner-oos (root-controlled; not ~/.hapi/).
 CANON="$(hapi_claude_oauth_system_token_file)"
 
+# Reject symlink slot sources before any CANON mutation. [[ -f ]] and JSON
+# validation follow the link, but later `cp -a` preserves it as the active
+# credential — every subsequent toggle then refuses the installed symlink.
+if [[ -L "$CRED" ]]; then
+    echo "ERROR: refusing symlink slot credentials: $CRED" >&2
+    echo "       Replace with a regular file, then re-run toggle." >&2
+    exit 1
+fi
+if [[ -e "$CRED" && ! -f "$CRED" ]]; then
+    echo "ERROR: refusing non-regular slot credentials: $CRED" >&2
+    exit 1
+fi
 [[ -f "$CRED" ]] || { echo "missing $CRED" >&2; exit 1; }
 [[ -f "$TOKEN" ]] || { echo "missing $TOKEN" >&2; exit 1; }
 hapi_claude_oauth_assert_safe_token_file "$TOKEN" || exit 1

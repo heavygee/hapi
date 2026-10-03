@@ -850,8 +850,68 @@ file_tok = None
 file_key_seen = False
 if token_file and os.path.isfile(token_file) and not os.path.islink(token_file):
     try:
-        # systemd applies the *last* assignment for a key; scan all lines.
-        for line in open(token_file, "rb"):
+        blob = open(token_file, "rb").read()
+        physical = [ln.rstrip(b"\r") for ln in blob.splitlines()]
+        logical = []
+        buf = b""
+        join_nl = False
+        for piece in physical:
+            if not buf:
+                buf = piece
+            elif join_nl:
+                buf += b"\n" + piece
+            else:
+                buf += piece
+            eq = buf.find(b"=")
+            quote = None
+            cont_bs = False
+            if eq >= 0:
+                val = buf[eq + 1:].lstrip(b" \t")
+                i = 0
+                while i < len(val):
+                    c = val[i:i+1]
+                    if quote is None:
+                        if c == b"'":
+                            quote = b"'"
+                        elif c == b'"':
+                            quote = b'"'
+                        elif c == b"\\":
+                            if i + 1 >= len(val):
+                                cont_bs = True
+                                break
+                            i += 2
+                            continue
+                        i += 1
+                        continue
+                    if quote == b"'":
+                        if c == b"'":
+                            quote = None
+                        i += 1
+                        continue
+                    if c == b"\\":
+                        if i + 1 >= len(val):
+                            quote = b'"'
+                            cont_bs = True
+                            break
+                        i += 2
+                        continue
+                    if c == b'"':
+                        quote = None
+                    i += 1
+            if cont_bs and buf.endswith(b"\\"):
+                buf = buf[:-1]
+                join_nl = False
+                continue
+            if quote is not None:
+                join_nl = True
+                continue
+            logical.append(buf)
+            buf = b""
+            join_nl = False
+        if buf:
+            logical.append(buf)
+        # systemd applies the *last* assignment for a key; scan logical lines.
+        for line in logical:
             if line.startswith(b"CLAUDE_CODE_OAUTH_TOKEN="):
                 file_key_seen = True
                 # Same nonempty rule as the shell probe after systemd unquote:
