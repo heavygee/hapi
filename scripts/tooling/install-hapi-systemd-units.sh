@@ -230,6 +230,16 @@ case "$PROFILE" in
     primary-soup|fleet-binary)
         HUB_DST="/etc/systemd/system/$HUB_UNIT"
         RUNNER_DST="/etc/systemd/system/$RUNNER_UNIT"
+        # Quiesce a pre-existing watchdog before rewriting units / migrate.
+        # stop (not disable): the timer stays enabled; we only prevent a fire
+        # during the window where EnvironmentFile may be unwired. A failed
+        # migrate exits with the timer left stopped (fail-closed).
+        WD_TIMER_WAS_ACTIVE=0
+        if systemctl is-active --quiet hapi-runner-watchdog.timer 2>/dev/null; then
+            WD_TIMER_WAS_ACTIVE=1
+        fi
+        systemctl stop hapi-runner-watchdog.timer 2>/dev/null || true
+        systemctl stop hapi-runner-watchdog.service 2>/dev/null || true
         render_pair \
             "$TEMPLATE_DIR/$HUB_UNIT.in" \
             "$TEMPLATE_DIR/$RUNNER_UNIT.in" \
@@ -273,6 +283,7 @@ case "$PROFILE" in
         if [[ "$dropin_rc" -ne 0 || "${HAPI_CLAUDE_OAUTH_MIGRATE_PENDING:-0}" -eq 1 ]]; then
             echo "ERROR: Claude OAuth drop-in install failed or migrate still pending ($CLAUDE_TOKEN_FILE)" >&2
             echo "       Resolve legacy token ambiguity / symlink, then re-run." >&2
+            echo "       hapi-runner-watchdog.timer was stopped for this upgrade and left stopped." >&2
             exit 1
         fi
         if [[ "$UNITS_ONLY" -eq 0 ]]; then
@@ -355,6 +366,11 @@ case "$PROFILE" in
             else
                 systemctl restart "$HUB_UNIT" "$RUNNER_UNIT"
             fi
+        fi
+        # --units-only skips Tier-1 (which restarts the timer). After a successful
+        # migrate, put back a timer we quiesced.
+        if [[ "$UNITS_ONLY" -eq 1 && "${WD_TIMER_WAS_ACTIVE:-0}" -eq 1 ]]; then
+            systemctl start hapi-runner-watchdog.timer 2>/dev/null || true
         fi
         ;;
     user-pet)

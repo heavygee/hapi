@@ -195,92 +195,10 @@ if [[ -x "$VERIFY_UNITS" || -f "$VERIFY_UNITS" ]]; then
     fi
 fi
 
-# --- 3. Watchdog journal fire (system scope) -------------------------------
-# verify-hapi-systemd-units.sh already asserts ConditionPathExists from unit
-# text. This layer only proves a live start left journal evidence. Fresh-box
-# skip while settings.json is still absent (parent home exists) is a NOTE —
-# the hub writes it on first start; the condition exists to keep the watchdog
-# dormant until then.
-if [[ "$SCOPE" == system ]]; then
-    if "${CTL[@]}" cat hapi-runner-watchdog.service >/dev/null 2>&1; then
-        cond="$("${CTL[@]}" show hapi-runner-watchdog.service -p ConditionResult --value 2>/dev/null || true)"
-        wd_path="$("${CTL[@]}" cat hapi-runner-watchdog.service 2>/dev/null \
-            | sed -n 's/^ConditionPathExists=//p' | tail -n1 || true)"
-        wd_path="${wd_path#!}"
-        # Kick once so a fresh install has journal evidence (idempotent).
-        "${CTL[@]}" start hapi-runner-watchdog.service 2>/dev/null || true
-        sleep 1
-        set +e
-        journal="$("${CTL[@]}" status hapi-runner-watchdog.service --no-pager -n 20 2>&1)"
-        jlog="$(journalctl -u hapi-runner-watchdog.service -n 30 --no-pager 2>&1)"
-        set -e
-        if grep -qiE 'Condition.*failed|start condition failed' <<<"$journal$jlog"; then
-            if [[ -n "$wd_path" && "$wd_path" == */settings.json \
-                && -d "$(dirname "$wd_path")" && ! -e "$wd_path" ]]; then
-                ok "watchdog dormant until settings.json (NOTE: first fire skip expected on fresh box; $wd_path)"
-            else
-                not_ok "watchdog executed (condition failed — service skipped every fire; path=$wd_path)"
-            fi
-        elif grep -qiE 'Main PID:|Started |code=exited|status=0' <<<"$journal$jlog" \
-            || [[ "$cond" == "yes" ]]; then
-            ok "watchdog executed (journal/ConditionResult=$cond)"
-        else
-            not_ok "watchdog executed (no journal evidence; ConditionResult=$cond)"
-        fi
-    else
-        not_ok "watchdog unit exists (hapi-runner-watchdog.service)"
-    fi
-else
-    ok "watchdog N/A for user-pet scope (system timer not expected)"
-fi
-
-# --- 4. Sudoers grants the runner account (system scope) -------------------
-# Primary path: read /etc/sudoers.d/hapi-watchdog directly. The file either
-# names the runner User= or it does not. `sudo -l` needing a password for the
-# probe user is environmental noise — not the property under test.
-if [[ "$SCOPE" == system ]]; then
-    runner_user="$("${CTL[@]}" show "$RUNNER_UNIT" -p User --value 2>/dev/null || true)"
-    # Empty User= on an existing unit means root (systemd); we already proved
-    # the unit exists via cat above.
-    if [[ -z "$runner_user" ]]; then
-        runner_user=root
-    fi
-    if ! id -u "$runner_user" >/dev/null 2>&1; then
-        not_ok "sudoers grants runner user ($runner_user does not exist on this host)"
-    else
-        sudoers_file=/etc/sudoers.d/hapi-watchdog
-        if [[ -r "$sudoers_file" ]]; then
-            if grep -qE "^${runner_user}[[:space:]]" "$sudoers_file"; then
-                ok "sudoers file grants $runner_user ($sudoers_file)"
-            else
-                not_ok "sudoers file grants $runner_user ($sudoers_file has no rule for that account)"
-            fi
-        elif [[ -f "$sudoers_file" ]]; then
-            inconclusive "sudoers file grants $runner_user ($sudoers_file unreadable to probe — not a grant miss)"
-        else
-            not_ok "sudoers file grants $runner_user ($sudoers_file missing)"
-        fi
-    fi
-else
-    ok "sudoers N/A for user-pet scope"
-fi
-
-# --- 5. Systemctl wrapper (default install; --no-systemctl-wrapper to opt out)
-# Flipped 2026-09-30: opt-in broke verify-hapi-operator-lock.sh, so the wrapper
-# installs by default again. Assert present unless the operator opted out.
-if [[ "$SCOPE" == system ]]; then
-    if [[ -x /usr/local/sbin/systemctl ]]; then
-        ok "systemctl wrapper present (/usr/local/sbin/systemctl)"
-    elif [[ "${HAPI_EXPECT_NO_SYSTEMCTL_WRAPPER:-0}" == "1" ]]; then
-        ok "systemctl wrapper absent (HAPI_EXPECT_NO_SYSTEMCTL_WRAPPER=1)"
-    else
-        not_ok "systemctl wrapper present (/usr/local/sbin/systemctl missing; set HAPI_EXPECT_NO_SYSTEMCTL_WRAPPER=1 if --no-systemctl-wrapper)"
-    fi
-else
-    ok "systemctl wrapper N/A for user-pet scope"
-fi
-
-# --- 6 + 7. Restart → active + MainPID match + live OOM + Claude auth + /health ----------
+# --- 2b. Claude OAuth safety (before watchdog kick / hub+runner restart) ----------
+# A compromised runner with passwordless restart can plant a drop-in
+# (User=root / ExecStart=…) that watchdog would execute as root, or discard
+# an ambient-only token. Validate before starting hapi-runner-watchdog.service.
 hapi_home="$("${CTL[@]}" show "$RUNNER_UNIT" -p Environment --value 2>/dev/null \
     | tr ' ' '\n' | sed -n 's/^HAPI_HOME=//p' | head -n1 || true)"
 if [[ -z "$hapi_home" ]]; then
@@ -445,6 +363,100 @@ elif [[ "$pre_env_files_all" != *claude-setup-token.env* ]]; then
     SYSTEM_OAUTH_SAFE=0
 fi
 
+# --- 3. Watchdog journal fire (system scope) -------------------------------
+# verify-hapi-systemd-units.sh already asserts ConditionPathExists from unit
+# text. This layer only proves a live start left journal evidence. Fresh-box
+# skip while settings.json is still absent (parent home exists) is a NOTE —
+# the hub writes it on first start; the condition exists to keep the watchdog
+# dormant until then.
+if [[ "$SCOPE" == system ]]; then
+    if "${CTL[@]}" cat hapi-runner-watchdog.service >/dev/null 2>&1; then
+        cond="$("${CTL[@]}" show hapi-runner-watchdog.service -p ConditionResult --value 2>/dev/null || true)"
+        wd_path="$("${CTL[@]}" cat hapi-runner-watchdog.service 2>/dev/null \
+            | sed -n 's/^ConditionPathExists=//p' | tail -n1 || true)"
+        wd_path="${wd_path#!}"
+        # Kick once so a fresh install has journal evidence (idempotent).
+        # Never kick if OAuth/drop-in is unsafe or --skip-restart: the oneshot
+        # can restart an unhealthy runner via passwordless systemctl.
+        if [[ "${OAUTH_RESTART_SAFE:-1}" -eq 0 ]]; then
+            inconclusive "skipped watchdog kick — OAuth drop-in/token/ambient safety checks failed"
+        elif [[ "$SKIP_RESTART" -eq 1 ]]; then
+            inconclusive "skipped watchdog kick — --skip-restart"
+        else
+            "${CTL[@]}" start hapi-runner-watchdog.service 2>/dev/null || true
+            sleep 1
+        fi
+        set +e
+        journal="$("${CTL[@]}" status hapi-runner-watchdog.service --no-pager -n 20 2>&1)"
+        jlog="$(journalctl -u hapi-runner-watchdog.service -n 30 --no-pager 2>&1)"
+        set -e
+        if grep -qiE 'Condition.*failed|start condition failed' <<<"$journal$jlog"; then
+            if [[ -n "$wd_path" && "$wd_path" == */settings.json \
+                && -d "$(dirname "$wd_path")" && ! -e "$wd_path" ]]; then
+                ok "watchdog dormant until settings.json (NOTE: first fire skip expected on fresh box; $wd_path)"
+            else
+                not_ok "watchdog executed (condition failed — service skipped every fire; path=$wd_path)"
+            fi
+        elif grep -qiE 'Main PID:|Started |code=exited|status=0' <<<"$journal$jlog" \
+            || [[ "$cond" == "yes" ]]; then
+            ok "watchdog executed (journal/ConditionResult=$cond)"
+        else
+            not_ok "watchdog executed (no journal evidence; ConditionResult=$cond)"
+        fi
+    else
+        not_ok "watchdog unit exists (hapi-runner-watchdog.service)"
+    fi
+else
+    ok "watchdog N/A for user-pet scope (system timer not expected)"
+fi
+
+# --- 4. Sudoers grants the runner account (system scope) -------------------
+# Primary path: read /etc/sudoers.d/hapi-watchdog directly. The file either
+# names the runner User= or it does not. `sudo -l` needing a password for the
+# probe user is environmental noise — not the property under test.
+if [[ "$SCOPE" == system ]]; then
+    runner_user="$("${CTL[@]}" show "$RUNNER_UNIT" -p User --value 2>/dev/null || true)"
+    # Empty User= on an existing unit means root (systemd); we already proved
+    # the unit exists via cat above.
+    if [[ -z "$runner_user" ]]; then
+        runner_user=root
+    fi
+    if ! id -u "$runner_user" >/dev/null 2>&1; then
+        not_ok "sudoers grants runner user ($runner_user does not exist on this host)"
+    else
+        sudoers_file=/etc/sudoers.d/hapi-watchdog
+        if [[ -r "$sudoers_file" ]]; then
+            if grep -qE "^${runner_user}[[:space:]]" "$sudoers_file"; then
+                ok "sudoers file grants $runner_user ($sudoers_file)"
+            else
+                not_ok "sudoers file grants $runner_user ($sudoers_file has no rule for that account)"
+            fi
+        elif [[ -f "$sudoers_file" ]]; then
+            inconclusive "sudoers file grants $runner_user ($sudoers_file unreadable to probe — not a grant miss)"
+        else
+            not_ok "sudoers file grants $runner_user ($sudoers_file missing)"
+        fi
+    fi
+else
+    ok "sudoers N/A for user-pet scope"
+fi
+
+# --- 5. Systemctl wrapper (default install; --no-systemctl-wrapper to opt out)
+# Flipped 2026-09-30: opt-in broke verify-hapi-operator-lock.sh, so the wrapper
+# installs by default again. Assert present unless the operator opted out.
+if [[ "$SCOPE" == system ]]; then
+    if [[ -x /usr/local/sbin/systemctl ]]; then
+        ok "systemctl wrapper present (/usr/local/sbin/systemctl)"
+    elif [[ "${HAPI_EXPECT_NO_SYSTEMCTL_WRAPPER:-0}" == "1" ]]; then
+        ok "systemctl wrapper absent (HAPI_EXPECT_NO_SYSTEMCTL_WRAPPER=1)"
+    else
+        not_ok "systemctl wrapper present (/usr/local/sbin/systemctl missing; set HAPI_EXPECT_NO_SYSTEMCTL_WRAPPER=1 if --no-systemctl-wrapper)"
+    fi
+else
+    ok "systemctl wrapper N/A for user-pet scope"
+fi
+
+# --- 6 + 7. Restart → active + MainPID match + live OOM + Claude auth + /health ----------
 if [[ "$SKIP_RESTART" -eq 0 ]]; then
     if [[ "$OAUTH_RESTART_SAFE" -eq 0 ]]; then
         inconclusive "skipped hub/runner restart — OAuth drop-in/token/ambient safety checks failed"

@@ -399,6 +399,12 @@ check "companion passes --unit-dir for user-pet drop-in" \
     "grep -q -- '--unit-dir' \"$ROOT/scripts/tooling/install-hapi-systemd-units.sh\""
 check "oauth drop-in install precedes watchdog tier1" \
     "awk '/^[[:space:]]+hapi_install_claude_oauth_dropin/ && !d {d=NR} /^[[:space:]]+bash .*install-hapi-primary-hub-tier1\\.sh/ {t=NR} END {exit !(d && t && d<t)}' \"$ROOT/scripts/tooling/install-hapi-systemd-units.sh\""
+check "installer stops watchdog timer before unit rewrite" \
+    "grep -q 'Quiesce a pre-existing watchdog' \"$ROOT/scripts/tooling/install-hapi-systemd-units.sh\" && grep -q 'stop hapi-runner-watchdog.timer' \"$ROOT/scripts/tooling/install-hapi-systemd-units.sh\""
+check "verify oauth gate precedes watchdog kick" \
+    "awk '/^OAUTH_RESTART_SAFE=1/ {o=NR} /start hapi-runner-watchdog.service/ {w=NR} END {exit !(o && w && o<w)}' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
+check "verify skips watchdog kick when oauth unsafe" \
+    "grep -q 'skipped watchdog kick' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
 check "toggle rejects symlink slot credentials" \
     "grep -q 'refusing symlink slot credentials' \"$ROOT/scripts/tooling/hapi-claude-account-toggle.sh\""
 check "effective token parser joins EnvironmentFile continuations" \
