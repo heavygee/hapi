@@ -373,17 +373,51 @@ case "$PROFILE" in
             --runner-unit hapi-runner.service \
             --token-file "$CLAUDE_TOKEN_FILE" \
             --unit-dir "$USER_UNIT_DIR"
+        # Ambient-only guard (mirrors system-profile --restart): if the runner
+        # still carries CLAUDE_CODE_OAUTH_TOKEN in MainPID environ but no durable
+        # file exists to reload, refuse restart so we do not force /login.
+        hapi_user_pet_refuse_ambient_only_restart() {
+            local token_file="$1"
+            if hapi_claude_oauth_has_effective_token "$token_file" 2>/dev/null; then
+                return 0
+            fi
+            local legacy_token
+            legacy_token="$(dirname "$token_file")/.hapi/claude-setup-token.env"
+            if hapi_claude_oauth_has_effective_token "$legacy_token" 2>/dev/null; then
+                return 0
+            fi
+            local runner_main_pid ambient_tok="" env_line
+            runner_main_pid="$(systemctl --user show -p MainPID --value hapi-runner.service 2>/dev/null || echo 0)"
+            if [[ "$runner_main_pid" != "0" && -r "/proc/$runner_main_pid/environ" ]]; then
+                while IFS= read -r -d '' env_line || [[ -n "$env_line" ]]; do
+                    case "$env_line" in
+                        CLAUDE_CODE_OAUTH_TOKEN=*)
+                            ambient_tok="${env_line#CLAUDE_CODE_OAUTH_TOKEN=}"
+                            ;;
+                    esac
+                done <"/proc/$runner_main_pid/environ"
+                if [[ -n "$ambient_tok" ]]; then
+                    echo "ERROR: user-pet runner MainPID=$runner_main_pid has ambient CLAUDE_CODE_OAUTH_TOKEN but $token_file is missing/empty" >&2
+                    echo "       Persist the token to $token_file before restart or you will discard the only credential." >&2
+                    return 1
+                fi
+            fi
+            return 0
+        }
         if [[ "$DO_ENABLE" -eq 1 ]]; then
             loginctl enable-linger "$(id -un)" 2>/dev/null || true
             systemctl --user enable hapi-hub.service hapi-runner.service
             systemctl --user start hapi-hub.service
             # Same race as the embedded pet path: pgrep kill + Restart=always can
             # leave an already-active pre-drop-in runner; start is then a no-op.
+            hapi_user_pet_refuse_ambient_only_restart "$CLAUDE_TOKEN_FILE" || exit 1
             systemctl --user restart hapi-runner.service
         elif [[ "$DO_RESTART" -eq 1 ]] && systemctl --user is-active --quiet hapi-runner.service 2>/dev/null; then
             # Config-only reruns must not yank MainPID unless the operator asked.
+            hapi_user_pet_refuse_ambient_only_restart "$CLAUDE_TOKEN_FILE" || exit 1
             systemctl --user restart hapi-runner.service
         fi
+        unset -f hapi_user_pet_refuse_ambient_only_restart
         ;;
 esac
 

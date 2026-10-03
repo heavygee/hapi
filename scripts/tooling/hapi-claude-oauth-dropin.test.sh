@@ -498,6 +498,12 @@ check "pet migrate logs Migrated" \
     "grep -q 'Migrated Claude OAuth token' \"$TMP/pet-migrate-test.out\""
 check "systemd install blocks ambient-only restart" \
     "grep -q 'ambient CLAUDE_CODE_OAUTH_TOKEN' \"$ROOT/scripts/tooling/install-hapi-systemd-units.sh\""
+check "user-pet install blocks ambient-only restart" \
+    "grep -q 'hapi_user_pet_refuse_ambient_only_restart' \"$ROOT/scripts/tooling/install-hapi-systemd-units.sh\""
+check "pet preflight checks symlink ancestors" \
+    "grep -q '_preflight_token_ancestors' \"$ROOT/scripts/install-hapi-pet.sh\""
+check "pet preflight blocks ambient-only stop" \
+    "grep -q 'refuse stop/restart; persist the token first' \"$ROOT/scripts/install-hapi-pet.sh\""
 check "retire function returns 1 on python failure" \
     "awk '/^hapi_claude_oauth_retire_legacy_token_source/,/^}/ {print}' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\" | grep -q 'return 1'"
 
