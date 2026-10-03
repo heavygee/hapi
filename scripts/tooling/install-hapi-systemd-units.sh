@@ -226,6 +226,29 @@ render_pair() {
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
+# True when MainPID still has CLAUDE_CODE_OAUTH_TOKEN but $1 (canonical token
+# file) has no effective assignment. Used before enabling/restoring watchdog.
+hapi_system_runner_ambient_oauth_unpersisted() {
+    local token_file="${1:?token_file}"
+    local unit="${2:?unit}"
+    if hapi_claude_oauth_has_effective_token "$token_file" 2>/dev/null; then
+        return 1
+    fi
+    local runner_main_pid ambient_tok="" env_line
+    runner_main_pid="$(systemctl show -p MainPID --value "$unit" 2>/dev/null || echo 0)"
+    if [[ "$runner_main_pid" == "0" || ! -r "/proc/$runner_main_pid/environ" ]]; then
+        return 1
+    fi
+    while IFS= read -r -d '' env_line || [[ -n "$env_line" ]]; do
+        case "$env_line" in
+            CLAUDE_CODE_OAUTH_TOKEN=*)
+                ambient_tok="${env_line#CLAUDE_CODE_OAUTH_TOKEN=}"
+                ;;
+        esac
+    done <"/proc/$runner_main_pid/environ"
+    [[ -n "$ambient_tok" ]]
+}
+
 case "$PROFILE" in
     primary-soup|fleet-binary)
         HUB_DST="/etc/systemd/system/$HUB_UNIT"
@@ -286,6 +309,12 @@ case "$PROFILE" in
             echo "       hapi-runner-watchdog.timer was stopped for this upgrade and left stopped." >&2
             exit 1
         fi
+        if hapi_system_runner_ambient_oauth_unpersisted "$CLAUDE_TOKEN_FILE" "$RUNNER_UNIT"; then
+            echo "ERROR: runner has ambient CLAUDE_CODE_OAUTH_TOKEN but $CLAUDE_TOKEN_FILE is missing/empty" >&2
+            echo "       Persist the token before enabling the watchdog or you will discard the only credential." >&2
+            echo "       hapi-runner-watchdog.timer was stopped for this upgrade and left stopped." >&2
+            exit 1
+        fi
         if [[ "$UNITS_ONLY" -eq 0 ]]; then
             # Pass the binary this profile just installed, so Tier-1's
             # ExecStartPre stop is valid on THIS host. Without it Tier-1 would
@@ -334,25 +363,10 @@ case "$PROFILE" in
                         break
                     fi
                 done < <(hapi_claude_oauth_legacy_system_token_candidates "$PROFILE" "$HAPI_HOME" "$op_home")
-                # Ambient-only: runner process still carries a token but no file
-                # exists to reload it. Restart would discard the only credential.
-                if [[ "$block_restart" -eq 0 ]]; then
-                    runner_main_pid="$(systemctl show -p MainPID --value "$RUNNER_UNIT" 2>/dev/null || echo 0)"
-                    if [[ "$runner_main_pid" != "0" && -r "/proc/$runner_main_pid/environ" ]]; then
-                        ambient_tok=""
-                        while IFS= read -r -d '' env_line || [[ -n "$env_line" ]]; do
-                            case "$env_line" in
-                                CLAUDE_CODE_OAUTH_TOKEN=*)
-                                    ambient_tok="${env_line#CLAUDE_CODE_OAUTH_TOKEN=}"
-                                    ;;
-                            esac
-                        done <"/proc/$runner_main_pid/environ"
-                        if [[ -n "$ambient_tok" ]]; then
-                            block_restart=1
-                            echo "ERROR: runner MainPID=$runner_main_pid has ambient CLAUDE_CODE_OAUTH_TOKEN but $CLAUDE_TOKEN_FILE is missing/empty" >&2
-                            echo "       Persist the token to $CLAUDE_TOKEN_FILE before --restart or you will discard the only credential." >&2
-                        fi
-                    fi
+                if hapi_system_runner_ambient_oauth_unpersisted "$CLAUDE_TOKEN_FILE" "$RUNNER_UNIT"; then
+                    block_restart=1
+                    echo "ERROR: runner has ambient CLAUDE_CODE_OAUTH_TOKEN but $CLAUDE_TOKEN_FILE is missing/empty" >&2
+                    echo "       Persist the token to $CLAUDE_TOKEN_FILE before --restart or you will discard the only credential." >&2
                 fi
             fi
             if [[ "$block_restart" -eq 1 ]]; then
@@ -370,6 +384,12 @@ case "$PROFILE" in
         # --units-only skips Tier-1 (which restarts the timer). After a successful
         # migrate, put back a timer we quiesced.
         if [[ "$UNITS_ONLY" -eq 1 && "${WD_TIMER_WAS_ACTIVE:-0}" -eq 1 ]]; then
+            if hapi_system_runner_ambient_oauth_unpersisted "$CLAUDE_TOKEN_FILE" "$RUNNER_UNIT"; then
+                echo "ERROR: runner has ambient CLAUDE_CODE_OAUTH_TOKEN but $CLAUDE_TOKEN_FILE is missing/empty" >&2
+                echo "       Persist the token before restoring the watchdog timer." >&2
+                echo "       hapi-runner-watchdog.timer was left stopped." >&2
+                exit 1
+            fi
             systemctl start hapi-runner-watchdog.timer 2>/dev/null || true
         fi
         ;;

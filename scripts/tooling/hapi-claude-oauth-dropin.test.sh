@@ -405,6 +405,12 @@ check "verify oauth gate precedes watchdog kick" \
     "awk '/^OAUTH_RESTART_SAFE=1/ {o=NR} /start hapi-runner-watchdog.service/ {w=NR} END {exit !(o && w && o<w)}' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
 check "verify skips watchdog kick when oauth unsafe" \
     "grep -q 'skipped watchdog kick' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
+check "verify audits FragmentPath and DropInPaths" \
+    "grep -q 'DropInPaths' \"$ROOT/scripts/tooling/verify-hapi-install.sh\" && grep -q 'loaded unit fragment' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
+check "verify refuses later EnvironmentFile oauth override" \
+    "grep -q 'overrides CLAUDE_CODE_OAUTH_TOKEN after canonical token' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
+check "installer checks ambient oauth before watchdog tier1" \
+    "python3 -c 't=open(\"$ROOT/scripts/tooling/install-hapi-systemd-units.sh\").read(); c=t.find(\"if hapi_system_runner_ambient_oauth_unpersisted\"); n=t.find(\"install-hapi-primary-hub-tier1.sh\\\"\"); raise SystemExit(0 if 0<=c<n else 1)'"
 check "toggle rejects symlink slot credentials" \
     "grep -q 'refusing symlink slot credentials' \"$ROOT/scripts/tooling/hapi-claude-account-toggle.sh\""
 check "effective token parser joins EnvironmentFile continuations" \

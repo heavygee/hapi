@@ -278,6 +278,50 @@ if [[ "$SCOPE" == system ]]; then
         OAUTH_RESTART_SAFE=0
     fi
 
+    # Loaded fragments can live outside ${RUNNER_UNIT}.d (FragmentPath, /run,
+    # /usr/lib). systemd.unit(5): DropInPaths is the resolved set. Require each
+    # loaded fragment to be a root-owned, non-group/other-writable regular file
+    # before watchdog kick or restart would exec it.
+    hapi_verify_audit_loaded_fragments() {
+        local unit="$1" frag dropins path owner uid mode
+        frag="$("${CTL[@]}" show "$unit" -p FragmentPath --value 2>/dev/null || true)"
+        dropins="$("${CTL[@]}" show "$unit" -p DropInPaths --value 2>/dev/null || true)"
+        for path in $frag $dropins; do
+            [[ -n "$path" ]] || continue
+            if [[ -L "$path" ]]; then
+                not_ok "loaded unit fragment is a symlink ($unit $path) — refusing restart"
+                SYSTEM_OAUTH_SAFE=0
+                OAUTH_RESTART_SAFE=0
+                continue
+            fi
+            if [[ ! -f "$path" ]]; then
+                not_ok "loaded unit fragment is not a regular file ($unit $path) — refusing restart"
+                SYSTEM_OAUTH_SAFE=0
+                OAUTH_RESTART_SAFE=0
+                continue
+            fi
+            uid="$(stat -c '%u' "$path" 2>/dev/null || true)"
+            mode="$(stat -c '%a' "$path" 2>/dev/null || true)"
+            owner="$(stat -c '%U:%G' "$path" 2>/dev/null || true)"
+            if [[ "$uid" != "0" ]]; then
+                not_ok "loaded unit fragment is not root-owned ($unit $path got ${owner:-unknown}) — refusing restart"
+                SYSTEM_OAUTH_SAFE=0
+                OAUTH_RESTART_SAFE=0
+                continue
+            fi
+            if [[ -n "$mode" ]] && (( (8#$mode & 022) != 0 )); then
+                not_ok "loaded unit fragment is group/other-writable ($unit $path mode $mode) — refusing restart"
+                SYSTEM_OAUTH_SAFE=0
+                OAUTH_RESTART_SAFE=0
+                continue
+            fi
+            ok "loaded unit fragment is root-owned non-writable ($unit $path)"
+        done
+    }
+    hapi_verify_audit_loaded_fragments "$RUNNER_UNIT"
+    hapi_verify_audit_loaded_fragments "$HUB_UNIT"
+    unset -f hapi_verify_audit_loaded_fragments
+
     # Canonical token node + parent before restart: systemd reads EnvironmentFile
     # as root; a symlink or service-writable /etc/hapi must not be loaded first.
     pre_token="/etc/hapi/claude-setup-token.env"
@@ -361,6 +405,33 @@ elif [[ "$pre_env_files_all" != *claude-setup-token.env* ]]; then
     not_ok "durable Claude OAuth token at ${pre_ambient_token} is not wired into ${RUNNER_UNIT} EnvironmentFiles — refusing restart"
     OAUTH_RESTART_SAFE=0
     SYSTEM_OAUTH_SAFE=0
+else
+    # systemd last-assignment-wins across EnvironmentFiles. A later file that
+    # sets CLAUDE_CODE_OAUTH_TOKEN (including empty) overrides the canonical
+    # token — refuse restart so we do not replace a working ambient login.
+    saw_canon_env=0
+    while IFS= read -r ef_path; do
+        ef_path="${ef_path#"${ef_path%%[![:space:]]*}"}"
+        ef_path="${ef_path%"${ef_path##*[![:space:]]}"}"
+        [[ -n "$ef_path" ]] || continue
+        if [[ "$ef_path" == *claude-setup-token.env ]]; then
+            saw_canon_env=1
+            continue
+        fi
+        [[ "$saw_canon_env" -eq 1 ]] || continue
+        [[ -e "$ef_path" || -L "$ef_path" ]] || continue
+        if [[ -L "$ef_path" ]]; then
+            not_ok "later EnvironmentFile is a symlink ($ef_path) after canonical token — refusing restart"
+            OAUTH_RESTART_SAFE=0
+            SYSTEM_OAUTH_SAFE=0
+            continue
+        fi
+        if [[ -f "$ef_path" ]] && grep -qE '^[[:space:]]*CLAUDE_CODE_OAUTH_TOKEN=' "$ef_path" 2>/dev/null; then
+            not_ok "later EnvironmentFile $ef_path overrides CLAUDE_CODE_OAUTH_TOKEN after canonical token — refusing restart"
+            OAUTH_RESTART_SAFE=0
+            SYSTEM_OAUTH_SAFE=0
+        fi
+    done < <(printf '%s' "$pre_env_files_all" | sed -E 's/ \(ignore_errors=(yes|no)\)/\n/g')
 fi
 
 # --- 3. Watchdog journal fire (system scope) -------------------------------
