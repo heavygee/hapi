@@ -702,5 +702,22 @@ chmod 600 "$cont_file"
 got="$(hapi_claude_oauth_effective_token_value "$cont_file")"
 check "effective token joins unquoted continuation" "[[ \"$got\" == \"abcdef\" ]]"
 check "continuation file is treated as durable" "hapi_claude_oauth_has_effective_token \"$cont_file\""
+qfile="$TMP/quoted-cont.env"
+printf '%s\n' 'CLAUDE_CODE_OAUTH_TOKEN="abc' 'def"' >"$qfile"
+chmod 600 "$qfile"
+got_q="$(PATH="$no_py" hapi_claude_oauth_effective_token_value "$qfile")"
+if [[ "$got_q" == $'abc\ndef' ]]; then echo "OK: bash fallback joins quoted EnvironmentFile newlines"; else
+    echo "FAIL: bash fallback quoted newline (got=$(printf %q "$got_q"))" >&2; exit 1
+fi
+check "pet embedded parser tracks quoted continuations" \
+    "grep -q 'hapi_claude_oauth_env_line_state' \"$ROOT/scripts/install-hapi-pet.sh\""
+check "verify UnsetEnvironment refuses restart" \
+    "grep -q 'UnsetEnvironment removes CLAUDE_CODE_OAUTH_TOKEN' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
+check "verify later EnvironmentFile root-control is system-scope" \
+    "python3 -c 'from pathlib import Path; t=Path(\"$ROOT/scripts/tooling/verify-hapi-install.sh\").read_text(); i=t.find(\"later EnvironmentFile parent is not root-controlled\"); c=t[max(0,i-250):i]; raise SystemExit(0 if \"SCOPE\" in c and \"system\" in c else 1)'"
+check "verify user token requires runner-owned 0600" \
+    "grep -q 'user Claude OAuth token must be owned by the runner account mode 0600' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
+check "installer fails closed if watchdog quiesce fails" \
+    "grep -q 'failed to stop hapi-runner-watchdog.timer before unit rewrite' \"$ROOT/scripts/tooling/install-hapi-systemd-units.sh\" && ! grep -q 'stop hapi-runner-watchdog.timer 2>/dev/null || true' \"$ROOT/scripts/tooling/install-hapi-systemd-units.sh\""
 
 echo "ALL OK"

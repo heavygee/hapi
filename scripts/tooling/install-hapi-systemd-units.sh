@@ -261,8 +261,26 @@ case "$PROFILE" in
         if systemctl is-active --quiet hapi-runner-watchdog.timer 2>/dev/null; then
             WD_TIMER_WAS_ACTIVE=1
         fi
-        systemctl stop hapi-runner-watchdog.timer 2>/dev/null || true
-        systemctl stop hapi-runner-watchdog.service 2>/dev/null || true
+        if systemctl cat hapi-runner-watchdog.timer >/dev/null 2>&1; then
+            if ! systemctl stop hapi-runner-watchdog.timer; then
+                echo "ERROR: failed to stop hapi-runner-watchdog.timer before unit rewrite" >&2
+                exit 1
+            fi
+            if systemctl is-active --quiet hapi-runner-watchdog.timer; then
+                echo "ERROR: hapi-runner-watchdog.timer still active after stop" >&2
+                exit 1
+            fi
+        fi
+        if systemctl cat hapi-runner-watchdog.service >/dev/null 2>&1; then
+            if ! systemctl stop hapi-runner-watchdog.service; then
+                echo "ERROR: failed to stop hapi-runner-watchdog.service before unit rewrite" >&2
+                exit 1
+            fi
+            if systemctl is-active --quiet hapi-runner-watchdog.service; then
+                echo "ERROR: hapi-runner-watchdog.service still active after stop" >&2
+                exit 1
+            fi
+        fi
         render_pair \
             "$TEMPLATE_DIR/$HUB_UNIT.in" \
             "$TEMPLATE_DIR/$RUNNER_UNIT.in" \

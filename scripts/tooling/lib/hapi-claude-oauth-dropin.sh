@@ -817,6 +817,110 @@ hapi_claude_oauth_parse_env_file_value() {
     return 0
 }
 
+# Bash EnvironmentFile line-state (mirrors env_line_state in the python parser):
+# open quote + whether a trailing unquoted/double-quoted backslash continues.
+hapi_claude_oauth_env_line_state() {
+    local buf="${1-}"
+    HAPI_EF_QUOTE=""
+    HAPI_EF_CONT_BS=0
+    [[ "$buf" == *"="* ]] || return 0
+    local val="${buf#*=}"
+    val="${val#"${val%%[![:space:]]*}"}"
+    local i=0 c quote=""
+    while (( i < ${#val} )); do
+        c="${val:i:1}"
+        if [[ -z "$quote" ]]; then
+            if [[ "$c" == "'" ]]; then
+                quote="'"
+            elif [[ "$c" == '"' ]]; then
+                quote='"'
+            elif [[ "$c" == '\' ]]; then
+                if (( i + 1 >= ${#val} )); then
+                    HAPI_EF_CONT_BS=1
+                    return 0
+                fi
+                i=$((i + 2))
+                continue
+            fi
+            i=$((i + 1))
+            continue
+        fi
+        if [[ "$quote" == "'" ]]; then
+            [[ "$c" == "'" ]] && quote=""
+            i=$((i + 1))
+            continue
+        fi
+        if [[ "$c" == '\' ]]; then
+            if (( i + 1 >= ${#val} )); then
+                HAPI_EF_QUOTE='"'
+                HAPI_EF_CONT_BS=1
+                return 0
+            fi
+            i=$((i + 2))
+            continue
+        fi
+        [[ "$c" == '"' ]] && quote=""
+        i=$((i + 1))
+    done
+    HAPI_EF_QUOTE="$quote"
+    HAPI_EF_CONT_BS=0
+}
+
+# Last CLAUDE_CODE_OAUTH_TOKEN via bash coalesce (quoted newlines + trailing \).
+hapi_claude_oauth_bash_last_oauth_token() {
+    local token_file="${1:?token_file}"
+    local line raw last="" parsed logical="" join_nl=0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%$'\r'}"
+        if [[ -z "$logical" ]]; then
+            logical="$line"
+        elif [[ "$join_nl" -eq 1 ]]; then
+            logical+=$'\n'"$line"
+        else
+            logical+="$line"
+        fi
+        hapi_claude_oauth_env_line_state "$logical"
+        if [[ "$HAPI_EF_CONT_BS" -eq 1 && "$logical" == *\\ ]]; then
+            logical="${logical%\\}"
+            join_nl=0
+            continue
+        fi
+        if [[ -n "$HAPI_EF_QUOTE" ]]; then
+            join_nl=1
+            continue
+        fi
+        case "$logical" in
+            CLAUDE_CODE_OAUTH_TOKEN=*)
+                raw="${logical#CLAUDE_CODE_OAUTH_TOKEN=}"
+                if parsed="$(hapi_claude_oauth_parse_env_file_value "$raw")"; then
+                    last="$parsed"
+                else
+                    last=""
+                fi
+                ;;
+        esac
+        logical=""
+        join_nl=0
+    done <"$token_file"
+    if [[ -n "$logical" ]]; then
+        case "$logical" in
+            CLAUDE_CODE_OAUTH_TOKEN=*)
+                raw="${logical#CLAUDE_CODE_OAUTH_TOKEN=}"
+                if parsed="$(hapi_claude_oauth_parse_env_file_value "$raw")"; then
+                    last="$parsed"
+                else
+                    last=""
+                fi
+                ;;
+        esac
+    fi
+    if [[ -z "$last" ]]; then
+        return 2
+    fi
+    printf '%s' "$last"
+    return 0
+}
+
 # Last effective CLAUDE_CODE_OAUTH_TOKEN= value (systemd last-assignment-wins),
 # after systemd-compatible unquote/unescape. Empty / whitespace-only → unset (exit 2).
 hapi_claude_oauth_effective_token_value() {
@@ -972,50 +1076,9 @@ PY
         return $?
     fi
 
-    # Bash fallback (pet / minimal hosts without python3).
-    # Join unquoted EnvironmentFile continuations (trailing \ eats newline).
-    local line raw last="" parsed logical="" cont=0
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        line="${line%$'\r'}"
-        if [[ "$cont" -eq 1 ]]; then
-            logical+="$line"
-        else
-            logical="$line"
-        fi
-        if [[ "$logical" == *\\ ]]; then
-            logical="${logical%\\}"
-            cont=1
-            continue
-        fi
-        cont=0
-        case "$logical" in
-            CLAUDE_CODE_OAUTH_TOKEN=*)
-                raw="${logical#CLAUDE_CODE_OAUTH_TOKEN=}"
-                if parsed="$(hapi_claude_oauth_parse_env_file_value "$raw")"; then
-                    last="$parsed"
-                else
-                    last=""
-                fi
-                ;;
-        esac
-    done <"$token_file"
-    if [[ "$cont" -eq 1 ]]; then
-        case "$logical" in
-            CLAUDE_CODE_OAUTH_TOKEN=*)
-                raw="${logical#CLAUDE_CODE_OAUTH_TOKEN=}"
-                if parsed="$(hapi_claude_oauth_parse_env_file_value "$raw")"; then
-                    last="$parsed"
-                else
-                    last=""
-                fi
-                ;;
-        esac
-    fi
-    if [[ -z "$last" ]]; then
-        return 2
-    fi
-    printf '%s' "$last"
-    return 0
+    # Bash fallback (pet / minimal hosts without python3): quoted newlines and
+    # trailing-backslash continuations (systemd.exec(5)).
+    hapi_claude_oauth_bash_last_oauth_token "$token_file"
 }
 
 # True when the final EnvironmentFile assignment is a nonempty token.
