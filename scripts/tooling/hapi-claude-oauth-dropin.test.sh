@@ -506,6 +506,10 @@ check "pet preflight blocks ambient-only stop" \
     "grep -q 'refuse stop/restart; persist the token first' \"$ROOT/scripts/install-hapi-pet.sh\""
 check "pet preflight runs without --with-systemd for canonical" \
     "awk '/_preflight_token_shape \"\\\$\{HAPI_HOME\}\/claude-setup-token.env\"/,/WITH_SYSTEMD/ {print}' \"$ROOT/scripts/install-hapi-pet.sh\" | head -1 | grep -q preflight"
+check "pet migrates legacy oauth before stop for nohup" \
+    "awk '/hapi_pet_migrate_legacy_oauth_if_needed \"\\\$\{HAPI_HOME\}\/claude-setup-token.env\"/,/Found running hapi process/ {print}' \"$ROOT/scripts/install-hapi-pet.sh\" | head -1 | grep -q migrate"
+check "pet nohup launch migrates legacy before export" \
+    "awk '/Without: nohup/,/Runner started/ {print}' \"$ROOT/scripts/install-hapi-pet.sh\" | grep -q 'hapi_pet_migrate_legacy_oauth_if_needed'"
 check "verify refuses ambient-only restart" \
     "grep -q 'has ambient CLAUDE_CODE_OAUTH_TOKEN but' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
 check "verify peer detection requires cgroup association" \

@@ -378,11 +378,11 @@ log "New binary fetched and verified runnable."
 
 # --- 3b. Preflight Claude OAuth token shape BEFORE stopping anything.
 #     Applies to BOTH --with-systemd and nohup upgrades: a symlink/non-regular
-#     canonical token must fail here — not after section 4 killed the old
-#     authenticated runner and left a replacement without CLAUDE_CODE_OAUTH_TOKEN.
-#     Include the legacy migrate source (${HAPI_HOME}/.hapi/...) for systemd path.
-#     Also reject symlink *ancestors* (e.g. .hapi → elsewhere): final-node -f
-#     follows them and would greenlight a path migrate later refuses.
+#     canonical (or legacy) token must fail here — not after section 4 killed the
+#     old authenticated runner and left a replacement without CLAUDE_CODE_OAUTH_TOKEN.
+#     Also migrate legacy → canonical here so nohup launch (canon-only) keeps auth.
+#     Reject symlink *ancestors* (e.g. .hapi → elsewhere): final-node -f follows
+#     them and would greenlight a path migrate later refuses.
 _preflight_token_ancestors() {
     local path="$1"
     if declare -F hapi_claude_oauth_assert_no_symlink_ancestors >/dev/null 2>&1; then
@@ -418,11 +418,14 @@ _preflight_token_shape() {
         fail "refusing non-regular token file: $path (write a regular 0600 file) — refusing before stop so the old install stays up"
     fi
 }
-# Canonical always (nohup + systemd). Legacy only matters for systemd migrate.
+# Canonical + legacy shape for both nohup and systemd — nohup launch only loads
+# canon, so a bad legacy node must fail here before migrate/stop, not after.
 _preflight_token_shape "${HAPI_HOME}/claude-setup-token.env"
-if [[ "$WITH_SYSTEMD" -eq 1 ]]; then
-    _preflight_token_shape "${HAPI_HOME}/.hapi/claude-setup-token.env"
-fi
+_preflight_token_shape "${HAPI_HOME}/.hapi/claude-setup-token.env"
+# Promote legacy → canonical BEFORE stop. Systemd drop-in and nohup launch both
+# read only ${HAPI_HOME}/claude-setup-token.env; treating legacy as "durable"
+# without this migrate lets stop succeed then start an unauthenticated runner.
+hapi_pet_migrate_legacy_oauth_if_needed "${HAPI_HOME}/claude-setup-token.env"
 
 # Ambient-only guard: if no durable token file exists but a live runner still
 # carries CLAUDE_CODE_OAUTH_TOKEN, refuse to stop — restart would discard it.
@@ -431,10 +434,8 @@ _pre_legacy="${HAPI_HOME}/.hapi/claude-setup-token.env"
 _pre_durable=0
 if ( hapi_pet_export_oauth_from_env_file "$_pre_canon" >/dev/null 2>&1 ); then
     _pre_durable=1
-elif [[ "$WITH_SYSTEMD" -eq 1 ]] && ( hapi_pet_export_oauth_from_env_file "$_pre_legacy" >/dev/null 2>&1 ); then
-    _pre_durable=1
-elif [[ "$WITH_SYSTEMD" -eq 0 ]] && ( hapi_pet_export_oauth_from_env_file "$_pre_legacy" >/dev/null 2>&1 ); then
-    # Nohup path also loads legacy if present via export helper elsewhere — treat as durable.
+elif ( hapi_pet_export_oauth_from_env_file "$_pre_legacy" >/dev/null 2>&1 ); then
+    # Migrate should have cleared this; keep as failsafe so we still refuse stop.
     _pre_durable=1
 fi
 if [[ "$_pre_durable" -eq 0 ]]; then
@@ -537,6 +538,9 @@ else
     # runner starts in "legacy mode" with no directory restriction, which defeats the point
     # of having a dedicated workspace dir at all.
     # Load Claude OAuth literally from EnvironmentFile (do NOT source the file).
+    # Legacy was migrated to canon in §3b; re-run migrate here so a mid-script
+    # drop of only `.hapi/...` still reaches the nohup runner env.
+    hapi_pet_migrate_legacy_oauth_if_needed "${HAPI_HOME}/claude-setup-token.env"
     (
         if [[ -f "$HAPI_HOME/claude-setup-token.env" && ! -L "$HAPI_HOME/claude-setup-token.env" ]]; then
             chmod 600 "$HAPI_HOME/claude-setup-token.env"
