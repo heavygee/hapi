@@ -83,15 +83,21 @@ TS="$(date -u +%Y%m%d%H%M%S)"
 mkdir -p "$HOME/.claude" "$HOME/.hapi" "$ROOT/auth-bak"
 prev_cred="$ROOT/auth-bak/.credentials.json.bak-toggle-$TS"
 cred_existed_before=0
-# Reject symlink active credentials before any CANON mutation — GNU cp -a follows
-# the destination symlink and would overwrite its target; rollback then only
-# removes the symlink leaf and leaves interactive creds destroyed.
-if [[ -L "$HOME/.claude/.credentials.json" ]]; then
-    echo "ERROR: refusing symlink interactive credentials: $HOME/.claude/.credentials.json" >&2
-    echo "       Replace with a regular file (or remove the symlink), then re-run toggle." >&2
-    exit 1
-fi
-if [[ -f "$HOME/.claude/.credentials.json" ]]; then
+# Reject non-regular active credentials before any CANON mutation — GNU cp -a
+# follows a destination symlink (overwrites its target) and copies *into* a
+# directory node, so toggle would switch CANON while Claude still has no file
+# and rollback would not restore a usable credentials path.
+if [[ -e "$HOME/.claude/.credentials.json" || -L "$HOME/.claude/.credentials.json" ]]; then
+    if [[ -L "$HOME/.claude/.credentials.json" ]]; then
+        echo "ERROR: refusing symlink interactive credentials: $HOME/.claude/.credentials.json" >&2
+        echo "       Replace with a regular file (or remove the symlink), then re-run toggle." >&2
+        exit 1
+    fi
+    if [[ ! -f "$HOME/.claude/.credentials.json" ]]; then
+        echo "ERROR: refusing non-regular interactive credentials: $HOME/.claude/.credentials.json" >&2
+        echo "       Replace with a regular file, then re-run toggle." >&2
+        exit 1
+    fi
     cred_existed_before=1
     cp -f "$HOME/.claude/.credentials.json" "$prev_cred"
 fi

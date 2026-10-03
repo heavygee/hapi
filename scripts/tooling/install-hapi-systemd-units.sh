@@ -407,14 +407,16 @@ case "$PROFILE" in
         if [[ "$DO_ENABLE" -eq 1 ]]; then
             loginctl enable-linger "$(id -un)" 2>/dev/null || true
             systemctl --user enable hapi-hub.service hapi-runner.service
-            systemctl --user start hapi-hub.service
             # Same race as the embedded pet path: pgrep kill + Restart=always can
-            # leave an already-active pre-drop-in runner; start is then a no-op.
+            # respawn the old hub/runner binary before INSTALL_DIR is swapped;
+            # systemctl start is then a no-op for already-active units.
             hapi_user_pet_refuse_ambient_only_restart "$CLAUDE_TOKEN_FILE" || exit 1
+            systemctl --user restart hapi-hub.service
             systemctl --user restart hapi-runner.service
         elif [[ "$DO_RESTART" -eq 1 ]] && systemctl --user is-active --quiet hapi-runner.service 2>/dev/null; then
             # Config-only reruns must not yank MainPID unless the operator asked.
             hapi_user_pet_refuse_ambient_only_restart "$CLAUDE_TOKEN_FILE" || exit 1
+            systemctl --user restart hapi-hub.service
             systemctl --user restart hapi-runner.service
         fi
         unset -f hapi_user_pet_refuse_ambient_only_restart

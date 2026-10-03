@@ -436,6 +436,13 @@ if ! hapi_claude_oauth_has_effective_token "${pre_ambient_token:-}" 2>/dev/null;
             SYSTEM_OAUTH_SAFE=0
         fi
     fi
+elif [[ "$pre_env_files_all" != *claude-setup-token.env* ]]; then
+    # Durable token exists but the unit has not loaded it (missing drop-in or
+    # no daemon-reload). Restart would discard ambient auth with nothing to
+    # reload — refuse until EnvironmentFiles references the token.
+    not_ok "durable Claude OAuth token at ${pre_ambient_token} is not wired into ${RUNNER_UNIT} EnvironmentFiles — refusing restart"
+    OAUTH_RESTART_SAFE=0
+    SYSTEM_OAUTH_SAFE=0
 fi
 
 if [[ "$SKIP_RESTART" -eq 0 ]]; then

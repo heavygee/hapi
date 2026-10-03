@@ -398,11 +398,17 @@ check "secure_copy retries short writes" \
 check "companion passes --unit-dir for user-pet drop-in" \
     "grep -A6 'hapi_install_claude_oauth_dropin' \"$ROOT/scripts/tooling/install-hapi-systemd-units.sh\" | grep -q -- '--unit-dir'"
 check "verify validates system drop-in before restart" \
-    "awk '/SYSTEM_OAUTH_SAFE=1/,/SKIP_RESTART/ {print}' \"$ROOT/scripts/tooling/verify-hapi-install.sh\" | grep -q 'refusing restart'"
+    "awk '/SYSTEM_OAUTH_SAFE=1/,/SKIP_RESTART/ { if (/refusing restart/) { found=1; exit } } END { exit !found }' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
 check "verify validates drop-in directory even when file absent" \
     "grep -q 'drop-in directory must be root-controlled' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
 check "verify validates token before restart" \
     "grep -q 'token file must be root:root 0600 before restart' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
+check "verify refuses restart when token not in EnvironmentFiles" \
+    "grep -q 'not wired into' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
+check "pet systemd path restarts hub on upgrade" \
+    "grep -q 'systemctl --user restart hapi-hub.service' \"$ROOT/scripts/install-hapi-pet.sh\""
+check "toggle rejects non-regular interactive credentials" \
+    "grep -q 'refusing non-regular interactive credentials' \"$ROOT/scripts/tooling/hapi-claude-account-toggle.sh\""
 check "secure_copy uses no-follow dirfds" \
     "grep -q 'open_via_nofollow_dirfds' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\""
 check "secure_copy bounds legacy token size" \

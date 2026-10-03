@@ -342,11 +342,12 @@ EOF
     systemctl --user daemon-reload
     loginctl enable-linger "$(id -un)" 2>/dev/null || true
     systemctl --user enable hapi-hub.service hapi-runner.service
-    systemctl --user start hapi-hub.service
-    # Always restart the runner AFTER the drop-in is written. On upgrades the
-    # earlier pgrep kill + Restart=always can respawn a pre-drop-in process;
-    # systemctl start is then a no-op and fresh UI sessions never see OAuth.
-    # Refuse restart when MainPID still holds ambient-only auth (no durable file).
+    # Always restart hub+runner AFTER units/drop-in are written. On upgrades
+    # section 4's pgrep kill + Restart=always can respawn the *old* binary
+    # before INSTALL_DIR is swapped; systemctl start is then a no-op for the
+    # already-active unit and the hub keeps running the deleted executable
+    # while only the runner would get the new binary.
+    # Refuse runner restart when MainPID still holds ambient-only auth.
     if ! ( hapi_pet_export_oauth_from_env_file "$token_file" >/dev/null 2>&1 ); then
         local _rp _amb="" _eline
         _rp="$(systemctl --user show -p MainPID --value hapi-runner.service 2>/dev/null || echo 0)"
@@ -361,6 +362,7 @@ EOF
             fi
         fi
     fi
+    systemctl --user restart hapi-hub.service
     systemctl --user restart hapi-runner.service
     log "Installed: $unit_dir/hapi-hub.service"
     log "Installed: $unit_dir/hapi-runner.service"
