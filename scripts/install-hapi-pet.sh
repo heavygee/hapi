@@ -114,7 +114,7 @@ if ! declare -F hapi_claude_oauth_parse_env_file_value >/dev/null 2>&1; then
                     if [[ "$c" == '\' && $((i + 1)) -lt ${#raw} ]]; then
                         nxt="${raw:i+1:1}"
                         case "$nxt" in
-                            '\\'|'"'|'`'|'$') out+="$nxt" ;;
+                            "\\"|'"'|'`'|'$') out+="$nxt" ;;
                             *) out+="\\$nxt" ;;
                         esac
                         i=$((i + 2)); continue
@@ -146,29 +146,45 @@ if ! declare -F hapi_claude_oauth_env_line_state >/dev/null 2>&1; then
         [[ "$buf" == *"="* ]] || return 0
         local val="${buf#*=}"
         val="${val#"${val%%[![:space:]]*}"}"
-        local i=0 c quote=""
+        local i=0 c quote="" pre=1
         while (( i < ${#val} )); do
             c="${val:i:1}"
             if [[ -z "$quote" ]]; then
-                if [[ "$c" == "'" ]]; then
-                    quote="'"
-                elif [[ "$c" == '"' ]]; then
-                    quote='"'
-                elif [[ "$c" == '\' ]]; then
+                if [[ "$pre" -eq 1 ]]; then
+                    if [[ "$c" =~ [[:space:]] ]]; then
+                        i=$((i + 1)); continue
+                    fi
+                    if [[ "$c" == "'" ]]; then
+                        quote="'"; i=$((i + 1)); continue
+                    fi
+                    if [[ "$c" == '"' ]]; then
+                        quote='"'; i=$((i + 1)); continue
+                    fi
+                    if [[ "$c" == '\' ]]; then
+                        pre=0
+                        if (( i + 1 >= ${#val} )); then
+                            HAPI_EF_CONT_BS=1
+                            return 0
+                        fi
+                        i=$((i + 2)); continue
+                    fi
+                    pre=0
+                    i=$((i + 1)); continue
+                fi
+                if [[ "$c" == '\' ]]; then
                     if (( i + 1 >= ${#val} )); then
                         HAPI_EF_CONT_BS=1
                         return 0
                     fi
-                    i=$((i + 2))
-                    continue
+                    i=$((i + 2)); continue
                 fi
-                i=$((i + 1))
-                continue
+                i=$((i + 1)); continue
             fi
             if [[ "$quote" == "'" ]]; then
-                [[ "$c" == "'" ]] && quote=""
-                i=$((i + 1))
-                continue
+                if [[ "$c" == "'" ]]; then
+                    quote=""; pre=1
+                fi
+                i=$((i + 1)); continue
             fi
             if [[ "$c" == '\' ]]; then
                 if (( i + 1 >= ${#val} )); then
@@ -176,10 +192,11 @@ if ! declare -F hapi_claude_oauth_env_line_state >/dev/null 2>&1; then
                     HAPI_EF_CONT_BS=1
                     return 0
                 fi
-                i=$((i + 2))
-                continue
+                i=$((i + 2)); continue
             fi
-            [[ "$c" == '"' ]] && quote=""
+            if [[ "$c" == '"' ]]; then
+                quote=""; pre=1
+            fi
             i=$((i + 1))
         done
         HAPI_EF_QUOTE="$quote"
@@ -301,6 +318,47 @@ hapi_pet_mainpid_oauth() {
     done
     exec {efd}<&-
     [[ -n "$tok" ]]
+}
+
+hapi_pet_assert_runner_owned_dir() {
+    local d="${1:?dir}"
+    local want="${2:?uid}"
+    local uid mode
+    if [[ -L "$d" ]]; then
+        fail "user token parent is a symlink: $d"
+    fi
+    if [[ ! -d "$d" ]]; then
+        fail "user token parent is not a directory: $d"
+    fi
+    uid="$(stat -c '%u' "$d" 2>/dev/null || true)"
+    mode="$(stat -c '%a' "$d" 2>/dev/null || true)"
+    if [[ "$uid" != "$want" ]]; then
+        fail "user token parent $d is owned by uid ${uid:-unknown} (must be runner uid $want)"
+    fi
+    if [[ -z "$mode" ]] || (( (8#$mode & 022) != 0 )); then
+        fail "user token parent $d is group/other-writable (mode ${mode:-unknown})"
+    fi
+}
+
+hapi_pet_assert_user_token_parents() {
+    local token_file="${1:?token_file}"
+    local want_uid="${2:-$(id -u)}"
+    local home="${HOME:-}"
+    local cur
+    if declare -F hapi_claude_oauth_assert_user_token_parents >/dev/null 2>&1; then
+        hapi_claude_oauth_assert_user_token_parents "$token_file" "$want_uid" \
+            || fail "user token parent is not runner-owned / is group-or-other-writable"
+        return 0
+    fi
+    cur="$(dirname -- "$token_file")"
+    hapi_pet_assert_runner_owned_dir "$cur" "$want_uid"
+    while [[ -n "$home" && "$cur" == "$home"/* ]]; do
+        cur="$(dirname -- "$cur")"
+        hapi_pet_assert_runner_owned_dir "$cur" "$want_uid"
+        if [[ "$cur" == "$home" ]]; then
+            return 0
+        fi
+    done
 }
 
 # Migrate ${HAPI_HOME}/.hapi/claude-setup-token.env → canonical before the
@@ -457,16 +515,31 @@ EOF
     # Claude OAuth EnvironmentFile drop-in (same shape as fleet/oos). Leading
     # '-' means the unit still starts before the operator mints a setup-token.
     local token_file="${HAPI_HOME}/claude-setup-token.env"
-    mkdir -p "$unit_dir/hapi-runner.service.d" "$HAPI_HOME"
+    mkdir -p "$unit_dir/hapi-runner.service.d"
+    if [[ ! -d "$HAPI_HOME" ]]; then
+        mkdir -m 0700 -p "$HAPI_HOME" || fail "cannot create $HAPI_HOME"
+    fi
+    hapi_pet_assert_user_token_parents "$token_file"
     # Migrate legacy nohup path BEFORE writing the drop-in / restarting — otherwise
     # EnvironmentFile points at a missing canon and the runner loses ambient auth.
     hapi_pet_migrate_legacy_oauth_if_needed "$token_file"
-    cat >"$unit_dir/hapi-runner.service.d/42-claude-oauth-token.conf" <<EOF
+    local dropin="$unit_dir/hapi-runner.service.d/42-claude-oauth-token.conf"
+    if [[ -L "$dropin" ]]; then
+        fail "refusing symlink drop-in: $dropin"
+    fi
+    if [[ -e "$dropin" && ! -f "$dropin" ]]; then
+        fail "refusing non-regular drop-in: $dropin"
+    fi
+    local dropin_tmp
+    dropin_tmp="$(mktemp "$unit_dir/hapi-runner.service.d/.42-claude-oauth-token.conf.XXXXXX")" \
+        || fail "cannot create temp drop-in"
+    cat >"$dropin_tmp" <<EOF
 [Service]
 EnvironmentFile=-${token_file}
 EOF
-    chmod 0644 "$unit_dir/hapi-runner.service.d/42-claude-oauth-token.conf"
-    log "Installed: $unit_dir/hapi-runner.service.d/42-claude-oauth-token.conf -> $token_file"
+    chmod 0644 "$dropin_tmp"
+    mv -f "$dropin_tmp" "$dropin"
+    log "Installed: $dropin -> $token_file"
 
     # Tighten an existing token even when the setup banner is skipped (curl/embedded
     # path does not go through hapi_install_claude_oauth_dropin).

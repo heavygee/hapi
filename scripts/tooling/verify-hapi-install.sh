@@ -459,12 +459,29 @@ else
             SYSTEM_OAUTH_SAFE=0
             continue
         fi
+        if [[ "$ef_missing" -eq 1 ]]; then
+            [[ "$ef_path" == "$expected_canon" ]] && saw_canon_env=1
+            continue
+        fi
+        if [[ "$ef_ignore" == "no" ]]; then
+            if [[ ! -f "$ef_path" ]]; then
+                not_ok "required EnvironmentFile is not a regular file ($ef_path) — refusing restart"
+                OAUTH_RESTART_SAFE=0
+                SYSTEM_OAUTH_SAFE=0
+                continue
+            fi
+            if [[ ! -r "$ef_path" ]]; then
+                not_ok "required EnvironmentFile is unreadable ($ef_path) — refusing restart"
+                OAUTH_RESTART_SAFE=0
+                SYSTEM_OAUTH_SAFE=0
+                continue
+            fi
+        fi
         if [[ "$ef_path" == "$expected_canon" ]]; then
             saw_canon_env=1
             continue
         fi
         [[ "$saw_canon_env" -eq 1 ]] || continue
-        [[ "$ef_missing" -eq 1 ]] && continue
         if [[ "$SCOPE" == system ]]; then
             if ! hapi_claude_oauth_assert_root_controlled_ancestors "$ef_path" >/dev/null 2>&1; then
                 not_ok "later EnvironmentFile parent is not root-controlled ($ef_path) — refusing restart"
@@ -1104,14 +1121,33 @@ if token_file and os.path.isfile(token_file) and not os.path.islink(token_file):
             if eq >= 0:
                 val = buf[eq + 1:].lstrip(b" \t")
                 i = 0
+                pre = True
                 while i < len(val):
                     c = val[i:i+1]
                     if quote is None:
-                        if c == b"'":
-                            quote = b"'"
-                        elif c == b'"':
-                            quote = b'"'
-                        elif c == b"\\":
+                        if pre:
+                            if c in b" \t":
+                                i += 1
+                                continue
+                            if c == b"'":
+                                quote = b"'"
+                                i += 1
+                                continue
+                            if c == b'"':
+                                quote = b'"'
+                                i += 1
+                                continue
+                            if c == b"\\":
+                                pre = False
+                                if i + 1 >= len(val):
+                                    cont_bs = True
+                                    break
+                                i += 2
+                                continue
+                            pre = False
+                            i += 1
+                            continue
+                        if c == b"\\":
                             if i + 1 >= len(val):
                                 cont_bs = True
                                 break
@@ -1122,6 +1158,7 @@ if token_file and os.path.isfile(token_file) and not os.path.islink(token_file):
                     if quote == b"'":
                         if c == b"'":
                             quote = None
+                            pre = True
                         i += 1
                         continue
                     if c == b"\\":
@@ -1133,6 +1170,7 @@ if token_file and os.path.isfile(token_file) and not os.path.islink(token_file):
                         continue
                     if c == b'"':
                         quote = None
+                        pre = True
                     i += 1
             if cont_bs and buf.endswith(b"\\"):
                 buf = buf[:-1]

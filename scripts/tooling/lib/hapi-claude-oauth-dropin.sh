@@ -607,8 +607,91 @@ def parse_value(raw):
         return None
     return bytes(out) or None
 
+def env_line_state(buf):
+    eq = buf.find(b"=")
+    if eq < 0:
+        return None, False
+    val = buf[eq + 1:].lstrip(b" \t")
+    quote = None
+    i = 0
+    pre = True
+    while i < len(val):
+        c = val[i:i+1]
+        if quote is None:
+            if pre:
+                if c in b" \t":
+                    i += 1
+                    continue
+                if c == b"'":
+                    quote = b"'"
+                    i += 1
+                    continue
+                if c == b'"':
+                    quote = b'"'
+                    i += 1
+                    continue
+                if c == b"\\":
+                    pre = False
+                    if i + 1 >= len(val):
+                        return None, True
+                    i += 2
+                    continue
+                pre = False
+                i += 1
+                continue
+            if c == b"\\":
+                if i + 1 >= len(val):
+                    return None, True
+                i += 2
+                continue
+            i += 1
+            continue
+        if quote == b"'":
+            if c == b"'":
+                quote = None
+                pre = True
+            i += 1
+            continue
+        if c == b"\\":
+            if i + 1 >= len(val):
+                return b'"', True
+            i += 2
+            continue
+        if c == b'"':
+            quote = None
+            pre = True
+        i += 1
+    return quote, False
+
+def coalesce_env_lines(blob):
+    physical = [ln.rstrip(b"\r") for ln in blob.splitlines()]
+    logical = []
+    buf = b""
+    join_nl = False
+    for piece in physical:
+        if not buf:
+            buf = piece
+        elif join_nl:
+            buf += b"\n" + piece
+        else:
+            buf += piece
+        quote, cont_bs = env_line_state(buf)
+        if cont_bs and buf.endswith(b"\\"):
+            buf = buf[:-1]
+            join_nl = False
+            continue
+        if quote is not None:
+            join_nl = True
+            continue
+        logical.append(buf)
+        buf = b""
+        join_nl = False
+    if buf:
+        logical.append(buf)
+    return logical
+
 last = None
-for line in data.splitlines():
+for line in coalesce_env_lines(data):
     s = line.lstrip(b" \t")
     if s.startswith(b"#") or s.startswith(b";"):
         continue
@@ -887,7 +970,7 @@ hapi_claude_oauth_parse_env_file_value() {
                 if [[ "$c" == '\' && $((i + 1)) -lt ${#raw} ]]; then
                     nxt="${raw:i+1:1}"
                     case "$nxt" in
-                        '\\'|'"'|'`'|'$') out+="$nxt" ;;
+                        "\\"|'"'|'`'|'$') out+="$nxt" ;;
                         *) out+="\\$nxt" ;;
                     esac
                     i=$((i + 2))
@@ -929,15 +1012,39 @@ hapi_claude_oauth_env_line_state() {
     [[ "$buf" == *"="* ]] || return 0
     local val="${buf#*=}"
     val="${val#"${val%%[![:space:]]*}"}"
-    local i=0 c quote=""
+    local i=0 c quote="" pre=1
     while (( i < ${#val} )); do
         c="${val:i:1}"
         if [[ -z "$quote" ]]; then
-            if [[ "$c" == "'" ]]; then
-                quote="'"
-            elif [[ "$c" == '"' ]]; then
-                quote='"'
-            elif [[ "$c" == '\' ]]; then
+            if [[ "$pre" -eq 1 ]]; then
+                if [[ "$c" =~ [[:space:]] ]]; then
+                    i=$((i + 1))
+                    continue
+                fi
+                if [[ "$c" == "'" ]]; then
+                    quote="'"
+                    i=$((i + 1))
+                    continue
+                fi
+                if [[ "$c" == '"' ]]; then
+                    quote='"'
+                    i=$((i + 1))
+                    continue
+                fi
+                if [[ "$c" == '\' ]]; then
+                    pre=0
+                    if (( i + 1 >= ${#val} )); then
+                        HAPI_EF_CONT_BS=1
+                        return 0
+                    fi
+                    i=$((i + 2))
+                    continue
+                fi
+                pre=0
+                i=$((i + 1))
+                continue
+            fi
+            if [[ "$c" == '\' ]]; then
                 if (( i + 1 >= ${#val} )); then
                     HAPI_EF_CONT_BS=1
                     return 0
@@ -949,7 +1056,10 @@ hapi_claude_oauth_env_line_state() {
             continue
         fi
         if [[ "$quote" == "'" ]]; then
-            [[ "$c" == "'" ]] && quote=""
+            if [[ "$c" == "'" ]]; then
+                quote=""
+                pre=1
+            fi
             i=$((i + 1))
             continue
         fi
@@ -962,7 +1072,10 @@ hapi_claude_oauth_env_line_state() {
             i=$((i + 2))
             continue
         fi
-        [[ "$c" == '"' ]] && quote=""
+        if [[ "$c" == '"' ]]; then
+            quote=""
+            pre=1
+        fi
         i=$((i + 1))
     done
     HAPI_EF_QUOTE="$quote"
@@ -1157,14 +1270,32 @@ def env_line_state(buf):
     val = buf[eq + 1:].lstrip(b" \t")
     quote = None
     i = 0
+    pre = True
     while i < len(val):
         c = val[i:i+1]
         if quote is None:
-            if c == b"'":
-                quote = b"'"
-            elif c == b'"':
-                quote = b'"'
-            elif c == b"\\":
+            if pre:
+                if c in b" \t":
+                    i += 1
+                    continue
+                if c == b"'":
+                    quote = b"'"
+                    i += 1
+                    continue
+                if c == b'"':
+                    quote = b'"'
+                    i += 1
+                    continue
+                if c == b"\\":
+                    pre = False
+                    if i + 1 >= len(val):
+                        return None, True
+                    i += 2
+                    continue
+                pre = False
+                i += 1
+                continue
+            if c == b"\\":
                 if i + 1 >= len(val):
                     return None, True
                 i += 2
@@ -1174,6 +1305,7 @@ def env_line_state(buf):
         if quote == b"'":
             if c == b"'":
                 quote = None
+                pre = True
             i += 1
             continue
         if c == b"\\":
@@ -1183,6 +1315,7 @@ def env_line_state(buf):
             continue
         if c == b'"':
             quote = None
+            pre = True
         i += 1
     return quote, False
 

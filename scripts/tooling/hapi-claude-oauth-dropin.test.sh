@@ -786,5 +786,29 @@ set -e
 check "user drop-in rejects group/other-writable token parent" "[[ $writable_rc -ne 0 ]] && grep -q 'group/other-writable' \"$TMP/writable-parent.err\""
 check "merged env validates required EnvironmentFile shape" \
     "grep -q 'required EnvironmentFile is not a regular file' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\" && grep -q 'required EnvironmentFile is unreadable' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\""
+interior_file="$TMP/interior-quote.env"
+printf '%s\n' 'CLAUDE_CODE_OAUTH_TOKEN=abc"def' 'CLAUDE_CODE_OAUTH_TOKEN=' >"$interior_file"
+chmod 600 "$interior_file"
+set +e
+got_int="$(hapi_claude_oauth_effective_token_value "$interior_file" 2>/dev/null)"
+int_rc=$?
+got_int_bash="$(PATH="$no_py" hapi_claude_oauth_effective_token_value "$interior_file" 2>/dev/null)"
+int_bash_rc=$?
+set -e
+check "interior quote does not swallow following empty assignment" "[[ $int_rc -ne 0 && -z \"$got_int\" ]]"
+check "bash interior quote does not swallow following empty assignment" "[[ $int_bash_rc -ne 0 && -z \"$got_int_bash\" ]]"
+bs_file="$TMP/bs-quote.env"
+printf '%s\n' 'CLAUDE_CODE_OAUTH_TOKEN="abc\\def"' >"$bs_file"
+chmod 600 "$bs_file"
+got_bs="$(PATH="$no_py" hapi_claude_oauth_effective_token_value "$bs_file")"
+check "bash double-quoted escaped backslash is one backslash" "[[ \"$got_bs\" == \$'abc\\\\def' ]]"
+check "install_bytes coalesces EnvironmentFile logical lines" \
+    "grep -q 'def coalesce_env_lines' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\""
+check "embedded pet drop-in write does not follow dest symlink" \
+    "grep -q 'mktemp' \"$ROOT/scripts/install-hapi-pet.sh\" && grep -q 'refusing symlink drop-in' \"$ROOT/scripts/install-hapi-pet.sh\""
+check "embedded pet validates user token parents" \
+    "grep -q 'hapi_pet_assert_user_token_parents' \"$ROOT/scripts/install-hapi-pet.sh\""
+check "verify required EnvironmentFile shape before canon order" \
+    "grep -q 'required EnvironmentFile is not a regular file' \"$ROOT/scripts/tooling/verify-hapi-install.sh\" && grep -q 'required EnvironmentFile is unreadable' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
 
 echo "ALL OK"
