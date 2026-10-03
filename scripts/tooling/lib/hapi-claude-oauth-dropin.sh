@@ -386,6 +386,18 @@ try:
     except FileNotFoundError:
         pass
     os.rename(leaf, dest_leaf, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+    try:
+        dest_fd = os.open(dest_leaf, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=dir_fd)
+    except OSError as exc:
+        sys.stderr.write("ERROR: cannot chmod retired legacy token: %s: %s\n" % (dest, exc))
+        sys.exit(1)
+    try:
+        os.fchmod(dest_fd, 0o600)
+    except OSError as exc:
+        sys.stderr.write("ERROR: cannot chmod retired legacy token: %s: %s\n" % (dest, exc))
+        sys.exit(1)
+    finally:
+        os.close(dest_fd)
 finally:
     os.close(dir_fd)
 sys.exit(0)
@@ -396,6 +408,7 @@ PY
     else
         # Pet / minimal hosts: already refused symlinks; mv is enough.
         mv -n -- "$src" "$dest" || return 1
+        /bin/chmod 600 "$dest" || return 1
     fi
     echo "Retired legacy Claude OAuth token: $src -> $dest"
     return 0
@@ -1452,7 +1465,7 @@ hapi_claude_oauth_merged_env_discards_token() {
             *) canon="$1"; shift ;;
         esac
     done
-    local files unset_env ef_path saw_canon=0
+    local files unset_env ef_path saw_canon=0 grep_rc
     files="$("${ctl[@]}" show "$unit" -p EnvironmentFiles --value 2>/dev/null || true)"
     unset_env="$("${ctl[@]}" show "$unit" -p UnsetEnvironment --value 2>/dev/null || true)"
     if [[ "$unset_env" =~ (^|[[:space:]])CLAUDE_CODE_OAUTH_TOKEN(=|[[:space:]]|$) ]]; then
@@ -1530,9 +1543,24 @@ hapi_claude_oauth_merged_env_discards_token() {
                 return 0
             fi
         fi
-        if [[ -f "$ef_path" ]] && grep -qE '^[[:space:]]*CLAUDE_CODE_OAUTH_TOKEN[[:space:]]*=' "$ef_path" 2>/dev/null; then
-            echo "ERROR: later EnvironmentFile $ef_path overrides CLAUDE_CODE_OAUTH_TOKEN" >&2
-            return 0
+        if [[ -f "$ef_path" ]]; then
+            if [[ ! -r "$ef_path" ]]; then
+                echo "ERROR: later EnvironmentFile is unreadable ($ef_path)" >&2
+                return 0
+            fi
+            local grep_rc=0
+            set +e
+            grep -qE '^[[:space:]]*CLAUDE_CODE_OAUTH_TOKEN[[:space:]]*=' "$ef_path"
+            grep_rc=$?
+            set -e
+            if [[ "$grep_rc" -eq 0 ]]; then
+                echo "ERROR: later EnvironmentFile $ef_path overrides CLAUDE_CODE_OAUTH_TOKEN" >&2
+                return 0
+            fi
+            if [[ "$grep_rc" -ne 1 ]]; then
+                echo "ERROR: later EnvironmentFile is unreadable ($ef_path)" >&2
+                return 0
+            fi
         fi
     done < <(hapi_claude_oauth_iter_environment_files "$files")
     if [[ "$saw_canon" -ne 1 ]]; then
@@ -1740,21 +1768,50 @@ hapi_claude_oauth_assert_runner_owned_dir() {
     return 0
 }
 
+hapi_claude_oauth_assert_trusted_user_token_ancestor() {
+    local d="${1:?dir}"
+    local want="${2:?uid}"
+    local uid mode
+    if [[ -L "$d" ]]; then
+        echo "ERROR: user token ancestor is a symlink: $d" >&2
+        return 1
+    fi
+    if [[ ! -d "$d" ]]; then
+        echo "ERROR: user token ancestor is not a directory: $d" >&2
+        return 1
+    fi
+    uid="$(stat -c '%u' "$d" 2>/dev/null || true)"
+    mode="$(stat -c '%a' "$d" 2>/dev/null || true)"
+    if [[ "$uid" != "$want" && "$uid" != "0" ]]; then
+        echo "ERROR: user token ancestor $d is owned by uid ${uid:-unknown} (must be runner uid $want or root)" >&2
+        return 1
+    fi
+    if [[ -z "$mode" ]] || (( (8#$mode & 022) != 0 )); then
+        echo "ERROR: user token ancestor $d is group/other-writable (mode ${mode:-unknown})" >&2
+        return 1
+    fi
+    return 0
+}
+
 hapi_claude_oauth_assert_user_token_parents() {
     local token_file="${1:?token_file}"
     local want_uid="${2:-$(id -u)}"
     local home="${HOME:-}"
-    local cur
+    local cur nxt
     cur="$(dirname -- "$token_file")"
     hapi_claude_oauth_assert_runner_owned_dir "$cur" "$want_uid" || return 1
-    while [[ -n "$home" && "$cur" == "$home"/* ]]; do
-        cur="$(dirname -- "$cur")"
-        hapi_claude_oauth_assert_runner_owned_dir "$cur" "$want_uid" || return 1
-        if [[ "$cur" == "$home" ]]; then
+    while true; do
+        nxt="$(dirname -- "$cur")"
+        if [[ "$nxt" == "/" || "$nxt" == "/tmp" || "$nxt" == "/var/tmp" ]]; then
             return 0
         fi
+        if [[ -n "$home" && "$nxt" == "$home" ]]; then
+            hapi_claude_oauth_assert_runner_owned_dir "$nxt" "$want_uid" || return 1
+            return 0
+        fi
+        hapi_claude_oauth_assert_trusted_user_token_ancestor "$nxt" "$want_uid" || return 1
+        cur="$nxt"
     done
-    return 0
 }
 
 # chmod 0600 (+ optional chown) without following a symlink final component.

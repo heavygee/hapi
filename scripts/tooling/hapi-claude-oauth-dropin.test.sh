@@ -78,6 +78,13 @@ check "canonical is not a symlink" "[[ ! -L \"$canon_token\" ]]"
 check "legacy source retired after migrate" "[[ ! -e \"$legacy_home/.hapi/claude-setup-token.env\" ]]"
 check "legacy archive exists after migrate" \
     "ls \"$legacy_home/.hapi/claude-setup-token.env.migrated.\"* >/dev/null 2>&1"
+legacy_arch=""
+for _arch in "$legacy_home/.hapi/claude-setup-token.env.migrated."*; do
+    legacy_arch="$_arch"
+    break
+done
+legacy_arch_mode="$(stat -c '%a' "$legacy_arch")"
+check "legacy archive is 0600" "[[ \"$legacy_arch_mode\" == 600 ]]"
 check "retire message logged" "grep -q 'Retired legacy Claude OAuth token' $TMP/hapi-claude-oauth-migrate.out"
 dropin_migrate="$XDG_CONFIG_HOME/systemd/user/hapi-runner.service.d/42-claude-oauth-token.conf"
 check "drop-in stays on canonical despite legacy" \
@@ -808,6 +815,64 @@ check "embedded pet drop-in write does not follow dest symlink" \
     "grep -q 'mktemp' \"$ROOT/scripts/install-hapi-pet.sh\" && grep -q 'refusing symlink drop-in' \"$ROOT/scripts/install-hapi-pet.sh\""
 check "embedded pet validates user token parents" \
     "grep -q 'hapi_pet_assert_user_token_parents' \"$ROOT/scripts/install-hapi-pet.sh\""
+check "merged env fails closed on unreadable later EnvironmentFile" \
+    "grep -q 'later EnvironmentFile is unreadable' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\" && grep -q 'later EnvironmentFile is unreadable' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
+check "user token ancestors walk custom homes" \
+    "grep -q 'hapi_claude_oauth_assert_trusted_user_token_ancestor' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\""
+check "retire archive is chmod 0600" \
+    "grep -q 'fchmod' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\" && grep -q 'chmod 600' \"$ROOT/scripts/install-hapi-pet.sh\""
+custom_anc="$TMP/custom-shared"
+mkdir -p "$custom_anc/hapi"
+chmod 0775 "$custom_anc"
+chmod 0700 "$custom_anc/hapi"
+set +e
+hapi_claude_oauth_assert_user_token_parents "$custom_anc/hapi/claude-setup-token.env" "$(id -u)" \
+    >"$TMP/custom-anc.out" 2>"$TMP/custom-anc.err"
+custom_anc_rc=$?
+set -e
+check "custom HAPI_HOME fails on group-writable ancestor" "[[ $custom_anc_rc -ne 0 ]] && grep -q 'group/other-writable' \"$TMP/custom-anc.err\""
+later_ur="$TMP/later-unreadable"
+mkdir -p "$later_ur"
+printf 'CLAUDE_CODE_OAUTH_TOKEN=canon\n' >"$later_ur/canon.env"
+chmod 600 "$later_ur/canon.env"
+printf 'CLAUDE_CODE_OAUTH_TOKEN=later\n' >"$later_ur/later.env"
+chmod 000 "$later_ur/later.env"
+mkdir -p "$later_ur/bin"
+cat >"$later_ur/bin/systemctl" <<EOF
+#!/usr/bin/env bash
+if [[ "\$*" == *EnvironmentFiles* ]]; then
+    printf '%s (ignore_errors=yes)%s (ignore_errors=yes)\\n' "$later_ur/canon.env" "$later_ur/later.env"
+    exit 0
+fi
+if [[ "\$*" == *UnsetEnvironment* ]]; then
+    echo
+    exit 0
+fi
+exit 0
+EOF
+chmod +x "$later_ur/bin/systemctl"
+set +e
+PATH="$later_ur/bin:$PATH" hapi_claude_oauth_merged_env_discards_token hapi-runner.service "$later_ur/canon.env" --user \
+    >"$TMP/later-ur.out" 2>"$TMP/later-ur.err"
+later_ur_rc=$?
+set -e
+chmod 600 "$later_ur/later.env" || true
+check "unreadable later EnvironmentFile is unsafe" "[[ $later_ur_rc -eq 0 ]] && grep -Eq 'unreadable|overrides' \"$TMP/later-ur.err\""
+legacy_loose="$TMP/migrate-644"
+mkdir -p "$legacy_loose/.hapi"
+printf 'CLAUDE_CODE_OAUTH_TOKEN=legacy644\n' >"$legacy_loose/.hapi/claude-setup-token.env"
+chmod 644 "$legacy_loose/.hapi/claude-setup-token.env"
+hapi_install_claude_oauth_dropin \
+    --scope user \
+    --runner-unit hapi-runner.service \
+    --token-file "$legacy_loose/claude-setup-token.env" >/dev/null 2>&1
+loose_arch=""
+for _arch in "$legacy_loose/.hapi/claude-setup-token.env.migrated."*; do
+    loose_arch="$_arch"
+    break
+done
+loose_mode="$(stat -c '%a' "$loose_arch")"
+check "retired 0644 legacy archive becomes 0600" "[[ \"$loose_mode\" == 600 ]]"
 check "verify required EnvironmentFile shape before canon order" \
     "grep -q 'required EnvironmentFile is not a regular file' \"$ROOT/scripts/tooling/verify-hapi-install.sh\" && grep -q 'required EnvironmentFile is unreadable' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
 

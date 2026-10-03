@@ -523,8 +523,23 @@ else
             continue
         fi
         [[ -f "$ef_path" ]] || continue
-        if grep -qE '^[[:space:]]*CLAUDE_CODE_OAUTH_TOKEN[[:space:]]*=' "$ef_path" 2>/dev/null; then
+        if [[ ! -r "$ef_path" ]]; then
+            not_ok "later EnvironmentFile is unreadable ($ef_path) after canonical token — refusing restart"
+            OAUTH_RESTART_SAFE=0
+            SYSTEM_OAUTH_SAFE=0
+            continue
+        fi
+        grep_rc=0
+        set +e
+        grep -qE '^[[:space:]]*CLAUDE_CODE_OAUTH_TOKEN[[:space:]]*=' "$ef_path"
+        grep_rc=$?
+        set -e
+        if [[ "$grep_rc" -eq 0 ]]; then
             not_ok "later EnvironmentFile $ef_path overrides CLAUDE_CODE_OAUTH_TOKEN after canonical token — refusing restart"
+            OAUTH_RESTART_SAFE=0
+            SYSTEM_OAUTH_SAFE=0
+        elif [[ "$grep_rc" -ne 1 ]]; then
+            not_ok "later EnvironmentFile is unreadable ($ef_path) after canonical token — refusing restart"
             OAUTH_RESTART_SAFE=0
             SYSTEM_OAUTH_SAFE=0
         fi

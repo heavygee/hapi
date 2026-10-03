@@ -344,7 +344,7 @@ hapi_pet_assert_user_token_parents() {
     local token_file="${1:?token_file}"
     local want_uid="${2:-$(id -u)}"
     local home="${HOME:-}"
-    local cur
+    local cur nxt uid mode
     if declare -F hapi_claude_oauth_assert_user_token_parents >/dev/null 2>&1; then
         hapi_claude_oauth_assert_user_token_parents "$token_file" "$want_uid" \
             || fail "user token parent is not runner-owned / is group-or-other-writable"
@@ -352,12 +352,30 @@ hapi_pet_assert_user_token_parents() {
     fi
     cur="$(dirname -- "$token_file")"
     hapi_pet_assert_runner_owned_dir "$cur" "$want_uid"
-    while [[ -n "$home" && "$cur" == "$home"/* ]]; do
-        cur="$(dirname -- "$cur")"
-        hapi_pet_assert_runner_owned_dir "$cur" "$want_uid"
-        if [[ "$cur" == "$home" ]]; then
+    while true; do
+        nxt="$(dirname -- "$cur")"
+        if [[ "$nxt" == "/" || "$nxt" == "/tmp" || "$nxt" == "/var/tmp" ]]; then
             return 0
         fi
+        if [[ -n "$home" && "$nxt" == "$home" ]]; then
+            hapi_pet_assert_runner_owned_dir "$nxt" "$want_uid"
+            return 0
+        fi
+        if [[ -L "$nxt" ]]; then
+            fail "user token ancestor is a symlink: $nxt"
+        fi
+        if [[ ! -d "$nxt" ]]; then
+            fail "user token ancestor is not a directory: $nxt"
+        fi
+        uid="$(stat -c '%u' "$nxt" 2>/dev/null || true)"
+        mode="$(stat -c '%a' "$nxt" 2>/dev/null || true)"
+        if [[ "$uid" != "$want_uid" && "$uid" != "0" ]]; then
+            fail "user token ancestor $nxt is owned by uid ${uid:-unknown} (must be runner uid $want_uid or root)"
+        fi
+        if [[ -z "$mode" ]] || (( (8#$mode & 022) != 0 )); then
+            fail "user token ancestor $nxt is group/other-writable (mode ${mode:-unknown})"
+        fi
+        cur="$nxt"
     done
 }
 
@@ -434,6 +452,8 @@ hapi_pet_migrate_legacy_oauth_if_needed() {
     dest="${legacy_token}.migrated.$(date +%s)"
     mv -n -- "$legacy_token" "$dest" \
         || fail "migrated but could not retire legacy source: $legacy_token"
+    /bin/chmod 600 "$dest" \
+        || fail "could not chmod 600 retired legacy token: $dest"
     log "Retired legacy Claude OAuth token: $legacy_token -> $dest"
     return 0
 }
@@ -581,7 +601,7 @@ EOF
             fail "merged user hapi-runner.service environment would override or unset CLAUDE_CODE_OAUTH_TOKEN — refusing restart"
         fi
     else
-        local _ue _ef _saw=0 _p _ign _miss
+        local _ue _ef _saw=0 _p _ign _miss _grc
         _ue="$(systemctl --user show hapi-runner.service -p UnsetEnvironment --value 2>/dev/null || true)"
         if [[ "$_ue" =~ (^|[[:space:]])CLAUDE_CODE_OAUTH_TOKEN(=|[[:space:]]|$) ]]; then
             fail "merged user hapi-runner.service UnsetEnvironment removes CLAUDE_CODE_OAUTH_TOKEN — refusing restart"
@@ -614,8 +634,21 @@ EOF
             if [[ -L "$_p" ]]; then
                 fail "later EnvironmentFile is a symlink ($_p) — refusing restart"
             fi
-            if [[ -f "$_p" ]] && grep -qE '^[[:space:]]*CLAUDE_CODE_OAUTH_TOKEN[[:space:]]*=' "$_p" 2>/dev/null; then
-                fail "later EnvironmentFile $_p overrides CLAUDE_CODE_OAUTH_TOKEN — refusing restart"
+            if [[ -f "$_p" ]]; then
+                if [[ ! -r "$_p" ]]; then
+                    fail "later EnvironmentFile is unreadable ($_p) — refusing restart"
+                fi
+                _grc=0
+                set +e
+                grep -qE '^[[:space:]]*CLAUDE_CODE_OAUTH_TOKEN[[:space:]]*=' "$_p"
+                _grc=$?
+                set -e
+                if [[ "$_grc" -eq 0 ]]; then
+                    fail "later EnvironmentFile $_p overrides CLAUDE_CODE_OAUTH_TOKEN — refusing restart"
+                fi
+                if [[ "$_grc" -ne 1 ]]; then
+                    fail "later EnvironmentFile is unreadable ($_p) — refusing restart"
+                fi
             fi
         done < <(hapi_claude_oauth_iter_environment_files "$_ef" 2>/dev/null || printf '%s' "$_ef" | sed -E 's/ \(ignore_errors=(yes|no)\)/\t\1\n/g')
         if [[ "$_saw" -ne 1 ]]; then
