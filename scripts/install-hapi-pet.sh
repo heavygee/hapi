@@ -267,6 +267,33 @@ hapi_pet_export_oauth_from_env_file() {
     return 0
 }
 
+# 0=ambient token, 1=no process/no token, 2=live pid unreadable (fail closed).
+hapi_pet_mainpid_oauth() {
+    local pid="${1:-0}" tok="" line efd
+    if declare -F hapi_claude_oauth_mainpid_has_oauth_token >/dev/null 2>&1; then
+        hapi_claude_oauth_mainpid_has_oauth_token "$pid"
+        return $?
+    fi
+    [[ "$pid" =~ ^[0-9]+$ ]] || return 2
+    if [[ "$pid" == "0" ]]; then
+        return 1
+    fi
+    if [[ ! -d "/proc/$pid" ]]; then
+        return 1
+    fi
+    if [[ ! -r "/proc/$pid/environ" ]]; then
+        return 2
+    fi
+    exec {efd}<"/proc/$pid/environ" || return 2
+    while IFS= read -r -d '' -u "$efd" line || [[ -n "$line" ]]; do
+        case "$line" in
+            CLAUDE_CODE_OAUTH_TOKEN=*) tok="${line#CLAUDE_CODE_OAUTH_TOKEN=}" ;;
+        esac
+    done
+    exec {efd}<&-
+    [[ -n "$tok" ]]
+}
+
 # Migrate ${HAPI_HOME}/.hapi/claude-setup-token.env → canonical before the
 # embedded drop-in points EnvironmentFile at the (otherwise missing) canon.
 # Companion path uses hapi_install_claude_oauth_dropin; curl|bash must do this
@@ -452,18 +479,20 @@ EOF
     # while only the runner would get the new binary.
     # Refuse runner restart when MainPID still holds ambient-only auth.
     if ! ( hapi_pet_export_oauth_from_env_file "$token_file" >/dev/null 2>&1 ); then
-        local _rp _amb="" _eline
+        local _rp _orc
         _rp="$(systemctl --user show -p MainPID --value hapi-runner.service 2>/dev/null || echo 0)"
-        if [[ "$_rp" != "0" && -r "/proc/$_rp/environ" ]]; then
-            while IFS= read -r -d '' _eline || [[ -n "$_eline" ]]; do
-                case "$_eline" in
-                    CLAUDE_CODE_OAUTH_TOKEN=*) _amb="${_eline#CLAUDE_CODE_OAUTH_TOKEN=}" ;;
-                esac
-            done <"/proc/$_rp/environ"
-            if [[ -n "$_amb" ]]; then
+        set +e
+        hapi_pet_mainpid_oauth "$_rp"
+        _orc=$?
+        set -e
+        case "$_orc" in
+            0)
                 fail "user-pet runner MainPID=$_rp has ambient CLAUDE_CODE_OAUTH_TOKEN but $token_file is missing/empty — persist the token before restart"
-            fi
-        fi
+                ;;
+            2)
+                fail "cannot inspect user-pet runner MainPID=$_rp environ for ambient OAuth — refusing restart"
+                ;;
+        esac
     fi
     if declare -F hapi_claude_oauth_merged_env_discards_token >/dev/null 2>&1; then
         if hapi_claude_oauth_merged_env_discards_token hapi-runner.service "$token_file" --user; then
@@ -479,7 +508,19 @@ EOF
         while IFS= read -r _p; do
             _p="${_p#"${_p%%[![:space:]]*}"}"
             _p="${_p%"${_p##*[![:space:]]}"}"
-            [[ "$_p" == "$token_file" ]] && _saw=1
+            [[ -n "$_p" ]] || continue
+            if [[ "$_p" == "$token_file" ]]; then
+                _saw=1
+                continue
+            fi
+            [[ "$_saw" -eq 1 ]] || continue
+            [[ -e "$_p" || -L "$_p" ]] || continue
+            if [[ -L "$_p" ]]; then
+                fail "later EnvironmentFile is a symlink ($_p) — refusing restart"
+            fi
+            if [[ -f "$_p" ]] && grep -qE '^[[:space:]]*CLAUDE_CODE_OAUTH_TOKEN[[:space:]]*=' "$_p" 2>/dev/null; then
+                fail "later EnvironmentFile $_p overrides CLAUDE_CODE_OAUTH_TOKEN — refusing restart"
+            fi
         done < <(printf '%s' "$_ef" | sed -E 's/ \(ignore_errors=(yes|no)\)/\n/g')
         if [[ "$_saw" -ne 1 ]]; then
             fail "canonical EnvironmentFile $token_file is not in merged user hapi-runner.service EnvironmentFiles — refusing restart"
@@ -641,20 +682,21 @@ fi
 if [[ "$_pre_durable" -eq 0 ]]; then
     mapfile -t _pre_pids < <(pgrep -u "$(id -un)" -f 'hapi (hub|runner)' 2>/dev/null || true)
     for _pre_pid in "${_pre_pids[@]:-}"; do
-        [[ -n "$_pre_pid" && -r "/proc/$_pre_pid/environ" ]] || continue
-        _pre_ambient=""
-        while IFS= read -r -d '' _pre_env || [[ -n "$_pre_env" ]]; do
-            case "$_pre_env" in
-                CLAUDE_CODE_OAUTH_TOKEN=*)
-                    _pre_ambient="${_pre_env#CLAUDE_CODE_OAUTH_TOKEN=}"
-                    ;;
-            esac
-        done <"/proc/$_pre_pid/environ"
-        if [[ -n "$_pre_ambient" ]]; then
-            fail "runner pid=$_pre_pid has ambient CLAUDE_CODE_OAUTH_TOKEN but no durable token at $_pre_canon (or legacy $_pre_legacy) — refuse stop/restart; persist the token first"
-        fi
+        [[ -n "$_pre_pid" ]] || continue
+        set +e
+        hapi_pet_mainpid_oauth "$_pre_pid"
+        _pre_orc=$?
+        set -e
+        case "$_pre_orc" in
+            0)
+                fail "runner pid=$_pre_pid has ambient CLAUDE_CODE_OAUTH_TOKEN but no durable token at $_pre_canon (or legacy $_pre_legacy) — refuse stop/restart; persist the token first"
+                ;;
+            2)
+                fail "cannot inspect pid=$_pre_pid environ for ambient OAuth — refuse stop/restart"
+                ;;
+        esac
     done
-    unset _pre_pids _pre_pid _pre_env _pre_ambient
+    unset _pre_pids _pre_pid _pre_orc
 fi
 unset -f _preflight_token_shape _preflight_token_ancestors
 unset _pre_canon _pre_legacy _pre_durable

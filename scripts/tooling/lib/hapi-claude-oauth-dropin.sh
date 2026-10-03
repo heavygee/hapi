@@ -1123,6 +1123,31 @@ hapi_claude_oauth_has_effective_token() {
     [[ "$rc" -eq 0 && -n "$eff" ]]
 }
 
+# Inspect /proc/<pid>/environ for CLAUDE_CODE_OAUTH_TOKEN.
+# 0 = nonempty token; 1 = pid 0 / gone / inspected with no token;
+# 2 = live pid but environ unreadable (fail closed — do not treat as "no token").
+hapi_claude_oauth_mainpid_has_oauth_token() {
+    local pid="${1:-0}" tok="" line efd
+    [[ "$pid" =~ ^[0-9]+$ ]] || return 2
+    if [[ "$pid" == "0" ]]; then
+        return 1
+    fi
+    if [[ ! -d "/proc/$pid" ]]; then
+        return 1
+    fi
+    if [[ ! -r "/proc/$pid/environ" ]]; then
+        return 2
+    fi
+    exec {efd}<"/proc/$pid/environ" || return 2
+    while IFS= read -r -d '' -u "$efd" line || [[ -n "$line" ]]; do
+        case "$line" in
+            CLAUDE_CODE_OAUTH_TOKEN=*) tok="${line#CLAUDE_CODE_OAUTH_TOKEN=}" ;;
+        esac
+    done
+    exec {efd}<&-
+    [[ -n "$tok" ]]
+}
+
 # True when merged unit EnvironmentFiles / UnsetEnvironment would drop or
 # override CLAUDE_CODE_OAUTH_TOKEN after the canonical token file.
 # Usage: hapi_claude_oauth_merged_env_discards_token <unit> [canon-path] [--user]
@@ -1169,11 +1194,14 @@ hapi_claude_oauth_merged_env_discards_token() {
                 echo "ERROR: later EnvironmentFile parent is not root-controlled ($ef_path)" >&2
                 return 0
             fi
-            [[ -e "$ef_path" || -L "$ef_path" ]] || continue
-            if [[ -L "$ef_path" ]]; then
-                echo "ERROR: later EnvironmentFile is a symlink ($ef_path)" >&2
-                return 0
-            fi
+        fi
+        [[ -e "$ef_path" || -L "$ef_path" ]] || continue
+        # systemd follows EnvironmentFile symlinks; later TOKEN= would override canon.
+        if [[ -L "$ef_path" ]]; then
+            echo "ERROR: later EnvironmentFile is a symlink ($ef_path)" >&2
+            return 0
+        fi
+        if [[ "$later_root" -eq 1 ]]; then
             if [[ ! -f "$ef_path" ]]; then
                 echo "ERROR: later EnvironmentFile is not a regular file ($ef_path)" >&2
                 return 0
@@ -1190,7 +1218,7 @@ hapi_claude_oauth_merged_env_discards_token() {
                 return 0
             fi
         fi
-        if [[ -f "$ef_path" && ! -L "$ef_path" ]] && grep -qE '^[[:space:]]*CLAUDE_CODE_OAUTH_TOKEN[[:space:]]*=' "$ef_path" 2>/dev/null; then
+        if [[ -f "$ef_path" ]] && grep -qE '^[[:space:]]*CLAUDE_CODE_OAUTH_TOKEN[[:space:]]*=' "$ef_path" 2>/dev/null; then
             echo "ERROR: later EnvironmentFile $ef_path overrides CLAUDE_CODE_OAUTH_TOKEN" >&2
             return 0
         fi

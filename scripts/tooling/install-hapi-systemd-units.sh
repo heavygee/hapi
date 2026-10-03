@@ -234,19 +234,20 @@ hapi_system_runner_ambient_oauth_unpersisted() {
     if hapi_claude_oauth_has_effective_token "$token_file" 2>/dev/null; then
         return 1
     fi
-    local runner_main_pid ambient_tok="" env_line
+    local runner_main_pid inspect_rc
     runner_main_pid="$(systemctl show -p MainPID --value "$unit" 2>/dev/null || echo 0)"
-    if [[ "$runner_main_pid" == "0" || ! -r "/proc/$runner_main_pid/environ" ]]; then
-        return 1
-    fi
-    while IFS= read -r -d '' env_line || [[ -n "$env_line" ]]; do
-        case "$env_line" in
-            CLAUDE_CODE_OAUTH_TOKEN=*)
-                ambient_tok="${env_line#CLAUDE_CODE_OAUTH_TOKEN=}"
-                ;;
-        esac
-    done <"/proc/$runner_main_pid/environ"
-    [[ -n "$ambient_tok" ]]
+    set +e
+    hapi_claude_oauth_mainpid_has_oauth_token "$runner_main_pid"
+    inspect_rc=$?
+    set -e
+    case "$inspect_rc" in
+        0) return 0 ;;
+        2)
+            echo "ERROR: cannot inspect runner MainPID=$runner_main_pid environ for ambient OAuth — refusing restart" >&2
+            return 0
+            ;;
+        *) return 1 ;;
+    esac
 }
 
 case "$PROFILE" in
@@ -462,22 +463,23 @@ case "$PROFILE" in
             if hapi_claude_oauth_has_effective_token "$legacy_token" 2>/dev/null; then
                 return 0
             fi
-            local runner_main_pid ambient_tok="" env_line
+            local runner_main_pid inspect_rc
             runner_main_pid="$(systemctl --user show -p MainPID --value hapi-runner.service 2>/dev/null || echo 0)"
-            if [[ "$runner_main_pid" != "0" && -r "/proc/$runner_main_pid/environ" ]]; then
-                while IFS= read -r -d '' env_line || [[ -n "$env_line" ]]; do
-                    case "$env_line" in
-                        CLAUDE_CODE_OAUTH_TOKEN=*)
-                            ambient_tok="${env_line#CLAUDE_CODE_OAUTH_TOKEN=}"
-                            ;;
-                    esac
-                done <"/proc/$runner_main_pid/environ"
-                if [[ -n "$ambient_tok" ]]; then
+            set +e
+            hapi_claude_oauth_mainpid_has_oauth_token "$runner_main_pid"
+            inspect_rc=$?
+            set -e
+            case "$inspect_rc" in
+                0)
                     echo "ERROR: user-pet runner MainPID=$runner_main_pid has ambient CLAUDE_CODE_OAUTH_TOKEN but $token_file is missing/empty" >&2
                     echo "       Persist the token to $token_file before restart or you will discard the only credential." >&2
                     return 1
-                fi
-            fi
+                    ;;
+                2)
+                    echo "ERROR: cannot inspect user-pet runner MainPID=$runner_main_pid environ for ambient OAuth — refusing restart" >&2
+                    return 1
+                    ;;
+            esac
             return 0
         }
         if [[ "$DO_ENABLE" -eq 1 ]]; then

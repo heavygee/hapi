@@ -750,5 +750,9 @@ check "merged env gate requires canonical EnvironmentFile" \
     "grep -q 'canonical EnvironmentFile .* is not in merged' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\""
 check "user-pet restart validates merged oauth env" \
     "grep -q 'hapi_claude_oauth_merged_env_discards_token hapi-runner.service' \"$ROOT/scripts/tooling/install-hapi-systemd-units.sh\" && grep -q 'hapi_claude_oauth_merged_env_discards_token hapi-runner.service' \"$ROOT/scripts/install-hapi-pet.sh\""
+check "merged env gate rejects later EnvironmentFile symlink in user scope" \
+    "LIB=\"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\" python3 -c 'from pathlib import Path; import os; t=Path(os.environ[\"LIB\"]).read_text(); a=t.find(\"hapi_claude_oauth_merged_env_discards_token\"); b=t.find(\"hapi_claude_oauth_secure_chown_mode\"); fn=t[a:b]; i=fn.find(\"[[ -e \"); j=fn.find(\"later EnvironmentFile is a symlink\"); k=fn.find(\"later EnvironmentFile is not root-owned\"); raise SystemExit(0 if 0<=i<j<k else 1)'"
+check "ambient oauth unreadable MainPID fails closed" \
+    "grep -q 'cannot inspect runner MainPID' \"$ROOT/scripts/tooling/install-hapi-systemd-units.sh\" && grep -q 'hapi_claude_oauth_mainpid_has_oauth_token' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\" && grep -q 'cannot inspect user-pet runner MainPID' \"$ROOT/scripts/install-hapi-pet.sh\""
 
 echo "ALL OK"
