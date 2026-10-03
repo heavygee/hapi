@@ -489,8 +489,8 @@ case "$PROFILE" in
             hapi_user_pet_refuse_ambient_only_restart "$CLAUDE_TOKEN_FILE" || exit 1
             systemctl --user restart hapi-hub.service
             systemctl --user restart hapi-runner.service
-        elif [[ "$DO_RESTART" -eq 1 ]] && systemctl --user is-active --quiet hapi-runner.service 2>/dev/null; then
-            # Config-only reruns must not yank MainPID unless the operator asked.
+        elif [[ "$DO_RESTART" -eq 1 ]]; then
+            # systemctl restart starts inactive units (try-restart would skip).
             hapi_user_pet_refuse_ambient_only_restart "$CLAUDE_TOKEN_FILE" || exit 1
             systemctl --user restart hapi-hub.service
             systemctl --user restart hapi-runner.service

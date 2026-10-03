@@ -740,5 +740,11 @@ check "padded empty last assignment is ineffective" "[[ $pad_rc -ne 0 && -z \"$g
 check "bash padded empty last assignment is ineffective" "[[ $pad_bash_rc -ne 0 && -z \"$got_pad_bash\" ]]"
 check "installer gates merged oauth env before tier1" \
     "python3 -c 'from pathlib import Path; t=Path(\"$ROOT/scripts/tooling/install-hapi-systemd-units.sh\").read_text(); a=t.find(\"if hapi_claude_oauth_merged_env_discards_token\"); b=t.find(\"install-hapi-primary-hub-tier1.sh\\\"\"); raise SystemExit(0 if 0<=a<b else 1)'"
+check "merged env gate requires later EnvironmentFile root-control" \
+    "grep -q 'later EnvironmentFile parent is not root-controlled' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\" && grep -q 'later EnvironmentFile is not root-owned' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\""
+check "verify final oauth probe normalizes padded keys" \
+    "grep -q 'key == b\"CLAUDE_CODE_OAUTH_TOKEN\"' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
+check "user-pet --restart is not gated on is-active" \
+    "! grep -q 'DO_RESTART.*is-active' \"$ROOT/scripts/tooling/install-hapi-systemd-units.sh\""
 
 echo "ALL OK"

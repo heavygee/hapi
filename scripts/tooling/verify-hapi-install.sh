@@ -1094,11 +1094,18 @@ if token_file and os.path.isfile(token_file) and not os.path.islink(token_file):
             logical.append(buf)
         # systemd applies the *last* assignment for a key; scan logical lines.
         for line in logical:
-            if line.startswith(b"CLAUDE_CODE_OAUTH_TOKEN="):
+            s = line.lstrip(b" \t")
+            if not s or s.startswith(b"#") or s.startswith(b";"):
+                continue
+            eq = s.find(b"=")
+            if eq < 0:
+                continue
+            key = s[:eq].rstrip(b" \t")
+            if key == b"CLAUDE_CODE_OAUTH_TOKEN":
                 file_key_seen = True
                 # Same nonempty rule as the shell probe after systemd unquote:
                 # CLAUDE_CODE_OAUTH_TOKEN=\r\n / "" / '' are missing, not a value.
-                file_tok = parse_env_file_value(line.split(b"=", 1)[1])
+                file_tok = parse_env_file_value(s[eq + 1:])
     except OSError:
         file_tok = None
         file_key_seen = False

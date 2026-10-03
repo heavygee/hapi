@@ -1152,11 +1152,31 @@ hapi_claude_oauth_merged_env_discards_token() {
             continue
         fi
         [[ "$saw_canon" -eq 1 ]] || continue
+        if ! hapi_claude_oauth_assert_root_controlled_ancestors "$ef_path" >/dev/null 2>&1; then
+            echo "ERROR: later EnvironmentFile parent is not root-controlled ($ef_path)" >&2
+            return 0
+        fi
+        [[ -e "$ef_path" || -L "$ef_path" ]] || continue
         if [[ -L "$ef_path" ]]; then
             echo "ERROR: later EnvironmentFile is a symlink ($ef_path)" >&2
             return 0
         fi
-        if [[ -f "$ef_path" ]] && grep -qE '^[[:space:]]*CLAUDE_CODE_OAUTH_TOKEN[[:space:]]*=' "$ef_path" 2>/dev/null; then
+        if [[ ! -f "$ef_path" ]]; then
+            echo "ERROR: later EnvironmentFile is not a regular file ($ef_path)" >&2
+            return 0
+        fi
+        local later_uid later_mode
+        later_uid="$(stat -c '%u' "$ef_path" 2>/dev/null || true)"
+        later_mode="$(stat -c '%a' "$ef_path" 2>/dev/null || true)"
+        if [[ "$later_uid" != "0" ]]; then
+            echo "ERROR: later EnvironmentFile is not root-owned ($ef_path)" >&2
+            return 0
+        fi
+        if [[ -n "$later_mode" ]] && (( (8#$later_mode & 022) != 0 )); then
+            echo "ERROR: later EnvironmentFile is group/other-writable ($ef_path mode $later_mode)" >&2
+            return 0
+        fi
+        if grep -qE '^[[:space:]]*CLAUDE_CODE_OAUTH_TOKEN[[:space:]]*=' "$ef_path" 2>/dev/null; then
             echo "ERROR: later EnvironmentFile $ef_path overrides CLAUDE_CODE_OAUTH_TOKEN" >&2
             return 0
         fi
