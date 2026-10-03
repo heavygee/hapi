@@ -377,82 +377,86 @@ chmod +x "$TMP_BIN"
 log "New binary fetched and verified runnable."
 
 # --- 3b. Preflight Claude OAuth token shape BEFORE stopping anything.
-#     On --with-systemd upgrade, a symlink/non-regular token must fail here —
-#     not after section 4 killed the nohup hub/runner and left nothing to respawn.
-#     Include the legacy migrate source (${HAPI_HOME}/.hapi/...) — companion
-#     install fails mid-migrate if that node is unsafe, after we already stopped.
+#     Applies to BOTH --with-systemd and nohup upgrades: a symlink/non-regular
+#     canonical token must fail here — not after section 4 killed the old
+#     authenticated runner and left a replacement without CLAUDE_CODE_OAUTH_TOKEN.
+#     Include the legacy migrate source (${HAPI_HOME}/.hapi/...) for systemd path.
 #     Also reject symlink *ancestors* (e.g. .hapi → elsewhere): final-node -f
 #     follows them and would greenlight a path migrate later refuses.
+_preflight_token_ancestors() {
+    local path="$1"
+    if declare -F hapi_claude_oauth_assert_no_symlink_ancestors >/dev/null 2>&1; then
+        hapi_claude_oauth_assert_no_symlink_ancestors "$path" \
+            || fail "refusing symlink ancestor in token path: $path — refusing before stop so the old install stays up"
+        return 0
+    fi
+    local cur="" part
+    local abs="$path"
+    if [[ "$abs" != /* ]]; then
+        abs="$(pwd)/$abs"
+    fi
+    cur=""
+    IFS=/ read -r -a _pre_parts <<<"${abs#/}" || true
+    for part in "${_pre_parts[@]}"; do
+        [[ -n "$part" ]] || continue
+        cur="${cur}/${part}"
+        if [[ -L "$cur" ]]; then
+            unset _pre_parts
+            fail "refusing symlink path component: $cur (in $path) — refusing before stop so the old install stays up"
+        fi
+    done
+    unset _pre_parts
+}
+_preflight_token_shape() {
+    local path="$1"
+    # Walk ancestors even when the leaf is absent — a symlinked .hapi dir
+    # still breaks migrate after we would have stopped the old install.
+    _preflight_token_ancestors "$path"
+    if [[ -L "$path" ]]; then
+        fail "refusing symlink token file: $path (write a regular 0600 file) — refusing before stop so the old install stays up"
+    elif [[ -e "$path" && ! -f "$path" ]]; then
+        fail "refusing non-regular token file: $path (write a regular 0600 file) — refusing before stop so the old install stays up"
+    fi
+}
+# Canonical always (nohup + systemd). Legacy only matters for systemd migrate.
+_preflight_token_shape "${HAPI_HOME}/claude-setup-token.env"
 if [[ "$WITH_SYSTEMD" -eq 1 ]]; then
-    _preflight_token_ancestors() {
-        local path="$1"
-        if declare -F hapi_claude_oauth_assert_no_symlink_ancestors >/dev/null 2>&1; then
-            hapi_claude_oauth_assert_no_symlink_ancestors "$path" \
-                || fail "refusing symlink ancestor in token path: $path — refusing before stop so the old install stays up"
-            return 0
-        fi
-        local cur="" part
-        local abs="$path"
-        if [[ "$abs" != /* ]]; then
-            abs="$(pwd)/$abs"
-        fi
-        cur=""
-        IFS=/ read -r -a _pre_parts <<<"${abs#/}" || true
-        for part in "${_pre_parts[@]}"; do
-            [[ -n "$part" ]] || continue
-            cur="${cur}/${part}"
-            if [[ -L "$cur" ]]; then
-                unset _pre_parts
-                fail "refusing symlink path component: $cur (in $path) — refusing before stop so the old install stays up"
-            fi
-        done
-        unset _pre_parts
-    }
-    _preflight_token_shape() {
-        local path="$1"
-        # Walk ancestors even when the leaf is absent — a symlinked .hapi dir
-        # still breaks migrate after we would have stopped the old install.
-        _preflight_token_ancestors "$path"
-        if [[ -L "$path" ]]; then
-            fail "refusing symlink token file: $path (write a regular 0600 file) — refusing before stop so the old install stays up"
-        elif [[ -e "$path" && ! -f "$path" ]]; then
-            fail "refusing non-regular token file: $path (write a regular 0600 file) — refusing before stop so the old install stays up"
-        fi
-    }
-    _preflight_token_shape "${HAPI_HOME}/claude-setup-token.env"
     _preflight_token_shape "${HAPI_HOME}/.hapi/claude-setup-token.env"
-
-    # Ambient-only guard: if no durable token file exists but a live runner still
-    # carries CLAUDE_CODE_OAUTH_TOKEN, refuse to stop — restart would discard it.
-    _pre_canon="${HAPI_HOME}/claude-setup-token.env"
-    _pre_legacy="${HAPI_HOME}/.hapi/claude-setup-token.env"
-    _pre_durable=0
-    if ( hapi_pet_export_oauth_from_env_file "$_pre_canon" >/dev/null 2>&1 ); then
-        _pre_durable=1
-    elif ( hapi_pet_export_oauth_from_env_file "$_pre_legacy" >/dev/null 2>&1 ); then
-        _pre_durable=1
-    fi
-    if [[ "$_pre_durable" -eq 0 ]]; then
-        mapfile -t _pre_pids < <(pgrep -u "$(id -un)" -f 'hapi (hub|runner)' 2>/dev/null || true)
-        for _pre_pid in "${_pre_pids[@]:-}"; do
-            [[ -n "$_pre_pid" && -r "/proc/$_pre_pid/environ" ]] || continue
-            _pre_ambient=""
-            while IFS= read -r -d '' _pre_env || [[ -n "$_pre_env" ]]; do
-                case "$_pre_env" in
-                    CLAUDE_CODE_OAUTH_TOKEN=*)
-                        _pre_ambient="${_pre_env#CLAUDE_CODE_OAUTH_TOKEN=}"
-                        ;;
-                esac
-            done <"/proc/$_pre_pid/environ"
-            if [[ -n "$_pre_ambient" ]]; then
-                fail "runner pid=$_pre_pid has ambient CLAUDE_CODE_OAUTH_TOKEN but no durable token at $_pre_canon (or legacy $_pre_legacy) — refuse stop/restart; persist the token first"
-            fi
-        done
-        unset _pre_pids _pre_pid _pre_env _pre_ambient
-    fi
-    unset -f _preflight_token_shape _preflight_token_ancestors
-    unset _pre_canon _pre_legacy _pre_durable
 fi
+
+# Ambient-only guard: if no durable token file exists but a live runner still
+# carries CLAUDE_CODE_OAUTH_TOKEN, refuse to stop — restart would discard it.
+_pre_canon="${HAPI_HOME}/claude-setup-token.env"
+_pre_legacy="${HAPI_HOME}/.hapi/claude-setup-token.env"
+_pre_durable=0
+if ( hapi_pet_export_oauth_from_env_file "$_pre_canon" >/dev/null 2>&1 ); then
+    _pre_durable=1
+elif [[ "$WITH_SYSTEMD" -eq 1 ]] && ( hapi_pet_export_oauth_from_env_file "$_pre_legacy" >/dev/null 2>&1 ); then
+    _pre_durable=1
+elif [[ "$WITH_SYSTEMD" -eq 0 ]] && ( hapi_pet_export_oauth_from_env_file "$_pre_legacy" >/dev/null 2>&1 ); then
+    # Nohup path also loads legacy if present via export helper elsewhere — treat as durable.
+    _pre_durable=1
+fi
+if [[ "$_pre_durable" -eq 0 ]]; then
+    mapfile -t _pre_pids < <(pgrep -u "$(id -un)" -f 'hapi (hub|runner)' 2>/dev/null || true)
+    for _pre_pid in "${_pre_pids[@]:-}"; do
+        [[ -n "$_pre_pid" && -r "/proc/$_pre_pid/environ" ]] || continue
+        _pre_ambient=""
+        while IFS= read -r -d '' _pre_env || [[ -n "$_pre_env" ]]; do
+            case "$_pre_env" in
+                CLAUDE_CODE_OAUTH_TOKEN=*)
+                    _pre_ambient="${_pre_env#CLAUDE_CODE_OAUTH_TOKEN=}"
+                    ;;
+            esac
+        done <"/proc/$_pre_pid/environ"
+        if [[ -n "$_pre_ambient" ]]; then
+            fail "runner pid=$_pre_pid has ambient CLAUDE_CODE_OAUTH_TOKEN but no durable token at $_pre_canon (or legacy $_pre_legacy) — refuse stop/restart; persist the token first"
+        fi
+    done
+    unset _pre_pids _pre_pid _pre_env _pre_ambient
+fi
+unset -f _preflight_token_shape _preflight_token_ancestors
+unset _pre_canon _pre_legacy _pre_durable
 
 # --- 4. Stop an already-running hub/runner, if any (upgrade path; no-op on fresh
 #     install). Only reached after step 3's new binary is confirmed good. Waits for

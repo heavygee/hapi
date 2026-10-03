@@ -300,6 +300,7 @@ state_file="$hapi_home/runner.state.json"
 source "$REPO_ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh"
 
 SYSTEM_OAUTH_SAFE=1
+OAUTH_RESTART_SAFE=1
 SYSTEM_DROPIN_VALIDATED=""
 SYSTEM_TOKEN_PRECHECKED=0
 SYSTEM_TOKEN_NODE_CHECKED=0
@@ -312,6 +313,7 @@ if [[ "$SCOPE" == system ]]; then
         if ! hapi_claude_oauth_assert_root_controlled_parent "$sys_dropin_dir" >/dev/null 2>&1; then
             not_ok "Claude OAuth drop-in directory must be root-controlled ($sys_dropin_dir) — refusing restart"
             SYSTEM_OAUTH_SAFE=0
+            OAUTH_RESTART_SAFE=0
         else
             ok "Claude OAuth drop-in directory is root-controlled ($sys_dropin_dir)"
         fi
@@ -319,15 +321,18 @@ if [[ "$SCOPE" == system ]]; then
     if [[ -L "$sys_dropin" ]]; then
         not_ok "Claude OAuth drop-in is a symlink ($sys_dropin) — refusing restart"
         SYSTEM_OAUTH_SAFE=0
+        OAUTH_RESTART_SAFE=0
     elif [[ -e "$sys_dropin" && ! -f "$sys_dropin" ]]; then
         not_ok "Claude OAuth drop-in is not a regular file ($sys_dropin) — refusing restart"
         SYSTEM_OAUTH_SAFE=0
+        OAUTH_RESTART_SAFE=0
     elif [[ -f "$sys_dropin" ]]; then
         dropin_owner="$(stat -c '%U:%G' "$sys_dropin" 2>/dev/null || true)"
         dropin_mode="$(stat -c '%a' "$sys_dropin" 2>/dev/null || true)"
         if [[ "$dropin_owner" != "root:root" || "$dropin_mode" != "644" ]]; then
             not_ok "Claude OAuth drop-in must be root:root 0644 (got ${dropin_owner:-unknown} mode ${dropin_mode:-unknown} at $sys_dropin) — refusing restart"
             SYSTEM_OAUTH_SAFE=0
+            OAUTH_RESTART_SAFE=0
         else
             ok "Claude OAuth drop-in is root:root 0644 ($sys_dropin)"
             SYSTEM_DROPIN_VALIDATED="$sys_dropin"
@@ -348,6 +353,7 @@ if [[ "$SCOPE" == system ]]; then
         if ! hapi_claude_oauth_assert_root_controlled_parent "$pre_token_parent" >/dev/null 2>&1; then
             not_ok "Claude OAuth token parent must be root-controlled before restart ($pre_token_parent) — refusing restart"
             SYSTEM_OAUTH_SAFE=0
+            OAUTH_RESTART_SAFE=0
         else
             ok "Claude OAuth token parent is root-controlled before restart ($pre_token_parent)"
             SYSTEM_TOKEN_PRECHECKED=1
@@ -356,10 +362,12 @@ if [[ "$SCOPE" == system ]]; then
     if [[ -L "$pre_token" ]]; then
         not_ok "Claude OAuth token file is a symlink ($pre_token) — refusing restart"
         SYSTEM_OAUTH_SAFE=0
+        OAUTH_RESTART_SAFE=0
         SYSTEM_TOKEN_NODE_CHECKED=1
     elif [[ -e "$pre_token" && ! -f "$pre_token" ]]; then
         not_ok "Claude OAuth token file is not a regular file ($pre_token) — refusing restart"
         SYSTEM_OAUTH_SAFE=0
+        OAUTH_RESTART_SAFE=0
         SYSTEM_TOKEN_NODE_CHECKED=1
     elif [[ -f "$pre_token" ]]; then
         SYSTEM_TOKEN_NODE_CHECKED=1
@@ -368,6 +376,7 @@ if [[ "$SCOPE" == system ]]; then
         if [[ "$pre_owner" != "root:root" || "$pre_mode" != "600" ]]; then
             not_ok "Claude OAuth token file must be root:root 0600 before restart (got ${pre_owner:-unknown} mode ${pre_mode:-unknown} at $pre_token) — refusing restart"
             SYSTEM_OAUTH_SAFE=0
+            OAUTH_RESTART_SAFE=0
         else
             ok "Claude OAuth token file is root:root 0600 before restart ($pre_token)"
             SYSTEM_TOKEN_PRECHECKED=1
@@ -375,9 +384,42 @@ if [[ "$SCOPE" == system ]]; then
     fi
 fi
 
+# Ambient-only guard (system + user): if MainPID still carries a token but the
+# durable EnvironmentFile is missing/ineffective, restart would discard it
+# before the later /proc probe can report split-brain.
+pre_ambient_token=""
+pre_env_files_all="$("${CTL[@]}" show "$RUNNER_UNIT" -p EnvironmentFiles --value 2>/dev/null || true)"
+if [[ "$SCOPE" == system ]]; then
+    pre_ambient_token="${pre_token:-/etc/hapi/claude-setup-token.env}"
+elif [[ "$pre_env_files_all" == *claude-setup-token.env* ]]; then
+    pre_ambient_token="$(printf '%s\n' "$pre_env_files_all" | tr ' ' '\n' | grep 'claude-setup-token\.env' | head -n1 || true)"
+    pre_ambient_token="${pre_ambient_token%% (*}"
+else
+    pre_ambient_token="${hapi_home}/claude-setup-token.env"
+fi
+if ! hapi_claude_oauth_has_effective_token "${pre_ambient_token:-}" 2>/dev/null; then
+    pre_runner_pid="$("${CTL[@]}" show "$RUNNER_UNIT" -p MainPID --value 2>/dev/null || echo 0)"
+    pre_runner_pid="${pre_runner_pid:-0}"
+    if [[ "$pre_runner_pid" != "0" && -r "/proc/$pre_runner_pid/environ" ]]; then
+        pre_ambient_val=""
+        while IFS= read -r -d '' pre_env_line || [[ -n "$pre_env_line" ]]; do
+            case "$pre_env_line" in
+                CLAUDE_CODE_OAUTH_TOKEN=*)
+                    pre_ambient_val="${pre_env_line#CLAUDE_CODE_OAUTH_TOKEN=}"
+                    ;;
+            esac
+        done <"/proc/$pre_runner_pid/environ"
+        if [[ -n "$pre_ambient_val" ]]; then
+            not_ok "runner MainPID=$pre_runner_pid has ambient CLAUDE_CODE_OAUTH_TOKEN but ${pre_ambient_token:-token file} is missing/empty — refusing restart"
+            OAUTH_RESTART_SAFE=0
+            SYSTEM_OAUTH_SAFE=0
+        fi
+    fi
+fi
+
 if [[ "$SKIP_RESTART" -eq 0 ]]; then
-    if [[ "$SYSTEM_OAUTH_SAFE" -eq 0 ]]; then
-        inconclusive "skipped hub/runner restart — system OAuth drop-in/token failed safety checks"
+    if [[ "$OAUTH_RESTART_SAFE" -eq 0 ]]; then
+        inconclusive "skipped hub/runner restart — OAuth drop-in/token/ambient safety checks failed"
     else
         "${CTL[@]}" restart "$HUB_UNIT" 2>/dev/null || true
         "${CTL[@]}" restart "$RUNNER_UNIT" 2>/dev/null || true
@@ -792,8 +834,35 @@ if token_file and os.path.isfile(token_file) and not os.path.islink(token_file):
         file_key_seen = False
 
 # KillMode=process reparents session wrappers to init. Count same-uid hapi/claude
-# peers that share this runner's HAPI_HOME (excludes interactive claude on
-# primary-soup) OR are still in the MainPID descendant tree.
+# peers that are still in the MainPID descendant tree, OR share HAPI_HOME *and*
+# the runner's systemd cgroup (UID+HAPI_HOME alone matches interactive shells
+# that sourced .bashrc on user-pet hosts).
+def cgroup_paths(proc_pid):
+    paths = []
+    try:
+        with open("/proc/%d/cgroup" % proc_pid, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                parts = line.strip().split(":")
+                if len(parts) >= 3 and parts[-1]:
+                    paths.append(parts[-1])
+    except OSError:
+        pass
+    return paths
+
+def cgroup_related(runner_paths, peer_paths):
+    for rp in runner_paths:
+        if not rp or rp == "/":
+            continue
+        rp_norm = rp.rstrip("/")
+        for pp in peer_paths:
+            if not pp:
+                continue
+            pp_norm = pp.rstrip("/")
+            if pp_norm == rp_norm or pp_norm.startswith(rp_norm + "/"):
+                return True
+    return False
+
+runner_cgroups = cgroup_paths(int(pid))
 peer_has = 0
 if runner_uid is not None:
     for entry in os.listdir("/proc"):
@@ -812,8 +881,10 @@ if runner_uid is not None:
             continue
         in_tree = cpid in tree
         peer_home = read_env_var("/proc/%d/environ" % cpid, "HAPI_HOME")
-        same_instance = bool(runner_home) and peer_home == runner_home
-        if not in_tree and not same_instance:
+        same_home = bool(runner_home) and peer_home == runner_home
+        same_cgroup = cgroup_related(runner_cgroups, cgroup_paths(cpid))
+        # Non-descendants need cgroup association — not HAPI_HOME alone.
+        if not in_tree and not (same_home and same_cgroup):
             continue
         if read_oauth_from_environ("/proc/%d/environ" % cpid) is not None:
             peer_has += 1

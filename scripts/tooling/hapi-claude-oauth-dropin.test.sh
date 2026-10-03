@@ -504,6 +504,12 @@ check "pet preflight checks symlink ancestors" \
     "grep -q '_preflight_token_ancestors' \"$ROOT/scripts/install-hapi-pet.sh\""
 check "pet preflight blocks ambient-only stop" \
     "grep -q 'refuse stop/restart; persist the token first' \"$ROOT/scripts/install-hapi-pet.sh\""
+check "pet preflight runs without --with-systemd for canonical" \
+    "awk '/_preflight_token_shape \"\\\$\{HAPI_HOME\}\/claude-setup-token.env\"/,/WITH_SYSTEMD/ {print}' \"$ROOT/scripts/install-hapi-pet.sh\" | head -1 | grep -q preflight"
+check "verify refuses ambient-only restart" \
+    "grep -q 'has ambient CLAUDE_CODE_OAUTH_TOKEN but' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
+check "verify peer detection requires cgroup association" \
+    "grep -q 'cgroup_related' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
 check "retire function returns 1 on python failure" \
     "awk '/^hapi_claude_oauth_retire_legacy_token_source/,/^}/ {print}' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\" | grep -q 'return 1'"
 
