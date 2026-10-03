@@ -491,7 +491,7 @@ else
             fi
         fi
         [[ -f "$ef_path" && ! -L "$ef_path" ]] || continue
-        if grep -qE '^[[:space:]]*CLAUDE_CODE_OAUTH_TOKEN=' "$ef_path" 2>/dev/null; then
+        if grep -qE '^[[:space:]]*CLAUDE_CODE_OAUTH_TOKEN[[:space:]]*=' "$ef_path" 2>/dev/null; then
             not_ok "later EnvironmentFile $ef_path overrides CLAUDE_CODE_OAUTH_TOKEN after canonical token — refusing restart"
             OAUTH_RESTART_SAFE=0
             SYSTEM_OAUTH_SAFE=0

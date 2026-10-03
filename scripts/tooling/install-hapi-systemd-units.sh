@@ -333,6 +333,12 @@ case "$PROFILE" in
             echo "       hapi-runner-watchdog.timer was stopped for this upgrade and left stopped." >&2
             exit 1
         fi
+        if hapi_claude_oauth_merged_env_discards_token "$RUNNER_UNIT"; then
+            echo "ERROR: merged $RUNNER_UNIT environment would override or unset CLAUDE_CODE_OAUTH_TOKEN" >&2
+            echo "       Fix later EnvironmentFiles / UnsetEnvironment before enabling the watchdog." >&2
+            echo "       hapi-runner-watchdog.timer was stopped for this upgrade and left stopped." >&2
+            exit 1
+        fi
         if [[ "$UNITS_ONLY" -eq 0 ]]; then
             # Pass the binary this profile just installed, so Tier-1's
             # ExecStartPre stop is valid on THIS host. Without it Tier-1 would
@@ -405,6 +411,11 @@ case "$PROFILE" in
             if hapi_system_runner_ambient_oauth_unpersisted "$CLAUDE_TOKEN_FILE" "$RUNNER_UNIT"; then
                 echo "ERROR: runner has ambient CLAUDE_CODE_OAUTH_TOKEN but $CLAUDE_TOKEN_FILE is missing/empty" >&2
                 echo "       Persist the token before restoring the watchdog timer." >&2
+                echo "       hapi-runner-watchdog.timer was left stopped." >&2
+                exit 1
+            fi
+            if hapi_claude_oauth_merged_env_discards_token "$RUNNER_UNIT"; then
+                echo "ERROR: merged $RUNNER_UNIT environment would override or unset CLAUDE_CODE_OAUTH_TOKEN" >&2
                 echo "       hapi-runner-watchdog.timer was left stopped." >&2
                 exit 1
             fi

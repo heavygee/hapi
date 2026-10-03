@@ -546,8 +546,15 @@ def parse_value(raw):
 
 last = None
 for line in data.splitlines():
-    if line.startswith(b"CLAUDE_CODE_OAUTH_TOKEN="):
-        last = parse_value(line.split(b"=", 1)[1])
+    s = line.lstrip(b" \t")
+    if s.startswith(b"#") or s.startswith(b";"):
+        continue
+    eq = s.find(b"=")
+    if eq < 0:
+        continue
+    key = s[:eq].rstrip(b" \t")
+    if key == b"CLAUDE_CODE_OAUTH_TOKEN":
+        last = parse_value(s[eq + 1 :])
 if last is None:
     sys.stderr.write(
         "ERROR: piped payload has no nonempty CLAUDE_CODE_OAUTH_TOKEN=; "
@@ -866,6 +873,23 @@ hapi_claude_oauth_env_line_state() {
     HAPI_EF_CONT_BS=0
 }
 
+# systemd.env-file.c: skip pre-key whitespace, strip trailing key whitespace.
+# Sets HAPI_EF_KEY and HAPI_EF_RAW. Return 1 for comments / no assignment.
+hapi_claude_oauth_env_line_key() {
+    local s="${1-}"
+    HAPI_EF_KEY=""
+    HAPI_EF_RAW=""
+    s="${s#"${s%%[![:space:]]*}"}"
+    case "$s" in
+        ''|\#*|\;*) return 1 ;;
+    esac
+    [[ "$s" == *=* ]] || return 1
+    HAPI_EF_KEY="${s%%=*}"
+    HAPI_EF_KEY="${HAPI_EF_KEY%"${HAPI_EF_KEY##*[![:space:]]}"}"
+    HAPI_EF_RAW="${s#*=}"
+    return 0
+}
+
 # Last CLAUDE_CODE_OAUTH_TOKEN via bash coalesce (quoted newlines + trailing \).
 hapi_claude_oauth_bash_last_oauth_token() {
     local token_file="${1:?token_file}"
@@ -889,30 +913,26 @@ hapi_claude_oauth_bash_last_oauth_token() {
             join_nl=1
             continue
         fi
-        case "$logical" in
-            CLAUDE_CODE_OAUTH_TOKEN=*)
-                raw="${logical#CLAUDE_CODE_OAUTH_TOKEN=}"
-                if parsed="$(hapi_claude_oauth_parse_env_file_value "$raw")"; then
-                    last="$parsed"
-                else
-                    last=""
-                fi
-                ;;
-        esac
+        if hapi_claude_oauth_env_line_key "$logical" && [[ "$HAPI_EF_KEY" == "CLAUDE_CODE_OAUTH_TOKEN" ]]; then
+            raw="$HAPI_EF_RAW"
+            if parsed="$(hapi_claude_oauth_parse_env_file_value "$raw")"; then
+                last="$parsed"
+            else
+                last=""
+            fi
+        fi
         logical=""
         join_nl=0
     done <"$token_file"
     if [[ -n "$logical" ]]; then
-        case "$logical" in
-            CLAUDE_CODE_OAUTH_TOKEN=*)
-                raw="${logical#CLAUDE_CODE_OAUTH_TOKEN=}"
-                if parsed="$(hapi_claude_oauth_parse_env_file_value "$raw")"; then
-                    last="$parsed"
-                else
-                    last=""
-                fi
-                ;;
-        esac
+        if hapi_claude_oauth_env_line_key "$logical" && [[ "$HAPI_EF_KEY" == "CLAUDE_CODE_OAUTH_TOKEN" ]]; then
+            raw="$HAPI_EF_RAW"
+            if parsed="$(hapi_claude_oauth_parse_env_file_value "$raw")"; then
+                last="$parsed"
+            else
+                last=""
+            fi
+        fi
     fi
     if [[ -z "$last" ]]; then
         return 2
@@ -1064,10 +1084,21 @@ def coalesce_env_lines(blob):
         logical.append(buf)
     return logical
 
+def env_assignment(line):
+    s = line.lstrip(b" \t")
+    if not s or s.startswith(b"#") or s.startswith(b";"):
+        return None, None
+    eq = s.find(b"=")
+    if eq < 0:
+        return None, None
+    key = s[:eq].rstrip(b" \t")
+    return key, s[eq + 1:]
+
 last = None
 for line in coalesce_env_lines(data):
-    if line.startswith(b"CLAUDE_CODE_OAUTH_TOKEN="):
-        last = parse_value(line.split(b"=", 1)[1])
+    key, raw = env_assignment(line)
+    if key == b"CLAUDE_CODE_OAUTH_TOKEN":
+        last = parse_value(raw)
 if last is None:
     sys.exit(2)
 sys.stdout.buffer.write(last)
@@ -1090,6 +1121,47 @@ hapi_claude_oauth_has_effective_token() {
     local rc=$?
     set -e
     [[ "$rc" -eq 0 && -n "$eff" ]]
+}
+
+# True when merged unit EnvironmentFiles / UnsetEnvironment would drop or
+# override CLAUDE_CODE_OAUTH_TOKEN after the canonical /etc/hapi file.
+hapi_claude_oauth_merged_env_discards_token() {
+    local unit="${1:?unit}"
+    local files unset_env ef_path saw_canon=0
+    files="$(systemctl show "$unit" -p EnvironmentFiles --value 2>/dev/null || true)"
+    unset_env="$(systemctl show "$unit" -p UnsetEnvironment --value 2>/dev/null || true)"
+    if [[ "$unset_env" =~ (^|[[:space:]])CLAUDE_CODE_OAUTH_TOKEN(=|[[:space:]]|$) ]]; then
+        echo "ERROR: $unit UnsetEnvironment removes CLAUDE_CODE_OAUTH_TOKEN" >&2
+        return 0
+    fi
+    local unset_name
+    for unset_name in $unset_env; do
+        unset_name="${unset_name#\"}"
+        unset_name="${unset_name%\"}"
+        if [[ "$unset_name" == "CLAUDE_CODE_OAUTH_TOKEN" || "$unset_name" == CLAUDE_CODE_OAUTH_TOKEN=* ]]; then
+            echo "ERROR: $unit UnsetEnvironment removes CLAUDE_CODE_OAUTH_TOKEN" >&2
+            return 0
+        fi
+    done
+    while IFS= read -r ef_path; do
+        ef_path="${ef_path#"${ef_path%%[![:space:]]*}"}"
+        ef_path="${ef_path%"${ef_path##*[![:space:]]}"}"
+        [[ -n "$ef_path" ]] || continue
+        if [[ "$ef_path" == "/etc/hapi/claude-setup-token.env" ]]; then
+            saw_canon=1
+            continue
+        fi
+        [[ "$saw_canon" -eq 1 ]] || continue
+        if [[ -L "$ef_path" ]]; then
+            echo "ERROR: later EnvironmentFile is a symlink ($ef_path)" >&2
+            return 0
+        fi
+        if [[ -f "$ef_path" ]] && grep -qE '^[[:space:]]*CLAUDE_CODE_OAUTH_TOKEN[[:space:]]*=' "$ef_path" 2>/dev/null; then
+            echo "ERROR: later EnvironmentFile $ef_path overrides CLAUDE_CODE_OAUTH_TOKEN" >&2
+            return 0
+        fi
+    done < <(printf '%s' "$files" | sed -E 's/ \(ignore_errors=(yes|no)\)/\n/g')
+    return 1
 }
 
 # chown + chmod without following a symlink final component (drop-in is 0644).

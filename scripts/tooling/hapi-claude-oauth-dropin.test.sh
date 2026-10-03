@@ -727,5 +727,18 @@ check "verify refuses system OAuth checks without root" \
     "grep -q 'system-scope OAuth restart checks require root' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
 check "pet tightens token mode before stop" \
     "python3 -c 't=open(\"$ROOT/scripts/install-hapi-pet.sh\").read(); a=t.find(\"cannot chmod 600\"); b=t.find(\"# --- 4. Stop\"); raise SystemExit(0 if 0<=a<b else 1)'"
+pad_file="$TMP/pad-empty.env"
+printf '%s\n' 'CLAUDE_CODE_OAUTH_TOKEN=good' '  CLAUDE_CODE_OAUTH_TOKEN =' >"$pad_file"
+chmod 600 "$pad_file"
+set +e
+got_pad="$(hapi_claude_oauth_effective_token_value "$pad_file" 2>/dev/null)"
+pad_rc=$?
+got_pad_bash="$(PATH="$no_py" hapi_claude_oauth_effective_token_value "$pad_file" 2>/dev/null)"
+pad_bash_rc=$?
+set -e
+check "padded empty last assignment is ineffective" "[[ $pad_rc -ne 0 && -z \"$got_pad\" ]]"
+check "bash padded empty last assignment is ineffective" "[[ $pad_bash_rc -ne 0 && -z \"$got_pad_bash\" ]]"
+check "installer gates merged oauth env before tier1" \
+    "python3 -c 'from pathlib import Path; t=Path(\"$ROOT/scripts/tooling/install-hapi-systemd-units.sh\").read_text(); a=t.find(\"if hapi_claude_oauth_merged_env_discards_token\"); b=t.find(\"install-hapi-primary-hub-tier1.sh\\\"\"); raise SystemExit(0 if 0<=a<b else 1)'"
 
 echo "ALL OK"

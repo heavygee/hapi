@@ -177,6 +177,22 @@ if ! declare -F hapi_claude_oauth_env_line_state >/dev/null 2>&1; then
         HAPI_EF_CONT_BS=0
     }
 fi
+if ! declare -F hapi_claude_oauth_env_line_key >/dev/null 2>&1; then
+    hapi_claude_oauth_env_line_key() {
+        local s="${1-}"
+        HAPI_EF_KEY=""
+        HAPI_EF_RAW=""
+        s="${s#"${s%%[![:space:]]*}"}"
+        case "$s" in
+            ''|\#*|\;*) return 1 ;;
+        esac
+        [[ "$s" == *=* ]] || return 1
+        HAPI_EF_KEY="${s%%=*}"
+        HAPI_EF_KEY="${HAPI_EF_KEY%"${HAPI_EF_KEY##*[![:space:]]}"}"
+        HAPI_EF_RAW="${s#*=}"
+        return 0
+    }
+fi
 if ! declare -F hapi_claude_oauth_bash_last_oauth_token >/dev/null 2>&1; then
     hapi_claude_oauth_bash_last_oauth_token() {
         local token_file="${1:?token_file}"
@@ -200,30 +216,26 @@ if ! declare -F hapi_claude_oauth_bash_last_oauth_token >/dev/null 2>&1; then
                 join_nl=1
                 continue
             fi
-            case "$logical" in
-                CLAUDE_CODE_OAUTH_TOKEN=*)
-                    raw="${logical#CLAUDE_CODE_OAUTH_TOKEN=}"
-                    if parsed="$(hapi_claude_oauth_parse_env_file_value "$raw")"; then
-                        last="$parsed"
-                    else
-                        last=""
-                    fi
-                    ;;
-            esac
+            if hapi_claude_oauth_env_line_key "$logical" && [[ "$HAPI_EF_KEY" == "CLAUDE_CODE_OAUTH_TOKEN" ]]; then
+                raw="$HAPI_EF_RAW"
+                if parsed="$(hapi_claude_oauth_parse_env_file_value "$raw")"; then
+                    last="$parsed"
+                else
+                    last=""
+                fi
+            fi
             logical=""
             join_nl=0
         done <"$token_file"
         if [[ -n "$logical" ]]; then
-            case "$logical" in
-                CLAUDE_CODE_OAUTH_TOKEN=*)
-                    raw="${logical#CLAUDE_CODE_OAUTH_TOKEN=}"
-                    if parsed="$(hapi_claude_oauth_parse_env_file_value "$raw")"; then
-                        last="$parsed"
-                    else
-                        last=""
-                    fi
-                    ;;
-            esac
+            if hapi_claude_oauth_env_line_key "$logical" && [[ "$HAPI_EF_KEY" == "CLAUDE_CODE_OAUTH_TOKEN" ]]; then
+                raw="$HAPI_EF_RAW"
+                if parsed="$(hapi_claude_oauth_parse_env_file_value "$raw")"; then
+                    last="$parsed"
+                else
+                    last=""
+                fi
+            fi
         fi
         [[ -n "$last" ]] || return 2
         printf '%s' "$last"
