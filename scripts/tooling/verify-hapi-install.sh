@@ -814,6 +814,14 @@ if [[ -n "$token_file" ]]; then
                 else
                     not_ok "user Claude OAuth token must be owned by the runner account mode 0600 (got uid ${token_uid:-unknown} mode ${token_mode:-unknown} at $token_file)"
                 fi
+                token_parent="$(dirname "$token_file")"
+                if [[ -d "$token_parent" || -L "$token_parent" ]]; then
+                    if parent_err="$(hapi_claude_oauth_assert_user_token_parents "$token_file" "$want_uid" 2>&1)"; then
+                        ok "user Claude OAuth token parent is runner-owned non-writable ($token_parent)"
+                    else
+                        not_ok "user Claude OAuth token parent must be runner-owned and not group/other-writable ($token_parent; ${parent_err:0:200})"
+                    fi
+                fi
             fi
         else
             inconclusive "Claude OAuth token file missing or empty (${token_file:-unknown}) — run claude setup-token and write CLAUDE_CODE_OAUTH_TOKEN=... then restart the runner"
@@ -1003,23 +1011,53 @@ runner_home = read_env_var("/proc/%s/environ" % pid, "HAPI_HOME") or expected_ho
 tree = descendants(int(pid))
 
 def parse_env_file_value(raw):
-    # Mirror systemd EnvironmentFile quoting (systemd.exec(5) / env-file.c):
-    # strip outer whitespace, then unquote '...' / "..." so file_tok matches
-    # what lands in the process environ (quotes are not part of the value).
+    # systemd env-file.c: PRE_VALUE skips whitespace; quotes concatenate
+    # with following unquoted segments ("abc"def -> abcdef).
     if raw is None:
         return None
     val = raw.strip()
     if not val:
         return None
-    if len(val) >= 2 and val[0:1] == val[-1:] == b"'":
-        return val[1:-1] or None
-    if len(val) >= 2 and val[0:1] == val[-1:] == b'"':
-        inner = val[1:-1]
-        out = bytearray()
-        i = 0
-        while i < len(inner):
-            if inner[i:i+1] == b"\\" and i + 1 < len(inner):
-                nxt = inner[i+1:i+2]
+    out = bytearray()
+    i = 0
+    state = "pre"
+    while i < len(val):
+        c = val[i:i+1]
+        if state == "pre":
+            if c in b" \t\r":
+                i += 1
+                continue
+            if c == b"'":
+                state = "sq"
+                i += 1
+                continue
+            if c == b'"':
+                state = "dq"
+                i += 1
+                continue
+            if c == b"\\":
+                state = "val"
+                if i + 1 < len(val):
+                    out.extend(val[i+1:i+2])
+                    i += 2
+                else:
+                    out.extend(c)
+                    i += 1
+                continue
+            state = "val"
+            out.extend(c)
+            i += 1
+            continue
+        if state == "sq":
+            if c == b"'":
+                state = "pre"
+            else:
+                out.extend(c)
+            i += 1
+            continue
+        if state == "dq":
+            if c == b"\\" and i + 1 < len(val):
+                nxt = val[i+1:i+2]
                 if nxt in (b"\\", b'"', b"`", b"$"):
                     out.extend(nxt)
                 else:
@@ -1027,20 +1065,21 @@ def parse_env_file_value(raw):
                     out.extend(nxt)
                 i += 2
                 continue
-            out.extend(inner[i:i+1])
+            if c == b'"':
+                state = "pre"
+                i += 1
+                continue
+            out.extend(c)
             i += 1
-        return bytes(out) or None
-    # Unquoted: leading/trailing whitespace already stripped; keep interior.
-    # Minimal \\ escape so "\\n" stays two chars unless we see \\X keep X.
-    out = bytearray()
-    i = 0
-    while i < len(val):
-        if val[i:i+1] == b"\\" and i + 1 < len(val):
+            continue
+        if c == b"\\" and i + 1 < len(val):
             out.extend(val[i+1:i+2])
             i += 2
             continue
-        out.extend(val[i:i+1])
+        out.extend(c)
         i += 1
+    if state in ("sq", "dq"):
+        return None
     return bytes(out) or None
 
 file_tok = None

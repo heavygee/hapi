@@ -536,13 +536,76 @@ if not data:
     sys.exit(1)
 
 def parse_value(raw):
+    # systemd env-file.c: PRE_VALUE skips whitespace; quotes concatenate
+    # with following unquoted segments ("abc"def -> abcdef).
+    if raw is None:
+        return None
     val = raw.strip()
     if not val:
         return None
-    if len(val) >= 2 and val[0:1] == val[-1:] and val[0:1] in (b"\x27", b"\x22"):
-        val = val[1:-1]
-    val = val.strip()
-    return val if val else None
+    out = bytearray()
+    i = 0
+    state = "pre"
+    while i < len(val):
+        c = val[i:i+1]
+        if state == "pre":
+            if c in b" \t\r":
+                i += 1
+                continue
+            if c == b"'":
+                state = "sq"
+                i += 1
+                continue
+            if c == b'"':
+                state = "dq"
+                i += 1
+                continue
+            if c == b"\\":
+                state = "val"
+                if i + 1 < len(val):
+                    out.extend(val[i+1:i+2])
+                    i += 2
+                else:
+                    out.extend(c)
+                    i += 1
+                continue
+            state = "val"
+            out.extend(c)
+            i += 1
+            continue
+        if state == "sq":
+            if c == b"'":
+                state = "pre"
+            else:
+                out.extend(c)
+            i += 1
+            continue
+        if state == "dq":
+            if c == b"\\" and i + 1 < len(val):
+                nxt = val[i+1:i+2]
+                if nxt in (b"\\", b'"', b"`", b"$"):
+                    out.extend(nxt)
+                else:
+                    out.extend(b"\\")
+                    out.extend(nxt)
+                i += 2
+                continue
+            if c == b'"':
+                state = "pre"
+                i += 1
+                continue
+            out.extend(c)
+            i += 1
+            continue
+        if c == b"\\" and i + 1 < len(val):
+            out.extend(val[i+1:i+2])
+            i += 2
+            continue
+        out.extend(c)
+        i += 1
+    if state in ("sq", "dq"):
+        return None
+    return bytes(out) or None
 
 last = None
 for line in data.splitlines():
@@ -767,8 +830,8 @@ hapi_claude_oauth_legacy_system_token_candidates() {
 }
 
 # Mirror systemd EnvironmentFile value parsing (systemd.exec(5) / env-file.c):
-# strip outer whitespace; single-quoted = literal; double-quoted unescapes
-# \, ", `, $; unquoted backslash escapes the next character.
+# PRE_VALUE skips whitespace; quoted segments concatenate with later unquoted
+# text ("abc"def -> abcdef). Unquoted quotes after the first non-WS stay literal.
 hapi_claude_oauth_parse_env_file_value() {
     local raw="${1-}"
     raw="${raw%$'\r'}"
@@ -776,49 +839,82 @@ hapi_claude_oauth_parse_env_file_value() {
     raw="${raw%"${raw##*[![:space:]]}"}"
     [[ -n "$raw" ]] || return 1
 
-    local quote=""
-    if [[ ${#raw} -ge 2 ]]; then
-        if [[ "${raw:0:1}" == '"' && "${raw: -1}" == '"' ]]; then
-            quote=double
-            raw="${raw:1:${#raw}-2}"
-        elif [[ "${raw:0:1}" == "'" && "${raw: -1}" == "'" ]]; then
-            printf '%s' "${raw:1:${#raw}-2}"
-            return 0
-        fi
-    fi
-
-    local out="" i=0 c nxt
-    if [[ "$quote" == "double" ]]; then
-        while (( i < ${#raw} )); do
-            c="${raw:i:1}"
-            if [[ "$c" == '\' && $((i + 1)) -lt ${#raw} ]]; then
-                nxt="${raw:i+1:1}"
-                case "$nxt" in
-                    '\\'|'"'|'`'|'$') out+="$nxt" ;;
-                    *) out+="\\$nxt" ;;
-                esac
-                i=$((i + 2))
-                continue
-            fi
-            out+="$c"
-            i=$((i + 1))
-        done
-        [[ -n "$out" ]] || return 1
-        printf '%s' "$out"
-        return 0
-    fi
-
-    # Unquoted: \X → X (including \\ → \).
+    local out="" i=0 c nxt state=pre
     while (( i < ${#raw} )); do
         c="${raw:i:1}"
-        if [[ "$c" == '\' && $((i + 1)) -lt ${#raw} ]]; then
-            out+="${raw:i+1:1}"
-            i=$((i + 2))
-            continue
-        fi
-        out+="$c"
-        i=$((i + 1))
+        case "$state" in
+            pre)
+                if [[ "$c" =~ [[:space:]] ]]; then
+                    i=$((i + 1))
+                    continue
+                fi
+                if [[ "$c" == "'" ]]; then
+                    state=sq
+                    i=$((i + 1))
+                    continue
+                fi
+                if [[ "$c" == '"' ]]; then
+                    state=dq
+                    i=$((i + 1))
+                    continue
+                fi
+                if [[ "$c" == '\' ]]; then
+                    state=val
+                    if (( i + 1 < ${#raw} )); then
+                        out+="${raw:i+1:1}"
+                        i=$((i + 2))
+                    else
+                        out+='\'
+                        i=$((i + 1))
+                    fi
+                    continue
+                fi
+                state=val
+                out+="$c"
+                i=$((i + 1))
+                continue
+                ;;
+            sq)
+                if [[ "$c" == "'" ]]; then
+                    state=pre
+                else
+                    out+="$c"
+                fi
+                i=$((i + 1))
+                continue
+                ;;
+            dq)
+                if [[ "$c" == '\' && $((i + 1)) -lt ${#raw} ]]; then
+                    nxt="${raw:i+1:1}"
+                    case "$nxt" in
+                        '\\'|'"'|'`'|'$') out+="$nxt" ;;
+                        *) out+="\\$nxt" ;;
+                    esac
+                    i=$((i + 2))
+                    continue
+                fi
+                if [[ "$c" == '"' ]]; then
+                    state=pre
+                    i=$((i + 1))
+                    continue
+                fi
+                out+="$c"
+                i=$((i + 1))
+                continue
+                ;;
+            val)
+                if [[ "$c" == '\' && $((i + 1)) -lt ${#raw} ]]; then
+                    out+="${raw:i+1:1}"
+                    i=$((i + 2))
+                    continue
+                fi
+                out+="$c"
+                i=$((i + 1))
+                continue
+                ;;
+        esac
     done
+    [[ "$state" != sq && "$state" != dq ]] || return 1
     [[ -n "$out" ]] || return 1
     printf '%s' "$out"
     return 0
@@ -982,21 +1078,53 @@ finally:
     os.close(fd)
 
 def parse_value(raw):
-    # Mirror verify-hapi-install.sh parse_env_file_value / systemd env-file.c.
+    # systemd env-file.c: PRE_VALUE skips whitespace; quotes concatenate
+    # with following unquoted segments ("abc"def -> abcdef).
     if raw is None:
         return None
     val = raw.strip()
     if not val:
         return None
-    if len(val) >= 2 and val[0:1] == val[-1:] == b"'":
-        return val[1:-1] or None
-    if len(val) >= 2 and val[0:1] == val[-1:] == b'"':
-        inner = val[1:-1]
-        out = bytearray()
-        i = 0
-        while i < len(inner):
-            if inner[i:i+1] == b"\\" and i + 1 < len(inner):
-                nxt = inner[i+1:i+2]
+    out = bytearray()
+    i = 0
+    state = "pre"
+    while i < len(val):
+        c = val[i:i+1]
+        if state == "pre":
+            if c in b" \t\r":
+                i += 1
+                continue
+            if c == b"'":
+                state = "sq"
+                i += 1
+                continue
+            if c == b'"':
+                state = "dq"
+                i += 1
+                continue
+            if c == b"\\":
+                state = "val"
+                if i + 1 < len(val):
+                    out.extend(val[i+1:i+2])
+                    i += 2
+                else:
+                    out.extend(c)
+                    i += 1
+                continue
+            state = "val"
+            out.extend(c)
+            i += 1
+            continue
+        if state == "sq":
+            if c == b"'":
+                state = "pre"
+            else:
+                out.extend(c)
+            i += 1
+            continue
+        if state == "dq":
+            if c == b"\\" and i + 1 < len(val):
+                nxt = val[i+1:i+2]
                 if nxt in (b"\\", b'"', b"`", b"$"):
                     out.extend(nxt)
                 else:
@@ -1004,18 +1132,21 @@ def parse_value(raw):
                     out.extend(nxt)
                 i += 2
                 continue
-            out.extend(inner[i:i+1])
+            if c == b'"':
+                state = "pre"
+                i += 1
+                continue
+            out.extend(c)
             i += 1
-        return bytes(out) or None
-    out = bytearray()
-    i = 0
-    while i < len(val):
-        if val[i:i+1] == b"\\" and i + 1 < len(val):
+            continue
+        if c == b"\\" and i + 1 < len(val):
             out.extend(val[i+1:i+2])
             i += 2
             continue
-        out.extend(val[i:i+1])
+        out.extend(c)
         i += 1
+    if state in ("sq", "dq"):
+        return None
     return bytes(out) or None
 
 def env_line_state(buf):
@@ -1213,12 +1344,31 @@ hapi_claude_oauth_merged_env_discards_token() {
             echo "ERROR: required EnvironmentFile is missing ($ef_path)" >&2
             return 0
         fi
+        if [[ "$ef_missing" -eq 1 ]]; then
+            if [[ "$ef_path" == "$canon" ]]; then
+                saw_canon=1
+            fi
+            continue
+        fi
+        if [[ "$ef_ignore" == "no" ]]; then
+            if [[ -L "$ef_path" && ! -f "$ef_path" ]]; then
+                echo "ERROR: required EnvironmentFile is not a regular file ($ef_path)" >&2
+                return 0
+            fi
+            if [[ ! -f "$ef_path" ]]; then
+                echo "ERROR: required EnvironmentFile is not a regular file ($ef_path)" >&2
+                return 0
+            fi
+            if [[ ! -r "$ef_path" ]]; then
+                echo "ERROR: required EnvironmentFile is unreadable ($ef_path)" >&2
+                return 0
+            fi
+        fi
         if [[ "$ef_path" == "$canon" ]]; then
             saw_canon=1
             continue
         fi
         [[ "$saw_canon" -eq 1 ]] || continue
-        [[ "$ef_missing" -eq 1 ]] && continue
         if [[ "$later_root" -eq 1 ]]; then
             if ! hapi_claude_oauth_assert_root_controlled_ancestors "$ef_path" >/dev/null 2>&1; then
                 echo "ERROR: later EnvironmentFile parent is not root-controlled ($ef_path)" >&2
@@ -1425,6 +1575,51 @@ hapi_claude_oauth_assert_root_controlled_ancestors() {
                 ;;
         esac
         dir="$(dirname -- "$dir")"
+    done
+    return 0
+}
+
+# User-scope token parents must be runner-owned and not group/other-writable.
+# Otherwise another local account can unlink a 0600 token and Restart=always
+# loads attacker credentials.
+hapi_claude_oauth_assert_runner_owned_dir() {
+    local d="${1:?dir}"
+    local want="${2:?uid}"
+    local uid mode
+    if [[ -L "$d" ]]; then
+        echo "ERROR: user token parent is a symlink: $d" >&2
+        return 1
+    fi
+    if [[ ! -d "$d" ]]; then
+        echo "ERROR: user token parent is not a directory: $d" >&2
+        return 1
+    fi
+    uid="$(stat -c '%u' "$d" 2>/dev/null || true)"
+    mode="$(stat -c '%a' "$d" 2>/dev/null || true)"
+    if [[ "$uid" != "$want" ]]; then
+        echo "ERROR: user token parent $d is owned by uid ${uid:-unknown} (must be runner uid $want)" >&2
+        return 1
+    fi
+    if [[ -z "$mode" ]] || (( (8#$mode & 022) != 0 )); then
+        echo "ERROR: user token parent $d is group/other-writable (mode ${mode:-unknown})" >&2
+        return 1
+    fi
+    return 0
+}
+
+hapi_claude_oauth_assert_user_token_parents() {
+    local token_file="${1:?token_file}"
+    local want_uid="${2:-$(id -u)}"
+    local home="${HOME:-}"
+    local cur
+    cur="$(dirname -- "$token_file")"
+    hapi_claude_oauth_assert_runner_owned_dir "$cur" "$want_uid" || return 1
+    while [[ -n "$home" && "$cur" == "$home"/* ]]; do
+        cur="$(dirname -- "$cur")"
+        hapi_claude_oauth_assert_runner_owned_dir "$cur" "$want_uid" || return 1
+        if [[ "$cur" == "$home" ]]; then
+            return 0
+        fi
     done
     return 0
 }
@@ -1637,6 +1832,8 @@ hapi_install_claude_oauth_dropin() {
     fi
     if [[ "$root_controlled" -eq 1 ]]; then
         hapi_claude_oauth_assert_root_controlled_parent "$token_parent" || return 1
+    elif [[ "$scope" == user ]]; then
+        hapi_claude_oauth_assert_user_token_parents "$token_file" || return 1
     fi
     if [[ -n "$owner" && "$scope" == system && "$root_controlled" -eq 0 ]]; then
         hapi_claude_oauth_secure_chown_parent "$token_parent" "$owner" || return 1

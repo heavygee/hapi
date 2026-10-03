@@ -81,49 +81,58 @@ if ! declare -F hapi_claude_oauth_parse_env_file_value >/dev/null 2>&1; then
         raw="${raw%"${raw##*[![:space:]]}"}"
         [[ -n "$raw" ]] || return 1
 
-        local quote=""
-        if [[ ${#raw} -ge 2 ]]; then
-            if [[ "${raw:0:1}" == '"' && "${raw: -1}" == '"' ]]; then
-                quote=double
-                raw="${raw:1:${#raw}-2}"
-            elif [[ "${raw:0:1}" == "'" && "${raw: -1}" == "'" ]]; then
-                printf '%s' "${raw:1:${#raw}-2}"
-                return 0
-            fi
-        fi
-
-        local out="" i=0 c nxt
-        if [[ "$quote" == "double" ]]; then
-            while (( i < ${#raw} )); do
-                c="${raw:i:1}"
-                if [[ "$c" == '\' && $((i + 1)) -lt ${#raw} ]]; then
-                    nxt="${raw:i+1:1}"
-                    case "$nxt" in
-                        '\\'|'"'|'`'|'$') out+="$nxt" ;;
-                        *) out+="\\$nxt" ;;
-                    esac
-                    i=$((i + 2))
-                    continue
-                fi
-                out+="$c"
-                i=$((i + 1))
-            done
-            [[ -n "$out" ]] || return 1
-            printf '%s' "$out"
-            return 0
-        fi
-
-        # Unquoted: \X → X (including \\ → \).
+        local out="" i=0 c nxt state=pre
         while (( i < ${#raw} )); do
             c="${raw:i:1}"
-            if [[ "$c" == '\' && $((i + 1)) -lt ${#raw} ]]; then
-                out+="${raw:i+1:1}"
-                i=$((i + 2))
-                continue
-            fi
-            out+="$c"
-            i=$((i + 1))
+            case "$state" in
+                pre)
+                    if [[ "$c" =~ [[:space:]] ]]; then
+                        i=$((i + 1)); continue
+                    fi
+                    if [[ "$c" == "'" ]]; then
+                        state=sq; i=$((i + 1)); continue
+                    fi
+                    if [[ "$c" == '"' ]]; then
+                        state=dq; i=$((i + 1)); continue
+                    fi
+                    if [[ "$c" == '\' ]]; then
+                        state=val
+                        if (( i + 1 < ${#raw} )); then
+                            out+="${raw:i+1:1}"; i=$((i + 2))
+                        else
+                            out+='\'; i=$((i + 1))
+                        fi
+                        continue
+                    fi
+                    state=val; out+="$c"; i=$((i + 1)); continue
+                    ;;
+                sq)
+                    if [[ "$c" == "'" ]]; then state=pre; else out+="$c"; fi
+                    i=$((i + 1)); continue
+                    ;;
+                dq)
+                    if [[ "$c" == '\' && $((i + 1)) -lt ${#raw} ]]; then
+                        nxt="${raw:i+1:1}"
+                        case "$nxt" in
+                            '\\'|'"'|'`'|'$') out+="$nxt" ;;
+                            *) out+="\\$nxt" ;;
+                        esac
+                        i=$((i + 2)); continue
+                    fi
+                    if [[ "$c" == '"' ]]; then
+                        state=pre; i=$((i + 1)); continue
+                    fi
+                    out+="$c"; i=$((i + 1)); continue
+                    ;;
+                val)
+                    if [[ "$c" == '\' && $((i + 1)) -lt ${#raw} ]]; then
+                        out+="${raw:i+1:1}"; i=$((i + 2)); continue
+                    fi
+                    out+="$c"; i=$((i + 1)); continue
+                    ;;
+            esac
         done
+        [[ "$state" != sq && "$state" != dq ]] || return 1
         [[ -n "$out" ]] || return 1
         printf '%s' "$out"
         return 0
@@ -512,12 +521,23 @@ EOF
             if [[ "$_miss" -eq 1 && "$_ign" == "no" ]]; then
                 fail "required EnvironmentFile is missing ($_p) — refusing restart"
             fi
+            if [[ "$_miss" -eq 1 ]]; then
+                [[ "$_p" == "$token_file" ]] && _saw=1
+                continue
+            fi
+            if [[ "$_ign" == "no" ]]; then
+                if [[ ! -f "$_p" ]]; then
+                    fail "required EnvironmentFile is not a regular file ($_p) — refusing restart"
+                fi
+                if [[ ! -r "$_p" ]]; then
+                    fail "required EnvironmentFile is unreadable ($_p) — refusing restart"
+                fi
+            fi
             if [[ "$_p" == "$token_file" ]]; then
                 _saw=1
                 continue
             fi
             [[ "$_saw" -eq 1 ]] || continue
-            [[ "$_miss" -eq 1 ]] && continue
             if [[ -L "$_p" ]]; then
                 fail "later EnvironmentFile is a symlink ($_p) — refusing restart"
             fi
@@ -652,6 +672,10 @@ _preflight_token_shape() {
 # canon, so a bad legacy node must fail here before migrate/stop, not after.
 _preflight_token_shape "${HAPI_HOME}/claude-setup-token.env"
 _preflight_token_shape "${HAPI_HOME}/.hapi/claude-setup-token.env"
+if [[ -d "$HAPI_HOME" ]] && declare -F hapi_claude_oauth_assert_user_token_parents >/dev/null 2>&1; then
+    hapi_claude_oauth_assert_user_token_parents "${HAPI_HOME}/claude-setup-token.env" \
+        || fail "user token parent $HAPI_HOME is not runner-owned / is group-or-other-writable — refusing before stop"
+fi
 # Promote legacy → canonical BEFORE stop. Systemd drop-in and nohup launch both
 # read only ${HAPI_HOME}/claude-setup-token.env; treating legacy as "durable"
 # without this migrate lets stop succeed then start an unauthenticated runner.

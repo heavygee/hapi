@@ -547,7 +547,7 @@ check "verify peer detection requires cgroup association" \
 check "verify validates every system drop-in conf before restart" \
     "grep -q 'unsafe drop-in' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
 check "pet embeds systemd EnvironmentFile unescape" \
-    "grep -q 'Unquoted: \\\\X' \"$ROOT/scripts/install-hapi-pet.sh\""
+    "grep -q 'state=pre' \"$ROOT/scripts/install-hapi-pet.sh\" && grep -q 'state=dq' \"$ROOT/scripts/install-hapi-pet.sh\""
 check "toggle rejects active credentials symlink" \
     "grep -q 'refusing symlink interactive credentials' \"$ROOT/scripts/tooling/hapi-claude-account-toggle.sh\""
 check "drop-in retires legacy even when canon already effective" \
@@ -767,5 +767,24 @@ check "nohup launch unsets inherited oauth before parse" \
     "python3 -c 't=open(\"$ROOT/scripts/install-hapi-pet.sh\").read(); a=t.find(\"Without: nohup\"); b=t.find(\"Runner started\"); chunk=t[a:b]; i=chunk.find(\"unset CLAUDE_CODE_OAUTH_TOKEN\"); j=chunk.find(\"hapi_pet_export_oauth_from_env_file\"); raise SystemExit(0 if 0<=i<j else 1)'"
 check "verify accepts strict modes on preserved drop-ins" \
     "grep -q 'is group/other-writable mode' \"$ROOT/scripts/tooling/verify-hapi-install.sh\" && ! grep -q 'must be root:root 0644' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
+got_seg="$(hapi_claude_oauth_parse_env_file_value '"abc"def')"
+check "parse concatenates quoted then unquoted segments" "[[ \"$got_seg\" == abcdef ]]"
+seg_file="$TMP/seg-quote.env"
+printf '%s\n' 'CLAUDE_CODE_OAUTH_TOKEN="abc"def' >"$seg_file"
+chmod 600 "$seg_file"
+got_seg_eff="$(hapi_claude_oauth_effective_token_value "$seg_file")"
+got_seg_bash="$(PATH="$no_py" hapi_claude_oauth_effective_token_value "$seg_file")"
+check "python effective token concatenates quote segments" "[[ \"$got_seg_eff\" == abcdef ]]"
+check "bash effective token concatenates quote segments" "[[ \"$got_seg_bash\" == abcdef ]]"
+writable_parent="$TMP/writable-home"
+mkdir -m 0777 -p "$writable_parent"
+writable_token="$writable_parent/claude-setup-token.env"
+set +e
+hapi_install_claude_oauth_dropin --scope user --runner-unit hapi-runner.service --token-file "$writable_token" >/dev/null 2>"$TMP/writable-parent.err"
+writable_rc=$?
+set -e
+check "user drop-in rejects group/other-writable token parent" "[[ $writable_rc -ne 0 ]] && grep -q 'group/other-writable' \"$TMP/writable-parent.err\""
+check "merged env validates required EnvironmentFile shape" \
+    "grep -q 'required EnvironmentFile is not a regular file' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\" && grep -q 'required EnvironmentFile is unreadable' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\""
 
 echo "ALL OK"
