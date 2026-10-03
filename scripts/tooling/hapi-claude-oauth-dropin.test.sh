@@ -746,5 +746,9 @@ check "verify final oauth probe normalizes padded keys" \
     "grep -q 'key == b\"CLAUDE_CODE_OAUTH_TOKEN\"' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
 check "user-pet --restart is not gated on is-active" \
     "! grep -q 'DO_RESTART.*is-active' \"$ROOT/scripts/tooling/install-hapi-systemd-units.sh\""
+check "merged env gate requires canonical EnvironmentFile" \
+    "grep -q 'canonical EnvironmentFile .* is not in merged' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\""
+check "user-pet restart validates merged oauth env" \
+    "grep -q 'hapi_claude_oauth_merged_env_discards_token hapi-runner.service' \"$ROOT/scripts/tooling/install-hapi-systemd-units.sh\" && grep -q 'hapi_claude_oauth_merged_env_discards_token hapi-runner.service' \"$ROOT/scripts/install-hapi-pet.sh\""
 
 echo "ALL OK"

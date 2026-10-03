@@ -465,6 +465,26 @@ EOF
             fi
         fi
     fi
+    if declare -F hapi_claude_oauth_merged_env_discards_token >/dev/null 2>&1; then
+        if hapi_claude_oauth_merged_env_discards_token hapi-runner.service "$token_file" --user; then
+            fail "merged user hapi-runner.service environment would override or unset CLAUDE_CODE_OAUTH_TOKEN — refusing restart"
+        fi
+    else
+        local _ue _ef _saw=0 _p
+        _ue="$(systemctl --user show hapi-runner.service -p UnsetEnvironment --value 2>/dev/null || true)"
+        if [[ "$_ue" =~ (^|[[:space:]])CLAUDE_CODE_OAUTH_TOKEN(=|[[:space:]]|$) ]]; then
+            fail "merged user hapi-runner.service UnsetEnvironment removes CLAUDE_CODE_OAUTH_TOKEN — refusing restart"
+        fi
+        _ef="$(systemctl --user show hapi-runner.service -p EnvironmentFiles --value 2>/dev/null || true)"
+        while IFS= read -r _p; do
+            _p="${_p#"${_p%%[![:space:]]*}"}"
+            _p="${_p%"${_p##*[![:space:]]}"}"
+            [[ "$_p" == "$token_file" ]] && _saw=1
+        done < <(printf '%s' "$_ef" | sed -E 's/ \(ignore_errors=(yes|no)\)/\n/g')
+        if [[ "$_saw" -ne 1 ]]; then
+            fail "canonical EnvironmentFile $token_file is not in merged user hapi-runner.service EnvironmentFiles — refusing restart"
+        fi
+    fi
     systemctl --user restart hapi-hub.service
     systemctl --user restart hapi-runner.service
     log "Installed: $unit_dir/hapi-hub.service"

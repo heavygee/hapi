@@ -487,11 +487,19 @@ case "$PROFILE" in
             # respawn the old hub/runner binary before INSTALL_DIR is swapped;
             # systemctl start is then a no-op for already-active units.
             hapi_user_pet_refuse_ambient_only_restart "$CLAUDE_TOKEN_FILE" || exit 1
+            if hapi_claude_oauth_merged_env_discards_token hapi-runner.service "$CLAUDE_TOKEN_FILE" --user; then
+                echo "ERROR: merged user hapi-runner.service environment would override or unset CLAUDE_CODE_OAUTH_TOKEN" >&2
+                exit 1
+            fi
             systemctl --user restart hapi-hub.service
             systemctl --user restart hapi-runner.service
         elif [[ "$DO_RESTART" -eq 1 ]]; then
             # systemctl restart starts inactive units (try-restart would skip).
             hapi_user_pet_refuse_ambient_only_restart "$CLAUDE_TOKEN_FILE" || exit 1
+            if hapi_claude_oauth_merged_env_discards_token hapi-runner.service "$CLAUDE_TOKEN_FILE" --user; then
+                echo "ERROR: merged user hapi-runner.service environment would override or unset CLAUDE_CODE_OAUTH_TOKEN" >&2
+                exit 1
+            fi
             systemctl --user restart hapi-hub.service
             systemctl --user restart hapi-runner.service
         fi

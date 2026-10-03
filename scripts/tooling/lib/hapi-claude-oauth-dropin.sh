@@ -1124,12 +1124,24 @@ hapi_claude_oauth_has_effective_token() {
 }
 
 # True when merged unit EnvironmentFiles / UnsetEnvironment would drop or
-# override CLAUDE_CODE_OAUTH_TOKEN after the canonical /etc/hapi file.
+# override CLAUDE_CODE_OAUTH_TOKEN after the canonical token file.
+# Usage: hapi_claude_oauth_merged_env_discards_token <unit> [canon-path] [--user]
+# Empty EnvironmentFile= resets the list (systemd.exec); missing canon is unsafe.
 hapi_claude_oauth_merged_env_discards_token() {
     local unit="${1:?unit}"
+    shift
+    local canon="/etc/hapi/claude-setup-token.env"
+    local ctl=(systemctl)
+    local later_root=1
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --user) ctl=(systemctl --user); later_root=0; shift ;;
+            *) canon="$1"; shift ;;
+        esac
+    done
     local files unset_env ef_path saw_canon=0
-    files="$(systemctl show "$unit" -p EnvironmentFiles --value 2>/dev/null || true)"
-    unset_env="$(systemctl show "$unit" -p UnsetEnvironment --value 2>/dev/null || true)"
+    files="$("${ctl[@]}" show "$unit" -p EnvironmentFiles --value 2>/dev/null || true)"
+    unset_env="$("${ctl[@]}" show "$unit" -p UnsetEnvironment --value 2>/dev/null || true)"
     if [[ "$unset_env" =~ (^|[[:space:]])CLAUDE_CODE_OAUTH_TOKEN(=|[[:space:]]|$) ]]; then
         echo "ERROR: $unit UnsetEnvironment removes CLAUDE_CODE_OAUTH_TOKEN" >&2
         return 0
@@ -1147,40 +1159,46 @@ hapi_claude_oauth_merged_env_discards_token() {
         ef_path="${ef_path#"${ef_path%%[![:space:]]*}"}"
         ef_path="${ef_path%"${ef_path##*[![:space:]]}"}"
         [[ -n "$ef_path" ]] || continue
-        if [[ "$ef_path" == "/etc/hapi/claude-setup-token.env" ]]; then
+        if [[ "$ef_path" == "$canon" ]]; then
             saw_canon=1
             continue
         fi
         [[ "$saw_canon" -eq 1 ]] || continue
-        if ! hapi_claude_oauth_assert_root_controlled_ancestors "$ef_path" >/dev/null 2>&1; then
-            echo "ERROR: later EnvironmentFile parent is not root-controlled ($ef_path)" >&2
-            return 0
+        if [[ "$later_root" -eq 1 ]]; then
+            if ! hapi_claude_oauth_assert_root_controlled_ancestors "$ef_path" >/dev/null 2>&1; then
+                echo "ERROR: later EnvironmentFile parent is not root-controlled ($ef_path)" >&2
+                return 0
+            fi
+            [[ -e "$ef_path" || -L "$ef_path" ]] || continue
+            if [[ -L "$ef_path" ]]; then
+                echo "ERROR: later EnvironmentFile is a symlink ($ef_path)" >&2
+                return 0
+            fi
+            if [[ ! -f "$ef_path" ]]; then
+                echo "ERROR: later EnvironmentFile is not a regular file ($ef_path)" >&2
+                return 0
+            fi
+            local later_uid later_mode
+            later_uid="$(stat -c '%u' "$ef_path" 2>/dev/null || true)"
+            later_mode="$(stat -c '%a' "$ef_path" 2>/dev/null || true)"
+            if [[ "$later_uid" != "0" ]]; then
+                echo "ERROR: later EnvironmentFile is not root-owned ($ef_path)" >&2
+                return 0
+            fi
+            if [[ -n "$later_mode" ]] && (( (8#$later_mode & 022) != 0 )); then
+                echo "ERROR: later EnvironmentFile is group/other-writable ($ef_path mode $later_mode)" >&2
+                return 0
+            fi
         fi
-        [[ -e "$ef_path" || -L "$ef_path" ]] || continue
-        if [[ -L "$ef_path" ]]; then
-            echo "ERROR: later EnvironmentFile is a symlink ($ef_path)" >&2
-            return 0
-        fi
-        if [[ ! -f "$ef_path" ]]; then
-            echo "ERROR: later EnvironmentFile is not a regular file ($ef_path)" >&2
-            return 0
-        fi
-        local later_uid later_mode
-        later_uid="$(stat -c '%u' "$ef_path" 2>/dev/null || true)"
-        later_mode="$(stat -c '%a' "$ef_path" 2>/dev/null || true)"
-        if [[ "$later_uid" != "0" ]]; then
-            echo "ERROR: later EnvironmentFile is not root-owned ($ef_path)" >&2
-            return 0
-        fi
-        if [[ -n "$later_mode" ]] && (( (8#$later_mode & 022) != 0 )); then
-            echo "ERROR: later EnvironmentFile is group/other-writable ($ef_path mode $later_mode)" >&2
-            return 0
-        fi
-        if grep -qE '^[[:space:]]*CLAUDE_CODE_OAUTH_TOKEN[[:space:]]*=' "$ef_path" 2>/dev/null; then
+        if [[ -f "$ef_path" && ! -L "$ef_path" ]] && grep -qE '^[[:space:]]*CLAUDE_CODE_OAUTH_TOKEN[[:space:]]*=' "$ef_path" 2>/dev/null; then
             echo "ERROR: later EnvironmentFile $ef_path overrides CLAUDE_CODE_OAUTH_TOKEN" >&2
             return 0
         fi
     done < <(printf '%s' "$files" | sed -E 's/ \(ignore_errors=(yes|no)\)/\n/g')
+    if [[ "$saw_canon" -ne 1 ]]; then
+        echo "ERROR: canonical EnvironmentFile $canon is not in merged $unit EnvironmentFiles" >&2
+        return 0
+    fi
     return 1
 }
 
