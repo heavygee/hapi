@@ -1303,18 +1303,20 @@ hapi_install_claude_oauth_dropin() {
         echo "NOTE: ignoring --owner=$owner for root-controlled token path $token_file" >&2
     fi
 
-    # Migrate when canonical is missing OR exists but has no effective token while
-    # a legacy credential is still present (empty-file trap).
+    # Migrate when canonical is missing/ineffective, and always retry retirement
+    # of leftover legacy sources even when canon is already effective (a prior
+    # copy+failed-retire must not succeed on rerun while leaving the stale source).
     HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=0
     local need_migrate=0
+    local canon_effective=0
     if [[ "$(basename "$token_file")" == "claude-setup-token.env" ]]; then
-        if [[ ! -f "$token_file" ]]; then
-            need_migrate=1
-        elif ! hapi_claude_oauth_has_effective_token "$token_file"; then
+        if hapi_claude_oauth_has_effective_token "$token_file" 2>/dev/null; then
+            canon_effective=1
+        else
             need_migrate=1
         fi
     fi
-    if [[ "$need_migrate" -eq 1 ]]; then
+    if [[ "$(basename "$token_file")" == "claude-setup-token.env" ]]; then
         local legacy_token
         if [[ "$root_controlled" -eq 1 ]]; then
             local -a present=()
@@ -1326,12 +1328,12 @@ hapi_install_claude_oauth_dropin() {
                 fi
             done < <(hapi_claude_oauth_legacy_system_token_candidates "$migrate_profile" "$migrate_hapi_home" "$migrate_operator_home")
 
-            if [[ ${#present[@]} -gt 1 ]]; then
+            if [[ "$need_migrate" -eq 1 && ${#present[@]} -gt 1 ]]; then
                 echo "ERROR: multiple legacy Claude OAuth tokens for profile '${migrate_profile:-unset}'; refuse to guess" >&2
                 printf '       - %s\n' "${present[@]}" >&2
                 echo "       Pick one source, remove or rename the others, then re-run install." >&2
                 HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=1
-            elif [[ ${#present[@]} -eq 1 ]]; then
+            elif [[ "$need_migrate" -eq 1 && ${#present[@]} -eq 1 ]]; then
                 legacy_token="${present[0]}"
                 if [[ -L "$legacy_token" ]]; then
                     echo "ERROR: refusing to migrate symlink legacy token: $legacy_token" >&2
@@ -1340,6 +1342,7 @@ hapi_install_claude_oauth_dropin() {
                 elif hapi_claude_oauth_secure_copy_regular_file "$legacy_token" "$token_file"; then
                     echo "Migrated Claude OAuth token: $legacy_token -> $token_file (regular file, 0600)"
                     if hapi_claude_oauth_has_effective_token "$token_file" 2>/dev/null; then
+                        canon_effective=1
                         hapi_claude_oauth_retire_legacy_token_source "$legacy_token" || {
                             echo "ERROR: migrated but could not retire legacy source $legacy_token" >&2
                             HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=1
@@ -1353,6 +1356,19 @@ hapi_install_claude_oauth_dropin() {
                     echo "       hapi_claude_oauth_secure_copy_regular_file $(printf '%q' "$legacy_token") $(printf '%q' "$token_file")" >&2
                     echo "       then: sudo systemctl restart ${runner_unit}" >&2
                 fi
+            elif [[ "$canon_effective" -eq 1 && ${#present[@]} -gt 0 ]]; then
+                # retry retirement: canon already good, archive every leftover legacy.
+                for legacy_token in "${present[@]}"; do
+                    if [[ -L "$legacy_token" ]]; then
+                        echo "ERROR: refusing to retire symlink legacy token: $legacy_token" >&2
+                        HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=1
+                        continue
+                    fi
+                    hapi_claude_oauth_retire_legacy_token_source "$legacy_token" || {
+                        echo "ERROR: could not retire leftover legacy source $legacy_token" >&2
+                        HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=1
+                    }
+                done
             fi
             if [[ ${#present[@]} -gt 0 ]] && ! hapi_claude_oauth_has_effective_token "$token_file" 2>/dev/null; then
                 HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=1
@@ -1363,17 +1379,26 @@ hapi_install_claude_oauth_dropin() {
                 if [[ -L "$legacy_token" ]]; then
                     echo "ERROR: refusing to migrate symlink legacy token: $legacy_token" >&2
                     HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=1
-                elif hapi_claude_oauth_secure_copy_regular_file "$legacy_token" "$token_file"; then
-                    echo "Migrated Claude OAuth token: $legacy_token -> $token_file"
-                    if hapi_claude_oauth_has_effective_token "$token_file" 2>/dev/null; then
-                        hapi_claude_oauth_retire_legacy_token_source "$legacy_token" || {
-                            echo "ERROR: migrated but could not retire legacy source $legacy_token" >&2
-                            HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=1
-                        }
+                elif [[ "$need_migrate" -eq 1 ]]; then
+                    if hapi_claude_oauth_secure_copy_regular_file "$legacy_token" "$token_file"; then
+                        echo "Migrated Claude OAuth token: $legacy_token -> $token_file"
+                        if hapi_claude_oauth_has_effective_token "$token_file" 2>/dev/null; then
+                            canon_effective=1
+                            hapi_claude_oauth_retire_legacy_token_source "$legacy_token" || {
+                                echo "ERROR: migrated but could not retire legacy source $legacy_token" >&2
+                                HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=1
+                            }
+                        fi
+                    else
+                        HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=1
+                        echo "WARN: could not migrate legacy token at $legacy_token" >&2
                     fi
-                else
-                    HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=1
-                    echo "WARN: could not migrate legacy token at $legacy_token" >&2
+                elif [[ "$canon_effective" -eq 1 ]]; then
+                    # retry retirement when a prior migrate left the legacy source behind.
+                    hapi_claude_oauth_retire_legacy_token_source "$legacy_token" || {
+                        echo "ERROR: could not retire leftover legacy source $legacy_token" >&2
+                        HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=1
+                    }
                 fi
             fi
         fi

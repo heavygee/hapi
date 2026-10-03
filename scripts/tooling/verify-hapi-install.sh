@@ -318,7 +318,39 @@ if [[ "$SCOPE" == system ]]; then
             ok "Claude OAuth drop-in directory is root-controlled ($sys_dropin_dir)"
         fi
     fi
-    if [[ -L "$sys_dropin" ]]; then
+    # systemd.unit(5): every *.conf in the unit .d directory is loaded. A
+    # previously planted 99-owned.conf survives directory-mode repair and can
+    # override User=/ExecStart= on the verifier's restart — gate every conf.
+    if [[ -d "$sys_dropin_dir" && ! -L "$sys_dropin_dir" ]]; then
+        shopt -s nullglob
+        for conf in "$sys_dropin_dir"/*.conf; do
+            if [[ -L "$conf" ]]; then
+                not_ok "Claude OAuth drop-in dir has unsafe drop-in symlink ($conf) — refusing restart"
+                SYSTEM_OAUTH_SAFE=0
+                OAUTH_RESTART_SAFE=0
+                continue
+            fi
+            if [[ ! -f "$conf" ]]; then
+                not_ok "Claude OAuth drop-in dir has unsafe drop-in non-regular ($conf) — refusing restart"
+                SYSTEM_OAUTH_SAFE=0
+                OAUTH_RESTART_SAFE=0
+                continue
+            fi
+            dropin_owner="$(stat -c '%U:%G' "$conf" 2>/dev/null || true)"
+            dropin_mode="$(stat -c '%a' "$conf" 2>/dev/null || true)"
+            if [[ "$dropin_owner" != "root:root" || "$dropin_mode" != "644" ]]; then
+                not_ok "Claude OAuth drop-in dir has unsafe drop-in ($conf must be root:root 0644; got ${dropin_owner:-unknown} mode ${dropin_mode:-unknown}) — refusing restart"
+                SYSTEM_OAUTH_SAFE=0
+                OAUTH_RESTART_SAFE=0
+                continue
+            fi
+            ok "Claude OAuth drop-in is root:root 0644 ($conf)"
+            if [[ "$(basename "$conf")" == "42-claude-oauth-token.conf" ]]; then
+                SYSTEM_DROPIN_VALIDATED="$conf"
+            fi
+        done
+        shopt -u nullglob
+    elif [[ -L "$sys_dropin" ]]; then
         not_ok "Claude OAuth drop-in is a symlink ($sys_dropin) — refusing restart"
         SYSTEM_OAUTH_SAFE=0
         OAUTH_RESTART_SAFE=0
@@ -326,17 +358,6 @@ if [[ "$SCOPE" == system ]]; then
         not_ok "Claude OAuth drop-in is not a regular file ($sys_dropin) — refusing restart"
         SYSTEM_OAUTH_SAFE=0
         OAUTH_RESTART_SAFE=0
-    elif [[ -f "$sys_dropin" ]]; then
-        dropin_owner="$(stat -c '%U:%G' "$sys_dropin" 2>/dev/null || true)"
-        dropin_mode="$(stat -c '%a' "$sys_dropin" 2>/dev/null || true)"
-        if [[ "$dropin_owner" != "root:root" || "$dropin_mode" != "644" ]]; then
-            not_ok "Claude OAuth drop-in must be root:root 0644 (got ${dropin_owner:-unknown} mode ${dropin_mode:-unknown} at $sys_dropin) — refusing restart"
-            SYSTEM_OAUTH_SAFE=0
-            OAUTH_RESTART_SAFE=0
-        else
-            ok "Claude OAuth drop-in is root:root 0644 ($sys_dropin)"
-            SYSTEM_DROPIN_VALIDATED="$sys_dropin"
-        fi
     fi
 
     # Canonical token node + parent before restart: systemd reads EnvironmentFile

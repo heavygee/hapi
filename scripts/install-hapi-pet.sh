@@ -71,6 +71,65 @@ if [[ -n "${SCRIPT_DIR}" && -f "${SCRIPT_DIR}/tooling/lib/hapi-claude-oauth-drop
     source "${SCRIPT_DIR}/tooling/lib/hapi-claude-oauth-dropin.sh"
 fi
 
+# Embed systemd EnvironmentFile value parser for curl|bash (keep in sync with
+# hapi_claude_oauth_parse_env_file_value in lib/hapi-claude-oauth-dropin.sh).
+if ! declare -F hapi_claude_oauth_parse_env_file_value >/dev/null 2>&1; then
+    hapi_claude_oauth_parse_env_file_value() {
+        local raw="${1-}"
+        raw="${raw%$'\r'}"
+        raw="${raw#"${raw%%[![:space:]]*}"}"
+        raw="${raw%"${raw##*[![:space:]]}"}"
+        [[ -n "$raw" ]] || return 1
+
+        local quote=""
+        if [[ ${#raw} -ge 2 ]]; then
+            if [[ "${raw:0:1}" == '"' && "${raw: -1}" == '"' ]]; then
+                quote=double
+                raw="${raw:1:${#raw}-2}"
+            elif [[ "${raw:0:1}" == "'" && "${raw: -1}" == "'" ]]; then
+                printf '%s' "${raw:1:${#raw}-2}"
+                return 0
+            fi
+        fi
+
+        local out="" i=0 c nxt
+        if [[ "$quote" == "double" ]]; then
+            while (( i < ${#raw} )); do
+                c="${raw:i:1}"
+                if [[ "$c" == '\' && $((i + 1)) -lt ${#raw} ]]; then
+                    nxt="${raw:i+1:1}"
+                    case "$nxt" in
+                        '\\'|'"'|'`'|'$') out+="$nxt" ;;
+                        *) out+="\\$nxt" ;;
+                    esac
+                    i=$((i + 2))
+                    continue
+                fi
+                out+="$c"
+                i=$((i + 1))
+            done
+            [[ -n "$out" ]] || return 1
+            printf '%s' "$out"
+            return 0
+        fi
+
+        # Unquoted: \X → X (including \\ → \).
+        while (( i < ${#raw} )); do
+            c="${raw:i:1}"
+            if [[ "$c" == '\' && $((i + 1)) -lt ${#raw} ]]; then
+                out+="${raw:i+1:1}"
+                i=$((i + 2))
+                continue
+            fi
+            out+="$c"
+            i=$((i + 1))
+        done
+        [[ -n "$out" ]] || return 1
+        printf '%s' "$out"
+        return 0
+    }
+fi
+
 # Export CLAUDE_CODE_OAUTH_TOKEN from an EnvironmentFile literally (never `source`
 # the file — shell would expand $, backticks, and abort under set -u).
 hapi_pet_export_oauth_from_env_file() {
@@ -84,29 +143,16 @@ hapi_pet_export_oauth_from_env_file() {
         set -e
         [[ "$rc" -eq 0 && -n "$eff" ]] || return 1
     else
-        # Minimal last-assignment parser (mirrors systemd strip-quotes; no source).
-        local line raw last=""
+        # Last-assignment parser with full systemd EnvironmentFile unescape.
+        local line raw last="" parsed
         while IFS= read -r line || [[ -n "$line" ]]; do
             case "$line" in
                 CLAUDE_CODE_OAUTH_TOKEN=*)
                     raw="${line#CLAUDE_CODE_OAUTH_TOKEN=}"
-                    raw="${raw%$'\r'}"
-                    if declare -F hapi_claude_oauth_parse_env_file_value >/dev/null 2>&1; then
-                        if parsed="$(hapi_claude_oauth_parse_env_file_value "$raw")"; then
-                            last="$parsed"
-                        else
-                            last=""
-                        fi
+                    if parsed="$(hapi_claude_oauth_parse_env_file_value "$raw")"; then
+                        last="$parsed"
                     else
-                        if [[ ${#raw} -ge 2 ]]; then
-                            if [[ "${raw:0:1}" == '"' && "${raw: -1}" == '"' ]] || \
-                               [[ "${raw:0:1}" == "'" && "${raw: -1}" == "'" ]]; then
-                                raw="${raw:1:${#raw}-2}"
-                            fi
-                        fi
-                        raw="${raw#"${raw%%[![:space:]]*}"}"
-                        raw="${raw%"${raw##*[![:space:]]}"}"
-                        last="$raw"
+                        last=""
                     fi
                     ;;
             esac
@@ -124,13 +170,13 @@ hapi_pet_export_oauth_from_env_file() {
 # itself or upgrades wipe ambient auth on the next runner restart.
 hapi_pet_migrate_legacy_oauth_if_needed() {
     local token_file="${1:?token_file}"
-    local hapi_home legacy_token dest tmp
+    local hapi_home legacy_token dest tmp canon_ok=0
     hapi_home="$(dirname "$token_file")"
     legacy_token="${hapi_home}/.hapi/claude-setup-token.env"
 
     # Subshell: export helper must not pollute the installer environment.
     if ( hapi_pet_export_oauth_from_env_file "$token_file" >/dev/null 2>&1 ); then
-        return 0
+        canon_ok=1
     fi
     [[ -e "$legacy_token" || -L "$legacy_token" ]] || return 0
 
@@ -139,6 +185,21 @@ hapi_pet_migrate_legacy_oauth_if_needed() {
     fi
     if [[ ! -f "$legacy_token" ]]; then
         fail "refusing non-regular legacy token: $legacy_token (write a regular 0600 file)"
+    fi
+
+    # Canon already effective: still retire leftover legacy (retry retirement) so a
+    # later empty/missing canon cannot re-import a revoked credential.
+    if [[ "$canon_ok" -eq 1 ]]; then
+        if declare -F hapi_claude_oauth_retire_legacy_token_source >/dev/null 2>&1; then
+            hapi_claude_oauth_retire_legacy_token_source "$legacy_token" \
+                || fail "could not retire leftover legacy Claude OAuth token: $legacy_token"
+        else
+            dest="${legacy_token}.migrated.$(date +%s)"
+            mv -n -- "$legacy_token" "$dest" \
+                || fail "could not retire leftover legacy Claude OAuth token: $legacy_token"
+            log "Retired legacy Claude OAuth token: $legacy_token -> $dest"
+        fi
+        return 0
     fi
 
     if declare -F hapi_claude_oauth_secure_copy_regular_file >/dev/null 2>&1; then

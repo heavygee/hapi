@@ -505,15 +505,23 @@ check "pet preflight checks symlink ancestors" \
 check "pet preflight blocks ambient-only stop" \
     "grep -q 'refuse stop/restart; persist the token first' \"$ROOT/scripts/install-hapi-pet.sh\""
 check "pet preflight runs without --with-systemd for canonical" \
-    "awk '/_preflight_token_shape \"\\\$\{HAPI_HOME\}\/claude-setup-token.env\"/,/WITH_SYSTEMD/ {print}' \"$ROOT/scripts/install-hapi-pet.sh\" | head -1 | grep -q preflight"
+    "awk '/_preflight_token_shape \"\\\$\{HAPI_HOME\}\/claude-setup-token.env\"/ {found=1; exit} END {exit !found}' \"$ROOT/scripts/install-hapi-pet.sh\""
 check "pet migrates legacy oauth before stop for nohup" \
-    "awk '/hapi_pet_migrate_legacy_oauth_if_needed \"\\\$\{HAPI_HOME\}\/claude-setup-token.env\"/,/Found running hapi process/ {print}' \"$ROOT/scripts/install-hapi-pet.sh\" | head -1 | grep -q migrate"
+    "awk '/hapi_pet_migrate_legacy_oauth_if_needed \"\\\$\{HAPI_HOME\}\/claude-setup-token.env\"/ {found=1; exit} END {exit !found}' \"$ROOT/scripts/install-hapi-pet.sh\""
 check "pet nohup launch migrates legacy before export" \
     "awk '/Without: nohup/,/Runner started/ {print}' \"$ROOT/scripts/install-hapi-pet.sh\" | grep -q 'hapi_pet_migrate_legacy_oauth_if_needed'"
 check "verify refuses ambient-only restart" \
     "grep -q 'has ambient CLAUDE_CODE_OAUTH_TOKEN but' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
 check "verify peer detection requires cgroup association" \
     "grep -q 'cgroup_related' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
+check "verify validates every system drop-in conf before restart" \
+    "grep -q 'unsafe drop-in' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
+check "pet embeds systemd EnvironmentFile unescape" \
+    "grep -q 'Unquoted: \\\\X' \"$ROOT/scripts/install-hapi-pet.sh\""
+check "toggle rejects active credentials symlink" \
+    "grep -q 'refusing symlink interactive credentials' \"$ROOT/scripts/tooling/hapi-claude-account-toggle.sh\""
+check "drop-in retires legacy even when canon already effective" \
+    "grep -q 'retry retirement' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\""
 check "retire function returns 1 on python failure" \
     "awk '/^hapi_claude_oauth_retire_legacy_token_source/,/^}/ {print}' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\" | grep -q 'return 1'"
 
@@ -625,5 +633,33 @@ set -e
 check "assert_root_controlled rejects non-root parent" "[[ $parent_rc -ne 0 ]]"
 check "assert_root_controlled mentions ownership or writable" \
     "grep -Eiq 'owned by uid|group/other-writable' /tmp/hapi-claude-oauth-parent.err"
+
+# systemd EnvironmentFile unescape (unquoted \X → X; whitespace then quotes).
+got="$(hapi_claude_oauth_parse_env_file_value 'abc\def')"
+check "parse unquoted backslash strips" "[[ \"$got\" == \"abcdef\" ]]"
+got="$(hapi_claude_oauth_parse_env_file_value '  "quoted"  ')"
+check "parse strips outer whitespace before quotes" "[[ \"$got\" == \"quoted\" ]]"
+
+# Canon already effective + leftover legacy → retry retirement (not need_migrate=0 no-op).
+retry_home="$TMP/retry-retire"
+mkdir -p "$retry_home/.hapi"
+printf 'CLAUDE_CODE_OAUTH_TOKEN=canon\n' >"$retry_home/claude-setup-token.env"
+chmod 600 "$retry_home/claude-setup-token.env"
+printf 'CLAUDE_CODE_OAUTH_TOKEN=stale\n' >"$retry_home/.hapi/claude-setup-token.env"
+chmod 600 "$retry_home/.hapi/claude-setup-token.env"
+set +e
+hapi_install_claude_oauth_dropin \
+    --scope user --runner-unit hapi-runner.service \
+    --token-file "$retry_home/claude-setup-token.env" \
+    >/tmp/hapi-claude-oauth-retry-retire.out 2>/tmp/hapi-claude-oauth-retry-retire.err
+retry_rc=$?
+set -e
+check "retry retirement succeeds with effective canon" "[[ $retry_rc -eq 0 ]]"
+check "retry retirement archives leftover legacy" \
+    "[[ ! -e \"$retry_home/.hapi/claude-setup-token.env\" ]]"
+check "retry retirement keeps canon value" \
+    "grep -q 'CLAUDE_CODE_OAUTH_TOKEN=canon' \"$retry_home/claude-setup-token.env\""
+check "retry retirement logs Retired" \
+    "grep -q 'Retired legacy Claude OAuth token' /tmp/hapi-claude-oauth-retry-retire.out"
 
 echo "ALL OK"
