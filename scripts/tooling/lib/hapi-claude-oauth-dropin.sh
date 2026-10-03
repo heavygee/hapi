@@ -1179,6 +1179,26 @@ PY
     return 0
 }
 
+# Walk dirname(path) up through the systemd unit-file search root (or /etc/hapi
+# for EnvironmentFiles). Each ancestor must be a non-symlink, root-owned
+# directory that is not group/other-writable — otherwise the runner can
+# replace the leaf before restart/watchdog kick.
+hapi_claude_oauth_assert_root_controlled_ancestors() {
+    local node="${1:?path}"
+    local dir
+    dir="$(dirname -- "$node")"
+    while [[ -n "$dir" && "$dir" != "/" && "$dir" != "." ]]; do
+        hapi_claude_oauth_assert_root_controlled_parent "$dir" || return 1
+        case "$dir" in
+            /etc/systemd/system|/etc/systemd/user|/run/systemd/system|/usr/lib/systemd/system|/lib/systemd/system|/usr/local/lib/systemd/system|/etc/hapi)
+                return 0
+                ;;
+        esac
+        dir="$(dirname -- "$dir")"
+    done
+    return 0
+}
+
 # chmod 0600 (+ optional chown) without following a symlink final component.
 # Prefer python3 O_NOFOLLOW + fchmod/fchown. Path-based shell chmod/chown is
 # only allowed for user-scope (no --owner): system-profile as root must fail

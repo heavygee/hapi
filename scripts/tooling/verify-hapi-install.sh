@@ -315,11 +315,19 @@ if [[ "$SCOPE" == system ]]; then
                 OAUTH_RESTART_SAFE=0
                 continue
             fi
+            if ! hapi_claude_oauth_assert_root_controlled_ancestors "$path" >/dev/null 2>&1; then
+                not_ok "loaded unit fragment parent is not root-controlled ($unit $path) — refusing restart"
+                SYSTEM_OAUTH_SAFE=0
+                OAUTH_RESTART_SAFE=0
+                continue
+            fi
             ok "loaded unit fragment is root-owned non-writable ($unit $path)"
         done
     }
     hapi_verify_audit_loaded_fragments "$RUNNER_UNIT"
     hapi_verify_audit_loaded_fragments "$HUB_UNIT"
+    hapi_verify_audit_loaded_fragments "hapi-runner-watchdog.service"
+    hapi_verify_audit_loaded_fragments "hapi-runner-watchdog.timer"
     unset -f hapi_verify_audit_loaded_fragments
 
     # Canonical token node + parent before restart: systemd reads EnvironmentFile
@@ -419,6 +427,12 @@ else
             continue
         fi
         [[ "$saw_canon_env" -eq 1 ]] || continue
+        if ! hapi_claude_oauth_assert_root_controlled_ancestors "$ef_path" >/dev/null 2>&1; then
+            not_ok "later EnvironmentFile parent is not root-controlled ($ef_path) — refusing restart"
+            OAUTH_RESTART_SAFE=0
+            SYSTEM_OAUTH_SAFE=0
+            continue
+        fi
         [[ -e "$ef_path" || -L "$ef_path" ]] || continue
         if [[ -L "$ef_path" ]]; then
             not_ok "later EnvironmentFile is a symlink ($ef_path) after canonical token — refusing restart"
@@ -426,7 +440,27 @@ else
             SYSTEM_OAUTH_SAFE=0
             continue
         fi
-        if [[ -f "$ef_path" ]] && grep -qE '^[[:space:]]*CLAUDE_CODE_OAUTH_TOKEN=' "$ef_path" 2>/dev/null; then
+        if [[ ! -f "$ef_path" ]]; then
+            not_ok "later EnvironmentFile is not a regular file ($ef_path) — refusing restart"
+            OAUTH_RESTART_SAFE=0
+            SYSTEM_OAUTH_SAFE=0
+            continue
+        fi
+        later_uid="$(stat -c '%u' "$ef_path" 2>/dev/null || true)"
+        later_mode="$(stat -c '%a' "$ef_path" 2>/dev/null || true)"
+        if [[ "$later_uid" != "0" ]]; then
+            not_ok "later EnvironmentFile is not root-owned ($ef_path) — refusing restart"
+            OAUTH_RESTART_SAFE=0
+            SYSTEM_OAUTH_SAFE=0
+            continue
+        fi
+        if [[ -n "$later_mode" ]] && (( (8#$later_mode & 022) != 0 )); then
+            not_ok "later EnvironmentFile is group/other-writable ($ef_path mode $later_mode) — refusing restart"
+            OAUTH_RESTART_SAFE=0
+            SYSTEM_OAUTH_SAFE=0
+            continue
+        fi
+        if grep -qE '^[[:space:]]*CLAUDE_CODE_OAUTH_TOKEN=' "$ef_path" 2>/dev/null; then
             not_ok "later EnvironmentFile $ef_path overrides CLAUDE_CODE_OAUTH_TOKEN after canonical token — refusing restart"
             OAUTH_RESTART_SAFE=0
             SYSTEM_OAUTH_SAFE=0

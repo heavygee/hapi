@@ -390,7 +390,15 @@ case "$PROFILE" in
                 echo "       hapi-runner-watchdog.timer was left stopped." >&2
                 exit 1
             fi
-            systemctl start hapi-runner-watchdog.timer 2>/dev/null || true
+            if ! systemctl start hapi-runner-watchdog.timer; then
+                echo "ERROR: failed to restore hapi-runner-watchdog.timer after --units-only" >&2
+                echo "       Timer was active before this upgrade and was left stopped." >&2
+                exit 1
+            fi
+            if ! systemctl is-active --quiet hapi-runner-watchdog.timer; then
+                echo "ERROR: hapi-runner-watchdog.timer did not become active after restore" >&2
+                exit 1
+            fi
         fi
         ;;
     user-pet)

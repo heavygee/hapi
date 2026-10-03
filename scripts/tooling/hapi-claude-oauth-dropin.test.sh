@@ -405,8 +405,14 @@ check "verify oauth gate precedes watchdog kick" \
     "awk '/^OAUTH_RESTART_SAFE=1/ {o=NR} /start hapi-runner-watchdog.service/ {w=NR} END {exit !(o && w && o<w)}' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
 check "verify skips watchdog kick when oauth unsafe" \
     "grep -q 'skipped watchdog kick' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
-check "verify audits FragmentPath and DropInPaths" \
-    "grep -q 'DropInPaths' \"$ROOT/scripts/tooling/verify-hapi-install.sh\" && grep -q 'loaded unit fragment' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
+check "verify audits watchdog fragments before kick" \
+    "grep -q 'hapi-runner-watchdog.service' \"$ROOT/scripts/tooling/verify-hapi-install.sh\" && grep -q 'hapi_verify_audit_loaded_fragments \"hapi-runner-watchdog.service\"' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
+check "verify audits fragment parent directories" \
+    "grep -q 'hapi_claude_oauth_assert_root_controlled_ancestors' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
+check "verify rejects writable later EnvironmentFiles" \
+    "grep -q 'later EnvironmentFile is group/other-writable' \"$ROOT/scripts/tooling/verify-hapi-install.sh\" && grep -q 'later EnvironmentFile is not root-owned' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
+check "installer fails closed if watchdog timer restore fails" \
+    "grep -q 'failed to restore hapi-runner-watchdog.timer' \"$ROOT/scripts/tooling/install-hapi-systemd-units.sh\" && ! grep -q 'start hapi-runner-watchdog.timer 2>/dev/null || true' \"$ROOT/scripts/tooling/install-hapi-systemd-units.sh\""
 check "verify refuses later EnvironmentFile oauth override" \
     "grep -q 'overrides CLAUDE_CODE_OAUTH_TOKEN after canonical token' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
 check "installer checks ambient oauth before watchdog tier1" \
@@ -658,6 +664,8 @@ set -e
 check "assert_root_controlled rejects non-root parent" "[[ $parent_rc -ne 0 ]]"
 check "assert_root_controlled mentions ownership or writable" \
     "grep -Eiq 'owned by uid|group/other-writable' $TMP/hapi-claude-oauth-parent.err"
+check "ancestor walker is exported from dropin lib" \
+    "declare -F hapi_claude_oauth_assert_root_controlled_ancestors >/dev/null"
 
 # systemd EnvironmentFile unescape (unquoted \X → X; whitespace then quotes).
 got="$(hapi_claude_oauth_parse_env_file_value 'abc\def')"
