@@ -91,6 +91,12 @@ if [[ "$eff_rc" -ne 0 || -z "$EFFECTIVE" ]]; then
     exit 1
 fi
 
+if hapi_claude_oauth_merged_env_discards_token hapi-runner-oos.service; then
+    echo "ERROR: merged hapi-runner-oos.service environment would override or unset CLAUDE_CODE_OAUTH_TOKEN" >&2
+    echo "       Fix later EnvironmentFiles / UnsetEnvironment before toggling." >&2
+    exit 1
+fi
+
 TS="$(date -u +%Y%m%d%H%M%S)"
 mkdir -p "$HOME/.claude" "$HOME/.hapi" "$ROOT/auth-bak"
 prev_cred="$ROOT/auth-bak/.credentials.json.bak-toggle-$TS"

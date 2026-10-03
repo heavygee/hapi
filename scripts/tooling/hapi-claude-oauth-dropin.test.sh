@@ -428,7 +428,7 @@ check "verify validates drop-in directory even when file absent" \
 check "verify validates token before restart" \
     "grep -q 'token file must be root:root 0600 before restart' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
 check "verify refuses restart when token not in EnvironmentFiles" \
-    "grep -q 'not wired into' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
+    "grep -q 'must be wired as' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
 check "pet systemd path restarts hub on upgrade" \
     "grep -q 'systemctl --user restart hapi-hub.service' \"$ROOT/scripts/install-hapi-pet.sh\""
 check "toggle rejects non-regular interactive credentials" \
@@ -754,5 +754,16 @@ check "merged env gate rejects later EnvironmentFile symlink in user scope" \
     "LIB=\"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\" python3 -c 'from pathlib import Path; import os; t=Path(os.environ[\"LIB\"]).read_text(); a=t.find(\"hapi_claude_oauth_merged_env_discards_token\"); b=t.find(\"hapi_claude_oauth_secure_chown_mode\"); fn=t[a:b]; i=fn.find(\"[[ -e \"); j=fn.find(\"later EnvironmentFile is a symlink\"); k=fn.find(\"later EnvironmentFile is not root-owned\"); raise SystemExit(0 if 0<=i<j<k else 1)'"
 check "ambient oauth unreadable MainPID fails closed" \
     "grep -q 'cannot inspect runner MainPID' \"$ROOT/scripts/tooling/install-hapi-systemd-units.sh\" && grep -q 'hapi_claude_oauth_mainpid_has_oauth_token' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\" && grep -q 'cannot inspect user-pet runner MainPID' \"$ROOT/scripts/install-hapi-pet.sh\""
+iter_got="$(hapi_claude_oauth_iter_environment_files '/etc/hapi/claude-setup-token.env (ignore_errors=yes) /tmp/missing-oauth.env (ignore_errors=no)')"
+check "environment file iterator preserves ignore_errors=no" \
+    "[[ \"$iter_got\" == *$'/tmp/missing-oauth.env\tno'* ]]"
+check "merged env gate rejects missing required EnvironmentFile" \
+    "grep -q 'required EnvironmentFile is missing' \"$ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh\""
+check "verify user canon skip is exact token path" \
+    "! grep -n 'ef_path.*\\*claude-setup-token.env' \"$ROOT/scripts/tooling/verify-hapi-install.sh\" && grep -q 'expected_canon' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
+check "account toggle validates merged oauth env before switch" \
+    "python3 -c 't=open(\"$ROOT/scripts/tooling/hapi-claude-account-toggle.sh\").read(); a=t.find(\"hapi_claude_oauth_merged_env_discards_token hapi-runner-oos.service\"); b=t.find(\"sudo -E systemctl restart hapi-runner-oos.service\"); raise SystemExit(0 if 0<=a<b else 1)'"
+check "nohup launch unsets inherited oauth before parse" \
+    "python3 -c 't=open(\"$ROOT/scripts/install-hapi-pet.sh\").read(); a=t.find(\"Without: nohup\"); b=t.find(\"Runner started\"); chunk=t[a:b]; i=chunk.find(\"unset CLAUDE_CODE_OAUTH_TOKEN\"); j=chunk.find(\"hapi_pet_export_oauth_from_env_file\"); raise SystemExit(0 if 0<=i<j else 1)'"
 
 echo "ALL OK"

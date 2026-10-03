@@ -499,29 +499,32 @@ EOF
             fail "merged user hapi-runner.service environment would override or unset CLAUDE_CODE_OAUTH_TOKEN — refusing restart"
         fi
     else
-        local _ue _ef _saw=0 _p
+        local _ue _ef _saw=0 _p _ign _miss
         _ue="$(systemctl --user show hapi-runner.service -p UnsetEnvironment --value 2>/dev/null || true)"
         if [[ "$_ue" =~ (^|[[:space:]])CLAUDE_CODE_OAUTH_TOKEN(=|[[:space:]]|$) ]]; then
             fail "merged user hapi-runner.service UnsetEnvironment removes CLAUDE_CODE_OAUTH_TOKEN — refusing restart"
         fi
         _ef="$(systemctl --user show hapi-runner.service -p EnvironmentFiles --value 2>/dev/null || true)"
-        while IFS= read -r _p; do
-            _p="${_p#"${_p%%[![:space:]]*}"}"
-            _p="${_p%"${_p##*[![:space:]]}"}"
+        while IFS=$'\t' read -r _p _ign || [[ -n "${_p-}" ]]; do
             [[ -n "$_p" ]] || continue
+            _miss=0
+            [[ -e "$_p" || -L "$_p" ]] || _miss=1
+            if [[ "$_miss" -eq 1 && "$_ign" == "no" ]]; then
+                fail "required EnvironmentFile is missing ($_p) — refusing restart"
+            fi
             if [[ "$_p" == "$token_file" ]]; then
                 _saw=1
                 continue
             fi
             [[ "$_saw" -eq 1 ]] || continue
-            [[ -e "$_p" || -L "$_p" ]] || continue
+            [[ "$_miss" -eq 1 ]] && continue
             if [[ -L "$_p" ]]; then
                 fail "later EnvironmentFile is a symlink ($_p) — refusing restart"
             fi
             if [[ -f "$_p" ]] && grep -qE '^[[:space:]]*CLAUDE_CODE_OAUTH_TOKEN[[:space:]]*=' "$_p" 2>/dev/null; then
                 fail "later EnvironmentFile $_p overrides CLAUDE_CODE_OAUTH_TOKEN — refusing restart"
             fi
-        done < <(printf '%s' "$_ef" | sed -E 's/ \(ignore_errors=(yes|no)\)/\n/g')
+        done < <(hapi_claude_oauth_iter_environment_files "$_ef" 2>/dev/null || printf '%s' "$_ef" | sed -E 's/ \(ignore_errors=(yes|no)\)/\t\1\n/g')
         if [[ "$_saw" -ne 1 ]]; then
             fail "canonical EnvironmentFile $token_file is not in merged user hapi-runner.service EnvironmentFiles — refusing restart"
         fi
@@ -784,6 +787,7 @@ else
     # drop of only `.hapi/...` still reaches the nohup runner env.
     hapi_pet_migrate_legacy_oauth_if_needed "${HAPI_HOME}/claude-setup-token.env"
     (
+        unset CLAUDE_CODE_OAUTH_TOKEN
         if [[ -f "$HAPI_HOME/claude-setup-token.env" && ! -L "$HAPI_HOME/claude-setup-token.env" ]]; then
             chmod 600 "$HAPI_HOME/claude-setup-token.env"
             hapi_pet_export_oauth_from_env_file "$HAPI_HOME/claude-setup-token.env" || true

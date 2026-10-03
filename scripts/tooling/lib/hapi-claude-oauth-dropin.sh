@@ -1148,6 +1148,30 @@ hapi_claude_oauth_mainpid_has_oauth_token() {
     [[ -n "$tok" ]]
 }
 
+# Split `systemctl show -p EnvironmentFiles` into path + ignore_errors (yes|no).
+# Missing marker is treated as required (ignore_errors=no).
+hapi_claude_oauth_iter_environment_files() {
+    local files="${1-}" line path ign
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+        [[ -n "$line" ]] || continue
+        ign="no"
+        path="$line"
+        if [[ "$line" == *$'\t'* ]]; then
+            path="${line%%$'\t'*}"
+            ign="${line#*$'\t'}"
+        fi
+        path="${path#"${path%%[![:space:]]*}"}"
+        path="${path%"${path##*[![:space:]]}"}"
+        [[ -n "$path" ]] || continue
+        if [[ "$ign" != "yes" && "$ign" != "no" ]]; then
+            ign="no"
+        fi
+        printf '%s\t%s\n' "$path" "$ign"
+    done < <(printf '%s' "$files" | sed -E 's/ \(ignore_errors=(yes|no)\)/\t\1\n/g')
+}
+
 # True when merged unit EnvironmentFiles / UnsetEnvironment would drop or
 # override CLAUDE_CODE_OAUTH_TOKEN after the canonical token file.
 # Usage: hapi_claude_oauth_merged_env_discards_token <unit> [canon-path] [--user]
@@ -1180,22 +1204,27 @@ hapi_claude_oauth_merged_env_discards_token() {
             return 0
         fi
     done
-    while IFS= read -r ef_path; do
-        ef_path="${ef_path#"${ef_path%%[![:space:]]*}"}"
-        ef_path="${ef_path%"${ef_path##*[![:space:]]}"}"
+    local ef_ignore ef_missing
+    while IFS=$'\t' read -r ef_path ef_ignore || [[ -n "${ef_path-}" ]]; do
         [[ -n "$ef_path" ]] || continue
+        ef_missing=0
+        [[ -e "$ef_path" || -L "$ef_path" ]] || ef_missing=1
+        if [[ "$ef_missing" -eq 1 && "$ef_ignore" == "no" ]]; then
+            echo "ERROR: required EnvironmentFile is missing ($ef_path)" >&2
+            return 0
+        fi
         if [[ "$ef_path" == "$canon" ]]; then
             saw_canon=1
             continue
         fi
         [[ "$saw_canon" -eq 1 ]] || continue
+        [[ "$ef_missing" -eq 1 ]] && continue
         if [[ "$later_root" -eq 1 ]]; then
             if ! hapi_claude_oauth_assert_root_controlled_ancestors "$ef_path" >/dev/null 2>&1; then
                 echo "ERROR: later EnvironmentFile parent is not root-controlled ($ef_path)" >&2
                 return 0
             fi
         fi
-        [[ -e "$ef_path" || -L "$ef_path" ]] || continue
         # systemd follows EnvironmentFile symlinks; later TOKEN= would override canon.
         if [[ -L "$ef_path" ]]; then
             echo "ERROR: later EnvironmentFile is a symlink ($ef_path)" >&2
@@ -1222,7 +1251,7 @@ hapi_claude_oauth_merged_env_discards_token() {
             echo "ERROR: later EnvironmentFile $ef_path overrides CLAUDE_CODE_OAUTH_TOKEN" >&2
             return 0
         fi
-    done < <(printf '%s' "$files" | sed -E 's/ \(ignore_errors=(yes|no)\)/\n/g')
+    done < <(hapi_claude_oauth_iter_environment_files "$files")
     if [[ "$saw_canon" -ne 1 ]]; then
         echo "ERROR: canonical EnvironmentFile $canon is not in merged $unit EnvironmentFiles" >&2
         return 0
