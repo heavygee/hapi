@@ -222,6 +222,14 @@ OAUTH_RESTART_SAFE=1
 SYSTEM_DROPIN_VALIDATED=""
 SYSTEM_TOKEN_PRECHECKED=0
 SYSTEM_TOKEN_NODE_CHECKED=0
+if [[ "$SCOPE" == system && "${EUID:-$(id -u)}" -ne 0 ]]; then
+    # Token is 0600 root; runner /proc environ is other-UID. Non-root cannot
+    # prove durable vs ambient — refuse watchdog kick/restart rather than
+    # defaulting OAUTH_RESTART_SAFE=1.
+    not_ok "system-scope OAuth restart checks require root (running as $(id -un)) — refusing restart"
+    SYSTEM_OAUTH_SAFE=0
+    OAUTH_RESTART_SAFE=0
+fi
 if [[ "$SCOPE" == system ]]; then
     sys_dropin_dir="/etc/systemd/system/${RUNNER_UNIT}.d"
     sys_dropin="${sys_dropin_dir}/42-claude-oauth-token.conf"
@@ -330,15 +338,10 @@ if [[ "$SCOPE" == system ]]; then
     hapi_verify_audit_loaded_fragments "hapi-runner-watchdog.timer"
     unset -f hapi_verify_audit_loaded_fragments
 
-    # Canonical token node + parent before restart: systemd reads EnvironmentFile
-    # as root; a symlink or service-writable /etc/hapi must not be loaded first.
+    # Canonical token is always /etc/hapi/claude-setup-token.env. Basename
+    # matches on EnvironmentFiles (e.g. /etc/hapi-old/...) must not retarget
+    # the pre-restart gate to a stale file.
     pre_token="/etc/hapi/claude-setup-token.env"
-    pre_env_files="$("${CTL[@]}" show "$RUNNER_UNIT" -p EnvironmentFiles --value 2>/dev/null || true)"
-    if [[ "$pre_env_files" == *claude-setup-token.env* ]]; then
-        pre_from_unit="$(printf '%s\n' "$pre_env_files" | tr ' ' '\n' | grep 'claude-setup-token\.env' | head -n1 || true)"
-        pre_from_unit="${pre_from_unit%% (*}"
-        [[ -n "$pre_from_unit" ]] && pre_token="$pre_from_unit"
-    fi
     pre_token_parent="$(dirname "$pre_token")"
     if [[ -d "$pre_token_parent" || -L "$pre_token_parent" ]]; then
         if ! hapi_claude_oauth_assert_root_controlled_parent "$pre_token_parent" >/dev/null 2>&1; then
@@ -357,6 +360,11 @@ if [[ "$SCOPE" == system ]]; then
         SYSTEM_TOKEN_NODE_CHECKED=1
     elif [[ -e "$pre_token" && ! -f "$pre_token" ]]; then
         not_ok "Claude OAuth token file is not a regular file ($pre_token) — refusing restart"
+        SYSTEM_OAUTH_SAFE=0
+        OAUTH_RESTART_SAFE=0
+        SYSTEM_TOKEN_NODE_CHECKED=1
+    elif [[ -e "$pre_token" && ! -r "$pre_token" ]]; then
+        not_ok "Claude OAuth token file is unreadable ($pre_token) — refusing restart"
         SYSTEM_OAUTH_SAFE=0
         OAUTH_RESTART_SAFE=0
         SYSTEM_TOKEN_NODE_CHECKED=1
@@ -381,7 +389,18 @@ fi
 pre_ambient_token=""
 pre_env_files_all="$("${CTL[@]}" show "$RUNNER_UNIT" -p EnvironmentFiles --value 2>/dev/null || true)"
 if [[ "$SCOPE" == system ]]; then
-    pre_ambient_token="${pre_token:-/etc/hapi/claude-setup-token.env}"
+    pre_ambient_token="/etc/hapi/claude-setup-token.env"
+    sys_canon_wired=0
+    while IFS= read -r ef_path; do
+        ef_path="${ef_path#"${ef_path%%[![:space:]]*}"}"
+        ef_path="${ef_path%"${ef_path##*[![:space:]]}"}"
+        [[ "$ef_path" == "/etc/hapi/claude-setup-token.env" ]] && sys_canon_wired=1
+    done < <(printf '%s' "$pre_env_files_all" | sed -E 's/ \(ignore_errors=(yes|no)\)/\n/g')
+    if [[ "$sys_canon_wired" -ne 1 ]]; then
+        not_ok "durable Claude OAuth token must be wired as /etc/hapi/claude-setup-token.env in ${RUNNER_UNIT} EnvironmentFiles — refusing restart"
+        OAUTH_RESTART_SAFE=0
+        SYSTEM_OAUTH_SAFE=0
+    fi
 elif [[ "$pre_env_files_all" == *claude-setup-token.env* ]]; then
     pre_ambient_token="$(printf '%s\n' "$pre_env_files_all" | tr ' ' '\n' | grep 'claude-setup-token\.env' | head -n1 || true)"
     pre_ambient_token="${pre_ambient_token%% (*}"
@@ -405,6 +424,10 @@ if ! hapi_claude_oauth_has_effective_token "${pre_ambient_token:-}" 2>/dev/null;
             OAUTH_RESTART_SAFE=0
             SYSTEM_OAUTH_SAFE=0
         fi
+    elif [[ "$pre_runner_pid" != "0" ]]; then
+        not_ok "cannot inspect runner MainPID=$pre_runner_pid environ for ambient OAuth — refusing restart"
+        OAUTH_RESTART_SAFE=0
+        SYSTEM_OAUTH_SAFE=0
     fi
 elif [[ "$pre_env_files_all" != *claude-setup-token.env* ]]; then
     # Durable token exists but the unit has not loaded it (missing drop-in or
@@ -422,7 +445,12 @@ else
         ef_path="${ef_path#"${ef_path%%[![:space:]]*}"}"
         ef_path="${ef_path%"${ef_path##*[![:space:]]}"}"
         [[ -n "$ef_path" ]] || continue
-        if [[ "$ef_path" == *claude-setup-token.env ]]; then
+        if [[ "$SCOPE" == system ]]; then
+            if [[ "$ef_path" == "/etc/hapi/claude-setup-token.env" ]]; then
+                saw_canon_env=1
+                continue
+            fi
+        elif [[ "$ef_path" == *claude-setup-token.env ]]; then
             saw_canon_env=1
             continue
         fi
@@ -474,14 +502,23 @@ fi
 # systemd.exec(5): UnsetEnvironment is applied after EnvironmentFile. A wired
 # token is useless if the merged unit strips CLAUDE_CODE_OAUTH_TOKEN on exec.
 unset_env="$("${CTL[@]}" show "$RUNNER_UNIT" -p UnsetEnvironment --value 2>/dev/null || true)"
+unset_oauth=0
+if [[ "$unset_env" =~ (^|[[:space:]])CLAUDE_CODE_OAUTH_TOKEN(=|[[:space:]]|$) ]]; then
+    unset_oauth=1
+fi
 for unset_name in $unset_env; do
-    if [[ "$unset_name" == "CLAUDE_CODE_OAUTH_TOKEN" ]]; then
-        not_ok "runner UnsetEnvironment removes CLAUDE_CODE_OAUTH_TOKEN — refusing restart"
-        OAUTH_RESTART_SAFE=0
-        SYSTEM_OAUTH_SAFE=0
+    unset_name="${unset_name#\"}"
+    unset_name="${unset_name%\"}"
+    if [[ "$unset_name" == "CLAUDE_CODE_OAUTH_TOKEN" || "$unset_name" == CLAUDE_CODE_OAUTH_TOKEN=* ]]; then
+        unset_oauth=1
         break
     fi
 done
+if [[ "$unset_oauth" -eq 1 ]]; then
+    not_ok "runner UnsetEnvironment removes CLAUDE_CODE_OAUTH_TOKEN — refusing restart"
+    OAUTH_RESTART_SAFE=0
+    SYSTEM_OAUTH_SAFE=0
+fi
 
 # --- 3. Watchdog journal fire (system scope) -------------------------------
 # verify-hapi-systemd-units.sh already asserts ConditionPathExists from unit

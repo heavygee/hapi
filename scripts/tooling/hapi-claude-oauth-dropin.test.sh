@@ -719,5 +719,13 @@ check "verify user token requires runner-owned 0600" \
     "grep -q 'user Claude OAuth token must be owned by the runner account mode 0600' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
 check "installer fails closed if watchdog quiesce fails" \
     "grep -q 'failed to stop hapi-runner-watchdog.timer before unit rewrite' \"$ROOT/scripts/tooling/install-hapi-systemd-units.sh\" && ! grep -q 'stop hapi-runner-watchdog.timer 2>/dev/null || true' \"$ROOT/scripts/tooling/install-hapi-systemd-units.sh\""
+check "verify requires exact /etc/hapi EnvironmentFile" \
+    "grep -q 'wired as /etc/hapi/claude-setup-token.env' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
+check "verify UnsetEnvironment matches assignment form" \
+    "grep -q 'CLAUDE_CODE_OAUTH_TOKEN=\\*' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
+check "verify refuses system OAuth checks without root" \
+    "grep -q 'system-scope OAuth restart checks require root' \"$ROOT/scripts/tooling/verify-hapi-install.sh\""
+check "pet tightens token mode before stop" \
+    "python3 -c 't=open(\"$ROOT/scripts/install-hapi-pet.sh\").read(); a=t.find(\"cannot chmod 600\"); b=t.find(\"# --- 4. Stop\"); raise SystemExit(0 if 0<=a<b else 1)'"
 
 echo "ALL OK"

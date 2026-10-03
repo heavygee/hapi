@@ -581,6 +581,20 @@ _preflight_token_shape "${HAPI_HOME}/.hapi/claude-setup-token.env"
 # without this migrate lets stop succeed then start an unauthenticated runner.
 hapi_pet_migrate_legacy_oauth_if_needed "${HAPI_HOME}/claude-setup-token.env"
 
+# Tighten canon mode/owner while the old runner is still alive. A root-owned
+# 0644 file from `sudo tee` used to pass preflight then die on chmod after stop.
+_pre_canon="${HAPI_HOME}/claude-setup-token.env"
+if [[ -f "$_pre_canon" && ! -L "$_pre_canon" ]]; then
+    if ! /bin/chmod 600 "$_pre_canon" 2>/dev/null; then
+        fail "cannot chmod 600 $_pre_canon before stop (got $(stat -c '%a uid=%u' "$_pre_canon" 2>/dev/null || echo unreadable)) — old runner left running"
+    fi
+    _pre_mode="$(stat -c '%a' "$_pre_canon" 2>/dev/null || true)"
+    _pre_uid="$(stat -c '%u' "$_pre_canon" 2>/dev/null || true)"
+    if [[ "$_pre_mode" != "600" || "$_pre_uid" != "$(id -u)" ]]; then
+        fail "token $_pre_canon must be owned by $(id -un) mode 0600 before stop (got mode ${_pre_mode:-unknown} uid ${_pre_uid:-unknown}) — old runner left running"
+    fi
+fi
+
 # Ambient-only guard: if no durable token file exists but a live runner still
 # carries CLAUDE_CODE_OAUTH_TOKEN, refuse to stop — restart would discard it.
 _pre_canon="${HAPI_HOME}/claude-setup-token.env"
