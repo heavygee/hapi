@@ -74,6 +74,9 @@ hapi_pet_resolve_with_systemd() {
             log "Using nohup (--no-systemd)."
             ;;
         on)
+            if ! hapi_pet_systemd_user_available; then
+                fail "systemd --user is not usable on this login — cannot use --with-systemd. Need PID 1 systemd, a user manager socket under XDG_RUNTIME_DIR (or /run/user/UID), and systemctl --user show-environment. Omit the flag to auto-fall-back to nohup, or pass --no-systemd."
+            fi
             WITH_SYSTEMD=1
             log "Using systemd user units (--with-systemd)."
             ;;
@@ -893,6 +896,10 @@ fi
 unset -f _preflight_token_shape _preflight_token_ancestors
 unset _pre_canon _pre_legacy _pre_durable
 
+# Decide persist path BEFORE stopping anything. --with-systemd must fail closed
+# on a login without a user bus rather than kill a working nohup install first.
+hapi_pet_resolve_with_systemd
+
 # --- 4. Stop an already-running hub/runner, if any (upgrade path; no-op on fresh
 #     install). Only reached after step 3's new binary is confirmed good. Waits for
 #     the old process(es) to actually exit (not a blind sleep) before proceeding, so
@@ -945,7 +952,7 @@ export HAPI_HOME
 # --- 7. Launch ---
 # systemd user units when a session is usable (or --with-systemd). Without: nohup.
 # Skip nohup when systemd owns hub+runner so we do not race :3006.
-hapi_pet_resolve_with_systemd
+# WITH_SYSTEMD was set by hapi_pet_resolve_with_systemd before §4 stop.
 if [[ "$WITH_SYSTEMD" -eq 1 ]]; then
     install_user_pet_systemd
     sleep 2

@@ -39,7 +39,8 @@ After a systemd install: `systemctl --user status hapi-hub hapi-runner`.
 ## Restarting (already installed)
 
 If the machine rebooted or the hub/runner just stopped, do **not** invent a new
-`hapi runner start --workspace-root …` line unless you installed with `--no-systemd`.
+`hapi runner start --workspace-root …` line unless this install used nohup
+(`--no-systemd`, or auto-fallback because `systemctl --user` was not usable).
 
 ```bash
 # systemd path (default when the installer detected a user session)

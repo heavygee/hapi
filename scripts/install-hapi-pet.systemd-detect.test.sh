@@ -132,7 +132,19 @@ s=socket.socket(socket.AF_UNIX); s.bind(p)' "$XDG_RUNTIME_DIR/systemd/private"
 )
 pass "detect succeeds with PID1 systemd + user manager socket + systemctl --user"
 
-# resolve: auto + available → 1; auto + unavailable → 0; on/off overrides
+happy_detect() {
+    PATH="$tmp/bin:/usr/bin:/bin"
+    export HAPI_PET_PID1_COMM=systemd
+    unset HAPI_PET_TEST_NO_SYSTEMCTL
+    export XDG_RUNTIME_DIR="$tmp/rt-ok"
+    mkdir -p "$XDG_RUNTIME_DIR/systemd"
+    python3 -c 'import socket,os,sys; p=sys.argv[1]; os.makedirs(os.path.dirname(p),exist_ok=True)
+try: os.unlink(p)
+except FileNotFoundError: pass
+s=socket.socket(socket.AF_UNIX); s.bind(p)' "$XDG_RUNTIME_DIR/systemd/private"
+}
+
+# resolve: auto + available → 1; auto + unavailable → 0; on requires detect
 SYSTEMD_PREF=off
 WITH_SYSTEMD=
 hapi_pet_resolve_with_systemd
@@ -140,10 +152,33 @@ hapi_pet_resolve_with_systemd
 pass "resolve --no-systemd forces nohup"
 
 SYSTEMD_PREF=on
-# force-on does not require detect here; resolve should set 1
-hapi_pet_resolve_with_systemd
-[[ "$WITH_SYSTEMD" -eq 1 ]] || fail "--with-systemd must force 1"
-pass "resolve --with-systemd forces units"
+export HAPI_PET_TEST_NO_SYSTEMCTL=1
+if (
+    fail() { printf 'ERROR: %s\n' "$1" >&2; exit 1; }
+    hapi_pet_resolve_with_systemd
+); then
+    fail "--with-systemd must fail closed when the user session is unusable"
+fi
+unset HAPI_PET_TEST_NO_SYSTEMCTL
+pass "resolve --with-systemd fails before launch when detect fails"
+
+(
+    happy_detect
+    SYSTEMD_PREF=on
+    WITH_SYSTEMD=
+    hapi_pet_resolve_with_systemd
+    [[ "$WITH_SYSTEMD" -eq 1 ]] || fail "--with-systemd must set 1 when detect succeeds"
+)
+pass "resolve --with-systemd forces units when session works"
+
+(
+    happy_detect
+    SYSTEMD_PREF=auto
+    WITH_SYSTEMD=
+    hapi_pet_resolve_with_systemd
+    [[ "$WITH_SYSTEMD" -eq 1 ]] || fail "auto should pick systemd when detect succeeds"
+)
+pass "resolve auto uses systemd when session works"
 
 # auto uses detect
 SYSTEMD_PREF=auto
@@ -155,6 +190,14 @@ hapi_pet_resolve_with_systemd
 [[ "$WITH_SYSTEMD" -eq 0 ]] || fail "auto should fall back to nohup when detect fails"
 unset HAPI_PET_TEST_NO_SYSTEMCTL
 pass "resolve auto falls back to nohup"
+
+# fail closed before §4 stop
+awk '
+  /^hapi_pet_resolve_with_systemd$/ { r=NR }
+  /^# --- 4\. / { s=NR }
+  END { if (!(r && s && r < s)) exit 1 }
+' "$SCRIPT" || fail "hapi_pet_resolve_with_systemd must run before §4 stop"
+pass "resolve runs before stop-for-upgrade"
 
 echo
 echo "All install-hapi-pet systemd detect tests passed."
