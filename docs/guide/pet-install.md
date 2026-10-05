@@ -18,14 +18,38 @@ It does **not** log Claude Code into your Anthropic account — that's a separat
 curl -fsSL https://raw.githubusercontent.com/heavygee/hapi/main/scripts/install-hapi-pet.sh | bash
 ```
 
-Optional — run hub + runner under your user systemd (survives logout when linger is on):
+That command uses **user systemd** when your machine actually has a working
+`systemctl --user` session (typical on Crostini, a VPS, or modern Linux). If it
+does not, the installer falls back to nohup automatically. You do not need a
+flag for the common case.
+
+Overrides (optional):
 
 ```bash
+# force nohup even when systemd --user works
+curl -fsSL https://raw.githubusercontent.com/heavygee/hapi/main/scripts/install-hapi-pet.sh | bash -s -- --no-systemd
+
+# force systemd units (fails if systemctl --user cannot run)
 curl -fsSL https://raw.githubusercontent.com/heavygee/hapi/main/scripts/install-hapi-pet.sh | bash -s -- --with-systemd
 ```
 
-`--with-systemd` works via `curl | bash` (units are embedded in the installer — no git
-checkout required). After install: `systemctl --user status hapi-hub hapi-runner`.
+Units are embedded in the installer — `curl | bash` does not need a git checkout.
+After a systemd install: `systemctl --user status hapi-hub hapi-runner`.
+
+## Restarting (already installed)
+
+If the machine rebooted or the hub/runner just stopped, do **not** invent a new
+`hapi runner start --workspace-root …` line unless you installed with `--no-systemd`.
+
+```bash
+# systemd path (default when the installer detected a user session)
+systemctl --user start hapi-hub hapi-runner
+systemctl --user status hapi-hub hapi-runner
+
+# nohup path only (--no-systemd, or no user session at install time)
+hapi hub
+hapi runner start --workspace-root "$HOME/.hapi-workspace"
+```
 
 ## Finish setup
 

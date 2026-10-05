@@ -14,7 +14,7 @@
 |---------|-------|-----------|
 | `primary-soup` | `hapi-hub-oos.service`, `hapi-runner-oos.service` | oos-linux soup kitchen (bun driver under `~/coding/hapi/active`) |
 | `fleet-binary` | `hapi-hub.service`, `hapi-runner.service` | Fleet VM shards (single-exe `/opt/hapi/hapi`, dedicated `hapi` user) |
-| `user-pet` | user `hapi-hub.service`, `hapi-runner.service` | Standalone pet installs (`install-hapi-pet.sh --with-systemd`) |
+| `user-pet` | user `hapi-hub.service`, `hapi-runner.service` | Standalone pet installs (`install-hapi-pet.sh`; systemd auto when `--user` works) |
 
 All runner base units set **`KillMode=process`** ([upstream #915](https://github.com/tiann/hapi/issues/915)). System profiles also install **Tier-1 drop-ins** (`install-hapi-primary-hub-tier1.sh`): `Restart=always`, hub `OOMScoreAdjust=-1000`, runner explicit `0`, watchdog timer.
 
@@ -70,7 +70,8 @@ sudo bash scripts/tooling/install-hapi-systemd-units.sh --profile fleet-binary \
 ### Pet / external user (no sudo)
 
 ```bash
-bash scripts/install-hapi-pet.sh --with-systemd
+bash scripts/install-hapi-pet.sh
+# or force units / nohup: --with-systemd / --no-systemd
 # or, after binary install:
 bash scripts/tooling/install-hapi-systemd-units.sh --profile user-pet --enable
 ```

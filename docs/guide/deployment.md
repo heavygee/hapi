@@ -258,7 +258,7 @@ launchctl unload ~/Library/LaunchAgents/com.hapi.runner.plist
 <details>
 <summary>Linux: systemd</summary>
 
-**heavygee/hapi pet installs:** prefer `install-hapi-pet.sh --with-systemd` or `scripts/tooling/install-hapi-systemd-units.sh --profile user-pet` — canonical units with `KillMode=process`. See [`docs/tooling/systemd-install.md`](../tooling/systemd-install.md).
+**heavygee/hapi pet installs:** `install-hapi-pet.sh` uses user systemd when `systemctl --user` actually works, otherwise nohup. Force with `--with-systemd` / `--no-systemd`. Or `scripts/tooling/install-hapi-systemd-units.sh --profile user-pet`. See [`docs/tooling/systemd-install.md`](../tooling/systemd-install.md).
 
 Manual user-level systemd services (equivalent to the `user-pet` profile):
 

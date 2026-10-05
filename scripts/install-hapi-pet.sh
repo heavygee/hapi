@@ -14,7 +14,10 @@
 #
 # Usage:
 #   HAPI_ARTIFACT_URL=<url-or-path-to-hapi-binary> bash install-hapi-pet.sh
-#   curl -fsSL …/install-hapi-pet.sh | bash -s -- --with-systemd
+#   curl -fsSL …/install-hapi-pet.sh | bash
+#   curl -fsSL …/install-hapi-pet.sh | bash -s -- --no-systemd
+# Default: user systemd units when a user session actually works; otherwise nohup.
+# --with-systemd / --no-systemd force one path.
 #
 # See docs/plans/2026-09-04-fleet-vm-swap-strategy.md §6 for the full history of what
 # this script encodes and why each step exists — every step here was a real bug found
@@ -31,6 +34,7 @@ NVM_VERSION="v0.39.7"
 NODE_MIN_MAJOR=22
 STOP_TIMEOUT_SECS=15
 WITH_SYSTEMD=0
+SYSTEMD_PREF=auto
 
 # curl|bash leaves BASH_SOURCE[0] empty under `set -u`. Never rely on a repo-relative
 # path for --with-systemd — that only works from a real git checkout.
@@ -42,9 +46,62 @@ else
 fi
 unset _script_src
 
+log()  { printf '==> %s\n' "$1"; }
+fail() { printf 'ERROR: %s\n' "$1" >&2; exit 1; }
+
+# True when systemd --user can actually manage units for this login, not merely
+# when `systemctl` exists on PATH. HAPI_PET_PID1_COMM is a test hook.
+hapi_pet_systemd_user_available() {
+    [[ -z "${HAPI_PET_TEST_NO_SYSTEMCTL:-}" ]] || return 1
+    command -v systemctl >/dev/null 2>&1 || return 1
+    local pid1
+    pid1="${HAPI_PET_PID1_COMM:-}"
+    if [[ -z "$pid1" ]]; then
+        pid1="$(tr -d '\0\n' </proc/1/comm 2>/dev/null || true)"
+    fi
+    [[ "$pid1" == systemd ]] || return 1
+    local runtime
+    runtime="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+    [[ -S "${runtime}/systemd/private" || -S "${runtime}/bus" ]] || return 1
+    systemctl --user show-environment >/dev/null 2>&1
+}
+
+# SYSTEMD_PREF=auto|on|off → WITH_SYSTEMD=0|1
+hapi_pet_resolve_with_systemd() {
+    case "${SYSTEMD_PREF:-auto}" in
+        off)
+            WITH_SYSTEMD=0
+            log "Using nohup (--no-systemd)."
+            ;;
+        on)
+            WITH_SYSTEMD=1
+            log "Using systemd user units (--with-systemd)."
+            ;;
+        auto)
+            if hapi_pet_systemd_user_available; then
+                WITH_SYSTEMD=1
+                log "systemd user session detected — installing user units (override with --no-systemd)."
+            else
+                WITH_SYSTEMD=0
+                log "no usable systemd user session — using nohup (override with --with-systemd)."
+            fi
+            ;;
+        *)
+            fail "internal: bad SYSTEMD_PREF=${SYSTEMD_PREF}"
+            ;;
+    esac
+}
+
 for arg in "$@"; do
     case "$arg" in
-        --with-systemd) WITH_SYSTEMD=1 ;;
+        --with-systemd)
+            [[ "$SYSTEMD_PREF" == auto || "$SYSTEMD_PREF" == on ]] || fail "cannot combine --with-systemd and --no-systemd"
+            SYSTEMD_PREF=on
+            ;;
+        --no-systemd)
+            [[ "$SYSTEMD_PREF" == auto || "$SYSTEMD_PREF" == off ]] || fail "cannot combine --with-systemd and --no-systemd"
+            SYSTEMD_PREF=off
+            ;;
         -h|--help)
             cat <<'HELP'
 hapi-pet-install: one-shot install/upgrade for a standalone ("pet") HAPI instance.
@@ -52,18 +109,20 @@ hapi-pet-install: one-shot install/upgrade for a standalone ("pet") HAPI instanc
 Usage:
   HAPI_ARTIFACT_URL=<url-or-path> bash install-hapi-pet.sh
   curl -fsSL …/install-hapi-pet.sh | bash
+  curl -fsSL …/install-hapi-pet.sh | bash -s -- --no-systemd
   curl -fsSL …/install-hapi-pet.sh | bash -s -- --with-systemd
 
---with-systemd  Install user-level systemd units (works via curl|bash; units are
-                embedded — no git checkout required).
+Default: detect a working systemd user session and install user units
+(survives logout when linger is on). If systemd --user is not actually
+usable, fall back to nohup automatically.
+
+--with-systemd  Force user-level systemd units (fail if systemctl --user cannot run).
+--no-systemd    Force nohup even when a user session is available.
 HELP
             exit 0
             ;;
     esac
 done
-
-log()  { printf '==> %s\n' "$1"; }
-fail() { printf 'ERROR: %s\n' "$1" >&2; exit 1; }
 
 # Prefer the checkout OAuth helpers when present (curl|bash has none).
 if [[ -n "${SCRIPT_DIR}" && -f "${SCRIPT_DIR}/tooling/lib/hapi-claude-oauth-dropin.sh" ]]; then
@@ -884,8 +943,9 @@ fi
 export HAPI_HOME
 
 # --- 7. Launch ---
-# With --with-systemd: systemd owns hub+runner (skip nohup so we do not race :3006).
-# Without: nohup background processes (local-only; --relay still broken as of 2026-09-13).
+# systemd user units when a session is usable (or --with-systemd). Without: nohup.
+# Skip nohup when systemd owns hub+runner so we do not race :3006.
+hapi_pet_resolve_with_systemd
 if [[ "$WITH_SYSTEMD" -eq 1 ]]; then
     install_user_pet_systemd
     sleep 2
@@ -983,9 +1043,9 @@ cat <<EOF
       printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\\n' '<token>' > ${q_token_file}
       chmod 600 ${q_token_file}
     Then reload the runner so it picks up the token:
-      # if you used --with-systemd:
+      # systemd path (default when a user session was detected):
       systemctl --user restart hapi-runner.service
-      # if you did NOT (nohup path): stop+wait+restart with the token exported
+      # nohup path (--no-systemd, or no user session): export the token
       # literally (do NOT `source` the env file — shell expands $, backticks, etc).
       # Prefer 'hapi runner start' (stops the old runner and waits) over a raw
       # kill + start-sync race that can leave you with no runner at all.
