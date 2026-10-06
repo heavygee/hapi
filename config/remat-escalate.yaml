@@ -12,7 +12,8 @@
 # 2026-07-31), so the LABEL gate below is the durable owner identity; the prefix is
 # a best-effort hint kept pointed at the live session for ping/coordination.
 # PR watcher sessions must NOT remat — ping this owner instead.
-owner_session_prefix: "05d9f0f2"
+# Rotated 2026-10-06: 05d9f0f2 gone; live tooling/meta bot is 028d0a86.
+owner_session_prefix: "028d0a86"
 owner_labels:
   - meta-soup
   - meta-soup-stabilize
