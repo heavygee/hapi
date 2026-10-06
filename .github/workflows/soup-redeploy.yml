@@ -52,6 +52,18 @@ jobs:
       - name: Run every scripts/**/*.test.sh
         run: |
           set -euo pipefail
+          # Self-hosted runner shares the operator HOME. Point remat hold/lease
+          # state at a disposable dir so a live ~/.hapi/remat-hold.json cannot
+          # poison promote / pretooluse guards mid-remat (heavygee/hapi#216 CI
+          # run 37504390289). Individual tests may still override these paths.
+          HAPI_CI_STATE="$(mktemp -d)"
+          trap 'rm -rf "$HAPI_CI_STATE"' EXIT
+          export HAPI_STATE_DIR="$HAPI_CI_STATE"
+          export HAPI_REMAT_HOLD_FILE="$HAPI_CI_STATE/remat-hold.json"
+          export HAPI_REMAT_OWNER_TOKEN_FILE="$HAPI_CI_STATE/remat-owner.token"
+          export HAPI_REMAT_LEASE_FILE="$HAPI_CI_STATE/remat-owner.lease"
+          printf '%s\n' '{"schema":1,"active":false}' >"$HAPI_REMAT_HOLD_FILE"
+
           # hapi-meta-daily.test.sh hangs indefinitely as of 2026-10-01 (confirmed:
           # reproduces standalone, prints its hapi-hold-ack lines then never
           # returns) - pre-existing, unrelated to this workflow. Excluded rather
