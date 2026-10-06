@@ -3,6 +3,7 @@ import { chmod, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promi
 import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { withSettingsFileLock } from '@hapi/protocol/settingsFileLock'
+import type { FleetUpgradePolicy } from '@hapi/protocol/upgradeChannel'
 
 export interface Settings {
     machineId?: string
@@ -34,6 +35,8 @@ export interface Settings {
     apnsTeamId?: string
     apnsBundleId?: string
     apnsEnv?: string
+    /** Opt-in GitHub PR awareness for sessions. Default off. */
+    githubPrAwareness?: boolean
     /** Per-hub relay auth key issued by the relay server (/issue) */
     relayAuthKey?: string
     /**
@@ -53,6 +56,8 @@ export interface Settings {
      * Env vars still win when set at process start (ops override).
      */
     providerCredentials?: Partial<Record<string, string>>
+    /** Operator fleet-upgrade policy (no alert / alert / auto-upgrade). */
+    fleetUpgradePolicy?: FleetUpgradePolicy
 }
 
 export function getSettingsFile(dataDir: string): string {
@@ -168,4 +173,23 @@ export async function updateSettings<T>(
         outcome.afterCommit?.()
         return outcome.result
     })
+}
+
+/**
+ * Read-modify-write settings under the shared lock (soup callers / fleet policy).
+ * Mutates in place; persists unless the file cannot be read.
+ */
+export async function updateSettingsFile(
+    settingsFile: string,
+    mutate: (settings: Settings) => void,
+): Promise<Settings> {
+    return updateSettings(settingsFile, (settings) => {
+        mutate(settings)
+        return { settings, result: settings }
+    })
+}
+
+/** Test-only: reset the settings write queue between suites. */
+export function resetSettingsWriteQueueForTests(): void {
+    settingsUpdateChains.clear()
 }
