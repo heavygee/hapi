@@ -34,17 +34,27 @@ expect_allow() {
 CLAUDE_BASH='{"tool_name":"Bash","tool_input":{"command":"hapi-driver-rebuild --verify"}}'
 CLAUDE_BUILD_WEB='{"tool_name":"Bash","tool_input":{"command":"hapi-driver-rebuild --build-web --verify"}}'
 
+# Self-hosted tooling-tests share the operator HOME. Never leave HAPI_REMAT_HOLD_FILE
+# unset (that falls through to ~/.hapi/remat-hold.json and flakes when a live remat
+# HOLD is active). Incident: heavygee/hapi#216 CI run 37504390289.
+HOLD_IDLE="$(mktemp)"
+HOLD_ACTIVE="$(mktemp)"
+trap 'rm -f "$HOLD_IDLE" "$HOLD_ACTIVE"' EXIT
+printf '%s\n' '{"schema":1,"active":false}' >"$HOLD_IDLE"
+printf '%s\n' '{"schema":1,"active":true,"reason":"claude-hold-test","owner_session_prefix":"8c6b5a7d"}' >"$HOLD_ACTIVE"
+export HAPI_REMAT_HOLD_FILE="$HOLD_IDLE"
+unset HAPI_REMAT_OWNER HAPI_REMAT_OWNER_TOKEN HAPI_OPERATOR_REMAT_HOLD_CLEAR || true
+
 expect_deny 'merge-only rebuild' "$CLAUDE_BASH"
 expect_deny 'swap bypass build' '{"tool_name":"Bash","tool_input":{"command":"HAPI_BUILD_MAX_SWAP_USED_PCT=100 hapi-driver-build-web"}}'
 expect_allow 'build-web rebuild' "$CLAUDE_BUILD_WEB"
 
 # Remat hold: Claude Bash must deny rebuild while hold active (no owner token).
-HOLD_TMP="$(mktemp)"
-trap 'rm -f "$HOLD_TMP"' EXIT
-echo '{"schema":1,"active":true,"reason":"claude-hold-test","owner_session_prefix":"8c6b5a7d"}' >"$HOLD_TMP"
-export HAPI_REMAT_HOLD_FILE="$HOLD_TMP"
-unset HAPI_REMAT_OWNER HAPI_REMAT_OWNER_TOKEN || true
+export HAPI_REMAT_HOLD_FILE="$HOLD_ACTIVE"
 expect_deny 'remat hold blocks build-web' "$CLAUDE_BUILD_WEB"
-unset HAPI_REMAT_HOLD_FILE
+
+# Back to idle isolation — still must not consult the host hold file.
+export HAPI_REMAT_HOLD_FILE="$HOLD_IDLE"
+expect_allow 'build-web rebuild under idle isolated hold' "$CLAUDE_BUILD_WEB"
 
 echo "hapi-claude-pretooluse-guard.test.sh: all patterns OK"
