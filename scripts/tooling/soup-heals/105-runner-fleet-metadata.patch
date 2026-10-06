@@ -170,4 +170,3 @@ index abe06c06e..8cb5bafd8 100644
              if (!platform || !arch) {
                  return {
                      type: 'error',
-
