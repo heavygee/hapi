@@ -27,6 +27,8 @@
 # Post-remat restart: after a successful promote, if hub/cli/shared changed vs the
 # pre-remat tip, runs patient hapi-restart-hub (hub + runner). Web-only remats
 # skip restart (hard-reload dogfood). Opt out: HAPI_DRIVER_NO_RESTART=1
+# Inside `hapi job run`: skip in-tree exec (kills supervisor). Run
+# hapi-restart-hub after the job exits (heavygee/hapi#205).
 #
 set -euo pipefail
 

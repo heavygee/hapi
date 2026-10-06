@@ -141,6 +141,8 @@ hapi-driver-rebuild --build-web --verify
 
 By default, a **successful** promote that touches `hub/`, `cli/`, or `shared/` chains into **patient `hapi-restart-hub`** (hub + runner) — same drain contract as a manual restart. Web-only remats skip restart (hard-reload dogfood). Opt out: `HAPI_DRIVER_NO_RESTART=1`.
 
+**`hapi job run` wrap (heavygee/hapi#205):** if remat is a child of `hapi job run` (`HAPI_INSIDE_JOB_RUN=1` or ancestor argv `job` then `run`), auto-restart **refuses** the in-tree `exec`. Promote is on disk; rebuild exits 0 so the job can mark `completed`. Restart after the wrap exits: `hapi-restart-hub`. In-tree exec used to yank the job supervisor and leave a stale `running` meter (2026-08-16 trap, remat-1933).
+
 Does **not** swing `hapi-active` (that is `--activate` / `hapi-use-worktree`).
 
 ```bash
