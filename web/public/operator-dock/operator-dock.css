@@ -4,7 +4,7 @@
 .opdock {
   position: fixed;
   /* #107: flush right (safe-area alone). #221: lift 2× hub diameter so host composer
-     Send/audio stay clear — flush bottom sat on top of HAPI web composer controls. */
+     Send/audio stay clear — flush bottom sat on top of hub UI composer controls. */
   right: env(safe-area-inset-right, 0px);
   bottom: calc(env(safe-area-inset-bottom, 0px) + 112px); /* 2 × 56px hub */
   /* #115: above markup overlay among our own surfaces. #254/#268: z-index cannot beat
@@ -103,7 +103,7 @@
   display: grid;
   place-items: center;
   color: #fff;
-  background: #6b21a8; /* neutral operator-purple; not a Jessica brand colour */
+  background: #6b21a8; /* neutral operator-purple; not a integrating app brand colour */
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
   transition: transform 0.12s ease, background 0.2s ease, box-shadow 0.2s ease;
 }
@@ -143,13 +143,14 @@
 }
 
 /* #134 / #166: absolute left of the hub. Must set min-width — shrink-to-fit +
-   word-break:break-word collapses to a one-glyph vertical pill on desktop. */
+   word-break:break-word collapses to a one-glyph vertical pill on desktop.
+   #411: below hub + cluster so live STT cannot cover satellite hits. */
 .opdock-label {
   pointer-events: none;
   position: absolute;
   right: 64px;
   bottom: 8px;
-  z-index: 2;
+  z-index: 0;
   box-sizing: border-box;
   min-width: 196px;
   width: max-content;
@@ -243,8 +244,16 @@
 }
 .opdock-swatch--on { border-color: #fff; transform: scale(1.15); }
 
-/* #271: foot Cancel/Send removed from markup; .opdock-btn2 remains for sheets (Done, etc.). */
-.opdock-interim { min-height: 16px; color: #a5b4fc; font-size: 13px; font-style: italic; }
+/* #271: foot Cancel/Send removed from markup; .opdock-btn2 remains for sheets (Done, etc.).
+ * #411: interim is paint-only — never above the fan hit plate. */
+.opdock-interim {
+  min-height: 16px;
+  color: #a5b4fc;
+  font-size: 13px;
+  font-style: italic;
+  pointer-events: none;
+  z-index: 0;
+}
 .opdock-listening {
   align-self: flex-start;
   display: inline-flex; align-items: center; gap: 8px;
@@ -272,6 +281,27 @@
 /* Sheet secondary / primary (not markup foot — #271). */
 .opdock-secondary { background: rgba(255, 255, 255, 0.14); color: #e5e7eb; }
 .opdock-secondary:hover { background: rgba(255, 255, 255, 0.22); }
+/* #416: Change pin sits beside Pin as a link, not a fat sheet button. */
+.opdock-text-link {
+  background: none;
+  border: none;
+  box-shadow: none;
+  padding: 8px 4px;
+  min-height: 44px;
+  min-width: 44px;
+  color: #c4b5fd;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+  border-radius: 6px;
+  position: relative;
+  z-index: 1;
+  pointer-events: auto;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.opdock-text-link:hover { color: #ede9fe; }
 .opdock-send { background: #6b21a8; color: #fff; }
 .opdock-send:hover { background: #7c3aed; }
 .opdock-send:disabled { opacity: 0.45; cursor: not-allowed; }
@@ -414,6 +444,8 @@
   width: 56px;
   height: 56px;
   pointer-events: none;
+  /* #411: above live STT chip; hub (#144, z-index 2) still wins the plate. */
+  z-index: 1;
 }
 .opdock-sat {
   pointer-events: none;
