@@ -43,7 +43,7 @@ trap 'rm -f "$HOLD_IDLE" "$HOLD_ACTIVE"' EXIT
 printf '%s\n' '{"schema":1,"active":false}' >"$HOLD_IDLE"
 printf '%s\n' '{"schema":1,"active":true,"reason":"claude-hold-test","owner_session_prefix":"8c6b5a7d"}' >"$HOLD_ACTIVE"
 export HAPI_REMAT_HOLD_FILE="$HOLD_IDLE"
-unset HAPI_REMAT_OWNER HAPI_REMAT_OWNER_TOKEN || true
+unset HAPI_REMAT_OWNER HAPI_REMAT_OWNER_TOKEN HAPI_OPERATOR_REMAT_HOLD_CLEAR || true
 
 expect_deny 'merge-only rebuild' "$CLAUDE_BASH"
 expect_deny 'swap bypass build' '{"tool_name":"Bash","tool_input":{"command":"HAPI_BUILD_MAX_SWAP_USED_PCT=100 hapi-driver-build-web"}}'

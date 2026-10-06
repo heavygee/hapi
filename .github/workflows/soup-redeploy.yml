@@ -61,7 +61,8 @@ jobs:
           export HAPI_STATE_DIR="$HAPI_CI_STATE"
           export HAPI_REMAT_HOLD_FILE="$HAPI_CI_STATE/remat-hold.json"
           export HAPI_REMAT_OWNER_TOKEN_FILE="$HAPI_CI_STATE/remat-owner.token"
-          export HAPI_REMAT_LEASE_FILE="$HAPI_CI_STATE/remat-owner.lease"
+          # Do not export HAPI_REMAT_LEASE_FILE — lease tests must derive
+          # $HAPI_STATE_DIR/remat-owner.lease (production default path).
           printf '%s\n' '{"schema":1,"active":false}' >"$HAPI_REMAT_HOLD_FILE"
 
           # hapi-meta-daily.test.sh hangs indefinitely as of 2026-10-01 (confirmed:

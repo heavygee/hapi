@@ -24,7 +24,8 @@ owner_labels:
   - meta-soup
 ping_cmd: ""
 EOF
-unset HAPI_REMAT_OWNER HAPI_REMAT_OWNER_TOKEN HAPI_SESSION_ID HAPI_AGENT_LABEL || true
+unset HAPI_REMAT_OWNER HAPI_REMAT_OWNER_TOKEN HAPI_SESSION_ID HAPI_AGENT_LABEL \
+    HAPI_OPERATOR_REMAT_HOLD_CLEAR || true
 
 run_case() {
     local label="$1"
@@ -157,12 +158,12 @@ echo "OK: HAPI_REMAT_RESUME=0 hard-resets WIP"
 printf '%s\n' '{"schema":1,"active":true,"reason":"atomic-isolation-probe","owner_session_prefix":"aaaaaaaa"}' \
     >"$HAPI_REMAT_HOLD_FILE"
 set +e
-( driver_remat_promote "$DRIVER" "driver/integration" "$PREV" ) >/tmp/atomic-hold-promote.out 2>&1
+( driver_remat_promote "$DRIVER" "driver/integration" "$PREV" ) >"$TMP/atomic-hold-promote.out" 2>&1
 hold_promote_rc=$?
 set -e
 [[ "$hold_promote_rc" -eq 76 ]] || {
     echo "FAIL: active isolated hold should refuse promote (rc=$hold_promote_rc)" >&2
-    cat /tmp/atomic-hold-promote.out >&2 || true
+    cat "$TMP/atomic-hold-promote.out" >&2 || true
     exit 1
 }
 printf '%s\n' '{"schema":1,"active":false}' >"$HAPI_REMAT_HOLD_FILE"
