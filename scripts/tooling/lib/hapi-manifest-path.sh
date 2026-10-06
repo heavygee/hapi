@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # Resolve driver-manifest.yaml.
 # Canonical recipe: <repo>/config/driver-manifest.yaml (tracked in fork main).
-# ~/.config/hapi/driver-manifest.yaml is a generated runtime mirror — refresh with
-#   scripts/tooling/hapi-manifest-mirror-to-config.sh
+# Optional override: HAPI_DRIVER_MANIFEST=/path/to/manifest.yaml
+# Optional generated mirror (never the editor of truth): 
+#   scripts/tooling/hapi-manifest-mirror-to-config.sh → ~/.config/hapi/driver-manifest.yaml
 # Do NOT copy ~/.config → repo (inverted sync deleted open-PR layers in 1d4644037).
+# Do NOT fall back to ~/.config — a stale mirror once composed soup on upstream/main
+# after the recipe flipped to origin/main (2026-10-06).
 
 hapi_manifest_path() {
     local primary="${1:-${HAPI_PRIMARY:-$HOME/coding/hapi}}"
@@ -13,10 +16,5 @@ hapi_manifest_path() {
         return 0
     fi
 
-    if [[ -f "$primary/config/driver-manifest.yaml" ]]; then
-        echo "$primary/config/driver-manifest.yaml"
-        return 0
-    fi
-
-    echo "${HOME}/.config/hapi/driver-manifest.yaml"
+    echo "$primary/config/driver-manifest.yaml"
 }

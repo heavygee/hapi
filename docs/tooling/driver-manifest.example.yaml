@@ -1,5 +1,5 @@
 # Daily driver manifest — canonical tracked copy: config/driver-manifest.yaml (this file's sibling in repo)
-# Legacy override: ~/.config/hapi/driver-manifest.yaml or HAPI_DRIVER_MANIFEST=
+# Optional override: HAPI_DRIVER_MANIFEST=/path/to/manifest.yaml
 # Rebuild: hapi-driver-rebuild [--build-web] [--verify] [--activate]
 #
 # ~/coding/hapi/driver is READ-ONLY between rebuilds — only hapi-driver-rebuild may change it.
