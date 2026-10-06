@@ -99,7 +99,11 @@
 # folds the double-toolbar merge artifact into ONE toolbar and lets
 # feat/fue-rich-composer-mentions rebase cleanly (its author base is now in HEAD).
 # Rerere will re-record fresh resolutions against the new base in one pass.
-base: upstream/main
+# Soup compose base (2026-10-06): fork origin/main — utensils + finished fork
+# product flow into soup via tip-forward. Feature layers stay thin tips for
+# in-flight work only. Upstream PR branches still cut from upstream/main.
+# Kill criterion: utensil add/add fights weekly → PRIMARY sole utensil writer.
+base: origin/main
 
 layers:
 
@@ -1019,13 +1023,10 @@ layers:
   # Doctor fails closed when Cursor ACP invoke path is broken (cwd/mailbox/stdio) — #194.
   - branch: fix/doctor-cursor-mcp-path
 
-  # tiann/hapi#1933 / fork PR heavygee/hapi#204 — Claude resume amnesia (id overwrite
-  # + transcript probe). Squash 94523eb0d is on fork main; this soup union is a
-  # cherry-pick onto live driver/integration (apiMachine soup imports, claudeRemote
-  # env-before-probe, apiTypes aroundId + totalCount). Long-lived sessions stay
-  # broken until they cycle. Worktree: ~/coding/hapi/worktrees/1933-resume-soup
-  # Tip: c1a98ef48
-  - branch: driver/1933-claude-resume-amnesia
+  # DROPPED 2026-10-06: driver/1933-claude-resume-amnesia — squash 94523eb0d is on
+  # fork main (heavygee/hapi#204). Soup base is now origin/main, so tip-forward
+  # absorbs it from the base; keeping the layer would double-apply / conflict.
+  # - branch: driver/1933-claude-resume-amnesia
 
   # DROPPED 2026-09-22: tooling/hapi-tick-v1 MERGED fork main as heavygee/hapi#159
   # (squash baf1893b6). Gate A cleanup — rematerialize once wave done. Tick stays on

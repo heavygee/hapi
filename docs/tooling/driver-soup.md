@@ -228,7 +228,9 @@ Exit reflection source: [`2026-08-08-pinned-sessions-soup-exit.md`](../plans/ret
 
 ### Keeping fork `main` truthful
 
-Fork `main` = **`upstream/main` + fork-only docs/plans**. After upstream merges: run `hapi-sync-fork-main`. Meta bot: weekly `--check-only` even if idle.
+Fork `main` = **`upstream/main` + utensils + finished fork product**. After upstream merges: run `hapi-sync-fork-main`. Meta bot: weekly `--check-only` even if idle.
+
+**Soup compose base (2026-10-06):** `config/driver-manifest.yaml` → `base: origin/main`. Tip-forward merges that base into the soup tip so fork work reaches `:3006` without a second cherry-pick. See [`repo-layout-and-dev-flow.md`](../operator/repo-layout-and-dev-flow.md) § Soup compose on fork main (kill criterion for utensil add/add).
 
 ---
 

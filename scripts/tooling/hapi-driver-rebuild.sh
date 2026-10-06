@@ -176,16 +176,20 @@ if echo "$manifest_json" | jq -e '.layers[] | select(.ref == "fix/web-scroll-gua
     fi
 fi
 
-if [[ -n "$upstream_tip" && "$base_ref" == "upstream/main" ]]; then
+if git -C "$PRIMARY" rev-parse --verify "${base_ref}^{commit}" >/dev/null 2>&1; then
+    echo "Base: $base_ref @ $(git -C "$PRIMARY" log -1 --oneline "$base_ref")"
+elif [[ -n "$upstream_tip" && "$base_ref" == "upstream/main" ]]; then
     echo "Base: upstream/main @ $(git -C "$PRIMARY" log -1 --oneline "$upstream_tip")"
 fi
 
 # Atomic remat: merge layers on WIP in a side worktree; only move live tip on success.
 # Failed remat must leave driver/integration (= dogfood source) unchanged (2026-07-29).
 #
-# Default mode tip-forward (2026-08-05 probe): start at PREV_TIP, merge upstream if
-# needed, skip ancestor layers, fat-tip gate on non-ancestors. Escape hatch:
-# HAPI_REMAT_MODE=full-recipe (reset to upstream/base + replay every layer).
+# Default mode tip-forward (2026-08-05 probe; 2026-10-06 base flip): start at PREV_TIP,
+# merge manifest base (fork origin/main) if needed — NOT hard-prefer upstream/main —
+# so fork utensils + finished fork product flow into soup. Skip ancestor layers;
+# fat-tip gate on non-ancestors. Escape hatch: HAPI_REMAT_MODE=full-recipe
+# (reset to base + replay every layer).
 PREV_TIP="$(git -C "$DRIVER" rev-parse "$DRIVER_BRANCH" 2>/dev/null || git -C "$DRIVER" rev-parse HEAD)"
 WIP_BRANCH="$(driver_remat_wip_branch "$DRIVER_BRANCH")"
 PROMOTED=0
@@ -209,34 +213,34 @@ fi
 echo "Preparing remat worktree for $WIP_BRANCH from $START_REF ($layer_count layer(s))..."
 REMAT="$(driver_remat_prepare "$PRIMARY" "$WIP_BRANCH" "$START_REF")"
 
-# Tip-forward: bring upstream/main in if tip has not absorbed it yet.
+# Tip-forward: bring manifest base in if tip has not absorbed it yet.
+# shellcheck source=lib/driver-remat-tip-forward.sh
+source "$LIB_DIR/driver-remat-tip-forward.sh"
 if [[ "$REMAT_MODE" == "tip-forward" ]]; then
-    upstream_ref=""
-    if git -C "$REMAT" rev-parse --verify upstream/main^{commit} >/dev/null 2>&1; then
-        upstream_ref=upstream/main
-    elif [[ "$base_ref" != "$PREV_TIP" ]] && git -C "$REMAT" rev-parse --verify "${base_ref}^{commit}" >/dev/null 2>&1; then
-        upstream_ref="$base_ref"
-    fi
-    if [[ -n "$upstream_ref" ]]; then
-        if git -C "$REMAT" merge-base --is-ancestor "$upstream_ref" HEAD; then
-            echo "Tip-forward: $upstream_ref already ancestor of WIP — skip"
+    base_merge_ref=""
+    if base_merge_ref="$(driver_remat_tip_forward_merge_ref "$base_ref" "$REMAT")"; then
+        if git -C "$REMAT" merge-base --is-ancestor "$base_merge_ref" HEAD; then
+            echo "Tip-forward: $base_merge_ref already ancestor of WIP — skip"
         else
-            echo "Tip-forward: merging $upstream_ref into WIP..."
-            if ! git -C "$REMAT" merge --no-edit "$upstream_ref"; then
+            echo "Tip-forward: merging manifest base $base_merge_ref into WIP..."
+            if ! git -C "$REMAT" merge --no-edit "$base_merge_ref"; then
                 unmerged="$(git -C "$REMAT" diff --name-only --diff-filter=U 2>/dev/null)"
                 markers="$(git -C "$REMAT" grep -lE '^<<<<<<< |^>>>>>>> ' 2>/dev/null || true)"
                 if [[ -z "$unmerged" && -z "$markers" ]]; then
                     git -C "$REMAT" commit --no-edit --no-verify -q
                 else
-                    echo "ERROR: merge conflict merging $upstream_ref into tip-forward WIP" >&2
-                    driver_remat_fail_leave_wip "$REMAT" "$WIP_BRANCH" "$DRIVER_BRANCH" "$PREV_TIP" "$upstream_ref"
+                    echo "ERROR: merge conflict merging $base_merge_ref into tip-forward WIP" >&2
+                    echo "       Resolve in remat worktree, or drop redundant layers that duplicate fork main." >&2
+                    driver_remat_fail_leave_wip "$REMAT" "$WIP_BRANCH" "$DRIVER_BRANCH" "$PREV_TIP" "$base_merge_ref"
                     driver_remat_hold_set \
-                        "merge conflict on $upstream_ref (tip-forward)" \
-                        "$REMAT" "$PREV_TIP" "$WIP_BRANCH" "$upstream_ref"
+                        "merge conflict on $base_merge_ref (tip-forward)" \
+                        "$REMAT" "$PREV_TIP" "$WIP_BRANCH" "$base_merge_ref"
                     exit 1
                 fi
             fi
         fi
+    else
+        echo "WARNING: tip-forward could not resolve manifest base '$base_ref' (no upstream/main fallback)" >&2
     fi
 fi
 
