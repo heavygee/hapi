@@ -96,6 +96,47 @@ describe('content-addressed artifact retention', () => {
         }
     })
 
+    it('prefers the current soup-tag sidecar when identical bytes are retained under two tags', () => {
+        const dataDir = mkdtempSync(join(tmpdir(), 'hapi-artifact-reuse-sha-'))
+        try {
+            const root = join(dataDir, 'upgrade-artifacts')
+            mkdirSync(root, { recursive: true })
+            const sha = '8'.repeat(64)
+            const oldPath = join(root, 'hapi-soup-v2026.09.29-17908b4-linux-x64-baseline')
+            const newPath = join(root, 'hapi-soup-v2026.10.06-dfa1c2b-linux-x64-baseline')
+            writeFileSync(oldPath, 'same-bytes')
+            writeFileSync(newPath, 'same-bytes')
+            writeFileSync(`${oldPath}.json`, JSON.stringify({
+                version: 'hapi-soup-v2026.09.29-17908b4',
+                platform: 'linux',
+                arch: 'x64',
+                path: oldPath,
+                sha256: sha,
+                sizeBytes: 10,
+                sourceFingerprint: 'hapi-soup-v2026.09.29-17908b4',
+            }))
+            writeFileSync(`${newPath}.json`, JSON.stringify({
+                version: 'hapi-soup-v2026.10.06-dfa1c2b',
+                platform: 'linux',
+                arch: 'x64',
+                path: newPath,
+                sha256: sha,
+                sizeBytes: 10,
+                sourceFingerprint: 'hapi-soup-v2026.10.06-dfa1c2b',
+            }))
+
+            const preferred = findArtifactMetaBySha256(sha, dataDir, {
+                preferVersion: 'hapi-soup-v2026.10.06-dfa1c2b',
+            })
+            expect(preferred?.version).toBe('hapi-soup-v2026.10.06-dfa1c2b')
+            expect(preferred?.path).toBe(newPath)
+            // Digest is identity: a lookup without preferVersion must still return some live path.
+            expect(findArtifactMetaBySha256(sha, dataDir)?.sha256).toBe(sha)
+        } finally {
+            rmSync(dataDir, { recursive: true, force: true })
+        }
+    })
+
     it('prunes older generations while preserving the offered digest', () => {
         const dataDir = mkdtempSync(join(tmpdir(), 'hapi-artifact-prune-'))
         resetArtifactOfferRetentionForTests()

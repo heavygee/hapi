@@ -104,7 +104,11 @@ export function readArtifactMeta(
 }
 
 /** Look up a retained artifact by digest without rebuilding. */
-export function findArtifactMetaBySha256(sha256: string, dataDir?: string): ArtifactMeta | null {
+export function findArtifactMetaBySha256(
+    sha256: string,
+    dataDir?: string,
+    options?: { preferVersion?: string },
+): ArtifactMeta | null {
     const digest = sha256.trim().toLowerCase()
     if (!/^[a-f0-9]{64}$/.test(digest)) {
         return null
@@ -119,6 +123,7 @@ export function findArtifactMetaBySha256(sha256: string, dataDir?: string): Arti
     } catch {
         return null
     }
+    const matches: ArtifactMeta[] = []
     for (const name of entries) {
         if (!name.endsWith('.json')) {
             continue
@@ -131,13 +136,22 @@ export function findArtifactMetaBySha256(sha256: string, dataDir?: string): Arti
                 && typeof meta.path === 'string'
                 && existsSync(meta.path)
             ) {
-                return meta
+                matches.push(meta)
             }
         } catch {
             // skip corrupt sidecar
         }
     }
-    return null
+    const prefer = options?.preferVersion?.trim()
+    if (prefer) {
+        const preferred = matches.find((meta) => meta.version === prefer)
+        if (preferred) {
+            return preferred
+        }
+    }
+    // Digest is identity — any live sidecar is the same bytes. Prefer the last
+    // match only as a stable fallback (readdir order is not chronological).
+    return matches[0] ?? null
 }
 
 function writeMeta(meta: ArtifactMeta): void {

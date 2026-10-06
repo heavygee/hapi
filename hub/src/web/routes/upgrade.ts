@@ -152,7 +152,9 @@ export function createUpgradeCliRoutes(): Hono<CliEnv> {
             if (wantedSha) {
                 // Digest-pinned offer: serve the retained bytes only. Do not
                 // rebuild — a newer generation would fail the runner's sha check.
-                const retained = findArtifactMetaBySha256(wantedSha, config.dataDir)
+                const retained = findArtifactMetaBySha256(wantedSha, config.dataDir, {
+                    preferVersion: targetVersion,
+                })
                 if (!retained || !existsSync(retained.path)) {
                     // Soup tip may not yet be mirrored into upgrade-artifacts —
                     // materialize on demand when the digest matches the tip.
@@ -182,8 +184,15 @@ export function createUpgradeCliRoutes(): Hono<CliEnv> {
                     }
                     return c.json({ error: 'Artifact not retained for digest' }, 404)
                 }
+                // Digest is identity. An older soup-tag sidecar with the same SHA
+                // must not 400 (Teemo/homelab 2026-10-06: reused linux/win bytes
+                // across hapi-soup-v* tags). PreferVersion already picks the
+                // current tag when present; leftover mismatch still serves.
                 if (retained.version !== targetVersion) {
-                    return c.json({ error: 'Artifact digest does not match offer version' }, 400)
+                    console.warn(
+                        '[fleet-upgrade] serving reused digest under older sidecar version',
+                        { retained: retained.version, offer: targetVersion, sha256: wantedSha },
+                    )
                 }
                 return new Response(Bun.file(retained.path), {
                     headers: {
