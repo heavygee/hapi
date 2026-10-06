@@ -928,40 +928,6 @@ export function NewSession(props: {
             setGrokPermissionMode('default')
         }
     }, [agent, grokPermissionMode, grokModelsState.autoPermissionModeSupported])
-
-    const copilotModelOptions = useMemo(
-        () => [
-            { value: 'auto', label: 'Auto' },
-            ...copilotModelsState.availableModels
-                .filter((candidate) => candidate.modelId !== 'auto')
-                .map((candidate) => ({
-                    value: candidate.modelId,
-                    label: candidate.name ?? candidate.modelId
-                }))
-        ],
-        [copilotModelsState.availableModels]
-    )
-    const grokModelOptions = useMemo(
-        () => buildGrokModelOptions(grokModelsState.availableModels),
-        [grokModelsState.availableModels]
-    )
-    const grokEffortOptions = useMemo(
-        () => buildGrokEffortOptions(
-            grokModelsState.availableModels,
-            model,
-            grokModelsState.currentModelId
-        ),
-        [grokModelsState.availableModels, grokModelsState.currentModelId, model]
-    )
-    useEffect(() => {
-        if (
-            agent === 'grok'
-            && grokPermissionMode === 'auto'
-            && grokModelsState.autoPermissionModeSupported === false
-        ) {
-            setGrokPermissionMode('default')
-        }
-    }, [agent, grokPermissionMode, grokModelsState.autoPermissionModeSupported])
     const agyModelsState = useAgyModels({
         api: props.api,
         machineId,
