@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import type { AgentMessage } from '@/agent/types';
 import { AcpMessageHandler } from './AcpMessageHandler';
 import { ACP_SESSION_UPDATE_TYPES } from './constants';
+import { clearGeneratedImages } from '@/modules/common/generatedImages';
 
 function getToolResult(messages: AgentMessage[], id: string): Extract<AgentMessage, { type: 'tool_result' }> {
     const result = messages.find((message): message is Extract<AgentMessage, { type: 'tool_result' }> =>
@@ -69,6 +70,33 @@ describe('AcpMessageHandler', () => {
         const result = getToolResult(messages, 'tool-2');
         expect(result.status).toBe('completed');
         expect(result.output).toEqual({ stdout: 'ok\n' });
+    });
+
+    it('redacts display_links exact-copy values before emitting tool_call', () => {
+        const messages: AgentMessage[] = [];
+        const handler = new AcpMessageHandler((message) => messages.push(message));
+        const secret = 'SENTINEL_SECRET_VK' + 'K';
+
+        handler.handleUpdate({
+            sessionUpdate: ACP_SESSION_UPDATE_TYPES.toolCall,
+            toolCallId: 'tool-links',
+            title: 'Display Links',
+            rawInput: {
+                urls: [{ href: 'https://example.com/public', title: 'Public' }],
+                texts: [{ value: secret, title: 'gate' }],
+                sessionId: 'abc',
+            },
+            status: 'in_progress',
+        });
+
+        const call = messages.find((message): message is Extract<AgentMessage, { type: 'tool_call' }> =>
+            message.type === 'tool_call' && message.id === 'tool-links'
+        );
+        expect(call).toBeDefined();
+        expect(JSON.stringify(call)).not.toContain(secret);
+        expect(call?.input).toMatchObject({
+            texts: [{ value: '[omitted]', title: 'gate' }],
+        });
     });
 
     it('preserves intra-turn interleave order: text → tool_call → tool_result', () => {
@@ -481,6 +509,7 @@ describe('AcpMessageHandler', () => {
         );
         expect(toolCall).toBeDefined();
         expect(toolCall!.input).toEqual({ command: 'df -hT' });
+        expect(toolCall).toMatchObject({ title: 'df -hT', kind: 'execute' });
     });
 
     it('strips "Shell: " prefix from title when deriving execute input (Kimi)', () => {
@@ -535,10 +564,9 @@ describe('AcpMessageHandler', () => {
             (m): m is Extract<AgentMessage, { type: 'tool_call' }> => m.type === 'tool_call'
         );
         expect(calls).toHaveLength(2);
-        // Initial call: generic display title is not a real command — leave null
-        // (same rule as Cursor "Read File"; avoids poisoning tool cards).
-        expect(calls[0].input).toBeNull();
-        // Updated call: re-derived from concrete "Shell: …" title
+        // Initial call: derived from generic title (placeholder)
+        expect(calls[0].input).toEqual({ command: 'Shell' });
+        // Updated call: re-derived from concrete title
         expect(calls[1].input).toEqual({ command: 'free -h' });
     });
 
@@ -613,6 +641,232 @@ describe('AcpMessageHandler', () => {
         );
         expect(results).toHaveLength(1);
         expect(results[0].status).toBe('completed');
+    });
+
+    describe('OpenCode rawInput lifecycle (empty {} is not usable input)', () => {
+        it('ignores empty content JSON {} on initial tool_call when rawInput is missing', () => {
+            // Kimi-style content JSON can be `{}`; initial path must not lock that as input.
+            const messages: AgentMessage[] = [];
+            const handler = new AcpMessageHandler((message) => messages.push(message));
+
+            handler.handleUpdate({
+                sessionUpdate: ACP_SESSION_UPDATE_TYPES.toolCall,
+                toolCallId: 'oc-empty-content-1',
+                title: 'other',
+                kind: 'other',
+                status: 'pending',
+                content: [{ type: 'content', content: { type: 'text', text: '{}' } }]
+            });
+
+            handler.handleUpdate({
+                sessionUpdate: ACP_SESSION_UPDATE_TYPES.toolCallUpdate,
+                toolCallId: 'oc-empty-content-1',
+                title: 'other',
+                kind: 'other',
+                status: 'in_progress',
+                rawInput: { url: 'https://example.com' }
+            });
+
+            const calls = messages.filter(
+                (m): m is Extract<AgentMessage, { type: 'tool_call' }> => m.type === 'tool_call'
+            );
+            expect(calls).toHaveLength(2);
+            expect(calls[0].input).toBeNull();
+            expect(calls[1].input).toEqual({ url: 'https://example.com' });
+        });
+
+        it('ignores rawInput: {} on tool start and accepts real args on update', () => {
+            // OpenCode toolStart emits rawInput: {} with title=tool name, then a
+            // running update carries part.state.input.
+            const messages: AgentMessage[] = [];
+            const handler = new AcpMessageHandler((message) => messages.push(message));
+
+            handler.handleUpdate({
+                sessionUpdate: ACP_SESSION_UPDATE_TYPES.toolCall,
+                toolCallId: 'oc-bash-1',
+                title: 'bash',
+                kind: 'execute',
+                status: 'pending',
+                locations: [],
+                rawInput: {}
+            });
+
+            handler.handleUpdate({
+                sessionUpdate: ACP_SESSION_UPDATE_TYPES.toolCallUpdate,
+                toolCallId: 'oc-bash-1',
+                title: "echo 'hi'",
+                kind: 'execute',
+                status: 'in_progress',
+                rawInput: { command: "echo 'hi'", description: "Print hi" }
+            });
+
+            const calls = messages.filter(
+                (m): m is Extract<AgentMessage, { type: 'tool_call' }> => m.type === 'tool_call'
+            );
+            expect(calls).toHaveLength(2);
+            // Start: empty {} must not lock input as {}; title "bash" alone is a weak
+            // execute fallback, but must not block the later real rawInput.
+            expect(calls[0].input).not.toEqual({});
+            expect(calls[1].input).toEqual({ command: "echo 'hi'", description: "Print hi" });
+        });
+
+        it('does not let permission rawInput: {} clobber a previously captured input', () => {
+            // OpenCode #7370: permission request / intermediate update can re-send
+            // rawInput: {} after a good running update.
+            const messages: AgentMessage[] = [];
+            const handler = new AcpMessageHandler((message) => messages.push(message));
+
+            handler.handleUpdate({
+                sessionUpdate: ACP_SESSION_UPDATE_TYPES.toolCall,
+                toolCallId: 'oc-bash-2',
+                title: 'bash',
+                kind: 'execute',
+                status: 'pending',
+                rawInput: {}
+            });
+
+            handler.handleUpdate({
+                sessionUpdate: ACP_SESSION_UPDATE_TYPES.toolCallUpdate,
+                toolCallId: 'oc-bash-2',
+                title: 'ls -la',
+                kind: 'execute',
+                status: 'in_progress',
+                rawInput: { command: 'ls -la' }
+            });
+
+            handler.handleUpdate({
+                sessionUpdate: ACP_SESSION_UPDATE_TYPES.toolCallUpdate,
+                toolCallId: 'oc-bash-2',
+                title: 'bash',
+                kind: 'execute',
+                status: 'pending',
+                rawInput: {}
+            });
+
+            handler.handleUpdate({
+                sessionUpdate: ACP_SESSION_UPDATE_TYPES.toolCallUpdate,
+                toolCallId: 'oc-bash-2',
+                status: 'completed',
+                // completed may omit rawInput entirely
+                content: [{ type: 'content', content: { type: 'text', text: 'ok' } }]
+            });
+
+            const calls = messages.filter(
+                (m): m is Extract<AgentMessage, { type: 'tool_call' }> => m.type === 'tool_call'
+            );
+            const lastCall = calls[calls.length - 1];
+            expect(lastCall.input).toEqual({ command: 'ls -la' });
+
+            const results = messages.filter(
+                (m): m is Extract<AgentMessage, { type: 'tool_result' }> => m.type === 'tool_result'
+            );
+            expect(results).toHaveLength(1);
+            expect(results[0].status).toBe('completed');
+        });
+
+        it('preserves OpenCode other/fetch/think tool rawInput (MCP, webfetch, task)', () => {
+            // These kinds have no kind+title fallback in HAPI — usable rawInput is
+            // the only path. Empty {} must not be stored in place of later args.
+            const cases: Array<{
+                id: string;
+                kind: string;
+                title: string;
+                rawInput: Record<string, unknown>;
+            }> = [
+                {
+                    id: 'oc-webfetch',
+                    kind: 'fetch',
+                    title: 'webfetch',
+                    rawInput: { url: 'https://example.com', format: 'text' }
+                },
+                {
+                    id: 'oc-task',
+                    kind: 'think',
+                    title: 'task',
+                    rawInput: {
+                        description: 'Explore',
+                        subagent_type: 'explorer',
+                        prompt: 'find null tool input'
+                    }
+                },
+                {
+                    id: 'oc-mcp',
+                    kind: 'other',
+                    title: 'hapi_change_title',
+                    rawInput: { title: 'fixed title' }
+                }
+            ];
+
+            for (const c of cases) {
+                const messages: AgentMessage[] = [];
+                const handler = new AcpMessageHandler((message) => messages.push(message));
+
+                handler.handleUpdate({
+                    sessionUpdate: ACP_SESSION_UPDATE_TYPES.toolCall,
+                    toolCallId: c.id,
+                    title: c.title,
+                    kind: c.kind,
+                    status: 'pending',
+                    rawInput: {}
+                });
+
+                handler.handleUpdate({
+                    sessionUpdate: ACP_SESSION_UPDATE_TYPES.toolCallUpdate,
+                    toolCallId: c.id,
+                    title: c.title,
+                    kind: c.kind,
+                    status: 'in_progress',
+                    rawInput: c.rawInput
+                });
+
+                handler.handleUpdate({
+                    sessionUpdate: ACP_SESSION_UPDATE_TYPES.toolCallUpdate,
+                    toolCallId: c.id,
+                    status: 'completed',
+                    rawInput: {}
+                });
+
+                const calls = messages.filter(
+                    (m): m is Extract<AgentMessage, { type: 'tool_call' }> => m.type === 'tool_call'
+                );
+                expect(calls[calls.length - 1].input, c.id).toEqual(c.rawInput);
+            }
+        });
+
+        it('keeps full edit rawInput (filePath/oldString/newString) over locations-only fallback', () => {
+            const messages: AgentMessage[] = [];
+            const handler = new AcpMessageHandler((message) => messages.push(message));
+
+            handler.handleUpdate({
+                sessionUpdate: ACP_SESSION_UPDATE_TYPES.toolCall,
+                toolCallId: 'oc-edit-1',
+                title: 'edit',
+                kind: 'edit',
+                status: 'pending',
+                locations: [],
+                rawInput: {}
+            });
+
+            const fullInput = {
+                filePath: '/tmp/a.ts',
+                oldString: 'foo',
+                newString: 'bar'
+            };
+            handler.handleUpdate({
+                sessionUpdate: ACP_SESSION_UPDATE_TYPES.toolCallUpdate,
+                toolCallId: 'oc-edit-1',
+                title: 'a.ts',
+                kind: 'edit',
+                status: 'in_progress',
+                locations: [{ path: '/tmp/a.ts' }],
+                rawInput: fullInput
+            });
+
+            const calls = messages.filter(
+                (m): m is Extract<AgentMessage, { type: 'tool_call' }> => m.type === 'tool_call'
+            );
+            expect(calls[calls.length - 1].input).toEqual(fullInput);
+        });
     });
 
     it('intercepts rate_limit_event chunk before it enters the text buffer', () => {
@@ -876,6 +1130,84 @@ describe('AcpMessageHandler', () => {
         // Should only have the converted warning, no raw JSON prefix
         expect(messages).toHaveLength(1);
         expect((messages[0] as { text: string }).text).toMatch(/^Claude AI usage limit warning\|/);
+    });
+
+    it('drops a metadata envelope split across delta chunks', () => {
+        // In delta mode every chunk is a fragment, so no individual chunk ever
+        // parses as JSON and the per-chunk filter never fires. Only the flush
+        // boundary sees the reassembled envelope.
+        const messages: AgentMessage[] = [];
+        const handler = new AcpMessageHandler(
+            (message) => messages.push(message),
+            { textChunkMode: 'delta' }
+        );
+
+        const metadataJson = JSON.stringify({
+            type: 'output',
+            data: {
+                parentUuid: null,
+                isSidechain: true,
+                userType: 'external',
+                sessionId: '5605239b-3ca8-4cf4-bf06-a234f7984f2f',
+                type: 'tool_progress',
+                tool_name: 'Bash',
+                elapsed_time_seconds: 30,
+                heartbeat: true,
+            },
+        });
+
+        for (let i = 0; i < metadataJson.length; i += 17) {
+            handler.handleUpdate({
+                sessionUpdate: ACP_SESSION_UPDATE_TYPES.agentMessageChunk,
+                content: { type: 'text', text: metadataJson.slice(i, i + 17) }
+            });
+        }
+
+        handler.flushText();
+
+        expect(messages).toEqual([]);
+    });
+
+    it('drops a metadata envelope that arrives with leading whitespace', () => {
+        const messages: AgentMessage[] = [];
+        const handler = new AcpMessageHandler((message) => messages.push(message));
+
+        const metadataJson = JSON.stringify({
+            type: 'output',
+            data: {
+                parentUuid: null,
+                sessionId: 'session-789',
+                userType: 'external',
+            },
+        });
+        handler.handleUpdate({
+            sessionUpdate: ACP_SESSION_UPDATE_TYPES.agentMessageChunk,
+            content: { type: 'text', text: `\n  ${metadataJson}` }
+        });
+
+        handler.flushText();
+
+        expect(messages).toEqual([]);
+    });
+
+    it('still emits genuine assistant text that happens to be JSON', () => {
+        const messages: AgentMessage[] = [];
+        const handler = new AcpMessageHandler(
+            (message) => messages.push(message),
+            { textChunkMode: 'delta' }
+        );
+
+        const answer = '{"name":"hapi","version":"0.23.4"}';
+        for (const chunk of [answer.slice(0, 10), answer.slice(10)]) {
+            handler.handleUpdate({
+                sessionUpdate: ACP_SESSION_UPDATE_TYPES.agentMessageChunk,
+                content: { type: 'text', text: chunk }
+            });
+        }
+
+        handler.flushText();
+
+        expect(messages).toEqual([{ type: 'text', text: answer }]);
     });
 
     it('forwards agent_thought_chunk as a reasoning message after flush', () => {
@@ -2151,86 +2483,92 @@ describe('AcpMessageHandler', () => {
         });
     });
 
-    describe('Cursor ACP empty rawInput + path recovery', () => {
-        it('treats rawInput: {} as absent and uses locations for Read File', () => {
-            const messages: AgentMessage[] = [];
-            const handler = new AcpMessageHandler((message) => messages.push(message));
+    it('emits generated_image agent messages from ACP image content blocks', async () => {
+        const messages: AgentMessage[] = [];
+        const handler = new AcpMessageHandler((message) => messages.push(message));
+        const pngHeader = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x00]);
 
-            handler.handleUpdate({
-                sessionUpdate: ACP_SESSION_UPDATE_TYPES.toolCall,
-                toolCallId: 'cursor-read',
-                title: 'Read File',
-                kind: 'read',
-                rawInput: {},
-                locations: [{ path: '/home/x/src/a.ts' }],
-                status: 'in_progress'
-            });
-
-            const toolCall = messages.find(
-                (m): m is Extract<AgentMessage, { type: 'tool_call' }> => m.type === 'tool_call'
-            );
-            expect(toolCall!.input).toEqual({ file_path: '/home/x/src/a.ts' });
+        handler.handleUpdate({
+            sessionUpdate: ACP_SESSION_UPDATE_TYPES.agentMessageChunk,
+            content: {
+                type: 'image',
+                mimeType: 'image/png',
+                data: pngHeader.toString('base64')
+            }
         });
 
-        it('does not set file_path from display title "Read File"', () => {
-            const messages: AgentMessage[] = [];
-            const handler = new AcpMessageHandler((message) => messages.push(message));
-
-            handler.handleUpdate({
-                sessionUpdate: ACP_SESSION_UPDATE_TYPES.toolCall,
-                toolCallId: 'cursor-read-bare',
-                title: 'Read File',
-                kind: 'read',
-                rawInput: {},
-                status: 'in_progress'
-            });
-
-            const toolCall = messages.find(
-                (m): m is Extract<AgentMessage, { type: 'tool_call' }> => m.type === 'tool_call'
-            );
-            expect(toolCall!.input).toBeNull();
+        await vi.waitFor(() => {
+            expect(messages.some((message) => message.type === 'generated_image')).toBe(true);
         });
 
-        it('backfills Edit File path from rawOutput on completion', () => {
-            const messages: AgentMessage[] = [];
-            const handler = new AcpMessageHandler((message) => messages.push(message));
+        const imageMessage = messages.find(
+            (message): message is Extract<AgentMessage, { type: 'generated_image' }> =>
+                message.type === 'generated_image'
+        );
+        expect(imageMessage?.mimeType).toBe('image/png');
+        expect(imageMessage?.fileName).toBeTruthy();
+        expect(imageMessage?.imageId).toBeTruthy();
+        expect(imageMessage?.source).toEqual({ ingress: 'acp' });
+        clearGeneratedImages();
+    });
 
-            handler.handleUpdate({
-                sessionUpdate: ACP_SESSION_UPDATE_TYPES.toolCall,
-                toolCallId: 'cursor-edit',
-                title: 'Edit File',
-                kind: 'edit',
-                rawInput: {},
-                status: 'in_progress'
-            });
+    it('emits generated_image before later tool_call when image registration is async', async () => {
+        const messages: AgentMessage[] = [];
+        const handler = new AcpMessageHandler((message) => messages.push(message));
+        const pngHeader = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x00]);
 
-            handler.handleUpdate({
-                sessionUpdate: ACP_SESSION_UPDATE_TYPES.toolCallUpdate,
-                toolCallId: 'cursor-edit',
-                title: 'Edit File',
-                kind: 'edit',
-                rawInput: {},
-                status: 'completed',
-                rawOutput: {
-                    path: '/home/x/docs/plan.md',
-                    oldText: 'a',
-                    newText: 'b'
-                }
-            });
-
-            const toolCalls = messages.filter(
-                (m): m is Extract<AgentMessage, { type: 'tool_call' }> =>
-                    m.type === 'tool_call' && m.id === 'cursor-edit'
-            );
-            const last = toolCalls[toolCalls.length - 1]!;
-            expect(last.input).toEqual({ file_path: '/home/x/docs/plan.md' });
-
-            const result = getToolResult(messages, 'cursor-edit');
-            expect(result.output).toEqual({
-                path: '/home/x/docs/plan.md',
-                oldText: 'a',
-                newText: 'b'
-            });
+        await handler.handleUpdate({
+            sessionUpdate: ACP_SESSION_UPDATE_TYPES.agentMessageChunk,
+            content: {
+                type: 'image',
+                mimeType: 'image/png',
+                data: pngHeader.toString('base64'),
+            },
         });
+        await handler.handleUpdate({
+            sessionUpdate: ACP_SESSION_UPDATE_TYPES.toolCall,
+            toolCallId: 'call-after-image',
+            title: 'Read',
+            kind: 'read',
+            status: 'in_progress',
+        });
+
+        const imageIndex = messages.findIndex((message) => message.type === 'generated_image');
+        const toolIndex = messages.findIndex((message) => message.type === 'tool_call');
+        expect(imageIndex).toBeGreaterThanOrEqual(0);
+        expect(toolIndex).toBeGreaterThan(imageIndex);
+        clearGeneratedImages();
+    });
+
+    it('emits buffered text before generated_image when text precedes an ACP image block', async () => {
+        const messages: AgentMessage[] = [];
+        const handler = new AcpMessageHandler((message) => messages.push(message), { flavor: 'cursor' });
+        const pngHeader = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x00]);
+
+        await handler.handleUpdate({
+            sessionUpdate: ACP_SESSION_UPDATE_TYPES.agentMessageChunk,
+            content: { type: 'text', text: 'Here is the screenshot:' }
+        });
+        await handler.handleUpdate({
+            sessionUpdate: ACP_SESSION_UPDATE_TYPES.agentMessageChunk,
+            content: {
+                type: 'image',
+                mimeType: 'image/png',
+                data: pngHeader.toString('base64')
+            }
+        });
+
+        await vi.waitFor(() => {
+            expect(messages.some((message) => message.type === 'generated_image')).toBe(true);
+        });
+
+        const textIndex = messages.findIndex((message) => message.type === 'text');
+        const imageIndex = messages.findIndex((message) => message.type === 'generated_image');
+        expect(textIndex).toBeGreaterThanOrEqual(0);
+        expect(imageIndex).toBeGreaterThan(textIndex);
+        if (messages[imageIndex]?.type === 'generated_image') {
+            expect(messages[imageIndex].source).toEqual({ ingress: 'acp', flavor: 'cursor' });
+        }
+        clearGeneratedImages();
     });
 });

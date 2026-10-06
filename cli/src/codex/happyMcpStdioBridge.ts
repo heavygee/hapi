@@ -1,7 +1,7 @@
 /**
  * HAPI MCP STDIO Bridge
  *
- * Minimal STDIO MCP server exposing HAPI tools such as `change_title`, `display_image`, `display_video`, `display_media`, `list_peers`, `search_peers`, `search_content`, `ping_peer`, `inspect_peer`, and `spawn_peer`.
+ * Minimal STDIO MCP server exposing HAPI tools such as `change_title`, `display_image`, `display_video`, `display_media`, `list_peers`, `ping_peer`, and `inspect_peer`.
  * `display_links` is Cursor-only and is registered only when `--tools` includes it.
  * On invocation it forwards the tool call to an existing HAPI HTTP MCP server
  * using the StreamableHTTPClientTransport.
@@ -18,34 +18,14 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { z } from 'zod';
 import { DISPLAY_IMAGE_PROMPT_CURSOR, DISPLAY_LINKS_PROMPT_CURSOR, DISPLAY_MEDIA_PROMPT_CURSOR, DISPLAY_VIDEO_PROMPT_CURSOR } from '@/modules/common/displayImagePrompt';
+import { isDisplayLinksToolName } from '@hapi/protocol';
 import {
   INSPECT_PEER_TOOL_DESCRIPTION,
   PING_PEER_TOOL_DESCRIPTION,
   SESSION_ID_PREFIX_PARAM_DESCRIPTION,
-  SPAWN_PEER_TOOL_DESCRIPTION,
 } from '@hapi/protocol/sessionCitation';
-import {
-  SESSION_JOB_TOOL_DESCRIPTION,
-  SESSION_JOB_TOOL_NAME,
-  sessionJobInputSchema,
-} from '@/modules/sessionJob/sessionJobMcp';
-import { SESSION_NAME_MAX_LENGTH } from '@hapi/protocol';
-import { CREATABLE_AGENT_FLAVORS } from '@hapi/protocol/modes';
-import { PermissionModeSchema } from '@hapi/protocol/schemas';
 
-const DEFAULT_TOOL_NAMES = [
-  'change_title',
-  'display_image',
-  'display_video',
-  'display_media',
-  'list_peers',
-  'search_peers',
-  'search_content',
-  'ping_peer',
-  'inspect_peer',
-  'spawn_peer',
-  SESSION_JOB_TOOL_NAME,
-];
+const DEFAULT_TOOL_NAMES = ['change_title', 'display_image', 'display_video', 'display_media', 'list_peers', 'ping_peer', 'inspect_peer'];
 
 function parseArgs(argv: string[]): { url: string | null; toolNames: Set<string> } {
   let url: string | null = null;
@@ -230,21 +210,30 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
           title: z.string().trim().min(1).max(255).optional().describe('Optional link label shown on the card'),
         }),
         z.string(),
-      ])).min(1).max(20).describe('One or more http(s) URLs to paint as tappable cards'),
-    });
+      ])).min(1).max(20).optional().describe('Optional http(s) URLs to paint as tappable cards'),
+      texts: z.array(z.union([
+        z.object({
+          value: z.string().min(1).max(8192).describe('Exact string to paint for copy. Construct by concatenation (VK+K), never copy from model prose.'),
+          title: z.string().trim().min(1).max(255).optional().describe('Optional label shown on the copy card'),
+        }),
+        z.string().min(1).max(8192),
+        ])).min(1).max(20).optional().describe('Optional exact-copy strings (secrets, tokens, SHAs, tags, MagicDNS labels)'),
+        sessionId: z.string().min(1).optional().describe('This chat\'s HAPI session id (required at runtime). Cursor routes duplicate MCP tool names to one server; a mismatch means the call landed on the wrong session MCP.'),
+      });
 
-    if (toolNames.has('display_links')) {
+    if (toolNames.has('display_links') || [...toolNames].some((name) => isDisplayLinksToolName(name))) {
+      const displayLinksToolName = [...toolNames].find((name) => isDisplayLinksToolName(name)) ?? 'display_links';
       server.registerTool<any, any>(
-        'display_links',
+        displayLinksToolName,
         {
-          description: `Paint clickable http(s) URL cards into the current HAPI chat. ${DISPLAY_LINKS_PROMPT_CURSOR}`,
+          description: `Paint clickable http(s) URL cards and/or exact-copy strings into the current HAPI chat. ${DISPLAY_LINKS_PROMPT_CURSOR}`,
           title: 'Display Links',
           inputSchema: displayLinksInputSchema,
         },
         async (args: Record<string, unknown>) => {
           try {
             const client = await ensureHttpClient();
-            return await client.callTool({ name: 'display_links', arguments: args }) as any;
+            return await client.callTool({ name: displayLinksToolName, arguments: args }) as any;
           } catch (error) {
             return {
               content: [{ type: 'text' as const, text: `Failed to display links: ${error instanceof Error ? error.message : String(error)}` }],
@@ -272,50 +261,6 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
             return {
               content: [
                 { type: 'text' as const, text: `Failed to ping peer: ${error instanceof Error ? error.message : String(error)}` },
-              ],
-              isError: true,
-            };
-          }
-        }
-      );
-    }
-
-    const spawnPeerInputSchema: z.ZodTypeAny = z.object({
-      directory: z.string().trim().min(1).describe('Working directory for the new session on this machine'),
-      message: z.string().min(1).describe('Required first user message (the remit). Empty spawn is a failed spawn.'),
-      name: z.string().trim().min(1).max(SESSION_NAME_MAX_LENGTH).optional().describe('Session display name'),
-      agent: z.enum(CREATABLE_AGENT_FLAVORS as unknown as [string, ...string[]]).optional()
-        .describe('Agent flavor override. When omitted, uses hub peerSpawnDefaults then stock claude.'),
-      model: z.string().trim().min(1).optional()
-        .describe('Model override for the resolved agent flavor.'),
-      effort: z.string().trim().min(1).optional()
-        .describe('Effort override (flavor-dependent).'),
-      sessionType: z.enum(['simple', 'worktree']).optional()
-        .describe('simple or worktree. Default simple (use directory as cwd). worktree creates a new tree from directory.'),
-      permissionMode: PermissionModeSchema.optional()
-        .describe(
-          'Permission mode for the new session. Omit to use hub/stock default (yolo). '
-          + 'Pass only to tighten or when the operator names a mode — do not clone the parent session.'
-        ),
-    });
-
-    if (toolNames.has('spawn_peer')) {
-      server.registerTool<any, any>(
-        'spawn_peer',
-        {
-          description: SPAWN_PEER_TOOL_DESCRIPTION,
-          title: 'Spawn Peer Session',
-          inputSchema: spawnPeerInputSchema,
-        },
-        async (args: Record<string, unknown>) => {
-          try {
-            const client = await ensureHttpClient();
-            const response = await client.callTool({ name: 'spawn_peer', arguments: args });
-            return response as any;
-          } catch (error) {
-            return {
-              content: [
-                { type: 'text' as const, text: `Failed to spawn peer: ${error instanceof Error ? error.message : String(error)}` },
               ],
               isError: true,
             };
@@ -366,7 +311,7 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
       server.registerTool<any, any>(
         'list_peers',
         {
-          description: 'List peer HAPI sessions on the same hub/namespace (id prefix, active, flavor, name). Uses this session\'s hub credentials - works from runner-spawned agents without being on the hub host. Prefer this over shelling `hapi ping-peer --list`. Then call inspect_peer / ping_peer with a listed id, search_peers for keyword inventory beyond the recency window, or spawn_peer to create a new peer with a remit.',
+          description: 'List peer HAPI sessions on the same hub/namespace (id prefix, active, flavor, name). Uses this session\'s hub credentials - works from runner-spawned agents without being on the hub host. Prefer this over shelling `hapi ping-peer --list`. Then call inspect_peer / ping_peer with a listed id.',
           title: 'List Peer Sessions',
           inputSchema: listPeersInputSchema,
         },
@@ -379,106 +324,6 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
             return {
               content: [
                 { type: 'text' as const, text: `Failed to list peers: ${error instanceof Error ? error.message : String(error)}` },
-              ],
-              isError: true,
-            };
-          }
-        }
-      );
-    }
-
-    const searchPeersInputSchema: z.ZodTypeAny = z.object({
-      query: z.string().trim().min(1).max(256).describe(
-        'Keyword to match against session name, path, agentSessionId, or id.'
-      ),
-      limit: z.number().int().min(1).max(100).optional().describe(
-        'Max matches to return (default 30, max 100). Ranked by match field then updatedAt.'
-      ),
-    });
-
-    if (toolNames.has('search_peers')) {
-      server.registerTool<any, any>(
-        'search_peers',
-        {
-          description: 'Search peer HAPI sessions on the same hub/namespace by keyword (name, path, agentSessionId, id). Not bounded by list_peers recency — finds quiet/aged sessions. Prefer this over /proc→SQLite archaeology. Then call inspect_peer / ping_peer with a returned id.',
-          title: 'Search Peer Sessions',
-          inputSchema: searchPeersInputSchema,
-        },
-        async (args: Record<string, unknown>) => {
-          try {
-            const client = await ensureHttpClient();
-            const response = await client.callTool({ name: 'search_peers', arguments: args });
-            return response as any;
-          } catch (error) {
-            return {
-              content: [
-                { type: 'text' as const, text: `Failed to search peers: ${error instanceof Error ? error.message : String(error)}` },
-              ],
-              isError: true,
-            };
-          }
-        }
-      );
-    }
-
-    const searchContentInputSchema: z.ZodTypeAny = z.object({
-      query: z.string().trim().min(2).max(200).describe(
-        'Distinctive noun/phrase from transcript text. Avoid short/common substrings (trigram FTS noise).'
-      ),
-      sessionId: z.string().min(1).optional().describe(
-        'Optional hub session id to scope search to one conversation.'
-      ),
-      limit: z.number().int().min(1).max(100).optional().describe(
-        'Max matches to return (default 50, hub max 100).'
-      ),
-    });
-
-    if (toolNames.has('search_content')) {
-      server.registerTool<any, any>(
-        'search_content',
-        {
-          description:
-            'Search transcript text across HAPI sessions on the same hub/namespace. Uses session CLI credentials — never hand-mint a JWT. Auth/backend failures are errors, never empty lists. Prefer distinctive nouns (trigram FTS).',
-          title: 'Search Session Transcripts',
-          inputSchema: searchContentInputSchema,
-        },
-        async (args: Record<string, unknown>) => {
-          try {
-            const client = await ensureHttpClient();
-            const response = await client.callTool({ name: 'search_content', arguments: args });
-            return response as any;
-          } catch (error) {
-            return {
-              content: [
-                { type: 'text' as const, text: `Failed to search content: ${error instanceof Error ? error.message : String(error)}` },
-              ],
-              isError: true,
-            };
-          }
-        }
-      );
-    }
-
-    if (toolNames.has(SESSION_JOB_TOOL_NAME)) {
-      server.registerTool<any, any>(
-        SESSION_JOB_TOOL_NAME,
-        {
-          description: SESSION_JOB_TOOL_DESCRIPTION,
-          title: 'Session-Attached Job',
-          inputSchema: sessionJobInputSchema,
-        },
-        async (args: Record<string, unknown>) => {
-          try {
-            const client = await ensureHttpClient();
-            const response = await client.callTool({ name: SESSION_JOB_TOOL_NAME, arguments: args });
-            return response as any;
-          } catch (error) {
-            return {
-              content: [
-                {
-                  type: 'text' as const,
-                  text: `Failed to run session_job: ${error instanceof Error ? error.message : String(error)}`,
-                },
               ],
               isError: true,
             };

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import {
     buildDisplayLinksPayload,
+    buildDisplayLinksToolName,
     isDisplayableHttpHref,
     parseDisplayLinksInput,
     parseDisplayLinksToolInput,
@@ -22,6 +23,10 @@ describe('isDisplayableHttpHref', () => {
     it('accepts http and https', () => {
         expect(isDisplayableHttpHref('https://hapi-gc-oos.forest-adder.ts.net/sessions/abc')).toBe(true)
         expect(isDisplayableHttpHref('http://example.com/path')).toBe(true)
+    })
+
+    it('accepts paths with unescaped spaces (web URL parity)', () => {
+        expect(isDisplayableHttpHref('https://example.com/report Q3.pdf')).toBe(true)
     })
 
     it.each([
@@ -49,6 +54,11 @@ describe('parseDisplayLinksInput', () => {
         const urls = parseDisplayLinksInput([{ href, title: 'Issue 1516' }])
         expect(urls).toEqual([{ href: 'https://github.com/tiann/hapi/issues/1516', title: 'Issue 1516' }])
         expect(urls[0]?.href).toBe(href)
+    })
+
+    it('keeps unescaped spaces in stored href bytes', () => {
+        const href = 'https://example.com/report Q3.pdf'
+        expect(parseDisplayLinksInput([{ href, title: 'Q3' }])).toEqual([{ href, title: 'Q3' }])
     })
 
     it('accepts a bare href string in the urls array', () => {
@@ -197,16 +207,51 @@ describe('redactDisplayLinksToolInput', () => {
             urls: [{ href, title: 'Public' }],
             texts: [{ value: secret, title: 'gate' }],
             sessionId: 'abc',
-        }) as { texts: Array<{ value: string }>; urls: Array<{ href: string }> }
+        }) as { texts: Array<{ value: string; title?: string }>; urls: Array<{ href: string }> }
         expect(JSON.stringify(redacted)).not.toContain(secret)
         expect(redacted.texts[0]?.value).toBe('[omitted]')
+        expect(redacted.texts[0]?.title).toBe('gate')
         expect(redacted.urls[0]?.href).toBe(href)
+    })
+
+    it('fail-closes when texts is malformed or carries extra secret fields', () => {
+        const secret = 'SENTINEL_BACKUP_VK' + 'K'
+        const objectTexts = redactDisplayLinksToolInput({
+            texts: { value: secret },
+        }) as { texts: string }
+        expect(objectTexts.texts).toBe('[omitted]')
+        expect(JSON.stringify(objectTexts)).not.toContain(secret)
+
+        const withBackup = redactDisplayLinksToolInput({
+            texts: [{ value: secret, backup: secret, title: 't' }],
+            backup: secret,
+            urls: [{ href: 'https://example.com', backup: secret }],
+        }) as { texts: Array<Record<string, unknown>>; urls: unknown[]; backup?: unknown }
+        expect(withBackup.texts[0]).toEqual({ value: '[omitted]', title: 't' })
+        expect(withBackup).not.toHaveProperty('backup')
+        expect(JSON.stringify(withBackup)).not.toContain(secret)
+        expect(withBackup.texts[0]).not.toHaveProperty('backup')
+        expect(JSON.stringify(withBackup.urls)).not.toContain('backup')
+    })
+
+    it('fail-closes for primitive and array tool inputs', () => {
+        const secret = 'SENTINEL_PRIMITIVE_VK' + 'K'
+        expect(redactDisplayLinksToolInput(secret)).toBe('[omitted]')
+        expect(redactDisplayLinksToolInput([secret])).toBe('[omitted]')
+        expect(redactDisplayLinksToolInput(null)).toBeNull()
     })
 
     it('recognizes Cursor-prefixed display_links tool names', () => {
         expect(isDisplayLinksToolName('display_links')).toBe(true)
         expect(isDisplayLinksToolName('Display Links')).toBe(true)
         expect(isDisplayLinksToolName('mcp__hapi__display_links')).toBe(true)
+        expect(isDisplayLinksToolName('hapi_2acd2599_525c_4774_825f_09ce7802549d_display_links')).toBe(true)
         expect(isDisplayLinksToolName('Bash')).toBe(false)
+    })
+
+    it('builds a per-session display_links tool name', () => {
+        expect(buildDisplayLinksToolName('2acd2599-525c-4774-825f-09ce7802549d')).toBe(
+            'hapi_2acd2599_525c_4774_825f_09ce7802549d_display_links',
+        )
     })
 })

@@ -104,81 +104,6 @@ function extractTitleArgument(title: string, kind: string | null): string {
 }
 
 /**
- * True when `title` is a tool display name (Cursor: "Read File") rather than
- * a path / command / pattern. Synthesizing `{file_path: "Read File"}` from
- * these titles poisons the heatmap and tool cards.
- */
-function isDisplayOnlyToolTitle(title: string): boolean {
-    const t = title.trim();
-    if (!t) return true;
-    if (/^(Read|Edit|Write|Delete)(\s+File)?$/i.test(t)) return true;
-    if (/^(Shell|Bash|Grep|Search|Find|Glob|Tool)$/i.test(t)) return true;
-    return false;
-}
-
-/** Loose path heuristic — rejects display titles and empty strings. */
-function looksLikePath(value: string): boolean {
-    const v = value.trim();
-    if (!v || isDisplayOnlyToolTitle(v)) return false;
-    if (v.includes('/') || v.includes('\\')) return true;
-    if (/\.[A-Za-z0-9]{1,12}$/.test(v)) return true;
-    return false;
-}
-
-function extractPathFromLocations(locations: unknown): string | null {
-    if (!Array.isArray(locations)) return null;
-    for (const loc of locations) {
-        if (!isObject(loc)) continue;
-        const path = asString(loc.path) ?? asString(loc.filePath) ?? asString(loc.uri);
-        if (path && looksLikePath(path)) return path;
-    }
-    return null;
-}
-
-function hasUsableFilePath(input: unknown): boolean {
-    if (!isObject(input)) return false;
-    for (const key of ['file_path', 'path', 'filePath', 'file', 'target_file'] as const) {
-        const value = input[key];
-        if (typeof value === 'string' && looksLikePath(value)) return true;
-    }
-    return false;
-}
-
-function enrichInputWithPath(input: unknown, path: string): Record<string, unknown> {
-    const base: Record<string, unknown> = isObject(input) ? { ...input } : {};
-    if (!hasUsableFilePath(base)) {
-        base.file_path = path;
-    }
-    return base;
-}
-
-/** Cursor Edit File completion payload: `{ path, oldText, newText }`. */
-function extractPathFromToolOutput(output: unknown): string | null {
-    if (!isObject(output)) return null;
-    for (const key of ['path', 'file_path', 'filePath', 'file', 'target_file'] as const) {
-        const value = output[key];
-        if (typeof value === 'string' && looksLikePath(value)) return value;
-    }
-    return null;
-}
-
-function needsInputEnrichment(
-    existingInput: unknown,
-    updateTitle: string | null,
-    kind: string | null
-): boolean {
-    if (existingInput == null) return true;
-    if (isObject(existingInput) && Object.keys(existingInput).length === 0) return true;
-    if (isObject(existingInput)) {
-        for (const key of ['file_path', 'path', 'filePath'] as const) {
-            const value = existingInput[key];
-            if (typeof value === 'string' && isDisplayOnlyToolTitle(value)) return true;
-        }
-    }
-    return isStaleDerivedInput(existingInput, updateTitle, kind);
-}
-
-/**
  * Fallback for ACP agents that omit `rawInput` and emit prose thoughts
  * (no JSON-form to hoist). The `tool_call` event still carries a
  * human-readable `title`, a structural `kind`, and (for file-touching tools)
@@ -187,10 +112,11 @@ function needsInputEnrichment(
  * "README.md" / "ls -la /tmp".
  *
  * Conservative on purpose:
- * - `read` / `edit` prefer `locations[0].path` when present (Cursor + Gemini).
- * - `read` / `execute` / `search` may derive from `title` when it looks like a
- *   real argument — not when it is a display name like "Read File".
- * - `edit` never derives path from title (prose: "Writing to foo.txt").
+ * - `read` / `execute` / `search` derive from `title`, which in those kinds
+ *   is the verbatim path / command / pattern.
+ * - `edit` (file-write / file-replace) derives from `locations[0].path`;
+ *   its title is prose ("Writing to foo.txt"), so the path must come from
+ *   the structured locations field, not the title.
  * - `think` stays null — its title carries topic-update prose with no clean
  *   argument mapping; fabricating one would mislead.
  * - Unknown kinds fall through to null rather than guessing a shape.
@@ -201,22 +127,21 @@ function deriveInputFromKindAndTitle(
     locations: unknown
 ): Record<string, unknown> | null {
     const normalizedKind = normalizeToolKind(kind);
-    const pathFromLoc = extractPathFromLocations(locations);
-    if ((normalizedKind === 'edit' || normalizedKind === 'read') && pathFromLoc) {
-        return { file_path: pathFromLoc };
-    }
     if (normalizedKind === 'edit') {
-        return null;
+        const arr = Array.isArray(locations) ? locations : [];
+        const first = arr[0];
+        const path = isObject(first) ? asString(first.path) : null;
+        return path ? { file_path: path } : null;
     }
     if (!title) return null;
     const arg = extractTitleArgument(title, kind);
     switch (normalizedKind) {
         case 'read':
-            return looksLikePath(arg) ? { file_path: arg } : null;
+            return { file_path: arg };
         case 'execute':
-            return isDisplayOnlyToolTitle(arg) ? null : { command: arg };
+            return { command: arg };
         case 'search':
-            return isDisplayOnlyToolTitle(arg) ? null : { pattern: arg };
+            return { pattern: arg };
         default:
             return null;
     }
@@ -835,11 +760,8 @@ export class AcpMessageHandler {
                 update.locations,
                 update.content
             );
-        let input = redactIfDisplayLinks(name, isUsableRawInput(candidate) ? candidate : null);
-        const locPath = extractPathFromLocations(update.locations);
-        if (locPath && !hasUsableFilePath(input)) {
-            input = redactIfDisplayLinks(name, enrichInputWithPath(input, locPath));
-        }
+        // Content JSON can be `{}` (same as unusable rawInput); never lock that in.
+        const input = redactIfDisplayLinks(name, isUsableRawInput(candidate) ? candidate : null);
         const status = normalizeStatus(update.status);
 
         this.toolCalls.set(toolCallId, { name, input });
@@ -869,11 +791,7 @@ export class AcpMessageHandler {
         if (isUsableRawInput(update.rawInput)) {
             const derivedName = deriveToolNameFromUpdate(update);
             const name = this.selectToolNameForUpdate(existing?.name ?? null, derivedName);
-            let input = redactIfDisplayLinks(name, update.rawInput);
-            const locPath = extractPathFromLocations(update.locations);
-            if (locPath && !hasUsableFilePath(input)) {
-                input = redactIfDisplayLinks(name, enrichInputWithPath(input, locPath));
-            }
+            const input = redactIfDisplayLinks(name, update.rawInput);
             this.toolCalls.set(toolCallId, { name, input });
             this.onMessage({
                 type: 'tool_call',
@@ -892,7 +810,7 @@ export class AcpMessageHandler {
             let name = existing.name;
             let rederived = false;
             const updateTitle = asString(update.title);
-            if (needsInputEnrichment(input, updateTitle, asString(update.kind))) {
+            if (!isUsableRawInput(input) || isStaleDerivedInput(input, updateTitle, asString(update.kind))) {
                 const fallback = resolveToolInputFallbacks(
                     asString(update.kind),
                     updateTitle,
@@ -907,25 +825,7 @@ export class AcpMessageHandler {
                     rederived = true;
                 }
             }
-            const locPath = extractPathFromLocations(update.locations);
-            if (locPath && !hasUsableFilePath(input)) {
-                input = redactIfDisplayLinks(name, enrichInputWithPath(input, locPath));
-                const derivedName = deriveToolNameFromUpdate(update);
-                name = this.selectToolNameForUpdate(existing.name ?? null, derivedName);
-                this.toolCalls.set(toolCallId, { name, input });
-                rederived = true;
-            }
-            if (!rederived && needsInputEnrichment(input, updateTitle, asString(update.kind))) {
-                const fromContent = extractJsonInputFromContent(update.content);
-                if (fromContent && isObject(fromContent)) {
-                    const derivedName = deriveToolNameFromUpdate(update);
-                    name = this.selectToolNameForUpdate(existing.name ?? null, derivedName);
-                    input = redactIfDisplayLinks(name, fromContent);
-                    this.toolCalls.set(toolCallId, { name, input });
-                    rederived = true;
-                }
-            }
-            const justEnriched = (existing.input == null && input != null) || rederived;
+            const justEnriched = (!isUsableRawInput(existing.input) && isUsableRawInput(input)) || rederived;
             if (status === 'in_progress' || status === 'pending' || justEnriched) {
                 this.onMessage({
                     type: 'tool_call',
@@ -975,25 +875,6 @@ export class AcpMessageHandler {
             } else {
                 const normalized = normalizeAcpToolContent(update.content);
                 output = normalized !== null ? normalized : update.content;
-            }
-
-            const current = this.toolCalls.get(toolCallId) ?? existing;
-            if (current && !hasUsableFilePath(current.input)) {
-                const pathFromOut = extractPathFromToolOutput(output);
-                const pathFromLoc = extractPathFromLocations(update.locations);
-                const path = pathFromOut ?? pathFromLoc;
-                if (path) {
-                    const enrichedInput = enrichInputWithPath(current.input, path);
-                    this.toolCalls.set(toolCallId, { name: current.name, input: enrichedInput });
-                    this.onMessage({
-                        type: 'tool_call',
-                        id: toolCallId,
-                        name: current.name,
-                        input: enrichedInput,
-                        status,
-                        ...presentation
-                    });
-                }
             }
             this.onMessage({
                 type: 'tool_result',

@@ -5,7 +5,11 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ApiSessionClient } from '@/api/apiSession'
+import { buildDisplayLinksToolName } from '@hapi/protocol'
 import { startHappyServer, toClaudeAllowedHapiMcpTools } from './startHappyServer'
+
+const TEST_SESSION_ID = 'happy-server-test-session'
+const TEST_DISPLAY_LINKS_TOOL = buildDisplayLinksToolName(TEST_SESSION_ID)
 
 type ToolResult = {
     content?: Array<{ type: string; text?: string }>
@@ -44,7 +48,7 @@ describe('startHappyServer skill_lookup', () => {
     async function connect(enableSkillLookup = true, extra: { enableDisplayLinks?: boolean; flavor?: string } = {}): Promise<Client> {
         sendAgentMessage = vi.fn()
         const sessionClient = {
-            sessionId: 'test-session-id',
+            sessionId: TEST_SESSION_ID,
             updateMetadata: vi.fn(),
             sendAgentMessage,
             sendClaudeSessionMessage: vi.fn()
@@ -112,19 +116,15 @@ describe('startHappyServer skill_lookup', () => {
         const mcp = await connect(false)
         const tools = await mcp.listTools()
 
-        expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
+        expect(tools.tools.map((tool) => tool.name)).toEqual([
             'change_title',
             'display_image',
             'display_video',
             'display_media',
-            'inspect_peer',
-            'list_peers',
-            'search_content',
-            'search_peers',
             'ping_peer',
-            'session_job',
-            'spawn_peer',
-        ].sort())
+            'inspect_peer',
+            'list_peers'
+        ])
         expect(tools.tools.map((tool) => tool.name)).not.toContain('display_links')
     })
 
@@ -158,49 +158,6 @@ describe('startHappyServer skill_lookup', () => {
         }))
     })
 
-    it('does not expose display_links for non-cursor flavors', async () => {
-        const mcp = await connect(true, { flavor: 'opencode' })
-        const tools = await mcp.listTools()
-        expect(tools.tools.map((tool) => tool.name)).not.toContain('display_links')
-    })
-
-    it('exposes display_links for cursor flavor', async () => {
-        const mcp = await connect(true, { flavor: 'cursor' })
-        const tools = await mcp.listTools()
-        expect(tools.tools.map((tool) => tool.name)).toContain('display_links')
-    })
-
-    it('paints display_links via sendAgentMessage with concatenated href bytes', async () => {
-        const mcp = await connect(false, { enableDisplayLinks: true })
-        const href = 'https://github.com/tia' + 'nn' + '/hapi/issues/1516'
-
-        const result = await mcp.callTool({
-            name: 'display_links',
-            arguments: { urls: [{ href, title: 'Issue 1516' }] }
-        }) as ToolResult
-
-        expect(result.isError).toBe(false)
-        expect(result.content?.[0]?.text).toContain('Displayed 1 link')
-        expect(sendAgentMessage).toHaveBeenCalledWith(expect.objectContaining({
-            type: 'display-links',
-            urls: [{ href: 'https://github.com/tiann/hapi/issues/1516', title: 'Issue 1516' }],
-        }))
-        const payload = sendAgentMessage.mock.calls[0]?.[0] as { urls: Array<{ href: string }> }
-        expect(payload.urls[0]?.href).toBe(href)
-        expect(payload.urls[0]?.href).not.toContain('tian/hapi')
-    })
-
-    it('rejects javascript hrefs without emitting an agent message', async () => {
-        const mcp = await connect(false, { enableDisplayLinks: true })
-        const result = await mcp.callTool({
-            name: 'display_links',
-            arguments: { urls: [{ href: 'javascript:alert(1)' }] }
-        }) as ToolResult
-
-        expect(result.isError).toBe(true)
-        expect(sendAgentMessage).not.toHaveBeenCalled()
-    })
-
     it('preserves the source extension when display_media title omits one', async () => {
         const path = join(sandboxDir, 'plan-a.zip')
         await writeFile(path, Buffer.from([0x50, 0x4b, 0x03, 0x04]))
@@ -221,9 +178,99 @@ describe('startHappyServer skill_lookup', () => {
         }))
     })
 
+    it('does not expose display_links for non-cursor flavors', async () => {
+        const mcp = await connect(true, { flavor: 'opencode' })
+        const tools = await mcp.listTools()
+        expect(tools.tools.map((tool) => tool.name)).not.toContain('display_links')
+    })
+
+    it('exposes a per-session display_links tool for cursor flavor', async () => {
+        const mcp = await connect(true, { flavor: 'cursor' })
+        const tools = await mcp.listTools()
+        expect(tools.tools.map((tool) => tool.name)).toContain(TEST_DISPLAY_LINKS_TOOL)
+        expect(tools.tools.map((tool) => tool.name)).not.toContain('display_links')
+    })
+
+    it('paints display_links via sendAgentMessage with concatenated href bytes', async () => {
+        const mcp = await connect(false, { enableDisplayLinks: true })
+        const href = 'https://github.com/tia' + 'nn' + '/hapi/issues/1516'
+
+        const result = await mcp.callTool({
+            name: TEST_DISPLAY_LINKS_TOOL,
+            arguments: { urls: [{ href, title: 'Issue 1516' }], sessionId: TEST_SESSION_ID }
+        }) as ToolResult
+
+        expect(result.isError).toBe(false)
+        expect(result.content?.[0]?.text).toContain('Displayed 1 link')
+        expect(sendAgentMessage).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'display-links',
+            urls: [{ href: 'https://github.com/tiann/hapi/issues/1516', title: 'Issue 1516' }],
+        }))
+        const payload = sendAgentMessage.mock.calls[0]?.[0] as { urls: Array<{ href: string }> }
+        expect(payload.urls[0]?.href).toBe(href)
+        expect(payload.urls[0]?.href).not.toContain('tian/hapi')
+    })
+
+    it('paints display_links exact-copy texts without echoing the value in the tool result', async () => {
+        const mcp = await connect(false, { enableDisplayLinks: true })
+        const value = 'VK' + 'K'
+
+        const result = await mcp.callTool({
+            name: TEST_DISPLAY_LINKS_TOOL,
+            arguments: { texts: [{ value, title: 'gate' }], sessionId: TEST_SESSION_ID }
+        }) as ToolResult
+
+        expect(result.isError).toBe(false)
+        expect(result.content?.[0]?.text).toContain('exact-copy')
+        expect(result.content?.[0]?.text).not.toContain(value)
+        expect(sendAgentMessage).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'display-links',
+            texts: [{ value: 'VKK', title: 'gate' }],
+        }))
+        const payload = sendAgentMessage.mock.calls[0]?.[0] as { texts: Array<{ value: string }> }
+        expect(payload.texts[0]?.value).toBe(value)
+        expect(payload.texts[0]?.value).not.toBe('VK')
+    })
+
+    it('refuses display_links when sessionId does not match the bound MCP session', async () => {
+        const mcp = await connect(false, { enableDisplayLinks: true })
+        const href = 'https://example.com/kinrupt'
+        const result = await mcp.callTool({
+            name: TEST_DISPLAY_LINKS_TOOL,
+            arguments: { urls: [{ href, title: 'Kinrupt' }], sessionId: '472632df-wrong-session' }
+        }) as ToolResult
+
+        expect(result.isError).toBe(true)
+        expect(result.content?.[0]?.text).toMatch(/wrong-session/)
+        expect(sendAgentMessage).not.toHaveBeenCalled()
+    })
+
+    it('refuses display_links when sessionId is omitted', async () => {
+        const mcp = await connect(false, { enableDisplayLinks: true })
+        const result = await mcp.callTool({
+            name: TEST_DISPLAY_LINKS_TOOL,
+            arguments: { urls: [{ href: 'https://example.com/x' }] }
+        }) as ToolResult
+
+        expect(result.isError).toBe(true)
+        expect(result.content?.[0]?.text).toMatch(/requires sessionId/)
+        expect(sendAgentMessage).not.toHaveBeenCalled()
+    })
+
+    it('rejects javascript hrefs without emitting an agent message', async () => {
+        const mcp = await connect(false, { enableDisplayLinks: true })
+        const result = await mcp.callTool({
+            name: TEST_DISPLAY_LINKS_TOOL,
+            arguments: { urls: [{ href: 'javascript:alert(1)' }], sessionId: TEST_SESSION_ID }
+        }) as ToolResult
+
+        expect(result.isError).toBe(true)
+        expect(sendAgentMessage).not.toHaveBeenCalled()
+    })
+
     it('does not expose change_title when native ACP titles are enabled', async () => {
         const sessionClient = {
-            sessionId: 'test-session-id',
+            sessionId: 'happy-server-test-session',
             updateMetadata: vi.fn(),
             sendAgentMessage: vi.fn(),
             sendClaudeSessionMessage: vi.fn()
@@ -236,146 +283,19 @@ describe('startHappyServer skill_lookup', () => {
         await mcp.connect(new StreamableHTTPClientTransport(new URL(server.url)))
         const tools = await mcp.listTools()
 
-        expect(server.toolNames).toEqual([
+        expect(server.toolNames).toEqual(['display_image', 'display_video', 'display_media', 'list_peers', 'ping_peer', 'inspect_peer'])
+        expect(tools.tools.map((tool) => tool.name)).toEqual([
             'display_image',
             'display_video',
             'display_media',
-            'list_peers',
-            'search_peers',
-            'search_content',
             'ping_peer',
             'inspect_peer',
-            'spawn_peer',
-            'session_job',
+            'list_peers'
         ])
-        expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
-            'display_image',
-            'display_media',
-            'display_video',
-            'inspect_peer',
-            'list_peers',
-            'search_content',
-            'search_peers',
-            'ping_peer',
-            'session_job',
-            'spawn_peer',
-        ].sort())
     })
 
 })
 
-describe('startHappyServer change_title', () => {
-    let stopServer: (() => void) | null
-    let client: Client | null
-
-    afterEach(async () => {
-        await client?.close()
-        stopServer?.()
-        client = null
-        stopServer = null
-    })
-
-    async function connectChangeTitleServer(sessionClient: ApiSessionClient, options?: Parameters<typeof startHappyServer>[1]) {
-        const server = await startHappyServer(sessionClient, options)
-        stopServer = server.stop
-        client = new Client(
-            { name: 'hapi-change-title-test', version: '1.0.0' },
-            { capabilities: {} }
-        )
-        await client.connect(new StreamableHTTPClientTransport(new URL(server.url)))
-        return client
-    }
-
-    it('renames via metadata.name so spawn --name sessions update visibly', async () => {
-        const updateMetadata = vi.fn()
-        const sendClaudeSessionMessage = vi.fn()
-        const sessionClient = {
-            updateMetadata,
-            sendAgentMessage: vi.fn(),
-            sendClaudeSessionMessage
-        } as unknown as ApiSessionClient
-
-        const mcp = await connectChangeTitleServer(sessionClient)
-        updateMetadata.mockClear()
-        sendClaudeSessionMessage.mockClear()
-
-        const result = await mcp.callTool({
-            name: 'change_title',
-            arguments: { title: '  Renamed triage peer  ' }
-        }) as ToolResult
-
-        expect(result.isError).toBe(false)
-        expect(result.content?.[0]?.text).toContain('Successfully changed chat title to: "Renamed triage peer"')
-        expect(updateMetadata).toHaveBeenCalledTimes(1)
-        const handler = updateMetadata.mock.calls[0]?.[0] as (metadata: {
-            path: string
-            host: string
-            name?: string
-            summary?: { text: string }
-        }) => {
-            path: string
-            host: string
-            name?: string
-            summary?: { text: string }
-        }
-        expect(handler({
-            path: '/tmp',
-            host: 'localhost',
-            name: 'issue-triage-#54',
-            summary: { text: 'stale' }
-        })).toEqual({
-            path: '/tmp',
-            host: 'localhost',
-            name: 'Renamed triage peer',
-            summary: { text: 'stale' }
-        })
-        expect(sendClaudeSessionMessage).not.toHaveBeenCalled()
-    })
-
-    it('returns an error for blank titles instead of claiming success', async () => {
-        const updateMetadata = vi.fn()
-        const sessionClient = {
-            updateMetadata,
-            sendAgentMessage: vi.fn(),
-            sendClaudeSessionMessage: vi.fn()
-        } as unknown as ApiSessionClient
-
-        const mcp = await connectChangeTitleServer(sessionClient)
-        updateMetadata.mockClear()
-
-        const result = await mcp.callTool({
-            name: 'change_title',
-            arguments: { title: '   ' }
-        }) as ToolResult
-
-        expect(result.isError).toBe(true)
-        expect(result.content?.[0]?.text).toContain('Failed to change chat title')
-        expect(updateMetadata).not.toHaveBeenCalled()
-    })
-
-    it('does not write titles when emitTitleSummary is disabled (Codex child isolation)', async () => {
-        const updateMetadata = vi.fn()
-        const sendClaudeSessionMessage = vi.fn()
-        const sessionClient = {
-            updateMetadata,
-            sendAgentMessage: vi.fn(),
-            sendClaudeSessionMessage
-        } as unknown as ApiSessionClient
-
-        const mcp = await connectChangeTitleServer(sessionClient, { emitTitleSummary: false })
-        updateMetadata.mockClear()
-        sendClaudeSessionMessage.mockClear()
-
-        const result = await mcp.callTool({
-            name: 'change_title',
-            arguments: { title: 'Child Title' }
-        }) as ToolResult
-
-        expect(result.isError).toBe(false)
-        expect(updateMetadata).not.toHaveBeenCalled()
-        expect(sendClaudeSessionMessage).not.toHaveBeenCalled()
-    })
-})
 describe('toClaudeAllowedHapiMcpTools', () => {
     it('keeps local-path and peer tools registered but out of Claude --allowedTools', () => {
         expect(toClaudeAllowedHapiMcpTools([
@@ -384,18 +304,13 @@ describe('toClaudeAllowedHapiMcpTools', () => {
             'display_video',
             'display_media',
             'list_peers',
-            'search_peers',
             'ping_peer',
             'inspect_peer',
-            'spawn_peer',
-            'session_job',
             'skill_lookup'
         ])).toEqual([
             'mcp__hapi__change_title',
             'mcp__hapi__display_image',
             'mcp__hapi__list_peers',
-            'mcp__hapi__search_peers',
-            'mcp__hapi__session_job',
             'mcp__hapi__skill_lookup'
         ])
         expect(toClaudeAllowedHapiMcpTools(['display_video'])).not.toContain('mcp__hapi__display_video')

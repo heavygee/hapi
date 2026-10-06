@@ -10,6 +10,7 @@ import { getHappyCliCommand } from '@/utils/spawnHappyCLI';
 import type { ApiSessionClient } from '@/api/apiSession';
 import { exportHapiSessionEnv } from '@/agent/hapiSessionEnv';
 import type { CodexMcpServerConfig } from './codexMcpServers';
+import { isDisplayLinksToolName } from '@hapi/protocol';
 
 /**
  * MCP server entry configuration.
@@ -105,10 +106,11 @@ export async function buildHapiMcpBridge(
             approval_mode: 'prompt'
         }
     };
-    // Cursor-only (#1516) — no local-file read; auto-approve so the model uses it
+    // Cursor-only (#1516) — per-session tool name; auto-approve so the model uses it
     // instead of typing doubled-letter-mangled URLs.
-    if (happyServer.toolNames.includes('display_links')) {
-        tools.display_links = {
+    const displayLinksToolName = happyServer.toolNames.find((name) => isDisplayLinksToolName(name));
+    if (displayLinksToolName) {
+        tools[displayLinksToolName] = {
             approval_mode: 'approve'
         };
     }
@@ -117,24 +119,13 @@ export async function buildHapiMcpBridge(
             approval_mode: 'approve'
         };
     }
-    // Discovery shortlist / keyword inventory - same trust as skill_lookup / change_title.
+    // Discovery shortlist only - same trust as skill_lookup / change_title.
     tools.list_peers = {
         approval_mode: 'approve'
     };
-    tools.search_peers = {
-        approval_mode: 'approve'
-    };
-    // Transcript fleet search — same trust as search_peers (read-only hub REST).
-    tools.search_content = {
-        approval_mode: 'approve'
-    };
-    // Own-session progress meter (tiann/hapi#1404) — hub REST, not peer inject.
-    tools.session_job = {
-        approval_mode: 'approve'
-    };
-    // ping_peer / inspect_peer / spawn_peer are registered on the HTTP MCP
-    // server / stdio bridge, but are not auto-approved: they target another
-    // session (resume + inject, read peer histories, or create + inject).
+    // ping_peer / inspect_peer are registered on the HTTP MCP server / stdio
+    // bridge, but are not auto-approved: they target another session (resume +
+    // inject, or read peer histories).
     if (options.skillLookup) {
         tools.skill_lookup = {
             approval_mode: 'approve'

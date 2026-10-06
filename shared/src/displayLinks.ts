@@ -183,6 +183,19 @@ export function assertBoundDisplayLinksSession(boundSessionId: string, callerSes
 
 export const DISPLAY_LINKS_REDACTED_VALUE = '[omitted]' as const
 
+/**
+ * Per-session MCP tool name so concurrent Cursor `hapi-*` overlays do not
+ * collide on bare `display_links` (forum 148059). Redaction matchers already
+ * accept names ending in `_display_links`.
+ */
+export function buildDisplayLinksToolName(sessionId: string): string {
+    const id = sessionId.trim().replaceAll('-', '_')
+    if (!id) {
+        throw new Error('display_links tool name requires a non-empty session id')
+    }
+    return `hapi_${id}_display_links`
+}
+
 export function isDisplayLinksToolName(name: unknown): boolean {
     if (typeof name !== 'string') return false
     const normalized = name.trim().toLowerCase().replace(/[\s-]+/g, '_')
@@ -193,21 +206,33 @@ export function isDisplayLinksToolName(name: unknown): boolean {
 
 /** Strip exact-copy bytes from a tool-call input record (hub/export must not store secrets). */
 export function redactDisplayLinksToolInput(input: unknown): unknown {
-    if (!input || typeof input !== 'object' || Array.isArray(input)) return input
-    const record = input as Record<string, unknown>
-    if (!Array.isArray(record.texts)) return input
-    return {
-        ...record,
-        texts: record.texts.map((item) => {
-            if (typeof item === 'string') return DISPLAY_LINKS_REDACTED_VALUE
-            if (!item || typeof item !== 'object' || Array.isArray(item)) return item
-            const row = item as Record<string, unknown>
-            const next = { ...row }
-            if (typeof row.value === 'string') next.value = DISPLAY_LINKS_REDACTED_VALUE
-            if (typeof row.text === 'string') next.text = DISPLAY_LINKS_REDACTED_VALUE
-            return next
-        }),
+    if (input == null) return input
+    if (typeof input !== 'object' || Array.isArray(input)) {
+        return DISPLAY_LINKS_REDACTED_VALUE
     }
+    const record = input as Record<string, unknown>
+    const safe: Record<string, unknown> = {}
+    if (Object.prototype.hasOwnProperty.call(record, 'urls')) {
+        safe.urls = safeParseDisplayLinksInput(record.urls)
+    }
+    if (Object.prototype.hasOwnProperty.call(record, 'texts')) {
+        safe.texts = Array.isArray(record.texts)
+            ? record.texts.map((item) => {
+                if (typeof item === 'string') return DISPLAY_LINKS_REDACTED_VALUE
+                const row = item && typeof item === 'object' && !Array.isArray(item)
+                    ? item as Record<string, unknown>
+                    : null
+                const title = typeof row?.title === 'string' ? row.title : undefined
+                return title === undefined
+                    ? { value: DISPLAY_LINKS_REDACTED_VALUE }
+                    : { value: DISPLAY_LINKS_REDACTED_VALUE, title }
+            })
+            : DISPLAY_LINKS_REDACTED_VALUE
+    }
+    if (typeof record.sessionId === 'string') {
+        safe.sessionId = record.sessionId
+    }
+    return safe
 }
 
 export function parseDisplayLinksInput(input: unknown): DisplayLink[] {
