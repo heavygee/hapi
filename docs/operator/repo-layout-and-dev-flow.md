@@ -1,5 +1,10 @@
 # Repo layout and dev flow (fork operator's reference)
 
+**Last rewritten 2026-10-06** (soup compose base flipped to fork `origin/main`). If this file
+disagrees with [`docs/tooling/driver-soup.md`](../tooling/driver-soup.md) or
+[`docs/tooling/feature-work-lifecycle.md`](../tooling/feature-work-lifecycle.md), those two win
+for remat mechanics — then fix *this* file the same turn.
+
 A single overview of how a long-lived fork of `tiann/hapi` is organized for parallel speculative work, daily testing across multiple in-flight features, and clean upstream contribution.
 
 Audience: the operator of this fork, peer agents working in it, and anyone evaluating this pattern for their own fork-with-speculative-work setup. Use as the entry point; dive into the subordinate docs from the cross-references at the end.
@@ -8,11 +13,12 @@ All paths use `~` (the operator's home directory). On this machine that resolves
 
 ---
 
-## TL;DR — three things to know
+## TL;DR — four things to know
 
 1. **`~/coding/hapi/` is the fork repo itself.** Worktrees, driver, and upstream-baseline live INSIDE it under `worktrees/`, `driver/`, `upstream/`. It is not a container holding the repo as a subfolder.
 2. **One branch per upstream-tracked item** (issue / PR / discussion). `hapi-branch-audit` enforces this read-only; `hapi-pr-create` enforces it at PR-open time.
 3. **No stashes.** Each context has its own worktree, so the "I need to stash to switch" need disappears. If you find yourself reaching for `git stash`, the right answer is a WIP commit on the current branch or a new worktree.
+4. **Soup composes on fork `origin/main`, not bare `upstream/main`.** Utensils and finished fork product reach `:3006` by tip-forward merge of the manifest base. Upstream PR branches still cut from `upstream/main` only.
 
 ---
 
@@ -97,7 +103,7 @@ graph LR
     UM --> F
     F -.push.-> OR
     OR -.PR.-> US
-    UM --> DI
+    MAIN --> DI
     F -.cherry-pick / merge.-> DI
     UM --> UMT
     MAIN --> G
@@ -112,11 +118,21 @@ graph LR
 
 | Branch | Base | Purpose | Lifetime | PR'd upstream? |
 |--------|------|---------|----------|----------------|
-| `main` (fork) | `upstream/main` + fork-only commits | Local dev landing; receives upstream syncs; carries operator docs | permanent; never PR'd | **NO** |
-| `driver/integration` | `upstream/main` + selective merges of in-flight feature branches | Daily test "soup" composed via `~/.config/hapi/driver-manifest.yaml`; what `hapi-runner` actually executes | permanent; rebuilt nightly or on demand | **NO** |
+| `main` (fork) | `upstream/main` + fork-only commits | Utensils + finished fork product; receives upstream syncs; carries operator docs / tooling | permanent; never PR'd | **NO** |
+| `driver/integration` | **`origin/main`** + selective merges of **in-flight** feature layers | Daily test "soup" for `:3006`; tip-forward merges manifest base then layers | permanent; rebuilt on demand | **NO** |
 | `upstream-main-test` | `upstream/main` | Clean baseline for A/B comparison against driver behavior | permanent | **NO** |
 | `garden/r3f-poc` | `main` (fork) | Long-running speculative XR work; operator-owned spike | indefinite | **NO** |
 | `feat/<x>`, `fix/<x>` | `upstream/main` (always — never `main`, never `driver/integration`) | One per upstream issue / PR / discussion | dies when PR merges or is killed | **YES** |
+
+### Soup compose on fork main (2026-10-06)
+
+**Problem this fixed:** when soup composed on bare `upstream/main`, fork `main` and soup shared **zero** commits above upstream. Finished work on the fork (#1933, heals, search_content) had to be hand-applied into soup. Two stacks, same base, blind to each other.
+
+**Rule now:** `config/driver-manifest.yaml` has `base: origin/main`. Tip-forward merges that base into the soup tip before layers. Layers are only genuinely in-flight product. Drop a layer when its squash is already on fork `main`.
+
+**Kill criterion (durable):** if tip-forward starts fighting utensil `add/add` conflicts every week, **PRIMARY (`~/coding/hapi` mirror) is the sole utensil writer** — stop editing `scripts/tooling/` / docs inside the soup tip; let tip-forward absorb utensils from `origin/main` only. Record regressions against this criterion in a plan, do not quietly re-fork the tooling tree.
+
+**Not a soft-fork:** upstream PR branches still cut from `upstream/main`. Weekly absorb is still `hapi-sync-fork-main` then remat (soup inherits upstream one hop later via fork main).
 
 ### The two-branch trap (the most common mistake)
 
@@ -132,6 +148,8 @@ graph TD
 ```
 
 `hapi-pr-create` refuses PRs from infra branches (`main`, `driver/integration`, `upstream-main-test`, `garden/r3f-poc`) and refuses branches whose history includes all of `driver/integration`. The pre-push hook also scans the outgoing diff for fork-private paths.
+
+**Do not confuse with soup base:** composing soup on fork `main` does **not** mean feature branches may start from fork `main`. Feature branches stay on `upstream/main`. Soup *consumes* fork `main`; it is not a license to pollute upstream diffs.
 
 ---
 
