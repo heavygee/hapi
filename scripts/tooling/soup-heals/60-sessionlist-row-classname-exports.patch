@@ -1,0 +1,34 @@
+From: HeavyGee <133152184+heavygee@users.noreply.github.com>
+Subject: [PATCH] fix(soup): restore SessionList row classname exports for typecheck
+
+github-pr-awareness tip exports sessionListItemButtonClassName /
+sessionListItemWrapperClassName for unit tests; later layer merges kept the
+test imports but dropped the helpers. Restore exports so --verify typecheck
+passes.
+
+---
+diff --git a/web/src/components/SessionList.tsx b/web/src/components/SessionList.tsx
+--- a/web/src/components/SessionList.tsx
++++ b/web/src/components/SessionList.tsx
+@@ -37,6 +37,16 @@ import { SessionPrChip } from '@/components/SessionPrChip'
+ import { getPrimaryGithubPrRef } from '@hapi/protocol'
+ 
++/** Outer row chrome — selected background lives here, not on the button. */
++export function sessionListItemWrapperClassName(selected: boolean): string {
++    return `session-list-item flex w-full items-stretch rounded-lg transition-colors${selected ? ' bg-[var(--app-secondary-bg)]' : ''}`
++}
++
++/** Focusable row control — owns `group/session-row` for keyboard tooltip reveal. */
++export function sessionListItemButtonClassName(): string {
++    return 'group/session-row flex min-w-0 flex-1 flex-col gap-1 px-2.5 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none rounded-lg'
++}
++
+ type SessionGroup = {
+     key: string
+     directory: string
+     displayName: string
+     machineId: string | null
+     sessions: SessionSummary[]
+     latestUpdatedAt: number
+     hasActiveSession: boolean
+ }

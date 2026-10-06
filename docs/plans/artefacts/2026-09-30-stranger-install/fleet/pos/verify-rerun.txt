@@ -1,0 +1,19 @@
+ok - runner unit exists (hapi-runner.service, scope=system)
+ok - runner KillMode=process (hapi-runner.service)
+ok - runner ExecStartPre runner-stop executable (/opt/hapi/hapi)
+ok - hub OOMScoreAdjust=-1000 (hapi-hub.service)
+ok - runner OOMScoreAdjust=0 (hapi-runner.service)
+ok - runner Restart policy (always)
+ok - watchdog service unit present (hapi-runner-watchdog.service)
+ok - watchdog executed (journal/ConditionResult=yes)
+not ok - sudoers applies to hapi (sudo -l / sudoers.d miss)
+ok - no /usr/local/sbin/systemctl wrapper
+ok - runner unit active after restart
+not ok - MainPID equals runner.state.json pid (no pid in /var/lib/hapi/runner.state.json; MainPID=16445)
+ok - live runner oom_score_adj=0 (matches unit)
+ok - live hub oom_score_adj=-1000
+ok - hub /health ok (http://127.0.0.1:3006)
+
+# Explicit gap: agent CLI / Claude auth NOT tested (pet installer leaves login to the operator).
+# This check proves supervision + hub HTTP, not the ninja "sessions cascade on restart" class.
+# pass=13 fail=2

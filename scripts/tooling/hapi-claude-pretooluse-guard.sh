@@ -12,6 +12,10 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 MUTATION_GUARD="${ROOT}/scripts/tooling/hapi-production-mutation-guard.sh"
 SYSTEMCTL_GUARD="${ROOT}/scripts/tooling/hapi-systemctl-guard.sh"
+REMAT_HOLD_GUARD="${ROOT}/scripts/tooling/hapi-remat-hold-guard.sh"
+MIRROR_HYGIENE_GUARD="${ROOT}/scripts/tooling/hapi-mirror-hygiene-guard.sh"
+PRODUCT_GUARD="${ROOT}/scripts/tooling/hapi-product-code-guard.sh"
+TOOLING_COMMIT_GUARD="${ROOT}/scripts/tooling/hapi-tooling-commit-guard.sh"
 
 INPUT="$(cat)"
 
@@ -43,13 +47,28 @@ _run_guard() {
     fi
 }
 
-# Bash-only: soup / production mutation + systemctl (matches Cursor Shell hooks).
 TOOL="$(printf '%s' "$INPUT" | jq -r '.tool_name // .tool // empty' 2>/dev/null || true)"
-if [[ -n "$TOOL" && "$TOOL" != "Bash" ]]; then
-    exit 0
-fi
 
-_run_guard "$MUTATION_GUARD"
-_run_guard "$SYSTEMCTL_GUARD"
+# Mirror hygiene: Bash (install/redirect) + Edit/Write (package.json / e2e on mirror).
+_run_guard "$MIRROR_HYGIENE_GUARD"
+
+case "$TOOL" in
+    ""|Bash)
+        _run_guard "$MUTATION_GUARD"
+        _run_guard "$SYSTEMCTL_GUARD"
+        _run_guard "$REMAT_HOLD_GUARD"
+        # Mess-maker sync/rebuild gate (shell mode)
+        if [[ -x "$TOOLING_COMMIT_GUARD" ]]; then
+            out="$(printf '%s' "$INPUT" | "$TOOLING_COMMIT_GUARD" shell 2>/dev/null || true)"
+            if printf '%s' "$out" | jq -e '.permission == "deny"' >/dev/null 2>&1; then
+                msg="$(printf '%s' "$out" | jq -r '.agent_message // .user_message // "Blocked: commit your tooling dirt"')"
+                _claude_deny "$msg"
+            fi
+        fi
+        ;;
+    Edit|Write|MultiEdit|NotebookEdit)
+        _run_guard "$PRODUCT_GUARD"
+        ;;
+esac
 
 exit 0

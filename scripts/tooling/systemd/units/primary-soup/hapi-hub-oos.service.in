@@ -1,0 +1,18 @@
+[Unit]
+Description=HAPI hub (OOS zone - @HOST_LABEL@)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@HAPI_USER@
+Group=@HAPI_GROUP@
+Environment=HAPI_HOME=@HAPI_HOME@
+WorkingDirectory=@HAPI_DRIVER_DIR@/hub
+EnvironmentFile=-@HAPI_HOME@/hub.env
+ExecStart=/bin/bash -lc 'exec -a hapi-hub-oos @BUN_BIN@ run src/index.ts'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,42 @@
+{
+  "claude": {
+    "sessions": 8,
+    "per_identifier": {
+      "host": {
+        "ok": 16,
+        "drop": 0,
+        "other": 0
+      },
+      "org": {
+        "ok": 20,
+        "drop": 0
+      },
+      "hub": {
+        "ok": 16,
+        "drop": 0
+      }
+    },
+    "faithful_emissions": 52,
+    "dropped_emissions": 0
+  },
+  "codex": {
+    "sessions": 8,
+    "per_identifier": {
+      "host": {
+        "ok": 16,
+        "drop": 0,
+        "other": 0
+      },
+      "org": {
+        "ok": 16,
+        "drop": 0
+      },
+      "hub": {
+        "ok": 16,
+        "drop": 0
+      }
+    },
+    "faithful_emissions": 48,
+    "dropped_emissions": 0
+  }
+}

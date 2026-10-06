@@ -1,0 +1,68 @@
+From 60fcb5fab3bb70c0174d11984f8adf3335291f91 Mon Sep 17 00:00:00 2001
+From: Debian <heavygee@oos-linux.in.lockhouse>
+Date: Tue, 21 Jul 2026 17:33:12 +0000
+Subject: [PATCH] fix(soup): align mermaid-diagram tests with #1117 fallback UX
+
+Layer 2 parse-failure tests still expected .aui-mermaid-render-error and
+no raw source; #1117 MermaidFallback shows source + reason. Take the
+diagnostics worktree expectations so verify matches the tip UI.
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+ .../assistant-ui/mermaid-diagram.test.tsx     | 19 ++++++++-----------
+ 1 file changed, 8 insertions(+), 11 deletions(-)
+
+diff --git a/web/src/components/assistant-ui/mermaid-diagram.test.tsx b/web/src/components/assistant-ui/mermaid-diagram.test.tsx
+index 8236872f3..bcf7bce40 100644
+--- a/web/src/components/assistant-ui/mermaid-diagram.test.tsx
++++ b/web/src/components/assistant-ui/mermaid-diagram.test.tsx
+@@ -75,7 +75,7 @@ describe('MermaidDiagram', () => {
+         expect(MARKDOWN_COMPONENTS_BY_LANGUAGE.mermaid.SyntaxHighlighter).toBe(MermaidDiagram)
+     })
+ 
+-    it('shows error placeholder (not raw source) when parse returns false', async () => {
++    it('falls back to source and suppresses Mermaid parse-error side effects for invalid syntax', async () => {
+         document.documentElement.dataset.theme = 'dark'
+         mermaidMocks.parseMock.mockResolvedValueOnce(false)
+ 
+@@ -86,11 +86,9 @@ describe('MermaidDiagram', () => {
+         })
+ 
+         await waitFor(() => {
+-            const placeholder = document.querySelector('.aui-mermaid-render-error')
+-            expect(placeholder).toBeTruthy()
+-            expect(placeholder?.getAttribute('data-rendered')).toBe('false')
+-            // raw markup must NOT be exposed to the user
+-            expect(placeholder?.textContent).not.toContain('graph TD')
++            const fallback = document.querySelector('.aui-mermaid-fallback')
++            expect(fallback).toBeTruthy()
++            expect(fallback?.textContent).toBe('graph TD\nA --')
+         })
+ 
+         expect(mermaidMocks.parseMock).toHaveBeenCalledWith('graph TD\nA --', { suppressErrors: true })
+@@ -98,7 +96,7 @@ describe('MermaidDiagram', () => {
+         expect(mermaidMocks.setParseErrorHandlerMock).toHaveBeenCalled()
+     })
+ 
+-    it('shows error placeholder (not raw source) and suppresses Mermaid error SVG when render throws', async () => {
++    it('falls back to source and asks Mermaid not to inject its own error SVG when render throws', async () => {
+         mermaidMocks.renderMock.mockRejectedValueOnce(new Error('render failed'))
+         const code = 'gantt\ndateFormat YYYY-MM-DD\nsection A\nTask :a, 2024-01-01'
+ 
+@@ -109,10 +107,9 @@ describe('MermaidDiagram', () => {
+         })
+ 
+         await waitFor(() => {
+-            const placeholder = document.querySelector('.aui-mermaid-render-error')
+-            expect(placeholder).toBeTruthy()
+-            expect(placeholder?.getAttribute('data-rendered')).toBe('false')
+-            expect(placeholder?.textContent).not.toContain('gantt')
++            const fallback = document.querySelector('.aui-mermaid-fallback')
++            expect(fallback).toBeTruthy()
++            expect(fallback?.textContent).toBe(code)
+         })
+ 
+         expect(mermaidMocks.renderMock).toHaveBeenCalled()
+-- 
+2.39.5
+

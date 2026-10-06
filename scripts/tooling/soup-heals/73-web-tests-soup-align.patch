@@ -1,0 +1,24 @@
+diff --git a/web/src/routes/settings/index.test.tsx b/web/src/routes/settings/index.test.tsx
+index f08d04ac9..46923a64e 100644
+--- a/web/src/routes/settings/index.test.tsx
++++ b/web/src/routes/settings/index.test.tsx
+@@ -48,6 +48,19 @@ vi.mock('@/lib/app-context', () => ({
+     useAppContext: () => ({ api: null, token: context.token }),
+ }))
+ 
++vi.mock('@/hooks/queries/useFeatures', () => ({
++    useFeatures: () => ({
++        features: { githubPrAwareness: { enabled: false, source: 'default' } },
++        isLoading: false,
++        error: null,
++        refetch: async () => undefined,
++    }),
++    usePatchFeatures: () => ({
++        setGithubPrAwareness: vi.fn(),
++        isPending: false,
++    }),
++}))
++
+ vi.mock('@/hooks/queries/useUpgradeInfo', () => ({
+     useUpgradeInfo: () => ({ info: null, isLoading: false }),
+     useSetFleetUpgradePolicy: () => ({ mutate: setFleetPolicy }),

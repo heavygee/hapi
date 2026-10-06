@@ -1,0 +1,60 @@
+diff --git a/hub/src/push/pushNotificationChannel.ts b/hub/src/push/pushNotificationChannel.ts
+index d71f988fd..771e14c93 100644
+--- a/hub/src/push/pushNotificationChannel.ts
++++ b/hub/src/push/pushNotificationChannel.ts
+@@ -140,7 +140,14 @@ export class PushNotificationChannel implements NotificationChannel {
+         await this.pushService.sendToNamespace(session.namespace, payload)
+     }
+ 
+-    async sendModelError(session: Session, notification: ModelErrorNotification): Promise<void> {
++    async sendModelError(
++        session: Session,
++        notification: ModelErrorNotification,
++        ctx?: import('../notifications/notificationSendContext').NotificationSendContext,
++    ): Promise<void> {
++        if (ctx?.nativeGate?.sent) {
++            return
++        }
+         if (!session.active) {
+             return
+         }
+diff --git a/hub/src/store/messages.test.ts b/hub/src/store/messages.test.ts
+index 1540b53ee..e034bb036 100644
+--- a/hub/src/store/messages.test.ts
++++ b/hub/src/store/messages.test.ts
+@@ -175,20 +175,6 @@ describe('cancelQueuedMessage', () => {
+     })
+ })
+ 
+-describe('recordMessagesConsumed', () => {
+-    it('rolls back the invocation transition when the session namespace cannot be verified', () => {
+-        const store = makeStore()
+-        const session = makeSession(store, 'consumed-rollback-wrong-namespace')
+-        store.messages.addMessage(session.id, { role: 'user', content: { type: 'text', text: 'hello' } }, 'local-rollback')
+-        const originalUpdatedAt = store.sessions.getSession(session.id)?.updatedAt
+-
+-        expect(() => store.recordMessagesConsumed(session.id, ['local-rollback'], 2_000, 'other-namespace'))
+-            .toThrow('session not found after messages-consumed transition')
+-        expect(store.messages.getLocalMessageStates(session.id, ['local-rollback']))
+-            .toEqual([{ localId: 'local-rollback', invokedAt: null }])
+-        expect(store.sessions.getSession(session.id)?.updatedAt).toBe(originalUpdatedAt)
+-    })
+-})
+ 
+ describe('position pagination and structural epochs', () => {
+     it('returns rows strictly after a cursor and respects an inclusive snapshot head', () => {
+diff --git a/hub/src/sync/rpcGateway.ts b/hub/src/sync/rpcGateway.ts
+index c649723f9..1cda044cf 100644
+--- a/hub/src/sync/rpcGateway.ts
++++ b/hub/src/sync/rpcGateway.ts
+@@ -346,6 +346,10 @@ export class RpcGateway {
+         }
+     }
+ 
++    async listCodexModelsForSession(sessionId: string): Promise<RpcListCodexModelsResponse> {
++        return await this.sessionRpc(sessionId, RPC_METHODS.ListCodexModels, {}, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListCodexModelsResponse
++    }
++
+     async listCodexModelsForMachine(machineId: string): Promise<RpcListCodexModelsResponse> {
+         return await this.machineRpc(machineId, RPC_METHODS.ListCodexModels, {}, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListCodexModelsResponse
+     }

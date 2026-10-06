@@ -1,0 +1,29 @@
+From: HeavyGee <133152184+heavygee@users.noreply.github.com>
+Subject: [PATCH] fix(soup): align Codex MCP bridge test with display_* tools
+
+buildHapiMcpBridge always registers display_image/display_video as prompt
+tools. Update unit expectations so soup --verify passes.
+
+---
+diff --git a/cli/src/codex/utils/buildHapiMcpBridge.test.ts b/cli/src/codex/utils/buildHapiMcpBridge.test.ts
+index ac0ec0be6..8b4697a0c 100644
+--- a/cli/src/codex/utils/buildHapiMcpBridge.test.ts
++++ b/cli/src/codex/utils/buildHapiMcpBridge.test.ts
+@@ -74,6 +74,8 @@ describe('buildHapiMcpBridge skill lookup config', () => {
+             'change_title,link_pr,display_image,display_video,ping_peer,skill_lookup'
+         ])
+         expect(bridge.mcpServers.hapi.tools).toEqual({
++            display_image: { approval_mode: 'prompt' },
++            display_video: { approval_mode: 'prompt' },
+             change_title: { approval_mode: 'approve' },
+             link_pr: { approval_mode: 'approve' },
+             skill_lookup: { approval_mode: 'approve' }
+@@ -85,6 +87,8 @@ describe('buildHapiMcpBridge skill lookup config', () => {
+ 
+         expect(harness.cliArgs.at(-1)).toBe('change_title,link_pr,display_image,display_video,ping_peer')
+         expect(bridge.mcpServers.hapi.tools).toEqual({
++            display_image: { approval_mode: 'prompt' },
++            display_video: { approval_mode: 'prompt' },
+             change_title: { approval_mode: 'approve' },
+             link_pr: { approval_mode: 'approve' }
+         })

@@ -1,0 +1,17 @@
+From: HeavyGee <133152184+heavygee@users.noreply.github.com>
+Subject: [PATCH] fix(soup): restore projectCount for garden sessions header
+
+---
+diff --git a/web/src/router.tsx b/web/src/router.tsx
+--- a/web/src/router.tsx
++++ b/web/src/router.tsx
+@@ -228,6 +228,9 @@ function SessionsPage() {
+         })()
+     }, [addToast, refetch, t])
+ 
++    const projectCount = useMemo(() => new Set(sessions.map(s =>
++        s.metadata?.worktree?.basePath ?? s.metadata?.path ?? 'Other'
++    )).size, [sessions])
+     const machineLabelsById = useMachineLabels(machines)
+     const machinesById = useMemo(() => {
+         const byId: Record<string, typeof machines[number]> = {}

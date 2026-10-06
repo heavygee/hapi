@@ -1,0 +1,18 @@
+# 96-syncengine-list-codex-models-session.patch
+#
+# Heal 87 restores rpcGateway.listCodexModelsForSession; SyncEngine wrapper can
+# still drop across fat-layer remat while sessions.ts still calls it.
+diff --git a/hub/src/sync/syncEngine.ts b/hub/src/sync/syncEngine.ts
+--- a/hub/src/sync/syncEngine.ts
++++ b/hub/src/sync/syncEngine.ts
+@@ -2552,6 +2552,10 @@ export class SyncEngine {
+         return await this.rpcGateway.listSkills(sessionId, flavor)
+     }
+ 
++    async listCodexModelsForSession(sessionId: string): Promise<RpcListCodexModelsResponse> {
++        return await this.rpcGateway.listCodexModelsForSession(sessionId)
++    }
++
+     async listCodexModelsForMachine(machineId: string): Promise<RpcListCodexModelsResponse> {
+         return await this.rpcGateway.listCodexModelsForMachine(machineId)
+     }

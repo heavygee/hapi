@@ -1,0 +1,15 @@
+ok - runner unit exists (hapi-runner.service, scope=user)
+ok - runner KillMode=process (hapi-runner.service)
+not ok - runner ExecStartPre runner-stop binary missing (hapi-runner.service → /opt/hapi/hapi) — stop silently no-ops
+ok - runner Restart policy (always)
+ok - watchdog N/A for user-pet scope (system timer not expected)
+ok - sudoers N/A for user-pet scope
+ok - no /usr/local/sbin/systemctl wrapper
+not ok - runner unit active after restart (is-active=activating)
+not ok - MainPID equals runner.state.json pid (MainPID=0; unit not running)
+not ok - live runner oom_score_adj (no /proc/0)
+not ok - hub /health ok (http://127.0.0.1:3006 → rc=7 curl: (7) Failed to connect to 127.0.0.1 port 3006 after 0 ms: Couldn't connect to server)
+
+# Explicit gap: agent CLI / Claude auth NOT tested (pet installer leaves login to the operator).
+# This check proves supervision + hub HTTP, not the ninja "sessions cascade on restart" class.
+# pass=6 fail=5

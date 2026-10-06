@@ -1,0 +1,29 @@
+---
+description: Fail-closed dogfood on driver soup — blocks feat-dist swap and driver hand-merge
+alwaysApply: true
+---
+
+# Driver soup dogfood (fail-closed)
+
+When dogfooding on `:3006` (driver/integration + manifest layers):
+
+**Shell guards (same rules, different harness):**
+- **Cursor:** `hapi-install-cursor-hooks.sh` → `preToolUse` on Shell
+- **Claude (this repo only):** `.claude/settings.json` + per-session `--settings` from HAPI CLI → `PreToolUse` on Bash via `hapi-claude-pretooluse-guard.sh` (NOT global `~/.claude/settings.json`)
+- **All flavors:** `hapi-driver-rebuild.sh` agent guard + stale-dist verify (script layer)
+
+**NEVER**
+- `cp`/`rsync`/`mv` any `worktrees/*/web/dist` into `driver/web/dist` (#921 — rolls back 100+ soup layers to a feat-only bundle)
+- `cd driver/web && bun run build` or raw `vite build` (bypasses atomic swap, preflight, verify rollback)
+- `git merge` / `git cherry-pick` / `git reset` inside `~/coding/hapi/driver` (#962 — hand-merge half-soups the tree)
+- `hapi-driver-rebuild` without `--build-web` (manifest merge without dist — agent guard refuses)
+
+**ONLY (soup promotion after operator approves dogfood on :3006)**
+- Edit **repo** `config/driver-manifest.yaml` (commit on mirror same turn); mirror to ~/.config with `scripts/tooling/hapi-manifest-mirror-to-config.sh` if your workflow reads ~/.config
+- `hapi-driver-rebuild --build-web [--verify]` when driver should include your layer
+- `hapi-driver-build-web` (builds from `driver/web` source on current driver HEAD)
+- `hapi-verify-web-dist` to audit (no build)
+
+If rebuild fails: **STOP**. Report blocked to operator. Do not workaround.
+
+See `docs/tooling/driver-soup.md` and `docs/tooling/feature-work-lifecycle.md`.

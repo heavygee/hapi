@@ -720,6 +720,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         // on the shared base repo collides on project MCP mailboxes and can hang ACP
         // initialize (heavygee/hapi#152). Linked worktrees skip `--cursor-worktree` in
         // buildCliArgs (#1085) and get per-path MCP overlay + clean git state.
+        // (Fork keeps this over upstream's cursor-native --worktree preference.)
         const worktreeResult = await createWorktree({
           basePath: directory,
           nameHint: worktreeName
@@ -819,6 +820,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           stdio: ['ignore', 'pipe', 'pipe'],  // Capture stdout/stderr for debugging
           env: {
             ...process.env,
+            HAPI_AGENT_CONTEXT: '1',
             ...extraEnv
           }
         });

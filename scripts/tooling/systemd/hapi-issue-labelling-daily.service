@@ -1,0 +1,35 @@
+# Daily Issue Labelling wake — pings the dedicated labelling HAPI session.
+#
+# Fork-local (heavygee estate). NOT upstream. NOT Tier-1.
+# Install: sudo bash scripts/tooling/install-hapi-issue-labelling-timer.sh
+
+[Unit]
+Description=HAPI Issue Labelling daily sweep wake (ping labelling session)
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/home/heavygee/.hapi/settings.json
+ConditionPathExists=/home/heavygee/.hapi/issue-labelling.env
+ConditionPathExists=/home/heavygee/coding/hapi/scripts/tooling/hapi-issue-labelling-daily.sh
+
+[Service]
+Type=oneshot
+User=heavygee
+Group=heavygee
+Nice=10
+Environment=HOME=/home/heavygee
+Environment=USER=heavygee
+Environment=PATH=/home/heavygee/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HAPI_HOST=http://127.0.0.1:3006
+Environment=HAPI_HOME=/var/lib/hapi
+Environment=HAPI_PRIMARY=/home/heavygee/coding/hapi
+Environment=HAPI_SETTINGS=/home/heavygee/.hapi/settings.json
+Environment=NO_COLOR=1
+Environment=CLICOLOR=0
+EnvironmentFile=-/home/heavygee/.hapi/issue-labelling.env
+WorkingDirectory=/home/heavygee/coding/hapi
+ExecStartPre=/usr/bin/mkdir -p /home/heavygee/.local/state/hapi
+ExecStart=/usr/bin/flock -w 300 /home/heavygee/.local/state/hapi/issue-labelling-daily.lock \
+    /home/heavygee/coding/hapi/scripts/tooling/hapi-issue-labelling-daily.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hapi-issue-labelling-daily

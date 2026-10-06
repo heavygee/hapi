@@ -1,0 +1,205 @@
+# 90-versioned-todos-teamstate-consumers.patch (meta-soup 5bcf291c, 2026-07-31)
+#
+# feat/sse-patch-extend-session-state (#884) moved SessionPatch todos/teamState to
+# the versioned { version, value } shape. The base advance merged took the versioned
+# SCHEMA but dropped the layer's CONSUMER updates in several files (split merge),
+# leaving old unversioned readers/writers against the new schema -> typecheck + test
+# fails. This re-syncs the consumers to the layer's canonical form:
+#   - shared/src/schemas.ts: add Session.todosUpdatedAt / teamStateUpdatedAt (read by
+#     sessionSummary, written by sessionCache).
+#   - web/src/hooks/useSSE.ts: unwrap patch.todos.value / patch.teamState.value and
+#     track .version (mirrors hub applySessionPatch).
+#   - hub .../sessionHandlers.ts: emit todos/teamState wrapped as { version, value }.
+#   - the three tests: assert the versioned shape (values taken verbatim from the layer).
+diff --git a/hub/src/socket/handlers/cli/sessionHandlers.test.ts b/hub/src/socket/handlers/cli/sessionHandlers.test.ts
+index d37830b6..eecaebc6 100644
+--- a/hub/src/socket/handlers/cli/sessionHandlers.test.ts
++++ b/hub/src/socket/handlers/cli/sessionHandlers.test.ts
+@@ -113,10 +113,13 @@ describe('cli session handlers', () => {
+         expect(sessionUpdated).toBeDefined()
+         if (!sessionUpdated || sessionUpdated.type !== 'session-updated') return
+         expect(sessionUpdated.data).toMatchObject({
+-            todos: [
+-                { content: 'pending thing', status: 'pending' },
+-                { content: 'done thing', status: 'completed' }
+-            ]
++            todos: {
++                version: expect.any(Number),
++                value: [
++                    { content: 'pending thing', status: 'pending' },
++                    { content: 'done thing', status: 'completed' }
++                ]
++            }
+         })
+         expect(typeof (sessionUpdated.data as { updatedAt?: number }).updatedAt).toBe('number')
+         expect((sessionUpdated.data as { updatedAt?: number }).updatedAt).toBeGreaterThan(0)
+diff --git a/hub/src/socket/handlers/cli/sessionHandlers.ts b/hub/src/socket/handlers/cli/sessionHandlers.ts
+index cf5cf917..2f494f2a 100644
+--- a/hub/src/socket/handlers/cli/sessionHandlers.ts
++++ b/hub/src/socket/handlers/cli/sessionHandlers.ts
+@@ -185,7 +185,13 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
+                 onWebappEvent?.({
+                     type: 'session-updated',
+                     sessionId: sid,
+-                    data: { todos, updatedAt: stored?.updatedAt ?? msg.createdAt }
++                    data: {
++                        todos: {
++                            version: stored?.todosUpdatedAt ?? msg.createdAt,
++                            value: todos
++                        },
++                        updatedAt: stored?.updatedAt ?? msg.createdAt
++                    }
+                 })
+             }
+         }
+@@ -207,7 +213,13 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
+                 onWebappEvent?.({
+                     type: 'session-updated',
+                     sessionId: sid,
+-                    data: { teamState: newTeamState, updatedAt: stored?.updatedAt ?? msg.createdAt }
++                    data: {
++                        teamState: {
++                            version: stored?.teamStateUpdatedAt ?? msg.createdAt,
++                            value: newTeamState
++                        },
++                        updatedAt: stored?.updatedAt ?? msg.createdAt
++                    }
+                 })
+             }
+         }
+diff --git a/hub/src/sync/sessionCache.applySessionPatch.test.ts b/hub/src/sync/sessionCache.applySessionPatch.test.ts
+index d773caa5..a2a36421 100644
+--- a/hub/src/sync/sessionCache.applySessionPatch.test.ts
++++ b/hub/src/sync/sessionCache.applySessionPatch.test.ts
+@@ -35,10 +35,13 @@ describe('SessionCache.applySessionPatch', () => {
+         const todos = [
+             { content: 'one', status: 'pending' as const, priority: 'medium' as const, id: '1' }
+         ]
+-        const applied = cache.applySessionPatch(created.id, { todos })
++        const applied = cache.applySessionPatch(created.id, {
++            todos: { version: 100, value: todos }
++        })
+ 
+         expect(applied).toBe(true)
+         expect(cache.getSession(created.id)?.todos).toEqual(todos)
++        expect(cache.getSession(created.id)?.todosUpdatedAt).toBe(100)
+     })
+ 
+     it('applies a versioned metadata patch by unwrapping value + version', () => {
+@@ -96,7 +99,7 @@ describe('SessionCache.applySessionPatch', () => {
+         const events: SyncEvent[] = []
+         const cache = new SessionCache(store, createPublisher(events))
+ 
+-        const applied = cache.applySessionPatch('does-not-exist', { todos: [] })
++        const applied = cache.applySessionPatch('does-not-exist', { todos: { version: 1, value: [] } })
+         expect(applied).toBe(false)
+     })
+ 
+@@ -158,13 +161,13 @@ describe('SessionCache.applySessionPatch', () => {
+         )
+         // Seed cached teamState (the pre-delete state).
+         const seedApplied = cache.applySessionPatch(created.id, {
+-            teamState: { teamName: 'crew', members: [{ name: 'a' }] }
++            teamState: { version: 10, value: { teamName: 'crew', members: [{ name: 'a' }] } }
+         })
+         expect(seedApplied).toBe(true)
+         expect(cache.getSession(created.id)?.teamState?.teamName).toBe('crew')
+ 
+-        // TeamDelete: null teamState patch must clear the cache.
+-        const cleared = cache.applySessionPatch(created.id, { teamState: null })
++        // TeamDelete: null teamState value must clear the cache.
++        const cleared = cache.applySessionPatch(created.id, { teamState: { version: 11, value: null } })
+         expect(cleared).toBe(true)
+         expect(cache.getSession(created.id)?.teamState).toBeUndefined()
+     })
+@@ -185,12 +188,15 @@ describe('SessionCache.applySessionPatch', () => {
+             'default'
+         )
+         cache.applySessionPatch(created.id, {
+-            teamState: { teamName: 'crew', members: [{ name: 'a' }] }
++            teamState: { version: 10, value: { teamName: 'crew', members: [{ name: 'a' }] } }
+         })
+         expect(cache.getSession(created.id)?.teamState?.teamName).toBe('crew')
+ 
+         const todosOnly = cache.applySessionPatch(created.id, {
+-            todos: [{ content: 'one', status: 'pending' as const, priority: 'medium' as const, id: '1' }]
++            todos: {
++                version: 20,
++                value: [{ content: 'one', status: 'pending' as const, priority: 'medium' as const, id: '1' }]
++            }
+         })
+         expect(todosOnly).toBe(true)
+         expect(cache.getSession(created.id)?.teamState?.teamName).toBe('crew')
+@@ -208,7 +214,7 @@ describe('SessionCache.applySessionPatch', () => {
+             'tenant-a'
+         )
+ 
+-        const applied = cache.applySessionPatch(created.id, { todos: [] }, 'tenant-b')
++        const applied = cache.applySessionPatch(created.id, { todos: { version: 1, value: [] } }, 'tenant-b')
+         expect(applied).toBe(false)
+     })
+ })
+diff --git a/hub/src/sync/syncEngineHandleRealtimeEvent.test.ts b/hub/src/sync/syncEngineHandleRealtimeEvent.test.ts
+index 4290c08f..6378807f 100644
+--- a/hub/src/sync/syncEngineHandleRealtimeEvent.test.ts
++++ b/hub/src/sync/syncEngineHandleRealtimeEvent.test.ts
+@@ -96,7 +96,7 @@ describe('SyncEngine.handleRealtimeEvent dedup-on-metadata-change', () => {
+         const event: SyncEvent = {
+             type: 'session-updated',
+             sessionId: created.id,
+-            data: { todos: [] } satisfies SessionPatch
++            data: { todos: { version: 1, value: [] } } satisfies SessionPatch
+         }
+         engine.handleRealtimeEvent(event)
+ 
+diff --git a/shared/src/schemas.ts b/shared/src/schemas.ts
+index a335248c..a01703e2 100644
+--- a/shared/src/schemas.ts
++++ b/shared/src/schemas.ts
+@@ -283,7 +283,9 @@ export const SessionSchema = z.object({
+     thinkingAt: z.number(),
+     backgroundTaskCount: z.number().optional(),
+     todos: TodosSchema.optional(),
++    todosUpdatedAt: z.number().optional(),
+     teamState: TeamStateSchema.optional(),
++    teamStateUpdatedAt: z.number().optional(),
+     model: z.string().nullable().optional().default(null),
+     modelReasoningEffort: z.string().nullable().optional().default(null),
+     effort: z.string().nullable().optional().default(null),
+diff --git a/web/src/hooks/useSSE.ts b/web/src/hooks/useSSE.ts
+index 1da489d1..180e5686 100644
+--- a/web/src/hooks/useSSE.ts
++++ b/web/src/hooks/useSSE.ts
+@@ -472,7 +472,7 @@ export function useSSE(options: {
+                 const detailMetadataVersion = detailForVersion?.metadataVersion ?? 0
+                 const detailAgentStateVersion = detailForVersion?.agentStateVersion ?? 0
+                 if (patch.todos !== undefined) {
+-                    nextSummary.todoProgress = computeTodoProgress(patch.todos)
++                    nextSummary.todoProgress = computeTodoProgress(patch.todos.value)
+                 }
+                 if (patch.agentState !== undefined && patch.agentState.version >= detailAgentStateVersion) {
+                     nextSummary.pendingRequestsCount = computePendingRequestsCount(patch.agentState.value)
+@@ -526,13 +526,16 @@ export function useSSE(options: {
+                 if (patch.permissionMode !== undefined) nextSession.permissionMode = patch.permissionMode
+                 if (patch.collaborationMode !== undefined) nextSession.collaborationMode = patch.collaborationMode
+                 if (patch.backgroundTaskCount !== undefined) nextSession.backgroundTaskCount = patch.backgroundTaskCount
+-                if (patch.todos !== undefined) nextSession.todos = patch.todos
+-                // teamState uses `null` on the wire as the explicit clear
+-                // signal (TeamDelete events). hasOwnProperty discriminates
+-                // "field absent" vs "field is null"; null → undefined to
+-                // match the cached Session.teamState shape.
+-                if (Object.prototype.hasOwnProperty.call(patch, 'teamState')) {
+-                    nextSession.teamState = patch.teamState ?? undefined
++                if (patch.todos !== undefined) {
++                    nextSession.todos = patch.todos.value
++                    nextSession.todosUpdatedAt = patch.todos.version
++                }
++                // Versioned teamState: `{ version, value }`; value null is the
++                // explicit clear signal (TeamDelete events) → undefined to match
++                // the cached Session.teamState shape.
++                if (patch.teamState !== undefined) {
++                    nextSession.teamState = patch.teamState.value ?? undefined
++                    nextSession.teamStateUpdatedAt = patch.teamState.version
+                 }
+                 // Versioned fields arrive as { version, value } — unwrap into
+                 // the Session's flat metadata/metadataVersion pair (same for

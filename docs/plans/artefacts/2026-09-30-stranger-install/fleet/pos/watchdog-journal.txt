@@ -1,0 +1,5 @@
+Sep 30 15:35:48 oos-stranger-fleet-test systemd[1]: hapi-runner-watchdog.service - HAPI runner liveness watchdog (restart service if machine drops off hub) was skipped because of an unmet condition check (ConditionPathExists=/var/lib/hapi/settings.json).
+Sep 30 15:36:26 oos-stranger-fleet-test systemd[1]: Starting hapi-runner-watchdog.service - HAPI runner liveness watchdog (restart service if machine drops off hub)...
+Sep 30 15:36:26 oos-stranger-fleet-test hapi-runner-watchdog.sh[16618]: 2026-09-30 15:36:26 [watchdog] machine 1e3950b5-fdf3-4f9c-be18-d95bbd6bfa10 present + runner running on http://127.0.0.1:3006; no action
+Sep 30 15:36:26 oos-stranger-fleet-test systemd[1]: hapi-runner-watchdog.service: Deactivated successfully.
+Sep 30 15:36:26 oos-stranger-fleet-test systemd[1]: Finished hapi-runner-watchdog.service - HAPI runner liveness watchdog (restart service if machine drops off hub).

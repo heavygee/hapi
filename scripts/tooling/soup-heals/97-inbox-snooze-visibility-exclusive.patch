@@ -1,0 +1,24 @@
+# 97-inbox-snooze-visibility-exclusive.patch
+#
+# queryInbox defaults include status "snoozed" among active statuses. The prior
+# "includes snoozed → show sleeping" rule made default views leak still-sleeping
+# rows and failed the #102 snooze hide/wake test. Only exclusive
+# statuses:["snoozed"] should return sleeping rows.
+diff --git a/hub/src/store/inboxItems.ts b/hub/src/store/inboxItems.ts
+--- a/hub/src/store/inboxItems.ts
++++ b/hub/src/store/inboxItems.ts
+@@ -235,9 +235,11 @@ export function listInboxItems(db: Database, options: ListInboxItemsOptions = {}
+         const placeholders = options.statuses.map(() => '?').join(', ')
+         clauses.push(`status IN (${placeholders})`)
+         params.push(...options.statuses)
+-        // Explicit status lists that include snoozed must return sleeping rows
+-        // (e.g. "what is currently snoozed?"). Default/active views still hide them.
+-        if (!options.statuses.includes('snoozed')) {
++        // Only an exclusive statuses:['snoozed'] query returns sleeping rows
++        // ("what is currently snoozed?"). Default views that happen to list
++        // snoozed among other statuses still hide still-sleeping items.
++        const snoozeOnlyQuery = options.statuses.length === 1 && options.statuses[0] === 'snoozed'
++        if (!snoozeOnlyQuery) {
+             appendSnoozeVisibilityClause(clauses, params, now)
+         }
+     } else if (options.activeOnly) {

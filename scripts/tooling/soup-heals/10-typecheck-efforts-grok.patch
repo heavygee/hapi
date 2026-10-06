@@ -1,0 +1,38 @@
+From 5ca6544713037b22587e842cebfd42398a649025 Mon Sep 17 00:00:00 2001
+From: Debian <heavygee@oos-linux.in.lockhouse>
+Date: Tue, 14 Jul 2026 09:35:22 +0000
+Subject: [PATCH] fix(soup): grok generated_image display
+
+Handle generated_image in Grok display switch so the ACP message union
+stays exhaustive.
+
+NOTE (2026-07-19, meta): the original runCodex.ts hunk in this heal
+(parseReasoningEffortValue on imported Codex history, #1012) was removed
+because the codex/claude import cluster (feat/codex-usage-indicator-rebased,
+feat/claude-session-import, feat/agent-session-import-picker) is temporarily
+PARKED off the soup for the 0.23.1 base bump — see config/driver-manifest.yaml.
+The importCodexSessionHistory block that hunk healed no longer exists in the
+merged tree, so applying it re-introduced conflict markers. Restore the
+runCodex hunk when the import cluster is re-added after its owner rebase.
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+ cli/src/grok/grokRemoteLauncher.ts | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/cli/src/grok/grokRemoteLauncher.ts b/cli/src/grok/grokRemoteLauncher.ts
+index f13226767..80537a07a 100644
+--- a/cli/src/grok/grokRemoteLauncher.ts
++++ b/cli/src/grok/grokRemoteLauncher.ts
+@@ -313,6 +313,9 @@ class GrokRemoteLauncher extends RemoteLauncherBase {
+             case 'error':
+                 this.messageBuffer.addMessage(message.message, 'status')
+                 break
++            case 'generated_image':
++                this.messageBuffer.addMessage(`Generated image: ${message.fileName}`, 'assistant')
++                break
+             case 'turn_complete':
+                 this.messageBuffer.addMessage('Turn complete', 'status')
+                 break
+-- 
+2.39.5

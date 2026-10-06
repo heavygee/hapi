@@ -1,0 +1,40 @@
+---
+description: Mess-maker must commit mirror tooling dirt before turn end — not the next agent
+alwaysApply: true
+---
+
+# Tooling dirt: mess-maker commits (not the next agent)
+
+When you edit **operator utensils** on the primary mirror (`~/coding/hapi`), **you** commit them before ending the turn. Do not leave porcelain for whoever runs `hapi-sync-fork-main` / `hapi-driver-rebuild` next.
+
+## Covered paths (mirror only — not worktrees)
+
+- `docs/tooling/`, `docs/operator/`, `docs/plans/`
+- `scripts/tooling/`
+- `config/driver-manifest.yaml`
+- `.cursor/rules/`
+
+## Required behavior
+
+1. Edit utensils as needed.
+2. **Same turn:** `git add` those paths + `git commit` with a clear `chore(tooling):` / `docs:` message.
+3. Only then emit `AGENT_NOTIFY_SUMMARY` / stop.
+
+If the dirty files are **not yours**, do **not** inherit cleanup — find the owner or ask the operator (see `no-stash-others-work`).
+
+## Mechanical enforcement
+
+| Layer | What it does |
+|-------|----------------|
+| Session ledger | `~/.hapi/tooling-dirt/<session>.paths` records paths **this** session wrote |
+| `stop` hook | If your ledger still has uncommitted covered paths → follow-up forcing a commit |
+| Shell preToolUse | Denies `hapi-sync-fork-main` / `hapi-driver-rebuild` while **your** dirt remains |
+| Others' dirt | Sync still refuses; hook tells you **not** to scavenge |
+
+Scripts: `scripts/tooling/hapi-tooling-commit-guard.sh` (+ `lib/hapi-tooling-dirt-ledger.sh`). Install/refresh: `scripts/tooling/hapi-install-cursor-hooks.sh`.
+
+Bypass (operator TTY only): `HAPI_OPERATOR_TOOLING_DIRT_OVERRIDE=1`
+
+## Why
+
+`hapi-sync-fork-main` refuses any porcelain. Allowed “tooling WIP” that never gets committed remake-blocks the whole kitchen. Enforcement keys off the **mess-maker**, not the next agent who trips the gate.

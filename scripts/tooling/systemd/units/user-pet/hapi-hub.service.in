@@ -1,0 +1,15 @@
+[Unit]
+Description=HAPI Hub (@HOST_LABEL@)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=HAPI_HOME=@HAPI_HOME@
+Environment=PATH=@HAPI_PATH@
+ExecStart=@HAPI_BIN@ hub
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

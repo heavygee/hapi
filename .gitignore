@@ -40,17 +40,44 @@ coverage/
 localdocs/
 execplan/
 
+# SpecStory terminal agent history (local-only; also in ~/.config/git/ignore globally)
+.specstory/
+
+# Package AGENTS stubs are tracked (cli/AGENTS.md, hub/AGENTS.md) — do not gitignore; agents must not overwrite them.
+
 # Generated npm bundle output (local)
 cli/npm/main/
 .ace-tool/
+
+# Canonical worktree layout (2026-06-01 onward, Phase 1 / Option B).
+# These subdirs are git worktrees of this same .git or operator-only shells.
+# Tracked: this gitignore + worktrees/.gitkeep. Everything else under them = worktree contents.
+# See docs/plans/2026-06-01-hapi-folders-reorganization.md.
+/active
+/driver
+/upstream
+/worktrees/*
+!/worktrees/.gitkeep
+
+# Cursor: ignored by global ~/.config/git/ignore but we want shared rules tracked
+# in this repo. Negate the global rule for .cursor/rules/ only (per-user state
+# under .cursor/ stays ignored).
+!.cursor/
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/**
 
 # Playwright e2e artifacts
 test-results/
 playwright-report/
 e2e-output/
+
+# Compiled output of scripts/hapi-sessions-plot.c (operator tool; rebuild via build-hapi-sessions-plot.sh)
+scripts/hapi-sessions-plot
 .xyz-harness
 .agents/
 .pi/
+AGENTS.local.md
 
 # Xcode / iOS build artifacts
 ios/**/xcuserdata/

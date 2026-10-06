@@ -1,0 +1,173 @@
+diff --git a/cli/src/agent/sessionFactory.ts b/cli/src/agent/sessionFactory.ts
+index 15a1d4944..3905dbe26 100644
+--- a/cli/src/agent/sessionFactory.ts
++++ b/cli/src/agent/sessionFactory.ts
+@@ -6,6 +6,8 @@ import { ApiClient } from '@/api/api'
+ import type { ApiSessionClient } from '@/api/apiSession'
+ import type { AgentState, MachineMetadata, Metadata, Session } from '@/api/types'
+ import { getInstalledCliMtimeMs, notifyRunnerSessionStarted } from '@/runner/controlClient'
++import { isVersionHandoffDisabledByEnv } from '@/runner/versionHandoff'
++import { durableTargetGeneration, readUpgradeTarget } from '@/upgrade/upgradeTarget'
+ import { readSettings } from '@/persistence'
+ import { configuration } from '@/configuration'
+ import { logger } from '@/ui/logger'
+@@ -52,14 +54,15 @@ export function buildMachineMetadata(options?: {
+      * (#1108 bot Major).
+      */
+     asRunner?: boolean
++    /** Snapshot from runner start; defaults to live env when omitted. */
+     versionHandoffDisabled?: boolean
+-    cliArtifactGeneration?: string
+ }): MachineMetadata {
+     const installedCliMtimeMs = getInstalledCliMtimeMs()
+     const startedCliMtimeMs = options?.startedCliMtimeMs ?? installedCliMtimeMs
+     const base: MachineMetadata = {
+         host: process.env.HAPI_HOSTNAME || os.hostname(),
+         platform: os.platform(),
++        arch: process.arch,
+         happyCliVersion: packageJson.version,
+         homeDir: os.homedir(),
+         happyHomeDir: configuration.happyHomeDir,
+@@ -69,15 +72,16 @@ export function buildMachineMetadata(options?: {
+     if (!options?.asRunner) {
+         return base
+     }
++    const cliArtifactGeneration = durableTargetGeneration(readUpgradeTarget()) ?? undefined
+     return {
+         ...base,
+         capabilities: [...CURRENT_MACHINE_CAPABILITIES],
+         ...(typeof startedCliMtimeMs === 'number' ? { startedCliMtimeMs } : {}),
+         ...(typeof installedCliMtimeMs === 'number' ? { installedCliMtimeMs } : {}),
++        ...(cliArtifactGeneration ? { cliArtifactGeneration } : {}),
++        versionHandoffDisabled: options?.versionHandoffDisabled ?? isVersionHandoffDisabledByEnv(),
+         // Always boolean so hub merge can clear a prior true on unsupervised restart.
+         supervisedRestart: process.env.HAPI_RUNNER_SUPERVISED === '1',
+-        ...(options?.versionHandoffDisabled === true ? { versionHandoffDisabled: true } : {}),
+-        ...(options?.cliArtifactGeneration ? { cliArtifactGeneration: options.cliArtifactGeneration } : {}),
+     }
+ }
+ 
+diff --git a/cli/src/runner/run.ts b/cli/src/runner/run.ts
+index 245dc398f..dab72e582 100644
+--- a/cli/src/runner/run.ts
++++ b/cli/src/runner/run.ts
+@@ -1156,6 +1156,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}):
+             workspaceRoots,
+             startedCliMtimeMs: startedWithCliMtimeMs,
+             asRunner: true,
++            versionHandoffDisabled: startedWithVersionHandoffDisabled,
+         }),
+         runnerState: initialRunnerState
+       }),
+diff --git a/hub/src/sync/fleetUpgrade.test.ts b/hub/src/sync/fleetUpgrade.test.ts
+index 769af6150..d03986c83 100644
+--- a/hub/src/sync/fleetUpgrade.test.ts
++++ b/hub/src/sync/fleetUpgrade.test.ts
+@@ -230,14 +230,23 @@ describe('SyncEngine fleet upgrade', () => {
+         }
+     })
+ 
+-    it('refuses hub-artifact upgrade when machine arch is missing', async () => {
++    it('infers x64 for legacy runners missing metadata.arch on win32', async () => {
+         const offer: HubUpgradeOffer = {
+             channel: 'hub-artifact',
+             targetVersion: '0.24.0',
+             targetCapabilities: ['cursor-chat-store-status'],
+         }
+         const store = new Store(':memory:')
+-        const prepareArtifactOffer = mock(async () => offer)
++        const prepareArtifactOffer = mock(async (base: HubUpgradeOffer, platform: string, arch: string) => ({
++            ...base,
++            artifact: {
++                url: '/cli/upgrade/cli-artifact',
++                sha256: 'abc',
++                platform,
++                arch,
++                sizeBytes: 10,
++            },
++        }))
+         const registry = new RpcRegistry()
+         const engine = new SyncEngine(
+             store,
+@@ -248,6 +257,13 @@ describe('SyncEngine fleet upgrade', () => {
+         )
+ 
+         try {
++            const runnerSelfUpgrade = mock(async () => ({
++                status: 'started',
++                message: 'ok',
++                channel: 'hub-artifact',
++            }))
++            ;(engine as any).rpcGateway.runnerSelfUpgrade = runnerSelfUpgrade
++
+             engine.getOrCreateMachine(
+                 'no-arch',
+                 {
+@@ -262,6 +278,45 @@ describe('SyncEngine fleet upgrade', () => {
+             registerLiveSelfUpgrade(registry, 'no-arch')
+             engine.handleMachineAlive({ machineId: 'no-arch', time: Date.now() })
+             const result = await engine.upgradeMachineRunner('no-arch', 'default')
++            expect(result.type).toBe('success')
++            expect(prepareArtifactOffer).toHaveBeenCalledWith(offer, 'win32', 'x64')
++        } finally {
++            engine.stop()
++        }
++    })
++
++    it('refuses hub-artifact upgrade when platform/arch cannot be resolved', async () => {
++        const offer: HubUpgradeOffer = {
++            channel: 'hub-artifact',
++            targetVersion: '0.24.0',
++            targetCapabilities: ['cursor-chat-store-status'],
++        }
++        const store = new Store(':memory:')
++        const prepareArtifactOffer = mock(async () => offer)
++        const registry = new RpcRegistry()
++        const engine = new SyncEngine(
++            store,
++            {} as never,
++            registry,
++            { broadcast() {} } as never,
++            { getUpgradeOffer: () => offer, prepareArtifactOffer },
++        )
++
++        try {
++            engine.getOrCreateMachine(
++                'no-arch',
++                {
++                    host: 'exotic',
++                    platform: 'freebsd',
++                    happyCliVersion: '0.20.0',
++                    capabilities: ['runner-self-upgrade'],
++                },
++                null,
++                'default',
++            )
++            registerLiveSelfUpgrade(registry, 'no-arch')
++            engine.handleMachineAlive({ machineId: 'no-arch', time: Date.now() })
++            const result = await engine.upgradeMachineRunner('no-arch', 'default')
+             expect(result).toEqual({
+                 type: 'error',
+                 message: 'Machine platform/arch unavailable for hub-artifact upgrade',
+diff --git a/hub/src/sync/syncEngine.ts b/hub/src/sync/syncEngine.ts
+index abe06c06e..8cb5bafd8 100644
+--- a/hub/src/sync/syncEngine.ts
++++ b/hub/src/sync/syncEngine.ts
+@@ -15,6 +15,7 @@ import {
+ } from '@hapi/protocol/runnerCapabilities'
+ import {
+     DEFAULT_FLEET_UPGRADE_POLICY,
++    inferMachineArch,
+     machineTrailsUpgradeOffer,
+     type FleetUpgradePolicy,
+     type HubUpgradeOffer,
+@@ -1626,7 +1627,7 @@ export class SyncEngine {
+                 return { type: 'error', message: 'Artifact builder not configured', code: 'upgrade_unavailable' }
+             }
+             const platform = machine.metadata?.platform
+-            const arch = machine.metadata?.arch
++            const arch = machine.metadata?.arch ?? inferMachineArch(platform)
+             if (!platform || !arch) {
+                 return {
+                     type: 'error',
+

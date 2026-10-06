@@ -1,0 +1,100 @@
+fix(soup): v0.23.4 integration — SessionListSearch, SessionLogPanel title, ACP title tests
+
+Post-merge integration gaps from the v0.23.4 bump:
+ - share/index.tsx: upstream #1103 made SessionListSearch.sessionActivityDates
+   required; /share picker call-site passes an empty set (no activity dots there).
+ - HappyThread.tsx: trace-graph merge dropped the outlineTitle prop plumbing but
+   left SessionLogPanel title={props.outlineTitle}; derive inline from metadata.
+ - AcpSdkBackend.test.ts: upstream #1028 title tests assert synchronously, but the
+   ACP inline-image layer wraps session updates in an async sessionUpdateQueue;
+   await that queue before asserting (feature works, timing changed).
+
+diff --git a/cli/src/agent/backends/acp/AcpSdkBackend.test.ts b/cli/src/agent/backends/acp/AcpSdkBackend.test.ts
+index 8b3e8fb59..65cf952be 100644
+--- a/cli/src/agent/backends/acp/AcpSdkBackend.test.ts
++++ b/cli/src/agent/backends/acp/AcpSdkBackend.test.ts
+@@ -51,13 +51,14 @@ afterEach(() => {
+ });
+ 
+ describe('AcpSdkBackend', () => {
+-    it('forwards ACP session_info_update titles without requiring an active prompt', () => {
++    it('forwards ACP session_info_update titles without requiring an active prompt', async () => {
+         const backend = new AcpSdkBackend({ command: 'agent' });
+         const updates: Array<{ sessionId: string | null; title: string | null }> = [];
+         backend.setSessionInfoUpdateListener((update) => updates.push(update));
+ 
+         const backendInternal = backend as unknown as {
+             handleSessionUpdate: (params: unknown) => void;
++            sessionUpdateQueue: Promise<void>;
+         };
+         backendInternal.handleSessionUpdate({
+             sessionId: 'session-1',
+@@ -74,6 +75,8 @@ describe('AcpSdkBackend', () => {
+             }
+         });
+ 
++        await backendInternal.sessionUpdateQueue;
++
+         expect(updates).toEqual([{ sessionId: 'session-1', title: 'Native session title' }]);
+     });
+ 
+@@ -914,7 +917,7 @@ describe('AcpSdkBackend', () => {
+         expect(realtimeUsage.map((m) => m.contextTokens)).toEqual([1_000, 2_500]);
+     });
+ 
+-    it('forwards title changes from session_info_update', () => {
++    it('forwards title changes from session_info_update', async () => {
+         const backend = new AcpSdkBackend({ command: 'agent' });
+         const updates: Array<{ sessionId: string | null; title: string | null }> = [];
+         backend.setSessionInfoUpdateListener((update) => updates.push(update));
+@@ -922,6 +925,7 @@ describe('AcpSdkBackend', () => {
+         const backendInternal = backend as unknown as {
+             activeSessionId: string | null;
+             handleSessionUpdate: (params: unknown) => void;
++            sessionUpdateQueue: Promise<void>;
+         };
+         backendInternal.activeSessionId = 'session-1';
+ 
+@@ -954,6 +958,8 @@ describe('AcpSdkBackend', () => {
+             }
+         });
+ 
++        await backendInternal.sessionUpdateQueue;
++
+         expect(updates).toEqual([
+             { sessionId: 'session-1', title: 'Native ACP title' },
+             { sessionId: 'session-1', title: null }
+diff --git a/web/src/components/AssistantChat/HappyThread.tsx b/web/src/components/AssistantChat/HappyThread.tsx
+index ac26d6db4..575a334ad 100644
+--- a/web/src/components/AssistantChat/HappyThread.tsx
++++ b/web/src/components/AssistantChat/HappyThread.tsx
+@@ -828,7 +828,7 @@ export function HappyThread(props: {
+                         <SessionLogPanel
+                             api={props.api}
+                             sessionId={props.sessionId}
+-                            title={props.outlineTitle}
++                            title={props.metadata?.name ?? props.metadata?.summary?.text ?? props.metadata?.path ?? props.sessionId.slice(0, 8)}
+                             onClose={() => props.onSessionLogOpenChange?.(false)}
+                         />
+                     </>
+diff --git a/web/src/routes/share/index.tsx b/web/src/routes/share/index.tsx
+index 8bf921799..5005e20b6 100644
+--- a/web/src/routes/share/index.tsx
++++ b/web/src/routes/share/index.tsx
+@@ -18,6 +18,8 @@ import {
+ import { setSharePendingTransfer } from '@/lib/sharePendingState'
+ import type { SessionSummary } from '@/types/api'
+ 
++const SHARE_PICKER_ACTIVITY_DATES: ReadonlySet<string> = new Set()
++
+ type LoadState =
+     | { state: 'loading' }
+     | { state: 'missing'; reason: 'not-found' | 'ingest-error' | 'no-id' }
+@@ -296,6 +298,7 @@ export default function SharePage() {
+                         <SessionListSearch
+                             value={searchQuery}
+                             onChange={setSearchQuery}
++                            sessionActivityDates={SHARE_PICKER_ACTIVITY_DATES}
+                             customStart={customStart}
+                             customEnd={customEnd}
+                             onDateRangeChange={(start, end) => {

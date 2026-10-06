@@ -1,0 +1,23 @@
+[Unit]
+Description=HAPI runner (OOS zone - @HOST_LABEL@)
+After=network-online.target @HUB_UNIT@
+Wants=network-online.target
+
+[Service]
+Type=simple
+KillMode=process
+User=@HAPI_USER@
+Group=@HAPI_GROUP@
+EnvironmentFile=-@HAPI_HOME@/hub.env
+EnvironmentFile=-@HAPI_AGENT_ENV@
+Environment=HAPI_API_URL=http://127.0.0.1:@HAPI_PORT@
+Environment=PATH=@HAPI_PATH@
+Environment=HAPI_RUNNER_SUPERVISED=1
+@EXEC_START_PRE_LINE@
+WorkingDirectory=@HAPI_DRIVER_DIR@/cli
+ExecStart=/bin/bash -lc 'exec @BUN_BIN@ run src/index.ts runner start-sync @WORKSPACE_ROOT_ARGS@'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

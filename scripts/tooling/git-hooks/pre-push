@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# Tiered push gate: safe fork files on origin/main; plans local-first; no fork canon on upstream.
+set -euo pipefail
+
+if [[ "${HAPI_SKIP_COMMIT_HOOKS:-}" == "1" ]]; then
+    exit 0
+fi
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+PRIMARY="${HAPI_PRIMARY:-$HOME/coding/hapi}"
+LEAK_CHECK="$PRIMARY/scripts/tooling/check-operator-leaks.sh"
+[[ -x "$LEAK_CHECK" ]] || LEAK_CHECK="$ROOT/scripts/tooling/check-operator-leaks.sh"
+POLICY="$PRIMARY/scripts/tooling/lib/fork-path-policy.sh"
+[[ -f "$POLICY" ]] || POLICY="$ROOT/scripts/tooling/lib/fork-path-policy.sh"
+if [[ ! -f "$POLICY" ]]; then
+    exit 0
+fi
+# shellcheck source=/dev/null
+source "$POLICY"
+
+PUSH_REMOTE="${1:-unknown}"
+
+FORK_PRIVATE_PATH_RE='^(web/src/garden/)'
+DAILY_REF_RE='^refs/heads/(driver/|garden/)'
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [[ -z "${local_ref:-}" || "$local_ref" == *'{'* ]] && continue
+
+  branch="${remote_ref#refs/heads/}"
+
+  if [[ "$remote_sha" =~ ^0+$ ]]; then
+    base="$(git merge-base "$local_sha" origin/main 2>/dev/null \
+            || git merge-base "$local_sha" upstream/main 2>/dev/null \
+            || true)"
+    if [[ -n "$base" ]]; then
+      range="${base}..${local_sha}"
+      files="$(git diff --name-only "$base" "$local_sha" 2>/dev/null || true)"
+    else
+      range="$local_sha"
+      files="$(git ls-tree -r --name-only "$local_sha")"
+    fi
+  else
+    range="${remote_sha}..${local_sha}"
+    files="$(git diff --name-only "$remote_sha" "$local_sha" 2>/dev/null || true)"
+  fi
+
+  [[ -z "$files" ]] && continue
+
+  bad=""
+  while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+    if fork_pre_push_path_ok "$PUSH_REMOTE" "$branch" "$f"; then
+      continue
+    fi
+    reason="$(fork_pre_push_block_reason "$PUSH_REMOTE" "$branch" "$f")"
+    bad="${bad}${f}  (${reason})"$'\n'
+  done <<< "$files"
+
+  if [[ -n "$bad" ]]; then
+    echo "pre-push: refusing push to $PUSH_REMOTE ($branch) — path policy" >&2
+    echo "  range: $range" >&2
+    printf '%s' "$bad" | sed 's/^/    /' >&2
+    echo "" >&2
+    fork_policy_github_safe_paths >&2
+    echo "  Override (emergency): HAPI_SKIP_COMMIT_HOOKS=1" >&2
+    exit 1
+  fi
+
+  # Garden: allowed on daily refs only
+  if ! [[ "${remote_ref:-}" =~ $DAILY_REF_RE ]]; then
+    bad_fork="$(printf '%s\n' "$files" | grep -E "$FORK_PRIVATE_PATH_RE" || true)"
+    if [[ -n "$bad_fork" ]]; then
+      echo "pre-push: refusing fork-private feature paths on non-daily ref ($remote_ref)" >&2
+      echo "  range: $range" >&2
+      printf '%s\n' "$bad_fork" | sed 's/^/    /' >&2
+      echo "  Garden lives in daily (driver/*, garden/*). Rebase onto upstream/main for PR branches." >&2
+      exit 1
+    fi
+  fi
+
+  # Product content scan (persona routes, SOUL in hub/web/cli/shared)
+  if [[ "$remote_sha" =~ ^0+$ ]]; then
+    continue
+  fi
+  PUSH_SCAN=(hub web cli shared)
+  if git diff "$remote_sha" "$local_sha" -G'jessica-mood' --quiet -- "${PUSH_SCAN[@]}" 2>/dev/null; then
+    :
+  else
+    echo "pre-push: outgoing product diff contains jessica-mood (fork-only route)" >&2
+    git diff "$remote_sha" "$local_sha" -G'jessica-mood' --name-only -- "${PUSH_SCAN[@]}" 2>/dev/null | sed 's/^/    /' >&2 || true
+    exit 1
+  fi
+  for pat in 'SOUL_SESSION' 'SOUL\.md' '~/coding/SOUL'; do
+    if ! git diff "$remote_sha" "$local_sha" -G"$pat" --quiet -- "${PUSH_SCAN[@]}" 2>/dev/null; then
+      echo "pre-push: outgoing product diff matches forbidden pattern: $pat" >&2
+      exit 1
+    fi
+  done
+
+  if [[ -x "$LEAK_CHECK" ]]; then
+    "$LEAK_CHECK" --git-range "$remote_sha" "$local_sha" || exit 1
+    # Tailnet / operator hostnames in docs we intentionally publish to origin
+    if [[ "$PUSH_REMOTE" == "origin" ]]; then
+      "$LEAK_CHECK" --git-range-docs "$remote_sha" "$local_sha" || exit 1
+    fi
+  fi
+done
+
+ADVISORY="$PRIMARY/scripts/tooling/check-stash-advisory.sh"
+[[ -x "$ADVISORY" ]] || ADVISORY="$ROOT/scripts/tooling/check-stash-advisory.sh"
+if [[ -x "$ADVISORY" ]]; then
+    "$ADVISORY" --quiet || true
+fi
+
+WT_AUDIT="$PRIMARY/scripts/tooling/check-worktree-layout.sh"
+[[ -x "$WT_AUDIT" ]] || WT_AUDIT="$ROOT/scripts/tooling/check-worktree-layout.sh"
+if [[ -x "$WT_AUDIT" ]]; then
+    "$WT_AUDIT" --quiet || true
+fi
+
+exit 0

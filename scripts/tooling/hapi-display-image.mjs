@@ -16,6 +16,8 @@
  * Self-resolution (tiann/hapi#1119): $HAPI_SESSION_ID → GET /api/sessions/:id directly.
  * Picks the strict image/video tool when recognized, else display_media.
  * Prefer the MCP tools when available; this script is the shell fallback.
+ *
+ * Auth: scripts/tooling/lib/hapi-hub-auth.mjs (HAPI_HOME / live-hub / oos soup aware).
  */
 
 import { closeSync, openSync, readSync, readFileSync, lstatSync } from 'node:fs'

@@ -68,12 +68,15 @@ export type HookSettingsOptions = {
     workingDirectory?: string;
     /** Mirror main-session permissions without suppressing the native dialog. Local only. */
     includeLocalPermissions?: boolean;
+    /** When set and cwd resolves to hapi, inject project-scoped PreToolUse Bash guard. */
+    workingDirectory?: string;
 };
 
 /**
  * Build Claude Code hook settings.
  * Soup union: upstream trackPermissionMode + includeLocalPermissions,
- * fork includePreToolUse + workingDirectory PreToolUse Bash guard.
+ * fork includePreToolUse + workingDirectory PreToolUse Bash guard
+ * (shell-quoted when path has whitespace).
  */
 export function buildHookSettings(
     command: string,
@@ -120,8 +123,9 @@ export function buildHookSettings(
 
     const hapiRoot = workingDirectory ? resolveHapiToolingRoot(workingDirectory) : null;
     if (hapiRoot) {
-        const guardCommand = hapiClaudePreToolUseGuardCommand(hapiRoot);
-        if (existsSync(guardCommand)) {
+        const guardScript = hapiClaudePreToolUseGuardCommand(hapiRoot);
+        if (existsSync(guardScript)) {
+            const guardCommand = shellJoin([guardScript]);
             const guardEntry: HookCommandConfig = {
                 matcher: 'Bash',
                 hooks: [

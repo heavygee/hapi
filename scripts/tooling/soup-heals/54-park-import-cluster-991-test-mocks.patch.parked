@@ -1,0 +1,12 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: meta <heavygee@oos-linux.in.lockhouse>
+Date: Wed, 22 Jul 2026 09:10:00 +0000
+Subject: [PATCH] fix(soup): heal 54 no-op — absorbed by #991 re-thin e0e909d9c
+
+Kept on disk (do not drop) so the soup-heal set stays ordered. The
+re-thinned fix/cursor-acp-remote-resume-ready tip already mocks
+spawnSession without the orphan `_importHistory` slot. This patch is
+intentionally empty so `git apply --check` skips cleanly.
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+---

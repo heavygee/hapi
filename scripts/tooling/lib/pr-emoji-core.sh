@@ -5,15 +5,20 @@
 #
 # Sourced by:
 #   scripts/tooling/hapi-pr-emoji-batch.sh    (gh I/O → calls pec_decide_emoji)
-#   scripts/tooling/hapi-pr-session-emoji.sh  (hub I/O → titles + worst-emoji)
 #   scripts/tooling/hapi-meta-daily.sh         (orchestrator → ping policy + state)
+#   (hapi-pr-session-emoji.sh is a removed stub — no longer sources this)
 #
-# Emoji contract (see docs/operator/AGENTS.md § Meta PR watcher):
+# Emoji contract (canonical YAML: config/pr-chip-states.yaml; docs/operator/AGENTS.md):
 #   ✅  open PR, CI green, 0 threads, bot clean, mergeable — wait on tiann
 #   🔁  CI/bot in flight, or thread/CI data momentarily unavailable — retry
-#   ⚠️  needs work — failing CI, open threads, bot findings, rebase, or closed-unmerged
-#   📝  pre-PR — tracked number, no open PR on upstream yet
-#   🔧  merged — clean up soup/worktree, idle (no mid-turn self-archive)
+#   ⚠️  needs work — failing CI, *current* open threads, bot findings, rebase, or closed-unmerged
+#                     (outdated unresolved threads do not count — #847 false ⚠️)
+#   📝  pre-PR — tracked number, no open PR on upstream yet; OR open draft PR
+#                 (draft must never classify green — heavygee/hapi#127)
+#   🔧  merged — clean up soup/worktree/branch/archive still owed (sticky ping)
+#   🧹  complete — fully cleaned by estate predicates; babysit ended (never ping)
+#   🛑  needs_operator / babysit.hold — human maintainer comment; operator ack only
+#       (never hourly-ping the coding peer; rank 7 beats ⚠️ and ?)
 #   ?   UNKNOWN — GitHub data unavailable this run; caller MUST NOT rename/ping on this
 #
 # Lives on fork main under scripts/tooling/lib/ — commit here; never hand-edit driver.
@@ -43,6 +48,8 @@ pec_strip_leading_emojis() {
             ⚠️*) s="${s#⚠️}" ;;
             📝*) s="${s#📝}" ;;
             🔧*) s="${s#🔧}" ;;
+            🧹*) s="${s#🧹}" ;;
+            🛑*) s="${s#🛑}" ;;
             "?"*) s="${s#\?}" ;;
             *) break ;;
         esac
@@ -60,7 +67,7 @@ pec_normalize_title_base() {
     printf '%s' "$s"
 }
 
-# Extract PR numbers (3-4 digits) from a session title. Prints one per line.
+# Extract PR / Peer numbers (3-4 digits) from a session title. Prints one per line.
 # Handles: "PR #941:", "pr#923", "PR #941/#923:", "PR: 941", "Peer #1100:".
 #
 # The 3-digit floor is DELIBERATE scope protection: peer/overseer sessions carry
@@ -68,6 +75,12 @@ pec_normalize_title_base() {
 # would otherwise cross-wire to unrelated upstream tiann/hapi PRs of the same
 # number. Upstream PRs relevant to this fork are all 3-4 digits. For a rare
 # low-numbered upstream PR (#48, #75) use `--pr <N>` explicitly.
+#
+# HARD RULE (2026-08-06 Sparling incident): NEVER match bare `#NNN`.
+# Titles like "Module 02: support case schema #395" (non-HAPI monorepos) must
+# NOT latch Meta onto tiann/hapi PR 395. Daily Meta discovery ignores titles
+# entirely (github_pr chips only); this helper remains for tests / backfill /
+# strip helpers. Chip backfill: pec_extract_linked_pr_numbers.
 pec_extract_pr_numbers() {
     local name="$1"
     local re_multi re_peer
@@ -91,8 +104,71 @@ pec_extract_pr_numbers() {
     if [[ "$name" =~ $re_peer ]]; then
         echo "${BASH_REMATCH[1]}"; return
     fi
-    printf '%s' "$name" | grep -oiE 'pr[#: ]*#?[0-9]{3,4}|#[0-9]{3,4}' \
-        | grep -oE '[0-9]{3,4}' | head -1
+    # No bare #NNN fallback. Empty stdout + exit 0 (pipefail-safe).
+    return 0
+}
+
+# True if session cwd is inside the HAPI estate (mirror / worktrees / driver).
+# Non-HAPI paths (Sparling, YAACC, server-setup, …) must never receive Meta
+# merge-wave cleanup pings from title scrapes.
+pec_path_is_hapi_estate() {
+    local path="${1:-}"
+    [[ -z "$path" ]] && return 1
+    case "$path" in
+        */coding/hapi|*/coding/hapi/*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Explicit pull-request markers only (ADR D6 backfill / chip identity).
+# Ignores Peer #N (issue/workstream) and bare #N (issue mentions in titles).
+pec_extract_linked_pr_numbers() {
+    local name="$1"
+    local re_multi
+    re_multi='[Pp][Rr][[:space:]]*#([0-9]{3,4})/#([0-9]{3,4})'
+    if [[ "$name" =~ [Pp][Rr][[:space:]]*#?([0-9]{3,4}):[[:space:]]*#?([0-9]{3,4}) ]]; then
+        echo "${BASH_REMATCH[1]}"; echo "${BASH_REMATCH[2]}"; return
+    fi
+    if [[ "$name" =~ [Pp][Rr][[:space:]]*#?([0-9]{3,4})[[:space:]]+#?([0-9]{3,4}): ]]; then
+        echo "${BASH_REMATCH[1]}"; echo "${BASH_REMATCH[2]}"; return
+    fi
+    if [[ "$name" =~ $re_multi ]]; then
+        echo "${BASH_REMATCH[1]}"; echo "${BASH_REMATCH[2]}"; return
+    fi
+    if [[ "$name" =~ [Pp][Rr]:[[:space:]]*#?([0-9]{3,4}) ]]; then
+        echo "${BASH_REMATCH[1]}"; return
+    fi
+    local first
+    first="$(printf '%s' "$name" | grep -oiE '[Pp][Rr][[:space:]]*#?[0-9]{3,4}' | head -1 | grep -oE '[0-9]{3,4}' || true)"
+    [[ -n "$first" ]] && echo "$first"
+    return 0
+}
+
+# Strip leading "PR #N:" / "PR #N/#M:" markers from a title.
+# Chip owns PR identity (ADR D8+) — titles should be workstream-only once chipped.
+# Does NOT strip "Peer #N:" (issue/workstream incubating titles stay until issue chips exist).
+pec_strip_pr_number_prefixes() {
+    local s="$1" prev
+    s="$(pec_trim_ws "$(pec_strip_leading_emojis "$s")")"
+    while true; do
+        prev="$s"
+        if [[ "$s" =~ ^[Pp][Rr][[:space:]]*#[0-9]{3,4}/#[0-9]{3,4}:[[:space:]]*(.*)$ ]]; then
+            s="${BASH_REMATCH[1]}"
+        elif [[ "$s" =~ ^[Pp][Rr][[:space:]]*#[0-9]{3,4}:[[:space:]]*(.*)$ ]]; then
+            s="${BASH_REMATCH[1]}"
+        elif [[ "$s" =~ ^pr#[0-9]{3,4}:[[:space:]]*(.*)$ ]]; then
+            s="${BASH_REMATCH[1]}"
+        elif [[ "$s" =~ ^[Pp][Rr][[:space:]]*#[0-9]{3,4}[[:space:]]+(.*)$ ]]; then
+            s="${BASH_REMATCH[1]}"
+        elif [[ "$s" =~ ^[Pp][Rr]:[[:space:]]*#?[0-9]{3,4}[[:space:]]*:?[[:space:]]*(.*)$ ]]; then
+            s="${BASH_REMATCH[1]}"
+        else
+            break
+        fi
+        s="$(pec_trim_ws "$s")"
+        [[ "$s" == "$prev" || -z "$s" ]] && break
+    done
+    printf '%s' "$s"
 }
 
 # Strip emoji + "PR #N:" / "Peer #N:" marker from a title, returning the base label.
@@ -129,6 +205,8 @@ pec_title_base_multi_from() {
 }
 
 # Build a canonical single-PR title. pre_pr=1 → "📝Peer #N:", else "<emoji>PR #N:".
+# LEGACY: Meta no longer writes status emoji into titles (ADR D8 — chip owns health).
+# Kept for unit tests (legacy title helpers; Meta no longer retitles with emoji).
 pec_build_title() {
     local emoji="$1" pr="$2" base="$3" pre_pr="${4:-0}"
     base="$(pec_title_base_from "$base" "$pr")"
@@ -143,12 +221,14 @@ pec_build_title() {
 # Severity ordering — higher rank wins when a session tracks multiple PRs.
 pec_emoji_rank() {
     case "$1" in
+        🛑) echo 7 ;;
         "?") echo 6 ;;
         ⚠️) echo 5 ;;
         🔁) echo 4 ;;
         ✅) echo 3 ;;
         📝) echo 2 ;;
         🔧) echo 1 ;;
+        🧹) echo 0 ;;
         *) echo 0 ;;
     esac
 }
@@ -162,6 +242,98 @@ pec_worst_emoji() {
     fi
 }
 
+# pec_estate_code_from_emoji <emoji> → babysit.* / peer.incubating (estate display keys)
+# Protocol no longer stores Meta status enums — chip terms come from pr-chip-display.json.
+pec_estate_code_from_emoji() {
+    case "$1" in
+        ✅) printf 'babysit.green' ;;
+        🔁) printf 'babysit.pending' ;;
+        ⚠️) printf 'babysit.needs_work' ;;
+        📝) printf 'peer.incubating' ;;
+        🔧) printf 'babysit.merged' ;;
+        🧹) printf 'babysit.complete' ;;
+        🛑) printf 'babysit.hold' ;;
+        *) printf '' ;;
+    esac
+}
+
+# pec_status_from_emoji — LEGACY alias for unit tests; prefer pec_estate_code_from_emoji.
+# Maps emoji → protocol GithubPrStatus (written to externalRefs.status).
+pec_status_from_emoji() {
+    case "$1" in
+        ✅) printf 'clean' ;;
+        🔁) printf 'pending' ;;
+        ⚠️) printf 'needs_work' ;;
+        📝) printf 'pre_pr' ;;
+        🔧) printf 'merged' ;;
+        🧹) printf 'complete' ;;
+        🛑) printf 'needs_operator' ;;
+        *) printf 'unknown' ;;
+    esac
+}
+
+# pec_count_chip_unresolved_threads <json-array-of-thread-nodes>
+# Count threads that should block chip ✅: unresolved AND not outdated.
+# True when a bot review body indicates a clean **Findings** section.
+# Never match bare "- None." globally — Codex puts that under **Questions**
+# even when **Findings** still has [Major] (#1108 attach-time false ✅).
+# HAPI Bot clean variants include "- None.", "- None at the current head.",
+# "No Blocker, Major, Minor, or Nit findings…" (#1400 false ⚠️), and
+# "No reportable issues found…" (align with hapi-pr-status CLEAN_REGEX; #1821 false ⚠️).
+# "No reportable code issues found" / "No additional actionable…" (#1163 Codex v2).
+pec_bot_body_findings_clean() {
+    local body="$1" findings stripped
+    if printf '%s' "$body" | grep -qiE \
+        'No findings|No high-confidence|No issues found|No reportable (code )?issues|No additional actionable|No actionable|Didn.t find any|No new issues found|No Blocker, Major, Minor, or Nit findings|No Blocker[[:space:]].*findings|None at the current head'; then
+        return 0
+    fi
+    findings="$(printf '%s' "$body" | awk '
+        BEGIN { p = 0 }
+        /^\*\*Findings\*\*/ { p = 1; next }
+        /^\*\*[A-Za-z]/ { if (p) exit }
+        p { print }
+    ')"
+    stripped="$(printf '%s' "$findings" | sed '/^[[:space:]]*$/d')"
+    [[ -z "$stripped" ]] && return 0
+    # Findings block must be only clean None lines (no other bullets).
+    if printf '%s\n' "$stripped" | grep -qvE \
+        '^[[:space:]]*(-[[:space:]]*)?None(\.|[[:space:]]+at[[:space:]]+the[[:space:]]+current[[:space:]]+head\.?)?[[:space:]]*$'; then
+        return 1
+    fi
+    return 0
+}
+
+# Outdated unresolved bot Majors left open after tip fixes (#847) must not
+# force ⚠️ when Findings:None + CI green on current head.
+# Stdin or $1: JSON array like [{"isResolved":false,"isOutdated":true}, ...]
+# Prints integer count on stdout.
+pec_count_chip_unresolved_threads() {
+    local json="${1:-}"
+    if [[ -z "$json" ]]; then
+        json="$(cat)"
+    fi
+    printf '%s' "$json" | jq '
+        if type != "array" then 0
+        else
+          [.[] | select((.isResolved == false) and (.isOutdated != true))] | length
+        end
+    '
+}
+
+# pec_emoji_from_status <status> → emoji
+pec_emoji_from_status() {
+    case "$1" in
+        clean) printf '✅' ;;
+        pending) printf '🔁' ;;
+        needs_work) printf '⚠️' ;;
+        pre_pr) printf '📝' ;;
+        merged) printf '🔧' ;;
+        complete) printf '🧹' ;;
+        needs_operator) printf '🛑' ;;
+        *) printf '?' ;;
+    esac
+}
+
 pec_leading_emoji() {
     local s="$1"
     case "$s" in
@@ -170,6 +342,8 @@ pec_leading_emoji() {
         ⚠️*) echo "⚠️" ;;
         📝*) echo "📝" ;;
         🔧*) echo "🔧" ;;
+        🧹*) echo "🧹" ;;
+        🛑*) echo "🛑" ;;
         "?"*) echo "?" ;;
         *) echo "" ;;
     esac
@@ -180,16 +354,20 @@ pec_leading_emoji() {
 #
 # Usage:
 #   pec_decide_emoji EXISTS MERGED CLOSED CHECKS_OK CHECKS_PENDING CHECKS_SEEN \
-#                    THREADS_N BOT_CLEAN BOT_MAJOR BOT_HAS_BODY MERGE_BAD DATA_UNAVAILABLE
+#                    THREADS_N BOT_CLEAN BOT_MAJOR BOT_HAS_BODY MERGE_BAD DATA_UNAVAILABLE \
+#                    [REVIEW_CHANGES_REQUESTED] [SUPERSEDED_HINT] [CRC_ATTESTED]
 #   → prints "<emoji>\t<action>"
 #
-# THREADS_N: >=0 real count, -1 = unavailable this run.
+# THREADS_N: >=0 actionable unresolved count (caller excludes isOutdated — #847), -1 = unavailable.
+# REVIEW_CHANGES_REQUESTED: 1 when GraphQL reviewDecision == CHANGES_REQUESTED.
+# SUPERSEDED_HINT: 1 when caller detected empty-vs-main / absorber merge (close as superseded).
 # ---------------------------------------------------------------------------
 
 pec_decide_emoji() {
     local exists="$1" merged="$2" closed="$3" checks_ok="$4" checks_pending="$5" \
         checks_seen="$6" threads_n="$7" bot_clean="$8" bot_major="$9" \
-        bot_has_body="${10}" merge_bad="${11}" data_unavailable="${12}"
+        bot_has_body="${10}" merge_bad="${11}" data_unavailable="${12}" \
+        review_changes="${13:-0}" superseded_hint="${14:-0}" crc_attested="${15:-0}"
 
     if [[ "$data_unavailable" == "1" ]]; then
         printf '%s\t%s' "?" "GitHub data unavailable this run — retry sweep (title unchanged)"
@@ -201,46 +379,163 @@ pec_decide_emoji() {
     fi
     if [[ "$merged" == "1" ]]; then
         # Keep in sync with docs/tooling/feature-work-lifecycle.md § After upstream merge.
-        printf '%s\t%s' "🔧" "MERGED — notify peer: (1) drop soup layer(s) (2) remove worktree+branch (3) ack; do NOT self-archive mid-turn (orphans tool UI); meta rematerializes soup once wave cleanup done, then archives when idle"
+        printf '%s\t%s' "🔧" "MERGED — notify peer: (1) drop soup layer(s) (2) remove worktree+branch (3) exit reflection docs/plans/retros/TEMPLATE-exit-reflection.md or skip: (4) ack; do NOT self-archive mid-turn (orphans tool UI); meta rematerializes soup once wave cleanup done, then archives when idle"
         return
     fi
     if [[ "$closed" == "1" ]]; then
-        printf '%s\t%s' "⚠️" "PR closed WITHOUT merge — reopen if still wanted, or drop the tracking/session"
+        if [[ "$superseded_hint" == "1" ]]; then
+            printf '%s\t%s' "⚠️" "PR closed superseded (empty-vs-main / absorbed) — retarget chip to absorbing merged PR; drop layer/worktree; do not rebase forever"
+            return
+        fi
+        # Default closed-unmerged: first-class exit is retarget-to-absorber when
+        # another upstream PR already shipped the same work (#958→#1405).
+        printf '%s\t%s' "⚠️" "PR closed WITHOUT merge — if empty-vs-main after an absorbing upstream merge: close superseded + retarget chip to absorber (not endless rebase); else reopen or drop session"
         return
     fi
 
     local parts=()
+    # Body-grep [Major] is sticky until the new pr-review check completes.
+    # While CI is still pending and open threads are cleared, treat that Major
+    # as stale (not actionable) so we stay on 🔁 "receiving" rather than ⚠️.
+    # Formal CHANGES_REQUESTED is never treated as sticky noise.
+    local bot_major_actionable="$bot_major"
+    if [[ "$checks_pending" == "1" && "$threads_n" == "0" && "$review_changes" != "1" ]]; then
+        bot_major_actionable=0
+    fi
     [[ "$merge_bad" == "1" ]] && parts+=("rebase (merge state dirty)")
+    [[ "$review_changes" == "1" ]] && parts+=("address CHANGES_REQUESTED review")
     if [[ "$checks_ok" == "0" && "$checks_pending" == "1" ]]; then
         parts+=("CI running")
-    elif [[ "$checks_ok" == "0" ]]; then
+    elif [[ "$checks_ok" == "0" && ! ( "$crc_attested" == "1" && "$checks_seen" == "0" ) ]]; then
         parts+=("fix failing CI")
     fi
     [[ "$threads_n" -gt 0 ]] 2>/dev/null && parts+=("resolve ${threads_n} open thread(s)")
     [[ "$threads_n" -lt 0 ]] 2>/dev/null && parts+=("thread count unavailable (retry)")
-    if [[ "$bot_clean" == "0" && "$bot_major" == "1" ]]; then
+    if [[ "$bot_clean" == "0" ]]; then
+        if [[ "$bot_major_actionable" == "1" ]]; then
+            parts+=("address bot [Major] findings")
+        elif [[ "$checks_pending" == "1" && "$threads_n" == "0" && "$review_changes" != "1" ]]; then
+            : # receiving — skip sticky body-grep bot nag until pr-review finishes
+        elif [[ "$bot_has_body" == "1" ]]; then
+            parts+=("address latest bot review")
+        elif [[ "$review_changes" != "1" && "$crc_attested" != "1" ]]; then
+            parts+=("push to trigger bot review")
+        fi
+    elif [[ "$bot_major_actionable" == "1" ]]; then
+        # bot_clean lied (e.g. Questions "- None." matched a global clean regex)
+        # while [Major] findings remain — still surface the Major.
         parts+=("address bot [Major] findings")
-    elif [[ "$bot_clean" == "0" && "$bot_has_body" == "1" ]]; then
-        parts+=("address latest bot review")
-    elif [[ "$bot_clean" == "0" ]]; then
-        parts+=("push to trigger bot review")
     fi
 
     local emoji action
-    if [[ "$checks_ok" == "1" && "$checks_seen" == "1" && "$threads_n" == "0" && "$bot_clean" == "1" && "$merge_bad" == "0" ]]; then
-        emoji="✅"; action="full green — wait on tiann"
-    elif [[ "$checks_seen" == "0" && "$merge_bad" == "0" && "$bot_major" == "0" ]]; then
+    # Never ✅ while Majors / CHANGES_REQUESTED / open threads remain — even if
+    # a stale bot_clean bit is set. Operators read green as "healthy PR".
+    if [[ "$checks_ok" == "1" && "$checks_seen" == "1" && "$threads_n" == "0" \
+        && "$bot_clean" == "1" && "$bot_major_actionable" == "0" \
+        && "$merge_bad" == "0" && "$review_changes" == "0" ]]; then
+        emoji="✅"; action="full green - wait on tiann"
+    elif [[ "$crc_attested" == "1" && "$checks_seen" == "0" && "$threads_n" == "0" \
+        && "$bot_clean" == "1" && "$bot_major_actionable" == "0" \
+        && "$merge_bad" == "0" && "$review_changes" == "0" ]]; then
+        # cold-review-clean + merge clean but GH returned empty rollup / 503 — do not
+        # invent ⚠️ or "push to trigger bot review" (#91 / #132 flake noise).
+        emoji="✅"; action="cold-review-clean — CI rollup empty/unavailable (merge clean)"
+    elif [[ "$checks_seen" == "0" && "$merge_bad" == "0" && "$bot_major_actionable" == "0" && "$review_changes" == "0" ]]; then
         # No CI evidence yet: never call it green. Nudge instead of false ✅.
         emoji="🔁"; action="no CI checks visible yet — push/retry then re-sweep"
-    elif [[ "$checks_pending" == "1" && "$threads_n" == "0" && "$bot_major" == "0" && "$merge_bad" == "0" ]]; then
+    elif [[ "$checks_pending" == "1" && "$threads_n" == "0" && "$merge_bad" == "0" && "$review_changes" == "0" ]]; then
+        # Prefer 🔁 while CI/pr-review is in flight and threads are clear —
+        # sticky body-grep Majors must not force needs_work (see above).
         emoji="🔁"; action="$([[ ${#parts[@]} -gt 0 ]] && (IFS='; '; echo "${parts[*]}") || echo "CI in flight")"
-    elif [[ "$checks_ok" == "1" && "$checks_seen" == "1" && "$threads_n" -lt 0 && "$bot_clean" == "1" && "$merge_bad" == "0" ]] 2>/dev/null; then
+    elif [[ "$checks_ok" == "1" && "$checks_seen" == "1" && "$threads_n" -lt 0 \
+        && "$bot_clean" == "1" && "$bot_major_actionable" == "0" \
+        && "$merge_bad" == "0" && "$review_changes" == "0" ]] 2>/dev/null; then
         emoji="🔁"; action="CI/bot green — thread count unavailable; retry sweep"
     else
         emoji="⚠️"; action="$(IFS='; '; echo "${parts[*]}")"
         [[ -n "$action" ]] || action="needs attention — run hapi-pr-status"
     fi
     printf '%s\t%s' "$emoji" "$action"
+}
+
+# ---------------------------------------------------------------------------
+# Draft / blocked-upstream gates (before CI/bot green can paint ✅)
+# ---------------------------------------------------------------------------
+
+# pec_labels_csv_has LABELS_CSV NEEDLE → 0 if needle is a pipe/comma-separated entry
+pec_labels_csv_has() {
+    local csv="${1:-}" needle="${2:-}"
+    [[ -n "$csv" && -n "$needle" ]] || return 1
+    local IFS=',|' entry
+    for entry in $csv; do
+        entry="${entry#"${entry%%[![:space:]]*}"}"
+        entry="${entry%"${entry##*[![:space:]]}"}"
+        [[ "$entry" == "$needle" ]] && return 0
+    done
+    return 1
+}
+
+# pec_blocked_upstream_dep_from_body BODY → "#N" or empty
+# Best-effort: "blocked on/by … #N" or owner/repo#N near blocked.
+pec_blocked_upstream_dep_from_body() {
+    local body="${1:-}" dep=""
+    [[ -n "$body" ]] || { printf ''; return 0; }
+    if [[ "$body" =~ [Bb]locked[[:space:]]+(on|by)[[:space:]]+[^[:digit:]#]{0,80}#([0-9]+) ]]; then
+        dep="#${BASH_REMATCH[2]}"
+    elif [[ "$body" =~ [Bb]locked[[:space:]]+(on|by)[[:space:]]+([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+) ]]; then
+        dep="${BASH_REMATCH[2]}"
+    fi
+    printf '%s' "$dep"
+}
+
+# pec_blocked_upstream_action [BODY] → statusAction for ⚠️ blocked-upstream
+pec_blocked_upstream_action() {
+    local body="${1:-}" dep
+    dep="$(pec_blocked_upstream_dep_from_body "$body")"
+    if [[ -n "$dep" ]]; then
+        printf 'blocked upstream — wait on %s (status:blocked-upstream)' "$dep"
+    else
+        printf 'blocked upstream (status:blocked-upstream) — known dependency; not green'
+    fi
+}
+
+# pec_gate_draft_blocked DRAFT LABELS_CSV [BODY]
+# Prints "emoji\taction\tprePr\tblockedUpstream" when a gate fires; empty if no gate.
+# Precedence: status:blocked-upstream (⚠️, prePr=0, blockedUpstream=1) beats draft alone
+# (📝, prePr=1, blockedUpstream=0). blockedUpstream is structured — never infer from
+# statusAction prose (heavygee/hapi#128).
+pec_gate_draft_blocked() {
+    local draft="${1:-0}" labels_csv="${2:-}" body="${3:-}"
+    local is_draft=0
+    case "${draft,,}" in
+        1|true|yes) is_draft=1 ;;
+    esac
+    if pec_labels_csv_has "$labels_csv" "status:blocked-upstream"; then
+        printf '%s\t%s\t%s\t%s' "⚠️" "$(pec_blocked_upstream_action "$body")" "0" "1"
+        return 0
+    fi
+    if [[ "$is_draft" -eq 1 ]]; then
+        printf '%s\t%s\t%s\t%s' "📝" "draft PR — not ready for green; mark ready when unblocked" "1" "0"
+        return 0
+    fi
+    printf ''
+}
+
+# pec_default_sticky_ping EMOJI [BLOCKED_UPSTREAM]
+# Estate stickyPing for peer nags (config/pr-chip-states.yaml). blockedUpstream
+# forces false while keeping ⚠️ / needs_work visible (#128).
+pec_default_sticky_ping() {
+    local emoji="$1" blocked="${2:-0}"
+    case "${blocked,,}" in
+        1|true|yes)
+            printf 'false'
+            return 0
+            ;;
+    esac
+    case "$emoji" in
+        ⚠️|🔧) printf 'true' ;;
+        *) printf 'false' ;;
+    esac
 }
 
 # ---------------------------------------------------------------------------
@@ -253,29 +548,99 @@ pec_action_fingerprint() {
     printf '%s|%s' "$emoji" "$action" | cksum | awk '{print $1}'
 }
 
+# pec_warn_window_backoff_secs STREAK [CAP_SECS]
+# Hours to wait after STREAK consecutive same-fp ⚠️ pings: 2h, 4h, 8h, … cap.
+# STREAK 0/empty still counts as 1 when a last_ping exists (legacy hourly state).
+pec_warn_window_backoff_secs() {
+    local streak="${1:-0}" cap="${2:-86400}"
+    local n="$streak"
+    [[ "$n" =~ ^[0-9]+$ ]] || n=0
+    (( n < 1 )) && n=1
+    [[ "$cap" =~ ^[0-9]+$ ]] || cap=86400
+    (( cap < 3600 )) && cap=3600
+    local secs=3600 i=0 next
+    while (( i < n )); do
+        next=$((secs * 2))
+        if (( next < secs || next >= cap )); then
+            secs=$cap
+            break
+        fi
+        secs=$next
+        i=$((i + 1))
+    done
+    (( secs > cap )) && secs=$cap
+    printf '%s' "$secs"
+}
+
+# pec_warn_window_due LAST_PING NOW REMINDER STREAK NEW_FP PREV_FP
+# Return 0 if a ⚠️ ping-window rouse should fire. Fingerprint change or never
+# pinged → due. Same fp → exponential wait vs last_ping.
+pec_warn_window_due() {
+    local last_ping="${1:-0}" now="${2:-0}" reminder="${3:-86400}" \
+        streak="${4:-0}" new_fp="${5:-}" prev_fp="${6:-}"
+    if [[ "$new_fp" != "$prev_fp" ]]; then
+        return 0
+    fi
+    if [[ "$last_ping" -le 0 ]]; then
+        return 0
+    fi
+    local wait
+    wait="$(pec_warn_window_backoff_secs "$streak" "$reminder")"
+    if (( now - last_ping >= wait )); then
+        return 0
+    fi
+    return 1
+}
+
 # Decide whether to ping a session, given its previous recorded state.
-#   pec_should_ping NEW_EMOJI PREV_EMOJI NEW_FP PREV_FP LAST_PING_EPOCH NOW_EPOCH REMINDER_SECS
+#   pec_should_ping NEW_EMOJI PREV_EMOJI NEW_FP PREV_FP LAST_PING_EPOCH NOW_EPOCH REMINDER_SECS [WINDOW_ROUSE] [STICKY_PING] [PING_STREAK]
 # Prints "yes" / "no" and returns 0/1 respectively.
 #
 # Rules:
 #   - "?" (unknown)                     → never ping
+#   - 🧹 (complete)                     → never ping (incl. 🔧→🧹 transition)
+#   - 🛑 (needs_operator)               → never ping the coding peer (operator hold)
+#   - STICKY_PING=0|false               → never ping (blocked-upstream-only, #128)
 #   - emoji changed vs recorded state   → ping (transition)
 #   - sticky ⚠️ or 🔧:
-#       - action fingerprint changed    → ping (new instruction)
-#       - reminder interval elapsed      → ping (nag)
-#       - otherwise                      → no
-#   - unchanged ✅ / 🔁 / 📝            → no
+#       - WINDOW_ROUSE=1 + 🔧            → always yes (merge cleanup is doable)
+#       - WINDOW_ROUSE=1 + ⚠️            → yes on first sight / fp change;
+#         same fp exponential backoff (2h, 4h, 8h … cap reminder). Stops
+#         hourly token burn on infra stalls (Sol 503 / distributor empty).
+#       - action fingerprint changed         → ping (new instruction)
+#       - reminder interval elapsed          → ping (nag)
+#       - otherwise                          → no
+#   - unchanged ✅ / 🔁 / 📝            → no (even on ping windows)
+#
+# STICKY_PING empty → treat as true for ⚠️/🔧 (legacy). Meta aggregates per-PR
+# stickyPing flags before calling; a session with any actionable sticky ⚠️/🔧
+# keeps normal policy even when a sibling PR is blockedUpstream.
 pec_should_ping() {
     local new_emoji="$1" prev_emoji="$2" new_fp="$3" prev_fp="$4" \
-        last_ping="${5:-0}" now="${6:-0}" reminder="${7:-86400}"
+        last_ping="${5:-0}" now="${6:-0}" reminder="${7:-86400}" window_rouse="${8:-0}" \
+        sticky_ping="${9:-}" ping_streak="${10:-0}"
 
-    if [[ "$new_emoji" == "?" ]]; then
+    if [[ "$new_emoji" == "?" || "$new_emoji" == "🧹" || "$new_emoji" == "🛑" ]]; then
         echo "no"; return 1
     fi
+    case "${sticky_ping,,}" in
+        0|false|no)
+            echo "no"; return 1
+            ;;
+    esac
     if [[ "$new_emoji" != "$prev_emoji" ]]; then
         echo "yes"; return 0
     fi
     if [[ "$new_emoji" == "⚠️" || "$new_emoji" == "🔧" ]]; then
+        if [[ "$window_rouse" -eq 1 ]]; then
+            if [[ "$new_emoji" == "🔧" ]]; then
+                echo "yes"; return 0
+            fi
+            if pec_warn_window_due "$last_ping" "$now" "$reminder" "$ping_streak" "$new_fp" "$prev_fp"; then
+                echo "yes"; return 0
+            fi
+            echo "no"; return 1
+        fi
         if [[ "$new_fp" != "$prev_fp" ]]; then
             echo "yes"; return 0
         fi
@@ -303,20 +668,38 @@ pec_should_rename() {
 # Channel event emit helpers (ContributionState → POST /api/system-events)
 # ---------------------------------------------------------------------------
 
-# pec_emit_reason NEW_EMOJI PREV_EMOJI NEW_FP PREV_FP LAST_PING NOW REMINDER
-# → transition | fingerprint | reminder | none
-# Same triggers as pec_should_ping, but returns why (reminder needs key suffix).
+# pec_emit_reason NEW_EMOJI PREV_EMOJI NEW_FP PREV_FP LAST_PING NOW REMINDER [WINDOW_ROUSE] [STICKY_PING] [PING_STREAK]
+# → transition | fingerprint | reminder | window | none
+# Same triggers as pec_should_ping, but returns why (reminder/window need key suffix).
+# STICKY_PING=0|false → none (no window/reminder/fingerprint/transition nags for
+# blocked-upstream-only sessions; #128). ⚠️ window emits honor the same
+# exponential backoff as pec_should_ping.
 pec_emit_reason() {
     local new_emoji="$1" prev_emoji="$2" new_fp="$3" prev_fp="$4" \
-        last_ping="${5:-0}" now="${6:-0}" reminder="${7:-86400}"
+        last_ping="${5:-0}" now="${6:-0}" reminder="${7:-86400}" window_rouse="${8:-0}" \
+        sticky_ping="${9:-}" ping_streak="${10:-0}"
 
-    if [[ "$new_emoji" == "?" ]]; then
+    if [[ "$new_emoji" == "?" || "$new_emoji" == "🧹" ]]; then
         echo "none"; return 1
     fi
+    case "${sticky_ping,,}" in
+        0|false|no)
+            echo "none"; return 1
+            ;;
+    esac
     if [[ "$new_emoji" != "$prev_emoji" ]]; then
         echo "transition"; return 0
     fi
     if [[ "$new_emoji" == "⚠️" || "$new_emoji" == "🔧" ]]; then
+        if [[ "$window_rouse" -eq 1 ]]; then
+            if [[ "$new_emoji" == "🔧" ]]; then
+                echo "window"; return 0
+            fi
+            if pec_warn_window_due "$last_ping" "$now" "$reminder" "$ping_streak" "$new_fp" "$prev_fp"; then
+                echo "window"; return 0
+            fi
+            echo "none"; return 1
+        fi
         if [[ "$new_fp" != "$prev_fp" ]]; then
             echo "fingerprint"; return 0
         fi
@@ -339,6 +722,7 @@ pec_event_type_for_emoji() {
     case "$emoji" in
         ⚠️) echo "blocked" ;;
         🔧) echo "completed" ;;
+        🛑) echo "needs_decision" ;;
         ✅|🔁|📝) echo "progress" ;;
         *) echo "needs_decision" ;;
     esac
@@ -352,8 +736,8 @@ pec_contrib_idempotency_key() {
     local repo="$1" number="$2" fp="$3" kind="${4:-}" date="${5:-}" session="${6:-}"
     local key="contrib:${repo}#${number}:${fp}"
     [[ -n "$session" ]] && key="${key}:sess:${session}"
-    if [[ "$kind" == "reminder" && -n "$date" ]]; then
-        key="${key}:reminder:${date}"
+    if [[ ( "$kind" == "reminder" || "$kind" == "window" ) && -n "$date" ]]; then
+        key="${key}:${kind}:${date}"
     fi
     printf '%s' "$key"
 }
@@ -361,13 +745,13 @@ pec_contrib_idempotency_key() {
 # pec_contrib_dedupe_key REPO NUMBER EVENT_TYPE FINGERPRINT [KIND] [DATE] [SESSION]
 # Must be unique per insert identity — events.dedupe_key has a UNIQUE index.
 # Align with idempotency by embedding the fingerprint (and the session when
-# bound, and the reminder date when nagging).
+# bound, and the reminder/window date when nagging).
 pec_contrib_dedupe_key() {
     local repo="$1" number="$2" event_type="$3" fp="$4" kind="${5:-}" date="${6:-}" session="${7:-}"
     local key="contrib:${repo}#${number}:${event_type}:${fp}"
     [[ -n "$session" ]] && key="${key}:sess:${session}"
-    if [[ "$kind" == "reminder" && -n "$date" ]]; then
-        key="${key}:reminder:${date}"
+    if [[ ( "$kind" == "reminder" || "$kind" == "window" ) && -n "$date" ]]; then
+        key="${key}:${kind}:${date}"
     fi
     printf '%s' "$key"
 }
@@ -396,6 +780,7 @@ pec_pr_target_for_repo() {
 
 pec_severity_for_emoji() {
     case "$1" in
+        🛑) echo 4 ;;
         ⚠️) echo 3 ;;
         🔧) echo 2 ;;
         ✅|🔁|📝) echo 1 ;;
@@ -434,8 +819,8 @@ pec_build_channel_event_body() {
     if [[ "$notif" -eq 1 ]]; then
         event_type="needs_decision"
     fi
-    if [[ "$reason" == "reminder" ]]; then
-        rem_kind="reminder"
+    if [[ "$reason" == "reminder" || "$reason" == "window" ]]; then
+        rem_kind="$reason"
         rem_date="$date"
     fi
 

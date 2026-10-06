@@ -1,0 +1,26 @@
+From 8f6a6f0c516d576de8344b62aa1beb748844bb6c Mon Sep 17 00:00:00 2001
+From: HeavyGee <133152184+heavygee@users.noreply.github.com>
+Date: Sat, 25 Jul 2026 09:59:00 +0000
+Subject: [PATCH] fix(soup): dedupe extractAssistantPlainText import in
+ syncEngine
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+ hub/src/sync/syncEngine.ts | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/hub/src/sync/syncEngine.ts b/hub/src/sync/syncEngine.ts
+index 4394e9283..059aab61a 100644
+--- a/hub/src/sync/syncEngine.ts
++++ b/hub/src/sync/syncEngine.ts
+@@ -51,7 +51,6 @@ import { OverseerEventRecorder, toSessionSnapshot } from './overseerEventRecorde
+ import { createOverseerLlmFallbackClient } from './overseerLlmFallback'
+ import { loadOverseerLlmFallbackConfig } from './overseerLlmFallbackConfig'
+ import { OverseerEntity } from './overseerEntity'
+-import { extractAssistantPlainText } from '@hapi/protocol/messages'
+ import type { InboxOperatorAction } from '@hapi/protocol'
+ import type { ListSystemEventsOptions, StoredSystemEvent } from '../store'
+ import type { ListInboxItemsOptions, StoredInboxItem } from '../store/inboxItems'
+-- 
+2.39.5
+

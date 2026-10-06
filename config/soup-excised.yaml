@@ -1,0 +1,45 @@
+# Soup excision registry — things deliberately removed that must NOT come back.
+#
+# WHY THIS EXISTS (2026-08-27):
+#   `feat/a2a-p05-peer-provenance` was dropped from the driver manifest on
+#   2026-08-17 to remove the rejected #1473 fortress/capability stack. The drop
+#   was correct and completely ineffective: seven OTHER active layers
+#   (kitchen-status, operator-dock, doctor-provenance, fleet-runner-upgrade,
+#   overseer-brain-active, cursor-notify-rule-delta, invalid-argument-bridge-gate)
+#   each carried the same code inside their own diffs, because they were cut from
+#   an integration tip that still had it. Every rebuild silently reinstated it.
+#   Docs said soft-nametag; the running hub kept enforcing an HMAC whose source
+#   had "already been removed". Ten days, and it only surfaced because attributed
+#   peer messaging started failing 403 for sessions whose id had rotated.
+#
+#   The generalisable rule: DROPPING A MANIFEST LAYER DOES NOT REMOVE CODE THAT
+#   OTHER LAYERS HAPPEN TO RE-CARRY.
+#
+# Checked by: scripts/tooling/hapi-soup-excised-check.mjs (run from
+# hapi-driver-rebuild --verify). Adding an entry here makes its reappearance a
+# loud rebuild failure instead of a silent regression.
+#
+# Fields:
+#   path    - repo-relative file that must not exist on any active layer
+#   symbol  - (optional) identifier that must not appear, for partial excisions
+#             where the file legitimately survives
+#   reason  - why it was excised; keep it short and cite the decision
+#   ref     - doc or PR carrying the decision, so a future reader can re-litigate
+#             deliberately rather than by accident
+#   allow   - (optional) layers permitted to carry it, e.g. the replacement branch
+
+excised:
+  - path: hub/src/web/peerCapability.ts
+    reason: >-
+      #1473 fortress peer-capability (session-id-bound HMAC). Closed upstream
+      without merge as overweight; canon moved to soft nametag 2026-08-22
+      (f09bfb225). Because the HMAC is bound to the session id and ids rotate,
+      any rotated session was permanently locked out of attributed peer
+      messaging with a silent 403.
+    ref: docs/plans/2026-08-17-a2a-nametag-only-thesis.md
+
+  - symbol: verifyPeerSessionCapability
+    reason: >-
+      Enforcement half of the same rejected #1473 stack. Listed separately from
+      the file because a layer can re-introduce the call site without the file.
+    ref: docs/operator/AGENTS.md

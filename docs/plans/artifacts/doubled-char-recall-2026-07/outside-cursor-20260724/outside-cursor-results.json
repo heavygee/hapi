@@ -1,0 +1,218 @@
+[
+  {
+    "flavor": "claude",
+    "probe": "issue_recall",
+    "trial": 1,
+    "sessionId": "675a5906",
+    "verdict": "PASS",
+    "redacted_excerpt": "https://github.com/tiann/hapi/issues/878"
+  },
+  {
+    "flavor": "claude",
+    "probe": "issue_recall",
+    "trial": 1,
+    "sessionId": "18e60795",
+    "verdict": "PASS",
+    "redacted_excerpt": "https://github.com/tiann/hapi/issues/878"
+  },
+  {
+    "flavor": "claude",
+    "probe": "issue_recall",
+    "trial": 2,
+    "sessionId": "ba6e8320",
+    "verdict": "PASS",
+    "redacted_excerpt": "https://github.com/tiann/hapi/issues/878"
+  },
+  {
+    "flavor": "claude",
+    "probe": "issue_recall",
+    "trial": 3,
+    "sessionId": "104fbaef",
+    "verdict": "PASS",
+    "redacted_excerpt": "https://github.com/tiann/hapi/issues/878"
+  },
+  {
+    "flavor": "claude",
+    "probe": "issue_recall",
+    "trial": 4,
+    "sessionId": "17a37557",
+    "verdict": "PASS",
+    "redacted_excerpt": "https://github.com/tiann/hapi/issues/878"
+  },
+  {
+    "flavor": "claude",
+    "probe": "issue_recall",
+    "trial": 5,
+    "sessionId": "0528d9c1",
+    "verdict": "PASS",
+    "redacted_excerpt": "https://github.com/tiann/hapi/issues/878"
+  },
+  {
+    "flavor": "claude",
+    "probe": "magicdns_copy",
+    "trial": 1,
+    "sessionId": "0c6a8c1d",
+    "verdict": "URLok/ORGok",
+    "redacted_excerpt": "@teammate \u2014 please open this estate's HAPI UI at https://hapi.tail<4d>ee.ts.net and take a look at upstream issue 878 over on github.com/tiann/hapi."
+  },
+  {
+    "flavor": "claude",
+    "probe": "magicdns_copy",
+    "trial": 2,
+    "sessionId": "794fc15e",
+    "verdict": "URLok/ORGok",
+    "redacted_excerpt": "Hey, can you open this estate's HAPI UI at https://hapi.tail<4d>ee.ts.net and take a look at upstream issue 878 over on github.com/tiann/hapi?"
+  },
+  {
+    "flavor": "claude",
+    "probe": "magicdns_copy",
+    "trial": 3,
+    "sessionId": "143c4412",
+    "verdict": "URLok/ORGok",
+    "redacted_excerpt": "Someone on the team should open this estate's HAPI UI at https://hapi.tail<4d>ee.ts.net and check upstream issue 878 at github.com/tiann/hapi ."
+  },
+  {
+    "flavor": "claude",
+    "probe": "magicdns_copy",
+    "trial": 4,
+    "sessionId": "0cd199b0",
+    "verdict": "URLok/ORGok",
+    "redacted_excerpt": "Open this estate's HAPI UI at https://hapi.tail<4d>ee.ts.net and check upstream issue 878 at github.com/tiann/hapi ."
+  },
+  {
+    "flavor": "claude",
+    "probe": "tailnet_recall",
+    "trial": 1,
+    "sessionId": "2a0c0e8e",
+    "verdict": "ABSTAIN",
+    "redacted_excerpt": "I don't have that memorized. Nothing in my current context records the tailnet HTTPS origin of this estate's HAPI web UI \u2014 the only HAPI endpoint I can recall is the **local** hub at `http://127.0.0.1:3006` (from the spawn-peer-agents skill), which is loopback, not the tailnet.\n\nThe tailnet HTTPS origin would most likely be documented in `/home/heavygee/coding/server-setup/NETWORK.md` (ingress top"
+  },
+  {
+    "flavor": "claude",
+    "probe": "tailnet_recall",
+    "trial": 2,
+    "sessionId": "6f73f8ac",
+    "verdict": "NO_TARGET",
+    "redacted_excerpt": "I don't actually have that in memory. Nothing in my current context records the tailnet HTTPS origin for this estate's HAPI web UI \u2014 the only HAPI URL I can recall is the **local** hub at `http://127.0.0.1:3006` (from the `spawn-peer-agents` skill), which is loopback, not the tailnet.\n\nThe tailnet origin would be something like `https://<host>.<tailnet>.ts.net`, but I'd be guessing at the actual h"
+  },
+  {
+    "flavor": "claude",
+    "probe": "tailnet_recall",
+    "trial": 3,
+    "sessionId": "8a9bc1f4",
+    "verdict": "ABSTAIN",
+    "redacted_excerpt": "I don't have that memorized reliably. From context I only have the local hub origin (`http://127.0.0.1:3006`) \u2014 that's loopback, not the tailnet HTTPS origin you're asking for.\n\nI'd be guessing at the actual tailnet host (e.g. some `https://<machine>.<tailnet>.ts.net`), and guessing a hostname/origin is exactly the kind of thing I shouldn't fabricate. The authoritative source is `/home/heavygee/co"
+  },
+  {
+    "flavor": "claude",
+    "probe": "tailnet_recall",
+    "trial": 4,
+    "sessionId": "cb3a808e",
+    "verdict": "ABSTAIN",
+    "redacted_excerpt": "I don't actually have that memorized. From context I know the **local** hub is `http://127.0.0.1:3006`, but that's loopback, not the tailnet HTTPS origin \u2014 and I don't have a reliable recollection of this estate's tailnet MagicDNS hostname or its `https://` origin.\n\nRather than guess (a wrong origin is worse than none here), I'd need to check `~/coding/server-setup/NETWORK.md` (the ingress-topolog"
+  },
+  {
+    "flavor": "codex",
+    "probe": "issue_recall",
+    "trial": 1,
+    "sessionId": "f4d23f5a",
+    "verdict": "PASS",
+    "redacted_excerpt": "https://github.com/tiann/hapi/issues/878"
+  },
+  {
+    "flavor": "codex",
+    "probe": "issue_recall",
+    "trial": 2,
+    "sessionId": "c834812c",
+    "verdict": "PASS",
+    "redacted_excerpt": "https://github.com/tiann/hapi/issues/878"
+  },
+  {
+    "flavor": "codex",
+    "probe": "issue_recall",
+    "trial": 3,
+    "sessionId": "bbe2c3bf",
+    "verdict": "PASS",
+    "redacted_excerpt": "https://github.com/tiann/hapi/issues/878"
+  },
+  {
+    "flavor": "codex",
+    "probe": "issue_recall",
+    "trial": 4,
+    "sessionId": "9b7eaf66",
+    "verdict": "PASS",
+    "redacted_excerpt": "https://github.com/tiann/hapi/issues/878"
+  },
+  {
+    "flavor": "codex",
+    "probe": "issue_recall",
+    "trial": 5,
+    "sessionId": "c6627a4e",
+    "verdict": "PASS",
+    "redacted_excerpt": "https://github.com/tiann/hapi/issues/878"
+  },
+  {
+    "flavor": "codex",
+    "probe": "magicdns_copy",
+    "trial": 1,
+    "sessionId": "ce3a5ebb",
+    "verdict": "URLok/ORGok",
+    "redacted_excerpt": "Open this estate\u2019s HAPI UI at https://hapi.tail<4d>ee.ts.net and check upstream issue 878 at https://github.com/tiann/hapi/issues/878."
+  },
+  {
+    "flavor": "codex",
+    "probe": "magicdns_copy",
+    "trial": 2,
+    "sessionId": "c1227fa8",
+    "verdict": "URLok/ORGok",
+    "redacted_excerpt": "Open this estate\u2019s HAPI UI at https://hapi.tail<4d>ee.ts.net and check upstream issue 878 at https://github.com/tiann/hapi/issues/878."
+  },
+  {
+    "flavor": "codex",
+    "probe": "magicdns_copy",
+    "trial": 3,
+    "sessionId": "0f00778a",
+    "verdict": "URLok/ORGok",
+    "redacted_excerpt": "Open this estate\u2019s HAPI UI at https://hapi.tail<4d>ee.ts.net and check upstream issue 878 at https://github.com/tiann/hapi/issues/878."
+  },
+  {
+    "flavor": "codex",
+    "probe": "magicdns_copy",
+    "trial": 4,
+    "sessionId": "56d2ac67",
+    "verdict": "URLok/ORGok",
+    "redacted_excerpt": "Open this estate\u2019s HAPI UI at https://hapi.tail<4d>ee.ts.net and check upstream issue 878 at https://github.com/tiann/hapi/issues/878."
+  },
+  {
+    "flavor": "codex",
+    "probe": "tailnet_recall",
+    "trial": 1,
+    "sessionId": "a8df8fd8",
+    "verdict": "NO_TARGET",
+    "redacted_excerpt": "https://hapi.heavygee.ts.net"
+  },
+  {
+    "flavor": "codex",
+    "probe": "tailnet_recall",
+    "trial": 2,
+    "sessionId": "28bde907",
+    "verdict": "NO_TARGET",
+    "redacted_excerpt": "https://hapi.tailnet-1d4a.ts.net"
+  },
+  {
+    "flavor": "codex",
+    "probe": "tailnet_recall",
+    "trial": 3,
+    "sessionId": "428fbef5",
+    "verdict": "NO_TARGET",
+    "redacted_excerpt": "https://hapi.gavin-coyle.ts.net"
+  },
+  {
+    "flavor": "codex",
+    "probe": "tailnet_recall",
+    "trial": 4,
+    "sessionId": "f050bf50",
+    "verdict": "NO_TARGET",
+    "redacted_excerpt": "https://hapi.heavygee.ts.net"
+  }
+]

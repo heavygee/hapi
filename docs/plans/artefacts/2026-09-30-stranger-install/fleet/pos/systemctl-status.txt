@@ -1,0 +1,62 @@
+● hapi-hub.service - HAPI hub (oos-stranger-fleet-test)
+     Loaded: loaded (/etc/systemd/system/hapi-hub.service; enabled; preset: enabled)
+    Drop-In: /etc/systemd/system/hapi-hub.service.d
+             └─90-oom-protect-hub.conf
+     Active: active (running) since Wed 2026-09-30 15:35:49 UTC; 12s ago
+   Main PID: 16433 (hapi)
+      Tasks: 7 (limit: 4686)
+     Memory: 206.8M
+        CPU: 1.802s
+     CGroup: /system.slice/hapi-hub.service
+             └─16433 /opt/hapi/hapi hub
+
+Sep 30 15:35:49 oos-stranger-fleet-test systemd[1]: Started hapi-hub.service - HAPI hub (oos-stranger-fleet-test).
+Sep 30 15:35:50 oos-stranger-fleet-test hapi[16433]: HAPI Hub starting...
+Sep 30 15:35:50 oos-stranger-fleet-test hapi[16433]: ======================================================================
+Sep 30 15:35:50 oos-stranger-fleet-test hapi[16433]:   NEW CLI_API_TOKEN GENERATED
+Sep 30 15:35:50 oos-stranger-fleet-test hapi[16433]: ======================================================================
+Sep 30 15:35:50 oos-stranger-fleet-test hapi[16433]:   Token: REDACTED
+Sep 30 15:35:50 oos-stranger-fleet-test hapi[16433]:   Saved to: /var/lib/hapi/settings.json
+Sep 30 15:35:50 oos-stranger-fleet-test hapi[16433]: ======================================================================
+Sep 30 15:35:50 oos-stranger-fleet-test hapi[16433]: [Hub] HAPI_LISTEN_HOST: 127.0.0.1 (default)
+Sep 30 15:35:50 oos-stranger-fleet-test hapi[16433]: [Hub] HAPI_LISTEN_PORT: 3006 (default)
+Sep 30 15:35:50 oos-stranger-fleet-test hapi[16433]: [Hub] HAPI_PUBLIC_URL: http://localhost:3006 (default)
+Sep 30 15:35:50 oos-stranger-fleet-test hapi[16433]: [Hub] Fleet upgrade policy: alert
+Sep 30 15:35:50 oos-stranger-fleet-test hapi[16433]: [Hub] Telegram: disabled (no TELEGRAM_BOT_TOKEN)
+Sep 30 15:35:50 oos-stranger-fleet-test hapi[16433]: [Hub] ServerChan: disabled (no SERVERCHAN_SENDKEY)
+Sep 30 15:35:50 oos-stranger-fleet-test hapi[16433]: [Hub] Tunnel: disabled (default)
+Sep 30 15:35:50 oos-stranger-fleet-test hapi[16433]: [Hub] fleet upgrade channel=npm target=0.30.7
+Sep 30 15:35:50 oos-stranger-fleet-test hapi[16433]: [Hub] Android push: relay (url: https://push.hapi.run)
+Sep 30 15:35:50 oos-stranger-fleet-test hapi[16433]: [Hub] iOS push: relay (default, url: https://push.hapi.run)
+Sep 30 15:35:50 oos-stranger-fleet-test hapi[16433]: [Web] hub listening on 127.0.0.1:3006
+Sep 30 15:35:50 oos-stranger-fleet-test hapi[16433]: [Web] public URL: http://localhost:3006
+Sep 30 15:35:50 oos-stranger-fleet-test hapi[16433]: [Web] Hub listening on :3006
+Sep 30 15:35:50 oos-stranger-fleet-test hapi[16433]: [Web] Local:  http://localhost:3006
+Sep 30 15:35:50 oos-stranger-fleet-test hapi[16433]: HAPI Hub is ready!
+Sep 30 15:35:51 oos-stranger-fleet-test hapi[16433]: <-- POST /cli/machines
+Sep 30 15:35:51 oos-stranger-fleet-test hapi[16433]: --> POST /cli/machines 200 6ms
+Sep 30 15:36:01 oos-stranger-fleet-test hapi[16433]: <-- GET /health
+Sep 30 15:36:01 oos-stranger-fleet-test hapi[16433]: --> GET /health 200 0ms
+
+● hapi-runner.service - HAPI runner (oos-stranger-fleet-test)
+     Loaded: loaded (/etc/systemd/system/hapi-runner.service; enabled; preset: enabled)
+    Drop-In: /etc/systemd/system/hapi-runner.service.d
+             └─10-resilience.conf, 90-oom-protect-runner.conf
+     Active: active (running) since Wed 2026-09-30 15:35:50 UTC; 11s ago
+    Process: 16435 ExecStartPre=/opt/hapi/hapi runner stop (code=exited, status=0/SUCCESS)
+   Main PID: 16445 (hapi)
+      Tasks: 7 (limit: 4686)
+     Memory: 149.9M
+        CPU: 2.005s
+     CGroup: /system.slice/hapi-runner.service
+             └─16445 /opt/hapi/hapi runner start-sync --workspace-root /work
+
+Sep 30 15:35:49 oos-stranger-fleet-test systemd[1]: Starting hapi-runner.service - HAPI runner (oos-stranger-fleet-test)...
+Sep 30 15:35:50 oos-stranger-fleet-test systemd[1]: Started hapi-runner.service - HAPI runner (oos-stranger-fleet-test).
+Sep 30 15:35:51 oos-stranger-fleet-test hapi[16445]: Hapi runner started.
+Sep 30 15:35:51 oos-stranger-fleet-test hapi[16445]:   Workspace roots: /work
+Sep 30 15:35:51 oos-stranger-fleet-test hapi[16445]:   Hub URL:        http://127.0.0.1:3006
+Sep 30 15:35:51 oos-stranger-fleet-test hapi[16445]:   Machine ID:     1e3950b5-fdf3-4f9c-be18-d95bbd6bfa10
+Sep 30 15:35:51 oos-stranger-fleet-test hapi[16445]:   Control port:   37125
+Sep 30 15:35:51 oos-stranger-fleet-test hapi[16445]: Waiting for sessions. Press Ctrl+C to stop.
+Sep 30 15:35:51 oos-stranger-fleet-test hapi[16445]: [HAPI] Workspace roots already up to date on hub: /work

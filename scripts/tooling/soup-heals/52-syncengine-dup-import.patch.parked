@@ -1,0 +1,25 @@
+From 6df6a7daf46b427289083bd3afe48764715644ab Mon Sep 17 00:00:00 2001
+From: Debian <heavygee@oos-linux.in.lockhouse>
+Date: Tue, 14 Jul 2026 14:48:51 +0000
+Subject: [PATCH] fix(soup): drop duplicate extractAssistantPlainText import
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+ hub/src/sync/syncEngine.ts | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/hub/src/sync/syncEngine.ts b/hub/src/sync/syncEngine.ts
+index d053b7615..72a1220fd 100644
+--- a/hub/src/sync/syncEngine.ts
++++ b/hub/src/sync/syncEngine.ts
+@@ -45,7 +45,6 @@ import {
+ import { SessionCache } from './sessionCache'
+ import { OverseerEventRecorder, toSessionSnapshot } from './overseerEventRecorder'
+ import { OverseerEntity } from './overseerEntity'
+-import { extractAssistantPlainText } from '@hapi/protocol/messages'
+ import type { InboxOperatorAction } from '@hapi/protocol'
+ import type { ListSystemEventsOptions, StoredSystemEvent } from '../store'
+ import type { ListInboxItemsOptions, StoredInboxItem } from '../store/inboxItems'
+-- 
+2.39.5
+

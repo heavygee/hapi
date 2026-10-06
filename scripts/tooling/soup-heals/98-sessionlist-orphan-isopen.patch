@@ -1,0 +1,26 @@
+# 98-sessionlist-orphan-isopen.patch
+# Drop orphan isOpen={archiveOpen}/isOpen={deleteOpen} fragment children
+# that React renders as literal "isOpen=isOpen=" between every session row.
+# Debris from driver/github-pr-awareness layer merges into SessionList.
+#
+commit 923175e57e3629f75f84b9c5ca23222d4e44b860
+Author: HeavyGee <133152184+heavygee@users.noreply.github.com>
+Date:   Mon Aug 3 09:00:09 2026 +0000
+
+    fix(soup): drop orphan isOpen props leaking into SessionList rows
+    
+    Co-authored-by: Cursor <cursoragent@cursor.com>
+
+diff --git a/web/src/components/SessionList.tsx b/web/src/components/SessionList.tsx
+index bde7c54c1..82eefbc79 100644
+--- a/web/src/components/SessionList.tsx
++++ b/web/src/components/SessionList.tsx
+@@ -972,8 +972,6 @@ function SessionItem(props: {
+                     centerTitle
+                 />
+             ) : null}
+-                isOpen={archiveOpen}
+-                isOpen={deleteOpen}
+         </>
+     )
+ }

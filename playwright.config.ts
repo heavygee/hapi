@@ -1,23 +1,37 @@
 import { defineConfig, devices } from '@playwright/test'
+import {
+    annotatedVideoUseOption,
+    shouldRecordAnnotatedVideo,
+} from './scripts/dev/playwright-annotated-video.mjs'
 
-const PORT = Number(process.env.PLAYWRIGHT_WEB_PORT ?? 5179)
-const BASE_URL = `http://localhost:${PORT}`
+const FIXTURE_PORT = Number(process.env.PLAYWRIGHT_WEB_PORT ?? 5179)
+const FIXTURE_BASE_URL = `http://localhost:${FIXTURE_PORT}`
+
+const peerWebUrl = process.env.HAPI_PEER_WEB_URL?.replace(/\/$/, '')
+const usePeerStack = Boolean(peerWebUrl)
+const baseURL = peerWebUrl ?? FIXTURE_BASE_URL
 
 export default defineConfig({
     testDir: './e2e',
-    // Peer-stack specs need HAPI_PEER_* + mirror tooling; run via playwright.peer.config.ts only.
-    testIgnore: ['**/peer/**'],
-    timeout: 30_000,
-    expect: { timeout: 5_000 },
+    // Peer-stack specs need HAPI_PEER_* (set by run-e2e-on-peer-stack.mjs).
+    // Fixture-only runs must not pick them up accidentally.
+    testIgnore: usePeerStack ? [] : ['**/peer/**'],
+    timeout: usePeerStack ? 60_000 : 30_000,
+    expect: { timeout: usePeerStack ? 10_000 : 5_000 },
     fullyParallel: false,
     forbidOnly: !!process.env.CI,
     retries: process.env.CI ? 1 : 0,
     workers: 1,
     reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
     use: {
-        baseURL: BASE_URL,
+        baseURL,
         trace: 'retain-on-failure',
         screenshot: 'only-on-failure',
+        // When video is on it MUST be annotated (pointer + action overlay).
+        // Raw `video: 'on'` is a kill-criterion — humans cannot see the click.
+        video: shouldRecordAnnotatedVideo()
+            ? annotatedVideoUseOption('on', usePeerStack ? { width: 1440, height: 900 } : undefined)
+            : 'off',
     },
     projects: [
         {
@@ -32,19 +46,19 @@ export default defineConfig({
                     // times out. Keep the flag scoped to launchOptions
                     // so this is the only place a future maintainer has
                     // to revisit if they harden the runner.
-                    args: ['--no-sandbox'],
+                    args: ['--no-sandbox', '--disable-dev-shm-usage'],
                 },
             },
         },
     ],
-    webServer: {
-        // The fixture page mounts ScratchlistPanel in isolation; no hub
-        // is required, which is why this dev server doesn't proxy /api.
-        command: `bun run --cwd web dev -- --port ${PORT} --strictPort`,
-        url: `${BASE_URL}/e2e-fixtures/scratchlist-fixture.html`,
-        timeout: 60_000,
-        reuseExistingServer: !process.env.CI,
-        stdout: 'ignore',
-        stderr: 'pipe',
-    },
+    webServer: usePeerStack
+        ? undefined
+        : {
+            command: `bun run --cwd web dev -- --port ${FIXTURE_PORT} --strictPort`,
+            url: `${FIXTURE_BASE_URL}/e2e-fixtures/scratchlist-fixture.html`,
+            timeout: 60_000,
+            reuseExistingServer: !process.env.CI,
+            stdout: 'ignore',
+            stderr: 'pipe',
+        },
 })

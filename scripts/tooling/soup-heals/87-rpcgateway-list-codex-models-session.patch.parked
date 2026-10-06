@@ -1,0 +1,29 @@
+From c5f8a263db7dad9f68a78c1f2c819f48ff9eed37 Mon Sep 17 00:00:00 2001
+From: HeavyGee <133152184+heavygee@users.noreply.github.com>
+Date: Fri, 31 Jul 2026 14:43:55 +0000
+Subject: [PATCH] fix(soup): restore rpcGateway.listCodexModelsForSession after
+ remat
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+ hub/src/sync/rpcGateway.ts | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/hub/src/sync/rpcGateway.ts b/hub/src/sync/rpcGateway.ts
+index c649723f..1cda044c 100644
+--- a/hub/src/sync/rpcGateway.ts
++++ b/hub/src/sync/rpcGateway.ts
+@@ -346,6 +346,10 @@ export class RpcGateway {
+         }
+     }
+ 
++    async listCodexModelsForSession(sessionId: string): Promise<RpcListCodexModelsResponse> {
++        return await this.sessionRpc(sessionId, RPC_METHODS.ListCodexModels, {}, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListCodexModelsResponse
++    }
++
+     async listCodexModelsForMachine(machineId: string): Promise<RpcListCodexModelsResponse> {
+         return await this.machineRpc(machineId, RPC_METHODS.ListCodexModels, {}, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListCodexModelsResponse
+     }
+-- 
+2.39.5
+
