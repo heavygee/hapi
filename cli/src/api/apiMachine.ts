@@ -68,8 +68,9 @@ import { listLocalPiSessionSummaries, listLocalPiSessionsWithMessagesByIds } fro
 import { buildSocketIoExtraHeaderOptions } from './hubExtraHeaders'
 import { collectMachineHealth } from '@/utils/machineHealth'
 import { inspectCursorChatStore } from '@/cursor/cursorChatStoreStatus'
+import { inspectClaudeTranscript } from '@/claude/utils/claudeCheckSession'
 import { homedir } from 'node:os'
-import type { CursorChatStoreStatus } from '@hapi/protocol/apiTypes'
+import type { ClaudeTranscriptStatus, CursorChatStoreStatus } from '@hapi/protocol/apiTypes'
 import type { HubUpgradeOffer, RunnerSelfUpgradeResponse } from '@hapi/protocol/upgradeChannel'
 import { applyRunnerSelfUpgrade } from '@/upgrade/selfUpgrade'
 import { buildMachineMetadata } from '@/agent/sessionFactory'
@@ -102,6 +103,12 @@ interface ListMachineDirectoryRequest {
 interface CursorChatStoreStatusRequest {
     workspacePath: string
     cursorSessionId: string
+    homeDir?: string
+}
+
+interface ClaudeTranscriptStatusRequest {
+    workspacePath: string
+    claudeSessionId: string
     homeDir?: string
 }
 
@@ -194,6 +201,18 @@ export class ApiMachineClient {
                     home: recordedHome || homedir(),
                     workspacePath: typeof params?.workspacePath === 'string' ? params.workspacePath : '',
                     cursorSessionId: typeof params?.cursorSessionId === 'string' ? params.cursorSessionId : ''
+                })
+            }
+        )
+
+        this.rpcHandlerManager.registerHandler<ClaudeTranscriptStatusRequest, ClaudeTranscriptStatus>(
+            RPC_METHODS.ClaudeTranscriptStatus,
+            async (params) => {
+                const recordedHome = typeof params?.homeDir === 'string' ? params.homeDir.trim() : ''
+                return inspectClaudeTranscript({
+                    home: recordedHome || undefined,
+                    workspacePath: typeof params?.workspacePath === 'string' ? params.workspacePath : '',
+                    sessionId: typeof params?.claudeSessionId === 'string' ? params.claudeSessionId : ''
                 })
             }
         )
