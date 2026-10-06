@@ -894,6 +894,7 @@ export function NewSession(props: {
             setEffort('auto')
         }
     }, [agent, claudeEffortOptions, claudeModelsState.isLoading, effort])
+
     const copilotModelOptions = useMemo(
         () => [
             { value: 'auto', label: 'Auto' },
