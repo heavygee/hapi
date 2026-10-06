@@ -102,7 +102,8 @@ driver_rebuild_agent_guard "$BUILD_WEB" || exit 1
 if [[ ! -f "$MANIFEST" ]]; then
     echo "ERROR: manifest not found: $MANIFEST" >&2
     echo "Canonical path: $PRIMARY/config/driver-manifest.yaml (git pull origin main)" >&2
-    echo "Legacy override: ~/.config/hapi/driver-manifest.yaml or HAPI_DRIVER_MANIFEST=" >&2
+    echo "Optional override: HAPI_DRIVER_MANIFEST=/path/to/manifest.yaml" >&2
+    echo "Do not point HAPI_DRIVER_MANIFEST at a stale ~/.config copy — recipe is the repo file." >&2
     exit 1
 fi
 
