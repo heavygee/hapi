@@ -766,7 +766,8 @@ layers:
   # tiann/hapi#1613 — Cursor MCP overlay isolation: project `.cursor/mcp.json`
   # single `hapi` key + dead-PID prune (fixes live multiplex N hapi-<uuid> user keys).
   # Worktree: ~/coding/hapi/worktrees/cursor-mcp-isolation @ fix/cursor-mcp-overlay-isolation
-  # Tip: 4b2fa0f5c — was dogfood-paired with #1473; now independent of nametag #1618
+  # Tip: 957a3d00a — rebase+fold #1951 ACP cwd + #1856 hard-fail collision (was 4b2fa0f5c;
+  # soup tip had unique hapi-<uuid> regression from #1909 thin — remat restores stable `hapi`)
   - branch: fix/cursor-mcp-overlay-isolation
 
   # Stacked on isolation: auto-worktree when Cursor mailbox held (dock spawn) — #195
