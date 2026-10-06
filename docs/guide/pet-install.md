@@ -38,6 +38,22 @@ hapi --print "hello"    # confirms everything actually works
 
 If `hapi --print "hello"` works, you're done.
 
+## Opening the web UI
+
+Go to `http://localhost:3006` in your **web browser** — Chrome, Firefox, whatever you
+normally use. Not your terminal. Typing a URL at the Linux command line just gives you
+`bash: http://...: No such file or directory` — that error means you're in the wrong
+place, not that anything's broken.
+
+It'll ask for an access token. That token is also sitting in your terminal's output and
+in `~/.hapi/settings.json` — **treat it exactly like a password.**
+
+**Do not paste it into an AI chat assistant, a support ticket, a screenshot, or anywhere
+else, even to ask for help.** If you ever do paste it somewhere by accident (including
+pasting full terminal output that happens to contain it), treat it as compromised and
+get a fresh one — delete the `cliApiToken` line from `~/.hapi/settings.json` and restart
+the hub; it generates a new one automatically.
+
 ## Upgrading later
 
 Run the exact same install command again. Nothing you've done is lost — it swaps the
