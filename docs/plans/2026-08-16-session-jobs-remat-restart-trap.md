@@ -10,14 +10,20 @@ Job-key reuse across attempts is **not** the bug: each `run` mints a new `runId`
 
 ## Product stance (session-attached-jobs peer)
 
-- Do **not** mark remat `completed` before patient restart finishes by default — that would lie about "done."
-- Prefer docs + recipe: `HAPI_DRIVER_NO_RESTART=1` inside `hapi job run`, restart outside the wrap (optional second short job for drain chrome).
-- Agent idle mid-drain is fine while supervisor lives; looks broken only when supervisor dies.
+- Do **not** auto-`failed` a job on heartbeat silence (stale ≠ failed; live rclone).
+- Honest "remat done" includes hub restart — **but** in-tree `exec` after wrap is worse than a chip that completes while hub is still old.
+
+## Mechanical close (2026-10-06, heavygee/hapi#205)
+
+`driver_remat_auto_restart_hub` skips `exec` when `HAPI_INSIDE_JOB_RUN=1` or an ancestor `/proc` cmdline has consecutive `job` `run`. Rebuild exits 0; stderr tells the agent to run `hapi-restart-hub` after the wrap. Tests: `scripts/tooling/lib/driver-remat-auto-restart.test.sh`.
+
+Docs-only `HAPI_DRIVER_NO_RESTART=1` did not stop agents (remat-1933, 2026-10-06).
+
+Kill criterion: if wraps regularly leave soup on an old hub for hours because nobody ran restart, switch to `systemd-run` detach instead of skip.
 
 ## Follow-ups
 
-1. Docs (`docs/guide/session-jobs.md` on #1424 or post-merge): "do not wrap self-restarting remat" trap + NO_RESTART recipe.
-2. Optional later: remat script prints a one-liner warning when `HAPI_SESSION_ID` is set and restart will run.
-3. Do **not** force unique job-keys on reuse — fence already handles generations.
+1. Optional: stamp `HAPI_INSIDE_JOB_RUN=1` from soup `hapi job run` (PPID walk is the live fence; env is nicer for nested `bash -c`).
+2. Do **not** force unique job-keys on reuse — fence already handles generations.
 
-Related: #1404 / PR #1424, #1489 wake layer, remat auto-restart (2026-08-13).
+Related: #1404 / PR #1424, #1489 wake layer, remat auto-restart (2026-08-13), #205.

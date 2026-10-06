@@ -13,6 +13,13 @@
 # depend on new hub API fields from going live while the old hub still serves.
 #
 # Opt out: HAPI_DRIVER_NO_RESTART=1
+#
+# Job-run trap (heavygee/hapi#205): wrapping remat in `hapi job run` then
+# exec'ing hapi-restart-hub kills the job supervisor (runner yank) and leaves
+# a stale running meter. If we are inside that supervisor, skip in-tree
+# restart; rebuild exits 0 so the job can complete. Operator/agent restarts
+# hub after the wrap exits. Detect: HAPI_INSIDE_JOB_RUN=1 or ancestor argv
+# `job` then `run`.
 
 # driver_remat_touched_hub_cli_shared <repo> <from_sha> <to_sha>
 # Exit 0 when hub/cli/shared differ between the two commits.
@@ -64,6 +71,60 @@ driver_remat_live_db_schema_lag() {
     db_v="$(sqlite3 "$db" 'PRAGMA user_version;' 2>/dev/null)" || return 1
     [[ -n "$db_v" ]] || return 1
     [[ "$driver_v" -gt "$db_v" ]]
+}
+
+# driver_remat_argv_is_job_run <cmdline-file>
+# Exit 0 when null-separated argv contains consecutive `job` `run`.
+driver_remat_argv_is_job_run() {
+    local file="$1"
+    [[ -r "$file" ]] || return 1
+    local -a argv=()
+    mapfile -d '' -t argv <"$file"
+    local i
+    for ((i = 0; i < ${#argv[@]} - 1; i++)); do
+        if [[ "${argv[i]}" == "job" && "${argv[i + 1]}" == "run" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# driver_remat_proc_ppid <pid>
+# Print parent pid from $HAPI_PROC_ROOT/pid/stat (default /proc).
+driver_remat_proc_ppid() {
+    local pid="$1"
+    local root="${HAPI_PROC_ROOT:-/proc}"
+    local stat="$root/$pid/stat"
+    [[ -r "$stat" ]] || return 1
+    local line rest
+    line="$(<"$stat")"
+    rest="${line##*)}"
+    # After comm: state ppid ...
+    # shellcheck disable=SC2086
+    set -- $rest
+    [[ -n "${2:-}" ]] || return 1
+    printf '%s\n' "$2"
+}
+
+# driver_remat_inside_job_run
+# Exit 0 when this process is under `hapi job run` (env stamp or /proc walk).
+driver_remat_inside_job_run() {
+    if [[ "${HAPI_INSIDE_JOB_RUN:-}" == "1" ]]; then
+        return 0
+    fi
+    local root="${HAPI_PROC_ROOT:-/proc}"
+    local pid="${HAPI_JOB_RUN_WALK_PID:-$$}"
+    local hops=0 next
+    while [[ "$hops" -lt 32 && -n "$pid" && "$pid" != "0" && "$pid" != "1" ]]; do
+        if driver_remat_argv_is_job_run "$root/$pid/cmdline"; then
+            return 0
+        fi
+        next="$(driver_remat_proc_ppid "$pid")" || break
+        [[ "$next" == "$pid" ]] && break
+        pid="$next"
+        hops=$((hops + 1))
+    done
+    return 1
 }
 
 # driver_remat_resolve_restart_hub — print path to hapi-restart-hub.
@@ -118,6 +179,12 @@ driver_remat_auto_restart_hub() {
         driver_v="$(driver_remat_hub_schema_version "$driver" HEAD)"
         db_v="$(sqlite3 "${HAPI_HUB_DB:-/var/lib/hapi/hapi.db}" 'PRAGMA user_version;' 2>/dev/null)"
         echo "post-remat: live DB v$db_v behind driver SCHEMA_VERSION $driver_v — hub restart required" >&2
+    fi
+    if driver_remat_inside_job_run; then
+        echo "post-remat: inside hapi job run — refusing in-tree hapi-restart-hub" >&2
+        echo "post-remat: exec restart would kill the job supervisor (stale running meter)." >&2
+        echo "post-remat: promote is on disk. After this job exits, run: hapi-restart-hub" >&2
+        return 0
     fi
     local restart_bin
     if ! restart_bin="$(driver_remat_resolve_restart_hub)"; then
