@@ -18,6 +18,7 @@ const BASE_SYSTEM_PROMPT = (() => trimIdent(`
         listPeersTool: 'mcp__hapi__list_peers',
         spawnTool: 'mcp__hapi__spawn_peer',
         searchPeersTool: 'mcp__hapi__search_peers',
+        searchContentTool: 'mcp__hapi__search_content',
     })}
 `))();
 
