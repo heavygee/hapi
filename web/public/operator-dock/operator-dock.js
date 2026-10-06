@@ -1359,7 +1359,7 @@
   }
 
   /**
-   * Host STT URL (proxy / raw): omit/undefined → '/api/stt' (Jessica).
+   * Host STT URL (proxy / raw): omit/undefined → '/api/stt' (integrating app).
    * Explicit null/false/'' → disabled for proxy (#176 — never coalesce null → relative /api/stt
    * with gate-secret headers / HAPI JWT 401).
    * Browser-hub effective URL is syncEffectiveSttUrl (#232): blank/null derive {hub}/api/stt.
@@ -1372,7 +1372,7 @@
     return s;
   }
 
-  /** STT auth: omit → proxy-secret (Jessica). Explicit hub-jwt → Bearer, never gate-secret-only (#176). */
+  /** STT auth: omit → proxy-secret (integrating app). Explicit hub-jwt → Bearer, never gate-secret-only (#176). */
   function resolveSttAuth(raw) {
     var s = String(raw || '').trim().toLowerCase();
     if (s === 'hub-jwt' || s === 'bearer' || s === 'jwt') return 'hub-jwt';
@@ -1453,7 +1453,7 @@
 
   /**
    * True when we will attempt MediaRecorder capture.
-   * Hosts that publish sttUrl (Jessica Quest LAN HTTP) must not hard-fail solely on
+   * Hosts that publish sttUrl (integrating app Quest LAN HTTP) must not hard-fail solely on
    * !isSecureContext — whisper can still POST audio (#302). Web-speech-only installs
    * keep the secure-context gate so we do not record into the void on plain HTTP.
    * Still requires capture APIs — missing mediaDevices is honest false (#308).
@@ -3772,11 +3772,10 @@
     function setQuietStatus(el, text) {
       if (el) el.textContent = text;
     }
-    function makeSection(id, title) {
+    function makeSection(id) {
       var sec = $('section', 'opdock-settings-section');
       sec.setAttribute('data-settings-section', id);
       sec.setAttribute('data-settings-page', id);
-      sec.appendChild($('h3', null, title));
       return sec;
     }
     // #349: multi-page Settings — chips switch one visible topic (not scroll-to-section).
@@ -3824,9 +3823,10 @@
     });
     toolSheet.appendChild(nav);
 
-    var routingSec = makeSection('routing', 'Routing');
+    var routingSec = makeSection('routing');
     sectionHosts.routing = routingSec;
     // #342 part A: Pin vs Spawn only — pick is a tool under Pin, not a third radio.
+    // #416: Change pin is a text link beside Pin, not a fat button under the radios.
     var modes = ['pin'];
     if (canSpawnPerSend()) modes.push('spawn-per-send');
     modes.forEach(function (mode) {
@@ -3842,6 +3842,16 @@
       });
       lab.appendChild(inp);
       lab.appendChild(document.createTextNode(mode === 'spawn-per-send' ? 'spawn per send' : mode));
+      if (mode === 'pin') {
+        var changePinLink = $('button', 'opdock-text-link', 'Change pin');
+        changePinLink.type = 'button';
+        changePinLink.addEventListener('click', function (ev) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          openSessionPicker();
+        });
+        lab.appendChild(changePinLink);
+      }
       routingSec.appendChild(lab);
     });
     routingSec.appendChild($('div', 'opdock-session-meta',
@@ -3850,10 +3860,6 @@
     var pinnedLine = $('div', 'opdock-session-meta',
       'Pinned: ' + (getPinnedSessionLabel() || (pinnedId ? operatorSessionLabel(null, 'pinned') : '(none)')));
     routingSec.appendChild(pinnedLine);
-    var changePinBtn = $('button', 'opdock-btn2 opdock-secondary', 'Change pin');
-    changePinBtn.type = 'button';
-    changePinBtn.addEventListener('click', function () { openSessionPicker(); });
-    routingSec.appendChild(changePinBtn);
     var secretForLabel = getSecret();
     if (secretForLabel && pinnedId) {
       resolvePinnedLabel(secretForLabel).then(function (label) {
@@ -3910,7 +3916,7 @@
     }
     toolSheet.appendChild(routingSec);
 
-    var credSec = makeSection('credentials', 'Credentials');
+    var credSec = makeSection('credentials');
     sectionHosts.credentials = credSec;
     var secInp = document.createElement('input');
     secInp.type = 'password';
@@ -3929,8 +3935,10 @@
       'Probes your hub — keep an explicit save for this one'));
     toolSheet.appendChild(credSec);
 
-    var spawnSec = makeSection('spawn', 'Spawn');
+    var spawnSec = makeSection('spawn');
     sectionHosts.spawn = spawnSec;
+    spawnSec.appendChild($('div', 'opdock-session-meta',
+      'Spawn per send starts a new HAPI session on every send. This tab is the machine and working directory those sessions land on.'));
     if (!canSpawnPerSend() && cfg.mode === MODE_BROWSER_HUB) {
       spawnSec.appendChild($('div', 'opdock-session-meta',
         spawnUnavailableReason() || 'Spawn per send needs a machine and working directory below'));
@@ -4106,23 +4114,12 @@
     }
     toolSheet.appendChild(spawnSec);
 
-    var aboutSec = makeSection('about', 'About');
+    var aboutSec = makeSection('about');
     sectionHosts.about = aboutSec;
-    var aboutRow = $('button', 'opdock-session-row');
-    aboutRow.type = 'button';
-    var aboutBody = $('div');
-    var aboutTitle = $('div', 'opdock-row-title');
-    aboutTitle.appendChild($('span', null, 'About hapi-inline'));
-    if (isVersionUnseen()) aboutTitle.appendChild($('span', 'opdock-version-dot opdock-version-dot--about opdock-version-dot--pulse'));
-    aboutBody.appendChild(aboutTitle);
-    aboutBody.appendChild($('div', 'opdock-session-meta', 'Version ' + currentDockVersion() + ' · config summary · changelog'));
-    aboutRow.appendChild(aboutBody);
-    aboutRow.addEventListener('click', function () { openAboutSheet(); });
-    aboutSec.appendChild(aboutRow);
+    appendAboutPageBody(aboutSec);
+    appendHideControl(aboutSec);
     toolSheet.appendChild(aboutSec);
     showSettingsPage('routing');
-
-    appendHideControl(toolSheet);
     // #139/#251: Done alone in the footer (primary dismiss).
     var actions = $('div', 'opdock-actions');
     var doneBtn = $('button', 'opdock-btn2 opdock-send', 'Done');
@@ -4152,7 +4149,8 @@
       var head = line.match(/^##\s+\[?v?(\d+\.\d+\.\d+[^\]\s]*)/i);
       if (head) {
         pushEntry();
-        entry = { version: head[1], notes: [] };
+        var dateM = line.match(/\((\d{4}-\d{2}-\d{2})\)\s*$/);
+        entry = { version: head[1], notes: [], date: dateM ? dateM[1] : '' };
         continue;
       }
       if (!entry) continue;
@@ -4172,7 +4170,7 @@
     return entries.slice(0, 16);
   }
   /* BEGIN GENERATED bundled-changelog */
-  var BUNDLED_CHANGELOG_FALLBACK = "## [0.18.4](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.3...v0.18.4) (2026-09-21)\n\n\n### Bug Fixes\n\n* **dock:** keep the unseen-version dot on the About settings tab ([#385](https://github.com/Heavygee-Projects/hapi-inline/issues/385)) ([df866f7](https://github.com/Heavygee-Projects/hapi-inline/commit/df866f79d4d91cef871c30c9e2d66539d6da6493)), closes [#382](https://github.com/Heavygee-Projects/hapi-inline/issues/382)\n\n\n### Documentation\n\n* stamp Arthur live dockTag v0.18.3 ([#387](https://github.com/Heavygee-Projects/hapi-inline/issues/387)) ([4615b2c](https://github.com/Heavygee-Projects/hapi-inline/commit/4615b2c6d0f3460ba508d6f77d088829a0f815f4))\n* stamp HAPI web live dockTag v0.18.2 ([#378](https://github.com/Heavygee-Projects/hapi-inline/issues/378)) ([7c93534](https://github.com/Heavygee-Projects/hapi-inline/commit/7c93534cc6c39f24ad78987908eecd7f652821ca))\n* stamp HAPI web live dockTag v0.18.3 ([#380](https://github.com/Heavygee-Projects/hapi-inline/issues/380)) ([5f6023f](https://github.com/Heavygee-Projects/hapi-inline/commit/5f6023f9e9bf9d37d3f6d7b27668576e675b7ffe))\n* stamp Newman and Jessica live dockTag v0.18.3 ([#386](https://github.com/Heavygee-Projects/hapi-inline/issues/386)) ([30e1e68](https://github.com/Heavygee-Projects/hapi-inline/commit/30e1e686b585e8db9f5aa81d1edd60d669a1c850))\n* stamp Wardrobe and Nuzzle live dockTag v0.18.3 ([#383](https://github.com/Heavygee-Projects/hapi-inline/issues/383)) ([f81f072](https://github.com/Heavygee-Projects/hapi-inline/commit/f81f072c95d5b354ef9caab03df456427e775dad))\n\n## [0.18.3](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.2...v0.18.3) (2026-09-21)\n\n\n### Bug Fixes\n\n* **dock:** Quest live label beside whisper ([#376](https://github.com/Heavygee-Projects/hapi-inline/issues/376)) ([a271c3d](https://github.com/Heavygee-Projects/hapi-inline/commit/a271c3d7a7d13434f19b5cdbf4269ad3e19f894a)), closes [#375](https://github.com/Heavygee-Projects/hapi-inline/issues/375)\n\n## [0.18.2](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.1...v0.18.2) (2026-09-21)\n\n\n### Bug Fixes\n\n* **dock:** drop voice-markup toolbar Undo/Clear/Send ([#374](https://github.com/Heavygee-Projects/hapi-inline/issues/374)) ([fa27702](https://github.com/Heavygee-Projects/hapi-inline/commit/fa27702d22a89e209bf7156ab771d606db27dbbf)), closes [#373](https://github.com/Heavygee-Projects/hapi-inline/issues/373)\n\n\n### Documentation\n\n* stamp Nuzzle live dockTag v0.18.1 ([#371](https://github.com/Heavygee-Projects/hapi-inline/issues/371)) ([20545ec](https://github.com/Heavygee-Projects/hapi-inline/commit/20545eca8296645c9e4f47c8d318f806feaea877))\n\n## [0.18.1](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.0...v0.18.1) (2026-09-20)\n\n\n### Bug Fixes\n\n* **compose:** PixelCopy WindowScreenshot for ScreenshotProvider ([#369](https://github.com/Heavygee-Projects/hapi-inline/issues/369)) ([#370](https://github.com/Heavygee-Projects/hapi-inline/issues/370)) ([532ac41](https://github.com/Heavygee-Projects/hapi-inline/commit/532ac415e0dd074649347d87ff31966538bdad44))\n\n\n### Documentation\n\n* stamp Wardrobe live dockTag v0.18.0 ([#367](https://github.com/Heavygee-Projects/hapi-inline/issues/367)) ([a947b5c](https://github.com/Heavygee-Projects/hapi-inline/commit/a947b5c50e2a955364db0b4d9e12ba82b68c653e))\n\n## [0.18.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.17.0...v0.18.0) (2026-09-20)\n\n\n### Features\n\n* bulletproof consumer integration verify gate ([#363](https://github.com/Heavygee-Projects/hapi-inline/issues/363)) ([#365](https://github.com/Heavygee-Projects/hapi-inline/issues/365)) ([a025a25](https://github.com/Heavygee-Projects/hapi-inline/commit/a025a25ec691a283a62b9aff1249d9f4a0bbeff8))\n\n\n### Bug Fixes\n\n* Quest Browser prefer whisper over broken Web Speech ([#364](https://github.com/Heavygee-Projects/hapi-inline/issues/364)) ([#366](https://github.com/Heavygee-Projects/hapi-inline/issues/366)) ([16e1a89](https://github.com/Heavygee-Projects/hapi-inline/commit/16e1a89c321a56d9bb0f606e0bcfbf824324ed99))\n\n\n### Documentation\n\n* proxy unlock boot MUST (Wardrobe [#33](https://github.com/Heavygee-Projects/hapi-inline/issues/33) / [#228](https://github.com/Heavygee-Projects/hapi-inline/issues/228)) ([#360](https://github.com/Heavygee-Projects/hapi-inline/issues/360)) ([7e64fa9](https://github.com/Heavygee-Projects/hapi-inline/commit/7e64fa96d95ffb8bc57e9247281bad45f982696c))\n* QAR land-clean v0.17.0 / APK 1.2.21 ([#357](https://github.com/Heavygee-Projects/hapi-inline/issues/357)) ([f28b648](https://github.com/Heavygee-Projects/hapi-inline/commit/f28b648412d305865afd5f6679814122588d8f78))\n* sttUrl omit ≠ no speech (Wardrobe [#38](https://github.com/Heavygee-Projects/hapi-inline/issues/38)) ([#361](https://github.com/Heavygee-Projects/hapi-inline/issues/361)) ([3ef1bce](https://github.com/Heavygee-Projects/hapi-inline/commit/3ef1bce9c7b223f53fdbaa979541cd4c09287a1c))\n* Wardrobe remat ack v0.17.0 ([#362](https://github.com/Heavygee-Projects/hapi-inline/issues/362)) ([47cff00](https://github.com/Heavygee-Projects/hapi-inline/commit/47cff00ccc5343c99f7c1bc9da4f22191607bbd0))\n\n## [Unreleased]\n\n### Bug Fixes\n\n* **dock:** Quest live label beside whisper; keep MediaRecorder if speech recognition kills the mic ([#375](https://github.com/HeavyGee-Projects/hapi-inline/issues/375))\n* **dock:** voice markup drops toolbar Undo/Clear/Send; H dismisses the overlay ([#373](https://github.com/HeavyGee-Projects/hapi-inline/issues/373))\n* **compose:** document + ship `WindowScreenshot` (PixelCopy) for `ScreenshotProvider`; ban `drawToBitmap` (#369)\n* **dock:** Quest Browser + `sttUrl` skips broken Web Speech so MediaRecorder/whisper can run ([#364](https://github.com/Heavygee-Projects/hapi-inline/issues/364))\n\n## [0.17.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.16.0...v0.17.0) (2026-09-20)\n\n\n### Features\n\n* **dock:** Replies panel thinking spinner ([#353](https://github.com/Heavygee-Projects/hapi-inline/issues/353)) ([#354](https://github.com/Heavygee-Projects/hapi-inline/issues/354)) ([fb67b37](https://github.com/Heavygee-Projects/hapi-inline/commit/fb67b37df2bd82b537c1290fb930bf6ba1393e3b))\n\n## [0.16.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.12...v0.16.0) (2026-09-20)\n\n\n### Features\n\n* **dock:** multi-page Settings topic panels ([#349](https://github.com/Heavygee-Projects/hapi-inline/issues/349)) ([#350](https://github.com/Heavygee-Projects/hapi-inline/issues/350)) ([6b2574d](https://github.com/Heavygee-Projects/hapi-inline/commit/6b2574d984051e4bd09c8495ce5174a82f2b8055))\n\n## [0.15.12](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.11...v0.15.12) (2026-09-17)\n\n\n### Bug Fixes\n\n* **dock:** Quest live STT status vs speech ([#343](https://github.com/Heavygee-Projects/hapi-inline/issues/343)) ([#345](https://github.com/Heavygee-Projects/hapi-inline/issues/345)) ([f6bba31](https://github.com/Heavygee-Projects/hapi-inline/commit/f6bba31eccfd1d900c2dca254b21ca69975d5ed1))\n* **dock:** sectioned Settings sheet ([#342](https://github.com/Heavygee-Projects/hapi-inline/issues/342) B) ([#347](https://github.com/Heavygee-Projects/hapi-inline/issues/347)) ([fb3e702](https://github.com/Heavygee-Projects/hapi-inline/commit/fb3e7022d6c1b6477e662c90b707cb6d9125ff7e))\n\n## [0.15.11](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.10...v0.15.11) (2026-09-17)\n\n\n### Bug Fixes\n\n* **dock:** Pin vs Spawn only — pick under Pin ([#344](https://github.com/Heavygee-Projects/hapi-inline/issues/344)) ([933cbca](https://github.com/Heavygee-Projects/hapi-inline/commit/933cbca51221b6d520193f007647cc2afaebe036))\n\n\n### Documentation\n\n* QAR remat ack v0.15.10 / app 1.2.12 ([#338](https://github.com/Heavygee-Projects/hapi-inline/issues/338)) ([fa28aa3](https://github.com/Heavygee-Projects/hapi-inline/commit/fa28aa346c15564c4ea9c7a6a5a4624781b0f6fb))\n\n## [0.15.10](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.9...v0.15.10) (2026-09-17)\n\n\n### Bug Fixes\n\n* **dock:** native mic onCaptureDone return + Quest label ([#334](https://github.com/Heavygee-Projects/hapi-inline/issues/334)) ([#336](https://github.com/Heavygee-Projects/hapi-inline/issues/336)) ([58b7d56](https://github.com/Heavygee-Projects/hapi-inline/commit/58b7d56ac3889b773fdfcff24938d7f6bea01037))\n\n\n### Documentation\n\n* QAR land-clean v0.15.9 + consumer registry catch-up ([#331](https://github.com/Heavygee-Projects/hapi-inline/issues/331)) ([2f524c1](https://github.com/Heavygee-Projects/hapi-inline/commit/2f524c1c841416bfee712b1d21d5e09b1189b29f))\n* QAR mic interim until [#334](https://github.com/Heavygee-Projects/hapi-inline/issues/334) remat ([#335](https://github.com/Heavygee-Projects/hapi-inline/issues/335)) ([9de1c15](https://github.com/Heavygee-Projects/hapi-inline/commit/9de1c150f844d11fb8d6dd0d84222d52f28af2c7))\n\n## [0.15.9](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.8...v0.15.9) (2026-09-16)\n\n\n### Bug Fixes\n\n* **dock:** do not map hub auth/502 to empty project sessions ([#328](https://github.com/Heavygee-Projects/hapi-inline/issues/328)) ([1b32dc6](https://github.com/Heavygee-Projects/hapi-inline/commit/1b32dc6e9cb43d3fa19b46fc1bb45f28f9ff1089))\n* projectPath treats /home/…/coding ↔ /work/coding aliases ([#329](https://github.com/Heavygee-Projects/hapi-inline/issues/329)) ([0a9cad2](https://github.com/Heavygee-Projects/hapi-inline/commit/0a9cad20d971bcff96c5ce318cec9b6026728875))\n\n\n### Documentation\n\n* hub-smoke every device + auth≠empty-project ([#330](https://github.com/Heavygee-Projects/hapi-inline/issues/330)) ([5288a78](https://github.com/Heavygee-Projects/hapi-inline/commit/5288a7878aa1d046be913d3ea390ecbef5ebca9e))\n* remat ack covers host FAB/proxy glue ([#322](https://github.com/Heavygee-Projects/hapi-inline/issues/322)) ([#323](https://github.com/Heavygee-Projects/hapi-inline/issues/323)) ([b0d72b1](https://github.com/Heavygee-Projects/hapi-inline/commit/b0d72b1734137df52b7d1c78c4a07c7f180d071f))\n\n## [0.15.8](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.7...v0.15.8) (2026-09-15)\n\n\n### Bug Fixes\n\n* **compose:** markup draw-only with H/mic like web ([#319](https://github.com/Heavygee-Projects/hapi-inline/issues/319)) ([#320](https://github.com/Heavygee-Projects/hapi-inline/issues/320)) ([47d827a](https://github.com/Heavygee-Projects/hapi-inline/commit/47d827ae3b4e7149a8ab578256795f5a030e3228))\n\n## [0.15.7](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.6...v0.15.7) (2026-09-15)\n\n\n### Bug Fixes\n\n* **compose:** replies panel title uses session name ([#316](https://github.com/Heavygee-Projects/hapi-inline/issues/316)) ([#317](https://github.com/Heavygee-Projects/hapi-inline/issues/317)) ([428684b](https://github.com/Heavygee-Projects/hapi-inline/commit/428684b443f051c772ee71649425d0ea6d3e69fe))\n\n## [0.15.6](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.5...v0.15.6) (2026-09-15)\n\n\n### Bug Fixes\n\n* **compose:** hide HubFab and opaque markup underlay ([#313](https://github.com/Heavygee-Projects/hapi-inline/issues/313)) ([#314](https://github.com/Heavygee-Projects/hapi-inline/issues/314)) ([2f42f76](https://github.com/Heavygee-Projects/hapi-inline/commit/2f42f76e3e8aeac2b54b2cc51f883494ce12b594))\n\n## [0.15.5](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.4...v0.15.5) (2026-09-14)\n\n\n### Documentation\n\n* four-state knock matrix + execute gate ≠ host app session ([#310](https://github.com/Heavygee-Projects/hapi-inline/issues/310)) ([4c852b6](https://github.com/Heavygee-Projects/hapi-inline/commit/4c852b6f8ddc395dae2043962eec0d3a81085cbc))\n\n## [0.15.4](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.3...v0.15.4) (2026-09-14)\n\n\n### Bug Fixes\n\n* **dock:** embed CHANGELOG.md into About fallback ([#306](https://github.com/Heavygee-Projects/hapi-inline/issues/306)) ([2320278](https://github.com/Heavygee-Projects/hapi-inline/commit/2320278cb2fad9b664fe6c4ec104f6f2f2565702))\n";
+  var BUNDLED_CHANGELOG_FALLBACK = "## [0.18.6](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.5...v0.18.6) (2026-10-06)\n\n\n### Bug Fixes\n\n* **dock:** keep live STT under H fan satellites ([e7610d1](https://github.com/Heavygee-Projects/hapi-inline/commit/e7610d1e9dd138957a6064101b496de1560e4303))\n* **dock:** stop repeating Hide and headings in Settings ([#416](https://github.com/Heavygee-Projects/hapi-inline/issues/416)) ([dfefc6a](https://github.com/Heavygee-Projects/hapi-inline/commit/dfefc6a5a610288a608c09aa57c01e55623114a7))\n\n\n### Documentation\n\n* keep changelog and About free of consumer names ([8e944f7](https://github.com/Heavygee-Projects/hapi-inline/commit/8e944f7f91ce21e113b6f11da1c6745db25fe844))\n* restore 0.18.5 functional notes after history rewrite ([3de9659](https://github.com/Heavygee-Projects/hapi-inline/commit/3de9659f947d11f0cdc2f7f9307894eb42301067))\n\n## [0.18.5](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.4...v0.18.5) (2026-10-05)\n\n\n### Bug Fixes\n\n* **compose:** About shows dock version and bundled changelog ([#402](https://github.com/Heavygee-Projects/hapi-inline/issues/402)), closes [#399](https://github.com/Heavygee-Projects/hapi-inline/issues/399)\n* **compose:** accept hub unread 0/1 in session list ([#401](https://github.com/Heavygee-Projects/hapi-inline/issues/401)), closes [#400](https://github.com/Heavygee-Projects/hapi-inline/issues/400)\n* warn once when legacy privilege sunsets to off ([#396](https://github.com/Heavygee-Projects/hapi-inline/issues/396)) ([#397](https://github.com/Heavygee-Projects/hapi-inline/issues/397))\n\n\n### Documentation\n\n* fail-closed deploy requirements for a new consumer ([#384](https://github.com/Heavygee-Projects/hapi-inline/issues/384))\n\n## [0.18.4](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.3...v0.18.4) (2026-09-21)\n\n## [0.18.3](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.2...v0.18.3) (2026-09-21)\n\n## [0.18.2](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.1...v0.18.2) (2026-09-21)\n\n## [0.18.1](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.0...v0.18.1) (2026-09-20)\n\n## [0.18.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.17.0...v0.18.0) (2026-09-20)\n\n## [Unreleased]\n\n## [0.17.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.16.0...v0.17.0) (2026-09-20)\n\n## [0.16.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.12...v0.16.0) (2026-09-20)\n\n## [0.15.12](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.11...v0.15.12) (2026-09-17)\n\n## [0.15.11](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.10...v0.15.11) (2026-09-17)\n\n## [0.15.10](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.9...v0.15.10) (2026-09-17)\n\n## [0.15.9](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.8...v0.15.9) (2026-09-16)\n\n## [0.15.8](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.7...v0.15.8) (2026-09-15)\n\n## [0.15.7](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.6...v0.15.7) (2026-09-15)\n\n## [0.15.6](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.5...v0.15.6) (2026-09-15)\n";
   /* END GENERATED bundled-changelog */
   function loadBundledChangelog() {
     if (bundledChangelogPromise) return bundledChangelogPromise;
@@ -4192,8 +4190,71 @@
     });
     return bundledChangelogPromise;
   }
+  function changelogDateFromText(text) {
+    var m = String(text || '').match(/\((\d{4}-\d{2}-\d{2})\)/);
+    return m ? m[1] : '';
+  }
+  function aboutLastUpdatedLine(date) {
+    var ver = currentDockVersion() || '(unknown)';
+    var shown = date || changelogDateFromText(BUNDLED_CHANGELOG_FALLBACK);
+    return 'Last updated: v' + String(ver).replace(/^v/, '')
+      + (shown ? ' · ' + shown : '')
+      + ' (tag / _version / changelog date)';
+  }
   function aboutModeLabel() {
     return cfg && cfg.mode === MODE_BROWSER_HUB ? 'browser-hub' : 'proxy';
+  }
+  function appendAboutPageBody(host) {
+    host.appendChild($('div', 'opdock-session-meta',
+      'The operator dock is the H hub on this page: markup, voice, and send into HAPI sessions.'));
+    host.appendChild($('div', 'opdock-session-meta',
+      'It ships as the hapi-inline package from HeavyGee Projects.'));
+    host.appendChild($('div', 'opdock-session-meta', 'Version: ' + (currentDockVersion() || '(unknown)')));
+    var updatedLine = $('div', 'opdock-session-meta', aboutLastUpdatedLine());
+    host.appendChild(updatedLine);
+    host.appendChild($('div', 'opdock-session-meta', 'Mode: ' + aboutModeLabel()));
+    host.appendChild($('div', 'opdock-session-meta', 'Hub: ' + aboutHubSummary()));
+    host.appendChild($('div', 'opdock-session-meta', 'STT: ' + aboutSttSummary()));
+    host.appendChild($('div', 'opdock-session-meta', 'Routing: ' + getRoutingMode()));
+    host.appendChild($('div', 'opdock-session-meta', 'Credits: hapi-inline by HeavyGee Projects'));
+    var changelogTitle = $('div', 'opdock-row-title');
+    changelogTitle.appendChild($('span', null, 'Release notes'));
+    if (isVersionUnseen()) {
+      changelogTitle.appendChild($('span',
+        'opdock-version-dot opdock-version-dot--about opdock-version-dot--changelog opdock-version-dot--pulse'));
+    }
+    host.appendChild(changelogTitle);
+    var sourceMeta = $('div', 'opdock-session-meta', 'Loading release notes…');
+    host.appendChild(sourceMeta);
+    var list = $('div', 'opdock-changelog');
+    list.appendChild($('div', 'opdock-session-meta', 'Loading…'));
+    host.appendChild(list);
+    loadBundledChangelog().then(function (result) {
+      if (!list.isConnected) return;
+      var source = result && result.source;
+      var entries = result && result.entries ? result.entries : [];
+      sourceMeta.textContent = source === 'host'
+        ? 'Release notes from host CHANGELOG.md'
+        : 'Embedded notes from this dock tag (host CHANGELOG.md not served)';
+      var date = (entries[0] && entries[0].date) || changelogDateFromText(BUNDLED_CHANGELOG_FALLBACK);
+      updatedLine.textContent = aboutLastUpdatedLine(date);
+      renderChangelogList(list, entries);
+    }).catch(function () {
+      if (!list.isConnected) return;
+      sourceMeta.textContent = 'Could not load release notes.';
+      list.textContent = '';
+      list.appendChild($('div', 'opdock-session-meta', 'Could not load bundled release notes.'));
+    });
+    if (isVersionUnseen()) {
+      var dismissBtn = $('button', 'opdock-btn2 opdock-secondary', 'Dismiss update');
+      dismissBtn.type = 'button';
+      dismissBtn.addEventListener('click', function () {
+        markCurrentVersionSeen();
+        refreshVersionTrailUi();
+        dismissBtn.remove();
+      });
+      host.appendChild(dismissBtn);
+    }
   }
   function aboutHubSummary() {
     if (cfg && cfg.mode === MODE_BROWSER_HUB) return hasValidHubOrigin() ? 'present' : 'not set';
@@ -4223,38 +4284,11 @@
     if (!dock) return;
     toolSheet = $('div', 'opdock-sheet');
     toolSheetStage = 'about';
-    toolSheet.appendChild($('h3', null, 'About hapi-inline'));
-    toolSheet.appendChild($('div', 'opdock-session-meta', 'Version: ' + (currentDockVersion() || '(unknown)')));
-    toolSheet.appendChild($('div', 'opdock-session-meta', 'Mode: ' + aboutModeLabel()));
-    toolSheet.appendChild($('div', 'opdock-session-meta', 'Hub: ' + aboutHubSummary()));
-    toolSheet.appendChild($('div', 'opdock-session-meta', 'STT: ' + aboutSttSummary()));
-    toolSheet.appendChild($('div', 'opdock-session-meta', 'Routing: ' + getRoutingMode()));
-    toolSheet.appendChild($('div', 'opdock-session-meta', 'Credits: hapi-inline by HeavyGee Projects'));
-
-    var changelogRow = $('button', 'opdock-session-row');
-    changelogRow.type = 'button';
-    var changelogBody = $('div');
-    var changelogTitle = $('div', 'opdock-row-title');
-    changelogTitle.appendChild($('span', null, 'Changelog'));
-    if (isVersionUnseen()) changelogTitle.appendChild($('span', 'opdock-version-dot opdock-version-dot--changelog opdock-version-dot--pulse'));
-    changelogBody.appendChild(changelogTitle);
-    changelogBody.appendChild($('div', 'opdock-session-meta', 'Open bundled release notes (no live GitHub fetch).'));
-    changelogRow.appendChild(changelogBody);
-    changelogRow.addEventListener('click', function () { openChangelogSheet(); });
-    toolSheet.appendChild(changelogRow);
-
+    appendAboutPageBody(toolSheet);
     var actions = $('div', 'opdock-actions');
     var backBtn = $('button', 'opdock-btn2 opdock-secondary', 'Back');
     backBtn.addEventListener('click', function () { openSettingsSheet(); });
     actions.appendChild(backBtn);
-    if (isVersionUnseen()) {
-      var dismissBtn = $('button', 'opdock-btn2 opdock-secondary', 'Dismiss update');
-      dismissBtn.addEventListener('click', function () {
-        markCurrentVersionSeen();
-        openAboutSheet();
-      });
-      actions.appendChild(dismissBtn);
-    }
     var doneBtn = $('button', 'opdock-btn2 opdock-send', 'Done');
     doneBtn.addEventListener('click', function () { closeToolSheet(); });
     actions.appendChild(doneBtn);
@@ -4436,7 +4470,7 @@
       });
     }
     // #124: native host ≠ hide mic sat. AndroidOperator is a bridge (STT / PixelCopy),
-    // not chrome ownership. Native FAB may be hub (QAR openCluster) or mic (Jessica).
+    // not chrome ownership. Native FAB may be hub (integrating app openCluster) or mic (integrating app).
     // Hosts that own mic chrome call hideButton() (or CSS-hide the sat).
   }
 
@@ -4622,7 +4656,7 @@
 
   window.HapiInline = {
     init: init,
-    _version: '0.18.5', // x-release-please-version
+    _version: '0.18.6', // x-release-please-version
     openCluster: function () { return openCluster(); },
     /** #287 — host Settings can offer the same hide/show the dock sheet does. */
     hideForThisUser: function () { setUserHidden(true); hideDockChrome(); },
@@ -4699,7 +4733,7 @@
       }
     },
     hideButton: function () {
-      // #124: opt-in for hosts that own mic chrome (Jessica). Hub stays.
+      // #124: opt-in for hosts that own mic chrome (integrating app). Hub stays.
       if (dock) {
         var micSat = dock.querySelector('.opdock-sat[data-tool="mic"]');
         if (micSat) micSat.style.display = 'none';
