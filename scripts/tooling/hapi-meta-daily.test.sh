@@ -172,14 +172,15 @@ check "run1: ✅ #200 first-sight transition pings (bbbbbbbb)" "grep -q '^bbbbbb
 check "run1: #400 asleep resume-pinged (C)" "grep -q '^dddddddd' <<<\"\$pings\""
 check "run1: thinking ⚠️ #600 not pinged (ffffffff)" "! grep -q '^ffffffff' <<<\"\$pings\""
 
-# ============ 3. second run: window-rouse sticky ⚠️/🔧; ✅ stays quiet ============
+# ============ 3. second run: 🔧 still hourly; same-fp ⚠️ backs off ============
 out="$(run 2>&1)"
 pings2="$(sort "$WORK/pings.log" 2>/dev/null || true)"
-check "run2: window-rouse re-pings ⚠️ #100" "grep -q '^aaaaaaaa' <<<\"\$pings2\""
+check "run2: same-fp ⚠️ #100 does NOT re-ping (backoff)" "! grep -q '^aaaaaaaa' <<<\"\$pings2\""
 check "run2: window-rouse re-pings 🔧 #300" "grep -q '^cccccccc' <<<\"\$pings2\""
-check "run2: window-rouse re-pings asleep ⚠️ #400" "grep -q '^dddddddd' <<<\"\$pings2\""
+check "run2: same-fp asleep ⚠️ #400 does NOT re-ping (backoff)" "! grep -q '^dddddddd' <<<\"\$pings2\""
 check "run2: thinking ⚠️ #600 still not pinged" "! grep -q '^ffffffff' <<<\"\$pings2\""
 check "run2: thinking skip listed" "grep -q 'ffffffff' <<<\"\$out\" && grep -qiE 'thinking|SKIPPED' <<<\"\$out\""
+check "run2: backoff skip listed" "grep -qi 'backoff' <<<\"\$out\""
 check "run2: ✅ #200 stays silent (not work-state)" "! grep -q '^bbbbbbbb' <<<\"\$pings2\""
 check "run2: still lists warn #100 in queue" "grep -q '#100' <<<\"\$out\""
 
@@ -190,6 +191,23 @@ out="$(run --reminder-hours 1 2>&1)"
 pings3="$(cat "$WORK/pings.log" 2>/dev/null || true)"
 check "run3: ⚠️ #100 still window-roused" "grep -q '^aaaaaaaa' <<<\"\$pings3\""
 check "run3: ✅ #200 still silent" "! grep -q '^bbbbbbbb' <<<\"\$pings3\""
+
+# ============ 4b. ⚠️ backoff still holds when last_ping is recent ============
+now_s="$(date +%s)"
+tmp="$(jq -c --argjson n "$now_s" \
+  '(.sessions["aaaaaaaa-1111"].last_ping) = $n | (.sessions["aaaaaaaa-1111"].ping_streak) = 1' \
+  "$WORK/state.json")"
+echo "$tmp" >"$WORK/state.json"
+out="$(run 2>&1)"
+pings3b="$(cat "$WORK/pings.log" 2>/dev/null || true)"
+check "run3b: recent same-fp ⚠️ does not ping" "! grep -q '^aaaaaaaa' <<<\"\$pings3b\""
+tmp="$(jq -c --argjson n "$((now_s - 8000))" \
+  '(.sessions["aaaaaaaa-1111"].last_ping) = $n | (.sessions["aaaaaaaa-1111"].ping_streak) = 1' \
+  "$WORK/state.json")"
+echo "$tmp" >"$WORK/state.json"
+out="$(run 2>&1)"
+pings3c="$(cat "$WORK/pings.log" 2>/dev/null || true)"
+check "run3c: ⚠️ re-pings after 2h backoff elapsed" "grep -q '^aaaaaaaa' <<<\"\$pings3c\""
 
 # ============ 5. --no-ping never pings ============
 out="$(run --no-ping 2>&1)"
@@ -1521,7 +1539,7 @@ out="$(run --emit-events 2>&1)"
 pings_b2="$(cat "$WORK/pings.log" 2>/dev/null || true)"
 check "blockedUpstream: second window still zero peer pings" "! grep -q '^bbbbbbbb' <<<\"\$pings_b2\""
 check "blockedUpstream: second window no window emit for blocked-only" "! grep -q 'bbbbbbbb-1511' '$WORK/events.log' 2>/dev/null"
-check "blockedUpstream: second window still rouses actionable" "grep -q '^cccccccc' <<<\"\$pings_b2\""
+check "blockedUpstream: second window same-fp ⚠️ backs off" "! grep -q '^cccccccc' <<<\"\$pings_b2\""
 check "blockedUpstream: second window still rouses blocked+🔧" "grep -q '^eeeeeeee' <<<\"\$pings_b2\""
 
 # Label cleared → stickyPing true restores normal first-sight/window policy

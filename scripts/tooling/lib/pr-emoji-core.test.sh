@@ -196,8 +196,17 @@ eq "fingerprint deterministic" "$FP_A" "$(pec_action_fingerprint "⚠️" "fix f
 
 eq "transition ✅→⚠️ pings" "$(pec_should_ping "⚠️" "✅" "$FP_A" "x" 100 200 86400)" "yes"
 eq "sticky ⚠️ same fp, no reminder → no" "$(pec_should_ping "⚠️" "⚠️" "$FP_A" "$FP_A" 200 300 86400)" "no"
-eq "sticky ⚠️ window rouse → yes" "$(pec_should_ping "⚠️" "⚠️" "$FP_A" "$FP_A" 200 300 86400 1)" "yes"
+eq "sticky ⚠️ window same-fp recent last_ping → no (backoff)" \
+    "$(pec_should_ping "⚠️" "⚠️" "$FP_A" "$FP_A" 200 300 86400 1 || true)" "no"
+eq "sticky ⚠️ window last_ping=0 → yes" "$(pec_should_ping "⚠️" "⚠️" "$FP_A" "$FP_A" 0 300 86400 1)" "yes"
+eq "sticky ⚠️ window 2h elapsed streak 1 → yes" \
+    "$(pec_should_ping "⚠️" "⚠️" "$FP_A" "$FP_A" 100 7400 86400 1 true 1)" "yes"
+eq "sticky ⚠️ window fp change → yes immediately" \
+    "$(pec_should_ping "⚠️" "⚠️" "$FP_B" "$FP_A" 200 300 86400 1)" "yes"
 eq "sticky 🔧 window rouse → yes" "$(pec_should_ping "🔧" "🔧" "$FP_A" "$FP_A" 200 300 86400 1)" "yes"
+eq "backoff secs streak 1 → 7200" "$(pec_warn_window_backoff_secs 1 86400)" "7200"
+eq "backoff secs streak 2 → 14400" "$(pec_warn_window_backoff_secs 2 86400)" "14400"
+eq "backoff secs streak 5 caps at reminder" "$(pec_warn_window_backoff_secs 5 86400)" "86400"
 eq "unchanged ✅ window rouse still no" "$(pec_should_ping "✅" "✅" "z" "z" 200 300 86400 1)" "no"
 eq "sticky ⚠️ changed fp → yes" "$(pec_should_ping "⚠️" "⚠️" "$FP_B" "$FP_A" 200 300 86400)" "yes"
 eq "sticky ⚠️ reminder elapsed → yes" "$(pec_should_ping "⚠️" "⚠️" "$FP_A" "$FP_A" 100 100000 86400)" "yes"
@@ -223,8 +232,10 @@ eq "emit reason: steady ✅ is none" \
     "$(pec_emit_reason "✅" "✅" "z" "z" 200 300 86400)" "none"
 eq "emit reason: sticky ⚠️ reminder" \
     "$(pec_emit_reason "⚠️" "⚠️" "$FP_A" "$FP_A" 100 100000 86400)" "reminder"
-eq "emit reason: sticky ⚠️ window" \
-    "$(pec_emit_reason "⚠️" "⚠️" "$FP_A" "$FP_A" 200 300 86400 1)" "window"
+eq "emit reason: sticky ⚠️ window last_ping=0" \
+    "$(pec_emit_reason "⚠️" "⚠️" "$FP_A" "$FP_A" 0 300 86400 1)" "window"
+eq "emit reason: sticky ⚠️ window backoff skip" \
+    "$(pec_emit_reason "⚠️" "⚠️" "$FP_A" "$FP_A" 200 300 86400 1 || true)" "none"
 eq "emit reason: sticky ⚠️ fp change" \
     "$(pec_emit_reason "⚠️" "⚠️" "$FP_B" "$FP_A" 200 300 86400)" "fingerprint"
 
@@ -481,8 +492,8 @@ eq "emit none when sticky=false window" \
     "$(pec_emit_reason "⚠️" "⚠️" "$FP_A" "$FP_A" 200 300 86400 1 false || true)" "none"
 eq "emit none when sticky=false transition" \
     "$(pec_emit_reason "⚠️" "✅" "$FP_A" "x" 100 200 86400 0 false || true)" "none"
-eq "ping sticky still yes when sticky=true window" \
-    "$(pec_should_ping "⚠️" "⚠️" "$FP_A" "$FP_A" 200 300 86400 1 true)" "yes"
+eq "ping sticky still yes when sticky=true window last_ping=0" \
+    "$(pec_should_ping "⚠️" "⚠️" "$FP_A" "$FP_A" 0 300 86400 1 true)" "yes"
 
 # complete never pings (incl. transition from 🔧)
 eq "ping never on complete" "$(pec_should_ping "🧹" "🔧" "a" "b" 0 100 10 1 || true)" "no"

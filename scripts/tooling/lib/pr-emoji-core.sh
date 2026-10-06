@@ -548,8 +548,52 @@ pec_action_fingerprint() {
     printf '%s|%s' "$emoji" "$action" | cksum | awk '{print $1}'
 }
 
+# pec_warn_window_backoff_secs STREAK [CAP_SECS]
+# Hours to wait after STREAK consecutive same-fp ⚠️ pings: 2h, 4h, 8h, … cap.
+# STREAK 0/empty still counts as 1 when a last_ping exists (legacy hourly state).
+pec_warn_window_backoff_secs() {
+    local streak="${1:-0}" cap="${2:-86400}"
+    local n="$streak"
+    [[ "$n" =~ ^[0-9]+$ ]] || n=0
+    (( n < 1 )) && n=1
+    [[ "$cap" =~ ^[0-9]+$ ]] || cap=86400
+    (( cap < 3600 )) && cap=3600
+    local secs=3600 i=0 next
+    while (( i < n )); do
+        next=$((secs * 2))
+        if (( next < secs || next >= cap )); then
+            secs=$cap
+            break
+        fi
+        secs=$next
+        i=$((i + 1))
+    done
+    (( secs > cap )) && secs=$cap
+    printf '%s' "$secs"
+}
+
+# pec_warn_window_due LAST_PING NOW REMINDER STREAK NEW_FP PREV_FP
+# Return 0 if a ⚠️ ping-window rouse should fire. Fingerprint change or never
+# pinged → due. Same fp → exponential wait vs last_ping.
+pec_warn_window_due() {
+    local last_ping="${1:-0}" now="${2:-0}" reminder="${3:-86400}" \
+        streak="${4:-0}" new_fp="${5:-}" prev_fp="${6:-}"
+    if [[ "$new_fp" != "$prev_fp" ]]; then
+        return 0
+    fi
+    if [[ "$last_ping" -le 0 ]]; then
+        return 0
+    fi
+    local wait
+    wait="$(pec_warn_window_backoff_secs "$streak" "$reminder")"
+    if (( now - last_ping >= wait )); then
+        return 0
+    fi
+    return 1
+}
+
 # Decide whether to ping a session, given its previous recorded state.
-#   pec_should_ping NEW_EMOJI PREV_EMOJI NEW_FP PREV_FP LAST_PING_EPOCH NOW_EPOCH REMINDER_SECS [WINDOW_ROUSE] [STICKY_PING]
+#   pec_should_ping NEW_EMOJI PREV_EMOJI NEW_FP PREV_FP LAST_PING_EPOCH NOW_EPOCH REMINDER_SECS [WINDOW_ROUSE] [STICKY_PING] [PING_STREAK]
 # Prints "yes" / "no" and returns 0/1 respectively.
 #
 # Rules:
@@ -559,7 +603,10 @@ pec_action_fingerprint() {
 #   - STICKY_PING=0|false               → never ping (blocked-upstream-only, #128)
 #   - emoji changed vs recorded state   → ping (transition)
 #   - sticky ⚠️ or 🔧:
-#       - WINDOW_ROUSE=1 (Meta ping windows) → always yes ("are you done yet?")
+#       - WINDOW_ROUSE=1 + 🔧            → always yes (merge cleanup is doable)
+#       - WINDOW_ROUSE=1 + ⚠️            → yes on first sight / fp change;
+#         same fp exponential backoff (2h, 4h, 8h … cap reminder). Stops
+#         hourly token burn on infra stalls (Sol 503 / distributor empty).
 #       - action fingerprint changed         → ping (new instruction)
 #       - reminder interval elapsed          → ping (nag)
 #       - otherwise                          → no
@@ -571,7 +618,7 @@ pec_action_fingerprint() {
 pec_should_ping() {
     local new_emoji="$1" prev_emoji="$2" new_fp="$3" prev_fp="$4" \
         last_ping="${5:-0}" now="${6:-0}" reminder="${7:-86400}" window_rouse="${8:-0}" \
-        sticky_ping="${9:-}"
+        sticky_ping="${9:-}" ping_streak="${10:-0}"
 
     if [[ "$new_emoji" == "?" || "$new_emoji" == "🧹" || "$new_emoji" == "🛑" ]]; then
         echo "no"; return 1
@@ -586,7 +633,13 @@ pec_should_ping() {
     fi
     if [[ "$new_emoji" == "⚠️" || "$new_emoji" == "🔧" ]]; then
         if [[ "$window_rouse" -eq 1 ]]; then
-            echo "yes"; return 0
+            if [[ "$new_emoji" == "🔧" ]]; then
+                echo "yes"; return 0
+            fi
+            if pec_warn_window_due "$last_ping" "$now" "$reminder" "$ping_streak" "$new_fp" "$prev_fp"; then
+                echo "yes"; return 0
+            fi
+            echo "no"; return 1
         fi
         if [[ "$new_fp" != "$prev_fp" ]]; then
             echo "yes"; return 0
@@ -615,15 +668,16 @@ pec_should_rename() {
 # Channel event emit helpers (ContributionState → POST /api/system-events)
 # ---------------------------------------------------------------------------
 
-# pec_emit_reason NEW_EMOJI PREV_EMOJI NEW_FP PREV_FP LAST_PING NOW REMINDER [WINDOW_ROUSE] [STICKY_PING]
+# pec_emit_reason NEW_EMOJI PREV_EMOJI NEW_FP PREV_FP LAST_PING NOW REMINDER [WINDOW_ROUSE] [STICKY_PING] [PING_STREAK]
 # → transition | fingerprint | reminder | window | none
 # Same triggers as pec_should_ping, but returns why (reminder/window need key suffix).
 # STICKY_PING=0|false → none (no window/reminder/fingerprint/transition nags for
-# blocked-upstream-only sessions; #128).
+# blocked-upstream-only sessions; #128). ⚠️ window emits honor the same
+# exponential backoff as pec_should_ping.
 pec_emit_reason() {
     local new_emoji="$1" prev_emoji="$2" new_fp="$3" prev_fp="$4" \
         last_ping="${5:-0}" now="${6:-0}" reminder="${7:-86400}" window_rouse="${8:-0}" \
-        sticky_ping="${9:-}"
+        sticky_ping="${9:-}" ping_streak="${10:-0}"
 
     if [[ "$new_emoji" == "?" || "$new_emoji" == "🧹" ]]; then
         echo "none"; return 1
@@ -638,7 +692,13 @@ pec_emit_reason() {
     fi
     if [[ "$new_emoji" == "⚠️" || "$new_emoji" == "🔧" ]]; then
         if [[ "$window_rouse" -eq 1 ]]; then
-            echo "window"; return 0
+            if [[ "$new_emoji" == "🔧" ]]; then
+                echo "window"; return 0
+            fi
+            if pec_warn_window_due "$last_ping" "$now" "$reminder" "$ping_streak" "$new_fp" "$prev_fp"; then
+                echo "window"; return 0
+            fi
+            echo "none"; return 1
         fi
         if [[ "$new_fp" != "$prev_fp" ]]; then
             echo "fingerprint"; return 0

@@ -12,7 +12,8 @@
 #      ADR D8+). Never writes emoji or PR-number prefixes into titles.
 #      Keeps "Peer #N:" incubating titles (no issue chip yet).
 #   4. Pings a session ONLY when policy says it is actionable and not noise
-#      (ping windows: always rouse sticky ⚠️/🔧 incl. inactive/archived resume;
+#      (ping windows: 🔧 always hourly; ⚠️ same-fp exponential backoff 2h/4h/8h…
+#      cap 24h — infra stalls must not hourly-wake the coding peer;
 #      SKIP if session.thinking — already in a turn / emitting (not merely active).
 #      🧹 complete never pings; 🔧 Gate A clean / archive-pending never hourly
 #      resume — that undoes archive → 🔧 forever; 2026-08-11 e4d152f3)
@@ -564,10 +565,10 @@ md_combined_emoji() {
     printf '%s' "$combined"
 }
 
-# md_plan_ping <new_emoji> <new_fp> <prev_emoji> <prev_fp> <prev_ping> <now> <reminder> [window_rouse] [sticky_ping]
+# md_plan_ping <new_emoji> <new_fp> <prev_emoji> <prev_fp> <prev_ping> <now> <reminder> [window_rouse] [sticky_ping] [ping_streak]
 #   → "yes"/"no" (wraps pec_should_ping; kept for test clarity)
 md_plan_ping() {
-    pec_should_ping "$1" "$3" "$2" "$4" "${5:-0}" "$6" "$7" "${8:-0}" "${9:-}"
+    pec_should_ping "$1" "$3" "$2" "$4" "${5:-0}" "$6" "$7" "${8:-0}" "${9:-}" "${10:-0}"
 }
 
 # md_session_sticky_peer_ping <sid8> <prs-space-joined>
@@ -924,7 +925,7 @@ main() {
 
     # --- per-session: rename + policy ping; build next state ---
     local new_state="$state"
-    local -a Q_WARN Q_MERGED Q_COMPLETE Q_ORPHAN Q_INACTIVE Q_PINGED Q_RENAMED Q_STATUS Q_WAIT_TIANN Q_WAIT_FORK Q_SELF_MERGE Q_SKIP_RUNNING Q_HOLD
+    local -a Q_WARN Q_MERGED Q_COMPLETE Q_ORPHAN Q_INACTIVE Q_PINGED Q_RENAMED Q_STATUS Q_WAIT_TIANN Q_WAIT_FORK Q_SELF_MERGE Q_SKIP_RUNNING Q_SKIP_BACKOFF Q_HOLD
     local -a PLAN_ROWS   # for --json
     MD_EMIT_FAILURES=0
     local now_ms=$(( now * 1000 ))
@@ -1069,11 +1070,11 @@ main() {
             fi
         fi
 
-        # ping policy (actuator cursor: emoji/fp/last_ping)
-        # Ping windows (DO_PING=1): force-rouse sticky ⚠️/🔧 ("are you done yet?").
-        # Quiet --no-ping refresh: never pings; emit still uses non-window policy.
+        # ping policy (actuator cursor: emoji/fp/last_ping/ping_streak)
+        # Ping windows (DO_PING=1): 🔧 always hourly; ⚠️ same-fp exponential
+        # backoff (2h/4h/8h… cap reminder). Quiet --no-ping never pings.
         # blockedUpstream-only sessions: stickyPing=false → no peer ping (#128).
-        local action_fp prev_emoji prev_fp prev_ping decision window_rouse=0 session_sticky=true
+        local action_fp prev_emoji prev_fp prev_ping prev_streak decision window_rouse=0 session_sticky=true
         [[ "$DO_PING" -eq 1 ]] && window_rouse=1
         if ! md_session_sticky_peer_ping "$sid8" "$prs"; then
             # No actionable sticky ⚠️/🔧 (e.g. only blocked-upstream, or only ✅/📝).
@@ -1086,9 +1087,20 @@ main() {
         prev_emoji="$(md_prev "$state" "$sid" "emoji")"
         prev_fp="$(md_prev "$state" "$sid" "fp")"
         prev_ping="$(md_prev "$state" "$sid" "last_ping")"
+        prev_streak="$(md_prev "$state" "$sid" "ping_streak")"
         [[ -z "$prev_ping" ]] && prev_ping=0
+        [[ -z "$prev_streak" ]] && prev_streak=0
+        # Mixed ⚠️+🔧: cleanup is still hourly. pec_worst_emoji ranks ⚠️ above
+        # 🔧, so combined stays ⚠️; ping policy must see the 🔧.
+        local ping_emoji="$combined" p_e
+        for p_e in $prs; do
+            if [[ "${SESS_PR_EMOJI[$sid8:$p_e]:-}" == "🔧" ]]; then
+                ping_emoji="🔧"
+                break
+            fi
+        done
         # md_plan_ping/pec_should_ping return 1 for "no"; capture text, ignore rc.
-        decision="$(md_plan_ping "$combined" "$action_fp" "$prev_emoji" "$prev_fp" "$prev_ping" "$now" "$REMINDER_SECS" "$window_rouse" "$session_sticky" || true)"
+        decision="$(md_plan_ping "$ping_emoji" "$action_fp" "$prev_emoji" "$prev_fp" "$prev_ping" "$now" "$REMINDER_SECS" "$window_rouse" "$session_sticky" "$prev_streak" || true)"
         # Gate A clean + archive pending is Meta's job. Hourly ping-peer resumes
         # the row, mw_member_complete fails not_archived, chip flips 🧹→🔧, and
         # the next window pings again. Never rouse for that remainder.
@@ -1111,8 +1123,11 @@ main() {
             decision="no"
             Q_SKIP_RUNNING+=("$sid8  $combined  #$(echo "$prs" | tr ' ' ',')  — thinking; skip ping this window")
         fi
+        if [[ "$combined" == "⚠️" && "$DO_PING" -eq 1 && "$session_sticky" == "true" && "$thinking" != "true" && "$decision" == "no" && "$prev_emoji" == "⚠️" ]]; then
+            Q_SKIP_BACKOFF+=("$sid8  ⚠️  #$(echo "$prs" | tr ' ' ',')  — same blocker; exponential backoff")
+        fi
 
-        local this_ping="$prev_ping"
+        local this_ping="$prev_ping" this_streak="$prev_streak"
         if [[ "$combined" == "?" ]]; then
             : # unknown: leave everything, don't touch state emoji
         else
@@ -1133,6 +1148,16 @@ main() {
                     _do_ping "$sid8" "$combined" "$prs" "$acts"
                     Q_PINGED+=("$sid8  $combined  #$(echo "$prs" | tr ' ' ',')${ping_note}")
                     this_ping="$now"
+                    if [[ "$combined" == "⚠️" ]]; then
+                        if [[ "$action_fp" == "$prev_fp" && "$prev_emoji" == "⚠️" ]]; then
+                            this_streak=$((prev_streak + 1))
+                            (( this_streak < 1 )) && this_streak=1
+                        else
+                            this_streak=1
+                        fi
+                    else
+                        this_streak=0
+                    fi
                 fi
             fi
 
@@ -1175,7 +1200,7 @@ main() {
                 prev_emitted_fp="$(md_prev "$state" "$sid" "emitted_fp")"
                 prev_emitted_at="$(md_prev "$state" "$sid" "last_emitted")"
                 [[ -z "$prev_emitted_at" ]] && prev_emitted_at=0
-                emit_reason="$(pec_emit_reason "$combined" "$prev_emitted_e" "$action_fp" "$prev_emitted_fp" "$prev_emitted_at" "$now" "$REMINDER_SECS" "$window_rouse" "$session_sticky" || true)"
+                emit_reason="$(pec_emit_reason "$ping_emoji" "$prev_emitted_e" "$action_fp" "$prev_emitted_fp" "$prev_emitted_at" "$now" "$REMINDER_SECS" "$window_rouse" "$session_sticky" "$prev_streak" || true)"
                 if [[ "$session_sticky" == "false" ]]; then
                     # No window/reminder/fingerprint/transition channel nags for
                     # blocked-upstream-only (#128). Queue row still lists the PR.
@@ -1212,10 +1237,13 @@ main() {
             fi
 
             # Actuator state always advances independently of emit success.
+            if [[ "$combined" != "⚠️" ]]; then
+                this_streak=0
+            fi
             new_state="$(printf '%s' "$new_state" | jq -c \
                 --arg s "$sid" --arg e "$combined" --arg f "$action_fp" \
-                --argjson lp "${this_ping:-0}" --arg t "$new_title" \
-                '.sessions[$s] = ((.sessions[$s] // {}) + {emoji:$e, fp:$f, last_ping:$lp, title:$t})')"
+                --argjson lp "${this_ping:-0}" --argjson ps "${this_streak:-0}" --arg t "$new_title" \
+                '.sessions[$s] = ((.sessions[$s] // {}) + {emoji:$e, fp:$f, last_ping:$lp, ping_streak:$ps, title:$t})')"
         fi
 
         # action queue rows
@@ -1631,6 +1659,7 @@ _print_queue() {
     _print_section "🏷️  CHIP STATUS updated (externalRefs cache):" "${Q_STATUS[@]:-}"
     _print_section "📣 PINGED this run:" "${Q_PINGED[@]:-}"
     _print_section "🧠 SKIPPED (in a turn / thinking — already working):" "${Q_SKIP_RUNNING[@]:-}"
+    _print_section "⏳ SKIPPED (⚠️ same-fp exponential backoff):" "${Q_SKIP_BACKOFF[@]:-}"
     _print_section "🟢 WAIT TIANN (✅ green, lane A - upstream maintainer merge):" "${Q_WAIT_TIANN[@]:-}"
     _print_section "🟢 WAIT META/OPERATOR (✅ green, fork PR - never tiann):" "${Q_WAIT_FORK[@]:-}"
     _print_section "🟣 SELF-MERGE / META MAY MERGE (✅ green, lane B or fork promote):" "${Q_SELF_MERGE[@]:-}"
