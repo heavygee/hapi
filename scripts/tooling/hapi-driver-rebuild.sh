@@ -118,6 +118,12 @@ echo "Fetching upstream..."
 git -C "$PRIMARY" fetch upstream
 upstream_tip="$(git -C "$PRIMARY" rev-parse upstream/main 2>/dev/null || true)"
 
+# Fetch origin before resolving manifest base (Codex #213): stale origin/main
+# otherwise composes soup that silently omits unpushed/unfetched fork tip work
+# after layers were retired as "already on base".
+echo "Fetching origin..."
+git -C "$PRIMARY" fetch origin
+
 SYNC_SCRIPT="$PRIMARY/scripts/tooling/hapi-sync-fork-main.sh"
 if [[ -x "$SYNC_SCRIPT" ]]; then
     if ! "$SYNC_SCRIPT" --check-only 2>/dev/null; then
@@ -177,10 +183,10 @@ if echo "$manifest_json" | jq -e '.layers[] | select(.ref == "fix/web-scroll-gua
     fi
 fi
 
-if git -C "$PRIMARY" rev-parse --verify "${base_ref}^{commit}" >/dev/null 2>&1; then
-    echo "Base: $base_ref @ $(git -C "$PRIMARY" log -1 --oneline "$base_ref")"
-elif [[ -n "$upstream_tip" && "$base_ref" == "upstream/main" ]]; then
-    echo "Base: upstream/main @ $(git -C "$PRIMARY" log -1 --oneline "$upstream_tip")"
+# shellcheck source=lib/driver-remat-compose-base.sh
+source "$LIB_DIR/driver-remat-compose-base.sh"
+if ! driver_remat_validate_compose_base "$PRIMARY" "$base_ref"; then
+    exit 1
 fi
 
 # Atomic remat: merge layers on WIP in a side worktree; only move live tip on success.
@@ -241,7 +247,14 @@ if [[ "$REMAT_MODE" == "tip-forward" ]]; then
             fi
         fi
     else
-        echo "WARNING: tip-forward could not resolve manifest base '$base_ref' (no upstream/main fallback)" >&2
+        echo "ERROR: tip-forward could not resolve manifest base '$base_ref'" >&2
+        echo "       Explicit bases never fall back to upstream/main (silent fork-omit)." >&2
+        echo "       Fetch/push the base ref, or fix config/driver-manifest.yaml base:." >&2
+        driver_remat_fail_leave_wip "$REMAT" "$WIP_BRANCH" "$DRIVER_BRANCH" "$PREV_TIP" "$base_ref"
+        driver_remat_hold_set \
+            "unresolved manifest base $base_ref (tip-forward)" \
+            "$REMAT" "$PREV_TIP" "$WIP_BRANCH" "$base_ref"
+        exit 1
     fi
 fi
 

@@ -806,13 +806,12 @@ layers:
   # Tip: f0803e996
   - branch: fix/claude-mcp-spawn-model-effort
 
-  # heavygee/hapi#120 — vendor hapi-inline operator dock (fork-local, not tiann).
-  # Pin v0.11.6 (#155 fail-closed + v0.11.5 capture). #123 Settings unlock + gate probe.
-  # Thin soup tip on live driver/integration. Worktree: hapi-inline-web (feat) + hapi-inline-soup (tip).
-  # Knock /opmic. Composed /hapi/operator/sessions. Do not allow-list raw GET /api/sessions.
-  
-  # Tip: 48bec4076 (driver/hapi-inline-operator-dock) — pin v0.15.5 (#308; re-thin after dogfood bump)
-  - branch: driver/hapi-inline-operator-dock
+  # heavygee/hapi#120 / #416 — vendor hapi-inline operator dock (fork-local, not tiann).
+  # Tip: 0a6d930f5 (driver/hapi-inline-revendor-0186) — pin v0.18.6 Settings UX (#416) + live STT under fan
+  # Replaces driver/hapi-inline-revendor-0185 / operator-dock v0.15.5 layer. Privilege:execute via adaa71b82 / #189.
+  # Worktree: ~/coding/hapi/worktrees/hapi-inline-revendor-0186
+  # Hub+web → remat needs --build-web + hapi-restart-hub (embedded web assets).
+  - branch: driver/hapi-inline-revendor-0186
 
   # heavygee/hapi#121 — operator-hold chip pulse (🛑 needs_operator / babysit.hold).
   # Soup UI on awareness ancestry (schema enum + SessionPrChip FueDot). Classifier
