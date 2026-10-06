@@ -1001,13 +1001,39 @@ describe('cursorAcpRemoteLauncher', () => {
         });
     });
 
-    it('surfaces overlay install failure as a status message and omits ACP mcpServers', async () => {
-        const { MessageBuffer } = await import('@/ui/ink/messageBuffer');
-        const addSpy = vi.spyOn(MessageBuffer.prototype, 'addMessage');
+    it('hard-fails same-cwd second live mailbox collision instead of leaving foreign hapi callable (#1856)', async () => {
         harness.overlayInstallError = new Error(
             'Cannot install a second live HAPI MCP mailbox in this workspace (held by session other).',
         );
         const session = makeSession(null);
+
+        await expect(cursorAcpRemoteLauncher(session)).rejects.toThrow(
+            /HAPI MCP mailbox collision:.*second live HAPI MCP mailbox/,
+        );
+        // Must not have started an ACP session that would merge the foreign project mailbox.
+        expect(harness.newSessionConfig).toBeNull();
+    });
+
+    it('hard-fails runner sessions on non-collision overlay install failure', async () => {
+        harness.overlayInstallError = new Error(
+            'Project MCP server "hapi" already exists (refusing to overwrite a non-HAPI entry)',
+        );
+        const session = makeSession(null);
+
+        await expect(cursorAcpRemoteLauncher(session)).rejects.toThrow(
+            /HAPI MCP overlay required for runner-spawned Cursor sessions/,
+        );
+        expect(harness.newSessionConfig).toBeNull();
+    });
+
+    it('surfaces non-collision overlay install failure as a status message for non-runner sessions', async () => {
+        const { MessageBuffer } = await import('@/ui/ink/messageBuffer');
+        const addSpy = vi.spyOn(MessageBuffer.prototype, 'addMessage');
+        harness.overlayInstallError = new Error(
+            'Project MCP server "hapi" already exists (refusing to overwrite a non-HAPI entry)',
+        );
+        const session = makeSession(null);
+        Object.assign(session, { startedBy: 'user' });
 
         await cursorAcpRemoteLauncher(session);
 

@@ -132,6 +132,18 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                 overlayInstalled = true;
             } catch (error) {
                 const detail = error instanceof Error ? error.message : String(error);
+                // #1856: Cursor still merges project `.cursor/mcp.json`. Catch-and-continue
+                // after a same-cwd refuse leaves the *other* session's `hapi` mailbox
+                // callable, so ping_peer stamps the wrong sourceSessionId. Hard-fail.
+                if (/second live HAPI MCP mailbox/i.test(detail)) {
+                    throw new Error(
+                        `HAPI MCP mailbox collision: ${detail} `
+                        + 'Stop the other Cursor session in this cwd, or use a separate worktree.',
+                    );
+                }
+                if (session.startedBy === 'runner') {
+                    throw new Error(`HAPI MCP overlay required for runner-spawned Cursor sessions (${detail})`);
+                }
                 logger.warn(
                     '[cursor-acp] failed to install HAPI MCP overlay; continuing without inline media',
                     error,
