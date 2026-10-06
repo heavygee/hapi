@@ -4,7 +4,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nProvider } from '@/lib/i18n-context'
 import SettingsHubPage from './index'
 import SettingsGeneralPage from './general'
-import SettingsRunnerManagementPage from './runner-management'
 import SettingsDisplayPage from './display'
 import SettingsChatPage from './chat'
 import SettingsAboutPage from './about'
@@ -12,7 +11,7 @@ import SettingsVoicePage from './voice'
 import SettingsVoiceVoicesPage from './voice-voices'
 import SettingsVoiceAdvancedPage from './voice-advanced'
 
-const { context, navigate, setAppearance, setColorTheme, setFontScale, setTerminalFontSize, setComposerEnterBehavior, setCodexExplorationCollapsed, setVoice, setFleetPolicy, setAppBadgeEnabled } = vi.hoisted(() => ({
+const { context, navigate, setAppearance, setColorTheme, setFontScale, setTerminalFontSize, setComposerEnterBehavior, setCodexExplorationCollapsed, setVoice, setAppBadgeEnabled } = vi.hoisted(() => ({
     context: { token: '' },
     navigate: vi.fn(),
     setAppearance: vi.fn(),
@@ -22,12 +21,23 @@ const { context, navigate, setAppearance, setColorTheme, setFontScale, setTermin
     setComposerEnterBehavior: vi.fn(),
     setCodexExplorationCollapsed: vi.fn(),
     setVoice: vi.fn(),
-    setFleetPolicy: vi.fn(),
     setAppBadgeEnabled: vi.fn(),
 }))
 
-const getHubSettings = vi.fn().mockResolvedValue({ sessionSummaryContract: false })
-const updateHubSettings = vi.fn().mockResolvedValue({ sessionSummaryContract: true })
+const hubSettingsFixture = {
+    sessionSummaryContract: false,
+    sessionSummaryInChat: false,
+    peerSpawnDefaults: {
+        agent: 'claude' as const,
+        permissionMode: 'bypassPermissions' as const,
+        models: { claude: 'sonnet' }
+    }
+}
+const getHubSettings = vi.fn().mockResolvedValue(hubSettingsFixture)
+const updateHubSettings = vi.fn().mockResolvedValue({
+    ...hubSettingsFixture,
+    sessionSummaryContract: true
+})
 
 vi.mock('@/hooks/useColorTheme', () => ({
     useColorTheme: () => ({ colorTheme: 'default', setColorTheme }),
@@ -42,43 +52,17 @@ vi.mock('@/hooks/useColorTheme', () => ({
 
 vi.mock('@tanstack/react-router', () => ({
     useNavigate: () => navigate,
-    Navigate: ({ to, replace }: { to: string; replace?: boolean }) => {
-        navigate({ to, replace: Boolean(replace) })
-        return null
-    },
 }))
 
-// About still mounts Overseer debug panels that call useAppContext; this suite only
-// asserts metadata, so stub the panels instead of wiring a full AppContext.
-vi.mock('@/components/settings/EventsDebugControls', () => ({ EventsDebugControls: () => null }))
-vi.mock('@/components/settings/InboxDebugControls', () => ({ InboxDebugControls: () => null }))
-vi.mock('@/components/settings/OverseerChatDebugControls', () => ({ OverseerChatDebugControls: () => null }))
-
-vi.mock('@hapi/protocol', async (importOriginal) => {
-    const actual = await importOriginal<typeof import('@hapi/protocol')>()
-    return { ...actual, PROTOCOL_VERSION: 1 }
-})
-
-vi.mock('@/lib/app-context', () => ({
-    useAppContext: () => ({ api: null, token: context.token }),
-}))
-
-vi.mock('@/hooks/queries/useFeatures', () => ({
-    useFeatures: () => ({
-        features: { githubPrAwareness: { enabled: false, source: 'default' } },
-        isLoading: false,
-        error: null,
-        refetch: async () => undefined,
-    }),
-    usePatchFeatures: () => ({
-        setGithubPrAwareness: vi.fn(),
-        isPending: false,
-    }),
-}))
-
-vi.mock('@/hooks/queries/useUpgradeInfo', () => ({
-    useUpgradeInfo: () => ({ info: null, isLoading: false }),
-    useSetFleetUpgradePolicy: () => ({ mutate: setFleetPolicy }),
+vi.mock('@hapi/protocol', () => ({
+    PROTOCOL_VERSION: 1,
+    CREATABLE_AGENT_FLAVORS: ['claude', 'codex', 'cursor'] as const,
+    getPermissionModeOptionsForFlavor: () => [
+        { mode: 'bypassPermissions', label: 'bypassPermissions' },
+        { mode: 'default', label: 'default' },
+    ],
+    getLaunchPermissionModesForFlavor: () => ['bypassPermissions', 'default'] as const,
+    getPermissionModeLabel: (mode: string) => mode,
 }))
 
 vi.mock('@/hooks/useTheme', () => ({
@@ -120,12 +104,7 @@ vi.mock('@/hooks/useShowActiveSessionsOnly', () => ({
 }))
 
 vi.mock('@/hooks/usePinInProgressSessions', () => ({
-    usePinInProgressSessions: () => ({
-        pinInProgressMode: 'off' as const,
-        setPinInProgressMode: vi.fn(),
-        pinInProgressSessions: false,
-        setPinInProgressSessions: vi.fn(),
-    }),
+    usePinInProgressSessions: () => ({ pinInProgressSessions: false, setPinInProgressSessions: vi.fn() }),
 }))
 
 vi.mock('@/hooks/useAppBadgePreference', () => ({
@@ -207,12 +186,7 @@ vi.mock('@/hooks/useChatSurfaceColors', () => ({
 
 vi.mock('@/lib/app-context', () => ({
     useAppContext: () => ({
-        api: {
-            getSessions: vi.fn(async () => ({ sessions: [] })),
-            setModelErrorAutoBridge: vi.fn(async () => {}),
-            getHubSettings,
-            updateHubSettings,
-        },
+        api: { getHubSettings, updateHubSettings },
         baseUrl: 'http://127.0.0.1:3006',
         token: context.token,
     }),
@@ -228,11 +202,6 @@ vi.mock('@/components/settings/VoiceAdvancedControls', () => ({
     VoicePersonaControls: () => <div>Persona controls</div>,
     VoiceDiagnosticsControls: () => <div>Diagnostics controls</div>,
 }))
-
-// About mounts Overseer debug panels that call useAppContext; this suite only
-// asserts metadata, so stub the panels instead of wiring a full AppContext.
-vi.mock('@/components/settings/EventsDebugControls', () => ({ EventsDebugControls: () => null }))
-vi.mock('@/components/settings/InboxDebugControls', () => ({ InboxDebugControls: () => null }))
 
 vi.mock('./useVoiceSettings', () => ({
     useVoiceSettings: () => ({
@@ -273,13 +242,12 @@ describe('responsive settings pages', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         localStorage.clear()
-        getHubSettings.mockResolvedValue({ sessionSummaryContract: false })
-        updateHubSettings.mockResolvedValue({ sessionSummaryContract: true })
+        getHubSettings.mockResolvedValue(hubSettingsFixture)
+        updateHubSettings.mockResolvedValue({
+            ...hubSettingsFixture,
+            sessionSummaryContract: true
+        })
         context.token = `x.${btoa(JSON.stringify({ ns: 'default' }))}.x`
-        vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{"error":"hapi inline disabled"}', {
-            status: 404,
-            headers: { 'Content-Type': 'application/json' }
-        }))
     })
 
     it('renders the mobile hub categories with current summaries', () => {
@@ -311,84 +279,6 @@ describe('responsive settings pages', () => {
         fireEvent.click(screen.getByRole('radio', { name: '简体中文' }))
         expect(localStorage.getItem('hapi-lang')).toBe('zh-CN')
         expect(screen.getByText('选择是否让受支持的智能体输出状态摘要，以及是否在聊天中显示。')).toBeInTheDocument()
-    })
-
-    it('shows an owner-only operator dock switch when /hapi/config is enabled', async () => {
-        vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
-            hapiInline: { enabled: true }
-        }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
-        renderPage(<SettingsGeneralPage />)
-        expect(await screen.findByRole('checkbox', { name: 'Show operator tools' })).toBeInTheDocument()
-    })
-
-    it('hides the operator dock switch from tenant namespaces', async () => {
-        context.token = `x.${btoa(JSON.stringify({ ns: 'tenant' }))}.x`
-        vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
-            hapiInline: { enabled: true }
-        }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
-        renderPage(<SettingsGeneralPage />)
-        expect(await screen.findByText('Companion pairing')).toBeInTheDocument()
-        expect(screen.queryByRole('checkbox', { name: 'Show operator tools' })).not.toBeInTheDocument()
-    })
-
-    it('persists operator dock enable via in-page gate field (no window.prompt)', async () => {
-        vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: RequestInfo | URL) => {
-            const url = String(input)
-            if (url.includes('/hapi/config')) {
-                return new Response(JSON.stringify({ hapiInline: { enabled: true } }), {
-                    status: 200,
-                    headers: { 'Content-Type': 'application/json' }
-                })
-            }
-            if (url.includes('/hapi/operator/sessions')) {
-                return new Response(JSON.stringify({ sessions: [] }), {
-                    status: 200,
-                    headers: { 'Content-Type': 'application/json' }
-                })
-            }
-            return new Response('unexpected', { status: 500 })
-        })
-        const promptSpy = vi.spyOn(window, 'prompt')
-        renderPage(<SettingsGeneralPage />)
-        const toggle = await screen.findByRole('checkbox', { name: 'Show operator tools' })
-        fireEvent.click(toggle)
-        const field = await screen.findByLabelText('Operator gate secret')
-        fireEvent.change(field, { target: { value: 'gate-secret' } })
-        fireEvent.click(screen.getByRole('button', { name: 'Unlock' }))
-        await vi.waitFor(() => {
-            expect(localStorage.getItem('hapi-operator-dock')).toBe('true')
-            expect(localStorage.getItem('hapiInlineSecret')).toBe('gate-secret')
-        })
-        expect(promptSpy).not.toHaveBeenCalled()
-    })
-
-    it('buries runner management behind a link row on General (not a front-and-center switch)', () => {
-        renderPage(<SettingsGeneralPage />)
-        // The 3-pole switch must NOT be present on the General page itself.
-        expect(screen.queryByRole('radio', { name: /Auto-upgrade/ })).not.toBeInTheDocument()
-        fireEvent.click(screen.getByRole('button', { name: /Runner management/ }))
-        expect(navigate).toHaveBeenCalledWith({ to: '/settings/general/runners' })
-    })
-
-    it('hides runner management from tenant namespaces on General', () => {
-        context.token = `x.${btoa(JSON.stringify({ ns: 'tenant' }))}.x`
-        renderPage(<SettingsGeneralPage />)
-        expect(screen.queryByRole('button', { name: /Runner management/ })).not.toBeInTheDocument()
-    })
-
-    it('renders the 3-pole policy switch on the runner management sub-page', () => {
-        renderPage(<SettingsRunnerManagementPage />)
-        expect(screen.getByRole('radio', { name: /^No alert/ })).toBeInTheDocument()
-        expect(screen.getByRole('radio', { name: /^Alert/ })).toBeInTheDocument()
-        fireEvent.click(screen.getByRole('radio', { name: /^Auto-upgrade/ }))
-        expect(setFleetPolicy).toHaveBeenCalledWith('auto')
-    })
-
-    it('redirects tenant namespaces away from the runner management route', () => {
-        context.token = `x.${btoa(JSON.stringify({ ns: 'tenant' }))}.x`
-        renderPage(<SettingsRunnerManagementPage />)
-        expect(navigate).toHaveBeenCalledWith({ to: '/settings/general', replace: true })
-        expect(screen.queryByRole('radio', { name: /^Auto-upgrade/ })).not.toBeInTheDocument()
     })
 
     it('explains and keeps summary generation separate from chat display', async () => {
@@ -470,8 +360,6 @@ describe('responsive settings pages', () => {
         expect(screen.getByText(String(__APP_VERSION__))).toBeInTheDocument()
         expect(screen.getByText('Protocol Version')).toBeInTheDocument()
         expect(screen.getByRole('link', { name: 'hapi.run' })).toHaveAttribute('rel', 'noopener noreferrer')
-        // OverseerChatDebugControls is stubbed null in this suite; deep-link to
-        // /overseer was removed in favor of the embedded About panel.
     })
 
     it('links common voice settings to full-page voices and advanced pages', () => {

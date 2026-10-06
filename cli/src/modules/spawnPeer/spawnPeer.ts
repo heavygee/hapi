@@ -17,13 +17,15 @@ import axios, { type AxiosInstance } from 'axios'
 import { isObject, SESSION_NAME_MAX_LENGTH } from '@hapi/protocol'
 import {
     CREATABLE_AGENT_FLAVORS,
-    isPermissionModeAllowedForFlavor,
+    getLaunchPermissionModesForFlavor,
     type AgentFlavor,
     type PermissionMode
 } from '@hapi/protocol/modes'
 import {
     resolvePeerSpawnConfig,
-    type PeerSpawnDefaults
+    ResolvedPeerSpawnDefaultsSchema,
+    type PeerSpawnDefaults,
+    type ResolvedPeerSpawnDefaults
 } from '@hapi/protocol/peerSpawnDefaults'
 import { configuration } from '@/configuration'
 import { getAuthToken } from '@/api/auth'
@@ -72,6 +74,11 @@ export type SpawnPeerOptions = {
     accessToken?: string
     /** Skip hub settings fetch (tests). */
     hubPeerSpawnDefaults?: PeerSpawnDefaults | null
+    /**
+     * Base directory for relative `directory` paths (MCP session cwd).
+     * Absolute directories are unchanged. Defaults to process.cwd().
+     */
+    cwd?: string
     http?: AxiosInstance
     sleep?: (ms: number) => Promise<void>
     now?: () => number
@@ -170,7 +177,7 @@ async function fetchHubPeerSpawnDefaults(
     apiUrl: string,
     jwt: string,
     http: AxiosInstance
-): Promise<PeerSpawnDefaults | null> {
+): Promise<ResolvedPeerSpawnDefaults> {
     try {
         const response = await http.get(`${apiUrl}/api/hub-settings`, {
             headers: authHeaders(jwt),
@@ -178,13 +185,16 @@ async function fetchHubPeerSpawnDefaults(
             validateStatus: () => true
         })
         if (response.status < 200 || response.status >= 300) {
-            return null
+            throw new SpawnPeerError('spawn_failed', 'Cannot load hub spawn defaults')
         }
-        const peerSpawnDefaults = (response.data as { peerSpawnDefaults?: PeerSpawnDefaults } | undefined)
-            ?.peerSpawnDefaults
-        return peerSpawnDefaults ?? null
-    } catch {
-        return null
+        return ResolvedPeerSpawnDefaultsSchema.parse(
+            (response.data as { peerSpawnDefaults?: unknown } | undefined)?.peerSpawnDefaults
+        )
+    } catch (error) {
+        if (error instanceof SpawnPeerError) {
+            throw error
+        }
+        throw new SpawnPeerError('spawn_failed', 'Cannot load valid hub spawn defaults')
     }
 }
 
@@ -231,30 +241,63 @@ async function sessionHasRemit(
     if (!needle) {
         return false
     }
-    let response: { status: number; data?: { messages?: unknown } }
-    try {
-        response = await http.get(
-            `${apiUrl}/api/sessions/${encodeURIComponent(sessionId)}/messages`,
-            {
-                headers: authHeaders(jwt),
-                params: { limit: 50 },
-                timeout: 20_000,
-                validateStatus: () => true
+    // Paginate oldest-ward: a busy child can push the remit off the latest
+    // 50-row page before verification runs. Cap pages so a broken cursor cannot
+    // loop forever (50 × 40 = 2000 messages).
+    const pageLimit = 50
+    const maxPages = 40
+    let beforeAt: number | undefined
+    let beforeSeq: number | undefined
+    for (let pageIndex = 0; pageIndex < maxPages; pageIndex++) {
+        let response: {
+            status: number
+            data?: {
+                messages?: unknown
+                page?: {
+                    hasMore?: unknown
+                    nextBeforeAt?: unknown
+                    nextBeforeSeq?: unknown
+                }
             }
-        )
-    } catch {
-        return false
-    }
-    if (response.status < 200 || response.status >= 300) {
-        return false
-    }
-    const rows = Array.isArray(response.data?.messages) ? response.data.messages : []
-    for (const row of rows) {
-        if (!isObject(row)) continue
-        const snippet = extractInspectMessageSnippet(row.content)
-        if (snippet?.role === 'user' && snippet.text.includes(needle)) {
-            return true
         }
+        try {
+            response = await http.get(
+                `${apiUrl}/api/sessions/${encodeURIComponent(sessionId)}/messages`,
+                {
+                    headers: authHeaders(jwt),
+                    params: {
+                        limit: pageLimit,
+                        ...(beforeAt !== undefined && beforeSeq !== undefined
+                            ? { beforeAt, beforeSeq }
+                            : {})
+                    },
+                    timeout: 20_000,
+                    validateStatus: () => true
+                }
+            )
+        } catch {
+            return false
+        }
+        if (response.status < 200 || response.status >= 300) {
+            return false
+        }
+        const rows = Array.isArray(response.data?.messages) ? response.data.messages : []
+        for (const row of rows) {
+            if (!isObject(row)) continue
+            const snippet = extractInspectMessageSnippet(row.content)
+            if (snippet?.role === 'user' && snippet.text.includes(needle)) {
+                return true
+            }
+        }
+        const page = response.data?.page
+        const hasMore = page?.hasMore === true
+        const nextBeforeAt = typeof page?.nextBeforeAt === 'number' ? page.nextBeforeAt : null
+        const nextBeforeSeq = typeof page?.nextBeforeSeq === 'number' ? page.nextBeforeSeq : null
+        if (!hasMore || nextBeforeAt === null || nextBeforeSeq === null) {
+            return false
+        }
+        beforeAt = nextBeforeAt
+        beforeSeq = nextBeforeSeq
     }
     return false
 }
@@ -267,7 +310,10 @@ export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerRes
     }
     // Runner RPC resolves relative paths against the long-lived runner cwd
     // (`hapi runner start`), not the calling CLI/MCP process. Anchor here.
-    const directory = resolvePath(rawDirectory)
+    // MCP callers pass cwd=session workingDirectory so "." is the session tree.
+    const directory = options.cwd
+        ? resolvePath(options.cwd, rawDirectory)
+        : resolvePath(rawDirectory)
     if (!message.trim()) {
         throw new SpawnPeerError(
             'bad_args',
@@ -284,13 +330,6 @@ export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerRes
 
     if (options.agent && !(CREATABLE_AGENT_FLAVORS as readonly string[]).includes(options.agent)) {
         throw new SpawnPeerError('bad_args', `unsupported agent: ${options.agent}`)
-    }
-    const previewAgent = options.agent ?? 'claude'
-    if (options.permissionMode && !isPermissionModeAllowedForFlavor(options.permissionMode, previewAgent)) {
-        throw new SpawnPeerError(
-            'bad_args',
-            `permission mode ${options.permissionMode} is not supported by ${previewAgent}`
-        )
     }
 
     const waitActiveSecs = options.waitActiveSecs ?? DEFAULT_WAIT_ACTIVE_SECS
@@ -330,11 +369,27 @@ export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerRes
         effort: options.effort
     }, hubDefaults)
 
+    // Validate explicit permission against the resolved agent (hub default when
+    // agent is omitted) — not a Claude preview before settings load.
+    if (
+        options.permissionMode
+        && !getLaunchPermissionModesForFlavor(resolved.agent).includes(options.permissionMode)
+    ) {
+        throw new SpawnPeerError(
+            'bad_args',
+            `permission mode ${options.permissionMode} is not supported by ${resolved.agent}`
+        )
+    }
+
     const spawnBody: Record<string, unknown> = {
         directory,
         sessionType,
-        agent: resolved.agent,
-        permissionMode: resolved.permissionMode
+        agent: resolved.agent
+    }
+    // Pi/DSH have empty launch-permission catalogs — omit permissionMode so the
+    // machine route does not 400 invalid_permission_mode on inherited default.
+    if (getLaunchPermissionModesForFlavor(resolved.agent).length > 0) {
+        spawnBody.permissionMode = resolved.permissionMode
     }
     if (options.worktreeName) {
         spawnBody.worktreeName = options.worktreeName
@@ -343,7 +398,11 @@ export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerRes
         spawnBody.model = resolved.model
     }
     if (resolved.effort) {
-        spawnBody.effort = resolved.effort
+        if (resolved.agent === 'codex' || resolved.agent === 'opencode') {
+            spawnBody.modelReasoningEffort = resolved.effort
+        } else {
+            spawnBody.effort = resolved.effort
+        }
     }
 
     onProgress?.(`spawning agent=${resolved.agent} permission=${resolved.permissionMode} type=${sessionType} dir=${directory}`)

@@ -111,12 +111,63 @@ describe('GET/PUT /api/hub-settings', () => {
         })
     })
 
+    it('clears a saved peer spawn model override with an empty string', async () => {
+        const { app } = await createApp()
+        await app.request('/api/hub-settings', {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+                peerSpawnDefaults: {
+                    agent: 'codex',
+                    permissionMode: 'default',
+                    models: { codex: 'gpt-5' }
+                }
+            })
+        })
+
+        const clear = await app.request('/api/hub-settings', {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+                peerSpawnDefaults: {
+                    agent: 'codex',
+                    permissionMode: 'default',
+                    models: { codex: '' }
+                }
+            })
+        })
+        expect(clear.status).toBe(200)
+        expect(await clear.json()).toEqual({
+            sessionSummaryContract: false,
+            sessionSummaryInChat: false,
+            peerSpawnDefaults: {
+                agent: 'codex',
+                permissionMode: 'default',
+                models: {
+                    claude: 'sonnet'
+                }
+            }
+        })
+    })
+
     it('rejects invalid body', async () => {
         const { app } = await createApp()
         const response = await app.request('/api/hub-settings', {
             method: 'PUT',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ sessionSummaryContract: 'yes' })
+        })
+        expect(response.status).toBe(400)
+    })
+
+    it('rejects retired gemini as peer spawn default agent', async () => {
+        const { app } = await createApp()
+        const response = await app.request('/api/hub-settings', {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+                peerSpawnDefaults: { agent: 'gemini' }
+            })
         })
         expect(response.status).toBe(400)
     })

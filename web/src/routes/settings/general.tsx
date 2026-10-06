@@ -1,9 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
-import { useNavigate } from '@tanstack/react-router'
 import {
     CREATABLE_AGENT_FLAVORS,
-    getPermissionModeOptionsForFlavor,
+    getLaunchPermissionModesForFlavor,
+    getPermissionModeLabel,
     type AgentFlavor,
     type PermissionMode
 } from '@hapi/protocol'
@@ -11,18 +10,13 @@ import type { UpdateHubSettingsRequest } from '@hapi/protocol/apiTypes'
 import type { ResolvedPeerSpawnDefaults } from '@hapi/protocol/peerSpawnDefaults'
 import { useTranslation, type Locale } from '@/lib/use-translation'
 import { useAppContext } from '@/lib/app-context'
-import { isDefaultNamespaceToken } from '@/lib/tokenNamespace'
-import { useFeatures, usePatchFeatures } from '@/hooks/queries/useFeatures'
 import { CompanionPairing } from '@/components/settings/CompanionPairing'
-import { SettingsChoiceGroup, SettingsLinkRow, SettingsPageContent, SettingsRow, SettingsSection, SettingsSwitch } from '@/components/settings/SettingsPrimitives'
-import { disableAllFue, enableAllFue, isFueDisabledGlobally } from '@/lib/use-fue'
+import { SettingsChoiceGroup, SettingsPageContent, SettingsRow, SettingsSection, SettingsSwitch } from '@/components/settings/SettingsPrimitives'
 import { queryKeys } from '@/lib/query-keys'
-import { useOperatorDock } from '@/hooks/useOperatorDock'
 
 const locales: ReadonlyArray<{ value: Locale; label: string }> = [
     { value: 'en', label: 'English' },
     { value: 'zh-CN', label: '简体中文' },
-    { value: 'ru', label: 'Русский' },
 ]
 
 function getNamespace(token: string | null): string | null {
@@ -41,15 +35,8 @@ function getNamespace(token: string | null): string | null {
 export default function SettingsGeneralPage() {
     const { t, locale, setLocale } = useTranslation()
     const { api, baseUrl, token } = useAppContext()
-    const navigate = useNavigate()
     const queryClient = useQueryClient()
     const isOwner = getNamespace(token) === 'default'
-    const showRunnerManagement = isDefaultNamespaceToken(token)
-    const { features } = useFeatures(api)
-    const { setGithubPrAwareness, isPending } = usePatchFeatures(api)
-    const awareness = features?.githubPrAwareness
-    const envPinned = awareness?.source === 'env'
-    const [onboardingTipsEnabled, setOnboardingTipsEnabled] = useState(() => !isFueDisabledGlobally())
 
     const hubSettingsQuery = useQuery({
         queryKey: queryKeys.hubSettings,
@@ -72,40 +59,11 @@ export default function SettingsGeneralPage() {
         },
     })
 
-    const {
-        operatorDockEnabled,
-        awaitingGateSecret,
-        gateDraft,
-        gateError,
-        gateBusy,
-        setGateDraft,
-        setOperatorDockEnabled,
-        submitGateSecret,
-        cancelGateSecret
-    } = useOperatorDock()
-    const inlineConfigQuery = useQuery({
-        queryKey: ['hapi-inline-config'],
-        queryFn: async () => {
-            const res = await fetch('/hapi/config', {
-                headers: { Accept: 'application/json' },
-                cache: 'no-store'
-            })
-            if (!res.ok) return { enabled: false }
-            const body = await res.json() as { hapiInline?: { enabled?: unknown }, operatorMic?: { enabled?: unknown } }
-            const inline = body.hapiInline ?? body.operatorMic
-            return { enabled: inline?.enabled === true }
-        },
-        enabled: isOwner,
-        staleTime: 30_000,
-        retry: false
-    })
-    const showOperatorDockSwitch = isOwner && inlineConfigQuery.data?.enabled === true
-
     const peerDefaults = hubSettingsQuery.data?.peerSpawnDefaults
     const agentOptions = CREATABLE_AGENT_FLAVORS.map((value) => ({ value, label: value }))
-    const permissionOptions = getPermissionModeOptionsForFlavor(peerDefaults?.agent).map((option) => ({
-        value: option.mode,
-        label: option.label
+    const permissionOptions = getLaunchPermissionModesForFlavor(peerDefaults?.agent).map((mode) => ({
+        value: mode,
+        label: getPermissionModeLabel(mode)
     }))
 
     function updatePeerSpawnDefaults(next: ResolvedPeerSpawnDefaults) {
@@ -125,18 +83,6 @@ export default function SettingsGeneralPage() {
         <SettingsPageContent description={t('settings.general.description')}>
             <SettingsSection title={t('settings.language.label')}>
                 <SettingsChoiceGroup hideLabel label={t('settings.language.label')} value={locale} options={locales} onChange={setLocale} />
-
-                <SettingsSwitch
-                    label={t('settings.general.githubPrAwareness')}
-                    description={envPinned
-                        ? t('settings.general.githubPrAwareness.envPinned')
-                        : t('settings.general.githubPrAwareness.desc')}
-                    checked={Boolean(awareness?.enabled)}
-                    onChange={(checked) => {
-                        if (envPinned || isPending) return
-                        void setGithubPrAwareness(checked)
-                    }}
-                />
             </SettingsSection>
             {isOwner ? (
                 <SettingsSection
@@ -200,7 +146,8 @@ export default function SettingsGeneralPage() {
                                             defaultValue={currentModel}
                                             onBlur={(event) => {
                                                 const model = event.target.value.trim()
-                                                if (!model || model === currentModel) return
+                                                if (model === currentModel) return
+                                                // Empty string is the clear sentinel for this flavor override.
                                                 updatePeerSpawnDefaults({
                                                     ...peerDefaults,
                                                     models: {
@@ -216,95 +163,13 @@ export default function SettingsGeneralPage() {
                             ) : null}
                         </>
                     ) : null}
-                    {showOperatorDockSwitch ? (
-                        <>
-                            <SettingsSwitch
-                                label={t('settings.general.operatorDock')}
-                                description={t('settings.general.operatorDock.desc')}
-                                checked={operatorDockEnabled}
-                                onChange={setOperatorDockEnabled}
-                            />
-                            {awaitingGateSecret ? (
-                                <div className="space-y-2 border-t border-[var(--app-border)] px-3 py-3">
-                                    <label className="block text-sm text-[var(--app-fg)]" htmlFor="operator-dock-gate-secret">
-                                        {t('settings.general.operatorDock.gateLabel')}
-                                    </label>
-                                    <p className="text-xs text-[var(--app-muted)]">
-                                        {t('settings.general.operatorDock.gateHint')}
-                                    </p>
-                                    <input
-                                        id="operator-dock-gate-secret"
-                                        type="password"
-                                        autoComplete="off"
-                                        spellCheck={false}
-                                        value={gateDraft}
-                                        disabled={gateBusy}
-                                        onChange={(event) => setGateDraft(event.target.value)}
-                                        onKeyDown={(event) => {
-                                            if (event.key === 'Enter') {
-                                                event.preventDefault()
-                                                void submitGateSecret()
-                                            }
-                                        }}
-                                        className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 font-mono text-sm text-[var(--app-fg)]"
-                                        aria-invalid={Boolean(gateError)}
-                                    />
-                                    {gateError ? (
-                                        <p className="text-sm text-red-500" role="alert">{gateError}</p>
-                                    ) : null}
-                                    <div className="flex flex-wrap gap-2">
-                                        <button
-                                            type="button"
-                                            disabled={gateBusy || !gateDraft.trim()}
-                                            onClick={() => void submitGateSecret()}
-                                            className="rounded-md bg-[var(--app-link)] px-3 py-1.5 text-sm text-white disabled:opacity-50"
-                                        >
-                                            {t('settings.general.operatorDock.gateSubmit')}
-                                        </button>
-                                        <button
-                                            type="button"
-                                            disabled={gateBusy}
-                                            onClick={cancelGateSecret}
-                                            className="rounded-md border border-[var(--app-border)] px-3 py-1.5 text-sm text-[var(--app-fg)]"
-                                        >
-                                            {t('settings.general.operatorDock.gateCancel')}
-                                        </button>
-                                    </div>
-                                </div>
-                            ) : null}
-                        </>
-                    ) : null}
                 </SettingsSection>
             ) : null}
-            <SettingsSection title={t('settings.onboarding.title')}>
-                <SettingsSwitch
-                    label={t('settings.onboarding.toggle.label')}
-                    description={t('settings.onboarding.toggle.description')}
-                    checked={onboardingTipsEnabled}
-                    onChange={(checked) => {
-                        setOnboardingTipsEnabled(checked)
-                        if (checked) {
-                            enableAllFue()
-                        } else {
-                            disableAllFue()
-                        }
-                    }}
-                />
-            </SettingsSection>
             <SettingsSection title={t('settings.companion.title')}>
                 <div className="px-3 py-3">
                     <CompanionPairing baseUrl={baseUrl} />
                 </div>
             </SettingsSection>
-            {showRunnerManagement ? (
-                <SettingsSection>
-                    <SettingsLinkRow
-                        label={t('settings.runnerMgmt.title')}
-                        description={t('settings.runnerMgmt.linkHint')}
-                        onClick={() => navigate({ to: '/settings/general/runners' })}
-                    />
-                </SettingsSection>
-            ) : null}
         </SettingsPageContent>
     )
 }
