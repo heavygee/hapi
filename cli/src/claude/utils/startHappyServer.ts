@@ -55,14 +55,6 @@ const SEARCH_CONTENT_DESCRIPTION =
     'Query tip: short/common substrings match badly via trigram FTS (e.g. "Ian" hits Austral**ian**; ' +
     '"home" hits every /home/ path) — prefer distinctive nouns. Auth/backend failures surface as errors, never [].';
 
-const SEARCH_CONTENT_DESCRIPTION =
-    'Search transcript text across HAPI sessions on the same hub/namespace (what sessions actually said). ' +
-    'Uses this session\'s CLI credentials — never hand-mint a JWT (expired JWT previously returned an empty list, ' +
-    'indistinguishable from no matches). Optional sessionId scopes to one session. ' +
-    'Returns session id, name, timestamp, and snippet so you can inspect_peer / ping_peer next. ' +
-    'Query tip: short/common substrings match badly via trigram FTS (e.g. "Ian" hits Austral**ian**; ' +
-    '"home" hits every /home/ path) — prefer distinctive nouns. Auth/backend failures surface as errors, never [].';
-
 type StartHappyServerOptions = {
     /**
      * When true (default), change_title writes metadata.name (web rename

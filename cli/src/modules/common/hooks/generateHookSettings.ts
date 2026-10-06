@@ -64,8 +64,6 @@ export type HookSettingsOptions = {
      * stdin `hook_event_name`.
      */
     includePreToolUse?: boolean;
-    /** When set and cwd resolves to hapi, inject project-scoped PreToolUse guards. */
-    workingDirectory?: string;
     /** Mirror main-session permissions without suppressing the native dialog. Local only. */
     includeLocalPermissions?: boolean;
     /** When set and cwd resolves to hapi, inject project-scoped PreToolUse Bash guard. */
