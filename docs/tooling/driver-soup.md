@@ -58,6 +58,14 @@ Since Phase P, **soup foundry + production dogfood hub** live on the **oos-linux
 
 **Agent rule:** follow workflow in [`feature-work-lifecycle.md`](./feature-work-lifecycle.md); run soup commands **on oos-linux** (SSH or Cursor workspace on the guest). Do not assume homelab is the soup host.
 
+### Footgun: reused soup-tag SHA vs sidecar version (2026-10-06)
+
+Fleet auto-upgrade downloads `GET /cli/upgrade/cli-artifact?sha256=…`. The offer carries **this remat's soup tag**; the bytes are **content-addressed**. Consecutive remats that do not change CLI/hub compile inputs **reuse the same linux/windows SHA** under a new `hapi-soup-v*` tag. Sidecars under `/var/lib/hapi/upgrade-artifacts/*.json` then exist for **two tags, one digest**.
+
+A first-sidecar-wins lookup plus `retained.version !== offer.targetVersion` → HTTP **400** `Artifact digest does not match offer version`. Runners (Teemo, homelab) log “can't find the artifact” even though the ELF is on disk. Symptom is **not** a missing binary.
+
+**Live unblock:** quarantine older duplicate-SHA json sidecars (keep the current tag). **Durable:** soup-heal `scripts/tooling/soup-heals/106-fleet-artifact-digest-reuse.patch` (`preferVersion` + serve on digest match; do not 400). Issue: heavygee/hapi#207.
+
 ---
 
 ## Daily driver (soup)

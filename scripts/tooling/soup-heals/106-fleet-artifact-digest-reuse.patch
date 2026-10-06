@@ -1,0 +1,134 @@
+diff --git a/hub/src/upgrade/cliArtifact.test.ts b/hub/src/upgrade/cliArtifact.test.ts
+index 9b3a51f35..bf03e678a 100644
+--- a/hub/src/upgrade/cliArtifact.test.ts
++++ b/hub/src/upgrade/cliArtifact.test.ts
+@@ -96,6 +96,47 @@ describe('content-addressed artifact retention', () => {
+         }
+     })
+ 
++    it('prefers the current soup-tag sidecar when identical bytes are retained under two tags', () => {
++        const dataDir = mkdtempSync(join(tmpdir(), 'hapi-artifact-reuse-sha-'))
++        try {
++            const root = join(dataDir, 'upgrade-artifacts')
++            mkdirSync(root, { recursive: true })
++            const sha = '8'.repeat(64)
++            const oldPath = join(root, 'hapi-soup-v2026.09.29-17908b4-linux-x64-baseline')
++            const newPath = join(root, 'hapi-soup-v2026.10.06-dfa1c2b-linux-x64-baseline')
++            writeFileSync(oldPath, 'same-bytes')
++            writeFileSync(newPath, 'same-bytes')
++            writeFileSync(`${oldPath}.json`, JSON.stringify({
++                version: 'hapi-soup-v2026.09.29-17908b4',
++                platform: 'linux',
++                arch: 'x64',
++                path: oldPath,
++                sha256: sha,
++                sizeBytes: 10,
++                sourceFingerprint: 'hapi-soup-v2026.09.29-17908b4',
++            }))
++            writeFileSync(`${newPath}.json`, JSON.stringify({
++                version: 'hapi-soup-v2026.10.06-dfa1c2b',
++                platform: 'linux',
++                arch: 'x64',
++                path: newPath,
++                sha256: sha,
++                sizeBytes: 10,
++                sourceFingerprint: 'hapi-soup-v2026.10.06-dfa1c2b',
++            }))
++
++            const preferred = findArtifactMetaBySha256(sha, dataDir, {
++                preferVersion: 'hapi-soup-v2026.10.06-dfa1c2b',
++            })
++            expect(preferred?.version).toBe('hapi-soup-v2026.10.06-dfa1c2b')
++            expect(preferred?.path).toBe(newPath)
++            // Digest is identity: a lookup without preferVersion must still return some live path.
++            expect(findArtifactMetaBySha256(sha, dataDir)?.sha256).toBe(sha)
++        } finally {
++            rmSync(dataDir, { recursive: true, force: true })
++        }
++    })
++
+     it('prunes older generations while preserving the offered digest', () => {
+         const dataDir = mkdtempSync(join(tmpdir(), 'hapi-artifact-prune-'))
+         resetArtifactOfferRetentionForTests()
+diff --git a/hub/src/upgrade/cliArtifact.ts b/hub/src/upgrade/cliArtifact.ts
+index 6b5159c1d..e8048bb07 100644
+--- a/hub/src/upgrade/cliArtifact.ts
++++ b/hub/src/upgrade/cliArtifact.ts
+@@ -104,7 +104,11 @@ export function readArtifactMeta(
+ }
+ 
+ /** Look up a retained artifact by digest without rebuilding. */
+-export function findArtifactMetaBySha256(sha256: string, dataDir?: string): ArtifactMeta | null {
++export function findArtifactMetaBySha256(
++    sha256: string,
++    dataDir?: string,
++    options?: { preferVersion?: string },
++): ArtifactMeta | null {
+     const digest = sha256.trim().toLowerCase()
+     if (!/^[a-f0-9]{64}$/.test(digest)) {
+         return null
+@@ -119,6 +123,7 @@ export function findArtifactMetaBySha256(sha256: string, dataDir?: string): Arti
+     } catch {
+         return null
+     }
++    const matches: ArtifactMeta[] = []
+     for (const name of entries) {
+         if (!name.endsWith('.json')) {
+             continue
+@@ -131,13 +136,22 @@ export function findArtifactMetaBySha256(sha256: string, dataDir?: string): Arti
+                 && typeof meta.path === 'string'
+                 && existsSync(meta.path)
+             ) {
+-                return meta
++                matches.push(meta)
+             }
+         } catch {
+             // skip corrupt sidecar
+         }
+     }
+-    return null
++    const prefer = options?.preferVersion?.trim()
++    if (prefer) {
++        const preferred = matches.find((meta) => meta.version === prefer)
++        if (preferred) {
++            return preferred
++        }
++    }
++    // Digest is identity — any live sidecar is the same bytes. Prefer the last
++    // match only as a stable fallback (readdir order is not chronological).
++    return matches[0] ?? null
+ }
+ 
+ function writeMeta(meta: ArtifactMeta): void {
+diff --git a/hub/src/web/routes/upgrade.ts b/hub/src/web/routes/upgrade.ts
+index c643ad9b8..dbf911554 100644
+--- a/hub/src/web/routes/upgrade.ts
++++ b/hub/src/web/routes/upgrade.ts
+@@ -152,7 +152,9 @@ export function createUpgradeCliRoutes(): Hono<CliEnv> {
+             if (wantedSha) {
+                 // Digest-pinned offer: serve the retained bytes only. Do not
+                 // rebuild — a newer generation would fail the runner's sha check.
+-                const retained = findArtifactMetaBySha256(wantedSha, config.dataDir)
++                const retained = findArtifactMetaBySha256(wantedSha, config.dataDir, {
++                    preferVersion: targetVersion,
++                })
+                 if (!retained || !existsSync(retained.path)) {
+                     // Soup tip may not yet be mirrored into upgrade-artifacts —
+                     // materialize on demand when the digest matches the tip.
+@@ -182,8 +184,15 @@ export function createUpgradeCliRoutes(): Hono<CliEnv> {
+                     }
+                     return c.json({ error: 'Artifact not retained for digest' }, 404)
+                 }
++                // Digest is identity. An older soup-tag sidecar with the same SHA
++                // must not 400 (Teemo/homelab 2026-10-06: reused linux/win bytes
++                // across hapi-soup-v* tags). PreferVersion already picks the
++                // current tag when present; leftover mismatch still serves.
+                 if (retained.version !== targetVersion) {
+-                    return c.json({ error: 'Artifact digest does not match offer version' }, 400)
++                    console.warn(
++                        '[fleet-upgrade] serving reused digest under older sidecar version',
++                        { retained: retained.version, offer: targetVersion, sha256: wantedSha },
++                    )
+                 }
+                 return new Response(Bun.file(retained.path), {
+                     headers: {
