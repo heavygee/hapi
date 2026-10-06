@@ -4,6 +4,7 @@ import {
     ArchiveCodexSessionRpcResponseSchema,
     AgentAvailabilityResponseSchema,
     CursorChatStoreStatusSchema,
+    ClaudeTranscriptStatusSchema,
     ListCodexSessionsRpcResponseSchema,
     ListClaudeSessionsRpcResponseSchema,
     ListCursorImportableSessionsRpcResponseSchema,
@@ -19,6 +20,7 @@ import type {
     CursorModelSummary,
     CursorModelsResponse,
     CursorChatStoreStatus,
+    ClaudeTranscriptStatus,
     DeleteUploadResponse,
     DirectoryEntry,
     FileReadResponse,
@@ -114,6 +116,7 @@ export type RpcArchiveCodexSessionResponse = ArchiveCodexSessionRpcResponse
 export type RpcCursorModel = CursorModelSummary
 export type RpcListCursorModelsResponse = CursorModelsResponse
 export type RpcCursorChatStoreStatus = CursorChatStoreStatus
+export type RpcClaudeTranscriptStatus = ClaudeTranscriptStatus
 export type RpcOpencodeModel = OpencodeModelSummary
 export type RpcListOpencodeModelsResponse = OpencodeModelsResponse
 export type RpcListOpencodeModelVariantsResponse = OpencodeModelVariantsResponse
@@ -401,6 +404,20 @@ export class RpcGateway {
             { workspacePath, cursorSessionId, homeDir }
         )
         return CursorChatStoreStatusSchema.parse(result)
+    }
+
+    async getClaudeTranscriptStatus(
+        machineId: string,
+        workspacePath: string,
+        claudeSessionId: string,
+        homeDir?: string
+    ): Promise<RpcClaudeTranscriptStatus> {
+        const result = await this.machineRpc(
+            machineId,
+            RPC_METHODS.ClaudeTranscriptStatus,
+            { workspacePath, claudeSessionId, homeDir }
+        )
+        return ClaudeTranscriptStatusSchema.parse(result)
     }
 
     async stopRunner(machineId: string): Promise<void> {
