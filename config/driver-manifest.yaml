@@ -711,11 +711,10 @@ layers:
   # Worktree: ~/coding/hapi/worktrees/cursor-notify-soup (archive when convenient).
   # - branch: driver/cursor-notify-rule-delta
 
-  # Fork-only — kitchen hygiene chip in session list header (GET /api/kitchen-status).
-  # Worktree: ~/coding/hapi/worktrees/kitchen-status-soup @ driver/kitchen-status-session-list
-  # Tip: b6f132d3e — cherry-pick 099e775cd onto c5840c9b7 (resolved server.ts + query-keys.ts)
-  # Peer: 0fd8ac8f. Queued 2026-08-15; remat blocked until hold clears.
-  - branch: driver/kitchen-status-session-list
+  # RETIRED 2026-10-06 — kitchen hygiene chip already on soup tip (driver/integration /
+  # origin/main after compose-on-fork). Feature files identical; layer tip is not an
+  # ancestor but content is absorbed. Was: driver/kitchen-status-session-list.
+  # - branch: driver/kitchen-status-session-list
 
   # tiann/hapi#1489 — wake owning session when attached job completes/fails (opt-in).
   # Thin tip on driver/session-attached-jobs. Upstream PR tip: feat/job-complete-wake
@@ -794,12 +793,12 @@ layers:
   # (5d8cd9b8f — @ mention pool: prepareSidebarSessions + title-signal; Fixes #1506)
   # Was: tip 17d091007. Worktree mention-sidebar-husks.
 
-  # tiann/hapi#1509 / PR #1511 — first-class spawn-peer with required remit.
-  # CLI hapi spawn-peer + MCP spawn_peer; hub 400 on spawn body message/prompt/text.
-  # Includes peerSpawnDefaults: machine spawn + New Session seed (Gap A/B; stock yolo).
-  # Worktree: ~/coding/hapi/worktrees/spawn-peer-remit @ feat/spawn-peer-remit
-  # Tip: 1fb2a7d17 (origin/feat/spawn-peer-remit) — Gap A/B + sticky NewSession seed + tests
-  - branch: feat/spawn-peer-remit
+  # tiann/hapi#1509 — spawn-peer remit thin tip (Gap A/B + sticky NewSession seed).
+  # Core remit + --machine already on soup tip after compose-on-fork; this delta is
+  # the remaining unique tip (16 files). Parent UUID stamp is NOT here — that is
+  # feat/peer-rename-proof-identity / upstream #1922 (still out of soup).
+  # Was: feat/spawn-peer-remit (fat). Tip: driver/spawn-peer-remit-delta @ b30bed331
+  - branch: driver/spawn-peer-remit-delta
 
   # Soup heal: remat 47ce90965 dropped Claude Happy MCP spawn_peer model/effort
   # (Codex bridge kept them). Restore schema + handler forwarding for Claude sessions.
@@ -846,11 +845,10 @@ layers:
   # Worktree: ~/coding/hapi/worktrees/estate-fleet-runner-upgrade @ driver/fleet-runner-upgrade
   # - branch: driver/fleet-runner-upgrade
 
-  # tiann/hapi#1516 — display_links MCP + CLI fallback + tappable SessionChat card.
-  # Href bytes constructed outside the model (concat landmines; no prose rewrite).
-  # Worktree: ~/coding/hapi/worktrees/display-links @ feat/display-links
-  # Tip: 1b9480192
-  - branch: feat/display-links
+  # tiann/hapi#1516 — display_links thin tip (per-session tool-name + bridge/CLI).
+  # Base registration already on soup tip; this delta is the unique naming surface
+  # (16 files). Was: feat/display-links (fat). Tip: driver/display-links-delta @ e5190a33c
+  - branch: driver/display-links-delta
 
   # tiann/hapi#1594 — long-press the collapsed session-search chip to dictate
   # into the query (whichever transcription provider is configured), replacing
@@ -1000,15 +998,12 @@ layers:
   # Remat order: #1605 → #1607 → #1772 last. Remat owner: tooling/meta — no self-remat.
   - branch: soup/1772-combined-list-filters
 
-  # tiann/hapi#1605 — Claude live model catalog (list_models) + effort/context-window wiring.
-  # Upstream PR MERGEABLE/CLEAN (junmo-kim). Thin tip on upstream/main:
-  #   soup/1605-claude-model-catalog @ 0964042d5 — 1 commit / 55 files (squashed merge noise).
-  # Soup union (driver tip; Claude-only SessionChat — no AGY catch-up):
-  #   driver/claude-model-catalog @ c84fc1914 — 1 commit / 55 files; merge-tree clean.
-  # Worktrees: soup-1605-claude-models + soup-1605-claude-union.
-  # Hub+cli+web → remat needs --build-web + hapi-restart-hub. Drop when #1605 merges.
-  # Wave slot 1 (before #1607 / #1772). Remat owner: tooling/meta — no self-remat.
-  - branch: driver/claude-model-catalog
+  # tiann/hapi#1605 — Claude live model catalog union onto soup tip.
+  # Re-thinned 2026-10-06: driver/claude-model-catalog-delta @ ec959f3a4
+  # (merge --no-ff of catalog tip onto driver/integration; kimi/agy kept).
+  # Still fat by file count (~54) — remat with ABSORB_FAT=1 / raised MAX_FILES.
+  # Drop when #1605 merges upstream. Hub+cli+web → --build-web + hapi-restart-hub.
+  - branch: driver/claude-model-catalog-delta
 
   # heavygee/hapi#193 / tiann/hapi#1951 — Cursor ACP spawn cwd = session.path so
   # MCP loads project <.cursor/mcp.json> instead of inheriting …/driver/cli and

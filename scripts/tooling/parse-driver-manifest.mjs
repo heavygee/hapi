@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Minimal YAML subset parser for ~/.config/hapi/driver-manifest.yaml
+ * Minimal YAML subset parser for config/driver-manifest.yaml (or HAPI_DRIVER_MANIFEST)
  * Supports: base, layers with branch / pr / integrate keys.
  */
 import { readFileSync } from 'node:fs';
