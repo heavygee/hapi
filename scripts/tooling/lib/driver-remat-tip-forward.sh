@@ -7,11 +7,16 @@
 #
 # Kill criterion: if tip-forward fights utensil add/add weekly, PRIMARY is the
 # sole utensil writer; do not edit tooling inside the soup tip.
+#
+# Explicit bases never silently fall back to upstream/main (2026-10-06 Codex on
+# #213): a missing origin/main would otherwise promote soup without fork-only
+# commits after layers were retired on the assumption the base supplies them.
 
-# driver_remat_tip_forward_merge_ref <base_ref>
-# Prints the ref tip-forward should merge into WIP (empty = nothing to merge).
-# Prefer the manifest base when it resolves; only use upstream/main when the
-# base *is* upstream/main (legacy) or when base cannot be resolved.
+# driver_remat_tip_forward_merge_ref <base_ref> [repo]
+# Prints the ref tip-forward should merge into WIP.
+# Returns 0 with the base ref when it resolves.
+# Returns 0 with upstream/main only when the configured base *is* upstream/main.
+# Returns 1 when an explicit non-upstream base cannot resolve (hard fail — no substitute).
 driver_remat_tip_forward_merge_ref() {
     local base_ref="${1:-}"
     local repo="${2:-.}"
@@ -20,17 +25,19 @@ driver_remat_tip_forward_merge_ref() {
         return 1
     fi
 
-    # Manifest base wins when it resolves (origin/main, main, upstream/main, …).
     if git -C "$repo" rev-parse --verify "${base_ref}^{commit}" >/dev/null 2>&1; then
         printf '%s\n' "$base_ref"
         return 0
     fi
 
-    # Legacy / missing base: fall back to upstream/main if present.
-    if git -C "$repo" rev-parse --verify 'upstream/main^{commit}' >/dev/null 2>&1; then
-        printf '%s\n' 'upstream/main'
-        return 0
+    # Legacy recipe only: base literally upstream/main may resolve after fetch.
+    if [[ "$base_ref" == "upstream/main" ]]; then
+        if git -C "$repo" rev-parse --verify 'upstream/main^{commit}' >/dev/null 2>&1; then
+            printf '%s\n' 'upstream/main'
+            return 0
+        fi
     fi
 
+    # Explicit fork base (origin/main, main, …) must not substitute upstream.
     return 1
 }

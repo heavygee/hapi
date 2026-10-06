@@ -52,10 +52,23 @@ if [[ "$got" != "upstream/main" ]]; then
     exit 1
 fi
 
-# Missing base falls back to upstream/main when present.
-got="$(driver_remat_tip_forward_merge_ref 'refs/heads/does-not-exist' "$tmpdir")"
-if [[ "$got" != "upstream/main" ]]; then
-    echo "FAIL: expected upstream/main fallback, got '$got'" >&2
+# Missing explicit base must HARD FAIL — never substitute upstream/main (#213 Codex).
+if got="$(driver_remat_tip_forward_merge_ref 'refs/heads/does-not-exist' "$tmpdir")"; then
+    echo "FAIL: unresolved explicit base should hard-fail, got '$got'" >&2
+    exit 1
+fi
+
+# Upstream missing entirely + unresolved base → still fail.
+git -C "$tmpdir" update-ref -d refs/remotes/upstream/main
+if got="$(driver_remat_tip_forward_merge_ref origin/main "$tmpdir")"; then
+    : # origin/main still resolves — ok
+else
+    echo "FAIL: origin/main should still resolve" >&2
+    exit 1
+fi
+git -C "$tmpdir" update-ref -d refs/remotes/origin/main
+if got="$(driver_remat_tip_forward_merge_ref origin/main "$tmpdir")"; then
+    echo "FAIL: deleted origin/main must hard-fail, got '$got'" >&2
     exit 1
 fi
 

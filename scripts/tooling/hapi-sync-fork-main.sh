@@ -35,6 +35,49 @@ if ! git -C "$PRIMARY" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     exit 1
 fi
 
+# Resolve the worktree that currently has MAIN_BRANCH checked out (Codex #213).
+# Linked worktrees may set HAPI_PRIMARY to a feature WT; `git checkout main` there
+# fails when main is already checked out in the canonical primary — or worse,
+# repurposes the feature WT. Mutating sync must run in the main worktree;
+# --check-only may stay on the caller's path (read-only counts).
+hapi_sync_main_worktree() {
+    local primary="$1" branch="$2"
+    local wt="" cur_branch="" line
+    while IFS= read -r line; do
+        case "$line" in
+            worktree\ *)
+                wt="${line#worktree }"
+                ;;
+            branch\ refs/heads/"$branch")
+                if [[ -n "$wt" ]]; then
+                    printf '%s\n' "$wt"
+                    return 0
+                fi
+                ;;
+            "")
+                wt=""
+                ;;
+        esac
+    done < <(git -C "$primary" worktree list --porcelain 2>/dev/null)
+    return 1
+}
+
+if [[ "$CHECK_ONLY" -eq 0 ]]; then
+    main_wt="$(hapi_sync_main_worktree "$PRIMARY" "$MAIN_BRANCH" || true)"
+    if [[ -n "${main_wt:-}" ]]; then
+        primary_abs="$(cd "$PRIMARY" && pwd)"
+        main_abs="$(cd "$main_wt" && pwd)"
+        if [[ "$primary_abs" != "$main_abs" ]]; then
+            echo "NOTE: HAPI_PRIMARY is a linked worktree; running sync in main worktree:"
+            echo "      $main_abs"
+            PRIMARY="$main_abs"
+        fi
+    else
+        # main not checked out anywhere — allow checkout in PRIMARY below
+        :
+    fi
+fi
+
 echo "Fetching upstream..."
 git -C "$PRIMARY" fetch upstream
 
