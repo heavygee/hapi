@@ -170,28 +170,4 @@ index abe06c06e..8cb5bafd8 100644
              if (!platform || !arch) {
                  return {
                      type: 'error',
-diff --git a/shared/src/upgradeChannel.ts b/shared/src/upgradeChannel.ts
-index 685d9871b..f3af0316c 100644
---- a/shared/src/upgradeChannel.ts
-+++ b/shared/src/upgradeChannel.ts
-@@ -130,6 +130,20 @@ export type MachineTrailsOptions = {
-     ignoreGenerationDrift?: boolean
- }
- 
-+export function inferMachineArch(platform: string | null | undefined): string | undefined {
-+    if (!platform) {
-+        return undefined
-+    }
-+    switch (platform) {
-+        case 'linux':
-+        case 'win32':
-+        case 'darwin':
-+            return 'x64'
-+        default:
-+            return undefined
-+    }
-+}
-+
- /**
-  * True when a runner advertising `version`/`capabilities`/`generation` is behind
-  * `offer` and the hub should auto-nudge it to the hub's generation.
+
