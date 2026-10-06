@@ -861,7 +861,10 @@ layers:
   # latency was eating single-word utterances before recording even began.
   # All commits on top of the already-merged 7c920d3f2 (not rebased) — clean
   # fast-forward into driver/integration-wip.
-  - branch: fix/session-search-longpress-dismiss
+  # DROPPED 2026-10-06: branch deleted from origin; already merged into soup
+  # (db7da28d1 and prior driver/integration-wip merges). Missing remote ref
+  # hard-failed tip-forward remat before later layers (incl. #1933) could absorb.
+  # - branch: fix/session-search-longpress-dismiss
 
 
   # tiann/hapi#1619 / draft PR #1620 — coalesce ~/coding vs /work/coding session-list groups.
