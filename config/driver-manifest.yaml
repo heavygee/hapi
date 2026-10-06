@@ -1016,6 +1016,14 @@ layers:
   # Doctor fails closed when Cursor ACP invoke path is broken (cwd/mailbox/stdio) — #194.
   - branch: fix/doctor-cursor-mcp-path
 
+  # tiann/hapi#1933 / fork PR heavygee/hapi#204 — Claude resume amnesia (id overwrite
+  # + transcript probe). Squash 94523eb0d is on fork main; this soup union is a
+  # cherry-pick onto live driver/integration (apiMachine soup imports, claudeRemote
+  # env-before-probe, apiTypes aroundId + totalCount). Long-lived sessions stay
+  # broken until they cycle. Worktree: ~/coding/hapi/worktrees/1933-resume-soup
+  # Tip: c1a98ef48
+  - branch: driver/1933-claude-resume-amnesia
+
   # DROPPED 2026-09-22: tooling/hapi-tick-v1 MERGED fork main as heavygee/hapi#159
   # (squash baf1893b6). Gate A cleanup — rematerialize once wave done. Tick stays on
   # fork main + PATH (~/.local/bin/hapi-tick → mirror scripts/tooling/hapi-tick.sh).
