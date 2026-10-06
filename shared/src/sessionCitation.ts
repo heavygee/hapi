@@ -174,6 +174,8 @@ export type SessionCitationSteerTools = {
     spawnTool?: string
     /** Keyword inventory beyond list_peers recency (name/path/agentSessionId). */
     searchPeersTool?: string
+    /** Transcript / tool-output fleet search (not titles). */
+    searchContentTool?: string
 }
 
 /**
@@ -198,6 +200,12 @@ export function buildSessionCitationSteerInstruction(tools: SessionCitationSteer
         text +=
             ` To find quiet or aged-out sessions by keyword (name/path/agentSessionId), call "${tools.searchPeersTool}" ` +
             `(not bounded by list_peers recency). Shell fallback: hapi search-peers <query>.`
+    }
+    if (tools.searchContentTool) {
+        text +=
+            ` To search transcript / tool-output text across sessions (not just name/path), call "${tools.searchContentTool}" ` +
+            `with query=…. Prefer that over grepping ~/.claude/projects. ` +
+            `Shell fallback: hapi search-content <query> via PATH (~/.local/bin/hapi).`
     }
     if (tools.spawnTool) {
         text +=
