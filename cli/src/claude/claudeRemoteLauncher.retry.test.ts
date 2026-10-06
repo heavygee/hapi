@@ -80,7 +80,9 @@ function createSessionStub() {
         onThinkingChange: () => {},
         queue: {
             size: () => 0,
-            waitForMessagesAndGetAsString: async () => null
+            waitForMessagesAndGetAsString: async () => null,
+            unshift: () => {},
+            unshiftIsolated: () => {},
         },
         client: {
             rpcHandlerManager: { registerHandler: () => {} },
@@ -95,7 +97,9 @@ function createSessionStub() {
         getModel: () => undefined,
         getPermissionMode: () => 'default',
         getEffort: () => undefined,
-        expandSkillReference: (message: string) => message
+        expandSkillReference: (message: string) => message,
+        getClaudeResumeSessionId: () => 'sess-1',
+        armResumeGuard: () => {},
     };
     return { session, events };
 }
