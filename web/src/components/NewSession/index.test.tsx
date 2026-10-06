@@ -26,6 +26,8 @@ const mocks = vi.hoisted(() => ({
     directoryExists: undefined as boolean | undefined,
     copilotModels: [] as Array<{ modelId: string; name?: string }>,
     copilotModelsLoading: false,
+    claudeModels: [] as Array<{ value: string; displayName: string; resolvedModel?: string; supportedEffortLevels?: string[] }>,
+    claudeModelsLoading: false,
     kimiModels: [] as Array<{ modelId: string; name?: string; provider?: string }>,
     kimiModelsLoading: false,
     kimiModelsError: null as string | null,
@@ -174,6 +176,14 @@ vi.mock('@/hooks/queries/useKimiModelsForCwd', () => ({
         currentModelId: null,
         isLoading: mocks.kimiModelsLoading,
         error: mocks.kimiModelsError
+    })
+}))
+vi.mock('@/hooks/queries/useClaudeModelsForCwd', () => ({
+    useClaudeModelsForCwd: () => ({
+        availableModels: mocks.claudeModels,
+        isLoading: mocks.claudeModelsLoading,
+        error: null,
+        refetch: vi.fn()
     })
 }))
 vi.mock('@/hooks/queries/usePiModelsForMachine', () => ({
@@ -338,6 +348,8 @@ describe('NewSession launch preferences', () => {
         mocks.kimiModels = []
         mocks.kimiModelsLoading = false
         mocks.kimiModelsError = null
+        mocks.claudeModels = []
+        mocks.claudeModelsLoading = false
         mocks.opencodeModels = [{ modelId: 'provider/current', name: 'Current' }]
         mocks.opencodeCurrentModelId = 'provider/current'
         mocks.opencodeModelsLoading = false

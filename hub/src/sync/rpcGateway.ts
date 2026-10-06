@@ -14,6 +14,8 @@ import {
 import type {
     AgyModelsResponse,
     AgentAvailabilityResponse,
+    ClaudeModelsResponse,
+    ClaudeModelSummary,
     CodexModelSummary,
     CodexModelsResponse,
     CommandResponse,
@@ -126,6 +128,8 @@ export type RpcListKimiModelsResponse = KimiModelsResponse
 export type RpcListGrokReasoningEffortOptionsResponse = GrokReasoningEffortResponse
 export type RpcListOpencodeReasoningEffortOptionsResponse = OpencodeReasoningEffortResponse
 export type RpcListAgyModelsResponse = AgyModelsResponse
+export type RpcClaudeModel = ClaudeModelSummary
+export type RpcListClaudeModelsResponse = ClaudeModelsResponse
 export type RpcListPiModelsResponse = PiModelsResponse
 
 export class RpcGateway {
@@ -573,6 +577,15 @@ export class RpcGateway {
 
     async listOpencodeModelsForCwd(machineId: string, cwd: string): Promise<RpcListOpencodeModelsResponse> {
         return await this.machineRpc(machineId, RPC_METHODS.ListOpencodeModelsForCwd, { cwd }) as RpcListOpencodeModelsResponse
+    }
+
+    async listClaudeModelsForCwd(machineId: string, cwd: string): Promise<RpcListClaudeModelsResponse> {
+        return await this.machineRpc(
+            machineId,
+            RPC_METHODS.ListClaudeModelsForCwd,
+            { cwd },
+            MODEL_LIST_RPC_TIMEOUT_MS
+        ) as RpcListClaudeModelsResponse
     }
 
     async listGrokModelsForCwd(machineId: string, cwd: string): Promise<RpcListGrokModelsResponse> {

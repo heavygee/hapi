@@ -64,6 +64,7 @@ import {
     type RpcListDirectoryResponse,
     type RpcStatFilesResponse,
     type RpcListAgyModelsResponse,
+    type RpcListClaudeModelsResponse,
     type RpcListPiModelsResponse,
     type RpcListCodexModelsResponse,
     type RpcArchiveCodexSessionResponse,
@@ -125,6 +126,7 @@ export type {
     RpcListDirectoryResponse,
     RpcStatFilesResponse,
     RpcListAgyModelsResponse,
+    RpcListClaudeModelsResponse,
     RpcListPiModelsResponse,
     RpcListCodexModelsResponse,
     RpcListCursorModelsResponse,
@@ -5624,6 +5626,10 @@ export class SyncEngine {
 
     async listOpencodeModelsForCwd(machineId: string, cwd: string): Promise<RpcListOpencodeModelsResponse> {
         return await this.rpcGateway.listOpencodeModelsForCwd(machineId, cwd)
+    }
+
+    async listClaudeModelsForCwd(machineId: string, cwd: string): Promise<RpcListClaudeModelsResponse> {
+        return await this.rpcGateway.listClaudeModelsForCwd(machineId, cwd)
     }
 
     async listGrokModelsForCwd(machineId: string, cwd: string): Promise<RpcListGrokModelsResponse> {

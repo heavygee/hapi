@@ -180,10 +180,10 @@ export function resolvePreferredLaunchSettings(
 ): PreferredLaunchSettings {
     const preferredModel = preferred?.model ?? 'auto'
     const staticModelValues = MODEL_OPTIONS[agent].map((option) => option.value)
-    // Kimi's catalog is dynamic (machine discovery); validating a saved alias
-    // against the static list would reset it to 'auto'. The settled-catalog
-    // effect in NewSession validates it once the real catalog has arrived.
-    const model = staticModelValues.length > 0 && agent !== 'codex' && agent !== 'copilot' && agent !== 'kimi'
+    // Kimi + Claude catalogs are dynamic (machine discovery / live CLI probe);
+    // validating a saved alias against the static list would reset it to 'auto'.
+    // The settled-catalog effect in NewSession validates once the real catalog arrives.
+    const model = staticModelValues.length > 0 && agent !== 'codex' && agent !== 'copilot' && agent !== 'kimi' && agent !== 'claude'
         ? resolvePreferredOptionValue(preferredModel, staticModelValues, 'auto')
         : preferredModel
     const effort = agent === 'claude'
