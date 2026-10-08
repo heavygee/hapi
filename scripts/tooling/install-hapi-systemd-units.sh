@@ -18,6 +18,11 @@
 #       --hapi-user hapi --workspace-root /work
 #   bash scripts/tooling/install-hapi-systemd-units.sh --profile user-pet
 #
+# Also installs the Claude OAuth EnvironmentFile drop-in (42-claude-oauth-token.conf)
+# so runner-spawned Claude sessions inherit CLAUDE_CODE_OAUTH_TOKEN. UI spawn does
+# not inject options.token — see lib/hapi-claude-oauth-dropin.sh.
+# System profiles require python3 on PATH (O_NOFOLLOW migrate/chmod of /etc/hapi).
+#
 # Estate-local drop-ins (cursor auth, work-cache, upload-heal) stay in
 # /etc/systemd/system/*.service.d/ and are never overwritten by this script.
 
@@ -28,6 +33,8 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$REPO_ROOT/scripts/tooling/lib/render-hapi-systemd-unit.sh"
 # shellcheck source=lib/hapi-systemd-units.sh
 source "$REPO_ROOT/scripts/tooling/lib/hapi-systemd-units.sh"
+# shellcheck source=lib/hapi-claude-oauth-dropin.sh
+source "$REPO_ROOT/scripts/tooling/lib/hapi-claude-oauth-dropin.sh"
 
 PROFILE=""
 UNITS_ONLY=0
@@ -150,6 +157,13 @@ if [[ "$NEED_ROOT" -eq 1 ]] && [[ "$(id -u)" -ne 0 ]]; then
     exit 1
 fi
 
+# Fail before touching units: system OAuth migrate/chmod needs python3 O_NOFOLLOW.
+if [[ "$NEED_ROOT" -eq 1 ]] && ! command -v python3 >/dev/null 2>&1; then
+    echo "ERROR: python3 is required for profile $PROFILE (Claude OAuth drop-in under /etc/hapi)" >&2
+    echo "       Install python3, then re-run: sudo bash $0 --profile $PROFILE ..." >&2
+    exit 1
+fi
+
 user_home="$(getent passwd "$HAPI_USER" | cut -d: -f6 || echo "$HOME")"
 HAPI_PATH="${HAPI_PATH:-$(hapi_systemd_default_path "$user_home")}"
 WORKSPACE_ROOT_ARGS="$(hapi_systemd_format_workspace_args "${WORKSPACE_ROOTS[@]}")"
@@ -212,10 +226,62 @@ render_pair() {
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
+# True when MainPID still has CLAUDE_CODE_OAUTH_TOKEN but $1 (canonical token
+# file) has no effective assignment. Used before enabling/restoring watchdog.
+hapi_system_runner_ambient_oauth_unpersisted() {
+    local token_file="${1:?token_file}"
+    local unit="${2:?unit}"
+    if hapi_claude_oauth_has_effective_token "$token_file" 2>/dev/null; then
+        return 1
+    fi
+    local runner_main_pid inspect_rc
+    runner_main_pid="$(systemctl show -p MainPID --value "$unit" 2>/dev/null || echo 0)"
+    set +e
+    hapi_claude_oauth_mainpid_has_oauth_token "$runner_main_pid"
+    inspect_rc=$?
+    set -e
+    case "$inspect_rc" in
+        0) return 0 ;;
+        2)
+            echo "ERROR: cannot inspect runner MainPID=$runner_main_pid environ for ambient OAuth — refusing restart" >&2
+            return 0
+            ;;
+        *) return 1 ;;
+    esac
+}
+
 case "$PROFILE" in
     primary-soup|fleet-binary)
         HUB_DST="/etc/systemd/system/$HUB_UNIT"
         RUNNER_DST="/etc/systemd/system/$RUNNER_UNIT"
+        # Quiesce a pre-existing watchdog before rewriting units / migrate.
+        # stop (not disable): the timer stays enabled; we only prevent a fire
+        # during the window where EnvironmentFile may be unwired. A failed
+        # migrate exits with the timer left stopped (fail-closed).
+        WD_TIMER_WAS_ACTIVE=0
+        if systemctl is-active --quiet hapi-runner-watchdog.timer 2>/dev/null; then
+            WD_TIMER_WAS_ACTIVE=1
+        fi
+        if systemctl cat hapi-runner-watchdog.timer >/dev/null 2>&1; then
+            if ! systemctl stop hapi-runner-watchdog.timer; then
+                echo "ERROR: failed to stop hapi-runner-watchdog.timer before unit rewrite" >&2
+                exit 1
+            fi
+            if systemctl is-active --quiet hapi-runner-watchdog.timer; then
+                echo "ERROR: hapi-runner-watchdog.timer still active after stop" >&2
+                exit 1
+            fi
+        fi
+        if systemctl cat hapi-runner-watchdog.service >/dev/null 2>&1; then
+            if ! systemctl stop hapi-runner-watchdog.service; then
+                echo "ERROR: failed to stop hapi-runner-watchdog.service before unit rewrite" >&2
+                exit 1
+            fi
+            if systemctl is-active --quiet hapi-runner-watchdog.service; then
+                echo "ERROR: hapi-runner-watchdog.service still active after stop" >&2
+                exit 1
+            fi
+        fi
         render_pair \
             "$TEMPLATE_DIR/$HUB_UNIT.in" \
             "$TEMPLATE_DIR/$RUNNER_UNIT.in" \
@@ -228,6 +294,51 @@ case "$PROFILE" in
         echo "Installed: $RUNNER_DST"
         if [[ "$DO_ENABLE" -eq 1 ]]; then
             systemctl enable "$HUB_UNIT" "$RUNNER_UNIT"
+        fi
+        # System-scope token is always root-controlled /etc/hapi/claude-setup-token.env
+        # (NOT under service-writable HAPI_HOME or operator ~/.hapi). Compromised
+        # runner + passwordless Restart must not retarget EnvironmentFile at other
+        # root-readable secrets. primary-soup 2026-08-25 hand-install under
+        # $OPERATOR_HOME/.hapi/ is a one-time migrate (WARN from the drop-in).
+        # Run migrate/drop-in BEFORE Tier-1: the watchdog timer can restart the
+        # runner; a failed migrate must not leave watchdog able to discard ambient
+        # auth before EnvironmentFile exists.
+        CLAUDE_TOKEN_FILE="$(hapi_claude_oauth_system_token_file)"
+        HAPI_CLAUDE_OAUTH_MIGRATE_PENDING=0
+        # primary-soup: pass configured operator home (not sudoer's HOME=/root).
+        DROPIN_ARGS=(
+            --scope system
+            --runner-unit "$RUNNER_UNIT"
+            --token-file "$CLAUDE_TOKEN_FILE"
+            --migrate-profile "$PROFILE"
+            --migrate-hapi-home "$HAPI_HOME"
+        )
+        if [[ "$PROFILE" == primary-soup ]]; then
+            DROPIN_ARGS+=(--migrate-operator-home "${OOS_OPERATOR_HOME:-/home/heavygee}")
+        fi
+        set +e
+        hapi_install_claude_oauth_dropin "${DROPIN_ARGS[@]}"
+        dropin_rc=$?
+        set -e
+        # Fail closed on config-only installs too: pending migrate must not leave
+        # a drop-in pointed at an empty/missing /etc/hapi token.
+        if [[ "$dropin_rc" -ne 0 || "${HAPI_CLAUDE_OAUTH_MIGRATE_PENDING:-0}" -eq 1 ]]; then
+            echo "ERROR: Claude OAuth drop-in install failed or migrate still pending ($CLAUDE_TOKEN_FILE)" >&2
+            echo "       Resolve legacy token ambiguity / symlink, then re-run." >&2
+            echo "       hapi-runner-watchdog.timer was stopped for this upgrade and left stopped." >&2
+            exit 1
+        fi
+        if hapi_system_runner_ambient_oauth_unpersisted "$CLAUDE_TOKEN_FILE" "$RUNNER_UNIT"; then
+            echo "ERROR: runner has ambient CLAUDE_CODE_OAUTH_TOKEN but $CLAUDE_TOKEN_FILE is missing/empty" >&2
+            echo "       Persist the token before enabling the watchdog or you will discard the only credential." >&2
+            echo "       hapi-runner-watchdog.timer was stopped for this upgrade and left stopped." >&2
+            exit 1
+        fi
+        if hapi_claude_oauth_merged_env_discards_token "$RUNNER_UNIT"; then
+            echo "ERROR: merged $RUNNER_UNIT environment would override or unset CLAUDE_CODE_OAUTH_TOKEN" >&2
+            echo "       Fix later EnvironmentFiles / UnsetEnvironment before enabling the watchdog." >&2
+            echo "       hapi-runner-watchdog.timer was stopped for this upgrade and left stopped." >&2
+            exit 1
         fi
         if [[ "$UNITS_ONLY" -eq 0 ]]; then
             # Pass the binary this profile just installed, so Tier-1's
@@ -260,10 +371,63 @@ case "$PROFILE" in
             bash "$REPO_ROOT/scripts/tooling/install-hapi-primary-hub-tier1.sh" "${TIER1_ARGS[@]}"
         fi
         if [[ "$DO_RESTART" -eq 1 ]]; then
+            # Fail closed: missing/ineffective canonical while a legacy token still
+            # exists, OR an empty canonical file that systemd would load as blank.
+            block_restart=0
+            op_home=""
+            [[ "$PROFILE" == primary-soup ]] && op_home="${OOS_OPERATOR_HOME:-/home/heavygee}"
+            if hapi_claude_oauth_has_effective_token "$CLAUDE_TOKEN_FILE" 2>/dev/null; then
+                :
+            else
+                if [[ -e "$CLAUDE_TOKEN_FILE" || -L "$CLAUDE_TOKEN_FILE" ]]; then
+                    block_restart=1
+                fi
+                while IFS= read -r legacy_probe; do
+                    if [[ -e "$legacy_probe" || -L "$legacy_probe" ]]; then
+                        block_restart=1
+                        break
+                    fi
+                done < <(hapi_claude_oauth_legacy_system_token_candidates "$PROFILE" "$HAPI_HOME" "$op_home")
+                if hapi_system_runner_ambient_oauth_unpersisted "$CLAUDE_TOKEN_FILE" "$RUNNER_UNIT"; then
+                    block_restart=1
+                    echo "ERROR: runner has ambient CLAUDE_CODE_OAUTH_TOKEN but $CLAUDE_TOKEN_FILE is missing/empty" >&2
+                    echo "       Persist the token to $CLAUDE_TOKEN_FILE before --restart or you will discard the only credential." >&2
+                fi
+            fi
+            if [[ "$block_restart" -eq 1 ]]; then
+                echo "ERROR: refusing --restart until Claude OAuth token is effective at $CLAUDE_TOKEN_FILE" >&2
+                echo "       Legacy path still present, empty canonical, ambient-only token, or migrate failed." >&2
+                echo "       Migrate with: hapi_claude_oauth_secure_copy_regular_file <legacy> $CLAUDE_TOKEN_FILE" >&2
+                exit 1
+            fi
             if [[ -x /home/heavygee/.local/bin/hapi-restart-hub ]]; then
                 sudo -u heavygee -H /home/heavygee/.local/bin/hapi-restart-hub
             else
                 systemctl restart "$HUB_UNIT" "$RUNNER_UNIT"
+            fi
+        fi
+        # --units-only skips Tier-1 (which restarts the timer). After a successful
+        # migrate, put back a timer we quiesced.
+        if [[ "$UNITS_ONLY" -eq 1 && "${WD_TIMER_WAS_ACTIVE:-0}" -eq 1 ]]; then
+            if hapi_system_runner_ambient_oauth_unpersisted "$CLAUDE_TOKEN_FILE" "$RUNNER_UNIT"; then
+                echo "ERROR: runner has ambient CLAUDE_CODE_OAUTH_TOKEN but $CLAUDE_TOKEN_FILE is missing/empty" >&2
+                echo "       Persist the token before restoring the watchdog timer." >&2
+                echo "       hapi-runner-watchdog.timer was left stopped." >&2
+                exit 1
+            fi
+            if hapi_claude_oauth_merged_env_discards_token "$RUNNER_UNIT"; then
+                echo "ERROR: merged $RUNNER_UNIT environment would override or unset CLAUDE_CODE_OAUTH_TOKEN" >&2
+                echo "       hapi-runner-watchdog.timer was left stopped." >&2
+                exit 1
+            fi
+            if ! systemctl start hapi-runner-watchdog.timer; then
+                echo "ERROR: failed to restore hapi-runner-watchdog.timer after --units-only" >&2
+                echo "       Timer was active before this upgrade and was left stopped." >&2
+                exit 1
+            fi
+            if ! systemctl is-active --quiet hapi-runner-watchdog.timer; then
+                echo "ERROR: hapi-runner-watchdog.timer did not become active after restore" >&2
+                exit 1
             fi
         fi
         ;;
@@ -280,14 +444,77 @@ case "$PROFILE" in
         systemctl --user daemon-reload
         echo "Installed: $USER_UNIT_DIR/hapi-hub.service"
         echo "Installed: $USER_UNIT_DIR/hapi-runner.service"
+        CLAUDE_TOKEN_FILE="$(hapi_claude_oauth_default_token_file "$HAPI_HOME")"
+        hapi_install_claude_oauth_dropin \
+            --scope user \
+            --runner-unit hapi-runner.service \
+            --token-file "$CLAUDE_TOKEN_FILE" \
+            --unit-dir "$USER_UNIT_DIR"
+        # Ambient-only guard (mirrors system-profile --restart): if the runner
+        # still carries CLAUDE_CODE_OAUTH_TOKEN in MainPID environ but no durable
+        # file exists to reload, refuse restart so we do not force /login.
+        hapi_user_pet_refuse_ambient_only_restart() {
+            local token_file="$1"
+            if hapi_claude_oauth_has_effective_token "$token_file" 2>/dev/null; then
+                return 0
+            fi
+            local legacy_token
+            legacy_token="$(dirname "$token_file")/.hapi/claude-setup-token.env"
+            if hapi_claude_oauth_has_effective_token "$legacy_token" 2>/dev/null; then
+                return 0
+            fi
+            local runner_main_pid inspect_rc
+            runner_main_pid="$(systemctl --user show -p MainPID --value hapi-runner.service 2>/dev/null || echo 0)"
+            set +e
+            hapi_claude_oauth_mainpid_has_oauth_token "$runner_main_pid"
+            inspect_rc=$?
+            set -e
+            case "$inspect_rc" in
+                0)
+                    echo "ERROR: user-pet runner MainPID=$runner_main_pid has ambient CLAUDE_CODE_OAUTH_TOKEN but $token_file is missing/empty" >&2
+                    echo "       Persist the token to $token_file before restart or you will discard the only credential." >&2
+                    return 1
+                    ;;
+                2)
+                    echo "ERROR: cannot inspect user-pet runner MainPID=$runner_main_pid environ for ambient OAuth — refusing restart" >&2
+                    return 1
+                    ;;
+            esac
+            return 0
+        }
         if [[ "$DO_ENABLE" -eq 1 ]]; then
             loginctl enable-linger "$(id -un)" 2>/dev/null || true
             systemctl --user enable hapi-hub.service hapi-runner.service
-            systemctl --user start hapi-hub.service hapi-runner.service
+            # Same race as the embedded pet path: pgrep kill + Restart=always can
+            # respawn the old hub/runner binary before INSTALL_DIR is swapped;
+            # systemctl start is then a no-op for already-active units.
+            hapi_user_pet_refuse_ambient_only_restart "$CLAUDE_TOKEN_FILE" || exit 1
+            if hapi_claude_oauth_merged_env_discards_token hapi-runner.service "$CLAUDE_TOKEN_FILE" --user; then
+                echo "ERROR: merged user hapi-runner.service environment would override or unset CLAUDE_CODE_OAUTH_TOKEN" >&2
+                exit 1
+            fi
+            systemctl --user restart hapi-hub.service
+            systemctl --user restart hapi-runner.service
+        elif [[ "$DO_RESTART" -eq 1 ]]; then
+            # systemctl restart starts inactive units (try-restart would skip).
+            hapi_user_pet_refuse_ambient_only_restart "$CLAUDE_TOKEN_FILE" || exit 1
+            if hapi_claude_oauth_merged_env_discards_token hapi-runner.service "$CLAUDE_TOKEN_FILE" --user; then
+                echo "ERROR: merged user hapi-runner.service environment would override or unset CLAUDE_CODE_OAUTH_TOKEN" >&2
+                exit 1
+            fi
+            systemctl --user restart hapi-hub.service
+            systemctl --user restart hapi-runner.service
         fi
+        unset -f hapi_user_pet_refuse_ambient_only_restart
         ;;
 esac
 
 echo
 echo "Profile: $PROFILE"
 echo "Verify: bash $REPO_ROOT/scripts/tooling/verify-hapi-systemd-units.sh"
+if [[ "$PROFILE" == user-pet ]]; then
+    echo "        bash $REPO_ROOT/scripts/tooling/verify-hapi-install.sh --skip-restart"
+else
+    echo "        sudo bash $REPO_ROOT/scripts/tooling/verify-hapi-install.sh --skip-restart"
+    echo "        (system-scope OAuth file is root:root 0600; verify as root)"
+fi

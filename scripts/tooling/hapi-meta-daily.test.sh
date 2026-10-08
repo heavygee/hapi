@@ -171,6 +171,10 @@ check "run1: pinged #300 merged (cccccccc)" "grep -q '^cccccccc' <<<\"\$pings\""
 check "run1: ✅ #200 first-sight transition pings (bbbbbbbb)" "grep -q '^bbbbbbbb' <<<\"\$pings\""
 check "run1: #400 asleep resume-pinged (C)" "grep -q '^dddddddd' <<<\"\$pings\""
 check "run1: thinking ⚠️ #600 not pinged (ffffffff)" "! grep -q '^ffffffff' <<<\"\$pings\""
+# Due ping skipped while thinking must not latch the new fingerprint — otherwise
+# the next idle window treats the blocker as unchanged and exponential-backs off.
+think_fp="$(jq -r '.sessions["ffffffff-6666"].fp // empty' "$WORK/state.json")"
+check "run1: thinking skip does not latch undelivered fingerprint" "[[ -z \"\$think_fp\" ]]"
 
 # ============ 3. second run: 🔧 still hourly; same-fp ⚠️ backs off ============
 out="$(run 2>&1)"
@@ -180,6 +184,8 @@ check "run2: window-rouse re-pings 🔧 #300" "grep -q '^cccccccc' <<<\"\$pings2
 check "run2: same-fp asleep ⚠️ #400 does NOT re-ping (backoff)" "! grep -q '^dddddddd' <<<\"\$pings2\""
 check "run2: thinking ⚠️ #600 still not pinged" "! grep -q '^ffffffff' <<<\"\$pings2\""
 check "run2: thinking skip listed" "grep -q 'ffffffff' <<<\"\$out\" && grep -qiE 'thinking|SKIPPED' <<<\"\$out\""
+think_fp2="$(jq -r '.sessions["ffffffff-6666"].fp // empty' "$WORK/state.json")"
+check "run2: thinking skip still leaves fingerprint undelivered" "[[ -z \"\$think_fp2\" ]]"
 check "run2: backoff skip listed" "grep -qi 'backoff' <<<\"\$out\""
 check "run2: ✅ #200 stays silent (not work-state)" "! grep -q '^bbbbbbbb' <<<\"\$pings2\""
 check "run2: still lists warn #100 in queue" "grep -q '#100' <<<\"\$out\""

@@ -1124,9 +1124,13 @@ main() {
         # In-turn skip: session.thinking means the agent is emitting / in a
         # turn (not merely active=true). Injecting "are you done yet?" steers
         # a live turn. Archived/inactive ⚠️ still rouse — chip says work owed.
+        # Keep the last *delivered* fingerprint when a due ping is suppressed so
+        # the next idle run still sees a fingerprint change (not backoff).
         local thinking="${SESS_THINKING[$sid8]:-false}"
+        local store_fp="$action_fp"
         if [[ "$thinking" == "true" && "$decision" == "yes" ]]; then
             decision="no"
+            store_fp="$prev_fp"
             Q_SKIP_RUNNING+=("$sid8  $combined  #$(echo "$prs" | tr ' ' ',')  — thinking; skip ping this window")
         fi
         if [[ "$combined" == "⚠️" && "$DO_PING" -eq 1 && "$session_sticky" == "true" && "$thinking" != "true" && "$decision" == "no" && "$prev_emoji" == "⚠️" ]]; then
@@ -1151,18 +1155,24 @@ main() {
                     fi
                 fi
                 if [[ "$ping_note" != "skip" ]]; then
-                    _do_ping "$sid8" "$combined" "$prs" "$acts"
-                    Q_PINGED+=("$sid8  $combined  #$(echo "$prs" | tr ' ' ',')${ping_note}")
-                    this_ping="$now"
-                    if [[ "$combined" == "⚠️" ]]; then
-                        if [[ "$action_fp" == "$prev_fp" && "$prev_emoji" == "⚠️" ]]; then
-                            this_streak=$((prev_streak + 1))
-                            (( this_streak < 1 )) && this_streak=1
+                    if _do_ping "$sid8" "$combined" "$prs" "$acts"; then
+                        Q_PINGED+=("$sid8  $combined  #$(echo "$prs" | tr ' ' ',')${ping_note}")
+                        this_ping="$now"
+                        if [[ "$combined" == "⚠️" ]]; then
+                            if [[ "$action_fp" == "$prev_fp" && "$prev_emoji" == "⚠️" ]]; then
+                                this_streak=$((prev_streak + 1))
+                                (( this_streak < 1 )) && this_streak=1
+                            else
+                                this_streak=1
+                            fi
                         else
-                            this_streak=1
+                            this_streak=0
                         fi
                     else
-                        this_streak=0
+                        # Delivery failed: keep prior fp/backoff so the next
+                        # window retries instead of sleeping for hours/days.
+                        store_fp="$prev_fp"
+                        Q_PINGED+=("$sid8  $combined  #$(echo "$prs" | tr ' ' ',')${ping_note} [ping-failed]")
                     fi
                 fi
             fi
@@ -1243,11 +1253,13 @@ main() {
             fi
 
             # Actuator state always advances independently of emit success.
+            # store_fp may intentionally lag action_fp when a due ping was
+            # skipped (thinking) or failed delivery — see thinking/fp gate above.
             if [[ "$combined" != "⚠️" ]]; then
                 this_streak=0
             fi
             new_state="$(printf '%s' "$new_state" | jq -c \
-                --arg s "$sid" --arg e "$combined" --arg f "$action_fp" \
+                --arg s "$sid" --arg e "$combined" --arg f "$store_fp" \
                 --argjson lp "${this_ping:-0}" --argjson ps "${this_streak:-0}" --arg t "$new_title" \
                 '.sessions[$s] = ((.sessions[$s] // {}) + {emoji:$e, fp:$f, last_ping:$lp, ping_streak:$ps, title:$t})')"
         fi
@@ -1634,7 +1646,11 @@ Canon: docs/operator/AGENTS.md § Meta PR watcher + feature-work-lifecycle.md §
         echo "    [dry-run] ping $sid8 ($emoji)" >&2
         return 0
     fi
-    "$PING_BIN" "$sid8" "$msg" >/dev/null 2>&1 || err "ping failed for $sid8"
+    if ! "$PING_BIN" "$sid8" "$msg" >/dev/null 2>&1; then
+        err "ping failed for $sid8"
+        return 1
+    fi
+    return 0
 }
 
 _print_section() {  # <title> <array-name>
