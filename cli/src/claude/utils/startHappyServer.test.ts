@@ -114,6 +114,7 @@ describe('startHappyServer skill_lookup', () => {
 
         expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
             'change_title',
+            'set_voice_mode',
             'display_image',
             'display_video',
             'display_media',
@@ -237,6 +238,7 @@ describe('startHappyServer skill_lookup', () => {
         const tools = await mcp.listTools()
 
         expect(server.toolNames).toEqual([
+            'set_voice_mode',
             'display_image',
             'display_video',
             'display_media',
@@ -258,6 +260,7 @@ describe('startHappyServer skill_lookup', () => {
             'search_peers',
             'ping_peer',
             'session_job',
+            'set_voice_mode',
             'spawn_peer',
         ].sort())
     })
@@ -376,10 +379,55 @@ describe('startHappyServer change_title', () => {
         expect(sendClaudeSessionMessage).not.toHaveBeenCalled()
     })
 })
+
+describe('startHappyServer set_voice_mode', () => {
+    let stopServer: (() => void) | null
+    let client: Client | null
+
+    afterEach(async () => {
+        await client?.close()
+        stopServer?.()
+        client = null
+        stopServer = null
+    })
+
+    it('writes metadata.voiceMode via updateMetadata', async () => {
+        const updateMetadata = vi.fn()
+        const sessionClient = {
+            updateMetadata,
+            sendAgentMessage: vi.fn(),
+            sendClaudeSessionMessage: vi.fn()
+        } as unknown as ApiSessionClient
+
+        const server = await startHappyServer(sessionClient)
+        stopServer = server.stop
+        const mcp = new Client({ name: 'hapi-voice-mode-test', version: '1.0.0' })
+        client = mcp
+        await mcp.connect(new StreamableHTTPClientTransport(new URL(server.url)))
+        updateMetadata.mockClear()
+
+        const result = await mcp.callTool({
+            name: 'set_voice_mode',
+            arguments: { enabled: true }
+        }) as ToolResult
+
+        expect(result.isError).toBe(false)
+        expect(result.content?.[0]?.text).toContain('Voice mode enabled')
+        expect(updateMetadata).toHaveBeenCalledTimes(1)
+        const handler = updateMetadata.mock.calls[0]?.[0] as (metadata: {
+            path: string
+            host: string
+            voiceMode?: boolean
+        }) => { path: string; host: string; voiceMode?: boolean }
+        expect(handler({ path: '/tmp', host: 'localhost' }).voiceMode).toBe(true)
+    })
+})
+
 describe('toClaudeAllowedHapiMcpTools', () => {
     it('keeps local-path and peer tools registered but out of Claude --allowedTools', () => {
         expect(toClaudeAllowedHapiMcpTools([
             'change_title',
+            'set_voice_mode',
             'display_image',
             'display_video',
             'display_media',
@@ -392,6 +440,7 @@ describe('toClaudeAllowedHapiMcpTools', () => {
             'skill_lookup'
         ])).toEqual([
             'mcp__hapi__change_title',
+            'mcp__hapi__set_voice_mode',
             'mcp__hapi__display_image',
             'mcp__hapi__list_peers',
             'mcp__hapi__search_peers',
