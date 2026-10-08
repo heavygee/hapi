@@ -799,7 +799,9 @@ layers:
   # the remaining unique tip (16 files). Parent UUID stamp is NOT here — that is
   # feat/peer-rename-proof-identity / upstream #1922 (still out of soup).
   # Was: feat/spawn-peer-remit (fat). Tip: driver/spawn-peer-remit-delta @ b30bed331
-  # HOLD 2026-10-06: tip regresses soup bridge/overlay/settings on absorb — re-thin before remat
+  # HOLD 2026-10-06: tip regresses soup bridge/overlay/settings on absorb.
+  # 2026-10-08: promote in flight — land whole upstream #1922 tip on fork main
+  # (feat/land-1922-peer-stamp-fork), then DROP this delta (no re-thin).
   # - branch: driver/spawn-peer-remit-delta
 
   # Soup heal: remat 47ce90965 dropped Claude Happy MCP spawn_peer model/effort
@@ -849,7 +851,9 @@ layers:
   # tiann/hapi#1516 — display_links thin tip (per-session tool-name + bridge/CLI).
   # Base registration already on soup tip; this delta is the unique naming surface
   # (16 files). Was: feat/display-links (fat). Tip: driver/display-links-delta @ e5190a33c
-  # HOLD 2026-10-06: tip regresses soup bridge/overlay/settings on absorb — re-thin before remat
+  # HOLD 2026-10-06: tip regresses soup bridge/overlay/settings on absorb.
+  # 2026-10-08: promote in flight — heavygee/hapi#222 lands upstream #1564 tip on
+  # fork main; DROP this delta after merge (no re-thin).
   # - branch: driver/display-links-delta
 
   # tiann/hapi#1594 — long-press the collapsed session-search chip to dictate
@@ -997,15 +1001,13 @@ layers:
   # (de6c9dee2). Ranking/pin-divider from upstream #1848 — do NOT re-apply soup ranking commits.
   # Worktree: ~/coding/hapi/worktrees/soup-1772-list-filters @ soup/1772-combined-list-filters
   # Tip: 79c85e024 — 2 commits / 34 files (#1772 filters + scratchlist SSE only)
-  # Remat order: #1605 → #1607 → #1772 last. Remat owner: tooling/meta — no self-remat.
+  # Remat order: #1607 → #1772 last (#1605 catalog DROPPED 2026-10-08). Remat owner: tooling/meta — no self-remat.
   - branch: soup/1772-combined-list-filters
 
-  # tiann/hapi#1605 — Claude live model catalog union onto soup tip.
-  # Re-thinned 2026-10-06: driver/claude-model-catalog-delta @ ec959f3a4
-  # (merge --no-ff of catalog tip onto driver/integration; kimi/agy kept).
-  # Still fat by file count (~54) — remat with ABSORB_FAT=1 / raised MAX_FILES.
-  # Drop when #1605 merges upstream. Hub+cli+web → --build-web + hapi-restart-hub.
-  # HOLD 2026-10-06: tip regresses soup bridge/overlay/settings on absorb — re-thin before remat
+  # DROPPED 2026-10-08: driver/claude-model-catalog (+ delta) — operator call via Overseer.
+  # Upstream tiann/hapi#1605 CLOSED unmerged (2026-10-02); absent from soup tip; unmissed.
+  # No re-thin / no quiet return. Want it later → fresh PR off upstream/main.
+  # Was: driver/claude-model-catalog-delta @ ec959f3a4 (HOLD 2026-10-06).
   # - branch: driver/claude-model-catalog-delta
 
   # heavygee/hapi#193 / tiann/hapi#1951 — Cursor ACP spawn cwd = session.path so
