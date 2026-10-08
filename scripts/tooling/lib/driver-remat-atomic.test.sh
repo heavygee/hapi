@@ -9,6 +9,24 @@ source "$LIB/driver-remat-atomic.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
+# Self-hosted tooling-tests share the operator HOME. Isolate remat hold state so a
+# live ~/.hapi/remat-hold.json (or any host HOLD) cannot fail promote/prepare.
+# Incident: heavygee/hapi#216 CI run 37504390289 — host HOLD active mid-remat.
+export HAPI_STATE_DIR="$TMP/hapi-state"
+mkdir -p "$HAPI_STATE_DIR"
+export HAPI_REMAT_HOLD_FILE="$HAPI_STATE_DIR/remat-hold.json"
+export HAPI_REMAT_OWNER_TOKEN_FILE="$TMP/remat-owner.token"
+export HAPI_REMAT_ESCALATE_CONFIG="$TMP/escalate.yaml"
+printf '%s\n' '{"schema":1,"active":false}' >"$HAPI_REMAT_HOLD_FILE"
+cat >"$HAPI_REMAT_ESCALATE_CONFIG" <<'EOF'
+owner_session_prefix: "aaaaaaaa"
+owner_labels:
+  - meta-soup
+ping_cmd: ""
+EOF
+unset HAPI_REMAT_OWNER HAPI_REMAT_OWNER_TOKEN HAPI_SESSION_ID HAPI_AGENT_LABEL \
+    HAPI_OPERATOR_REMAT_HOLD_CLEAR || true
+
 run_case() {
     local label="$1"
     shift
@@ -134,5 +152,21 @@ REMAT="$(HAPI_REMAT_RESUME=0 HAPI_REMAT_MODE=tip-forward driver_remat_prepare "$
 [[ "$(git -C "$REMAT" rev-parse HEAD)" == "$PREV" ]] || { echo "FAIL: RESUME=0 should reset to PREV"; exit 1; }
 [[ ! -f "$REMAT/resume.txt" ]] || { echo "FAIL: RESUME=0 left resolution file"; exit 1; }
 echo "OK: HAPI_REMAT_RESUME=0 hard-resets WIP"
+
+# Isolated hold file still gates promote (prove the check is wired, not merely skipped).
+# driver_remat_hold_require_clear_or_owner uses `exit 76` (not return) — subshell required.
+printf '%s\n' '{"schema":1,"active":true,"reason":"atomic-isolation-probe","owner_session_prefix":"aaaaaaaa"}' \
+    >"$HAPI_REMAT_HOLD_FILE"
+set +e
+( driver_remat_promote "$DRIVER" "driver/integration" "$PREV" ) >"$TMP/atomic-hold-promote.out" 2>&1
+hold_promote_rc=$?
+set -e
+[[ "$hold_promote_rc" -eq 76 ]] || {
+    echo "FAIL: active isolated hold should refuse promote (rc=$hold_promote_rc)" >&2
+    cat "$TMP/atomic-hold-promote.out" >&2 || true
+    exit 1
+}
+printf '%s\n' '{"schema":1,"active":false}' >"$HAPI_REMAT_HOLD_FILE"
+echo "OK: isolated active hold refuses promote (exit 76)"
 
 echo "driver-remat-atomic.test.sh: all cases OK"

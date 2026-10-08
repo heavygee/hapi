@@ -52,6 +52,19 @@ jobs:
       - name: Run every scripts/**/*.test.sh
         run: |
           set -euo pipefail
+          # Self-hosted runner shares the operator HOME. Point remat hold/lease
+          # state at a disposable dir so a live ~/.hapi/remat-hold.json cannot
+          # poison promote / pretooluse guards mid-remat (heavygee/hapi#216 CI
+          # run 37504390289). Individual tests may still override these paths.
+          HAPI_CI_STATE="$(mktemp -d)"
+          trap 'rm -rf "$HAPI_CI_STATE"' EXIT
+          export HAPI_STATE_DIR="$HAPI_CI_STATE"
+          export HAPI_REMAT_HOLD_FILE="$HAPI_CI_STATE/remat-hold.json"
+          export HAPI_REMAT_OWNER_TOKEN_FILE="$HAPI_CI_STATE/remat-owner.token"
+          # Do not export HAPI_REMAT_LEASE_FILE — lease tests must derive
+          # $HAPI_STATE_DIR/remat-owner.lease (production default path).
+          printf '%s\n' '{"schema":1,"active":false}' >"$HAPI_REMAT_HOLD_FILE"
+
           # hapi-meta-daily.test.sh hangs indefinitely as of 2026-10-01 (confirmed:
           # reproduces standalone, prints its hapi-hold-ack lines then never
           # returns) - pre-existing, unrelated to this workflow. Excluded rather
@@ -79,34 +92,96 @@ jobs:
   # the moment this workflow exists to react to. Proves the standalone path
   # with zero pre-existing state, zero Lockhouse dependency, exactly as
   # anyone else running this script would experience it.
+  #
+  # --with-systemd needs a real system manager (PID 1) plus a per-user manager
+  # (loginctl linger + /run/user/$UID). A plain `docker run debian bash` has
+  # neither, so systemctl --user daemon-reload fails under set -e.
   redeploy-pet:
     if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     runs-on: [self-hosted, hapi]
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - name: Build a throwaway systemd-capable pet test image
+        run: |
+          set -euo pipefail
+          cat > /tmp/hapi-pet-test.Dockerfile <<'EOF'
+          FROM debian:trixie
+          RUN apt-get update -qq && apt-get install -y -qq \
+              systemd systemd-sysv dbus dbus-user-session libpam-systemd \
+              curl ca-certificates procps sudo \
+              && rm -rf /var/lib/apt/lists/*
+          EOF
+          docker build -f /tmp/hapi-pet-test.Dockerfile -t hapi-pet-test:ci /tmp
+      - name: Boot it with systemd as init
+        run: |
+          set -euo pipefail
+          docker rm -f hapi-pet-ci >/dev/null 2>&1 || true
+          docker run -d --name hapi-pet-ci \
+            --privileged \
+            --tmpfs /tmp --tmpfs /run --tmpfs /run/lock \
+            -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
+            -v "$PWD":/repo:ro \
+            hapi-pet-test:ci /lib/systemd/systemd --log-target=console --log-level=info
+          sleep 3
+          docker exec hapi-pet-ci systemctl is-system-running || true
       - name: Fresh install, then re-run to exercise the upgrade path
         run: |
           set -euo pipefail
-          docker run --rm -v "$PWD":/repo:ro debian:trixie bash -c '
-            set -euo pipefail
-            apt-get update -qq >/dev/null
-            apt-get install -y -qq curl ca-certificates procps >/dev/null
-            useradd -m testuser
+          # Heredoc into docker exec -i (not bash -c '...') so inner single quotes
+          # (pgrep pattern, etc.) cannot terminate the host shell string.
+          docker exec -i hapi-pet-ci bash <<'EOS'
+          set -euo pipefail
+          useradd -m -s /bin/bash testuser
+          loginctl enable-linger testuser
+          for _ in $(seq 1 30); do
+            [[ -d /run/user/$(id -u testuser) ]] && break
+            sleep 1
+          done
+          [[ -d /run/user/$(id -u testuser) ]] \
+            || { echo "FAIL: user manager runtime dir never appeared for testuser"; exit 1; }
+          echo "OK: linger + /run/user/$(id -u testuser) ready"
 
-            echo "=== fresh install ==="
-            su - testuser -c "bash /repo/scripts/install-hapi-pet.sh"
-            su - testuser -c "curl -fsS localhost:3006/health"
-            FIRST_SHA=$(su - testuser -c "sha256sum ~/.local/bin/hapi" | awk "{print \$1}")
-            echo "binary sha256: $FIRST_SHA"
+          as_testuser() {
+            # install-hapi-pet.sh --with-systemd calls systemctl --user; that
+            # needs XDG_RUNTIME_DIR + the user dbus socket from linger.
+            su - testuser -c "export XDG_RUNTIME_DIR=/run/user/\$(id -u); export DBUS_SESSION_BUS_ADDRESS=unix:path=\$XDG_RUNTIME_DIR/bus; $*"
+          }
 
-            echo "=== re-run (upgrade path): must stop the old process, swap, relaunch ==="
-            su - testuser -c "bash /repo/scripts/install-hapi-pet.sh"
-            sleep 2
-            su - testuser -c "curl -fsS localhost:3006/health"
-            su - testuser -c "pgrep -fa \"hapi (hub|runner)\"" || { echo "FAIL: no hapi processes survived the re-run"; exit 1; }
-            echo "OK: pet install + upgrade re-run both healthy"
-          '
+          # Isolate the installer so SCRIPT_DIR has no tooling/ companion —
+          # same shape as curl|bash. Running /repo/scripts/... always prefers
+          # install-hapi-systemd-units.sh and never hits the embedded units.
+          install -m 0755 /repo/scripts/install-hapi-pet.sh /home/testuser/install-hapi-pet.sh
+          chown testuser:testuser /home/testuser/install-hapi-pet.sh
+
+          echo "=== fresh install with --with-systemd (embedded curl|bash path) ==="
+          as_testuser "bash ~/install-hapi-pet.sh --with-systemd" \
+            | tee /tmp/hapi-pet-fresh-install.log
+          grep -q 'No git checkout — writing embedded user systemd units' \
+            /tmp/hapi-pet-fresh-install.log \
+            || { echo "FAIL: expected embedded units path (no companion SCRIPT_DIR)"; exit 1; }
+          echo "OK: exercised embedded install_user_pet_systemd branch"
+          as_testuser "curl -fsS localhost:3006/health"
+          FIRST_SHA=$(as_testuser "sha256sum ~/.local/bin/hapi" | awk '{print $1}')
+          echo "binary sha256: $FIRST_SHA"
+
+          echo "=== Claude OAuth drop-in must exist (token itself is operator-minted) ==="
+          as_testuser "test -f ~/.config/systemd/user/hapi-runner.service.d/42-claude-oauth-token.conf"
+          as_testuser "grep -q claude-setup-token.env ~/.config/systemd/user/hapi-runner.service.d/42-claude-oauth-token.conf"
+          echo "OK: pet installer provisioned 42-claude-oauth-token.conf"
+
+          echo "=== re-run (upgrade path): must stop the old process, swap, relaunch ==="
+          as_testuser "bash ~/install-hapi-pet.sh --with-systemd"
+          sleep 2
+          as_testuser "curl -fsS localhost:3006/health"
+          as_testuser "pgrep -fa 'hapi (hub|runner)'" || { echo "FAIL: no hapi processes survived the re-run"; exit 1; }
+          echo "OK: pet install + upgrade re-run both healthy"
+          EOS
+      - name: Cleanup
+        if: always()
+        run: |
+          docker rm -f hapi-pet-ci >/dev/null 2>&1 || true
+          docker rmi hapi-pet-test:ci >/dev/null 2>&1 || true
 
   # Also only on release/dispatch. Needs real systemd as PID 1 to test the
   # actual units Tier-1 installs (KillMode, OOMScoreAdjust, the watchdog) —
@@ -120,17 +195,15 @@ jobs:
       - name: Build a throwaway systemd-capable test image
         run: |
           set -euo pipefail
-          # Dedicated, empty build context - NOT /tmp. This is a shared,
-          # busy host; /tmp as build context tries to package the whole
-          # directory (other processes' sockets etc.) and fails with
-          # "no permission to read from '/tmp/dotnet-diagnostic-...-socket'"
-          # (confirmed live, 2026-10-01).
+          # Dedicated, empty build context - NOT /tmp. Shared host /tmp as
+          # context fails with "no permission to read from '/tmp/dotnet-diagnostic-...'"
+          # (heavygee/hapi#190).
           CTX="$(mktemp -d)"
           trap 'rm -rf "$CTX"' EXIT
           cat > "$CTX/Dockerfile" <<'EOF'
           FROM debian:trixie
           RUN apt-get update -qq && apt-get install -y -qq \
-              systemd systemd-sysv curl ca-certificates sudo procps \
+              systemd systemd-sysv curl ca-certificates sudo procps python3 \
               && rm -rf /var/lib/apt/lists/*
           EOF
           docker build -t hapi-fleet-test:ci "$CTX"
@@ -152,10 +225,10 @@ jobs:
           docker exec hapi-fleet-ci bash -c '
             set -euo pipefail
             useradd --system --create-home --home-dir /var/lib/hapi --shell /usr/sbin/nologin hapi
-            mkdir -p /opt/hapi /work
+            mkdir -p /opt/hapi /work /var/lib/hapi
             curl -fsSL "https://github.com/heavygee/hapi/releases/latest/download/hapi-linux-x64-baseline" -o /opt/hapi/hapi
             chmod +x /opt/hapi/hapi
-            chown hapi:hapi /opt/hapi/hapi /work
+            chown hapi:hapi /opt/hapi/hapi /work /var/lib/hapi
             /opt/hapi/hapi --version
           '
       - name: Run the real installer (fleet-binary + Tier-1), with a real TTY
@@ -165,11 +238,30 @@ jobs:
             cd /repo
             bash scripts/tooling/install-hapi-systemd-units.sh --profile fleet-binary --hapi-user hapi --workspace-root /work
           '
+      - name: Plant a probe Claude OAuth token (proves EnvironmentFile loads)
+        run: |
+          set -euo pipefail
+          docker exec hapi-fleet-ci bash -c '
+            set -euo pipefail
+            # Installer must have created the drop-in. Plant a known probe value
+            # so we can assert the runner process actually loaded it — the
+            # antevorta 2026-10-01 failure mode was drop-in/file missing after upgrade.
+            test -f /etc/systemd/system/hapi-runner.service.d/42-claude-oauth-token.conf \
+              || { echo "FAIL: Claude OAuth drop-in not installed by fleet-binary profile"; exit 1; }
+            install -d -m 0755 /etc/hapi
+            TOKEN_FILE=/etc/hapi/claude-setup-token.env
+            umask 077
+            printf "CLAUDE_CODE_OAUTH_TOKEN=%s\n" "probe-ci-token-do-not-use-against-anthropic" > "$TOKEN_FILE"
+            chown root:root "$TOKEN_FILE"
+            chmod 600 "$TOKEN_FILE"
+            echo "planted probe token at $TOKEN_FILE"
+          '
       - name: Start hub + runner, let the watchdog fire once, then verify
         run: |
           set -euo pipefail
           docker exec -t hapi-fleet-ci bash -c '
             set -euo pipefail
+            systemctl daemon-reload
             systemctl start hapi-hub.service
             sleep 2
             systemctl start hapi-runner.service
@@ -178,18 +270,143 @@ jobs:
             systemctl is-active hapi-runner.service
             curl -sf http://127.0.0.1:3006/health
 
-            # A brand-new install watchdog fires once before settings.json
-            # exists and correctly skips (documented, expected) — give it one
-            # more real chance now that the hub has written it, same as the
-            # install script own guidance ("re-run verify once the hub has
-            # started"), rather than asserting on a known-stale first fire.
+            RPID=$(systemctl show -p MainPID --value hapi-runner.service)
+            tr "\0" "\n" < /proc/$RPID/environ | grep -q "^CLAUDE_CODE_OAUTH_TOKEN=probe-ci-token-do-not-use-against-anthropic$" \
+              || { echo "FAIL: runner did not load Claude OAuth EnvironmentFile"; tr "\0" "\n" < /proc/$RPID/environ | grep -E "CLAUDE|HAPI_HOME" || true; exit 1; }
+            echo "OK: runner loaded probe CLAUDE_CODE_OAUTH_TOKEN from EnvironmentFile"
+
             systemctl start hapi-runner-watchdog.service || true
             sleep 2
           '
       - name: verify-hapi-install.sh
         run: |
           set -euo pipefail
-          docker exec hapi-fleet-ci bash /repo/scripts/tooling/verify-hapi-install.sh
+          docker exec hapi-fleet-ci bash /repo/scripts/tooling/verify-hapi-install.sh --skip-restart
+      - name: Fresh non-resume spawn must not show Not logged in (when secret present)
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
+            echo "::notice::CLAUDE_CODE_OAUTH_TOKEN secret not set — skipping live Anthropic spawn assertion (EnvironmentFile load already proven above)"
+            exit 0
+          fi
+          # Heredoc + docker exec -i keeps runuser/claude install quotes inside the
+          # container script (bash -c '...' nesting previously terminated the host string).
+          docker exec -i -e CLAUDE_CODE_OAUTH_TOKEN hapi-fleet-ci bash <<'EOS'
+          set -euo pipefail
+          # Native Claude install lands in $HOME/.local/bin; runuser -u is not a
+          # login shell so inherit an explicit PATH that includes it.
+          HAPI_CLAUDE_PATH="/var/lib/hapi/.local/bin:/usr/local/bin:/usr/bin:/bin"
+          # Never leak the live OAuth secret into network install.sh / npm.
+          if ! runuser -u hapi -- env -u CLAUDE_CODE_OAUTH_TOKEN HOME=/var/lib/hapi PATH="$HAPI_CLAUDE_PATH" \
+              bash -c 'command -v claude >/dev/null'; then
+            echo "=== installing Claude Code CLI for hapi service user ==="
+            runuser -u hapi -- env -u CLAUDE_CODE_OAUTH_TOKEN HOME=/var/lib/hapi PATH="$HAPI_CLAUDE_PATH" \
+              bash -c 'curl -fsSL https://claude.ai/install.sh | bash'
+            runuser -u hapi -- env -u CLAUDE_CODE_OAUTH_TOKEN HOME=/var/lib/hapi PATH="$HAPI_CLAUDE_PATH" \
+              bash -c 'command -v claude && claude --version'
+          fi
+          install -d -m 0755 /etc/hapi
+          TOKEN_FILE=/etc/hapi/claude-setup-token.env
+          umask 077
+          printf "CLAUDE_CODE_OAUTH_TOKEN=%s\n" "$CLAUDE_CODE_OAUTH_TOKEN" > "$TOKEN_FILE"
+          chown root:root "$TOKEN_FILE"
+          chmod 600 "$TOKEN_FILE"
+          systemctl restart hapi-runner.service
+          sleep 3
+          python3 - <<'PY'
+          import json, time, urllib.request
+          base="http://127.0.0.1:3006"
+          # Unique reply token — require it in agent-role text only (Codex P2).
+          PROBE="AUTHPROBEOK"
+          token=json.load(open("/var/lib/hapi/settings.json"))["cliApiToken"]
+          jwt=json.load(urllib.request.urlopen(urllib.request.Request(
+              base+"/api/auth", data=json.dumps({"accessToken":token}).encode(),
+              headers={"Content-Type":"application/json"}, method="POST")))["token"]
+          def http(path, method="GET", body=None):
+              data=None if body is None else json.dumps(body).encode()
+              req=urllib.request.Request(base+path, data=data, headers={"Authorization":f"Bearer {jwt}","Content-Type":"application/json"}, method=method)
+              with urllib.request.urlopen(req, timeout=90) as r:
+                  raw=r.read().decode()
+                  try: return r.status, json.loads(raw)
+                  except: return r.status, raw
+          def agent_blob(resp):
+              """Flatten real assistant output; skip Claude user-echo envelopes."""
+              if not isinstance(resp, dict):
+                  return str(resp)
+              parts=[]
+              for m in resp.get("messages") or []:
+                  if not isinstance(m, dict):
+                      continue
+                  content = m.get("content")
+                  if not isinstance(content, dict):
+                      continue
+                  # DecryptedMessage.content is usually {role, content: ...}
+                  role = content.get("role")
+                  body = content.get("content")
+                  if role is None and isinstance(content.get("message"), dict):
+                      role = content["message"].get("role")
+                      body = content["message"].get("content", body)
+                  if role not in ("agent", "assistant"):
+                      continue
+                  # Claude stream-json: user prompts are re-emitted as
+                  # role=agent / type=output / data.type=user — ignore those.
+                  if isinstance(body, dict) and body.get("type") == "output":
+                      data = body.get("data")
+                      if isinstance(data, dict) and data.get("type") != "assistant":
+                          continue
+                  parts.append(json.dumps(content, default=str))
+              return "\n".join(parts)
+          st, machines = http("/api/machines")
+          arr = machines if isinstance(machines, list) else (machines.get("machines") or [])
+          mid = arr[0]["id"]
+          st, spawn = http(f"/api/machines/{mid}/spawn", "POST", {
+              "directory": "/work", "agent": "claude", "model": "sonnet",
+              "permissionMode": "bypassPermissions", "sessionType": "simple",
+          })
+          sid = spawn.get("sessionId")
+          assert sid, spawn
+          print("spawned", sid)
+          # Spawn HTTP 200 only means the runner accepted the RPC. Poll active
+          # like pingPeer.waitUntilActive before POST /messages (else 409).
+          deadline = time.time() + 90
+          while time.time() < deadline:
+              st, sess = http(f"/api/sessions/{sid}")
+              active = False
+              if isinstance(sess, dict):
+                  active = bool((sess.get("session") or sess).get("active"))
+              print(f"wait-active status={st} active={active}")
+              if active:
+                  break
+              time.sleep(1)
+          else:
+              raise SystemExit(f"FAIL: session {sid} never became active within 90s")
+          # Prompt names the expected token; we still require it in an agent-role
+          # message so the echoed user prompt cannot pass the assertion alone.
+          st, _ = http(f"/api/sessions/{sid}/messages", "POST", {
+              "text": f"Reply with the single token {PROBE} and nothing else."
+          })
+          assert st == 200
+          saw_login=False; saw_ok=False
+          for i in range(30):
+              time.sleep(2)
+              st, resp = http(f"/api/sessions/{sid}/messages?limit=40")
+              agent_text = agent_blob(resp)
+              if "Not logged in" in agent_text: saw_login=True
+              if PROBE in agent_text: saw_ok=True
+              print(f"poll[{i}] login={saw_login} ok={saw_ok}")
+              if saw_login or saw_ok: break
+          # archive smoke session
+          try: http(f"/api/sessions/{sid}/archive", "POST", {})
+          except Exception: pass
+          if saw_login:
+              raise SystemExit("FAIL: fresh spawn showed Not logged in")
+          if not saw_ok:
+              raise SystemExit(f"FAIL: fresh spawn did not produce agent reply containing {PROBE} (auth may still be broken)")
+          print("OK: fresh non-resume spawn authenticated")
+          PY
+          EOS
       - name: Cleanup
         if: always()
         run: |

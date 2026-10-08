@@ -35,8 +35,8 @@ states:
     # status:blocked-upstream → blockedUpstream:true + stickyPing:false while
     # emoji/status stay needs_work / ⚠️. Meta must not hourly-nag the coding
     # peer; dependency merge (or session job poller) is the wake source (#128).
-    # Same-fp ⚠️ ping windows use exponential backoff (2h/4h/8h… cap 24h) so
-    # infra-only stalls (empty Sol distributor, 503) do not hourly-wake peers.
+    # Same-fp ⚠️ ping windows use exponential backoff (2h/4h/8h… cap 7d) so
+    # infra-only stalls (empty Sol distributor, 503) do not daily-wake peers.
 
   pre_pr:
     emoji: "📝"

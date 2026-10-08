@@ -766,7 +766,8 @@ layers:
   # tiann/hapi#1613 — Cursor MCP overlay isolation: project `.cursor/mcp.json`
   # single `hapi` key + dead-PID prune (fixes live multiplex N hapi-<uuid> user keys).
   # Worktree: ~/coding/hapi/worktrees/cursor-mcp-isolation @ fix/cursor-mcp-overlay-isolation
-  # Tip: 4b2fa0f5c — was dogfood-paired with #1473; now independent of nametag #1618
+  # Tip: 957a3d00a — rebase+fold #1951 ACP cwd + #1856 hard-fail collision (was 4b2fa0f5c;
+  # soup tip had unique hapi-<uuid> regression from #1909 thin — remat restores stable `hapi`)
   - branch: fix/cursor-mcp-overlay-isolation
 
   # Stacked on isolation: auto-worktree when Cursor mailbox held (dock spawn) — #195
@@ -798,7 +799,10 @@ layers:
   # the remaining unique tip (16 files). Parent UUID stamp is NOT here — that is
   # feat/peer-rename-proof-identity / upstream #1922 (still out of soup).
   # Was: feat/spawn-peer-remit (fat). Tip: driver/spawn-peer-remit-delta @ b30bed331
-  - branch: driver/spawn-peer-remit-delta
+  # HOLD 2026-10-06: tip regresses soup bridge/overlay/settings on absorb.
+  # 2026-10-08: promote in flight — land whole upstream #1922 tip on fork main
+  # (feat/land-1922-peer-stamp-fork), then DROP this delta (no re-thin).
+  # - branch: driver/spawn-peer-remit-delta
 
   # Soup heal: remat 47ce90965 dropped Claude Happy MCP spawn_peer model/effort
   # (Codex bridge kept them). Restore schema + handler forwarding for Claude sessions.
@@ -847,7 +851,10 @@ layers:
   # tiann/hapi#1516 — display_links thin tip (per-session tool-name + bridge/CLI).
   # Base registration already on soup tip; this delta is the unique naming surface
   # (16 files). Was: feat/display-links (fat). Tip: driver/display-links-delta @ e5190a33c
-  - branch: driver/display-links-delta
+  # HOLD 2026-10-06: tip regresses soup bridge/overlay/settings on absorb.
+  # 2026-10-08: promote in flight — heavygee/hapi#222 lands upstream #1564 tip on
+  # fork main; DROP this delta after merge (no re-thin).
+  # - branch: driver/display-links-delta
 
   # tiann/hapi#1594 — long-press the collapsed session-search chip to dictate
   # into the query (whichever transcription provider is configured), replacing
@@ -994,15 +1001,25 @@ layers:
   # (de6c9dee2). Ranking/pin-divider from upstream #1848 — do NOT re-apply soup ranking commits.
   # Worktree: ~/coding/hapi/worktrees/soup-1772-list-filters @ soup/1772-combined-list-filters
   # Tip: 79c85e024 — 2 commits / 34 files (#1772 filters + scratchlist SSE only)
-  # Remat order: #1605 → #1607 → #1772 last. Remat owner: tooling/meta — no self-remat.
+  # Remat order: #1607 → #1772 last (#1605 catalog DROPPED 2026-10-08). Remat owner: tooling/meta — no self-remat.
   - branch: soup/1772-combined-list-filters
 
-  # tiann/hapi#1605 — Claude live model catalog union onto soup tip.
-  # Re-thinned 2026-10-06: driver/claude-model-catalog-delta @ ec959f3a4
-  # (merge --no-ff of catalog tip onto driver/integration; kimi/agy kept).
-  # Still fat by file count (~54) — remat with ABSORB_FAT=1 / raised MAX_FILES.
-  # Drop when #1605 merges upstream. Hub+cli+web → --build-web + hapi-restart-hub.
-  - branch: driver/claude-model-catalog-delta
+  # tiann/hapi#1996 — fold blocked lens into combined session list filter menu.
+  # Keep BlockedJumpPill; remove leftmost BlockedLensToggle.
+  # Worktree: ~/coding/hapi/worktrees/consolidate-list-filters
+  # Tip: 7ed7e05e3 — 3 commits / 12 files on post-1772 driver tip (7543f5eab).
+  # Remat order: after soup/1772-combined-list-filters (needs both layers present).
+  # Needs --build-web. Remat owner: tooling/meta.
+  # Sanity 2026-10-08: delta is incremental on soup tip (12 files vs parent), not a
+  # 1400-file soup snapshot — tip-forward absorb will not stomp #1772 the way the
+  # held thin deltas did.
+  - branch: driver/1996-consolidate-blocked-filter
+
+  # DROPPED 2026-10-08: driver/claude-model-catalog (+ delta) — operator call via Overseer.
+  # Upstream tiann/hapi#1605 CLOSED unmerged (2026-10-02); absent from soup tip; unmissed.
+  # No re-thin / no quiet return. Want it later → fresh PR off upstream/main.
+  # Was: driver/claude-model-catalog-delta @ ec959f3a4 (HOLD 2026-10-06).
+  # - branch: driver/claude-model-catalog-delta
 
   # heavygee/hapi#193 / tiann/hapi#1951 — Cursor ACP spawn cwd = session.path so
   # MCP loads project <.cursor/mcp.json> instead of inheriting …/driver/cli and
@@ -1016,6 +1033,31 @@ layers:
   # Worktree: ~/coding/hapi/worktrees/doctor-cursor-mcp-path
   # Doctor fails closed when Cursor ACP invoke path is broken (cwd/mailbox/stdio) — #194.
   - branch: fix/doctor-cursor-mcp-path
+
+  # heavygee/hapi#211 — restore unexpected-stop Blocked AGENT_NOTIFY_SUMMARY wire.
+  # #211 is on fork main, but tip-forward + later layers (esp. soup/1772) overwrite
+  # cursorAcpRemoteLauncher.ts without the surfacePromptFailure footer stamp.
+  # Thin tip on live driver (2 files). Place LAST so absorb sticks.
+  # Worktree: ~/coding/hapi/worktrees/211-unexpected-stop-notify
+  # Tip: adde1a8cd — 69 focused CLI tests green.
+  # CLI-only → remat needs hapi-restart-hub (no --build-web for this tip alone).
+  - branch: driver/211-unexpected-stop-notify
+
+  # heavygee/hapi#223 — per-session voice-mode turn shape (metadata.voiceMode +
+  # set_voice_mode MCP). Thin tip on live soup; system-prompt seam for Claude/
+  # Codex/Grok/OpenCode. Not inherited by spawned peers.
+  # Worktree: ~/coding/hapi/worktrees/223-voice-mode-turn-shape
+  # Tip: fce15a32c — 25 focused CLI tests + typecheck green.
+  # CLI+shared → remat needs hapi-restart-hub (no --build-web required for this tip).
+  - branch: driver/223-voice-mode-turn-shape
+
+  # heavygee/hapi#231 — RetriableError resource_exhausted must ACP-retry and
+  # stamp Blocked (lastNotify) when capacity retries exhaust; Error: T: quota
+  # form stays non-retry and stamps Blocked without silent retry.
+  # Worktree: ~/coding/hapi/worktrees/cursor-resource-exhausted-blocked
+  # Tip: c11c027c7 — 71 focused CLI tests green.
+  # CLI-only → remat needs hapi-restart-hub (no --build-web for this tip alone).
+  - branch: driver/cursor-resource-exhausted-blocked
 
   # DROPPED 2026-10-06: driver/1933-claude-resume-amnesia — squash 94523eb0d is on
   # fork main (heavygee/hapi#204). Soup base is now origin/main, so tip-forward

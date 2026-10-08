@@ -13,7 +13,7 @@
 #      Keeps "Peer #N:" incubating titles (no issue chip yet).
 #   4. Pings a session ONLY when policy says it is actionable and not noise
 #      (ping windows: 🔧 always hourly; ⚠️ same-fp exponential backoff 2h/4h/8h…
-#      cap 24h — infra stalls must not hourly-wake the coding peer;
+#      cap 7d — infra stalls must not daily-wake the coding peer;
 #      SKIP if session.thinking — already in a turn / emitting (not merely active).
 #      🧹 complete never pings; 🔧 Gate A clean / archive-pending never hourly
 #      resume — that undoes archive → 🔧 forever; 2026-08-11 e4d152f3)
@@ -131,6 +131,8 @@ JSON_OUT=0
 VERBOSE=0
 SINCE_OVERRIDE=""
 REMINDER_SECS=$((24 * 3600))
+# ⚠️ same-fp window backoff ceiling (independent of --reminder-hours).
+WARN_BACKOFF_CAP_SECS="${HAPI_META_WARN_BACKOFF_CAP_SECS:-$((7 * 24 * 3600))}"
 PR_ONLY=""
 BACKFILL_REFS=0
 BACKFILL_APPLY=0
@@ -150,11 +152,15 @@ while [[ $# -gt 0 ]]; do
         --verbose|-v) VERBOSE=1; shift ;;
         --since) SINCE_OVERRIDE="$2"; shift 2 ;;
         --reminder-hours) REMINDER_SECS=$(( ${2} * 3600 )); shift 2 ;;
+        --warn-backoff-cap-hours) WARN_BACKOFF_CAP_SECS=$(( ${2} * 3600 )); shift 2 ;;
         --pr) PR_ONLY="$2"; shift 2 ;;
         --help|-h) sed -n '2,55p' "$0"; exit 0 ;;
         *) die "unknown arg: $1 (try --help)" ;;
     esac
 done
+if ! [[ "$WARN_BACKOFF_CAP_SECS" =~ ^[0-9]+$ ]] || (( WARN_BACKOFF_CAP_SECS < 3600 )); then
+    die "--warn-backoff-cap-hours / HAPI_META_WARN_BACKOFF_CAP_SECS must be >= 1h"
+fi
 
 if [[ "$BACKFILL_APPLY" -eq 1 && "$BACKFILL_REFS" -eq 0 ]]; then
     die "--apply requires --backfill-refs"
@@ -565,10 +571,10 @@ md_combined_emoji() {
     printf '%s' "$combined"
 }
 
-# md_plan_ping <new_emoji> <new_fp> <prev_emoji> <prev_fp> <prev_ping> <now> <reminder> [window_rouse] [sticky_ping] [ping_streak]
+# md_plan_ping <new_emoji> <new_fp> <prev_emoji> <prev_fp> <prev_ping> <now> <reminder> [window_rouse] [sticky_ping] [ping_streak] [warn_backoff_cap]
 #   → "yes"/"no" (wraps pec_should_ping; kept for test clarity)
 md_plan_ping() {
-    pec_should_ping "$1" "$3" "$2" "$4" "${5:-0}" "$6" "$7" "${8:-0}" "${9:-}" "${10:-0}"
+    pec_should_ping "$1" "$3" "$2" "$4" "${5:-0}" "$6" "$7" "${8:-0}" "${9:-}" "${10:-0}" "${11:-604800}"
 }
 
 # md_session_sticky_peer_ping <sid8> <prs-space-joined>
@@ -1072,7 +1078,7 @@ main() {
 
         # ping policy (actuator cursor: emoji/fp/last_ping/ping_streak)
         # Ping windows (DO_PING=1): 🔧 always hourly; ⚠️ same-fp exponential
-        # backoff (2h/4h/8h… cap reminder). Quiet --no-ping never pings.
+        # backoff (2h/4h/8h… cap WARN_BACKOFF_CAP_SECS, default 7d). Quiet --no-ping never pings.
         # blockedUpstream-only sessions: stickyPing=false → no peer ping (#128).
         local action_fp prev_emoji prev_fp prev_ping prev_streak decision window_rouse=0 session_sticky=true
         [[ "$DO_PING" -eq 1 ]] && window_rouse=1
@@ -1100,7 +1106,7 @@ main() {
             fi
         done
         # md_plan_ping/pec_should_ping return 1 for "no"; capture text, ignore rc.
-        decision="$(md_plan_ping "$ping_emoji" "$action_fp" "$prev_emoji" "$prev_fp" "$prev_ping" "$now" "$REMINDER_SECS" "$window_rouse" "$session_sticky" "$prev_streak" || true)"
+        decision="$(md_plan_ping "$ping_emoji" "$action_fp" "$prev_emoji" "$prev_fp" "$prev_ping" "$now" "$REMINDER_SECS" "$window_rouse" "$session_sticky" "$prev_streak" "$WARN_BACKOFF_CAP_SECS" || true)"
         # Gate A clean + archive pending is Meta's job. Hourly ping-peer resumes
         # the row, mw_member_complete fails not_archived, chip flips 🧹→🔧, and
         # the next window pings again. Never rouse for that remainder.
@@ -1118,9 +1124,13 @@ main() {
         # In-turn skip: session.thinking means the agent is emitting / in a
         # turn (not merely active=true). Injecting "are you done yet?" steers
         # a live turn. Archived/inactive ⚠️ still rouse — chip says work owed.
+        # Keep the last *delivered* fingerprint when a due ping is suppressed so
+        # the next idle run still sees a fingerprint change (not backoff).
         local thinking="${SESS_THINKING[$sid8]:-false}"
+        local store_fp="$action_fp"
         if [[ "$thinking" == "true" && "$decision" == "yes" ]]; then
             decision="no"
+            store_fp="$prev_fp"
             Q_SKIP_RUNNING+=("$sid8  $combined  #$(echo "$prs" | tr ' ' ',')  — thinking; skip ping this window")
         fi
         if [[ "$combined" == "⚠️" && "$DO_PING" -eq 1 && "$session_sticky" == "true" && "$thinking" != "true" && "$decision" == "no" && "$prev_emoji" == "⚠️" ]]; then
@@ -1145,18 +1155,24 @@ main() {
                     fi
                 fi
                 if [[ "$ping_note" != "skip" ]]; then
-                    _do_ping "$sid8" "$combined" "$prs" "$acts"
-                    Q_PINGED+=("$sid8  $combined  #$(echo "$prs" | tr ' ' ',')${ping_note}")
-                    this_ping="$now"
-                    if [[ "$combined" == "⚠️" ]]; then
-                        if [[ "$action_fp" == "$prev_fp" && "$prev_emoji" == "⚠️" ]]; then
-                            this_streak=$((prev_streak + 1))
-                            (( this_streak < 1 )) && this_streak=1
+                    if _do_ping "$sid8" "$combined" "$prs" "$acts"; then
+                        Q_PINGED+=("$sid8  $combined  #$(echo "$prs" | tr ' ' ',')${ping_note}")
+                        this_ping="$now"
+                        if [[ "$combined" == "⚠️" ]]; then
+                            if [[ "$action_fp" == "$prev_fp" && "$prev_emoji" == "⚠️" ]]; then
+                                this_streak=$((prev_streak + 1))
+                                (( this_streak < 1 )) && this_streak=1
+                            else
+                                this_streak=1
+                            fi
                         else
-                            this_streak=1
+                            this_streak=0
                         fi
                     else
-                        this_streak=0
+                        # Delivery failed: keep prior fp/backoff so the next
+                        # window retries instead of sleeping for hours/days.
+                        store_fp="$prev_fp"
+                        Q_PINGED+=("$sid8  $combined  #$(echo "$prs" | tr ' ' ',')${ping_note} [ping-failed]")
                     fi
                 fi
             fi
@@ -1200,7 +1216,7 @@ main() {
                 prev_emitted_fp="$(md_prev "$state" "$sid" "emitted_fp")"
                 prev_emitted_at="$(md_prev "$state" "$sid" "last_emitted")"
                 [[ -z "$prev_emitted_at" ]] && prev_emitted_at=0
-                emit_reason="$(pec_emit_reason "$ping_emoji" "$prev_emitted_e" "$action_fp" "$prev_emitted_fp" "$prev_emitted_at" "$now" "$REMINDER_SECS" "$window_rouse" "$session_sticky" "$prev_streak" || true)"
+                emit_reason="$(pec_emit_reason "$ping_emoji" "$prev_emitted_e" "$action_fp" "$prev_emitted_fp" "$prev_emitted_at" "$now" "$REMINDER_SECS" "$window_rouse" "$session_sticky" "$prev_streak" "$WARN_BACKOFF_CAP_SECS" || true)"
                 if [[ "$session_sticky" == "false" ]]; then
                     # No window/reminder/fingerprint/transition channel nags for
                     # blocked-upstream-only (#128). Queue row still lists the PR.
@@ -1237,11 +1253,13 @@ main() {
             fi
 
             # Actuator state always advances independently of emit success.
+            # store_fp may intentionally lag action_fp when a due ping was
+            # skipped (thinking) or failed delivery — see thinking/fp gate above.
             if [[ "$combined" != "⚠️" ]]; then
                 this_streak=0
             fi
             new_state="$(printf '%s' "$new_state" | jq -c \
-                --arg s "$sid" --arg e "$combined" --arg f "$action_fp" \
+                --arg s "$sid" --arg e "$combined" --arg f "$store_fp" \
                 --argjson lp "${this_ping:-0}" --argjson ps "${this_streak:-0}" --arg t "$new_title" \
                 '.sessions[$s] = ((.sessions[$s] // {}) + {emoji:$e, fp:$f, last_ping:$lp, ping_streak:$ps, title:$t})')"
         fi
@@ -1628,7 +1646,11 @@ Canon: docs/operator/AGENTS.md § Meta PR watcher + feature-work-lifecycle.md §
         echo "    [dry-run] ping $sid8 ($emoji)" >&2
         return 0
     fi
-    "$PING_BIN" "$sid8" "$msg" >/dev/null 2>&1 || err "ping failed for $sid8"
+    if ! "$PING_BIN" "$sid8" "$msg" >/dev/null 2>&1; then
+        err "ping failed for $sid8"
+        return 1
+    fi
+    return 0
 }
 
 _print_section() {  # <title> <array-name>
