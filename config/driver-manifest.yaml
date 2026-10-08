@@ -1001,7 +1001,7 @@ layers:
   # (de6c9dee2). Ranking/pin-divider from upstream #1848 — do NOT re-apply soup ranking commits.
   # Worktree: ~/coding/hapi/worktrees/soup-1772-list-filters @ soup/1772-combined-list-filters
   # Tip: 79c85e024 — 2 commits / 34 files (#1772 filters + scratchlist SSE only)
-  # Remat order: #1605 → #1607 → #1772 last. Remat owner: tooling/meta — no self-remat.
+  # Remat order: #1607 → #1772 last (#1605 catalog DROPPED 2026-10-08). Remat owner: tooling/meta — no self-remat.
   - branch: soup/1772-combined-list-filters
 
   # DROPPED 2026-10-08: driver/claude-model-catalog (+ delta) — operator call via Overseer.
