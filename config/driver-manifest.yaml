@@ -1043,6 +1043,14 @@ layers:
   # CLI-only → remat needs hapi-restart-hub (no --build-web for this tip alone).
   - branch: driver/211-unexpected-stop-notify
 
+  # heavygee/hapi#223 — per-session voice-mode turn shape (metadata.voiceMode +
+  # set_voice_mode MCP). Thin tip on live soup; system-prompt seam for Claude/
+  # Codex/Grok/OpenCode. Not inherited by spawned peers.
+  # Worktree: ~/coding/hapi/worktrees/223-voice-mode-turn-shape
+  # Tip: fce15a32c — 25 focused CLI tests + typecheck green.
+  # CLI+shared → remat needs hapi-restart-hub (no --build-web required for this tip).
+  - branch: driver/223-voice-mode-turn-shape
+
   # DROPPED 2026-10-06: driver/1933-claude-resume-amnesia — squash 94523eb0d is on
   # fork main (heavygee/hapi#204). Soup base is now origin/main, so tip-forward
   # absorbs it from the base; keeping the layer would double-apply / conflict.
