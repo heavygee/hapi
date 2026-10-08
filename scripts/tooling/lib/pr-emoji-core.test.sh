@@ -201,12 +201,18 @@ eq "sticky ⚠️ window same-fp recent last_ping → no (backoff)" \
 eq "sticky ⚠️ window last_ping=0 → yes" "$(pec_should_ping "⚠️" "⚠️" "$FP_A" "$FP_A" 0 300 86400 1)" "yes"
 eq "sticky ⚠️ window 2h elapsed streak 1 → yes" \
     "$(pec_should_ping "⚠️" "⚠️" "$FP_A" "$FP_A" 100 7400 86400 1 true 1)" "yes"
+eq "sticky ⚠️ window streak 5 at 25h still no (weekly cap)" \
+    "$(pec_should_ping "⚠️" "⚠️" "$FP_A" "$FP_A" 100 $((100 + 25 * 3600)) 86400 1 true 5 || true)" "no"
+eq "sticky ⚠️ window streak 5 at 33h → yes" \
+    "$(pec_should_ping "⚠️" "⚠️" "$FP_A" "$FP_A" 100 $((100 + 33 * 3600)) 86400 1 true 5)" "yes"
 eq "sticky ⚠️ window fp change → yes immediately" \
     "$(pec_should_ping "⚠️" "⚠️" "$FP_B" "$FP_A" 200 300 86400 1)" "yes"
 eq "sticky 🔧 window rouse → yes" "$(pec_should_ping "🔧" "🔧" "$FP_A" "$FP_A" 200 300 86400 1)" "yes"
-eq "backoff secs streak 1 → 7200" "$(pec_warn_window_backoff_secs 1 86400)" "7200"
-eq "backoff secs streak 2 → 14400" "$(pec_warn_window_backoff_secs 2 86400)" "14400"
-eq "backoff secs streak 5 caps at reminder" "$(pec_warn_window_backoff_secs 5 86400)" "86400"
+eq "backoff secs streak 1 → 7200" "$(pec_warn_window_backoff_secs 1)" "7200"
+eq "backoff secs streak 2 → 14400" "$(pec_warn_window_backoff_secs 2)" "14400"
+eq "backoff secs streak 5 → 32h (not 24h)" "$(pec_warn_window_backoff_secs 5)" "115200"
+eq "backoff secs streak 8 caps at weekly" "$(pec_warn_window_backoff_secs 8)" "604800"
+eq "backoff secs explicit 24h cap still works" "$(pec_warn_window_backoff_secs 5 86400)" "86400"
 eq "unchanged ✅ window rouse still no" "$(pec_should_ping "✅" "✅" "z" "z" 200 300 86400 1)" "no"
 eq "sticky ⚠️ changed fp → yes" "$(pec_should_ping "⚠️" "⚠️" "$FP_B" "$FP_A" 200 300 86400)" "yes"
 eq "sticky ⚠️ reminder elapsed → yes" "$(pec_should_ping "⚠️" "⚠️" "$FP_A" "$FP_A" 100 100000 86400)" "yes"
