@@ -1051,6 +1051,14 @@ layers:
   # CLI+shared → remat needs hapi-restart-hub (no --build-web required for this tip).
   - branch: driver/223-voice-mode-turn-shape
 
+  # heavygee/hapi#231 — RetriableError resource_exhausted must ACP-retry and
+  # stamp Blocked (lastNotify) when capacity retries exhaust; Error: T: quota
+  # form stays non-retry and stamps Blocked without silent retry.
+  # Worktree: ~/coding/hapi/worktrees/cursor-resource-exhausted-blocked
+  # Tip: c11c027c7 — 71 focused CLI tests green.
+  # CLI-only → remat needs hapi-restart-hub (no --build-web for this tip alone).
+  - branch: driver/cursor-resource-exhausted-blocked
+
   # DROPPED 2026-10-06: driver/1933-claude-resume-amnesia — squash 94523eb0d is on
   # fork main (heavygee/hapi#204). Soup base is now origin/main, so tip-forward
   # absorbs it from the base; keeping the layer would double-apply / conflict.
