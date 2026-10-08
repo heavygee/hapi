@@ -55,6 +55,7 @@ import {
     isRetryableCursorError,
     stripRetryableCursorError
 } from './cursorAutoRetry';
+import { classifyCursorAgentMessage } from './cursorAgentMessageClassifier';
 import { formatUnexpectedStopBlockedFooter } from './unexpectedStopBlockedFooter';
 import {
     applyCanonicalCursorApiKeyToProcessEnv,
@@ -98,6 +99,12 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
     private pendingRetryableError: string | null = null;
     private pendingRetryableFromStderr = false;
     private pendingInlineRetryableError = false;
+    /**
+     * Classified inline Cursor failure that is NOT auto-retried (e.g.
+     * `Error: T: [resource_exhausted]` hard quota). Text may already be in
+     * chat; after the prompt returns we stamp Blocked via lastNotify footer.
+     */
+    private pendingTerminalClassifiedFailure: string | null = null;
     private attemptProducedToolActivity = false;
     private userAbortRequested = false;
     /** Last hub cursorCredentialRefreshAt we already acted on (dedupe). */
@@ -759,6 +766,7 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                         this.pendingRetryableError = null;
                         this.pendingRetryableFromStderr = false;
                         this.pendingInlineRetryableError = false;
+                        this.pendingTerminalClassifiedFailure = null;
                         this.attemptProducedToolActivity = false;
                         let turnCompleted = false;
                         try {
@@ -769,6 +777,12 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                             if (this.userAbortRequested) break;
                             if (turnCompleted && this.pendingRetryableFromStderr && !this.pendingInlineRetryableError) {
                                 this.pendingRetryableError = null;
+                            }
+                            if (this.pendingTerminalClassifiedFailure) {
+                                // Text already rendered (actionable quota copy). Stamp
+                                // Blocked so session-list chrome sees lastNotify.
+                                this.surfaceBlockedNotify(this.pendingTerminalClassifiedFailure);
+                                break;
                             }
                             if (!this.pendingRetryableError) {
                                 void liveBackend.refreshSessionInfo(liveSessionId, session.path);
@@ -825,6 +839,7 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                 this.pendingRetryableError = null;
                 this.pendingRetryableFromStderr = false;
                 this.pendingInlineRetryableError = false;
+                this.pendingTerminalClassifiedFailure = null;
                 this.attemptProducedToolActivity = false;
                 session.onThinkingChange(false);
                 await this.permissionAdapter?.cancelAll('Prompt finished');
@@ -993,8 +1008,18 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                 if (this.userAbortRequested) return;
                 this.pendingRetryableError = message.text;
                 this.pendingInlineRetryableError = true;
+                this.pendingTerminalClassifiedFailure = null;
                 if (!visibleText) return;
                 message = { ...message, text: visibleText };
+            } else if (this.promptInFlight && !this.userAbortRequested) {
+                // Classified Cursor failure that ACP will not auto-retry (e.g.
+                // Error: T: [resource_exhausted] hard quota, or other wire forms
+                // outside RETRYABLE_CURSOR_ERROR). Keep rendering the text;
+                // stamp Blocked after prompt so session-list chrome lights up.
+                const failure = classifyCursorAgentMessage(message.text);
+                if (failure && !isRetryableCursorError(message.text)) {
+                    this.pendingTerminalClassifiedFailure = failure.raw;
+                }
             }
         }
         const converted = convertAgentMessage(message, this.currentBackendModel);
@@ -1043,17 +1068,21 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         });
     }
 
-    private surfacePromptFailure(message: string): void {
-        const converted = convertAgentMessage({ type: 'error', message });
-        if (converted) this.session.sendAgentMessage(converted);
-        this.messageBuffer.addMessage(message, 'status');
+    private surfaceBlockedNotify(summary: string): void {
         // Estate Blocked chrome (#1717) keys off lastNotify from AGENT_NOTIFY_SUMMARY
         // on assistant text — not error rows (#1724 / heavygee#211).
         const footer = convertAgentMessage({
             type: 'text',
-            text: formatUnexpectedStopBlockedFooter({ summary: message })
+            text: formatUnexpectedStopBlockedFooter({ summary })
         });
         if (footer) this.session.sendAgentMessage(footer);
+    }
+
+    private surfacePromptFailure(message: string): void {
+        const converted = convertAgentMessage({ type: 'error', message });
+        if (converted) this.session.sendAgentMessage(converted);
+        this.messageBuffer.addMessage(message, 'status');
+        this.surfaceBlockedNotify(message);
     }
 
     private installLiveSessionConfigSync(

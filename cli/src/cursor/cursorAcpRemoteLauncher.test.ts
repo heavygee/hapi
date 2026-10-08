@@ -808,6 +808,121 @@ describe('cursorAcpRemoteLauncher', () => {
         }));
     });
 
+    it('retries inline RetriableError resource_exhausted (capacity) instead of leaving a dead idle turn', async () => {
+        // Korean App Builder regression: capacity wire was classified for the
+        // amber banner but not in ACP retry allow-list → ready with no Blocked.
+        harness.promptMessages = [
+            { type: 'text', text: 'Error: RetriableError: [resource_exhausted] Error' }
+        ];
+        const queue = new MessageQueue2<EnhancedMode>(() => 'mode');
+        const client = makeClient() as unknown as ApiSessionClient & {
+            sendClaudeSessionMessage: ReturnType<typeof vi.fn>;
+            sendAgentMessage: ReturnType<typeof vi.fn>;
+        };
+        const session = new CursorSession({
+            api: {} as never,
+            client,
+            path: '/tmp/project',
+            logPath: '/tmp/log',
+            sessionId: null,
+            messageQueue: queue,
+            onModeChange: vi.fn(),
+            mode: 'remote',
+            startedBy: 'runner',
+            startingMode: 'remote',
+            permissionMode: 'default'
+        });
+        session.onSessionFoundWithProtocol = vi.fn();
+        queue.push('finish the task', { permissionMode: 'default' });
+        queue.close();
+
+        await cursorAcpRemoteLauncher(session);
+
+        expect(harness.promptCalls).toBe(2);
+        expect(client.sendClaudeSessionMessage).toHaveBeenCalledWith(expect.objectContaining({
+            subtype: 'api_error',
+            retryAttempt: 1
+        }));
+        expect(client.sendAgentMessage).not.toHaveBeenCalledWith(expect.objectContaining({
+            type: 'message',
+            message: expect.stringContaining('Error: RetriableError: [resource_exhausted]')
+        }));
+    });
+
+    it('stamps Blocked when inline Error: T: resource_exhausted (hard quota) ends the turn', async () => {
+        harness.promptMessages = [
+            { type: 'text', text: 'Error: T: [resource_exhausted] Error' }
+        ];
+        const queue = new MessageQueue2<EnhancedMode>(() => 'mode');
+        const client = makeClient() as unknown as ApiSessionClient & {
+            sendAgentMessage: ReturnType<typeof vi.fn>;
+        };
+        const session = new CursorSession({
+            api: {} as never,
+            client,
+            path: '/tmp/project',
+            logPath: '/tmp/log',
+            sessionId: null,
+            messageQueue: queue,
+            onModeChange: vi.fn(),
+            mode: 'remote',
+            startedBy: 'runner',
+            startingMode: 'remote',
+            permissionMode: 'default'
+        });
+        session.onSessionFoundWithProtocol = vi.fn();
+        queue.push('finish the task', { permissionMode: 'default' });
+        queue.close();
+
+        await cursorAcpRemoteLauncher(session);
+
+        expect(harness.promptCalls).toBe(1);
+        expect(client.sendAgentMessage).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'message',
+            message: expect.stringMatching(
+                /AGENT_NOTIFY_SUMMARY \{.*"status":"blocked".*resource_exhausted.*\}/
+            )
+        }));
+    });
+
+    it('stamps Blocked after RetriableError resource_exhausted retries are exhausted', async () => {
+        const capacity = {
+            type: 'text' as const,
+            text: 'Error: RetriableError: [resource_exhausted] Error'
+        };
+        harness.promptMessages = [capacity, capacity, capacity, capacity];
+        const queue = new MessageQueue2<EnhancedMode>(() => 'mode');
+        const client = makeClient() as unknown as ApiSessionClient & {
+            sendAgentMessage: ReturnType<typeof vi.fn>;
+        };
+        const session = new CursorSession({
+            api: {} as never,
+            client,
+            path: '/tmp/project',
+            logPath: '/tmp/log',
+            sessionId: null,
+            messageQueue: queue,
+            onModeChange: vi.fn(),
+            mode: 'remote',
+            startedBy: 'runner',
+            startingMode: 'remote',
+            permissionMode: 'default'
+        });
+        session.onSessionFoundWithProtocol = vi.fn();
+        queue.push('finish the task', { permissionMode: 'default' });
+        queue.close();
+
+        await cursorAcpRemoteLauncher(session);
+
+        expect(harness.promptCalls).toBe(4);
+        expect(client.sendAgentMessage).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'message',
+            message: expect.stringMatching(
+                /AGENT_NOTIFY_SUMMARY \{.*"status":"blocked".*\}/
+            )
+        }));
+    });
+
     it('suppresses retryable Cursor stderr while a prompt is retried', async () => {
         harness.promptStderrErrors = [{
             type: 'unknown',

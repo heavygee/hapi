@@ -14,4 +14,15 @@ describe('Cursor automatic retry classification', () => {
             'Example:\n```text\nError: RetriableError: [canceled] http/2 stream closed\n```'
         )).toBeNull();
     });
+
+    it('retries RetriableError resource_exhausted (capacity) but not Error: T: quota form', () => {
+        const capacityWire = 'Error: RetriableError: [resource_exhausted] Error';
+        expect(isRetryableCursorError(new Error(capacityWire))).toBe(true);
+        expect(stripRetryableCursorError(capacityWire)).toBe('');
+        expect(stripRetryableCursorError(`Partial\n\n${capacityWire}`)).toBe('Partial');
+
+        const quotaWire = 'Error: T: [resource_exhausted] Error';
+        expect(isRetryableCursorError(new Error(quotaWire))).toBe(false);
+        expect(stripRetryableCursorError(quotaWire)).toBeNull();
+    });
 });
