@@ -15,6 +15,7 @@ import {
 } from '@/modules/common/displayImagePrompt';
 import { SKILL_LOOKUP_INSTRUCTION } from '@/modules/common/skillLookupInstruction';
 import { withSessionSummaryInstruction } from '@/modules/common/sessionSummaryInstruction';
+import { withVoiceModeInstruction } from '@/modules/common/voiceModeInstruction';
 
 /**
  * Title and display_image / display_video / display_media instructions for OpenCode to call the hapi MCP tools.
@@ -30,7 +31,7 @@ export const TITLE_INSTRUCTION = trimIdent(`
 `);
 
 export function getTitleInstruction(env: NodeJS.ProcessEnv = process.env): string {
-    return withSessionSummaryInstruction(TITLE_INSTRUCTION, env)
+    return withSessionSummaryInstruction(withVoiceModeInstruction(TITLE_INSTRUCTION), env)
 }
 
 /**
@@ -50,7 +51,7 @@ export const OPENCODE_NATIVE_TOOL_INSTRUCTION = trimIdent(`
 `);
 
 export function getOpencodeNativeToolInstruction(env: NodeJS.ProcessEnv = process.env): string {
-    return withSessionSummaryInstruction(OPENCODE_NATIVE_TOOL_INSTRUCTION, env)
+    return withSessionSummaryInstruction(withVoiceModeInstruction(OPENCODE_NATIVE_TOOL_INSTRUCTION), env)
 }
 
 /**

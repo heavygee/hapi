@@ -1,6 +1,7 @@
 import axios from 'axios'
 import type { AgentState, ClearOpencodeSessionCallbackRequest, ClearOpencodeSessionResponse, CreateMachineResponse, CreateSessionResponse, RunnerState, Machine, MachineMetadata, Metadata, Session } from '@/api/types'
 import { applyHubSessionSummaryContract } from '@/modules/common/sessionSummaryInstruction'
+import { applyVoiceModePreference } from '@/modules/common/voiceModeInstruction'
 import type { LocalResumeTarget, ResumableSession } from '@hapi/protocol'
 import {
     AgentStateSchema,
@@ -99,6 +100,7 @@ export class ApiClient {
             const parsedMetadata = MetadataSchema.safeParse(raw.metadata)
             return parsedMetadata.success ? parsedMetadata.data : null
         })()
+        applyVoiceModePreference(metadata?.voiceMode === true)
 
         const agentState = (() => {
             if (raw.agentState == null) return null
@@ -154,6 +156,7 @@ export class ApiClient {
             const parsedMetadata = MetadataSchema.safeParse(raw.metadata)
             return parsedMetadata.success ? parsedMetadata.data : null
         })()
+        applyVoiceModePreference(metadata?.voiceMode === true)
         const agentState = (() => {
             if (raw.agentState == null) return null
             const parsedAgentState = AgentStateSchema.safeParse(raw.agentState)

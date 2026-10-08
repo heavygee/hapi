@@ -129,6 +129,12 @@ export const MetadataSchema = z.object({
     // sit quiet indefinitely (operator holding pens, sessions owning work the
     // hub cannot see). Never reconciled to 'idle' while true.
     idleReconcileExempt: z.boolean().optional(),
+    // Set when a voice relay is bound to this session (operator voice agent,
+    // Overseer, etc). Agent-facing instructions switch to short, answer-first,
+    // one-packet-at-a-time replies instead of screen-shaped structure. Not
+    // inherited by spawned/pinged peers — only the session actually bound to
+    // voice needs its own output shaped this way.
+    voiceMode: z.boolean().optional(),
     archivedBy: z.string().optional(),
     archiveReason: z.string().optional(),
     // Set only after a completed fresh-session clear. The source row remains

@@ -28,6 +28,7 @@ import {
 } from '@hapi/protocol/sessionCitation'
 import { PingPeerError, formatInspectPeerReport, formatPeerSessionsList, inspectPeer, listPeerSessions, peerListFetchLimit, pingPeer } from "@/modules/pingPeer/pingPeer";
 import { applySessionDisplayRename, normalizeSessionDisplayTitle } from "@/agent/sessionDisplayRename";
+import { applySessionVoiceMode } from "@/agent/sessionVoiceMode";
 
 type StartHappyServerOptions = {
     /**
@@ -128,6 +129,10 @@ function createHapiMcpServer(
         ),
     });
 
+    const setVoiceModeInputSchema: z.ZodTypeAny = z.object({
+        enabled: z.boolean().describe('True when this session is bound to a voice relay and should answer in short, one-packet turns'),
+    });
+
     const listPeersInputSchema: z.ZodTypeAny = z.object({
         limit: z.number().int().min(1).max(100).optional().describe(
             'Max sessions to return (default 30, max 100). Newest updatedAt first.'
@@ -206,6 +211,23 @@ function createHapiMcpServer(
             };
         });
     }
+
+    mcp.registerTool<any, any>('set_voice_mode', {
+        description: 'Mark whether this HAPI session is bound to a voice relay. When enabled, this session answers in short, answer-first, one-packet-at-a-time turns instead of screen-shaped structure (no headings/lists/tables). Call once when you start or stop relaying for voice — not inherited by spawned or pinged peer sessions, and takes effect on the next resume rather than mid-turn.',
+        title: 'Set Voice Mode',
+        inputSchema: setVoiceModeInputSchema,
+    }, async (args: { enabled: boolean }) => {
+        applySessionVoiceMode(client, args.enabled);
+        return {
+            content: [
+                {
+                    type: 'text' as const,
+                    text: `Voice mode ${args.enabled ? 'enabled' : 'disabled'} for this session (effective next resume).`,
+                },
+            ],
+            isError: false,
+        };
+    });
 
     mcp.registerTool<any, any>('display_image', {
         description: `Display a local image file to the human user inline in the current HAPI chat session. ${DISPLAY_IMAGE_PROMPT_CURSOR}`,
@@ -541,8 +563,8 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
     }));
 
     const toolNames = enableChangeTitle
-        ? ['change_title', 'display_image', 'display_video', 'display_media', 'list_peers', 'ping_peer', 'inspect_peer']
-        : ['display_image', 'display_video', 'display_media', 'list_peers', 'ping_peer', 'inspect_peer'];
+        ? ['change_title', 'set_voice_mode', 'display_image', 'display_video', 'display_media', 'list_peers', 'ping_peer', 'inspect_peer']
+        : ['set_voice_mode', 'display_image', 'display_video', 'display_media', 'list_peers', 'ping_peer', 'inspect_peer'];
     if (options.skillLookup) {
         toolNames.push('skill_lookup');
     }
