@@ -51,8 +51,18 @@ in `~/.hapi/settings.json` — **treat it exactly like a password.**
 **Do not paste it into an AI chat assistant, a support ticket, a screenshot, or anywhere
 else, even to ask for help.** If you ever do paste it somewhere by accident (including
 pasting full terminal output that happens to contain it), treat it as compromised and
-get a fresh one — delete the `cliApiToken` line from `~/.hapi/settings.json` and restart
-the hub; it generates a new one automatically.
+get a fresh one — remove it with a JSON-safe edit and restart **both** hub and runner
+(the runner caches the token at process start, so hub-only restart leaves reconnects
+rejected):
+
+```bash
+jq 'del(.cliApiToken)' ~/.hapi/settings.json > ~/.hapi/settings.json.tmp \
+  && mv ~/.hapi/settings.json.tmp ~/.hapi/settings.json
+systemctl --user restart hapi-hub.service hapi-runner.service
+```
+
+If you are on the nohup/path without user systemd units, re-run the install command
+instead — it regenerates the token and relaunches hub + runner.
 
 ## Upgrading later
 
