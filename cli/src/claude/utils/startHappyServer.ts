@@ -22,11 +22,15 @@ import type { InlineMediaSource } from "@/modules/common/inlineMediaSource";
 import { DISPLAY_IMAGE_PROMPT_CURSOR, DISPLAY_LINKS_PROMPT_CURSOR, DISPLAY_MEDIA_PROMPT_CURSOR, DISPLAY_VIDEO_PROMPT_CURSOR } from "@/modules/common/displayImagePrompt";
 import { buildDisplayLinksPayload, buildDisplayLinksToolName, parseDisplayLinksToolInput, assertBoundDisplayLinksSession } from "@hapi/protocol";
 import { resolveSkill } from "@/modules/common/skills";
+import { SESSION_NAME_MAX_LENGTH, toSessionSummaryMetadata } from '@hapi/protocol'
 import {
     INSPECT_PEER_TOOL_DESCRIPTION,
     PING_PEER_TOOL_DESCRIPTION,
     SESSION_ID_PREFIX_PARAM_DESCRIPTION,
+    SPAWN_PEER_TOOL_DESCRIPTION,
 } from '@hapi/protocol/sessionCitation'
+import { CREATABLE_AGENT_FLAVORS } from '@hapi/protocol/modes'
+import { PermissionModeSchema } from '@hapi/protocol/schemas'
 import { PingPeerError, formatInspectPeerReport, formatPeerSessionsList, inspectPeer, listPeerSessions, peerListFetchLimit, pingPeer } from "@/modules/pingPeer/pingPeer";
 import {
     SearchContentError,
@@ -34,6 +38,7 @@ import {
     searchSessionContent,
 } from "@/modules/searchContent/searchContent";
 import { applySessionDisplayRename, normalizeSessionDisplayTitle } from "@/agent/sessionDisplayRename";
+import { SpawnPeerError, spawnPeer } from "@/modules/spawnPeer/spawnPeer";
 
 const SEARCH_CONTENT_DESCRIPTION =
     'Search transcript text across HAPI sessions on the same hub/namespace (what sessions actually said). ' +
@@ -56,6 +61,12 @@ type StartHappyServerOptions = {
      * Defaults on when skillLookup.flavor === 'cursor'.
      */
     enableDisplayLinks?: boolean;
+    /**
+     * Session project cwd for resolving relative `spawn_peer` directories.
+     * Prefer the launcher's effective cwd (including Codex `--cd` overrides).
+     * Falls back to `skillLookup.workingDirectory`, then hub metadata.path.
+     */
+    workingDirectory?: string;
     skillLookup?: {
         workingDirectory: string;
         flavor: string;
@@ -69,18 +80,38 @@ function resolveEnableDisplayLinks(options: StartHappyServerOptions): boolean {
     return options.skillLookup?.flavor === 'cursor';
 }
 
+/**
+ * Resolve the base cwd for MCP spawn_peer relative directories.
+ * Prefer launcher workingDirectory (Codex --cd), then skillLookup, then
+ * session metadata.path so bridges without skillLookup still anchor to the
+ * session tree instead of the long-lived HAPI process cwd.
+ */
+export function resolveMcpSpawnPeerCwd(options: {
+    workingDirectory?: string | null
+    skillWorkingDirectory?: string | null
+    sessionPath?: string | null
+}): string | undefined {
+    const fromLauncher = (options.workingDirectory ?? '').trim()
+    if (fromLauncher) return fromLauncher
+    const fromSkill = (options.skillWorkingDirectory ?? '').trim()
+    if (fromSkill) return fromSkill
+    const fromSession = (options.sessionPath ?? '').trim()
+    return fromSession || undefined
+}
+
 /** Registered on the MCP server, but never pre-approved via Claude --allowedTools. */
 const CLAUDE_MANUAL_APPROVAL_HAPI_TOOLS = new Set([
     'display_media',
     'display_video',
     'ping_peer',
-    'inspect_peer'
+    'inspect_peer',
+    'spawn_peer'
 ]);
 
 /**
  * Map HAPI MCP tool names to Claude `--allowedTools` entries.
- * Keeps `display_media` / `display_video` (arbitrary local-path readers), `ping_peer`, and
- * `inspect_peer` off the auto-allow list so they still prompt.
+ * Keeps `display_media` / `display_video` (arbitrary local-path readers), `ping_peer`,
+ * `inspect_peer`, and `spawn_peer` off the auto-allow list so they still prompt.
  * `list_peers` stays allowed (discovery shortlist only).
  * `search_content` stays allowed (transcript search; read-only hub REST).
  */
@@ -95,7 +126,8 @@ function createHapiMcpServer(
     emitTitleSummary: boolean,
     enableChangeTitle: boolean,
     skillLookup: StartHappyServerOptions['skillLookup'],
-    enableDisplayLinks: boolean
+    enableDisplayLinks: boolean,
+    workingDirectory: string | undefined
 ): McpServer {
     const handler = async (title: string) => {
         logger.debug('[hapiMCP] Changing title to:', title);
@@ -163,6 +195,31 @@ function createHapiMcpServer(
     const pingPeerInputSchema: z.ZodTypeAny = z.object({
         sessionIdPrefix: z.string().trim().min(1).describe(SESSION_ID_PREFIX_PARAM_DESCRIPTION),
         message: z.string().min(1).describe('Message text to deliver to the target session'),
+    });
+
+    const spawnPeerInputSchema: z.ZodTypeAny = z.object({
+        directory: z.string().trim().min(1)
+            .describe('Working directory for the new session on the target machine (must exist there)'),
+        message: z.string().min(1).describe('Required first user message (the remit). Empty spawn is a failed spawn.'),
+        name: z.string().trim().min(1).max(SESSION_NAME_MAX_LENGTH).optional().describe('Session display name'),
+        machine: z.string().trim().min(1).optional()
+            .describe(
+                'Optional target runner: hub machine UUID or hostname (metadata.host / displayName from GET /api/machines). '
+                + 'Omit to spawn on this host.'
+            ),
+        agent: z.enum(CREATABLE_AGENT_FLAVORS as unknown as [string, ...string[]]).optional()
+            .describe('Agent flavor override. When omitted, uses hub peerSpawnDefaults then stock claude.'),
+        model: z.string().trim().min(1).optional()
+            .describe('Model override for the resolved agent flavor.'),
+        effort: z.string().trim().min(1).optional()
+            .describe('Effort override (flavor-dependent).'),
+        sessionType: z.enum(['simple', 'worktree']).optional()
+            .describe('simple or worktree. Default simple (use directory as cwd). worktree creates a new tree from directory.'),
+        permissionMode: PermissionModeSchema.optional()
+            .describe(
+                'Permission mode for the new session. Omit to use hub/stock default (yolo). '
+                + 'Pass only to tighten or when the operator names a mode — do not clone the parent session.'
+            ),
     });
 
     const maxInlineMediaBytes = 25 * 1024 * 1024;
@@ -458,6 +515,75 @@ function createHapiMcpServer(
         }
     });
 
+    mcp.registerTool<any, any>('spawn_peer', {
+        description: SPAWN_PEER_TOOL_DESCRIPTION,
+        title: 'Spawn Peer Session',
+        inputSchema: spawnPeerInputSchema,
+    }, async (args: {
+        directory: string
+        message: string
+        name?: string
+        machine?: string
+        agent?: string
+        model?: string
+        effort?: string
+        sessionType?: 'simple' | 'worktree'
+        permissionMode?: string
+    }) => {
+        logger.debug('[hapiMCP] spawn_peer:', args.directory, args.machine ? `machine=${args.machine}` : '');
+        try {
+            const metadata = client.getMetadata()
+            const summaryMeta = toSessionSummaryMetadata(metadata)
+            const result = await spawnPeer({
+                directory: args.directory,
+                cwd: resolveMcpSpawnPeerCwd({
+                    workingDirectory,
+                    skillWorkingDirectory: skillLookup?.workingDirectory,
+                    sessionPath: metadata?.path,
+                }),
+                message: args.message,
+                name: args.name,
+                machine: args.machine,
+                agent: args.agent as Parameters<typeof spawnPeer>[0]['agent'],
+                model: args.model,
+                effort: args.effort,
+                sessionType: args.sessionType,
+                permissionMode: args.permissionMode as Parameters<typeof spawnPeer>[0]['permissionMode'],
+                parent: {
+                    sessionId: client.sessionId,
+                    name: metadata?.name ?? null,
+                    agentSessionId: summaryMeta?.agentSessionId ?? null,
+                },
+                requireParent: true,
+            });
+            return {
+                content: [
+                    {
+                        type: 'text' as const,
+                        text: `Spawned ${result.sessionId} (${result.name})`,
+                    },
+                ],
+                isError: false,
+            };
+        } catch (error) {
+            const message = error instanceof SpawnPeerError
+                ? error.message
+                : error instanceof Error
+                    ? error.message
+                    : String(error);
+            logger.debug('[hapiMCP] spawn_peer failed:', message);
+            return {
+                content: [
+                    {
+                        type: 'text' as const,
+                        text: `Failed to spawn peer: ${message}`,
+                    },
+                ],
+                isError: true,
+            };
+        }
+    });
+
     mcp.registerTool<any, any>('inspect_peer', {
         description: INSPECT_PEER_TOOL_DESCRIPTION,
         title: 'Inspect Peer Session',
@@ -498,7 +624,7 @@ function createHapiMcpServer(
     });
 
     mcp.registerTool<any, any>('list_peers', {
-        description: 'List peer HAPI sessions on the same hub/namespace (id prefix, active, flavor, name). Uses this session\'s hub credentials - works from runner-spawned agents without being on the hub host. Prefer this over shelling `hapi ping-peer --list`. Then call inspect_peer / ping_peer with a listed id.',
+        description: 'List peer HAPI sessions on the same hub/namespace (id prefix, active, flavor, name). Uses this session\'s hub credentials - works from runner-spawned agents without being on the hub host. Prefer this over shelling `hapi ping-peer --list`. Then call inspect_peer / ping_peer with a listed id, or spawn_peer to create a new peer with a remit.',
         title: 'List Peer Sessions',
         inputSchema: listPeersInputSchema,
     }, async (args: { limit?: number }) => {
@@ -652,7 +778,14 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
     const mcps = new Map<string, McpServer>();
 
     const createMcpTransport = () => {
-        const mcp = createHapiMcpServer(client, emitTitleSummary, enableChangeTitle, options.skillLookup, enableDisplayLinks);
+        const mcp = createHapiMcpServer(
+            client,
+            emitTitleSummary,
+            enableChangeTitle,
+            options.skillLookup,
+            enableDisplayLinks,
+            options.workingDirectory
+        );
         const transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => randomUUID(),
             onsessioninitialized: (sessionId) => {
@@ -712,7 +845,7 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
     if (enableDisplayLinks) {
         toolNames.push(buildDisplayLinksToolName(client.sessionId));
     }
-    toolNames.push('list_peers', 'search_content', 'ping_peer', 'inspect_peer');
+    toolNames.push('list_peers', 'search_content', 'ping_peer', 'inspect_peer', 'spawn_peer');
     if (options.skillLookup) {
         toolNames.push('skill_lookup');
     }
