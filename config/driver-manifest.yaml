@@ -1004,6 +1004,17 @@ layers:
   # Remat order: #1607 → #1772 last (#1605 catalog DROPPED 2026-10-08). Remat owner: tooling/meta — no self-remat.
   - branch: soup/1772-combined-list-filters
 
+  # tiann/hapi#1996 — fold blocked lens into combined session list filter menu.
+  # Keep BlockedJumpPill; remove leftmost BlockedLensToggle.
+  # Worktree: ~/coding/hapi/worktrees/consolidate-list-filters
+  # Tip: 7ed7e05e3 — 3 commits / 12 files on post-1772 driver tip (7543f5eab).
+  # Remat order: after soup/1772-combined-list-filters (needs both layers present).
+  # Needs --build-web. Remat owner: tooling/meta.
+  # Sanity 2026-10-08: delta is incremental on soup tip (12 files vs parent), not a
+  # 1400-file soup snapshot — tip-forward absorb will not stomp #1772 the way the
+  # held thin deltas did.
+  - branch: driver/1996-consolidate-blocked-filter
+
   # DROPPED 2026-10-08: driver/claude-model-catalog (+ delta) — operator call via Overseer.
   # Upstream tiann/hapi#1605 CLOSED unmerged (2026-10-02); absent from soup tip; unmissed.
   # No re-thin / no quiet return. Want it later → fresh PR off upstream/main.
@@ -1022,6 +1033,15 @@ layers:
   # Worktree: ~/coding/hapi/worktrees/doctor-cursor-mcp-path
   # Doctor fails closed when Cursor ACP invoke path is broken (cwd/mailbox/stdio) — #194.
   - branch: fix/doctor-cursor-mcp-path
+
+  # heavygee/hapi#211 — restore unexpected-stop Blocked AGENT_NOTIFY_SUMMARY wire.
+  # #211 is on fork main, but tip-forward + later layers (esp. soup/1772) overwrite
+  # cursorAcpRemoteLauncher.ts without the surfacePromptFailure footer stamp.
+  # Thin tip on live driver (2 files). Place LAST so absorb sticks.
+  # Worktree: ~/coding/hapi/worktrees/211-unexpected-stop-notify
+  # Tip: adde1a8cd — 69 focused CLI tests green.
+  # CLI-only → remat needs hapi-restart-hub (no --build-web for this tip alone).
+  - branch: driver/211-unexpected-stop-notify
 
   # DROPPED 2026-10-06: driver/1933-claude-resume-amnesia — squash 94523eb0d is on
   # fork main (heavygee/hapi#204). Soup base is now origin/main, so tip-forward
