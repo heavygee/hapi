@@ -102,6 +102,8 @@ Both must be run and findings addressed before a PR is filed.
 
 The `~/.local/bin/gh` wrapper (install: `scripts/tooling/install-gh-wrapper.sh`) **refuses** `gh pr create` → `tiann/hapi` when the branch diff includes fork-only paths or the branch is `tooling/*`, `docs/*`, etc. Postmortem: accidental `tiann/hapi#971` (2026-06-24).
 
+**`gh pr merge` + merge gate:** the wrapper only parses long `--repo owner/name` (not short `-R`). If you omit `--repo`, it falls back to `gh repo view` (often `tiann/hapi` in this mirror) and can gate/merge the wrong `#N`. For fork merges always pass `--repo heavygee/hapi`. Same landmine as #192 (2026-10-08).
+
 ### Claude Code enforcement: PreToolUse hook
 
 In `~/.claude/settings.json`, a PreToolUse hook fires when `gh pr create` is about
