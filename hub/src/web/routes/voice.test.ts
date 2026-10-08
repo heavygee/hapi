@@ -549,6 +549,115 @@ describe('POST /api/voice/token', () => {
     })
 })
 
+describe('POST /api/voice/token max conversation duration', () => {
+    type Call = { url: string; method?: string; body: any }
+
+    async function runToken(opts: {
+        env?: string
+        existingAgent?: boolean
+        envAgentId?: string
+    }) {
+        const app = createApp()
+        const headers = { ...(await authHeaders()), 'content-type': 'application/json' }
+        const suffix = Math.random().toString(36).slice(2, 10)
+        const voiceId = `dur-voice-${suffix}`
+        const prev = {
+            key: process.env.ELEVENLABS_API_KEY,
+            agent: process.env.ELEVENLABS_AGENT_ID,
+            max: process.env.ELEVENLABS_MAX_DURATION_SECONDS
+        }
+        process.env.ELEVENLABS_API_KEY = `dur-key-${suffix}`
+        if (opts.envAgentId) process.env.ELEVENLABS_AGENT_ID = opts.envAgentId
+        else delete process.env.ELEVENLABS_AGENT_ID
+        if (opts.env === undefined) delete process.env.ELEVENLABS_MAX_DURATION_SECONDS
+        else process.env.ELEVENLABS_MAX_DURATION_SECONDS = opts.env
+
+        const calls: Call[] = []
+        const originalFetch = global.fetch
+        // @ts-expect-error test override
+        global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+            const url = String(input)
+            const body = init?.body ? JSON.parse(String(init.body)) : null
+            calls.push({ url, method: init?.method, body })
+            if (url.endsWith('/convai/agents') && init?.method === 'GET') {
+                return new Response(JSON.stringify({
+                    agents: opts.existingAgent
+                        ? [{ agent_id: `agent_${suffix}`, name: `Hapi Voice Assistant [voice:${voiceId}]` }]
+                        : []
+                }), { status: 200 })
+            }
+            if (url.endsWith('/convai/agents/create')) {
+                return new Response(JSON.stringify({ agent_id: `agent_${suffix}` }), { status: 200 })
+            }
+            if (init?.method === 'PATCH') {
+                return new Response(JSON.stringify({}), { status: 200 })
+            }
+            if (url.includes('/convai/conversation/token?agent_id=')) {
+                return new Response(JSON.stringify({ token: 'tok' }), { status: 200 })
+            }
+            return new Response('not found', { status: 404 })
+        }) as typeof fetch
+
+        try {
+            const res = await app.request('/api/voice/token', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(opts.envAgentId ? {} : { voiceId })
+            })
+            return { res, calls }
+        } finally {
+            global.fetch = originalFetch
+            for (const [name, value] of [
+                ['ELEVENLABS_API_KEY', prev.key],
+                ['ELEVENLABS_AGENT_ID', prev.agent],
+                ['ELEVENLABS_MAX_DURATION_SECONDS', prev.max]
+            ] as const) {
+                if (value === undefined) delete process.env[name]
+                else process.env[name] = value
+            }
+        }
+    }
+
+    it('creates new agents with the default 1800s cap (not ElevenLabs\' 600s)', async () => {
+        const { res, calls } = await runToken({})
+        expect(res.status).toBe(200)
+        const create = calls.find(c => c.url.endsWith('/convai/agents/create'))
+        expect(create?.body.conversation_config.conversation.max_duration_seconds).toBe(1800)
+    })
+
+    it('creates new agents with the configured cap', async () => {
+        const { calls } = await runToken({ env: '3600' })
+        const create = calls.find(c => c.url.endsWith('/convai/agents/create'))
+        expect(create?.body.conversation_config.conversation.max_duration_seconds).toBe(3600)
+    })
+
+    it('reconciles the cap onto existing hub-managed agents', async () => {
+        const { res, calls } = await runToken({ env: '3600', existingAgent: true })
+        expect(res.status).toBe(200)
+        expect(calls.some(c => c.url.endsWith('/convai/agents/create'))).toBe(false)
+        const patch = calls.find(c => c.method === 'PATCH')
+        expect(patch?.body.conversation_config.conversation.max_duration_seconds).toBe(3600)
+    })
+
+    it('does not touch the cap on operator-supplied agents', async () => {
+        const { calls } = await runToken({ env: '3600', envAgentId: 'agent_operator_owned' })
+        const patch = calls.find(c => c.method === 'PATCH')
+        expect(patch).toBeTruthy()
+        expect(patch?.body.conversation_config).toBeUndefined()
+    })
+
+    for (const bad of ['59', '7201', 'abc', '1800.5']) {
+        it(`rejects out-of-range/invalid value "${bad}" with a clear message and creates nothing`, async () => {
+            const { res, calls } = await runToken({ env: bad })
+            expect(res.status).toBe(500)
+            const json = await res.json() as { allowed: boolean; error: string }
+            expect(json.allowed).toBe(false)
+            expect(json.error).toContain('ELEVENLABS_MAX_DURATION_SECONDS must be an integer between 60 and 7200')
+            expect(calls.some(c => c.url.endsWith('/convai/agents/create'))).toBe(false)
+        })
+    }
+})
+
 describe('GET /api/voice/backend', () => {
     const originalEnv = {
         VOICE_BACKEND: process.env.VOICE_BACKEND,

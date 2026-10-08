@@ -74,6 +74,14 @@ hapi hub --relay
 
 The hub automatically creates a "Hapi Voice Assistant" agent in your ElevenLabs account on first use. When you pick a non-default voice, the hub creates a dedicated per-voice agent named `Hapi Voice Assistant [voice:<id>]` so the selection always takes effect.
 
+Each conversation is capped at 1800 seconds (ElevenLabs' own default of 600s cuts conversations off). The cap also bounds the cost of a conversation left open, since ConvAI bills per minute. Change it with:
+
+```bash
+export ELEVENLABS_MAX_DURATION_SECONDS=3600   # 60-7200
+```
+
+The cap is set when an agent is created and re-applied to existing auto-created agents the first time the hub serves a token for them after a start, so a hub restart picks up a new value. Agents you supply yourself (below) keep their own cap.
+
 To use your own ElevenLabs agent instead of the auto-created one:
 
 ```bash

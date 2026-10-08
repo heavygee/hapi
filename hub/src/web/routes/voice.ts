@@ -12,6 +12,7 @@ import {
     OPENAI_TRANSCRIPTION_MODEL,
     VOICE_AGENT_NAME,
     buildVoiceAgentConfig,
+    resolveVoiceMaxDurationSeconds,
     listConfiguredTranscriptionProviders,
     listConfiguredVoiceBackends,
     resolveHubVoiceBackend
@@ -254,6 +255,11 @@ const agentIdCache = new Map<string, string>()
 // reconciled with the canonical buildVoiceAgentConfig() shape. Reset on process restart.
 const overridesEnsuredAgents = new Set<string>()
 
+/** Configured ConvAI conversation cap; throws if ELEVENLABS_MAX_DURATION_SECONDS is invalid. */
+function getMaxDurationSeconds(): number {
+    return resolveVoiceMaxDurationSeconds(process.env.ELEVENLABS_MAX_DURATION_SECONDS)
+}
+
 interface ElevenLabsAgent {
     agent_id: string
     name: string
@@ -270,11 +276,20 @@ interface ElevenLabsAgent {
  *
  * See: https://elevenlabs.io/docs/agents-platform/customization/personalization/overrides
  */
-async function ensureAgentOverrides(apiKey: string, agentId: string): Promise<void> {
+async function ensureAgentOverrides(
+    apiKey: string,
+    agentId: string,
+    options: { reconcileMaxDuration?: boolean } = {}
+): Promise<void> {
     if (overridesEnsuredAgents.has(agentId)) return
     overridesEnsuredAgents.add(agentId)
 
-    const canonical = buildVoiceAgentConfig().platform_settings
+    // The conversation cap is only enforced on agents the hub itself manages
+    // (found/created by name); operator-supplied agents keep their own cap.
+    const canonicalConfig = buildVoiceAgentConfig(
+        options.reconcileMaxDuration ? { maxDurationSeconds: getMaxDurationSeconds() } : {}
+    )
+    const canonical = canonicalConfig.platform_settings
     if (!canonical) return
 
     try {
@@ -287,7 +302,12 @@ async function ensureAgentOverrides(apiKey: string, agentId: string): Promise<vo
                     'Content-Type': 'application/json',
                     'Accept': 'application/json'
                 },
-                body: JSON.stringify({ platform_settings: canonical })
+                body: JSON.stringify({
+                    platform_settings: canonical,
+                    ...(canonicalConfig.conversation_config.conversation
+                        ? { conversation_config: { conversation: canonicalConfig.conversation_config.conversation } }
+                        : {})
+                })
             }
         )
 
@@ -308,7 +328,7 @@ async function ensureAgentOverrides(apiKey: string, agentId: string): Promise<vo
             return
         }
 
-        console.log('[Voice] Reconciled platform_settings.overrides on agent', { agentId })
+        console.log('[Voice] Reconciled platform_settings.overrides and max duration on agent', { agentId })
     } catch (error) {
         console.warn('[Voice] Error reconciling agent overrides (non-fatal)', {
             agentId,
@@ -370,7 +390,7 @@ async function createHapiAgent(apiKey: string): Promise<string | null> {
 
 async function createNamedHapiAgent(apiKey: string, agentName: string, voiceId?: string): Promise<string | null> {
     try {
-        const config = buildVoiceAgentConfig()
+        const config = buildVoiceAgentConfig({ maxDurationSeconds: getMaxDurationSeconds() })
         config.name = agentName
         if (voiceId) {
             config.conversation_config.tts.voice_id = voiceId
@@ -436,7 +456,7 @@ async function getOrCreateAgentIdForVoice(apiKey: string, voiceId?: string): Pro
         console.log('[Voice] Found existing agent:', agentId)
         // Existing agents may predate the platform_settings.overrides we declare
         // in buildVoiceAgentConfig() — reconcile so client overrides are accepted.
-        await ensureAgentOverrides(apiKey, agentId)
+        await ensureAgentOverrides(apiKey, agentId, { reconcileMaxDuration: true })
     } else {
         // Create new agent
         console.log('[Voice] No existing agent found, creating new one...')
@@ -631,6 +651,15 @@ export function createVoiceRoutes(options: { dataDir?: string } = {}): Hono<WebA
                 allowed: false,
                 error: 'ElevenLabs API key not configured'
             }, 400)
+        }
+
+        // Fail fast with a clear message rather than a generic agent-creation error.
+        try {
+            getMaxDurationSeconds()
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            console.error('[Voice][Token] Invalid max duration configuration', { requestId, message })
+            return c.json({ allowed: false, error: message }, 500)
         }
 
         // If a voice was selected and no explicit mapping/custom agent is set,
