@@ -6,6 +6,7 @@ import { HoverTooltip } from '@/components/HoverTooltip'
 import { CheckIcon } from '@/components/icons'
 import { cn } from '@/lib/utils'
 import {
+    hasActiveSessionListFilter,
     isSessionListFilterSelected,
     SESSION_LIST_FILTER_OPTIONS,
     toggleSessionListFilter,
@@ -178,12 +179,14 @@ function SessionFilterMenuRow(props: {
     label: string
     selected: boolean
     onSelect: () => void
+    testId?: string
 }) {
     return (
         <button
             type="button"
             role="menuitemcheckbox"
             aria-checked={props.selected}
+            data-testid={props.testId}
             onClick={props.onSelect}
             className={cn(
                 'flex w-full items-center gap-2 rounded-lg py-2 pl-2.5 pr-2 text-left text-sm transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
@@ -389,7 +392,7 @@ export function MachineFilterMenu(props: {
             >
                 <FilterIcon className="h-5 w-5" />
                 {props.value !== null
-                    || (props.sessionFilter !== undefined && (props.sessionFilter.unread || props.sessionFilter.scratchlist))
+                    || (props.sessionFilter !== undefined && hasActiveSessionListFilter(props.sessionFilter))
                     || (hasDateFilter && Boolean(props.customStart && props.customEnd)) ? (
                     <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-[var(--app-link)]" />
                 ) : null}
@@ -428,6 +431,7 @@ export function MachineFilterMenu(props: {
                                                 label={t(option.labelKey)}
                                                 selected={isSessionListFilterSelected(props.sessionFilter!, option.value)}
                                                 onSelect={() => selectSessionFilter(option.value)}
+                                                testId={`session-list-filter-${option.value}`}
                                             />
                                             {hasDateFilter && option.value === 'unread' ? (
                                                 <SessionDateFilterMenuRow

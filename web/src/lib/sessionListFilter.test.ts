@@ -8,14 +8,22 @@ import {
 describe('session list filter state', () => {
     it('toggles each condition independently so filters can be composed', () => {
         const unread = toggleSessionListFilter(DEFAULT_SESSION_LIST_FILTER_STATE, 'unread')
-        const combined = toggleSessionListFilter(unread, 'scratchlist')
+        const withScratch = toggleSessionListFilter(unread, 'scratchlist')
+        const combined = toggleSessionListFilter(withScratch, 'blocked')
 
-        expect(combined).toEqual({ unread: true, scratchlist: true })
+        expect(DEFAULT_SESSION_LIST_FILTER_STATE).toEqual({
+            unread: false,
+            scratchlist: false,
+            blocked: false
+        })
+        expect(combined).toEqual({ unread: true, scratchlist: true, blocked: true })
         expect(isSessionListFilterSelected(combined, 'unread')).toBe(true)
         expect(isSessionListFilterSelected(combined, 'scratchlist')).toBe(true)
+        expect(isSessionListFilterSelected(combined, 'blocked')).toBe(true)
         expect(toggleSessionListFilter(combined, 'unread')).toEqual({
             unread: false,
-            scratchlist: true
+            scratchlist: true,
+            blocked: true
         })
     })
 })

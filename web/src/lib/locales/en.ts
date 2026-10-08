@@ -96,6 +96,7 @@ export default {
   'sessions.filter.section': 'Session',
   'sessions.filter.unread': 'Unread',
   'sessions.filter.scratchlist': 'Scratchlist',
+  'sessions.filter.blocked': 'Blocked',
   'sessions.filter.date': 'Date',
   'sessions.filter.loading': 'Loading scratchlist sessions…',
   'sessions.filter.error': 'Unable to load scratchlist sessions.',

@@ -128,20 +128,22 @@ describe('SessionList blocked chrome (#1717)', () => {
         expect(within(pill).getByText('2')).toBeTruthy()
     })
 
-    it('narrows to blocked work through a real toggle button', () => {
+    it('narrows to blocked work through the combined filter menu', () => {
         renderList([blocked('stuck-one'), blocked('stuck-two'), makeSession({ id: 'fine-one' })])
 
-        const toggle = screen.getByTestId('blocked-lens-toggle')
-        expect(toggle.getAttribute('aria-pressed')).toBe('false')
+        expect(screen.queryByTestId('blocked-lens-toggle')).toBeNull()
         expect(screen.getByText('fine-one')).toBeTruthy()
 
-        // A native button, so keyboard and assistive activation reach the lens
-        // that `aria-pressed` advertises.
-        fireEvent.click(toggle)
+        fireEvent.click(screen.getByTestId('session-list-filter-menu'))
+        const option = screen.getByTestId('session-list-filter-blocked')
+        expect(option.getAttribute('aria-checked')).toBe('false')
+        fireEvent.click(option)
 
-        expect(screen.getByTestId('blocked-lens-toggle').getAttribute('aria-pressed')).toBe('true')
+        expect(screen.getByTestId('session-list-filter-blocked').getAttribute('aria-checked')).toBe('true')
         expect(screen.queryByText('fine-one')).toBeNull()
         expect(screen.getAllByTestId('session-blocked-chip')).toHaveLength(2)
+        // Jump pill stays — navigation, not a filter (#1996).
+        expect(screen.getByTestId('blocked-jump-pill')).toBeTruthy()
     })
 
     it('counts a session awaiting a permission prompt as blocked', () => {

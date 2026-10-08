@@ -292,14 +292,6 @@ const BLOCKED_DIRECTION_GLYPH: Record<BlockedJumpDirection, string | null> = {
     both: '\u2195'
 }
 
-function BlockedFilterIcon(props: { className?: string }) {
-    return (
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={props.className} aria-hidden="true">
-            <path d="M3 5h18l-7 8v6l-4 2v-8Z" />
-        </svg>
-    )
-}
-
 function BlockedFlagIcon(props: { className?: string }) {
     return (
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={props.className} aria-hidden="true">
@@ -318,9 +310,9 @@ function BlockedFlagIcon(props: { className?: string }) {
  * collapsed header. A header counter is always on screen, states a number, and
  * its click makes the row reachable before travelling to it.
  *
- * Deliberately a plain action button, not a toggle: the blocked-only lens is
- * its own sibling control below, so keyboard and assistive activation reach
- * both behaviours natively rather than depending on a long-press gesture.
+ * Deliberately a plain action button, not a filter toggle: blocked-only
+ * narrowing lives in the combined filter menu (#1996 / #1772). This pill only
+ * jumps to the next blocker.
  */
 function BlockedJumpPill(props: {
     count: number
@@ -352,37 +344,6 @@ function BlockedJumpPill(props: {
             <BlockedFlagIcon className="h-3.5 w-3.5" />
             <span>{props.count}</span>
             {glyph ? <span aria-hidden="true">{glyph}</span> : null}
-        </button>
-    )
-}
-
-/** Blocked-only lens, mirroring the existing unread-only header toggle. */
-function BlockedLensToggle(props: {
-    active: boolean
-    count: number
-    onToggle: () => void
-}) {
-    const { t } = useTranslation()
-    const label = props.active
-        ? t('sessions.blockedFilter.showingOnly', { count: props.count })
-        : t('sessions.blockedFilter.hint')
-
-    return (
-        <button
-            type="button"
-            onClick={props.onToggle}
-            data-testid="blocked-lens-toggle"
-            aria-pressed={props.active}
-            title={label}
-            aria-label={label}
-            className={cn(
-                'flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
-                props.active
-                    ? 'bg-[var(--app-badge-warning-bg)] text-[var(--app-badge-warning-text)]'
-                    : 'text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)]'
-            )}
-        >
-            <BlockedFilterIcon className="h-4 w-4" />
         </button>
     )
 }
@@ -1908,15 +1869,18 @@ export function SessionList(props: {
     const { sessionListStatusMode } = useSessionListStatusMode()
     const { showActiveSessionsOnly, setShowActiveSessionsOnly } = useShowActiveSessionsOnly()
     const lastSeenVersion = useSessionLastSeenVersion()
-    // Transient session-list lens — not a Settings preference. Cleared on reload.
+    // Transient session-list lenses (unread / scratchlist / blocked) — not Settings
+    // preferences. Cleared on reload. #1996 folded the old standalone showBlockedOnly
+    // useState into sessionFilters.blocked; both were always ephemeral, so there is
+    // no persisted migration — an in-flight blocked lens resets on remount (same as today).
     const [sessionFilters, setSessionFilters] = useState<SessionListFilterState>(DEFAULT_SESSION_LIST_FILTER_STATE)
     const showScratchlistOnly = sessionFilters.scratchlist
+    const showBlockedOnly = sessionFilters.blocked
     const {
         sessionIds: scratchlistSessionIds,
         isLoading: isScratchlistStatusLoading,
         error: scratchlistStatusError
     } = useScratchlistSessionIds(api, showScratchlistOnly)
-    const [showBlockedOnly, setShowBlockedOnly] = useState(false)
     const [blockedSectionCollapsed, setBlockedSectionCollapsed] = useState(false)
     const [pendingBlockedScrollId, setPendingBlockedScrollId] = useState<string | null>(null)
     const [flashBlockedSessionId, setFlashBlockedSessionId] = useState<string | null>(null)
@@ -2163,6 +2127,15 @@ export function SessionList(props: {
                 scratchlistSessionIds
             )
         }
+        // Blocked is AND-composed with unread/scratchlist (#1996): "you have not
+        // looked at this" and "it stopped and needs you" remain different
+        // questions — a blocked session you already read is still blocked.
+        if (sessionFilters.blocked) {
+            const now = Date.now()
+            filtered = filtered.filter(session =>
+                session.id === selectedSessionId || sessionIsBlocked(session, { now })
+            )
+        }
         return filtered
     }, [
         isScratchlistStatusLoading,
@@ -2173,24 +2146,13 @@ export function SessionList(props: {
         sessionFilters,
         visibleSessions
     ])
-    // Blocked lens. Sits alongside the unread lens rather than inside it:
-    // "you have not looked at this" and "it stopped and needs you" are
-    // different questions, and a blocked session you already read is still
-    // blocked.
-    const blockedFilteredSessions = useMemo(() => {
-        if (!showBlockedOnly) return sessionFilteredSessions
-        const now = Date.now()
-        return sessionFilteredSessions.filter(session =>
-            session.id === selectedSessionId || sessionIsBlocked(session, { now })
-        )
-    }, [sessionFilteredSessions, showBlockedOnly, selectedSessionId])
     const machineFilteredSessions = useMemo(
         () => activeMachineFilter === null
-            ? blockedFilteredSessions
-            : blockedFilteredSessions.filter(session =>
+            ? sessionFilteredSessions
+            : sessionFilteredSessions.filter(session =>
                 (session.metadata?.machineId ?? UNKNOWN_MACHINE_ID) === activeMachineFilter
             ),
-        [blockedFilteredSessions, activeMachineFilter]
+        [sessionFilteredSessions, activeMachineFilter]
     )
     const { pinned: pinnedSessions, unpinned: unpinnedMachineSessions } = useMemo(() => {
         const { pinned, unpinned } = partitionGlobalPinnedSessions(machineFilteredSessions)
@@ -2980,19 +2942,12 @@ export function SessionList(props: {
                                 />
                             ) : null}
                             {blockedCount > 0 ? (
-                                <>
-                                    <BlockedJumpPill
-                                        count={blockedCount}
-                                        direction={blockedDirection}
-                                        alerting={blockedAlerting}
-                                        onJump={jumpToNextBlocked}
-                                    />
-                                    <BlockedLensToggle
-                                        active={showBlockedOnly}
-                                        count={blockedCount}
-                                        onToggle={() => setShowBlockedOnly((value) => !value)}
-                                    />
-                                </>
+                                <BlockedJumpPill
+                                    count={blockedCount}
+                                    direction={blockedDirection}
+                                    alerting={blockedAlerting}
+                                    onJump={jumpToNextBlocked}
+                                />
                             ) : null}
                             {unreadSessionCount > 0 ? (
                                 <button

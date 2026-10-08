@@ -6,6 +6,7 @@ import {
     SessionDateRangePicker
 } from '@/components/SessionDateFilter'
 import {
+    hasActiveSessionListFilter,
     isSessionListFilterSelected,
     SESSION_LIST_FILTER_OPTIONS,
     toggleSessionListFilter,
@@ -146,12 +147,13 @@ export function SessionListFilterMenu(props: {
                 aria-expanded={open}
                 className={cn(
                     'relative flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]',
-                    (props.value.unread || props.value.scratchlist || hasDateRange)
+                    (hasActiveSessionListFilter(props.value) || hasDateRange)
                         && 'bg-[var(--app-subtle-bg)] text-[var(--app-fg)]'
                 )}
+                data-testid="session-list-filter-menu"
             >
                 <FilterIcon className="h-5 w-5" />
-                {props.value.unread || props.value.scratchlist || hasDateRange ? (
+                {hasActiveSessionListFilter(props.value) || hasDateRange ? (
                     <span
                         aria-hidden="true"
                         className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-[var(--app-link)]"
@@ -188,6 +190,7 @@ export function SessionListFilterMenu(props: {
                                         type="button"
                                         role="menuitemcheckbox"
                                         aria-checked={selected}
+                                        data-testid={`session-list-filter-${option.value}`}
                                         onClick={() => select(option.value)}
                                         className={cn(
                                             'flex w-full items-center gap-2 rounded-lg py-2 pl-2.5 pr-2 text-left text-sm transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',

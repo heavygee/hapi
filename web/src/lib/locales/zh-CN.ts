@@ -96,6 +96,7 @@ export default {
   'sessions.filter.section': '会话状态',
   'sessions.filter.unread': '未读',
   'sessions.filter.scratchlist': '草稿夹',
+  'sessions.filter.blocked': '已阻塞',
   'sessions.filter.date': '日期',
   'sessions.filter.loading': '正在加载草稿夹会话…',
   'sessions.filter.error': '无法加载草稿夹会话。',

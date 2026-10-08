@@ -196,7 +196,7 @@ describe('MachineFilterMenu', () => {
     it('combines session filters with machine filters when requested', () => {
         const onSessionFilterChange = vi.fn()
         renderMenu({
-            sessionFilter: { unread: false, scratchlist: false },
+            sessionFilter: { unread: false, scratchlist: false, blocked: false },
             onSessionFilterChange
         })
 
@@ -206,12 +206,12 @@ describe('MachineFilterMenu', () => {
         expect(screen.getByRole('group', { name: 'Filter by machine' })).toBeTruthy()
         fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Scratchlist' }))
         expect(screen.getByRole('menu')).toBeTruthy()
-        expect(onSessionFilterChange).toHaveBeenCalledWith({ unread: false, scratchlist: true })
+        expect(onSessionFilterChange).toHaveBeenCalledWith({ unread: false, scratchlist: true, blocked: false })
     })
 
     it('opens the existing date picker from the unified machine menu', () => {
         renderMenu({
-            sessionFilter: { unread: false, scratchlist: false },
+            sessionFilter: { unread: false, scratchlist: false, blocked: false },
             onSessionFilterChange: vi.fn(),
             customStart: '',
             customEnd: '',

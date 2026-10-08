@@ -176,6 +176,7 @@ describe('SessionList machine filter', () => {
             'Unread',
             'Date',
             'Scratchlist',
+            'Blocked',
             'All(2)',
             'Mint(1)',
             'Teemo(1)'
@@ -187,7 +188,7 @@ describe('SessionList machine filter', () => {
 })
 
 describe('SessionList session filter menu', () => {
-    it('lists unread, date, and scratchlist and closes when clicking outside', () => {
+    it('lists unread, date, scratchlist, and blocked and closes when clicking outside', () => {
         renderSessionList([
             makeSession({ id: 'session-1', metadata: { path: '/work/hapi', name: 'Session one' } })
         ])
@@ -198,7 +199,8 @@ describe('SessionList session filter menu', () => {
         expect(Array.from(menu.querySelectorAll('[role="menuitemradio"], [role="menuitemcheckbox"], [role="menuitem"]')).map((item) => item.textContent)).toEqual([
             'Unread',
             'Date',
-            'Scratchlist'
+            'Scratchlist',
+            'Blocked'
         ])
 
         fireEvent.click(screen.getByRole('button', { name: 'Close' }))
