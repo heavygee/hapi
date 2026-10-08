@@ -36,7 +36,7 @@ export const TITLE_INSTRUCTION = trimIdent(`
 
 export function getTitleInstruction(env: NodeJS.ProcessEnv = process.env): string {
     return withSessionSummaryInstruction(
-        withVoiceModeInstruction(withSessionJobInstruction(TITLE_INSTRUCTION), env)),
+        withVoiceModeInstruction(withSessionJobInstruction(TITLE_INSTRUCTION)),
         env,
     )
 }
@@ -62,7 +62,7 @@ export const OPENCODE_NATIVE_TOOL_INSTRUCTION = trimIdent(`
 
 export function getOpencodeNativeToolInstruction(env: NodeJS.ProcessEnv = process.env): string {
     return withSessionSummaryInstruction(
-        withVoiceModeInstruction(withSessionJobInstruction(OPENCODE_NATIVE_TOOL_INSTRUCTION), env)),
+        withVoiceModeInstruction(withSessionJobInstruction(OPENCODE_NATIVE_TOOL_INSTRUCTION)),
         env,
     )
 }

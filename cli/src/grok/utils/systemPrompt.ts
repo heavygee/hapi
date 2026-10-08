@@ -8,7 +8,7 @@ export const GROK_TITLE_INSTRUCTION =
 
 export function getGrokTitleInstruction(env: NodeJS.ProcessEnv = process.env): string {
     return withSessionSummaryInstruction(
-        withVoiceModeInstruction(withSessionJobInstruction(GROK_TITLE_INSTRUCTION), env)),
+        withVoiceModeInstruction(withSessionJobInstruction(GROK_TITLE_INSTRUCTION)),
         env,
     )
 }
