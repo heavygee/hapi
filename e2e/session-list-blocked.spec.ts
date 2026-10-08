@@ -64,11 +64,17 @@ test.describe('#1717 blocked session-list chrome', () => {
         await expect(pill).toContainText(/[↑↓↕]/)
     })
 
-    test('the lens toggle narrows the list to blocked work only', async ({ page }) => {
-        const toggle = page.getByTestId('blocked-lens-toggle')
-        await toggle.click()
+    test('the combined filter menu narrows the list to blocked work only', async ({ page }) => {
+        // #1996: blocked lens lives in the funnel menu, not a leftmost icon.
+        await expect(page.getByTestId('blocked-lens-toggle')).toHaveCount(0)
+        await expect(page.getByTestId('blocked-jump-pill')).toBeVisible()
 
-        await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+        await page.getByTestId('session-list-filter-menu').click()
+        const option = page.getByTestId('session-list-filter-blocked')
+        await expect(option).toHaveAttribute('aria-checked', 'false')
+        await option.click()
+        await expect(option).toHaveAttribute('aria-checked', 'true')
+
         await expect(page.getByTestId('session-blocked-chip')).toHaveCount(11)
         // Every remaining row carries the blocked flag.
         const rows = page.locator('[data-session-id]')
@@ -78,7 +84,7 @@ test.describe('#1717 blocked session-list chrome', () => {
         // directories whose only remaining rows floated into the section.
         await expect(page.locator('[data-testid="blocked-section"] ~ * >> text=coding/')).toHaveCount(0)
 
-        await page.screenshot({ path: 'test-results/blocked-4-lens.png' })
+        await page.screenshot({ path: 'test-results/blocked-4-filter-menu.png' })
     })
 })
 
