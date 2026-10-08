@@ -941,6 +941,94 @@ describe('cursorAcpRemoteLauncher', () => {
             type: 'error',
             message: expect.stringContaining('not retried')
         }));
+        // Assistant text footer stamps lastNotify → estate Blocked chrome (#1724).
+        expect(client.sendAgentMessage).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'message',
+            message: expect.stringMatching(
+                /AGENT_NOTIFY_SUMMARY \{.*"status":"blocked".*\}/
+            )
+        }));
+    });
+
+    it('stamps Blocked on an immediate non-retryable prompt error', async () => {
+        harness.promptErrors = [new Error('ACP backend rejected the request: invalid session')];
+        const queue = new MessageQueue2<EnhancedMode>(() => 'mode');
+        const client = makeClient() as unknown as ApiSessionClient & {
+            sendAgentMessage: ReturnType<typeof vi.fn>;
+        };
+        const session = new CursorSession({
+            api: {} as never,
+            client,
+            path: '/tmp/project',
+            logPath: '/tmp/log',
+            sessionId: null,
+            messageQueue: queue,
+            onModeChange: vi.fn(),
+            mode: 'remote',
+            startedBy: 'runner',
+            startingMode: 'remote',
+            permissionMode: 'default'
+        });
+        session.onSessionFoundWithProtocol = vi.fn();
+        queue.push('finish the task', { permissionMode: 'default' });
+        queue.close();
+
+        await cursorAcpRemoteLauncher(session);
+
+        expect(harness.promptCalls).toBe(1);
+        expect(client.sendAgentMessage).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'error',
+            message: expect.stringContaining('invalid session')
+        }));
+        expect(client.sendAgentMessage).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'message',
+            message: expect.stringMatching(
+                /AGENT_NOTIFY_SUMMARY \{.*"status":"blocked".*"summary":"ACP backend rejected the request: invalid session".*\}/
+            )
+        }));
+    });
+
+    it('stamps Blocked after retries are exhausted', async () => {
+        harness.promptErrors = [
+            new Error('Error: RetriableError: [canceled] http/2 stream closed with error code CANCEL'),
+            new Error('Error: RetriableError: [unavailable] connection reset'),
+            new Error("ACP request 'session/prompt' timed out after 120000ms"),
+            new Error('Error: RetriableError: [canceled] http/2 stream closed with error code CANCEL')
+        ];
+        const queue = new MessageQueue2<EnhancedMode>(() => 'mode');
+        const client = makeClient() as unknown as ApiSessionClient & {
+            sendAgentMessage: ReturnType<typeof vi.fn>;
+        };
+        const session = new CursorSession({
+            api: {} as never,
+            client,
+            path: '/tmp/project',
+            logPath: '/tmp/log',
+            sessionId: null,
+            messageQueue: queue,
+            onModeChange: vi.fn(),
+            mode: 'remote',
+            startedBy: 'runner',
+            startingMode: 'remote',
+            permissionMode: 'default'
+        });
+        session.onSessionFoundWithProtocol = vi.fn();
+        queue.push('finish the task', { permissionMode: 'default' });
+        queue.close();
+
+        await cursorAcpRemoteLauncher(session);
+
+        expect(harness.promptCalls).toBe(4);
+        expect(client.sendAgentMessage).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'error',
+            message: expect.stringContaining('failed after 3 retries')
+        }));
+        expect(client.sendAgentMessage).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'message',
+            message: expect.stringMatching(
+                /AGENT_NOTIFY_SUMMARY \{.*"status":"blocked".*"summary":"Cursor Agent failed after 3 retries\."\}/
+            )
+        }));
     });
 
     it('removes the Cursor MCP overlay even when backend.disconnect rejects', async () => {
