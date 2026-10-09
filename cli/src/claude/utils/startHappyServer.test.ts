@@ -445,6 +445,7 @@ describe('toClaudeAllowedHapiMcpTools', () => {
         ])).toEqual([
             'mcp__hapi__change_title',
             'mcp__hapi__set_voice_mode',
+            'mcp__hapi__link_issue',
             'mcp__hapi__display_image',
             'mcp__hapi__list_peers',
             'mcp__hapi__search_peers',
