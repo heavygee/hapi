@@ -42,6 +42,9 @@ export const SESSION_JOB_SET_REFUSED_TEXT = [
 export const SESSION_JOB_TOOL_DESCRIPTION = [
     'Progress meter on THIS HAPI session for work that OUTLIVES the agent turn.',
     'Own-session only. CRITICAL: do NOT use action=set — it is refused.',
+    'HYGIENE: call action=list on session start/resume AND before claiming done or inviting archive.',
+    'If list shows status=running but the process is dead / you cannot prove it is alive, action=clear or update status=failed — do not ask the operator to clean meters.',
+    'Leave live jobs with fresh heartbeats alone.',
     'To START a long job, use the Shell tool with:',
     SESSION_JOB_RUN_RECIPE,
     '(auto-heartbeats + completed/failed on exit). Idle agents cannot heartbeat.',
