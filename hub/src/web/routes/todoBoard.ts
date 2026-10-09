@@ -5,10 +5,16 @@ import type { TodoBoardItem, TodoBoardItemsResponse, TodoBoardsResponse } from '
 import type { WebAppEnv } from '../middleware/auth'
 
 /**
- * First shippable slice of the to-do/board view (hapi#235): one hardcoded
- * GitHub Projects v2 board, read via the host's already-authenticated `gh`
- * CLI. No multi-host/multi-identity auth, caching, or pagination beyond a
- * single page of items — that's the full data-layer issue (#234).
+ * First shippable slice of the to-do/board view (hapi#235): one GitHub
+ * Projects v2 board, read via the host's already-authenticated `gh` CLI. No
+ * multi-host/multi-identity auth, caching, or pagination beyond a single
+ * page of items — that's the full data-layer issue (#234).
+ *
+ * The board is config (env, with a safe default), not a constant — a real
+ * personal board was hardcoded here earlier and caught before it shipped
+ * (see hapi#235 discussion). The default must stay a dull, public,
+ * nothing-real demo board (`heavygee/hapi-demo-board`, project 6) so a
+ * forgotten env var never surfaces anyone's real data.
  */
 type TodoBoardConfig = {
     id: string
@@ -19,23 +25,36 @@ type TodoBoardConfig = {
     doneValues: string[]
 }
 
-// WARNING: this hardcode points at a real, personal GitHub Projects v2 board
-// (owner's own account) — not fixture/demo data. It was chosen for this slice
-// because it's single-host/single-identity (no GHE auth complexity), not
-// because its content is safe to surface. Do not screenshot/record this
-// board's real item titles for any audience wider than the operator's own
-// local dogfood session, and do not let this hardcode survive un-flagged past
-// #234 (the real multi-board config layer).
-const TODO_BOARDS: TodoBoardConfig[] = [
-    {
-        id: 'heavygee-4',
-        label: 'heavygee/4',
-        ownerLogin: 'heavygee',
-        projectNumber: 4,
-        statusFieldName: 'Status',
-        doneValues: ['Done']
+const DEFAULT_TODO_BOARD: TodoBoardConfig = {
+    id: 'heavygee-6',
+    label: 'heavygee/6',
+    ownerLogin: 'heavygee',
+    projectNumber: 6,
+    statusFieldName: 'Status',
+    doneValues: ['Done']
+}
+
+function readTodoBoardConfig(): TodoBoardConfig {
+    const ownerLogin = process.env.HAPI_TODO_BOARD_OWNER?.trim() || DEFAULT_TODO_BOARD.ownerLogin
+    const numberRaw = process.env.HAPI_TODO_BOARD_NUMBER?.trim()
+    const parsedNumber = numberRaw ? Number(numberRaw) : NaN
+    const projectNumber = Number.isFinite(parsedNumber) && parsedNumber > 0 ? parsedNumber : DEFAULT_TODO_BOARD.projectNumber
+    const statusFieldName = process.env.HAPI_TODO_BOARD_STATUS_FIELD?.trim() || DEFAULT_TODO_BOARD.statusFieldName
+    const doneValuesRaw = process.env.HAPI_TODO_BOARD_DONE_VALUES?.trim()
+    const doneValues = doneValuesRaw
+        ? doneValuesRaw.split(',').map(value => value.trim()).filter(Boolean)
+        : DEFAULT_TODO_BOARD.doneValues
+    const label = process.env.HAPI_TODO_BOARD_LABEL?.trim() || `${ownerLogin}/${projectNumber}`
+
+    return {
+        id: `${ownerLogin}-${projectNumber}`,
+        label,
+        ownerLogin,
+        projectNumber,
+        statusFieldName,
+        doneValues
     }
-]
+}
 
 const GH_TIMEOUT_MS = 15_000
 
@@ -151,16 +170,19 @@ export function createTodoBoardRoutes(
     runGraphql: (board: TodoBoardConfig) => GhProjectV2Response | Promise<GhProjectV2Response> = runGhGraphql
 ): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
+    // Read once per route-set creation (hub startup), not per request — env
+    // doesn't change mid-process, and this keeps request handlers simple.
+    const todoBoards: TodoBoardConfig[] = [readTodoBoardConfig()]
 
     app.get('/todo-boards', (c) => {
         const body: TodoBoardsResponse = {
-            boards: TODO_BOARDS.map(board => ({ id: board.id, label: board.label }))
+            boards: todoBoards.map(board => ({ id: board.id, label: board.label }))
         }
         return c.json(body)
     })
 
     app.get('/todo-boards/:id/items', async (c) => {
-        const board = TODO_BOARDS.find(b => b.id === c.req.param('id'))
+        const board = todoBoards.find(b => b.id === c.req.param('id'))
         if (!board) {
             return c.json({ error: 'Unknown board' }, 404)
         }
