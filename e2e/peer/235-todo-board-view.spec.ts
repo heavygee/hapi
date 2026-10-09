@@ -1,7 +1,8 @@
 /*
  * Peer-stack e2e for heavygee/hapi#235 — to-do board view, first shippable slice:
- * global [Sessions] [To-Do] mode switch, board switcher (one real board,
- * heavygee/4), status-grouped list, fold-to-bottom for done items.
+ * global [Sessions] [To-Do] mode switch, board switcher (one real board —
+ * heavygee/6, the dull public demo board, the hub's safe default),
+ * status-grouped list, fold-to-bottom for done items.
  *
  *   cd ~/coding/hapi && HAPI_PEER_RECORD_VIDEO=1 node scripts/dev/run-e2e-on-peer-stack.mjs \
  *     --worktree ~/coding/hapi/worktrees/todo-board-ui-worktrees/1009-14eb \
@@ -75,7 +76,7 @@ test.describe('to-do board view — peer stack (#235)', () => {
 
         const boardSwitcher = page.getByRole('radiogroup', { name: 'Filter to-do items by board' })
         await expect(boardSwitcher).toBeVisible()
-        const boardChip = boardSwitcher.getByRole('radio', { name: 'heavygee/4' })
+        const boardChip = boardSwitcher.getByRole('radio', { name: 'heavygee/6' })
         await expect(boardChip).toBeVisible()
         await expect(boardChip).toHaveAttribute('aria-checked', 'true')
 
@@ -104,6 +105,6 @@ test.describe('to-do board view — peer stack (#235)', () => {
 
         const openInGithubLink = githubLinks.first()
         await expect(openInGithubLink).toHaveAttribute('target', '_blank')
-        await expect(openInGithubLink).toHaveAttribute('href', /github\.com\/heavygee\/little-list\/issues\/\d+/)
+        await expect(openInGithubLink).toHaveAttribute('href', /github\.com\/heavygee\/hapi-demo-board\/issues\/\d+/)
     })
 })
