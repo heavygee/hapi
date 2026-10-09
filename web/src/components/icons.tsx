@@ -35,6 +35,21 @@ export function ShareIcon(props: IconProps) {
     )
 }
 
+export function FilterIcon(props: IconProps) {
+    return createIcon(
+        <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />,
+        props,
+        2
+    )
+}
+
+export function ExternalLinkIcon(props: IconProps) {
+    return createIcon(
+        <path d="M13.5 6H18m0 0v4.5M18 6l-7.5 7.5M8.25 6H7.5a2.25 2.25 0 0 0-2.25 2.25v9A2.25 2.25 0 0 0 7.5 19.5h9a2.25 2.25 0 0 0 2.25-2.25v-.75" />,
+        props
+    )
+}
+
 export function PlusCircleIcon(props: IconProps) {
     return createIcon(
         <path d="M12 9v6m3-3H9m12 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />,
