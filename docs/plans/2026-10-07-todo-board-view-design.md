@@ -14,17 +14,19 @@ The operator's task list lives in GitHub (Projects v2 boards), not in HAPI, whic
 
 A single board does not map onto a single working directory, and most items on a personal board may have no repo relationship at all. This must not be treated as a degenerate edge case — for at least one of the operator's two real boards, it's the common case.
 
-## Prior art this extends (corrected after cold read)
+## Prior art this extends (corrected twice — see below)
 
-`tiann/hapi#1160`/`#1161`/`#1162`/`#1163` are all still **open/unmerged on upstream main** — nothing in that chain has landed. The PR-chip mechanism described below is not settled upstream convention; it's **this fork's own in-flight dogfood pattern**, running on the daily-driver soup build (`driver/shared/src/schemas.ts`, `hub/src/configuration.ts`, `cli/src/commands/linkPr.ts`, `web/.../SessionPrChip.tsx` + `LinkPrDialog.tsx`) ahead of upstream merge. Treat it as "what the fork already does," not "accepted upstream design."
+`tiann/hapi#1160` (issue) and `#1162` (issue) are open. `#1161` (the original implementation PR) is **closed as superseded** — explicit operator policy on that PR: *"do not land stacked upstream PRs... #1163 now carries the full product delta as a single tip vs main. Closing this foundation PR to avoid a two-step merge stack."* `#1163` is the live, open PR carrying the full consolidated delta. So: not "all unmerged," and the real operational lesson is the opposite of a 4-way split — **this project explicitly rejected landing a stacked PR chain upstream in favor of one consolidated PR.** Keep that in mind below when this doc cites the same four numbers to justify splitting into child issues — the split is for tracking/review clarity during design, not a plan to land four stacked PRs.
+
+The PR-chip mechanism described below is not settled upstream convention either way; it's **this fork's own in-flight dogfood pattern**, running on the daily-driver soup build (`driver/shared/src/schemas.ts`, `driver/hub/src/configuration.ts`, `driver/cli/src/commands/linkPr.ts`, `driver/web/.../SessionPrChip.tsx` + `LinkPrDialog.tsx`) ahead of upstream merge — all under `driver/`, the separate daily-driver worktree; **none of this exists on fork `main`, where this doc itself lives.** Treat it as "what the fork already does," not "accepted upstream design," and treat the paths as `driver/`-relative, not repo-root-relative.
 
 The actual mechanism, verified against that fork code: `metadata.externalRefs`, written only via an explicit action (`hapi link-pr <url|owner/repo#N>` / MCP `link_pr`, self-session only), gated behind an opt-in hub toggle (`githubPrAwareness`, default **off**, env > file > default). Branch-name auto-detect was explicitly scoped out as "a later suggestion-only slice... not silent write."
 
-**This is a generalization, not a drop-in extension.** `ExternalRefSchema` today is a single-case alias — `export const ExternalRefSchema = GithubPrExternalRefSchema` — not a discriminated union. At least one call site hardcodes the single existing kind: `hub/src/web/routes/cli.ts:390` dedupes primary refs via `candidate.kind !== 'github_pr' || candidate.role !== 'primary'`. Adding `kind: 'github_issue'` means:
+**This is a generalization, not a drop-in extension.** In `driver/` (not on `main`, see above): `ExternalRefSchema` today is a single-case alias — `driver/shared/src/schemas.ts:151`, `export const ExternalRefSchema = GithubPrExternalRefSchema` — not a discriminated union. At least one call site hardcodes the single existing kind: `driver/hub/src/web/routes/cli.ts:390` dedupes primary refs via `candidate.kind !== 'github_pr' || candidate.role !== 'primary'`. Adding `kind: 'github_issue'` means:
 
 - Turning `ExternalRefSchema` into a real `kind`-discriminated union (two variants, not one aliased case).
 - Auditing every call site that currently assumes "the externalRef is a PR" — the dedup/cap logic above, the PR-status classify pipeline in `linkPr.ts`, and `SessionPrChip` itself — not just adding a case and moving on.
-- **Naming collision to avoid confusing future readers:** `hub/src/web/routes/systemEvents.ts:19` already has an *unrelated* `kind: z.enum(['github_pr', 'github_issue', 'github_notification'])` for a different notification subsystem. Reusing the literal `'github_issue'` string for the externalRefs kind is fine, but it is a second, differently-shaped thing with the same name — call this out in the implementation so nobody conflates the two.
+- **Naming collision to avoid confusing future readers:** `driver/hub/src/web/routes/systemEvents.ts:19` already has an *unrelated* `kind: z.enum(['github_pr', 'github_issue', 'github_notification'])` for a different notification subsystem. Reusing the literal `'github_issue'` string for the externalRefs kind is fine, but it is a second, differently-shaped thing with the same name — call this out in the implementation so nobody conflates the two.
 
 With that corrected scope in mind, the design intent still holds:
 
@@ -45,6 +47,7 @@ graph LR
   subgraph Repos
     R1[repo: hapi]
     R2[repo: jessica-story]
+    R4[repo: lockhouse-billing — no local checkout]
   end
   subgraph Board["one configured board, e.g. lockhouse/projects/3"]
     T1["#45 fleet digest reuse → hapi"]
@@ -55,7 +58,7 @@ graph LR
   R1 --> W2
   R2 --> W3
   T1 -.-> R1
-  T2 -.-> R4[lockhouse-billing — no local checkout]
+  T2 -.-> R4
 ```
 
 ## Mode switch
@@ -140,16 +143,16 @@ Each board entry needs host + board owner/number + which of the operator's exist
 - **Stale-cache UX** — if a refresh fails, show last-known data with a staleness indicator (e.g. "updated 14m ago, refresh failed"), not silently frozen or silently blank.
 - **Pagination** — boards with many items; not designed yet, flagged as an explicit open item rather than folded into "wraps if long."
 
-## Scope: tracking issue + sub-issues, not one issue
+## Scope: tracking issue + sub-issues for tracking, consolidate at merge
 
-This bundles four independently-shippable pieces, mirroring how the project's own PR-chip precedent was already split (`#1160` schema+chip, `#1161` implementation, `#1162` explicit-attach, `#1163` draft PR):
+This bundles four independently-reviewable pieces:
 
-1. `externalRefs` generalization to a real discriminated union + call-site audit + `hapi link-issue`/`link_issue` + issue chip UI. Blocked on upstream `#1160`-`#1163` landing (or forked ahead of them, fork-local).
+1. `externalRefs` generalization to a real discriminated union + call-site audit + `hapi link-issue`/`link_issue` + issue chip UI. Depends on fork-local PR-chip work in `driver/` (itself staged against upstream `#1160`-`#1163`, not yet landed there either).
 2. Projects v2 GraphQL read layer + multi-host/multi-identity auth (GHE Server + github.com, different tokens) + caching/refresh/error states above.
 3. To-Do mode UI: global mode switch, board switcher (`MachineFilterBar` reuse), status-grouped list, fold/done heuristic.
 4. Spawn/worktree resolution: repo → working-directory matching, worktree picker extending `NewSession/index.tsx`, the four-state right-pane table.
 
-Filed as a tracking issue linking four child issues on `heavygee/hapi`, not one issue covering all four.
+Filed as a tracking issue linking four child issues on `heavygee/hapi`, for scoping and review clarity while each piece is designed/built. **This is not a plan to land four stacked PRs** — per the corrected precedent above, this project's own operator policy explicitly rejected a stacked upstream PR chain in favor of one consolidated PR. Prefer consolidating at merge time (one PR, or as few as the actual dependency graph forces), same logic that closed `#1161` in favor of `#1163`.
 
 ## First shippable slice (not the full design)
 
@@ -177,8 +180,8 @@ Per operator direction (relayed via Overseer, 2026-10-09): ship the smallest thi
 
 - `web/src/components/SessionList.tsx:334` — `groupSessionsByDirectory`, confirms working-directory = literal path (`${machineId}::${path}`, path from `worktree.basePath ?? path`).
 - `web/src/components/MachineFilterBar.tsx` — chip bar (desktop) / filter-icon menu (mobile) pattern to reuse for the board switcher. Both variants currently include an "All" pseudo-item to drop.
-- `web/src/components/NewSession/index.tsx` — existing spawn-session flow; worktree picker (state D3) should extend this, not invent new UI.
-- Fork's own in-flight PR-chip stack (not yet merged upstream — see correction above): `driver/shared/src/schemas.ts` (`GithubPrExternalRefSchema`, currently `ExternalRefSchema`'s only case), `hub/src/configuration.ts` (`githubPrAwareness` toggle), `cli/src/commands/linkPr.ts` (`hapi link-pr`), `web/.../SessionPrChip.tsx` + `LinkPrDialog.tsx`.
-- `hub/src/web/routes/cli.ts:390` — call site hardcoding `kind !== 'github_pr'`; must be audited when `ExternalRefSchema` becomes a real union.
-- `hub/src/web/routes/systemEvents.ts:19` — unrelated existing `'github_issue'` enum value in a different (notification) subsystem; naming collision to flag, not block on.
-- `tiann/hapi#1160`/`#1161`/`#1162`/`#1163` — the upstream issue/PR chain this fork's PR-chip work is staged against. All open/unmerged as of this writing; cite as "what the fork is building toward," not as landed precedent.
+- `web/src/components/NewSession/index.tsx` — existing spawn-session flow (already worktree-aware: `sessionType === 'worktree'`, `worktreeName` state); worktree picker (state D3) should extend this, not invent new UI.
+- Fork's own in-flight PR-chip stack — **all paths below are `driver/`-relative; none of this exists on `main`**: `driver/shared/src/schemas.ts:151` (`GithubPrExternalRefSchema`, currently `ExternalRefSchema`'s only case), `driver/hub/src/configuration.ts` (`githubPrAwareness` toggle, env > file > default, refuses mutation when env-pinned), `driver/cli/src/commands/linkPr.ts` (`hapi link-pr`), `driver/web/.../SessionPrChip.tsx` + `LinkPrDialog.tsx`.
+- `driver/hub/src/web/routes/cli.ts:390` — call site hardcoding `kind !== 'github_pr'`; must be audited when `ExternalRefSchema` becomes a real union.
+- `driver/hub/src/web/routes/systemEvents.ts:19` — unrelated existing `'github_issue'` enum value in a different (notification) subsystem; naming collision to flag, not block on.
+- `tiann/hapi#1160` (issue, open), `#1162` (issue, open) — still open. `#1161` (PR) is **closed as superseded by `#1163`** (open PR, carries the full consolidated delta) — operator policy on `#1161`: explicitly rejected landing it as a stacked chain. Cite this precedent as "what the fork is building toward, landed as one consolidated PR," not as a 4-way-split landing pattern.
