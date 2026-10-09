@@ -67,6 +67,16 @@ hapi job run "$HAPI_SESSION_ID" beets \
 
 Do **not** start long work with MCP `session_job` `set` or a one-shot CLI `set` and then background the process. That is the wardrobe failure mode.
 
+### Hygiene (list on resume / before done)
+
+Agents must inventory their own jobs — do not wait for the operator to notice a sticky `running` meter before archive (delete returns 409 while a job is running).
+
+1. Call `session_job` `action=list` (or `hapi job list <session>`) on **start/resume** and again **before claiming done / inviting archive**.
+2. If a job is `running` but the process is dead (or you cannot prove it is alive): `clear` or `update` with `status: failed`. Prefer `clear` when progress is meaningless. **Never ask the operator to clean meters.**
+3. Leave live jobs with fresh heartbeats alone; mention them if still running when you summarize.
+
+Hub does **not** auto-clear silent jobs (quiet legitimate long runners must not be murdered). A structured `stale` flag on list is a follow-up; until then, agent judgment + the ~15m UI amber threshold apply.
+
 ### MCP (update / clear / list only)
 
 Tool name: `session_job` (Claude: `mcp__hapi__session_job`; Codex: `functions.hapi__session_job`; OpenCode/ACP: `hapi_session_job`).

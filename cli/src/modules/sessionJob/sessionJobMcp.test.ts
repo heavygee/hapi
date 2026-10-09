@@ -36,6 +36,9 @@ describe('sessionJobMcp', () => {
         expect(SESSION_JOB_TOOL_DESCRIPTION).toMatch(/do NOT use action=set/i)
         expect(SESSION_JOB_TOOL_DESCRIPTION).toContain('hapi job run')
         expect(SESSION_JOB_TOOL_DESCRIPTION).toMatch(/Own-session only/i)
+        expect(SESSION_JOB_TOOL_DESCRIPTION).toMatch(/action=list on session start\/resume/i)
+        expect(SESSION_JOB_TOOL_DESCRIPTION).toMatch(/before claiming done or inviting archive/i)
+        expect(SESSION_JOB_TOOL_DESCRIPTION).toMatch(/do not ask the operator to clean meters/i)
     })
 
     it('hard-refuses action=set and never calls setSessionJob', async () => {
