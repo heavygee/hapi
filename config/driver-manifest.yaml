@@ -1059,14 +1059,10 @@ layers:
   # CLI-only → remat needs hapi-restart-hub (no --build-web for this tip alone).
   - branch: driver/cursor-resource-exhausted-blocked
 
-  # heavygee/hapi#235 — to-do board view first slice (Sessions/To-Do mode switch,
-  # board switcher, status grouping, minimal single-board gh Projects v2 read).
-  # Fork-local dogfood; no upstream PR yet. Hardcoded board = operator personal
-  # project #4 — local dogfood only until #234 multi-board config.
-  # Tip: f3a8bf63d — typecheck + web tests green; Playwright proof in peer.
-  # Worktree: peer feat/todo-board-view-ui; layer ref driver/235-todo-board-view.
-  # Hub+web → remat needs --build-web + hapi-restart-hub.
-  - branch: driver/235-todo-board-view
+  # DROPPED 2026-10-09: driver/235-todo-board-view — rolled back off live tip
+  # (privacy: personal board heavygee/4 was reachable on :3006). Fork-stage only
+  # until Design consult re-requests carry from feat/todo-board-view-ui current tip.
+  # - branch: driver/235-todo-board-view
 
   # DROPPED 2026-10-06: driver/1933-claude-resume-amnesia — squash 94523eb0d is on
   # fork main (heavygee/hapi#204). Soup base is now origin/main, so tip-forward
