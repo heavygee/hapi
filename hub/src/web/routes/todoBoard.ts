@@ -19,6 +19,13 @@ type TodoBoardConfig = {
     doneValues: string[]
 }
 
+// WARNING: this hardcode points at a real, personal GitHub Projects v2 board
+// (owner's own account) — not fixture/demo data. It was chosen for this slice
+// because it's single-host/single-identity (no GHE auth complexity), not
+// because its content is safe to surface. Do not screenshot/record this
+// board's real item titles for any audience wider than the operator's own
+// local dogfood session, and do not let this hardcode survive un-flagged past
+// #234 (the real multi-board config layer).
 const TODO_BOARDS: TodoBoardConfig[] = [
     {
         id: 'heavygee-4',
