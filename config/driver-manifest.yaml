@@ -1059,9 +1059,10 @@ layers:
   # CLI-only → remat needs hapi-restart-hub (no --build-web for this tip alone).
   - branch: driver/cursor-resource-exhausted-blocked
 
-  # heavygee/hapi#235 — to-do board view (Sessions/To-Do, cards/chips/relative-time,
-  # accent wash). Re-carry 2026-10-09 from feat tip 8ad039995 (ls-remote confirmed):
-  # config-driven board, safe default heavygee/6 — NOT personal heavygee/4.
+  # heavygee/hapi#235 / PR #238 — to-do board view (cards/chips/relative-time,
+  # accent wash, detail pane + spawn, board add/remove, github_issue chip).
+  # Re-carry 2026-10-09 from feat tip 60061cf5e (ls-remote confirmed).
+  # Safe default github.com::heavygee::6 — NOT personal project 4.
   # Worktree: peer feat/todo-board-view-ui; layer ref driver/235-todo-board-view
   # MUST match origin/feat/todo-board-view-ui before remat (stale layer = incident).
   # Hub+web → remat --build-web + hapi-restart-hub.
