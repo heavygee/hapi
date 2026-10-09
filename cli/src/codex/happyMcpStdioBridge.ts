@@ -1,7 +1,7 @@
 /**
  * HAPI MCP STDIO Bridge
  *
- * Minimal STDIO MCP server exposing HAPI tools such as `change_title`, `display_image`, `display_video`, `display_media`, `list_peers`, `search_peers`, `search_content`, `ping_peer`, `inspect_peer`, and `spawn_peer`.
+ * Minimal STDIO MCP server exposing HAPI tools such as `change_title`, `link_issue`, `display_image`, `display_video`, `display_media`, `list_peers`, `search_peers`, `search_content`, `ping_peer`, `inspect_peer`, and `spawn_peer`.
  * `display_links` is Cursor-only and is registered only when `--tools` includes it.
  * On invocation it forwards the tool call to an existing HAPI HTTP MCP server
  * using the StreamableHTTPClientTransport.
@@ -35,6 +35,7 @@ import { PermissionModeSchema } from '@hapi/protocol/schemas';
 
 const DEFAULT_TOOL_NAMES = [
   'change_title',
+  'link_issue',
   'display_image',
   'display_video',
   'display_media',
@@ -136,6 +137,34 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
       title: z.string().optional().describe('Optional display title or filename shown to the human user'),
     });
 
+    const linkIssueInputSchema: z.ZodTypeAny = z.object({
+      url: z.string().describe('GitHub issue URL (https://github.com/<owner>/<repo>/issues/<n>) or the <owner>/<repo>#<n> shorthand'),
+    });
+
+    if (toolNames.has('link_issue')) {
+      server.registerTool<any, any>(
+        'link_issue',
+        {
+          description: 'Attach a GitHub issue reference to the current HAPI session (self-session only). Shows as a chip on the session row/detail. Re-linking the same issue refreshes it rather than duplicating.',
+          title: 'Link GitHub Issue',
+          inputSchema: linkIssueInputSchema,
+        },
+        async (args: Record<string, unknown>) => {
+          try {
+            const client = await ensureHttpClient();
+            const response = await client.callTool({ name: 'link_issue', arguments: args });
+            return response as any;
+          } catch (error) {
+            return {
+              content: [
+                { type: 'text' as const, text: `Failed to link issue: ${error instanceof Error ? error.message : String(error)}` },
+              ],
+              isError: true,
+            };
+          }
+        }
+      );
+    }
     if (toolNames.has('display_image')) {
       server.registerTool<any, any>(
         'display_image',

@@ -10,6 +10,8 @@ import {
     getSessionBlockedState,
     sessionBlockedIsError
 } from '@/lib/sessionAttention'
+import { IssueRefChip } from '@/components/IssueRefChip'
+import { getLinkedGithubIssue } from '@/lib/externalRefs'
 import { getSessionLastSeenAt, getSessionManualUnreadAt } from '@/lib/sessionLastSeen'
 import { formatAbsoluteDateTime, formatRelativeTime } from '@/lib/relativeTime'
 import { formatScheduledTooltipDetail } from '@/lib/scheduledTime'
@@ -199,11 +201,8 @@ export function SessionRowSummary(props: {
         if (!attachedJob) return
         setNowMs(Date.now())
         const id = window.setInterval(() => setNowMs(Date.now()), 60_000)
-        return () => window.clearInterval(id)
-    }, [attachedJob?.key, attachedJob?.startedAt])
-    const jobStale = attachedJob ? isAttachedJobStale(attachedJob, nowMs) : false
-    const jobFraction = attachedJob ? attachedJobFraction(attachedJob) : null
-    const jobProgressLabel = attachedJob ? formatAttachedJobProgress(attachedJob, nowMs) : null
+            const linkedIssue = getLinkedGithubIssue(s.metadata)
+
 
     return (
         <div className={`flex w-full min-w-0 flex-col gap-1 ${className ?? ''}`}>
@@ -216,7 +215,7 @@ export function SessionRowSummary(props: {
                     >
                         {sessionName}
                     </div>
-                    {blocked && blockedLabel ? (
+{blocked && blockedLabel ? (
                         <span
                             data-testid="session-blocked-chip"
                             className={`inline-flex shrink-0 items-center rounded border px-1 py-px text-[10px] font-semibold uppercase leading-none tracking-wide ${
@@ -232,6 +231,7 @@ export function SessionRowSummary(props: {
                             {blockedLabel}
                         </span>
                     ) : null}
+                    {linkedIssue ? <IssueRefChip ref={linkedIssue} /> : null}
                     {attention?.kind === 'unread' && nestedTooltips && attentionId ? (
                         <SessionAttentionIndicator
                             attention={attention}

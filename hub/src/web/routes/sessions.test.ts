@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import { Hono } from 'hono'
+import { parseIssueUrl } from '@hapi/protocol/schemas'
 import { SessionArchiveUncontrollableError, type Session, type SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { createSessionsRoutes } from './sessions'
@@ -75,6 +76,7 @@ function createApp(session: Session, opts?: {
     rewindConversation?: SyncEngine['rewindConversation']
     suggestSessionTitle?: SyncEngine['suggestSessionTitle']
     updateSessionSummary?: SyncEngine['updateSessionSummary']
+    linkIssue?: SyncEngine['linkIssue']
     setSessionPinned?: (sessionId: string, pinned: boolean) => void
     setSessionPinMode?: (sessionId: string, mode: 'none' | 'project' | 'global') => void
 }) {
@@ -199,7 +201,8 @@ function createApp(session: Session, opts?: {
         patchAttachedJob: async () => null,
         deleteAttachedJob: async () => false,
         suggestSessionTitle: opts?.suggestSessionTitle ?? (async () => 'Generated title'),
-        updateSessionSummary: opts?.updateSessionSummary ?? (async () => {})
+        updateSessionSummary: opts?.updateSessionSummary ?? (async () => {}),
+        linkIssue: opts?.linkIssue ?? (async () => {})
     } as Partial<SyncEngine>
 
     const app = new Hono<WebAppEnv>()
@@ -334,6 +337,75 @@ describe('sessions routes', () => {
         })
 
         expect(response.status).toBe(400)
+    })
+
+    it('links a github issue via the full URL', async () => {
+        const calls: Array<[string, unknown]> = []
+        const { app } = createApp(createSession(), {
+            linkIssue: async (sessionId, ref) => { calls.push([sessionId, ref]) }
+        })
+
+        const response = await app.request('/api/sessions/session-1/link-issue', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: 'https://github.com/heavygee/hapi/issues/235' })
+        })
+
+        expect(response.status).toBe(200)
+        expect(calls).toHaveLength(1)
+        const [sessionId, ref] = calls[0]!
+        expect(sessionId).toBe('session-1')
+        expect(ref).toMatchObject({ kind: 'github_issue', url: 'https://github.com/heavygee/hapi/issues/235', repo: 'heavygee/hapi', number: 235 })
+    })
+
+    it('links a github issue via the owner/repo#N shorthand', async () => {
+        const calls: Array<[string, unknown]> = []
+        const { app } = createApp(createSession(), {
+            linkIssue: async (sessionId, ref) => { calls.push([sessionId, ref]) }
+        })
+
+        const response = await app.request('/api/sessions/session-1/link-issue', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: 'heavygee/hapi#235' })
+        })
+
+        expect(response.status).toBe(200)
+        expect(calls[0]![1]).toMatchObject({ repo: 'heavygee/hapi', number: 235 })
+    })
+
+    it('rejects a missing or unparsable issue url', async () => {
+        const { app } = createApp(createSession())
+        const missing = await app.request('/api/sessions/session-1/link-issue', {
+            method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({})
+        })
+        expect(missing.status).toBe(400)
+        const bad = await app.request('/api/sessions/session-1/link-issue', {
+            method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: 'not an issue url' })
+        })
+        expect(bad.status).toBe(400)
+    })
+
+    it('maps a concurrent-modification error to 409', async () => {
+        const { app } = createApp(createSession(), {
+            linkIssue: async () => { throw new Error('Session was modified concurrently. Please try again.') }
+        })
+
+        const response = await app.request('/api/sessions/session-1/link-issue', {
+            method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: 'heavygee/hapi#235' })
+        })
+        expect(response.status).toBe(409)
+    })
+
+    it('maps a session-not-found error to 404 instead of 500', async () => {
+        const { app } = createApp(createSession(), {
+            linkIssue: async () => { throw new Error('Session not found') }
+        })
+
+        const response = await app.request('/api/sessions/session-1/link-issue', {
+            method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: 'heavygee/hapi#235' })
+        })
+        expect(response.status).toBe(404)
     })
 
     it('updates the persisted pin mode', async () => {
@@ -2183,4 +2255,31 @@ describe('sessions routes', () => {
         expect(body.sessions).toEqual([])
     })
 
+})
+
+describe('parseIssueUrl', () => {
+    it('parses a full github.com issue URL', () => {
+        expect(parseIssueUrl('https://github.com/heavygee/hapi/issues/235')).toEqual({
+            url: 'https://github.com/heavygee/hapi/issues/235', repo: 'heavygee/hapi', number: 235
+        })
+    })
+
+    it('parses a bare host (no scheme) and a trailing slash', () => {
+        expect(parseIssueUrl('github.com/heavygee/hapi/issues/235/')).toEqual({
+            url: 'https://github.com/heavygee/hapi/issues/235', repo: 'heavygee/hapi', number: 235
+        })
+    })
+
+    it('parses the owner/repo#N shorthand', () => {
+        expect(parseIssueUrl('heavygee/hapi#235')).toEqual({
+            url: 'https://github.com/heavygee/hapi/issues/235', repo: 'heavygee/hapi', number: 235
+        })
+    })
+
+    it('rejects anything that is not a recognizable issue reference', () => {
+        expect(parseIssueUrl('not an issue url')).toBeNull()
+        expect(parseIssueUrl('https://github.com/heavygee/hapi')).toBeNull()
+        expect(parseIssueUrl('https://github.com/heavygee/hapi/issues/not-a-number')).toBeNull()
+        expect(parseIssueUrl('heavygee/hapi#not-a-number')).toBeNull()
+    })
 })

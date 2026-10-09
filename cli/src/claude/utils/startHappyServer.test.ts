@@ -115,6 +115,7 @@ describe('startHappyServer skill_lookup', () => {
         expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
             'change_title',
             'set_voice_mode',
+            'link_issue',
             'display_image',
             'display_video',
             'display_media',
@@ -239,6 +240,7 @@ describe('startHappyServer skill_lookup', () => {
 
         expect(server.toolNames).toEqual([
             'set_voice_mode',
+            'link_issue',
             'display_image',
             'display_video',
             'display_media',
@@ -261,6 +263,7 @@ describe('startHappyServer skill_lookup', () => {
             'ping_peer',
             'session_job',
             'set_voice_mode',
+            'link_issue',
             'spawn_peer',
         ].sort())
     })
@@ -408,6 +411,7 @@ describe('startHappyServer set_voice_mode', () => {
 
         const result = await mcp.callTool({
             name: 'set_voice_mode',
+            'link_issue',
             arguments: { enabled: true }
         }) as ToolResult
 
@@ -428,6 +432,7 @@ describe('toClaudeAllowedHapiMcpTools', () => {
         expect(toClaudeAllowedHapiMcpTools([
             'change_title',
             'set_voice_mode',
+            'link_issue',
             'display_image',
             'display_video',
             'display_media',

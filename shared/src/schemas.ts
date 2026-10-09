@@ -148,10 +148,74 @@ export const GithubPrExternalRefSchema = z.object({
 })
 
 export type GithubPrExternalRef = z.infer<typeof GithubPrExternalRefSchema>
-export const ExternalRefSchema = GithubPrExternalRefSchema
+
+export const GithubIssueExternalRefSchema = z.object({
+    kind: z.literal('github_issue'),
+    url: z.string(),
+    repo: z.string(),
+    number: z.number(),
+    linkedAt: z.number()
+})
+
+export const ExternalRefSchema = z.discriminatedUnion('kind', [
+    GithubPrExternalRefSchema,
+    GithubIssueExternalRefSchema
+])
+
 export type ExternalRef = z.infer<typeof ExternalRefSchema>
+export type GithubIssueExternalRef = z.infer<typeof GithubIssueExternalRefSchema>
 export const ExternalRefsSchema = z.array(ExternalRefSchema)
 export type ExternalRefs = z.infer<typeof ExternalRefsSchema>
+
+
+/**
+ * Accepts both the full GitHub issue URL and the `owner/repo#N` shorthand
+ * (`hapi link-issue <url|owner/repo#N>`, hapi#235/#238). GHE/other hosts
+ * aren't supported here — unlike the to-do board's `parseProjectUrl`, the
+ * issue link is for the operator's own quick reference, not a board read
+ * that already had to handle multiple hosts. Lives in `shared/` (not
+ * hub-only) so both the hub REST route and the MCP tool's socket-based
+ * write path (which never touches that route) validate identically instead
+ * of maintaining two copies of the same regex.
+ */
+function finishIssueMatch(repo: string, numberRaw: string): { url: string; repo: string; number: number } | null {
+    const number = Number(numberRaw)
+    if (!Number.isFinite(number) || number <= 0) return null
+    return { url: `https://github.com/${repo}/issues/${number}`, repo, number }
+}
+
+export function parseIssueUrl(input: string): { url: string; repo: string; number: number } | null {
+    const trimmed = input.trim()
+
+    const urlMatch = /^(?:https?:\/\/)?github\.com\/([^/\s#]+\/[^/\s#]+)\/issues\/(\d+)\/?(?:[/?#].*)?$/i.exec(trimmed)
+    if (urlMatch) {
+        const [, repo, numberRaw] = urlMatch
+        return finishIssueMatch(repo!, numberRaw!)
+    }
+
+    const shorthandMatch = /^([^/\s#]+\/[^/\s#]+)#(\d+)$/.exec(trimmed)
+    if (shorthandMatch) {
+        const [, repo, numberRaw] = shorthandMatch
+        return finishIssueMatch(repo!, numberRaw!)
+    }
+
+    return null
+}
+
+/**
+ * Upserts by `kind`+`repo`+`number`, case-insensitively on `repo` (GitHub repo
+ * names aren't case-sensitive — `Owner/Repo#5` and `owner/repo#5` are the same
+ * issue). Keeps the first-seen casing rather than normalizing it, since the
+ * stored `repo` is shown to the operator verbatim. Shared by the hub's direct
+ * write path (`sessionCache.linkIssue`) and the CLI/MCP socket write path
+ * (`applyLinkIssue`) so both agree on what counts as a duplicate.
+ */
+export function upsertExternalRef(existing: ExternalRef[], ref: ExternalRef): ExternalRef[] {
+    const withoutMatch = existing.filter(
+        candidate => !(candidate.kind === ref.kind && candidate.repo.toLowerCase() === ref.repo.toLowerCase() && candidate.number === ref.number)
+    )
+    return [...withoutMatch, ref]
+}
 
 export const MetadataSchema = z.object({
     path: z.string(),
@@ -301,7 +365,7 @@ export const MetadataSchema = z.object({
     // the provider so web can resolve the exact model when two providers
     // share a modelId.
     piSelectedModel: z.object({ provider: z.string(), modelId: z.string() }).nullable().optional(),
-    lastModelError: z.object({
+lastModelError: z.object({
         kind: z.string(),
         transient: z.boolean(),
         rawSnippet: z.string(),

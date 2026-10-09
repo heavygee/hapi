@@ -353,7 +353,7 @@ function createWebApp(options: {
     app.route('/api', createWorkGraphRoutes(options.store))
     app.route('/api', createDoctorRoutes(options.getSyncEngine))
     app.route('/api', createSessionPinsRoutes(options.getSyncEngine))
-    app.route('/api', createTodoBoardRoutes())
+    app.route('/api', createTodoBoardRoutes(configuration.dataDir))
 
     // Skip static serving in relay mode, show helpful message on root
     if (options.relayMode) {

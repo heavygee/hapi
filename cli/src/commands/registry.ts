@@ -29,6 +29,7 @@ import { displayLinksCommand } from './displayLinks'
 import { versionCommand } from './version'
 import { searchPeersCommand } from './searchPeers'
 import { searchContentCommand } from './searchContent'
+import { linkIssueCommand } from './linkIssue'
 import type { CommandContext, CommandDefinition } from './types'
 
 // Gemini CLI was sunset (Google stopped serving the consumer Gemini CLI on
@@ -79,6 +80,7 @@ const COMMANDS: CommandDefinition[] = [
     searchContentCommand,
     helpCommand,
     versionCommand,
+    linkIssueCommand
 ]
 
 const commandMap = new Map<string, CommandDefinition>()

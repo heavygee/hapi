@@ -117,7 +117,7 @@ export function sessionListItemButtonClassName(): string {
     return 'group/session-row flex min-w-0 flex-1 flex-col gap-1 px-2.5 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none rounded-lg'
 }
 
-type SessionGroup = {
+export type SessionGroup = {
     key: string
     directory: string
     displayName: string

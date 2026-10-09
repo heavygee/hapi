@@ -5,6 +5,16 @@ import { dirname, join } from 'node:path'
 import { withSettingsFileLock } from '@hapi/protocol/settingsFileLock'
 import type { FleetUpgradePolicy } from '@hapi/protocol/upgradeChannel'
 
+export interface StoredTodoBoard {
+    id: string
+    label: string
+    host: string
+    ownerLogin: string
+    projectNumber: number
+    statusFieldName: string
+    doneValues: string[]
+}
+
 export interface Settings {
     machineId?: string
     machineIdConfirmedByServer?: boolean
@@ -58,6 +68,13 @@ export interface Settings {
     providerCredentials?: Partial<Record<string, string>>
     /** Operator fleet-upgrade policy (no alert / alert / auto-upgrade). */
     fleetUpgradePolicy?: FleetUpgradePolicy
+    /**
+     * To-do board view (hapi#235) — user-added GitHub Projects v2 boards.
+     * Empty/missing means "fall back to the env-configured default board"
+     * (see createTodoBoardRoutes). Once the operator adds a board, this is the
+     * list, never silently emptied (removal re-seeds the default instead).
+     */
+    todoBoards?: StoredTodoBoard[]
 }
 
 export function getSettingsFile(dataDir: string): string {

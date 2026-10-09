@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ApiError, type ApiClient, type TranscriptionCredentialStatus, type TranscriptionCredentialsUpdate } from '@/api/client'
+import type { ApiClient, TranscriptionCredentialStatus, TranscriptionCredentialsUpdate } from '@/api/client'
+import { getApiErrorMessage } from '@/lib/apiErrorMessage'
 import { useTranslation } from '@/lib/use-translation'
 import { SelectControl } from '@/components/ui/select-control'
 import { Button } from '@/components/ui/button'
@@ -54,18 +55,6 @@ function statusForProvider(
     if (provider === 'qwen-realtime') return status.voiceBackends.qwenRealtime
     if (provider === 'elevenlabs') return status.elevenlabs
     return status[provider]
-}
-
-function errorMessage(err: unknown, fallback: string): string {
-    if (err instanceof ApiError && err.body) {
-        try {
-            const parsed = JSON.parse(err.body) as { error?: unknown }
-            if (typeof parsed.error === 'string' && parsed.error.trim()) return parsed.error
-        } catch {
-            // fall through
-        }
-    }
-    return err instanceof Error ? err.message : fallback
 }
 
 export function TranscriptionProviderOnboard(props: {
@@ -183,7 +172,7 @@ export function TranscriptionProviderOnboard(props: {
             setMessage(t('settings.voice.credentials.saved'))
             props.onConfigured()
         } catch (err) {
-            setError(errorMessage(err, t('settings.voice.credentials.saveFailed')))
+            setError(getApiErrorMessage(err, t('settings.voice.credentials.saveFailed')))
         } finally {
             setBusy(false)
         }
@@ -201,7 +190,7 @@ export function TranscriptionProviderOnboard(props: {
             setMessage(t('settings.voice.credentials.cleared'))
             props.onConfigured()
         } catch (err) {
-            setError(errorMessage(err, t('settings.voice.credentials.saveFailed')))
+            setError(getApiErrorMessage(err, t('settings.voice.credentials.saveFailed')))
         } finally {
             setBusy(false)
         }

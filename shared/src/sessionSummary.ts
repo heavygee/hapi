@@ -56,7 +56,7 @@ export type SessionSummaryMetadata = {
     /** Loopback MCP URL when session CLI happy server is running (#956). */
     hapiMcpUrl?: string
     lastModelError?: Metadata['lastModelError']
-    /** Structured contribution links (GitHub PRs, …). tiann/hapi#1160. */
+    /** Structured contribution links (GitHub PRs, issues, …). */
     externalRefs?: ExternalRef[]
 }
 

@@ -217,6 +217,20 @@ describe('runHappyMcpStdioBridge tool forwarding', () => {
         ])
     })
 
+    it('registers and forwards link_issue when included in --tools', async () => {
+        await runHappyMcpStdioBridge([
+            '--url',
+            'http://127.0.0.1:43006',
+            '--tools',
+            'change_title,link_issue'
+        ])
+
+        expect([...harness.tools.keys()]).toEqual(['change_title', 'link_issue'])
+
+        const handler = harness.tools.get('link_issue')
+        expect(handler).toBeTypeOf('function')
+    })
+
     it('registers list_peers when included in --tools', async () => {
         await runHappyMcpStdioBridge([
             '--url',

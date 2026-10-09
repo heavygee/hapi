@@ -9,6 +9,7 @@ import {
     getPermissionModesForFlavor,
     isLiveLifecycleState,
     isPermissionModeAllowedForFlavor,
+    LinkIssueRequestSchema,
     RenameSessionRequestSchema,
     SetSessionPinnedRequestSchema,
     ResumeSessionRequestSchema,
@@ -32,6 +33,7 @@ import {
     UploadFileRequestSchema
 } from '@hapi/protocol'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
+import { parseIssueUrl } from '@hapi/protocol/schemas'
 import type { SlashCommand } from '@hapi/protocol/apiTypes'
 import { DeleteArchivedSessionsRequestSchema } from '@hapi/protocol/schemas'
 import { Hono, type Context } from 'hono'
@@ -1335,6 +1337,49 @@ export function createSessionsRoutes(
             const message = error instanceof Error ? error.message : 'Failed to update session summary'
             if (message.includes('concurrently') || message.includes('version')) {
                 return c.json({ error: message }, 409)
+            }
+            return c.json({ error: message }, 500)
+        }
+    })
+
+    app.patch('/sessions/:id/link-issue', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const body = await c.req.json().catch(() => null)
+        const parsed = LinkIssueRequestSchema.safeParse(body)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body: url is required' }, 400)
+        }
+
+        const target = parseIssueUrl(parsed.data.url)
+        if (!target) {
+            return c.json({ error: 'Could not parse a GitHub issue URL (expected e.g. https://github.com/<owner>/<repo>/issues/<n> or <owner>/<repo>#<n>)' }, 400)
+        }
+
+        try {
+            await engine.linkIssue(sessionResult.sessionId, {
+                kind: 'github_issue',
+                url: target.url,
+                repo: target.repo,
+                number: target.number,
+                linkedAt: Date.now()
+            })
+            return c.json({ ok: true })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to link issue'
+            if (message.includes('concurrently') || message.includes('version')) {
+                return c.json({ error: message }, 409)
+            }
+            if (message.includes('not found')) {
+                return c.json({ error: message }, 404)
             }
             return c.json({ error: message }, 500)
         }

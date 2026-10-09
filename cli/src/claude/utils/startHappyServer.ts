@@ -39,6 +39,7 @@ import {
     formatSearchContentMatches,
     searchSessionContent,
 } from "@/modules/searchContent/searchContent";
+import { applyLinkIssue } from "@/agent/sessionIssueLink";
 import {
     SESSION_JOB_TOOL_DESCRIPTION,
     SESSION_JOB_TOOL_NAME,
@@ -321,7 +322,40 @@ function createHapiMcpServer(
         };
     });
 
-    mcp.registerTool<any, any>('display_image', {
+    
+    // Always-on issue link (hapi#235/#238) — see feat tip; coexist with soup tools.
+    const linkIssueInputSchema: z.ZodTypeAny = z.object({
+        url: z.string().describe('GitHub issue URL (https://github.com/<owner>/<repo>/issues/<n>) or the <owner>/<repo>#<n> shorthand'),
+    });
+    mcp.registerTool<any, any>('link_issue', {
+        description: 'Attach a GitHub issue reference to the current HAPI session (self-session only). Shows as a chip on the session row/detail. Re-linking the same issue refreshes it rather than duplicating.',
+        title: 'Link GitHub Issue',
+        inputSchema: linkIssueInputSchema,
+    }, async (args: { url: string }) => {
+        const outcome = applyLinkIssue(client, args.url);
+        if (outcome.ok) {
+            return {
+                content: [
+                    {
+                        type: 'text' as const,
+                        text: `Linked ${outcome.ref.repo}#${outcome.ref.number}`,
+                    },
+                ],
+                isError: false,
+            };
+        }
+        return {
+            content: [
+                {
+                    type: 'text' as const,
+                    text: `Failed to link issue: ${outcome.error}`,
+                },
+            ],
+            isError: true,
+        };
+    });
+
+mcp.registerTool<any, any>('display_image', {
         description: `Display a local image file to the human user inline in the current HAPI chat session. ${DISPLAY_IMAGE_PROMPT_CURSOR}`,
         title: 'Display Image',
         inputSchema: displayImageInputSchema,
@@ -856,8 +890,8 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
     }));
 
     const toolNames = enableChangeTitle
-        ? ['change_title', 'set_voice_mode', 'display_image', 'display_video', 'display_media']
-        : ['set_voice_mode', 'display_image', 'display_video', 'display_media'];
+        ? ['change_title', 'set_voice_mode', 'link_issue', 'display_image', 'display_video', 'display_media']
+        : ['set_voice_mode', 'link_issue', 'display_image', 'display_video', 'display_media'];
     if (enableDisplayLinks) {
         toolNames.push('display_links');
     }
