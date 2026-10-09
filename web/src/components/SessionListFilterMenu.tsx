@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
-import { CheckIcon } from '@/components/icons'
-import { FilterIcon, getCenteredFilterMenuLeft, getMachineFilterMenuClampStyle } from '@/components/MachineFilterBar'
+import { CheckIcon, FilterIcon } from '@/components/icons'
+import { getCenteredFilterMenuLeft, getMachineFilterMenuClampStyle } from '@/components/MachineFilterBar'
 import {
     SessionDateFilterMenuRow,
     SessionDateRangePicker
