@@ -411,7 +411,6 @@ describe('startHappyServer set_voice_mode', () => {
 
         const result = await mcp.callTool({
             name: 'set_voice_mode',
-            'link_issue',
             arguments: { enabled: true }
         }) as ToolResult
 
