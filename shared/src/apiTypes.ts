@@ -8,6 +8,7 @@ import {
     PermissionModeSchema,
     SessionSchema,
     ExternalRefSchema,
+    GithubPrExternalRefSchema,
 } from './schemas'
 import { AgentFlavorSchema } from './modes'
 import {
@@ -323,9 +324,10 @@ export const SetExternalRefsRequestSchema = z.object({
 })
 export type SetExternalRefsRequest = z.infer<typeof SetExternalRefsRequestSchema>
 
-/** Atomic primary/secondary attach — hub merges against the latest metadata version. */
+/** Atomic primary/secondary attach — hub merges against the latest metadata version.
+ *  PR-awareness CLI route only accepts github_pr (issues use link-issue / todo board). */
 export const UpsertExternalRefRequestSchema = z.object({
-    ref: ExternalRefSchema
+    ref: GithubPrExternalRefSchema
 })
 export type UpsertExternalRefRequest = z.infer<typeof UpsertExternalRefRequestSchema>
 

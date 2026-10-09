@@ -8,7 +8,6 @@
  */
 
 import { BLOCKED_NOTIFY_STALE_MS, isKnownFlavor, isLiveLifecycleState, isSteeringSupportedForSession, type LocalResumeTarget, type ResumableSession, type SessionEndReason } from '@hapi/protocol'
-import type { ExternalRef } from '@hapi/protocol/schemas'
 import {
     cliBinaryUpdatedOnDisk,
     isMachineCapabilitySkewed,
