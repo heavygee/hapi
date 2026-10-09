@@ -22,6 +22,8 @@ import { SessionChat } from '@/components/SessionChat'
 import { SessionList } from '@/components/SessionList'
 import { AgentSessionImportDialog } from '@/components/AgentSessionImportDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { SessionsModeSwitch, type SessionsMode } from '@/components/SessionsModeSwitch'
+import { TodoBoardList } from '@/components/TodoBoardList'
 import { NewSession } from '@/components/NewSession'
 import { WorkspaceBrowser } from '@/components/WorkspaceBrowser'
 import { LoadingState } from '@/components/LoadingState'
@@ -32,6 +34,9 @@ import { useSidebarResize } from '@/hooks/useSidebarResize'
 import { useMessages } from '@/hooks/queries/useMessages'
 import { useMachines } from '@/hooks/queries/useMachines'
 import { useMachineLabels } from '@/hooks/useMachineLabels'
+import { useTodoBoards } from '@/hooks/queries/useTodoBoards'
+import { useTodoBoardItems } from '@/hooks/queries/useTodoBoardItems'
+import { useTodoBoardSelection } from '@/hooks/useTodoBoardSelection'
 import { useSession } from '@/hooks/queries/useSession'
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
 import { useSessions } from '@/hooks/queries/useSessions'
@@ -321,6 +326,26 @@ function SessionsPage() {
     // navigates to /sessions/new) leaves an unexplained dot pulsing with no
     // callout in sight, since the callout alone was gated on isSessionsIndex.
     const visibleTourStep = isSessionsIndex ? tour.activeStepId : null
+    const [sessionsMode, setSessionsMode] = useState<SessionsMode>('sessions')
+    const {
+        boards: todoBoards,
+        isLoading: todoBoardsLoading,
+        error: todoBoardsError,
+    } = useTodoBoards(api, sessionsMode === 'todo')
+    const { selectedBoardId, setSelectedBoardId } = useTodoBoardSelection()
+    const effectiveBoardId = useMemo(() => {
+        if (selectedBoardId && todoBoards.some(board => board.id === selectedBoardId)) {
+            return selectedBoardId
+        }
+        return todoBoards[0]?.id ?? null
+    }, [selectedBoardId, todoBoards])
+    const {
+        items: todoItems,
+        statusOrder: todoStatusOrder,
+        doneValues: todoDoneValues,
+        isLoading: todoItemsLoading,
+        error: todoItemsError,
+    } = useTodoBoardItems(api, sessionsMode === 'todo' ? effectiveBoardId : null)
     const handleNewSessionInDirectory = useCallback((args: { machineId: string | null; directory: string }) => {
         navigate({
             to: '/sessions/new',
@@ -772,11 +797,26 @@ function SessionsPage() {
                 </div>
 
                 <div className="flex min-h-0 flex-1 flex-col">
+                    <div className="mx-auto w-full max-w-content shrink-0">
+                        <SessionsModeSwitch mode={sessionsMode} onChange={setSessionsMode} />
+                    </div>
                     {error ? (
                         <div className="mx-auto w-full max-w-content px-3 py-2">
                             <div className="text-sm text-red-600">{error}</div>
                         </div>
                     ) : null}
+                    {sessionsMode === 'todo' ? (
+                        <TodoBoardList
+                            boards={todoBoards}
+                            selectedBoardId={effectiveBoardId}
+                            onSelectBoard={setSelectedBoardId}
+                            items={todoItems}
+                            statusOrder={todoStatusOrder}
+                            doneValues={todoDoneValues}
+                            isLoading={todoBoardsLoading || todoItemsLoading}
+                            error={todoBoardsError ?? todoItemsError}
+                        />
+                    ) : (
                     <SessionList
                         key={initializedHub === baseUrl ? 'last-seen-ready' : 'last-seen-pending'}
                         sessions={sessions}
@@ -872,7 +912,8 @@ function SessionsPage() {
                         machineLabelsById={machineLabelsById}
                         machinesById={machinesById}
                     />
-                    {visibleTourStep ? (
+                    )}
+                    {visibleTourStep && sessionsMode === 'sessions' ? (
                         <FueCallout
                             title={tourStepCopy[visibleTourStep].title}
                             body={tourStepCopy[visibleTourStep].body}

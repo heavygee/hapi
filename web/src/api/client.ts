@@ -31,6 +31,8 @@ import type {
     SlashCommandsResponse,
     SkillsResponse,
     SpawnResponse,
+    TodoBoardItemsResponse,
+    TodoBoardsResponse,
     VisibilityPayload,
     HapiSessionExportResponse,
     HubHealthResponse,
@@ -916,6 +918,14 @@ export class ApiClient {
 
     async getMachines(): Promise<MachinesResponse> {
         return await this.request<MachinesResponse>('/api/machines')
+    }
+
+    async getTodoBoards(): Promise<TodoBoardsResponse> {
+        return await this.request<TodoBoardsResponse>('/api/todo-boards')
+    }
+
+    async getTodoBoardItems(boardId: string): Promise<TodoBoardItemsResponse> {
+        return await this.request<TodoBoardItemsResponse>(`/api/todo-boards/${encodeURIComponent(boardId)}/items`)
     }
 
     /** Pass an empty string to clear the custom name and fall back to the hostname. */

@@ -58,6 +58,10 @@ export type {
     SessionsResponse,
     SessionContentSearchResponse,
     SpawnResponse,
+    TodoBoardItem,
+    TodoBoardItemsResponse,
+    TodoBoardSummary,
+    TodoBoardsResponse,
     UploadFileResponse
 } from '@hapi/protocol/apiTypes'
 

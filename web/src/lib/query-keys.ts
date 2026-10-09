@@ -5,6 +5,8 @@ export const queryKeys = {
     messages: (sessionId: string) => ['messages', sessionId] as const,
     sessionContentSearch: (sessionId: string, query: string) => ['session-content-search', sessionId, query] as const,
     machines: ['machines'] as const,
+    todoBoards: ['todo-boards'] as const,
+    todoBoardItems: (boardId: string) => ['todo-board-items', boardId] as const,
     sqliteStorage: ['sqlite-storage'] as const,
     hubSettings: ['hub-settings'] as const,
     usageSummary: (range: string, timeZone: string) => ['usage-summary', range, timeZone] as const,

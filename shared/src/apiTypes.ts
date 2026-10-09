@@ -1237,6 +1237,33 @@ export type UsageSummaryBucket = {
     requests: number
 }
 
+export type TodoBoardSummary = {
+    id: string
+    label: string
+}
+
+export type TodoBoardsResponse = {
+    boards: TodoBoardSummary[]
+}
+
+export type TodoBoardItem = {
+    id: string
+    title: string
+    url: string | null
+    number: number | null
+    repo: string | null
+    state: 'OPEN' | 'CLOSED' | null
+    status: string | null
+    updatedAt: string | null
+}
+
+export type TodoBoardItemsResponse = {
+    board: TodoBoardSummary
+    statusOrder: string[]
+    doneValues: string[]
+    items: TodoBoardItem[]
+}
+
 export type UsageSummaryResponse = {
     range: {
         from: number | null

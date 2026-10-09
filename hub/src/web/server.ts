@@ -44,6 +44,7 @@ import { loadHapiInlineConfig } from './hapi-inline/config'
 import { createDoctorRoutes } from './routes/doctor'
 import { createKitchenStatusRoutes } from './routes/kitchenStatus'
 import { createSessionPinsRoutes } from './routes/sessionPins'
+import { createTodoBoardRoutes } from './routes/todoBoard'
 import type { SSEManager } from '../sse/sseManager'
 import type { VisibilityTracker } from '../visibility/visibilityTracker'
 import type { Server as BunServer, ServerWebSocket } from 'bun'
@@ -352,6 +353,7 @@ function createWebApp(options: {
     app.route('/api', createWorkGraphRoutes(options.store))
     app.route('/api', createDoctorRoutes(options.getSyncEngine))
     app.route('/api', createSessionPinsRoutes(options.getSyncEngine))
+    app.route('/api', createTodoBoardRoutes())
 
     // Skip static serving in relay mode, show helpful message on root
     if (options.relayMode) {
