@@ -1,4 +1,4 @@
-import type { AgentState, Metadata, Session, TodoItem, WorktreeMetadata } from './schemas'
+import type { AgentState, ExternalRef, Metadata, Session, TodoItem, WorktreeMetadata } from './schemas'
 import { isKnownFlavor } from './flavors'
 import type { AgentFlavor } from './modes'
 
@@ -43,6 +43,7 @@ export type SessionSummaryMetadata = {
     lifecycleState?: string
     /** Loopback MCP URL when session CLI happy server is running (#956). */
     hapiMcpUrl?: string
+    externalRefs?: ExternalRef[]
 }
 
 export type SessionSummary = {
@@ -199,7 +200,8 @@ export function toSessionSummaryMetadata(metadata: Metadata | null | undefined):
         worktree: metadata.worktree,
         agentSessionId: getSummaryAgentSessionId(metadata),
         lifecycleState: metadata.lifecycleState,
-        hapiMcpUrl: metadata.hapiMcpUrl ?? undefined
+        hapiMcpUrl: metadata.hapiMcpUrl ?? undefined,
+        externalRefs: metadata.externalRefs
     }
 }
 

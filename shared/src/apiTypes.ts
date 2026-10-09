@@ -1029,6 +1029,12 @@ export const AddTodoBoardRequestSchema = z.object({
 
 export type AddTodoBoardRequest = z.infer<typeof AddTodoBoardRequestSchema>
 
+export const LinkIssueRequestSchema = z.object({
+    url: z.string().min(1)
+})
+
+export type LinkIssueRequest = z.infer<typeof LinkIssueRequestSchema>
+
 export type UsageSummaryResponse = {
     range: {
         from: number | null

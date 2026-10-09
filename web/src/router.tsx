@@ -278,6 +278,7 @@ function SessionsPage() {
                 ...(resolved ? { directory: resolved.directory } : {}),
                 ...(resolved ? { machineId: resolved.machineId } : {}),
                 initialMessage: buildTodoItemSpawnMessage(item),
+                ...(item.url ? { linkIssueUrl: item.url } : {}),
             },
             ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
@@ -1002,7 +1003,8 @@ function NewSessionPage() {
     const queryClient = useQueryClient()
     const { machines, isLoading: machinesLoading, error: machinesError } = useMachines(api, true)
     const { t } = useTranslation()
-    const { directory: initialDirectory, machineId: initialMachineId, shareTransferId, initialMessage } = newSessionRoute.useSearch()
+    const { addToast } = useToast()
+    const { directory: initialDirectory, machineId: initialMachineId, shareTransferId, initialMessage, linkIssueUrl } = newSessionRoute.useSearch()
 
     const handleCancel = useCallback(() => {
         if (shareTransferId) {
@@ -1017,6 +1019,19 @@ function NewSessionPage() {
     const handleSuccess = useCallback((sessionId: string) => {
         if (shareTransferId) {
             setSharePendingTransfer(shareTransferId, sessionId)
+        }
+        if (linkIssueUrl && api) {
+            // Fire-and-forget: a failed link shouldn't block the spawn flow the
+            // operator is already mid-navigation through. The session still
+            // exists and is usable without its issue chip.
+            api.linkIssue(sessionId, linkIssueUrl).catch(() => {
+                addToast({
+                    title: t('todo.detail.linkIssueFailed'),
+                    body: t('todo.detail.linkIssueFailedBody', { url: linkIssueUrl }),
+                    sessionId,
+                    url: ''
+                })
+            })
         }
         void queryClient.invalidateQueries({ queryKey: queryKeys.sessions })
         // Replace current page with /sessions to clear spawn flow from history
@@ -1033,7 +1048,7 @@ function NewSessionPage() {
                 ...PRESERVE_SESSION_SIDEBAR_SCROLL,
             })
         })
-    }, [navigate, queryClient, shareTransferId])
+    }, [navigate, queryClient, shareTransferId, linkIssueUrl, api, addToast, t])
 
     const handleChooseFolder = useCallback((args: { machineId: string | null; directory: string }) => {
         // Forward the currently-selected machine so /browse opens scoped to
@@ -1246,6 +1261,7 @@ type NewSessionSearch = {
     machineId?: string
     shareTransferId?: string
     initialMessage?: string
+    linkIssueUrl?: string
 }
 
 const newSessionRoute = createRoute({
@@ -1264,6 +1280,9 @@ const newSessionRoute = createRoute({
         }
         if (typeof search.initialMessage === 'string' && search.initialMessage) {
             result.initialMessage = search.initialMessage
+        }
+        if (typeof search.linkIssueUrl === 'string' && search.linkIssueUrl) {
+            result.linkIssueUrl = search.linkIssueUrl
         }
         return result
     },

@@ -20,9 +20,9 @@ function BackIcon() {
 // flow entirely (NewSession's initialDirectory/initialMachineId/
 // initialMessage props) — resolving a directory and building the briefing
 // message both happen in the parent (router.tsx), this component just
-// triggers it. Not the formal externalRefs/github_issue chip mechanism
-// (#233, blocked on driver/-only PR-chip infra) — the spawned session is
-// only briefed via its first composer message, no structured persisted link.
+// triggers it. The parent also passes the item's issue URL through so the
+// new session is auto-linked (metadata.externalRefs) once created, surfacing
+// as an IssueRefChip on the resulting session row/detail.
 export function TodoItemDetail(props: {
     item: TodoBoardItem
     onBack: () => void

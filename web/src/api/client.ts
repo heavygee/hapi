@@ -1047,6 +1047,13 @@ export class ApiClient {
         })
     }
 
+    async linkIssue(sessionId: string, url: string): Promise<void> {
+        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/link-issue`, {
+            method: 'PATCH',
+            body: JSON.stringify({ url })
+        })
+    }
+
     async setSessionPinMode(sessionId: string, mode: 'none' | 'project' | 'global'): Promise<void> {
         await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/pin`, {
             method: 'PUT',

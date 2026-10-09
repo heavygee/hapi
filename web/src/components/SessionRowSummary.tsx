@@ -4,7 +4,9 @@ import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
 import { ScheduleIcon } from '@/components/icons'
 import { HoverTooltip, SESSION_ROW_TOOLTIP_FOCUS_CLASS, useSessionRowTooltipIds } from '@/components/HoverTooltip'
 import { getAttentionLabel, SessionAttentionIndicator } from '@/components/SessionAttentionIndicator'
+import { IssueRefChip } from '@/components/IssueRefChip'
 import { classifySessionAttention } from '@/lib/sessionAttention'
+import { getLinkedGithubIssue } from '@/lib/externalRefs'
 import { getSessionLastSeenAt, getSessionManualUnreadAt } from '@/lib/sessionLastSeen'
 import { formatRelativeTime } from '@/lib/relativeTime'
 import { formatScheduledTooltipDetail } from '@/lib/scheduledTime'
@@ -162,6 +164,7 @@ export function SessionRowSummary(props: {
     const attentionId = attentionTooltipIdProp ?? ownedIds.attentionId
     const scheduleId = scheduleTooltipIdProp ?? ownedIds.scheduleId
     const timeLabel = getSessionTimeLabel(s, t)
+    const linkedIssue = getLinkedGithubIssue(s.metadata)
 
     return (
         <div className={`flex w-full min-w-0 flex-col gap-1 ${className ?? ''}`}>
@@ -174,6 +177,7 @@ export function SessionRowSummary(props: {
                     >
                         {sessionName}
                     </div>
+                    {linkedIssue ? <IssueRefChip ref={linkedIssue} /> : null}
                     {attention?.kind === 'unread' && nestedTooltips && attentionId ? (
                         <SessionAttentionIndicator
                             attention={attention}

@@ -124,6 +124,8 @@ export default {
   'todo.detail.noBody': 'No description.',
   'todo.detail.back': 'Back to the to-do list',
   'todo.detail.spawnSession': 'Spawn session',
+  'todo.detail.linkIssueFailed': 'Could not link the session to the issue',
+  'todo.detail.linkIssueFailedBody': 'The session was created and is usable. To retry, run: hapi link-issue {url}',
   'codexSync.tooltip': 'Import sessions from Codex into Hapi',
   'codexSync.newSessionAction': 'Import Codex history',
   'codexSync.confirm.title': 'Import Codex sessions',

@@ -7,11 +7,10 @@ const MAX_BODY_LENGTH = 1000
 
 /**
  * Builds the composer "briefing" text for a session spawned from a to-do
- * item (hapi#235/#238). This is deliberately just a plain seeded message —
- * not the formal externalRefs/`github_issue` chip mechanism (#233), which
- * depends on PR-chip infrastructure that only exists in `driver/`, not on
- * `main`. The spawned session has no structured, persisted link back to the
- * item; it only starts already briefed via this first message.
+ * item (hapi#235/#238). This seeds the first message only — the structured,
+ * persisted link (metadata.externalRefs, surfaced as an IssueRefChip) is a
+ * separate step the caller (router.tsx's handleSpawnFromTodoItem) triggers
+ * after the session is created.
  */
 export function buildTodoItemSpawnMessage(item: TodoBoardItem): string {
     const heading = item.number !== null ? `${item.title} (#${item.number})` : item.title
