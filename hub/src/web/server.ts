@@ -309,7 +309,7 @@ function createWebApp(options: {
     app.route('/api', createVoiceRoutes({ dataDir: configuration.dataDir }))
     // Path is intentionally NOT `/api/events` — that route is the SSE stream.
     app.route('/api', createWorkGraphRoutes(options.store))
-    app.route('/api', createTodoBoardRoutes())
+    app.route('/api', createTodoBoardRoutes(configuration.dataDir))
 
     // Skip static serving in relay mode, show helpful message on root
     if (options.relayMode) {

@@ -12,6 +12,7 @@ function makeItem(overrides: Partial<TodoBoardItem>): TodoBoardItem {
         state: overrides.state ?? null,
         status: overrides.status ?? null,
         updatedAt: overrides.updatedAt ?? null,
+        body: overrides.body ?? null,
     }
 }
 

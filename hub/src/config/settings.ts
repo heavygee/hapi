@@ -4,6 +4,16 @@ import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { withSettingsFileLock } from '@hapi/protocol/settingsFileLock'
 
+export interface StoredTodoBoard {
+    id: string
+    label: string
+    host: string
+    ownerLogin: string
+    projectNumber: number
+    statusFieldName: string
+    doneValues: string[]
+}
+
 export interface Settings {
     machineId?: string
     machineIdConfirmedByServer?: boolean
@@ -51,6 +61,13 @@ export interface Settings {
      * Env vars still win when set at process start (ops override).
      */
     providerCredentials?: Partial<Record<string, string>>
+    /**
+     * To-do board view (hapi#235) — user-added GitHub Projects v2 boards.
+     * Empty/missing means "fall back to the env-configured default board"
+     * (hub/src/web/routes/todoBoard.ts); once populated, this is the full
+     * list, never silently emptied (removal re-seeds the default instead).
+     */
+    todoBoards?: StoredTodoBoard[]
 }
 
 export function getSettingsFile(dataDir: string): string {

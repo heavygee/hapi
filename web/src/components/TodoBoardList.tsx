@@ -1,9 +1,12 @@
 import { useMemo, useState } from 'react'
 import type { TodoBoardItem, TodoBoardSummary } from '@/types/api'
-import { TodoBoardSwitcherBar, TodoBoardSwitcherMenu } from '@/components/TodoBoardSwitcher'
+import { TodoBoardSwitcherBar, TodoBoardSwitcherMenu, type TodoBoardFilterItem } from '@/components/TodoBoardSwitcher'
+import { AddTodoBoardDialog } from '@/components/AddTodoBoardDialog'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { LoadingState } from '@/components/LoadingState'
-import { ExternalLinkIcon, PlusCircleIcon } from '@/components/icons'
+import { ExternalLinkIcon } from '@/components/icons'
 import { chipBaseClass, chipIdleClass } from '@/components/filterChipStyles'
+import { getApiErrorMessage } from '@/lib/apiErrorMessage'
 import { formatRelativeTime } from '@/lib/relativeTime'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
@@ -77,17 +80,13 @@ export function groupItemsByStatus(items: TodoBoardItem[], statusOrder: string[]
 
 // Card, not a text row — operator feedback (hapi#235): the to-do list needs
 // "some shape, some structure in time," comparable to GitHub's own board
-// cards. The whole card is a GitHub-bound link (via a stretched overlay
-// anchor, not by nesting the actions row's buttons inside an <a> — that
-// would be invalid HTML and break the disabled spawn button's semantics).
-// The actions row needs `relative z-10`: a position:absolute, z-index:auto
-// overlay paints *above* non-positioned in-flow content regardless of DOM
-// order (CSS2.1 Appendix E, step 6 vs steps 3/5) — without it the overlay
-// would swallow clicks meant for the external-link icon and, later, #236's
-// spawn button.
-function TodoItemCard(props: { item: TodoBoardItem; muted: boolean }) {
+// cards. Clicking the card body opens item detail in the right pane (a
+// plain <button>, not a GitHub anchor — that moved to the explicit corner
+// icon, see TodoBoardList's own comment below for why they're siblings, not
+// nested).
+function TodoItemCard(props: { item: TodoBoardItem; muted: boolean; selected: boolean; onSelect: () => void }) {
     const { t } = useTranslation()
-    const { item, muted } = props
+    const { item, muted, selected } = props
     const repoLabel = item.repo ?? t('todo.noRepo')
     const updatedLabel = item.updatedAt ? formatRelativeTime(new Date(item.updatedAt).getTime(), t) : null
     const infoChipClass = cn(chipBaseClass, chipIdleClass, 'pointer-events-none h-6 px-2')
@@ -95,62 +94,45 @@ function TodoItemCard(props: { item: TodoBoardItem; muted: boolean }) {
     return (
         <div
             className={cn(
-                'relative mb-2 rounded-lg border border-[var(--app-border)] p-3 transition-all',
+                'relative mb-2 flex items-start gap-1 rounded-lg border p-3 transition-all',
+                selected ? 'border-[var(--app-link)]' : 'border-[var(--app-border)]',
                 // Persistent (not hover-only) accent wash on active cards —
                 // operator feedback that a hover-only `/40` touch is invisible
                 // in a static view. `--app-link-muted` now derives from a
                 // custom accent (see useThemeColors.ts), so this reacts live
                 // to Settings > Display > Theme Colors > accent. Done/muted
                 // cards stay neutral, reinforcing the fold-fade treatment.
-                muted ? 'bg-[var(--app-bg)] opacity-60' : 'bg-[var(--app-link-muted)] hover:border-[var(--app-link)]/40 hover:shadow-sm'
+                muted ? 'bg-[var(--app-bg)] opacity-60' : 'bg-[var(--app-link-muted)] hover:shadow-sm'
             )}
         >
+            <button
+                type="button"
+                onClick={props.onSelect}
+                aria-current={selected || undefined}
+                className="min-w-0 flex-1 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+            >
+                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                    {item.number !== null ? <span className={cn(infoChipClass, 'font-mono')}>#{item.number}</span> : null}
+                    <span className={cn(infoChipClass, 'max-w-40 truncate')}>{repoLabel}</span>
+                </div>
+                <div className={cn('mt-2 line-clamp-2 text-sm', muted ? 'text-[var(--app-hint)]' : 'text-[var(--app-fg)]')}>
+                    {item.title}
+                </div>
+                {updatedLabel ? <div className="mt-2 text-xs text-[var(--app-hint)]">{updatedLabel}</div> : null}
+            </button>
+
             {item.url ? (
                 <a
                     href={item.url}
                     target="_blank"
                     rel="noopener noreferrer"
+                    title={t('todo.openInGithub')}
                     aria-label={`${t('todo.openInGithub')}: ${item.title}`}
-                    className="absolute inset-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                />
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                >
+                    <ExternalLinkIcon className="h-3.5 w-3.5" />
+                </a>
             ) : null}
-
-            <div className="flex items-start justify-between gap-2">
-                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                    {item.number !== null ? <span className={cn(infoChipClass, 'font-mono')}>#{item.number}</span> : null}
-                    <span className={cn(infoChipClass, 'max-w-40 truncate')}>{repoLabel}</span>
-                </div>
-                <div className="relative z-10 flex shrink-0 items-center gap-1">
-                    {item.url ? (
-                        <a
-                            href={item.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            title={t('todo.openInGithub')}
-                            aria-label={`${t('todo.openInGithub')}: ${item.title}`}
-                            className="flex h-6 w-6 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                        >
-                            <ExternalLinkIcon className="h-3.5 w-3.5" />
-                        </a>
-                    ) : null}
-                    {/* Reserved, not wired up: hapi#236 (spawn/worktree resolution) slots in here later without reshaping the card. */}
-                    <button
-                        type="button"
-                        disabled
-                        title={t('todo.spawnComingSoon')}
-                        aria-label={t('todo.spawnComingSoon')}
-                        className="flex h-6 w-6 cursor-not-allowed items-center justify-center rounded-full text-[var(--app-hint)] opacity-50"
-                    >
-                        <PlusCircleIcon className="h-3.5 w-3.5" />
-                    </button>
-                </div>
-            </div>
-
-            <div className={cn('mt-2 line-clamp-2 text-sm', muted ? 'text-[var(--app-hint)]' : 'text-[var(--app-fg)]')}>
-                {item.title}
-            </div>
-
-            {updatedLabel ? <div className="mt-2 text-xs text-[var(--app-hint)]">{updatedLabel}</div> : null}
         </div>
     )
 }
@@ -159,14 +141,21 @@ export function TodoBoardList(props: {
     boards: TodoBoardSummary[]
     selectedBoardId: string | null
     onSelectBoard: (id: string) => void
+    onAddBoard: (url: string) => Promise<void>
+    onRemoveBoard: (id: string) => Promise<void>
     items: TodoBoardItem[]
     statusOrder: string[]
     doneValues: string[]
     isLoading: boolean
     error: string | null
+    selectedItemId: string | null
+    onSelectItem: (item: TodoBoardItem) => void
 }) {
     const { t } = useTranslation()
     const [doneExpanded, setDoneExpanded] = useState(false)
+    const [addDialogOpen, setAddDialogOpen] = useState(false)
+    const [removeTarget, setRemoveTarget] = useState<TodoBoardFilterItem | null>(null)
+    const [isRemoving, setIsRemoving] = useState(false)
     const boardFilterItems = useMemo(
         () => props.boards.map(board => ({ id: board.id, label: board.label })),
         [props.boards]
@@ -189,20 +178,57 @@ export function TodoBoardList(props: {
     return (
         <div className="flex min-h-0 w-full flex-1 flex-col">
             <div className="mx-auto w-full max-w-content shrink-0">
-                <div className="flex items-center gap-1 px-2 py-1">
-                    <div className="flex-1" />
-                    <TodoBoardSwitcherMenu
-                        boards={boardFilterItems}
-                        value={props.selectedBoardId}
-                        onChange={props.onSelectBoard}
-                    />
-                </div>
-                <TodoBoardSwitcherBar
-                    boards={boardFilterItems}
-                    value={props.selectedBoardId}
-                    onChange={props.onSelectBoard}
-                />
+                {boardFilterItems.length > 0 || !props.isLoading ? (
+                    <>
+                        <div className="flex items-center gap-1 px-2 py-1">
+                            <div className="flex-1" />
+                            <TodoBoardSwitcherMenu
+                                boards={boardFilterItems}
+                                value={props.selectedBoardId}
+                                onChange={props.onSelectBoard}
+                                onRemove={(id) => setRemoveTarget(boardFilterItems.find(b => b.id === id) ?? { id, label: id })}
+                                onAddClick={() => setAddDialogOpen(true)}
+                            />
+                        </div>
+                        <TodoBoardSwitcherBar
+                            boards={boardFilterItems}
+                            value={props.selectedBoardId}
+                            onChange={props.onSelectBoard}
+                            onRemove={(id) => setRemoveTarget(boardFilterItems.find(b => b.id === id) ?? { id, label: id })}
+                            onAddClick={() => setAddDialogOpen(true)}
+                        />
+                    </>
+                ) : null}
             </div>
+
+            <AddTodoBoardDialog
+                isOpen={addDialogOpen}
+                onClose={() => setAddDialogOpen(false)}
+                onAdd={props.onAddBoard}
+            />
+
+            {removeTarget ? (
+                <ConfirmDialog
+                    isOpen={true}
+                    onClose={() => setRemoveTarget(null)}
+                    title={t('todo.removeBoard.confirmTitle')}
+                    description={t('todo.removeBoard.confirmDescription', { label: removeTarget.label })}
+                    confirmLabel={t('todo.removeBoard.confirm')}
+                    confirmingLabel={t('todo.removeBoard.removing')}
+                    onConfirm={async () => {
+                        setIsRemoving(true)
+                        try {
+                            await props.onRemoveBoard(removeTarget.id)
+                        } catch (err) {
+                            throw new Error(getApiErrorMessage(err, t('dialog.error.default')))
+                        } finally {
+                            setIsRemoving(false)
+                        }
+                    }}
+                    isPending={isRemoving}
+                    destructive
+                />
+            ) : null}
 
             <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
                 {props.isLoading ? (
@@ -224,7 +250,13 @@ export function TodoBoardList(props: {
                                     {isNoStatus ? t('todo.noStatus') : group.status} ({group.items.length})
                                 </div>
                                 {group.items.map((item) => (
-                                    <TodoItemCard key={item.id} item={item} muted={false} />
+                                    <TodoItemCard
+                                        key={item.id}
+                                        item={item}
+                                        muted={false}
+                                        selected={props.selectedItemId === item.id}
+                                        onSelect={() => props.onSelectItem(item)}
+                                    />
                                 ))}
                             </div>
                         ))}
@@ -241,7 +273,13 @@ export function TodoBoardList(props: {
                                         : t('todo.doneSection.expand', { n: doneItems.length })}
                                 </button>
                                 {doneExpanded ? doneItems.map((item) => (
-                                    <TodoItemCard key={item.id} item={item} muted />
+                                    <TodoItemCard
+                                        key={item.id}
+                                        item={item}
+                                        muted
+                                        selected={props.selectedItemId === item.id}
+                                        onSelect={() => props.onSelectItem(item)}
+                                    />
                                 )) : null}
                             </div>
                         ) : null}

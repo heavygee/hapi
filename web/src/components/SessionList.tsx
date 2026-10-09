@@ -65,7 +65,7 @@ import { getPathDisplayName } from '@/utils/path'
 
 export { getWorktreeSessionLabel } from '@/lib/sessionWorktreeLabel'
 
-type SessionGroup = {
+export type SessionGroup = {
     key: string
     directory: string
     displayName: string
@@ -331,7 +331,7 @@ export function getPreviousSessionVisibleCount(current: number, step: number): n
     return Math.max(normalizedStep, current - normalizedStep)
 }
 
-function groupSessionsByDirectory(sessions: SessionSummary[]): SessionGroup[] {
+export function groupSessionsByDirectory(sessions: SessionSummary[]): SessionGroup[] {
     const groups = new Map<string, { directory: string; machineId: string | null; sessions: SessionSummary[] }>()
 
     sessions.forEach(session => {

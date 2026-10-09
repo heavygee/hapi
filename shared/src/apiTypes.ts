@@ -1013,6 +1013,7 @@ export type TodoBoardItem = {
     state: 'OPEN' | 'CLOSED' | null
     status: string | null
     updatedAt: string | null
+    body: string | null
 }
 
 export type TodoBoardItemsResponse = {
@@ -1021,6 +1022,12 @@ export type TodoBoardItemsResponse = {
     doneValues: string[]
     items: TodoBoardItem[]
 }
+
+export const AddTodoBoardRequestSchema = z.object({
+    url: z.string().min(1)
+})
+
+export type AddTodoBoardRequest = z.infer<typeof AddTodoBoardRequestSchema>
 
 export type UsageSummaryResponse = {
     range: {

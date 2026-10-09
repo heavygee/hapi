@@ -769,6 +769,19 @@ export class ApiClient {
         return await this.request<TodoBoardItemsResponse>(`/api/todo-boards/${encodeURIComponent(boardId)}/items`)
     }
 
+    async addTodoBoard(url: string): Promise<TodoBoardsResponse> {
+        return await this.request<TodoBoardsResponse>('/api/todo-boards', {
+            method: 'POST',
+            body: JSON.stringify({ url })
+        })
+    }
+
+    async removeTodoBoard(boardId: string): Promise<TodoBoardsResponse> {
+        return await this.request<TodoBoardsResponse>(`/api/todo-boards/${encodeURIComponent(boardId)}`, {
+            method: 'DELETE'
+        })
+    }
+
     /** Pass an empty string to clear the custom name and fall back to the hostname. */
     async renameMachine(machineId: string, displayName: string): Promise<void> {
         await this.request(`/api/machines/${encodeURIComponent(machineId)}`, {

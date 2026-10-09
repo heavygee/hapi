@@ -20,6 +20,7 @@ import { useSessions } from '@/hooks/queries/useSessions'
 import { useActiveSuggestions, type Suggestion } from '@/hooks/useActiveSuggestions'
 import { useDirectorySuggestions } from '@/hooks/useDirectorySuggestions'
 import { useRecentPaths } from '@/hooks/useRecentPaths'
+import { saveDraft } from '@/lib/composer-drafts'
 import { useTranslation } from '@/lib/use-translation'
 import { getCodexModelReasoningEfforts } from '@/lib/codexModelCapabilities'
 import {
@@ -92,6 +93,8 @@ export function NewSession(props: {
     onChooseFolder?: (args: { machineId: string | null; directory: string }) => void
     initialDirectory?: string
     initialMachineId?: string
+    /** Seeds the new session's composer draft (editable, not sent automatically) once creation succeeds — e.g. a to-do item's title/URL/body (hapi#235/#238). */
+    initialMessage?: string
 }) {
     const { haptic } = usePlatform()
     const { t } = useTranslation()
@@ -1689,6 +1692,12 @@ export function NewSession(props: {
                 clearNewSessionFormDraft()
                 setLastUsedMachineId(machineId)
                 addRecentPath(machineId, trimmedDirectory)
+                if (props.initialMessage?.trim()) {
+                    // Seeds the composer draft the session page already restores
+                    // on mount (useComposerDraft) — editable, not sent, same as
+                    // any other draft. No new composer plumbing needed.
+                    saveDraft(result.sessionId, props.initialMessage)
+                }
                 props.onSuccess(result.sessionId)
                 return
             }

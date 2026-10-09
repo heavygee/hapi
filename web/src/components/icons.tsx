@@ -50,6 +50,14 @@ export function ExternalLinkIcon(props: IconProps) {
     )
 }
 
+export function PlusIcon(props: IconProps) {
+    return createIcon(
+        <path d="M12 5v14m-7-7h14" />,
+        props,
+        2
+    )
+}
+
 export function PlusCircleIcon(props: IconProps) {
     return createIcon(
         <path d="M12 9v6m3-3H9m12 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />,

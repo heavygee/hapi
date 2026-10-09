@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { CheckIcon, FilterIcon } from '@/components/icons'
+import { CheckIcon, CloseIcon, FilterIcon, PlusIcon } from '@/components/icons'
 import { chipBaseClass, chipIdleClass, chipSelectedClass } from '@/components/filterChipStyles'
 import { getMachineFilterMenuClampStyle } from '@/components/MachineFilterBar'
 import { cn } from '@/lib/utils'
@@ -12,34 +12,57 @@ export type TodoBoardFilterItem = {
 
 // Board switcher: same chip-row pattern as MachineFilterBar, minus the "All"
 // pseudo-chip — board selection has no unfiltered state, exactly one board is
-// always selected (hapi#235).
+// always selected (hapi#235). Each chip is a wrapping <div>, not a <button>,
+// because it holds two independent actions (select, remove) — nesting a
+// remove <button> inside a select <button> would be invalid HTML.
 export function TodoBoardSwitcherBar(props: {
     boards: TodoBoardFilterItem[]
     value: string | null
     onChange: (id: string) => void
+    onRemove: (id: string) => void
+    onAddClick: () => void
 }) {
     const { t } = useTranslation()
-    if (props.boards.length === 0) {
-        return null
-    }
     return (
         <div
             role="radiogroup"
             aria-label={t('todo.boardSwitcher.label')}
             className="flex flex-wrap items-center gap-1.5 px-2 pb-2 max-md:hidden"
         >
-            {props.boards.map((board) => (
-                <button
-                    key={board.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={props.value === board.id}
-                    onClick={() => props.onChange(board.id)}
-                    className={cn(chipBaseClass, props.value === board.id ? chipSelectedClass : chipIdleClass)}
-                >
-                    <span className="max-w-48 truncate">{board.label}</span>
-                </button>
-            ))}
+            {props.boards.map((board) => {
+                const selected = props.value === board.id
+                return (
+                    <div key={board.id} className={cn(chipBaseClass, 'gap-1', selected ? chipSelectedClass : chipIdleClass)}>
+                        <button
+                            type="button"
+                            role="radio"
+                            aria-checked={selected}
+                            onClick={() => props.onChange(board.id)}
+                            className="max-w-48 truncate focus-visible:outline-none"
+                        >
+                            {board.label}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => props.onRemove(board.id)}
+                            aria-label={t('todo.removeBoard.label', { label: board.label })}
+                            title={t('todo.removeBoard.label', { label: board.label })}
+                            className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full opacity-60 hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                        >
+                            <CloseIcon className="h-3 w-3" />
+                        </button>
+                    </div>
+                )
+            })}
+            <button
+                type="button"
+                onClick={props.onAddClick}
+                aria-label={t('todo.addBoard.chipLabel')}
+                title={t('todo.addBoard.chipLabel')}
+                className={cn(chipBaseClass, chipIdleClass, 'px-2')}
+            >
+                <PlusIcon className="h-3.5 w-3.5" />
+            </button>
         </div>
     )
 }
@@ -50,6 +73,8 @@ export function TodoBoardSwitcherMenu(props: {
     boards: TodoBoardFilterItem[]
     value: string | null
     onChange: (id: string) => void
+    onRemove: (id: string) => void
+    onAddClick: () => void
 }) {
     const { t } = useTranslation()
     const [open, setOpen] = useState(false)
@@ -119,10 +144,6 @@ export function TodoBoardSwitcherMenu(props: {
         }
     }, [open, close])
 
-    if (props.boards.length === 0) {
-        return null
-    }
-
     return (
         <div ref={wrapperRef} className="relative shrink-0 md:hidden">
             <button
@@ -154,20 +175,40 @@ export function TodoBoardSwitcherMenu(props: {
                         className="absolute right-0 top-full z-30 mt-1 max-h-80 w-64 overflow-y-auto rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] p-1 shadow-xl"
                     >
                         {props.boards.map((board) => (
-                            <button
-                                key={board.id}
-                                type="button"
-                                role="menuitemradio"
-                                aria-checked={props.value === board.id}
-                                onClick={() => select(board.id)}
-                                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                            >
-                                <span className="flex h-5 w-4 shrink-0 items-center justify-center text-[var(--app-link)]">
-                                    {props.value === board.id ? <CheckIcon className="h-4 w-4" /> : null}
-                                </span>
-                                <span className="min-w-0 flex-1 truncate text-[var(--app-fg)]">{board.label}</span>
-                            </button>
+                            <div key={board.id} className="flex w-full items-center gap-1 rounded-lg hover:bg-[var(--app-subtle-bg)]">
+                                <button
+                                    type="button"
+                                    role="menuitemradio"
+                                    aria-checked={props.value === board.id}
+                                    onClick={() => select(board.id)}
+                                    className="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-2 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                >
+                                    <span className="flex h-5 w-4 shrink-0 items-center justify-center text-[var(--app-link)]">
+                                        {props.value === board.id ? <CheckIcon className="h-4 w-4" /> : null}
+                                    </span>
+                                    <span className="min-w-0 flex-1 truncate text-[var(--app-fg)]">{board.label}</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => props.onRemove(board.id)}
+                                    aria-label={t('todo.removeBoard.label', { label: board.label })}
+                                    title={t('todo.removeBoard.label', { label: board.label })}
+                                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] opacity-60 hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                >
+                                    <CloseIcon className="h-3.5 w-3.5" />
+                                </button>
+                            </div>
                         ))}
+                        <button
+                            type="button"
+                            onClick={() => { props.onAddClick(); close() }}
+                            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-[var(--app-link)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                        >
+                            <span className="flex h-5 w-4 shrink-0 items-center justify-center">
+                                <PlusIcon className="h-4 w-4" />
+                            </span>
+                            {t('todo.addBoard.chipLabel')}
+                        </button>
                     </div>
                 </>
             ) : null}
