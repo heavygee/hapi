@@ -73,9 +73,9 @@ query($login: String!, $number: Int!, $statusField: String!) {
             id
             content {
               __typename
-              ... on Issue { title number url state repository { nameWithOwner } }
-              ... on PullRequest { title number url state repository { nameWithOwner } }
-              ... on DraftIssue { title }
+              ... on Issue { title number url state updatedAt repository { nameWithOwner } }
+              ... on PullRequest { title number url state updatedAt repository { nameWithOwner } }
+              ... on DraftIssue { title updatedAt }
             }
             fieldValueByName(name: $statusField) {
               ... on ProjectV2ItemFieldSingleSelectValue { name }
@@ -101,6 +101,7 @@ type GhProjectV2Response = {
                             number?: number
                             url?: string
                             state?: 'OPEN' | 'CLOSED'
+                            updatedAt?: string
                             repository?: { nameWithOwner: string }
                         } | null
                         fieldValueByName?: { name: string } | null
@@ -160,7 +161,8 @@ function mapItems(response: GhProjectV2Response): TodoBoardItem[] {
             number: node.content.number ?? null,
             repo: node.content.repository?.nameWithOwner ?? null,
             state: node.content.state ?? null,
-            status: node.fieldValueByName?.name ?? null
+            status: node.fieldValueByName?.name ?? null,
+            updatedAt: node.content.updatedAt ?? null
         })
     }
     return items

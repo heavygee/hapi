@@ -2,7 +2,9 @@ import { useMemo, useState } from 'react'
 import type { TodoBoardItem, TodoBoardSummary } from '@/types/api'
 import { TodoBoardSwitcherBar, TodoBoardSwitcherMenu } from '@/components/TodoBoardSwitcher'
 import { LoadingState } from '@/components/LoadingState'
-import { ExternalLinkIcon } from '@/components/icons'
+import { ExternalLinkIcon, PlusCircleIcon } from '@/components/icons'
+import { chipBaseClass, chipIdleClass } from '@/components/filterChipStyles'
+import { formatRelativeTime } from '@/lib/relativeTime'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
 
@@ -10,6 +12,17 @@ type StatusGroup = {
     status: string
     items: TodoBoardItem[]
     isDone: boolean
+}
+
+// Index-based, not semantic — status names are read verbatim from whatever
+// board is configured (hapi#235 design doc), so we can't assume "In
+// Progress"/"Todo" wording to pick a meaningful color. Cycling a fixed
+// palette by group position gives each status a stable, distinct accent
+// without hardcoding assumptions about any particular board's vocabulary.
+const STATUS_DOT_PALETTE = ['bg-blue-500', 'bg-amber-500', 'bg-emerald-500', 'bg-purple-500', 'bg-rose-500']
+
+function statusDotClass(colorIndex: number): string {
+    return STATUS_DOT_PALETTE[colorIndex % STATUS_DOT_PALETTE.length]
 }
 
 // Groups by the board's own status field (verbatim), in board-defined column
@@ -62,42 +75,77 @@ export function groupItemsByStatus(items: TodoBoardItem[], statusOrder: string[]
     return { openGroups, doneItems }
 }
 
-function TodoItemRow(props: { item: TodoBoardItem; muted: boolean }) {
+// Card, not a text row — operator feedback (hapi#235): the to-do list needs
+// "some shape, some structure in time," comparable to GitHub's own board
+// cards. The whole card is a GitHub-bound link (via a stretched overlay
+// anchor, not by nesting the actions row's buttons inside an <a> — that
+// would be invalid HTML and break the disabled spawn button's semantics).
+// The actions row needs `relative z-10`: a position:absolute, z-index:auto
+// overlay paints *above* non-positioned in-flow content regardless of DOM
+// order (CSS2.1 Appendix E, step 6 vs steps 3/5) — without it the overlay
+// would swallow clicks meant for the external-link icon and, later, #236's
+// spawn button.
+function TodoItemCard(props: { item: TodoBoardItem; muted: boolean }) {
     const { t } = useTranslation()
     const { item, muted } = props
-    const label = item.repo
-        ? `${item.repo}${item.number !== null ? `#${item.number}` : ''}`
-        : t('todo.noRepo')
-
-    const content = (
-        <>
-            <span className={cn('min-w-0 flex-1 truncate text-sm', muted ? 'text-[var(--app-hint)]' : 'text-[var(--app-fg)]')}>
-                {item.title}
-            </span>
-            <span className="shrink-0 text-xs tabular-nums text-[var(--app-hint)]">{label}</span>
-            {item.url ? <ExternalLinkIcon className="h-3.5 w-3.5 shrink-0 text-[var(--app-hint)]" /> : null}
-        </>
-    )
-
-    if (!item.url) {
-        return (
-            <div className="flex items-center gap-2 rounded-lg px-2.5 py-2">
-                {content}
-            </div>
-        )
-    }
+    const repoLabel = item.repo ?? t('todo.noRepo')
+    const updatedLabel = item.updatedAt ? formatRelativeTime(new Date(item.updatedAt).getTime(), t) : null
+    const infoChipClass = cn(chipBaseClass, chipIdleClass, 'pointer-events-none h-6 px-2')
 
     return (
-        <a
-            href={item.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            title={t('todo.openInGithub')}
-            aria-label={`${t('todo.openInGithub')}: ${item.title}`}
-            className="flex items-center gap-2 rounded-lg px-2.5 py-2 transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+        <div
+            className={cn(
+                'relative mb-2 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] p-3 transition-all',
+                muted ? 'opacity-60' : 'hover:border-[var(--app-link)]/40 hover:shadow-sm'
+            )}
         >
-            {content}
-        </a>
+            {item.url ? (
+                <a
+                    href={item.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`${t('todo.openInGithub')}: ${item.title}`}
+                    className="absolute inset-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                />
+            ) : null}
+
+            <div className="flex items-start justify-between gap-2">
+                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                    {item.number !== null ? <span className={cn(infoChipClass, 'font-mono')}>#{item.number}</span> : null}
+                    <span className={cn(infoChipClass, 'max-w-40 truncate')}>{repoLabel}</span>
+                </div>
+                <div className="relative z-10 flex shrink-0 items-center gap-1">
+                    {item.url ? (
+                        <a
+                            href={item.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={t('todo.openInGithub')}
+                            aria-label={`${t('todo.openInGithub')}: ${item.title}`}
+                            className="flex h-6 w-6 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                        >
+                            <ExternalLinkIcon className="h-3.5 w-3.5" />
+                        </a>
+                    ) : null}
+                    {/* Reserved, not wired up: hapi#236 (spawn/worktree resolution) slots in here later without reshaping the card. */}
+                    <button
+                        type="button"
+                        disabled
+                        title={t('todo.spawnComingSoon')}
+                        aria-label={t('todo.spawnComingSoon')}
+                        className="flex h-6 w-6 cursor-not-allowed items-center justify-center rounded-full text-[var(--app-hint)] opacity-50"
+                    >
+                        <PlusCircleIcon className="h-3.5 w-3.5" />
+                    </button>
+                </div>
+            </div>
+
+            <div className={cn('mt-2 line-clamp-2 text-sm', muted ? 'text-[var(--app-hint)]' : 'text-[var(--app-fg)]')}>
+                {item.title}
+            </div>
+
+            {updatedLabel ? <div className="mt-2 text-xs text-[var(--app-hint)]">{updatedLabel}</div> : null}
+        </div>
     )
 }
 
@@ -121,6 +169,16 @@ export function TodoBoardList(props: {
         () => groupItemsByStatus(props.items, props.statusOrder, props.doneValues),
         [props.items, props.statusOrder, props.doneValues]
     )
+    // Color index only advances for real statuses — "no status" always gets
+    // the same neutral dot rather than consuming a palette slot.
+    const groupsWithDot = useMemo(() => {
+        let colorIndex = -1
+        return openGroups.map((group) => {
+            const isNoStatus = group.status === 'noStatus'
+            if (!isNoStatus) colorIndex += 1
+            return { group, isNoStatus, dotClass: isNoStatus ? 'bg-[var(--app-hint)]' : statusDotClass(colorIndex) }
+        })
+    }, [openGroups])
 
     return (
         <div className="flex min-h-0 w-full flex-1 flex-col">
@@ -153,13 +211,14 @@ export function TodoBoardList(props: {
                     <div className="px-1 py-4 text-sm text-[var(--app-hint)]">{t('todo.empty')}</div>
                 ) : (
                     <>
-                        {openGroups.map((group) => (
+                        {groupsWithDot.map(({ group, isNoStatus, dotClass }) => (
                             <div key={group.status} className="mb-3">
-                                <div className="px-1 py-1 text-xs font-semibold uppercase tracking-wide text-[var(--app-hint)]">
-                                    {group.status === 'noStatus' ? t('todo.noStatus') : group.status} ({group.items.length})
+                                <div className="flex items-center gap-1.5 px-1 py-1 text-xs font-semibold uppercase tracking-wide text-[var(--app-hint)]">
+                                    <span aria-hidden className={cn('h-2 w-2 shrink-0 rounded-full', dotClass)} />
+                                    {isNoStatus ? t('todo.noStatus') : group.status} ({group.items.length})
                                 </div>
                                 {group.items.map((item) => (
-                                    <TodoItemRow key={item.id} item={item} muted={false} />
+                                    <TodoItemCard key={item.id} item={item} muted={false} />
                                 ))}
                             </div>
                         ))}
@@ -176,7 +235,7 @@ export function TodoBoardList(props: {
                                         : t('todo.doneSection.expand', { n: doneItems.length })}
                                 </button>
                                 {doneExpanded ? doneItems.map((item) => (
-                                    <TodoItemRow key={item.id} item={item} muted />
+                                    <TodoItemCard key={item.id} item={item} muted />
                                 )) : null}
                             </div>
                         ) : null}

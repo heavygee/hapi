@@ -75,6 +75,7 @@ describe('GET /api/todo-boards/:id/items', () => {
                                         number: 12,
                                         url: 'https://github.com/acme/widgets/issues/12',
                                         state: 'OPEN',
+                                        updatedAt: '2026-10-06T12:00:00Z',
                                         repository: { nameWithOwner: 'acme/widgets' }
                                     },
                                     fieldValueByName: { name: 'In Progress' }
@@ -105,7 +106,8 @@ describe('GET /api/todo-boards/:id/items', () => {
                 number: 12,
                 repo: 'acme/widgets',
                 state: 'OPEN',
-                status: 'In Progress'
+                status: 'In Progress',
+                updatedAt: '2026-10-06T12:00:00Z'
             },
             {
                 id: 'item-2',
@@ -114,7 +116,8 @@ describe('GET /api/todo-boards/:id/items', () => {
                 number: null,
                 repo: null,
                 state: null,
-                status: null
+                status: null,
+                updatedAt: null
             }
         ])
     })

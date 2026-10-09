@@ -11,6 +11,7 @@ function makeItem(overrides: Partial<TodoBoardItem>): TodoBoardItem {
         repo: overrides.repo ?? null,
         state: overrides.state ?? null,
         status: overrides.status ?? null,
+        updatedAt: overrides.updatedAt ?? null,
     }
 }
 

@@ -1012,6 +1012,7 @@ export type TodoBoardItem = {
     repo: string | null
     state: 'OPEN' | 'CLOSED' | null
     status: string | null
+    updatedAt: string | null
 }
 
 export type TodoBoardItemsResponse = {

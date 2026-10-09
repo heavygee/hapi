@@ -109,6 +109,7 @@ export default {
   'todo.doneSection.collapse': 'Hide {n} done',
   'todo.openInGithub': 'Open in GitHub',
   'todo.noRepo': 'No repo',
+  'todo.spawnComingSoon': 'Coming soon — hapi#236',
   'codexSync.tooltip': 'Import sessions from Codex into Hapi',
   'codexSync.newSessionAction': 'Import Codex history',
   'codexSync.confirm.title': 'Import Codex sessions',
