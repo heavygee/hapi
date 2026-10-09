@@ -23,6 +23,8 @@ import type {
     SlashCommandsResponse,
     SkillsResponse,
     SpawnResponse,
+    TodoBoardItemsResponse,
+    TodoBoardsResponse,
     VisibilityPayload,
     HapiSessionExportResponse,
     HubHealthResponse,
@@ -759,6 +761,27 @@ export class ApiClient {
         return await this.request<MachinesResponse>('/api/machines')
     }
 
+    async getTodoBoards(): Promise<TodoBoardsResponse> {
+        return await this.request<TodoBoardsResponse>('/api/todo-boards')
+    }
+
+    async getTodoBoardItems(boardId: string): Promise<TodoBoardItemsResponse> {
+        return await this.request<TodoBoardItemsResponse>(`/api/todo-boards/${encodeURIComponent(boardId)}/items`)
+    }
+
+    async addTodoBoard(url: string): Promise<TodoBoardsResponse> {
+        return await this.request<TodoBoardsResponse>('/api/todo-boards', {
+            method: 'POST',
+            body: JSON.stringify({ url })
+        })
+    }
+
+    async removeTodoBoard(boardId: string): Promise<TodoBoardsResponse> {
+        return await this.request<TodoBoardsResponse>(`/api/todo-boards/${encodeURIComponent(boardId)}`, {
+            method: 'DELETE'
+        })
+    }
+
     /** Pass an empty string to clear the custom name and fall back to the hostname. */
     async renameMachine(machineId: string, displayName: string): Promise<void> {
         await this.request(`/api/machines/${encodeURIComponent(machineId)}`, {
@@ -1021,6 +1044,13 @@ export class ApiClient {
         await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/summary`, {
             method: 'PATCH',
             body: JSON.stringify({ text })
+        })
+    }
+
+    async linkIssue(sessionId: string, url: string): Promise<void> {
+        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/link-issue`, {
+            method: 'PATCH',
+            body: JSON.stringify({ url })
         })
     }
 

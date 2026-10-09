@@ -52,6 +52,79 @@ export const WorktreeMetadataSchema = z.object({
 
 export type WorktreeMetadata = z.infer<typeof WorktreeMetadataSchema>
 
+/**
+ * Lightweight external reference attached to a session (hapi#235/#238) — a
+ * session is only ever "briefed" by its first composer message unless this
+ * exists; this is the actual structured, persisted link. Built fresh here:
+ * `main` has no prior externalRefs mechanism to generalize (that work is
+ * fork-local to `driver/`, tangled with unrelated unmerged features, and
+ * irrelevant to this schema). `kind` is a discriminated union from the start
+ * even with one case today, so a future PR-chip (`kind: 'github_pr'`) slots
+ * in without a redesign. Self-session write path only (`hapi link-issue`
+ * CLI / MCP `link_issue`), always-on — no opt-in toggle, since nobody sees
+ * this chrome unless they actually link something.
+ */
+export const GithubIssueExternalRefSchema = z.object({
+    kind: z.literal('github_issue'),
+    url: z.string(),
+    repo: z.string(),
+    number: z.number(),
+    linkedAt: z.number()
+})
+
+export const ExternalRefSchema = z.discriminatedUnion('kind', [GithubIssueExternalRefSchema])
+
+export type ExternalRef = z.infer<typeof ExternalRefSchema>
+
+/**
+ * Accepts both the full GitHub issue URL and the `owner/repo#N` shorthand
+ * (`hapi link-issue <url|owner/repo#N>`, hapi#235/#238). GHE/other hosts
+ * aren't supported here — unlike the to-do board's `parseProjectUrl`, the
+ * issue link is for the operator's own quick reference, not a board read
+ * that already had to handle multiple hosts. Lives in `shared/` (not
+ * hub-only) so both the hub REST route and the MCP tool's socket-based
+ * write path (which never touches that route) validate identically instead
+ * of maintaining two copies of the same regex.
+ */
+function finishIssueMatch(repo: string, numberRaw: string): { url: string; repo: string; number: number } | null {
+    const number = Number(numberRaw)
+    if (!Number.isFinite(number) || number <= 0) return null
+    return { url: `https://github.com/${repo}/issues/${number}`, repo, number }
+}
+
+export function parseIssueUrl(input: string): { url: string; repo: string; number: number } | null {
+    const trimmed = input.trim()
+
+    const urlMatch = /^(?:https?:\/\/)?github\.com\/([^/\s#]+\/[^/\s#]+)\/issues\/(\d+)\/?(?:[/?#].*)?$/i.exec(trimmed)
+    if (urlMatch) {
+        const [, repo, numberRaw] = urlMatch
+        return finishIssueMatch(repo!, numberRaw!)
+    }
+
+    const shorthandMatch = /^([^/\s#]+\/[^/\s#]+)#(\d+)$/.exec(trimmed)
+    if (shorthandMatch) {
+        const [, repo, numberRaw] = shorthandMatch
+        return finishIssueMatch(repo!, numberRaw!)
+    }
+
+    return null
+}
+
+/**
+ * Upserts by `kind`+`repo`+`number`, case-insensitively on `repo` (GitHub repo
+ * names aren't case-sensitive — `Owner/Repo#5` and `owner/repo#5` are the same
+ * issue). Keeps the first-seen casing rather than normalizing it, since the
+ * stored `repo` is shown to the operator verbatim. Shared by the hub's direct
+ * write path (`sessionCache.linkIssue`) and the CLI/MCP socket write path
+ * (`applyLinkIssue`) so both agree on what counts as a duplicate.
+ */
+export function upsertExternalRef(existing: ExternalRef[], ref: ExternalRef): ExternalRef[] {
+    const withoutMatch = existing.filter(
+        candidate => !(candidate.kind === ref.kind && candidate.repo.toLowerCase() === ref.repo.toLowerCase() && candidate.number === ref.number)
+    )
+    return [...withoutMatch, ref]
+}
+
 export const MetadataSchema = z.object({
     path: z.string(),
     host: z.string(),
@@ -175,7 +248,10 @@ export const MetadataSchema = z.object({
     // field stores only modelId (shared across all flavors); this preserves
     // the provider so web can resolve the exact model when two providers
     // share a modelId.
-    piSelectedModel: z.object({ provider: z.string(), modelId: z.string() }).nullable().optional()
+    piSelectedModel: z.object({ provider: z.string(), modelId: z.string() }).nullable().optional(),
+    // Structured links to external resources (hapi#235/#238) — see
+    // ExternalRefSchema above for the "why build fresh, not port driver/" note.
+    externalRefs: z.array(ExternalRefSchema).optional()
 })
 
 export type Metadata = z.infer<typeof MetadataSchema>

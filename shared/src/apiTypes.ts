@@ -995,6 +995,46 @@ export type UsageSummaryBucket = {
     requests: number
 }
 
+export type TodoBoardSummary = {
+    id: string
+    label: string
+}
+
+export type TodoBoardsResponse = {
+    boards: TodoBoardSummary[]
+}
+
+export type TodoBoardItem = {
+    id: string
+    title: string
+    url: string | null
+    number: number | null
+    repo: string | null
+    state: 'OPEN' | 'CLOSED' | null
+    status: string | null
+    updatedAt: string | null
+    body: string | null
+}
+
+export type TodoBoardItemsResponse = {
+    board: TodoBoardSummary
+    statusOrder: string[]
+    doneValues: string[]
+    items: TodoBoardItem[]
+}
+
+export const AddTodoBoardRequestSchema = z.object({
+    url: z.string().min(1)
+})
+
+export type AddTodoBoardRequest = z.infer<typeof AddTodoBoardRequestSchema>
+
+export const LinkIssueRequestSchema = z.object({
+    url: z.string().min(1)
+})
+
+export type LinkIssueRequest = z.infer<typeof LinkIssueRequestSchema>
+
 export type UsageSummaryResponse = {
     range: {
         from: number | null

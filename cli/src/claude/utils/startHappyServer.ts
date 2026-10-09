@@ -33,6 +33,7 @@ import {
     searchSessionContent,
 } from "@/modules/searchContent/searchContent";
 import { applySessionDisplayRename, normalizeSessionDisplayTitle } from "@/agent/sessionDisplayRename";
+import { applyLinkIssue } from "@/agent/sessionIssueLink";
 
 const SEARCH_CONTENT_DESCRIPTION =
     'Search transcript text across HAPI sessions on the same hub/namespace (what sessions actually said). ' +
@@ -232,6 +233,40 @@ function createHapiMcpServer(
             };
         });
     }
+
+    // Always-on, no opt-in toggle (hapi#235/#238 operator decision: "unless
+    // someone uses it, they're not gonna see it" — no chrome to gate for
+    // operators who never link an issue).
+    const linkIssueInputSchema: z.ZodTypeAny = z.object({
+        url: z.string().describe('GitHub issue URL (https://github.com/<owner>/<repo>/issues/<n>) or the <owner>/<repo>#<n> shorthand'),
+    });
+    mcp.registerTool<any, any>('link_issue', {
+        description: 'Attach a GitHub issue reference to the current HAPI session (self-session only). Shows as a chip on the session row/detail. Re-linking the same issue refreshes it rather than duplicating.',
+        title: 'Link GitHub Issue',
+        inputSchema: linkIssueInputSchema,
+    }, async (args: { url: string }) => {
+        const outcome = applyLinkIssue(client, args.url);
+        if (outcome.ok) {
+            return {
+                content: [
+                    {
+                        type: 'text' as const,
+                        text: `Linked ${outcome.ref.repo}#${outcome.ref.number}`,
+                    },
+                ],
+                isError: false,
+            };
+        }
+        return {
+            content: [
+                {
+                    type: 'text' as const,
+                    text: `Failed to link issue: ${outcome.error}`,
+                },
+            ],
+            isError: true,
+        };
+    });
 
     mcp.registerTool<any, any>('display_image', {
         description: `Display a local image file to the human user inline in the current HAPI chat session. ${DISPLAY_IMAGE_PROMPT_CURSOR}`,
@@ -611,8 +646,8 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
     }));
 
     const toolNames = enableChangeTitle
-        ? ['change_title', 'display_image', 'display_video', 'display_media', 'list_peers', 'search_content', 'ping_peer', 'inspect_peer']
-        : ['display_image', 'display_video', 'display_media', 'list_peers', 'search_content', 'ping_peer', 'inspect_peer'];
+        ? ['change_title', 'link_issue', 'display_image', 'display_video', 'display_media', 'list_peers', 'search_content', 'ping_peer', 'inspect_peer']
+        : ['link_issue', 'display_image', 'display_video', 'display_media', 'list_peers', 'search_content', 'ping_peer', 'inspect_peer'];
     if (options.skillLookup) {
         toolNames.push('skill_lookup');
     }

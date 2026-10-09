@@ -20,6 +20,12 @@ import {
 import { App } from '@/App'
 import { SessionChat } from '@/components/SessionChat'
 import { SessionList } from '@/components/SessionList'
+import { SessionsModeSwitch, type SessionsMode } from '@/components/SessionsModeSwitch'
+import { TodoBoardList } from '@/components/TodoBoardList'
+import { TodoItemDetail } from '@/components/TodoItemDetail'
+import { resolveTodoItemDirectory } from '@/lib/resolveTodoItemDirectory'
+import { buildTodoItemSpawnMessage } from '@/lib/todoItemSpawnMessage'
+import type { TodoBoardItem } from '@/types/api'
 import { NewSession } from '@/components/NewSession'
 import { WorkspaceBrowser } from '@/components/WorkspaceBrowser'
 import { LoadingState } from '@/components/LoadingState'
@@ -30,6 +36,10 @@ import { useSidebarResize } from '@/hooks/useSidebarResize'
 import { useMessages } from '@/hooks/queries/useMessages'
 import { useMachines } from '@/hooks/queries/useMachines'
 import { useMachineLabels } from '@/hooks/useMachineLabels'
+import { useTodoBoards } from '@/hooks/queries/useTodoBoards'
+import { useTodoBoardItems } from '@/hooks/queries/useTodoBoardItems'
+import { useTodoBoardSelection } from '@/hooks/useTodoBoardSelection'
+import { useTodoBoardActions } from '@/hooks/mutations/useTodoBoardActions'
 import { useSession } from '@/hooks/queries/useSession'
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
 import { useSessions } from '@/hooks/queries/useSessions'
@@ -210,6 +220,69 @@ function SessionsPage() {
     useSelectedSessionSeen(selectedSessionId, selectedSession?.updatedAt)
     const isSessionsIndex = pathname === '/sessions' || pathname === '/sessions/'
     const sidebar = useSidebarResize()
+    const [sessionsMode, setSessionsMode] = useState<SessionsMode>('sessions')
+    const {
+        boards: todoBoards,
+        isLoading: todoBoardsLoading,
+        error: todoBoardsError,
+    } = useTodoBoards(api, sessionsMode === 'todo')
+    const { selectedBoardId, setSelectedBoardId } = useTodoBoardSelection()
+    const effectiveBoardId = useMemo(() => {
+        if (selectedBoardId && todoBoards.some(board => board.id === selectedBoardId)) {
+            return selectedBoardId
+        }
+        return todoBoards[0]?.id ?? null
+    }, [selectedBoardId, todoBoards])
+    const {
+        items: todoItems,
+        statusOrder: todoStatusOrder,
+        doneValues: todoDoneValues,
+        isLoading: todoItemsLoading,
+        error: todoItemsError,
+    } = useTodoBoardItems(api, sessionsMode === 'todo' ? effectiveBoardId : null)
+    const { addBoard: addTodoBoard, removeBoard: removeTodoBoard } = useTodoBoardActions(api)
+    const [selectedTodoItemId, setSelectedTodoItemId] = useState<string | null>(null)
+    useEffect(() => {
+        setSelectedTodoItemId(null)
+    }, [sessionsMode, effectiveBoardId])
+    const selectedTodoItem = useMemo(
+        () => (selectedTodoItemId ? todoItems.find(item => item.id === selectedTodoItemId) ?? null : null),
+        [selectedTodoItemId, todoItems]
+    )
+    // Item detail reuses the session-detail right-pane slot, so it needs the
+    // same mobile show/hide signal `isSessionsIndex` drives for sessions —
+    // but it's local state, not a route, so it has to opt in explicitly here
+    // rather than coming from `pathname` for free. Branching on `sessionsMode`
+    // (not `!isSessionsIndex || selectedTodoItem !== null`) matters: mode
+    // switching never touches the URL, so a session route can still be live
+    // underneath while the operator is in To-Do mode — without this branch,
+    // switching to To-Do mode with no item selected yet would leave the
+    // previous session's chat showing in the right pane on mobile instead of
+    // the to-do list, since `isSessionsIndex` alone has no idea a mode
+    // switch happened.
+    const hasRightPaneContent = sessionsMode === 'todo' ? selectedTodoItem !== null : !isSessionsIndex
+    const handleSpawnFromTodoItem = useCallback((item: TodoBoardItem) => {
+        const resolved = resolveTodoItemDirectory(item.repo, sessions)
+        // `/sessions/new` is a sibling route under the same `/sessions`
+        // parent, so SessionsPage never remounts — without clearing the
+        // selected item (and switching back to Sessions mode, so
+        // `hasRightPaneContent` stops gating on `selectedTodoItem`), the
+        // right pane would keep rendering the stale TodoItemDetail instead
+        // of <Outlet/> picking up the new-session form; the URL would change
+        // but the screen wouldn't.
+        setSelectedTodoItemId(null)
+        setSessionsMode('sessions')
+        navigate({
+            to: '/sessions/new',
+            search: {
+                ...(resolved ? { directory: resolved.directory } : {}),
+                ...(resolved ? { machineId: resolved.machineId } : {}),
+                initialMessage: buildTodoItemSpawnMessage(item),
+                ...(item.url ? { linkIssueUrl: item.url } : {}),
+            },
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
+        })
+    }, [navigate, sessions, setSelectedTodoItemId, setSessionsMode])
     const handleNewSessionInDirectory = useCallback((args: { machineId: string | null; directory: string }) => {
         navigate({
             to: '/sessions/new',
@@ -224,15 +297,34 @@ function SessionsPage() {
         <>
             <div className="flex h-full min-h-0">
             <div
-                className={`${isSessionsIndex ? 'flex' : 'hidden split:flex'} w-full shrink-0 flex-col bg-[var(--app-bg)]`}
+                className={`${hasRightPaneContent ? 'hidden split:flex' : 'flex'} w-full shrink-0 flex-col bg-[var(--app-bg)]`}
                 style={{ '--sidebar-w': `${sidebar.width}px` } as React.CSSProperties}
             >
                 <div className="flex min-h-0 flex-1 flex-col pt-[env(safe-area-inset-top)]">
+                    <div className="mx-auto w-full max-w-content shrink-0">
+                        <SessionsModeSwitch mode={sessionsMode} onChange={setSessionsMode} />
+                    </div>
                     {error ? (
                         <div className="mx-auto w-full max-w-content px-3 py-2">
                             <div className="text-sm text-red-600">{error}</div>
                         </div>
                     ) : null}
+                    {sessionsMode === 'todo' ? (
+                        <TodoBoardList
+                            boards={todoBoards}
+                            selectedBoardId={effectiveBoardId}
+                            onSelectBoard={setSelectedBoardId}
+                            onAddBoard={addTodoBoard}
+                            onRemoveBoard={removeTodoBoard}
+                            items={todoItems}
+                            statusOrder={todoStatusOrder}
+                            doneValues={todoDoneValues}
+                            isLoading={todoBoardsLoading || todoItemsLoading}
+                            error={todoBoardsError ?? todoItemsError}
+                            selectedItemId={selectedTodoItemId}
+                            onSelectItem={(item) => setSelectedTodoItemId(item.id)}
+                        />
+                    ) : (
                     <SessionList
                         key={initializedHub === baseUrl ? 'last-seen-ready' : 'last-seen-pending'}
                         sessions={sessions}
@@ -285,6 +377,7 @@ function SessionsPage() {
                         machineLabelsById={machineLabelsById}
                         machinesById={machinesById}
                     />
+                    )}
                 </div>
             </div>
 
@@ -295,9 +388,17 @@ function SessionsPage() {
                 onPointerDown={sidebar.onPointerDown}
             />
 
-            <div className={`${isSessionsIndex ? 'hidden split:flex' : 'flex'} min-w-0 flex-1 flex-col bg-[var(--app-bg)]`}>
+            <div className={`${hasRightPaneContent ? 'flex' : 'hidden split:flex'} min-w-0 flex-1 flex-col bg-[var(--app-bg)]`}>
                 <div className="flex-1 min-h-0">
-                    <Outlet />
+                    {selectedTodoItem ? (
+                        <TodoItemDetail
+                            item={selectedTodoItem}
+                            onBack={() => setSelectedTodoItemId(null)}
+                            onSpawn={() => handleSpawnFromTodoItem(selectedTodoItem)}
+                        />
+                    ) : (
+                        <Outlet />
+                    )}
                 </div>
             </div>
             </div>
@@ -902,7 +1003,8 @@ function NewSessionPage() {
     const queryClient = useQueryClient()
     const { machines, isLoading: machinesLoading, error: machinesError } = useMachines(api, true)
     const { t } = useTranslation()
-    const { directory: initialDirectory, machineId: initialMachineId, shareTransferId } = newSessionRoute.useSearch()
+    const { addToast } = useToast()
+    const { directory: initialDirectory, machineId: initialMachineId, shareTransferId, initialMessage, linkIssueUrl } = newSessionRoute.useSearch()
 
     const handleCancel = useCallback(() => {
         if (shareTransferId) {
@@ -917,6 +1019,19 @@ function NewSessionPage() {
     const handleSuccess = useCallback((sessionId: string) => {
         if (shareTransferId) {
             setSharePendingTransfer(shareTransferId, sessionId)
+        }
+        if (linkIssueUrl && api) {
+            // Fire-and-forget: a failed link shouldn't block the spawn flow the
+            // operator is already mid-navigation through. The session still
+            // exists and is usable without its issue chip.
+            api.linkIssue(sessionId, linkIssueUrl).catch(() => {
+                addToast({
+                    title: t('todo.detail.linkIssueFailed'),
+                    body: t('todo.detail.linkIssueFailedBody', { url: linkIssueUrl }),
+                    sessionId,
+                    url: ''
+                })
+            })
         }
         void queryClient.invalidateQueries({ queryKey: queryKeys.sessions })
         // Replace current page with /sessions to clear spawn flow from history
@@ -933,7 +1048,7 @@ function NewSessionPage() {
                 ...PRESERVE_SESSION_SIDEBAR_SCROLL,
             })
         })
-    }, [navigate, queryClient, shareTransferId])
+    }, [navigate, queryClient, shareTransferId, linkIssueUrl, api, addToast, t])
 
     const handleChooseFolder = useCallback((args: { machineId: string | null; directory: string }) => {
         // Forward the currently-selected machine so /browse opens scoped to
@@ -981,6 +1096,7 @@ function NewSessionPage() {
                     onChooseFolder={handleChooseFolder}
                     initialDirectory={initialDirectory}
                     initialMachineId={initialMachineId}
+                    initialMessage={initialMessage}
                 />
             </div>
         </div>
@@ -1144,6 +1260,8 @@ type NewSessionSearch = {
     directory?: string
     machineId?: string
     shareTransferId?: string
+    initialMessage?: string
+    linkIssueUrl?: string
 }
 
 const newSessionRoute = createRoute({
@@ -1159,6 +1277,12 @@ const newSessionRoute = createRoute({
         }
         if (typeof search.shareTransferId === 'string' && search.shareTransferId) {
             result.shareTransferId = search.shareTransferId
+        }
+        if (typeof search.initialMessage === 'string' && search.initialMessage) {
+            result.initialMessage = search.initialMessage
+        }
+        if (typeof search.linkIssueUrl === 'string' && search.linkIssueUrl) {
+            result.linkIssueUrl = search.linkIssueUrl
         }
         return result
     },
