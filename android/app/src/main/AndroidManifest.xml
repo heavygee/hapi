@@ -123,10 +123,14 @@
         <!-- Wear OS companion bridge: the watch has no hub credentials of
              its own, so every :wear screen is really a remote view onto
              this service (session list / transcript / approve / deny /
-             reply), over the Wearable Data Layer. -->
+             reply), over the Wearable Data Layer. exported=true is required
+             here, not a loosening: GMS (a different uid) must bind to
+             deliver DATA_CHANGED, and the data payload itself is only ever
+             relayed through GMS's local Data Layer storage, never a public
+             surface another app can call directly. -->
         <service
             android:name=".wear.PhoneWearListenerService"
-            android:exported="false">
+            android:exported="true">
             <intent-filter>
                 <action android:name="com.google.android.gms.wearable.DATA_CHANGED" />
                 <data

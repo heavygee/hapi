@@ -67,8 +67,18 @@ when the *phone* side (not the watch) answers the same request first.
 **Validation status:** `:core:protocol:test`, `:core:data:testDebugUnitTest`
 (including a new `WearTranscriptTest`), `:app:testDebugUnitTest`,
 `:app:assembleDebug`/`:wear:assembleDebug`, and `:app:lintDebug`/`:wear:lintDebug`
-all pass. Not yet installed on physical Wear OS hardware — no watch was
-available in the environment this was built in.
+all pass. Installed on a real phone + Wear OS pair (Pixel + Pixel Watch,
+Bluetooth-bonded): session list, transcript (real hub content rendering
+correctly, agent-flavor text extraction included), and the Reply action's
+system mic/keyboard sheet (`RemoteInputIntentHelper`) all confirmed working
+end-to-end over the Data Layer. One real bug this caught that no unit test or
+lint pass would have: `PhoneWearListenerService` needs `android:exported="true"`
+— GMS binds to it from a different uid to deliver `DATA_CHANGED`, so
+`exported="false"` silently drops every watch request with a
+`SecurityException` in `WearableService`'s own log, never the app's. Not yet
+exercised: a full approve/deny/reply round-trip typing real text on-device
+(the system keyboard sheet opens correctly; completing entry needs an actual
+watch keyboard tap sequence, which is impractical to drive over `adb`).
 
 ## Building
 
