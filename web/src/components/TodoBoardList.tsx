@@ -95,8 +95,14 @@ function TodoItemCard(props: { item: TodoBoardItem; muted: boolean }) {
     return (
         <div
             className={cn(
-                'relative mb-2 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] p-3 transition-all',
-                muted ? 'opacity-60' : 'hover:border-[var(--app-link)]/40 hover:shadow-sm'
+                'relative mb-2 rounded-lg border border-[var(--app-border)] p-3 transition-all',
+                // Persistent (not hover-only) accent wash on active cards —
+                // operator feedback that a hover-only `/40` touch is invisible
+                // in a static view. `--app-link-muted` now derives from a
+                // custom accent (see useThemeColors.ts), so this reacts live
+                // to Settings > Display > Theme Colors > accent. Done/muted
+                // cards stay neutral, reinforcing the fold-fade treatment.
+                muted ? 'bg-[var(--app-bg)] opacity-60' : 'bg-[var(--app-link-muted)] hover:border-[var(--app-link)]/40 hover:shadow-sm'
             )}
         >
             {item.url ? (
