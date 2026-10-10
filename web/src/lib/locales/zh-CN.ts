@@ -95,6 +95,8 @@ export default {
   'sessions.filter.label': '筛选会话',
   'sessions.filter.section': '会话状态',
   'sessions.filter.unread': '未读',
+  'sessions.filter.active': '活跃',
+  'sessions.filter.working': '工作中',
   'sessions.filter.scratchlist': '草稿夹',
   'sessions.filter.blocked': '已阻塞',
   'sessions.filter.date': '日期',

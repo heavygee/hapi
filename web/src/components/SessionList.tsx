@@ -648,6 +648,22 @@ export function filterActiveSessionsOnly(sessions: SessionSummary[], selectedSes
     )
 }
 
+/**
+ * Working lens (#2002): match the In-progress "working" bucket — connected and
+ * mid-turn (`thinking`) or running background agent tasks. Keep the open
+ * session visible so toggling never yanks the main pane.
+ */
+export function filterWorkingSessionsOnly(
+    sessions: SessionSummary[],
+    selectedSessionId?: string | null
+): SessionSummary[] {
+    return sessions.filter(session =>
+        session.id === selectedSessionId
+        || (session.active === true
+            && (session.thinking || (session.backgroundTaskCount ?? 0) > 0))
+    )
+}
+
 // Transient unread lens: hide sessions the operator has already seen.
 // Keep the open session visible. Not Overseer / "needs attention" — just unread.
 export function filterUnreadSessionsOnly(
@@ -1876,6 +1892,8 @@ export function SessionList(props: {
     const [sessionFilters, setSessionFilters] = useState<SessionListFilterState>(DEFAULT_SESSION_LIST_FILTER_STATE)
     const showScratchlistOnly = sessionFilters.scratchlist
     const showBlockedOnly = sessionFilters.blocked
+    const showActiveOnly = sessionFilters.active
+    const showWorkingOnly = sessionFilters.working
     const {
         sessionIds: scratchlistSessionIds,
         isLoading: isScratchlistStatusLoading,
@@ -1906,7 +1924,12 @@ export function SessionList(props: {
     const contentSearchActive = searchMode === 'content' && normalizedQuery.length > 0
     const contentSearchReady = contentSearchActive
         && Array.from(normalizedQuery).length >= MIN_CONTENT_SEARCH_QUERY_LENGTH
-    const isFiltering = isSearchFiltering || sessionFilters.unread || sessionFilters.scratchlist || showBlockedOnly
+    const isFiltering = isSearchFiltering
+        || sessionFilters.unread
+        || showActiveOnly
+        || showWorkingOnly
+        || sessionFilters.scratchlist
+        || showBlockedOnly
 
     useEffect(() => {
         // 中文注释：监听导入标记变化，让列表在“导入完成”或“用户已在 Hapi 中继续会话”后立即刷新时间文案。
@@ -2116,6 +2139,14 @@ export function SessionList(props: {
                 selectedSessionId,
                 id => lastSeenById[id] ?? 0
             )
+        }
+        // Active / Working are AND-composed with the other lenses (#2002).
+        // Active reuses the Settings helper; Working matches the running bucket.
+        if (sessionFilters.active) {
+            filtered = filterActiveSessionsOnly(filtered, selectedSessionId)
+        }
+        if (sessionFilters.working) {
+            filtered = filterWorkingSessionsOnly(filtered, selectedSessionId)
         }
         if (sessionFilters.scratchlist) {
             if (isScratchlistStatusLoading || scratchlistStatusError) {

@@ -95,6 +95,8 @@ export default {
   'sessions.filter.label': 'Filter sessions',
   'sessions.filter.section': 'Session',
   'sessions.filter.unread': 'Unread',
+  'sessions.filter.active': 'Active',
+  'sessions.filter.working': 'Working',
   'sessions.filter.scratchlist': 'Scratchlist',
   'sessions.filter.blocked': 'Blocked',
   'sessions.filter.date': 'Date',
