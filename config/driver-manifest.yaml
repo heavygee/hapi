@@ -809,8 +809,8 @@ layers:
   # on soup tip after #1931 --machine (do NOT use fat driver/1922-peer-rename-proof
   # @ 2290c737f / 45f ABSORB_FAT — tip-forward conflicted). Thin tip 3c/27f.
   # Worktree: ~/coding/hapi/worktrees/1922-parent-stamp-delta
-  # Tip: c8ceb9600 — queryKeys import fix for remat typecheck; re-thin after dogfood bump.
-  # Hub+web → remat --build-web + restart.
+  # Tip: 56fb7cda7 — complete NewSession port + hubSettings test seed; keep soup initialMessage.
+  # Hub+web → remat --build-web + restart. 5c/31f (under fat gate).
   # Upstream PR stays https://github.com/tiann/hapi/pull/1922 — no second PR.
   - branch: driver/1922-parent-stamp-delta
 
