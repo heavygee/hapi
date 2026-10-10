@@ -1,0 +1,23 @@
+[Unit]
+Description=HAPI local CI (oos-linux Test bridge for heavygee/hapi)
+Documentation=file:///home/heavygee/coding/hapi/docs/tooling/local-ci.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Prefer PATH that includes bun + gh for the heavygee user.
+Environment=HOME=/home/heavygee
+Environment=PATH=/home/heavygee/.bun/bin:/home/heavygee/.local/bin:/usr/local/bin:/usr/bin:/bin
+# Full suite is heavy; timer fires often — keep e2e on, but allow override in drop-in.
+# Environment=HAPI_LOCAL_CI_SKIP_E2E=1
+# Installed copy — sync from scripts/tooling/hapi-local-ci.sh after merge.
+# Main tip only by default (add --prs in a drop-in when backlog is cleared).
+ExecStart=/home/heavygee/.local/bin/hapi-local-ci --once
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+TimeoutStartSec=7200
+
+[Install]
+WantedBy=default.target
