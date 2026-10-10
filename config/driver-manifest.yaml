@@ -1025,6 +1025,15 @@ layers:
   # held thin deltas did.
   - branch: driver/1996-consolidate-blocked-filter
 
+  # tiann/hapi#2002 — Active + Working lenses in the combined session list filter menu.
+  # Active = connected/non-archived (filterActiveSessionsOnly); Working = thinking or
+  # backgroundTaskCount (In-progress working bucket). Ephemeral AND-compose like unread/blocked.
+  # Worktree: ~/coding/hapi/worktrees/session-filter-active-working
+  # Tip: fb502599d — 1 commit / 7 files on live driver tip (cf595c7e8).
+  # Remat order: after driver/1996-consolidate-blocked-filter (extends that menu).
+  # Needs --build-web. Remat owner: this peer (feature promote).
+  - branch: driver/2002-session-filter-active-working
+
   # DROPPED 2026-10-08: driver/claude-model-catalog (+ delta) — operator call via Overseer.
   # Upstream tiann/hapi#1605 CLOSED unmerged (2026-10-02); absent from soup tip; unmissed.
   # No re-thin / no quiet return. Want it later → fresh PR off upstream/main.
