@@ -1362,4 +1362,627 @@ describe('NewSession launch preferences', () => {
             model: 'opencode-go/deepseek-v4-pro',
         }))
     })
+
+    it('seeds Codex hub defaults on a fresh browser before sticky keys are written', async () => {
+        localStorage.clear()
+        let resolveSettings!: (value: unknown) => void
+        const deferred = new Promise((resolve) => {
+            resolveSettings = resolve
+        })
+        const slowApi = {
+            getHubSettings: vi.fn(() => deferred)
+        } as unknown as ApiClient
+
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        render(
+            <QueryClientProvider client={client}>
+                <NewSession
+                    api={slowApi}
+                    machines={[machine]}
+                    initialMachineId="machine-1"
+                    initialDirectory="C:\\repo"
+                    onSuccess={mocks.onSuccess}
+                    onCancel={() => {}}
+                />
+            </QueryClientProvider>
+        )
+
+        expect(screen.getByTestId('create')).toBeDisabled()
+
+        await act(async () => {
+            resolveSettings({
+                sessionSummaryContract: false,
+                sessionSummaryInChat: false,
+                peerSpawnDefaults: {
+                    agent: 'codex',
+                    permissionMode: 'read-only',
+                    models: { codex: 'gpt-5' }
+                }
+            })
+            await deferred
+        })
+
+        await waitFor(() => {
+            expect(screen.getByTestId('permission-mode')).toHaveTextContent('read-only')
+        })
+        expect(screen.getByTestId('create')).not.toBeDisabled()
+    })
+
+    it('keeps Create disabled while getHubSettings is pending', async () => {
+        localStorage.clear()
+        const deferred = new Promise(() => {})
+        const slowApi = {
+            getHubSettings: vi.fn(() => deferred)
+        } as unknown as ApiClient
+
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        render(
+            <QueryClientProvider client={client}>
+                <NewSession
+                    api={slowApi}
+                    machines={[machine]}
+                    initialMachineId="machine-1"
+                    initialDirectory="C:\\repo"
+                    onSuccess={mocks.onSuccess}
+                    onCancel={() => {}}
+                />
+            </QueryClientProvider>
+        )
+
+        expect(screen.getByTestId('create')).toBeDisabled()
+        fireEvent.click(screen.getByTestId('create'))
+        expect(mocks.spawnSession).not.toHaveBeenCalled()
+    })
+
+    it('keeps an explicit Default permission when hub settings resolve after the edit', async () => {
+        localStorage.clear()
+        let resolveSettings!: (value: unknown) => void
+        const deferred = new Promise((resolve) => {
+            resolveSettings = resolve
+        })
+        const slowApi = {
+            getHubSettings: vi.fn(() => deferred)
+        } as unknown as ApiClient
+
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        render(
+            <QueryClientProvider client={client}>
+                <NewSession
+                    api={slowApi}
+                    machines={[machine]}
+                    initialMachineId="machine-1"
+                    initialDirectory="C:\\repo"
+                    onSuccess={mocks.onSuccess}
+                    onCancel={() => {}}
+                />
+            </QueryClientProvider>
+        )
+
+        // Explicit Default (same value as mount default) must still count as an edit.
+        fireEvent.click(screen.getByTestId('permission-mode-default'))
+        expect(screen.getByTestId('permission-mode')).toHaveTextContent('default')
+
+        await act(async () => {
+            resolveSettings({
+                sessionSummaryContract: false,
+                sessionSummaryInChat: false,
+                peerSpawnDefaults: {
+                    agent: 'claude',
+                    permissionMode: 'bypassPermissions',
+                    models: { claude: 'sonnet' }
+                }
+            })
+            await deferred
+        })
+
+        await waitFor(() => {
+            expect(screen.getByTestId('permission-mode')).toHaveTextContent('default')
+        })
+    })
+
+    it('keeps Cursor Plan when hub settings resolve late with a different agent default', async () => {
+        localStorage.clear()
+        let resolveSettings!: (value: unknown) => void
+        const deferred = new Promise((resolve) => {
+            resolveSettings = resolve
+        })
+        const slowApi = {
+            getHubSettings: vi.fn(() => deferred)
+        } as unknown as ApiClient
+
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        render(
+            <QueryClientProvider client={client}>
+                <NewSession
+                    api={slowApi}
+                    machines={[machine]}
+                    initialMachineId="machine-1"
+                    initialDirectory="C:\\repo"
+                    onSuccess={mocks.onSuccess}
+                    onCancel={() => {}}
+                />
+            </QueryClientProvider>
+        )
+
+        fireEvent.click(screen.getByDisplayValue('cursor'))
+        fireEvent.click(screen.getByTestId('permission-mode-plan'))
+        expect(screen.getByTestId('permission-mode')).toHaveTextContent('plan')
+
+        await act(async () => {
+            resolveSettings({
+                sessionSummaryContract: false,
+                sessionSummaryInChat: false,
+                peerSpawnDefaults: {
+                    agent: 'codex',
+                    permissionMode: 'yolo',
+                    models: { codex: 'gpt-5' }
+                }
+            })
+            await deferred
+        })
+
+        await waitFor(() => {
+            expect(screen.getByTestId('permission-mode')).toHaveTextContent('plan')
+        })
+
+        act(() => {
+            mocks.spawnSession.mockImplementation(async () => ({ type: 'success', sessionId: 'session-1' }))
+        })
+        fireEvent.click(screen.getByTestId('create'))
+        await waitFor(() => expect(mocks.onSuccess).toHaveBeenCalledWith('session-1'))
+        expect(mocks.spawnSession).toHaveBeenCalledWith(expect.objectContaining({
+            agent: 'cursor',
+            permissionMode: 'plan'
+        }))
+    })
+
+    it('seeds Grok Plan from delayed hub defaults after agent initialization', async () => {
+        localStorage.clear()
+        let resolveSettings!: (value: unknown) => void
+        const deferred = new Promise((resolve) => {
+            resolveSettings = resolve
+        })
+        const slowApi = {
+            getHubSettings: vi.fn(() => deferred)
+        } as unknown as ApiClient
+
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        render(
+            <QueryClientProvider client={client}>
+                <NewSession
+                    api={slowApi}
+                    machines={[machine]}
+                    initialMachineId="machine-1"
+                    initialDirectory="C:\\repo"
+                    onSuccess={mocks.onSuccess}
+                    onCancel={() => {}}
+                />
+            </QueryClientProvider>
+        )
+
+        await act(async () => {
+            resolveSettings({
+                sessionSummaryContract: false,
+                sessionSummaryInChat: false,
+                peerSpawnDefaults: {
+                    agent: 'grok',
+                    permissionMode: 'plan',
+                    models: {}
+                }
+            })
+            await deferred
+        })
+
+        await waitFor(() => {
+            expect(screen.getByTestId('permission-mode')).toHaveTextContent('plan')
+        })
+
+        act(() => {
+            mocks.spawnSession.mockImplementation(async () => ({ type: 'success', sessionId: 'session-1' }))
+        })
+        fireEvent.click(screen.getByTestId('create'))
+        await waitFor(() => expect(mocks.onSuccess).toHaveBeenCalledWith('session-1'))
+        expect(mocks.spawnSession).toHaveBeenCalledWith(expect.objectContaining({
+            agent: 'grok',
+            permissionMode: 'plan'
+        }))
+    })
+
+    it('applies delayed hub permission with a sticky agent and no launch prefs', async () => {
+        localStorage.clear()
+        savePreferredAgent('codex')
+        let resolveSettings!: (value: unknown) => void
+        const deferred = new Promise((resolve) => {
+            resolveSettings = resolve
+        })
+        const slowApi = {
+            getHubSettings: vi.fn(() => deferred)
+        } as unknown as ApiClient
+
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        render(
+            <QueryClientProvider client={client}>
+                <NewSession
+                    api={slowApi}
+                    machines={[machine]}
+                    initialMachineId="machine-1"
+                    initialDirectory="C:\\repo"
+                    onSuccess={mocks.onSuccess}
+                    onCancel={() => {}}
+                />
+            </QueryClientProvider>
+        )
+
+        expect(screen.getByTestId('permission-mode')).toHaveTextContent('default')
+
+        await act(async () => {
+            resolveSettings({
+                sessionSummaryContract: false,
+                sessionSummaryInChat: false,
+                peerSpawnDefaults: {
+                    agent: 'claude',
+                    permissionMode: 'read-only',
+                    models: { claude: 'sonnet' }
+                }
+            })
+            await deferred
+        })
+
+        await waitFor(() => {
+            expect(screen.getByTestId('permission-mode')).toHaveTextContent('read-only')
+        })
+        expect(screen.getByDisplayValue('codex')).toBeChecked()
+    })
+
+    it('preserves a saved Default model over a cached hub model', async () => {
+        localStorage.clear()
+        savePreferredAgent('claude')
+        savePreferredLaunchSettings('machine-1', 'claude', {
+            model: 'auto',
+            cursorSelectedBase: 'auto',
+            effort: 'auto',
+            modelReasoningEffort: 'default',
+            permissionMode: 'default'
+        })
+        mocks.spawnSession.mockResolvedValue({ type: 'success', sessionId: 'session-1' })
+
+        renderWithQuery(
+            <NewSession
+                api={api}
+                machines={[machine]}
+                initialMachineId="machine-1"
+                initialDirectory="C:\\repo"
+                onSuccess={mocks.onSuccess}
+                onCancel={() => {}}
+            />
+        )
+
+        await waitFor(() => {
+            expect(screen.getByTestId('model')).toHaveTextContent('auto')
+        })
+        await waitFor(() => expect(screen.getByTestId('create')).toBeEnabled())
+        fireEvent.click(screen.getByTestId('create'))
+        await waitFor(() => expect(mocks.onSuccess).toHaveBeenCalledWith('session-1'))
+        expect(mocks.spawnSession).toHaveBeenCalledWith(expect.objectContaining({
+            agent: 'claude'
+        }))
+        expect(mocks.spawnSession.mock.calls[0]![0].model).toBeUndefined()
+    })
+
+    it('seeds OpenCode model state from hub when no launch preference exists', async () => {
+        localStorage.clear()
+        mocks.opencodeModels = [
+            { modelId: 'provider/hub-model', name: 'Hub' },
+            { modelId: 'provider/current', name: 'Current' }
+        ]
+        mocks.opencodeCurrentModelId = 'provider/current'
+        const hubApi = {
+            getHubSettings: vi.fn().mockResolvedValue({
+                sessionSummaryContract: false,
+                sessionSummaryInChat: false,
+                peerSpawnDefaults: {
+                    agent: 'opencode',
+                    permissionMode: 'default',
+                    models: { opencode: 'provider/hub-model' }
+                }
+            })
+        } as unknown as ApiClient
+
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        client.setQueryData(queryKeys.hubSettings, {
+            sessionSummaryContract: false,
+            sessionSummaryInChat: false,
+            peerSpawnDefaults: {
+                agent: 'opencode',
+                permissionMode: 'default',
+                models: { opencode: 'provider/hub-model' }
+            }
+        })
+        render(
+            <QueryClientProvider client={client}>
+                <NewSession
+                    api={hubApi}
+                    machines={[machine]}
+                    initialMachineId="machine-1"
+                    initialDirectory="C:\\repo"
+                    onSuccess={mocks.onSuccess}
+                    onCancel={() => {}}
+                />
+            </QueryClientProvider>
+        )
+
+        await waitFor(() => {
+            expect(screen.getByTestId('opencode-model')).toHaveTextContent('provider/hub-model')
+        })
+    })
+
+    it('migrates Cursor YOLO=false over hub yolo into native Default', async () => {
+        localStorage.clear()
+        savePreferredAgent('cursor')
+        savePreferredYoloMode(false)
+        mocks.spawnSession.mockResolvedValue({ type: 'success', sessionId: 'session-1' })
+        const hubApi = {
+            getHubSettings: vi.fn().mockResolvedValue({
+                sessionSummaryContract: false,
+                sessionSummaryInChat: false,
+                peerSpawnDefaults: {
+                    agent: 'cursor',
+                    permissionMode: 'yolo',
+                    models: {}
+                }
+            })
+        } as unknown as ApiClient
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        client.setQueryData(queryKeys.hubSettings, {
+            sessionSummaryContract: false,
+            sessionSummaryInChat: false,
+            peerSpawnDefaults: {
+                agent: 'cursor',
+                permissionMode: 'yolo',
+                models: {}
+            }
+        })
+        render(
+            <QueryClientProvider client={client}>
+                <NewSession
+                    api={hubApi}
+                    machines={[machine]}
+                    initialMachineId="machine-1"
+                    initialDirectory="C:\\repo"
+                    onSuccess={mocks.onSuccess}
+                    onCancel={() => {}}
+                />
+            </QueryClientProvider>
+        )
+
+        await waitFor(() => {
+            expect(screen.getByDisplayValue('cursor')).toBeChecked()
+            expect(screen.getByTestId('permission-mode')).toHaveTextContent('default')
+        })
+        await waitFor(() => expect(screen.getByTestId('create')).toBeEnabled())
+        fireEvent.click(screen.getByTestId('create'))
+        await waitFor(() => expect(mocks.onSuccess).toHaveBeenCalledWith('session-1'))
+        expect(mocks.spawnSession).toHaveBeenCalledWith(expect.objectContaining({
+            agent: 'cursor',
+            permissionMode: 'default'
+        }))
+    })
+
+    it('does not apply Cursor YOLO migration after switching agent before hub settings', async () => {
+        localStorage.clear()
+        savePreferredAgent('cursor')
+        savePreferredYoloMode(true)
+        let resolveSettings!: (value: unknown) => void
+        const deferred = new Promise((resolve) => {
+            resolveSettings = resolve
+        })
+        const slowApi = {
+            getHubSettings: vi.fn(() => deferred)
+        } as unknown as ApiClient
+
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        render(
+            <QueryClientProvider client={client}>
+                <NewSession
+                    api={slowApi}
+                    machines={[machine]}
+                    initialMachineId="machine-1"
+                    initialDirectory="C:\\repo"
+                    onSuccess={mocks.onSuccess}
+                    onCancel={() => {}}
+                />
+            </QueryClientProvider>
+        )
+
+        fireEvent.click(screen.getByDisplayValue('codex'))
+        await waitFor(() => expect(screen.getByDisplayValue('codex')).toBeChecked())
+        expect(screen.getByTestId('permission-mode')).toHaveTextContent('default')
+
+        await act(async () => {
+            resolveSettings({
+                sessionSummaryContract: false,
+                sessionSummaryInChat: false,
+                peerSpawnDefaults: {
+                    agent: 'codex',
+                    permissionMode: 'read-only',
+                    models: {}
+                }
+            })
+            await deferred
+        })
+
+        await waitFor(() => {
+            expect(screen.getByDisplayValue('codex')).toBeChecked()
+            // Hub read-only — not Cursor sticky YOLO → yolo
+            expect(screen.getByTestId('permission-mode')).toHaveTextContent('read-only')
+        })
+    })
+
+    it('keeps an explicit Claude model when hub settings resolve late with Codex', async () => {
+        localStorage.clear()
+        let resolveSettings!: (value: unknown) => void
+        const deferred = new Promise((resolve) => {
+            resolveSettings = resolve
+        })
+        const slowApi = {
+            getHubSettings: vi.fn(() => deferred)
+        } as unknown as ApiClient
+        mocks.spawnSession.mockResolvedValue({ type: 'success', sessionId: 'session-1' })
+
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        render(
+            <QueryClientProvider client={client}>
+                <NewSession
+                    api={slowApi}
+                    machines={[machine]}
+                    initialMachineId="machine-1"
+                    initialDirectory="C:\\repo"
+                    onSuccess={mocks.onSuccess}
+                    onCancel={() => {}}
+                />
+            </QueryClientProvider>
+        )
+
+        expect(screen.getByDisplayValue('claude')).toBeChecked()
+        fireEvent.click(screen.getByTestId('model'))
+        expect(screen.getByTestId('model')).toHaveTextContent(mocks.nextModelValue)
+
+        await act(async () => {
+            resolveSettings({
+                sessionSummaryContract: false,
+                sessionSummaryInChat: false,
+                peerSpawnDefaults: {
+                    agent: 'codex',
+                    permissionMode: 'read-only',
+                    models: { codex: 'gpt-5' }
+                }
+            })
+            await deferred
+        })
+
+        await waitFor(() => {
+            expect(screen.getByDisplayValue('claude')).toBeChecked()
+            expect(screen.getByTestId('model')).toHaveTextContent(mocks.nextModelValue)
+        })
+        await waitFor(() => expect(screen.getByTestId('create')).toBeEnabled())
+        fireEvent.click(screen.getByTestId('create'))
+        await waitFor(() => expect(mocks.onSuccess).toHaveBeenCalledWith('session-1'))
+        expect(mocks.spawnSession).toHaveBeenCalledWith(expect.objectContaining({
+            agent: 'claude',
+            model: mocks.nextModelValue
+        }))
+    })
+
+    it('keeps an explicit OpenCode Default when hub settings resolve late', async () => {
+        localStorage.clear()
+        mocks.opencodeModels = [
+            { modelId: 'provider/hub-model', name: 'Hub' },
+            { modelId: 'provider/current', name: 'Current' }
+        ]
+        mocks.opencodeCurrentModelId = 'provider/current'
+        mocks.spawnSession.mockResolvedValue({ type: 'success', sessionId: 'session-1' })
+        let resolveSettings!: (value: unknown) => void
+        const deferred = new Promise((resolve) => {
+            resolveSettings = resolve
+        })
+        const slowApi = {
+            getHubSettings: vi.fn(() => deferred)
+        } as unknown as ApiClient
+
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        render(
+            <QueryClientProvider client={client}>
+                <NewSession
+                    api={slowApi}
+                    machines={[machine]}
+                    initialMachineId="machine-1"
+                    initialDirectory="C:\\repo"
+                    onSuccess={mocks.onSuccess}
+                    onCancel={() => {}}
+                />
+            </QueryClientProvider>
+        )
+
+        fireEvent.click(screen.getByDisplayValue('opencode'))
+        fireEvent.click(screen.getByTestId('opencode-model-default'))
+        expect(screen.getByTestId('opencode-model')).toHaveTextContent('default')
+
+        await act(async () => {
+            resolveSettings({
+                sessionSummaryContract: false,
+                sessionSummaryInChat: false,
+                peerSpawnDefaults: {
+                    agent: 'opencode',
+                    permissionMode: 'default',
+                    models: { opencode: 'provider/hub-model' }
+                }
+            })
+            await deferred
+        })
+
+        await waitFor(() => {
+            expect(screen.getByTestId('opencode-model')).toHaveTextContent('default')
+        })
+        await waitFor(() => expect(screen.getByTestId('create')).toBeEnabled())
+        fireEvent.click(screen.getByTestId('create'))
+        await waitFor(() => expect(mocks.onSuccess).toHaveBeenCalledWith('session-1'))
+        expect(mocks.spawnSession).toHaveBeenCalledWith(expect.objectContaining({
+            agent: 'opencode',
+            model: undefined
+        }))
+    })
+
+    it('seeds AGY spawn model from hub when no launch preference exists', async () => {
+        localStorage.clear()
+        mocks.agyModels = [
+            { modelId: 'hub-agy-model', name: 'Hub AGY' },
+            { modelId: 'gemini-3.6-flash-low', name: 'Gemini 3.6 Flash (Low)' }
+        ]
+        mocks.spawnSession.mockResolvedValue({ type: 'success', sessionId: 'session-1' })
+        const hubApi = {
+            getHubSettings: vi.fn().mockResolvedValue({
+                sessionSummaryContract: false,
+                sessionSummaryInChat: false,
+                peerSpawnDefaults: {
+                    agent: 'agy',
+                    permissionMode: 'default',
+                    models: { agy: 'hub-agy-model' }
+                }
+            })
+        } as unknown as ApiClient
+
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        client.setQueryData(queryKeys.hubSettings, {
+            sessionSummaryContract: false,
+            sessionSummaryInChat: false,
+            peerSpawnDefaults: {
+                agent: 'agy',
+                permissionMode: 'default',
+                models: { agy: 'hub-agy-model' }
+            }
+        })
+        render(
+            <QueryClientProvider client={client}>
+                <NewSession
+                    api={hubApi}
+                    machines={[machine]}
+                    initialMachineId="machine-1"
+                    initialDirectory="C:\\repo"
+                    onSuccess={mocks.onSuccess}
+                    onCancel={() => {}}
+                />
+            </QueryClientProvider>
+        )
+
+        await waitFor(() => {
+            expect(screen.getByTestId('agy-model')).toHaveTextContent('hub-agy-model')
+        })
+        await waitFor(() => expect(screen.getByTestId('create')).toBeEnabled())
+        fireEvent.click(screen.getByTestId('create'))
+        await waitFor(() => expect(mocks.onSuccess).toHaveBeenCalledWith('session-1'))
+        expect(mocks.spawnSession).toHaveBeenCalledWith(expect.objectContaining({
+            agent: 'agy',
+            model: 'hub-agy-model'
+        }))
+    })
 })
