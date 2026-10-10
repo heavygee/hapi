@@ -175,6 +175,8 @@ describe('SessionList machine filter', () => {
         expect(Array.from(menu.querySelectorAll('[role="menuitemradio"], [role="menuitemcheckbox"], [role="menuitem"]')).map((item) => item.textContent?.replace(/\s+/g, ''))).toEqual([
             'Unread',
             'Date',
+            'Active',
+            'Working',
             'Scratchlist',
             'Blocked',
             'All(2)',
@@ -188,7 +190,7 @@ describe('SessionList machine filter', () => {
 })
 
 describe('SessionList session filter menu', () => {
-    it('lists unread, date, scratchlist, and blocked and closes when clicking outside', () => {
+    it('lists unread, date, active, working, scratchlist, and blocked and closes when clicking outside', () => {
         renderSessionList([
             makeSession({ id: 'session-1', metadata: { path: '/work/hapi', name: 'Session one' } })
         ])
@@ -199,6 +201,8 @@ describe('SessionList session filter menu', () => {
         expect(Array.from(menu.querySelectorAll('[role="menuitemradio"], [role="menuitemcheckbox"], [role="menuitem"]')).map((item) => item.textContent)).toEqual([
             'Unread',
             'Date',
+            'Active',
+            'Working',
             'Scratchlist',
             'Blocked'
         ])
