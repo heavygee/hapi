@@ -208,7 +208,8 @@
 }
 .opdock-stage { position: absolute; inset: 0; pointer-events: none; }
 .opdock-shot {
-  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+  /* fill (not cover): capture is viewport-sized (#430); cover center-crops full-page shots. */
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill;
   pointer-events: none;
 }
 /* #271: full-viewport draw — Cancel/Send foot removed (mic=send, H=cancel). */
