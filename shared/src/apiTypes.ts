@@ -1010,7 +1010,7 @@ export type TodoBoardItem = {
     url: string | null
     number: number | null
     repo: string | null
-    state: 'OPEN' | 'CLOSED' | null
+    state: 'OPEN' | 'CLOSED' | 'MERGED' | null
     status: string | null
     updatedAt: string | null
     body: string | null

@@ -36,8 +36,20 @@ export type ResolvedTodoItemDirectory = {
  * match" is the safer call: the operator still gets a fully normal
  * new-session flow (per #235's explicit zero-match behavior) instead of a
  * silently wrong pre-fill.
+ *
+ * `onlineMachineIds` further restricts matches to machines that are
+ * *currently* online (`/api/machines`, which only lists online runners) —
+ * without this, a basename match from a historical session whose runner
+ * went offline would still return that machine id, and `NewSession` would
+ * then silently swap in a different (online) machine while keeping the
+ * nonexistent directory, pairing a path from one host with another
+ * (hapi#238 Codex review).
  */
-export function resolveTodoItemDirectory(repo: string | null, sessions: SessionSummary[]): ResolvedTodoItemDirectory | null {
+export function resolveTodoItemDirectory(
+    repo: string | null,
+    sessions: SessionSummary[],
+    onlineMachineIds: ReadonlySet<string>
+): ResolvedTodoItemDirectory | null {
     if (!repo) {
         return null
     }
@@ -47,7 +59,7 @@ export function resolveTodoItemDirectory(repo: string | null, sessions: SessionS
     }
 
     const match = groupSessionsByDirectory(sessions).find(
-        group => group.machineId !== null && basename(group.directory).toLowerCase() === repoName
+        group => group.machineId !== null && onlineMachineIds.has(group.machineId) && basename(group.directory).toLowerCase() === repoName
     )
     if (!match || !match.machineId) {
         return null

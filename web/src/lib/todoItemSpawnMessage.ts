@@ -1,8 +1,8 @@
 import type { TodoBoardItem } from '@/types/api'
 
-// Keeps the whole message comfortably under practical URL length limits
-// (it travels as a `/sessions/new` search param, not a dedicated transfer
-// mechanism — see router.tsx's `initialMessage`) even for a long issue body.
+// Caps how much of a long issue body gets seeded into the first composer
+// message, independent of transport — the briefing travels via
+// sessionStorage (lib/todoSpawnBriefing.ts), not the URL.
 const MAX_BODY_LENGTH = 1000
 
 /**

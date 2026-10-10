@@ -25,6 +25,8 @@ import { TodoBoardList } from '@/components/TodoBoardList'
 import { TodoItemDetail } from '@/components/TodoItemDetail'
 import { resolveTodoItemDirectory } from '@/lib/resolveTodoItemDirectory'
 import { buildTodoItemSpawnMessage } from '@/lib/todoItemSpawnMessage'
+import { clearTodoSpawnBriefing, peekTodoSpawnBriefing, stashTodoSpawnBriefing } from '@/lib/todoSpawnBriefing'
+import { parseIssueUrl } from '@hapi/protocol/schemas'
 import type { TodoBoardItem } from '@/types/api'
 import { NewSession } from '@/components/NewSession'
 import { WorkspaceBrowser } from '@/components/WorkspaceBrowser'
@@ -261,8 +263,20 @@ function SessionsPage() {
     // the to-do list, since `isSessionsIndex` alone has no idea a mode
     // switch happened.
     const hasRightPaneContent = sessionsMode === 'todo' ? selectedTodoItem !== null : !isSessionsIndex
+    const onlineMachineIds = useMemo(() => new Set(machines.map(m => m.id)), [machines])
     const handleSpawnFromTodoItem = useCallback((item: TodoBoardItem) => {
-        const resolved = resolveTodoItemDirectory(item.repo, sessions)
+        const resolved = resolveTodoItemDirectory(item.repo, sessions, onlineMachineIds)
+        // Only attempt the auto-link for a real GitHub issue URL — board
+        // items can also be pull requests or draft issues, and parseIssueUrl
+        // only recognizes `/issues/<n>`. Linking a PR URL always 400s on the
+        // hub, so skip it rather than spawn with a guaranteed failure toast
+        // (hapi#238 Codex review; PR-kind refs are out of scope for now, see
+        // ExternalRefSchema's doc comment in shared/src/schemas.ts).
+        const linkIssueUrl = item.url && parseIssueUrl(item.url) ? item.url : undefined
+        const briefingId = stashTodoSpawnBriefing({
+            initialMessage: buildTodoItemSpawnMessage(item),
+            linkIssueUrl
+        })
         // `/sessions/new` is a sibling route under the same `/sessions`
         // parent, so SessionsPage never remounts — without clearing the
         // selected item (and switching back to Sessions mode, so
@@ -277,12 +291,11 @@ function SessionsPage() {
             search: {
                 ...(resolved ? { directory: resolved.directory } : {}),
                 ...(resolved ? { machineId: resolved.machineId } : {}),
-                initialMessage: buildTodoItemSpawnMessage(item),
-                ...(item.url ? { linkIssueUrl: item.url } : {}),
+                briefingId,
             },
             ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
-    }, [navigate, sessions, setSelectedTodoItemId, setSessionsMode])
+    }, [navigate, sessions, onlineMachineIds, setSelectedTodoItemId, setSessionsMode])
     const handleNewSessionInDirectory = useCallback((args: { machineId: string | null; directory: string }) => {
         navigate({
             to: '/sessions/new',
@@ -304,7 +317,7 @@ function SessionsPage() {
                     <div className="mx-auto w-full max-w-content shrink-0">
                         <SessionsModeSwitch mode={sessionsMode} onChange={setSessionsMode} />
                     </div>
-                    {error ? (
+                    {error && sessionsMode === 'sessions' ? (
                         <div className="mx-auto w-full max-w-content px-3 py-2">
                             <div className="text-sm text-red-600">{error}</div>
                         </div>
@@ -1004,22 +1017,30 @@ function NewSessionPage() {
     const { machines, isLoading: machinesLoading, error: machinesError } = useMachines(api, true)
     const { t } = useTranslation()
     const { addToast } = useToast()
-    const { directory: initialDirectory, machineId: initialMachineId, shareTransferId, initialMessage, linkIssueUrl } = newSessionRoute.useSearch()
+    const { directory: initialDirectory, machineId: initialMachineId, shareTransferId, briefingId } = newSessionRoute.useSearch()
+    // Peek, not take — `handleChooseFolder` can round-trip through /browse
+    // and back to this same route with the same briefingId before the
+    // session is created, remounting this component each time.
+    const briefing = useMemo(() => briefingId ? peekTodoSpawnBriefing(briefingId) : null, [briefingId])
 
     const handleCancel = useCallback(() => {
         if (shareTransferId) {
             void deleteShareTransfer(shareTransferId)
         }
+        if (briefingId) {
+            clearTodoSpawnBriefing(briefingId)
+        }
         navigate({
             to: '/sessions',
             ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
-    }, [navigate, shareTransferId])
+    }, [navigate, shareTransferId, briefingId])
 
     const handleSuccess = useCallback((sessionId: string) => {
         if (shareTransferId) {
             setSharePendingTransfer(shareTransferId, sessionId)
         }
+        const linkIssueUrl = briefing?.linkIssueUrl
         if (linkIssueUrl && api) {
             // Fire-and-forget: a failed link shouldn't block the spawn flow the
             // operator is already mid-navigation through. The session still
@@ -1032,6 +1053,9 @@ function NewSessionPage() {
                     url: ''
                 })
             })
+        }
+        if (briefingId) {
+            clearTodoSpawnBriefing(briefingId)
         }
         void queryClient.invalidateQueries({ queryKey: queryKeys.sessions })
         // Replace current page with /sessions to clear spawn flow from history
@@ -1048,19 +1072,21 @@ function NewSessionPage() {
                 ...PRESERVE_SESSION_SIDEBAR_SCROLL,
             })
         })
-    }, [navigate, queryClient, shareTransferId, linkIssueUrl, api, addToast, t])
+    }, [navigate, queryClient, shareTransferId, briefing, briefingId, api, addToast, t])
 
     const handleChooseFolder = useCallback((args: { machineId: string | null; directory: string }) => {
         // Forward the currently-selected machine so /browse opens scoped to
         // it rather than falling back to `hapi:lastMachineId`, which can
         // disagree if the user changed machines without yet creating a
-        // session. Preserve shareTransferId so a share-target spawn that
-        // detours through /browse still seeds the composer after success.
-        const search: { machineId?: string; shareTransferId?: string } = {}
+        // session. Preserve shareTransferId/briefingId so a share-target or
+        // to-do spawn that detours through /browse still seeds the composer
+        // (and auto-links its issue) after success.
+        const search: { machineId?: string; shareTransferId?: string; briefingId?: string } = {}
         if (args.machineId) search.machineId = args.machineId
         if (shareTransferId) search.shareTransferId = shareTransferId
+        if (briefingId) search.briefingId = briefingId
         navigate({ to: '/browse', search })
-    }, [navigate, shareTransferId])
+    }, [navigate, shareTransferId, briefingId])
 
     return (
         <div className="flex h-full min-h-0 flex-col">
@@ -1096,7 +1122,7 @@ function NewSessionPage() {
                     onChooseFolder={handleChooseFolder}
                     initialDirectory={initialDirectory}
                     initialMachineId={initialMachineId}
-                    initialMessage={initialMessage}
+                    initialMessage={briefing?.initialMessage}
                 />
             </div>
         </div>
@@ -1109,16 +1135,19 @@ function BrowsePage() {
     const goBack = useAppGoBack()
     const { machines, isLoading: machinesLoading } = useMachines(api, true)
     const { t } = useTranslation()
-    const { machineId: initialMachineId, shareTransferId } = browseRoute.useSearch()
+    const { machineId: initialMachineId, shareTransferId, briefingId } = browseRoute.useSearch()
 
     const handleStartSession = useCallback((machineId: string, directory: string) => {
         navigate({
             to: '/sessions/new',
-            search: shareTransferId
-                ? { directory, machineId, shareTransferId }
-                : { directory, machineId }
+            search: {
+                directory,
+                machineId,
+                ...(shareTransferId ? { shareTransferId } : {}),
+                ...(briefingId ? { briefingId } : {}),
+            }
         })
-    }, [navigate, shareTransferId])
+    }, [navigate, shareTransferId, briefingId])
 
     return (
         <div className="flex h-full min-h-0 flex-col">
@@ -1260,8 +1289,11 @@ type NewSessionSearch = {
     directory?: string
     machineId?: string
     shareTransferId?: string
-    initialMessage?: string
-    linkIssueUrl?: string
+    // Opaque id into sessionStorage (see lib/todoSpawnBriefing.ts) — the
+    // actual briefing text/issue URL never goes in the URL itself (hapi#238
+    // Codex review: that leaked private board content into browser history
+    // and access logs).
+    briefingId?: string
 }
 
 const newSessionRoute = createRoute({
@@ -1278,11 +1310,8 @@ const newSessionRoute = createRoute({
         if (typeof search.shareTransferId === 'string' && search.shareTransferId) {
             result.shareTransferId = search.shareTransferId
         }
-        if (typeof search.initialMessage === 'string' && search.initialMessage) {
-            result.initialMessage = search.initialMessage
-        }
-        if (typeof search.linkIssueUrl === 'string' && search.linkIssueUrl) {
-            result.linkIssueUrl = search.linkIssueUrl
+        if (typeof search.briefingId === 'string' && search.briefingId) {
+            result.briefingId = search.briefingId
         }
         return result
     },
@@ -1292,13 +1321,16 @@ const newSessionRoute = createRoute({
 const browseRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: '/browse',
-    validateSearch: (search: Record<string, unknown>): { machineId?: string; shareTransferId?: string } => {
-        const result: { machineId?: string; shareTransferId?: string } = {}
+    validateSearch: (search: Record<string, unknown>): { machineId?: string; shareTransferId?: string; briefingId?: string } => {
+        const result: { machineId?: string; shareTransferId?: string; briefingId?: string } = {}
         if (typeof search.machineId === 'string' && search.machineId) {
             result.machineId = search.machineId
         }
         if (typeof search.shareTransferId === 'string' && search.shareTransferId) {
             result.shareTransferId = search.shareTransferId
+        }
+        if (typeof search.briefingId === 'string' && search.briefingId) {
+            result.briefingId = search.briefingId
         }
         return result
     },

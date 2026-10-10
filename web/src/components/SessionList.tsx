@@ -1061,11 +1061,20 @@ function SessionItem(props: {
     )
     return (
         <>
-            <button
-                type="button"
+            {/* A plain focusable div, not a <button> — SessionRowSummary can
+                render a real nested link (IssueRefChip), and interactive
+                content inside a native <button> is invalid: the link becomes
+                unreachable by keyboard (native buttons don't allow focusable
+                descendants) and mouse activation on it also fires the
+                button's own handlers (hapi#238 Codex review). useLongPress's
+                onKeyDown already implements Enter/Space activation itself,
+                so no native button semantics are lost by switching. */}
+            <div
+                role="button"
+                tabIndex={0}
                 {...longPressHandlers}
                 data-session-scroll-anchor
-                className={`session-list-item group/session-row flex w-full flex-col gap-1 py-2 pl-2.5 pr-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none rounded-lg ${selected ? 'bg-[var(--app-secondary-bg)]' : ''}`}
+                className={`session-list-item group/session-row flex w-full flex-col gap-1 py-2 pl-2.5 pr-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none rounded-lg cursor-pointer ${selected ? 'bg-[var(--app-secondary-bg)]' : ''}`}
                 style={{ WebkitTouchCallout: 'none' }}
                 aria-current={selected ? 'page' : undefined}
                 aria-describedby={describedBy}
@@ -1083,7 +1092,7 @@ function SessionItem(props: {
                     projectLabel={projectLabel}
                     machineLabel={machineLabel}
                 />
-            </button>
+            </div>
 
             <SessionActionMenu
                 isOpen={menuOpen}

@@ -26,6 +26,12 @@ export function useTodoBoardItems(api: ApiClient | null, boardId: string | null)
             return await api.getTodoBoardItems(boardId)
         },
         enabled: Boolean(api && boardId),
+        // GitHub-side changes produce no HAPI SSE event and the global query
+        // client disables refetch-on-focus, so without polling the board can
+        // stay stale indefinitely while the view remains open. Pauses
+        // automatically while the tab is backgrounded (refetchIntervalInBackground
+        // defaults to false).
+        refetchInterval: 60_000,
     })
 
     return {

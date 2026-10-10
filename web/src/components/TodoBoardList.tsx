@@ -12,7 +12,11 @@ import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
 
 type StatusGroup = {
-    status: string
+    // `null` means "no status assigned" — kept distinct from a string so a
+    // board with a real status column literally named "noStatus" can't
+    // collide with the missing-status bucket (same React key, mislabeled
+    // group header).
+    status: string | null
     items: TodoBoardItem[]
     isDone: boolean
 }
@@ -72,7 +76,7 @@ export function groupItemsByStatus(items: TodoBoardItem[], statusOrder: string[]
         isDone: false
     }))
     if (noStatus.length > 0) {
-        openGroups.push({ status: 'noStatus', items: noStatus, isDone: false })
+        openGroups.push({ status: null, items: noStatus, isDone: false })
     }
 
     return { openGroups, doneItems }
@@ -169,7 +173,7 @@ export function TodoBoardList(props: {
     const groupsWithDot = useMemo(() => {
         let colorIndex = -1
         return openGroups.map((group) => {
-            const isNoStatus = group.status === 'noStatus'
+            const isNoStatus = group.status === null
             if (!isNoStatus) colorIndex += 1
             return { group, isNoStatus, dotClass: isNoStatus ? 'bg-[var(--app-hint)]' : statusDotClass(colorIndex) }
         })
@@ -244,7 +248,7 @@ export function TodoBoardList(props: {
                 ) : (
                     <>
                         {groupsWithDot.map(({ group, isNoStatus, dotClass }) => (
-                            <div key={group.status} className="mb-3">
+                            <div key={group.status ?? '__no_status__'} className="mb-3">
                                 <div className="flex items-center gap-1.5 px-1 py-1 text-xs font-semibold uppercase tracking-wide text-[var(--app-hint)]">
                                     <span aria-hidden className={cn('h-2 w-2 shrink-0 rounded-full', dotClass)} />
                                     {isNoStatus ? t('todo.noStatus') : group.status} ({group.items.length})

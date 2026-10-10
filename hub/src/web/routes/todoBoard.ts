@@ -51,12 +51,20 @@ export function makeBoardId(host: string, ownerLogin: string, projectNumber: num
     return [host, ownerLogin, String(projectNumber)].map(encodeURIComponent).join('::')
 }
 
+// GraphQL's Int is a non-fractional signed 32-bit value — a project number
+// outside that range always 404s against `$number: Int!`, so reject it here
+// instead of advertising a board that can never load.
+const MAX_GRAPHQL_INT = 2_147_483_647
+function isValidProjectNumber(value: number): boolean {
+    return Number.isInteger(value) && value > 0 && value <= MAX_GRAPHQL_INT
+}
+
 function readEnvTodoBoardConfig(): StoredTodoBoard {
     const host = process.env.HAPI_TODO_BOARD_HOST?.trim() || DEFAULT_TODO_BOARD.host
     const ownerLogin = process.env.HAPI_TODO_BOARD_OWNER?.trim() || DEFAULT_TODO_BOARD.ownerLogin
     const numberRaw = process.env.HAPI_TODO_BOARD_NUMBER?.trim()
     const parsedNumber = numberRaw ? Number(numberRaw) : NaN
-    const projectNumber = Number.isFinite(parsedNumber) && parsedNumber > 0 ? parsedNumber : DEFAULT_TODO_BOARD.projectNumber
+    const projectNumber = isValidProjectNumber(parsedNumber) ? parsedNumber : DEFAULT_TODO_BOARD.projectNumber
     const statusFieldName = process.env.HAPI_TODO_BOARD_STATUS_FIELD?.trim() || DEFAULT_TODO_BOARD.statusFieldName
     const doneValuesRaw = process.env.HAPI_TODO_BOARD_DONE_VALUES?.trim()
     const doneValues = doneValuesRaw
@@ -180,6 +188,9 @@ type GhProjectV2Response = {
                 title?: string
                 field?: { options?: Array<{ name: string }> } | null
                 items?: {
+                    // GitHub's ProjectV2ItemConnection declares `nodes` as
+                    // `[ProjectV2Item]` — individual entries can be null
+                    // (e.g. an item the viewer lost access to).
                     nodes?: Array<{
                         id: string
                         content: {
@@ -187,13 +198,13 @@ type GhProjectV2Response = {
                             title?: string
                             number?: number
                             url?: string
-                            state?: 'OPEN' | 'CLOSED'
+                            state?: 'OPEN' | 'CLOSED' | 'MERGED'
                             updatedAt?: string
                             body?: string
                             repository?: { nameWithOwner: string }
                         } | null
                         fieldValueByName?: { name: string } | null
-                    }>
+                    } | null>
                 } | null
             } | null
         } | null
@@ -234,7 +245,11 @@ async function execGhGraphql(host: string, query: string, variables: Record<stri
         args.push(typeof value === 'number' ? '-F' : '-f', `${key}=${value}`)
     }
     try {
-        const result = await execFileAsync('gh', args, { encoding: 'utf-8', timeout: GH_TIMEOUT_MS })
+        // Node's execFile defaults maxBuffer to 1MB — the items query pulls
+        // every item's full markdown body (up to 100 items), which can
+        // exceed that on a board with long descriptions; without raising it
+        // here `gh` gets SIGTERM'd mid-response and the whole board 502s.
+        const result = await execFileAsync('gh', args, { encoding: 'utf-8', timeout: GH_TIMEOUT_MS, maxBuffer: 20 * 1024 * 1024 })
         return result.stdout
     } catch (error) {
         if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
@@ -274,7 +289,7 @@ function mapItems(response: GhProjectV2Response): TodoBoardItem[] {
     const nodes = response.data?.repositoryOwner?.projectV2?.items?.nodes ?? []
     const items: TodoBoardItem[] = []
     for (const node of nodes) {
-        if (!node.content) {
+        if (!node?.content) {
             continue
         }
         items.push({
@@ -307,15 +322,38 @@ export function parseProjectUrl(url: string): { host: string; ownerLogin: string
     }
     const [, host, ownerLogin, numberRaw] = match
     const projectNumber = Number(numberRaw)
-    if (!Number.isFinite(projectNumber) || projectNumber <= 0) {
+    if (!isValidProjectNumber(projectNumber)) {
         return null
     }
     return { host: host!, ownerLogin: ownerLogin!, projectNumber }
 }
 
+// Board hosts default to github.com only — a board-add request's host comes
+// straight from a JWT caller's POST body and is passed to `gh api
+// --hostname`, which resolves credentials (including any
+// GH_ENTERPRISE_TOKEN/GITHUB_ENTERPRISE_TOKEN) for that host. Without an
+// allowlist, an attacker-controlled hostname in the URL would make the hub
+// send its own enterprise token to that host. Operators who actually run a
+// GHE board add it explicitly via HAPI_TODO_BOARD_ALLOWED_HOSTS.
+function getAllowedBoardHosts(): string[] {
+    const raw = process.env.HAPI_TODO_BOARD_ALLOWED_HOSTS?.trim()
+    if (!raw) {
+        return ['github.com']
+    }
+    return raw.split(',').map(host => host.trim().toLowerCase()).filter(Boolean)
+}
+
 function toSummary(board: StoredTodoBoard): { id: string; label: string } {
     return { id: board.id, label: board.label }
 }
+
+// To-do boards are read with the hub process's own host-wide `gh` auth, not
+// per-namespace credentials. On a hub with more than one JWT namespace, any
+// namespace could otherwise request the configured board (which may name a
+// real, non-public project via HAPI_TODO_BOARD_*) and get its titles and
+// drafts back through the operator's own authenticated session. Scope the
+// whole feature to the owner namespace, same pattern as hub-settings/usage.
+const OWNER_ONLY_ERROR = 'To-do boards are only available to the hub owner'
 
 export function createTodoBoardRoutes(
     dataDir: string,
@@ -325,12 +363,18 @@ export function createTodoBoardRoutes(
     const app = new Hono<WebAppEnv>()
 
     app.get('/todo-boards', async (c) => {
+        if (c.get('namespace') !== 'default') {
+            return c.json({ error: OWNER_ONLY_ERROR }, 403)
+        }
         const boards = await loadTodoBoards(dataDir)
         const body: TodoBoardsResponse = { boards: boards.map(toSummary) }
         return c.json(body)
     })
 
     app.post('/todo-boards', async (c) => {
+        if (c.get('namespace') !== 'default') {
+            return c.json({ error: OWNER_ONLY_ERROR }, 403)
+        }
         const json = await c.req.json().catch(() => null)
         const parsed = AddTodoBoardRequestSchema.safeParse(json)
         if (!parsed.success) {
@@ -339,6 +383,10 @@ export function createTodoBoardRoutes(
         const target = parseProjectUrl(parsed.data.url)
         if (!target) {
             return c.json({ error: 'Could not parse a GitHub Projects URL (expected e.g. https://github.com/users/<handle>/projects/<n> or .../orgs/<org>/projects/<n>)' }, 400)
+        }
+        const allowedHosts = getAllowedBoardHosts()
+        if (!allowedHosts.includes(target.host.toLowerCase())) {
+            return c.json({ error: `Host "${target.host}" is not in the allowed board hosts (${allowedHosts.join(', ')}). Set HAPI_TODO_BOARD_ALLOWED_HOSTS to permit it.` }, 400)
         }
 
         let ghResponse: GhProjectTitleResponse
@@ -378,6 +426,9 @@ export function createTodoBoardRoutes(
     })
 
     app.delete('/todo-boards/:id', async (c) => {
+        if (c.get('namespace') !== 'default') {
+            return c.json({ error: OWNER_ONLY_ERROR }, 403)
+        }
         const id = c.req.param('id')
         // Safety invariant, non-negotiable: never leave the list empty —
         // enforced inside updateTodoBoards itself, not here. Returning
@@ -394,6 +445,9 @@ export function createTodoBoardRoutes(
     })
 
     app.get('/todo-boards/:id/items', async (c) => {
+        if (c.get('namespace') !== 'default') {
+            return c.json({ error: OWNER_ONLY_ERROR }, 403)
+        }
         const boards = await loadTodoBoards(dataDir)
         const board = boards.find(b => b.id === c.req.param('id'))
         if (!board) {
@@ -406,7 +460,24 @@ export function createTodoBoardRoutes(
                 return c.json({ error: ghResponse.errors.map(e => e.message).join('; ') }, 502)
             }
 
-            const statusOrder = ghResponse.data?.repositoryOwner?.projectV2?.field?.options?.map(o => o.name) ?? []
+            const projectV2 = ghResponse.data?.repositoryOwner?.projectV2
+            if (!projectV2) {
+                // GitHub can return `projectV2: null` with no top-level error
+                // (owner exists, project number doesn't or isn't visible to
+                // the active gh identity) — without this check the route
+                // would 200 with an empty board instead of surfacing why.
+                return c.json({ error: 'Project not found, or not accessible with the current gh auth' }, 404)
+            }
+            if (!projectV2.field) {
+                // `field(name: $statusField)` resolves to null both when no
+                // field has that name and when it exists but isn't a
+                // single-select — either way the configured status field is
+                // wrong, so error instead of silently dumping every item
+                // into "No status".
+                return c.json({ error: `Status field "${board.statusFieldName}" was not found, or is not a single-select field, on this project` }, 502)
+            }
+
+            const statusOrder = projectV2.field.options?.map(o => o.name) ?? []
             const body: TodoBoardItemsResponse = {
                 board: toSummary(board),
                 statusOrder,

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test'
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -13,8 +13,34 @@ const ENV_KEYS = [
     'HAPI_TODO_BOARD_NUMBER',
     'HAPI_TODO_BOARD_STATUS_FIELD',
     'HAPI_TODO_BOARD_DONE_VALUES',
-    'HAPI_TODO_BOARD_LABEL'
+    'HAPI_TODO_BOARD_LABEL',
+    'HAPI_TODO_BOARD_ALLOWED_HOSTS'
 ] as const
+
+// A dev machine actually configured to use this feature plausibly has one or
+// more of these set in its shell already — snapshot and clear them once for
+// the whole suite, then restore the caller's original values afterward,
+// rather than unconditionally deleting them after every test (which would
+// permanently wipe a value this process never set in the first place).
+const originalEnv = new Map<string, string | undefined>()
+
+beforeAll(() => {
+    for (const key of ENV_KEYS) {
+        originalEnv.set(key, process.env[key])
+        delete process.env[key]
+    }
+})
+
+afterAll(() => {
+    for (const key of ENV_KEYS) {
+        const value = originalEnv.get(key)
+        if (value === undefined) {
+            delete process.env[key]
+        } else {
+            process.env[key] = value
+        }
+    }
+})
 
 const directories: string[] = []
 
@@ -27,13 +53,14 @@ afterEach(async () => {
 
 async function createApp(
     runGraphql: Parameters<typeof createTodoBoardRoutes>[1],
-    runGraphqlTitle?: Parameters<typeof createTodoBoardRoutes>[2]
+    runGraphqlTitle?: Parameters<typeof createTodoBoardRoutes>[2],
+    namespace = 'default'
 ) {
     const dataDir = await mkdtemp(join(tmpdir(), 'hapi-todo-board-'))
     directories.push(dataDir)
     const app = new Hono<WebAppEnv>()
     app.use('*', async (c, next) => {
-        c.set('namespace', 'default')
+        c.set('namespace', namespace)
         await next()
     })
     // Default the title lookup to a 404-shaped response (not the real `gh`
@@ -85,6 +112,32 @@ describe('parseProjectUrl', () => {
         expect(parseProjectUrl('not a url at all')).toBeNull()
         expect(parseProjectUrl('https://github.com/users/heavygee/projects/not-a-number')).toBeNull()
     })
+
+    it('rejects a project number that is not a valid GraphQL Int', () => {
+        // $number: Int! is a non-fractional signed 32-bit value — anything
+        // else always fails the subsequent gh api call, so reject it here.
+        expect(parseProjectUrl('https://github.com/users/heavygee/projects/1.5')).toBeNull()
+        expect(parseProjectUrl('https://github.com/users/heavygee/projects/0')).toBeNull()
+        expect(parseProjectUrl('https://github.com/users/heavygee/projects/99999999999')).toBeNull()
+    })
+})
+
+describe('owner-only namespace restriction', () => {
+    it('rejects every board route for a non-default namespace', async () => {
+        const app = await createApp(() => ({ data: {} }), undefined, 'some-other-namespace')
+
+        const list = await app.request('/api/todo-boards')
+        expect(list.status).toBe(403)
+
+        const add = await app.request('/api/todo-boards', { method: 'POST', body: JSON.stringify({ url: 'https://github.com/users/heavygee/projects/6' }) })
+        expect(add.status).toBe(403)
+
+        const del = await app.request('/api/todo-boards/github.com%3A%3Aheavygee%3A%3A6', { method: 'DELETE' })
+        expect(del.status).toBe(403)
+
+        const items = await app.request('/api/todo-boards/github.com%3A%3Aheavygee%3A%3A6/items')
+        expect(items.status).toBe(403)
+    })
 })
 
 describe('GET /api/todo-boards', () => {
@@ -105,6 +158,13 @@ describe('GET /api/todo-boards', () => {
 
     it('ignores a non-numeric board number and falls back to the default', async () => {
         process.env.HAPI_TODO_BOARD_NUMBER = 'not-a-number'
+        const app = await createApp(() => ({ data: {} }))
+        const response = await app.request('/api/todo-boards')
+        expect(await response.json()).toEqual({ boards: [{ id: 'github.com::heavygee::6', label: 'heavygee/6' }] })
+    })
+
+    it('ignores a fractional board number and falls back to the default', async () => {
+        process.env.HAPI_TODO_BOARD_NUMBER = '1.5'
         const app = await createApp(() => ({ data: {} }))
         const response = await app.request('/api/todo-boards')
         expect(await response.json()).toEqual({ boards: [{ id: 'github.com::heavygee::6', label: 'heavygee/6' }] })
@@ -139,6 +199,29 @@ describe('POST /api/todo-boards', () => {
             body: JSON.stringify({ url: 'https://github.com/users/nobody/projects/1' })
         })
         expect(response.status).toBe(404)
+    })
+
+    it('rejects a board host outside the default allowlist (github.com only)', async () => {
+        // A POST-supplied host reaches `gh api --hostname <host>`, which
+        // resolves that host's credentials (including any enterprise
+        // token) — without an allowlist, an attacker-controlled host in
+        // the URL could make the hub leak its own token to it.
+        const app = await createApp(() => ({ data: {} }), () => ({ data: { repositoryOwner: { projectV2: { title: 'x' } } } }))
+        const response = await app.request('/api/todo-boards', {
+            method: 'POST',
+            body: JSON.stringify({ url: 'https://attacker.example/orgs/acme/projects/9' })
+        })
+        expect(response.status).toBe(400)
+    })
+
+    it('allows an explicitly-configured host via HAPI_TODO_BOARD_ALLOWED_HOSTS', async () => {
+        process.env.HAPI_TODO_BOARD_ALLOWED_HOSTS = 'github.com,lhs.ghe.com'
+        const app = await createApp(() => ({ data: {} }), () => ({ data: { repositoryOwner: { projectV2: { title: 'Lockhouse TODO' } } } }))
+        const response = await app.request('/api/todo-boards', {
+            method: 'POST',
+            body: JSON.stringify({ url: 'https://lhs.ghe.com/orgs/lockhouse/projects/3' })
+        })
+        expect(response.status).toBe(200)
     })
 
     it('adds a board, keeping the default in the list (add, not replace), using the project title as the label', async () => {
@@ -282,7 +365,7 @@ describe('GET /api/todo-boards/:id/items', () => {
 
     it('applies HAPI_TODO_BOARD_DONE_VALUES as a comma-separated override', async () => {
         process.env.HAPI_TODO_BOARD_DONE_VALUES = 'Done, Archived'
-        const app = await createApp(() => ({ data: {} }))
+        const app = await createApp(() => ({ data: { repositoryOwner: { projectV2: { field: { options: [] }, items: { nodes: [] } } } } }))
         const response = await app.request('/api/todo-boards/github.com%3A%3Aheavygee%3A%3A6/items')
         const body = await response.json() as TodoBoardItemsResponse
         expect(body.doneValues).toEqual(['Done', 'Archived'])
@@ -302,5 +385,38 @@ describe('GET /api/todo-boards/:id/items', () => {
         const response = await app.request('/api/todo-boards/github.com%3A%3Aheavygee%3A%3A6/items')
         expect(response.status).toBe(502)
         expect(await response.json()).toEqual({ error: 'Could not resolve to a ProjectV2Owner' })
+    })
+
+    it('404s when the configured project is missing or inaccessible (no top-level error)', async () => {
+        // GitHub can return `projectV2: null` without a top-level GraphQL
+        // error (owner exists, project number doesn't or isn't visible) —
+        // without this check the route would 200 with an empty board.
+        const app = await createApp(() => ({ data: { repositoryOwner: {} } }))
+        const response = await app.request('/api/todo-boards/github.com%3A%3Aheavygee%3A%3A6/items')
+        expect(response.status).toBe(404)
+    })
+
+    it('502s when the configured status field is missing or not a single-select', async () => {
+        const app = await createApp(() => ({ data: { repositoryOwner: { projectV2: { field: null, items: { nodes: [] } } } } }))
+        const response = await app.request('/api/todo-boards/github.com%3A%3Aheavygee%3A%3A6/items')
+        expect(response.status).toBe(502)
+    })
+
+    it('skips a null entry in the items nodes array instead of throwing', async () => {
+        const app = await createApp(() => ({
+            data: {
+                repositoryOwner: {
+                    projectV2: {
+                        field: { options: [{ name: 'Done' }] },
+                        items: { nodes: [null, { id: 'item-1', content: { __typename: 'DraftIssue', title: 'Still here' } }] }
+                    }
+                }
+            }
+        }))
+        const response = await app.request('/api/todo-boards/github.com%3A%3Aheavygee%3A%3A6/items')
+        expect(response.status).toBe(200)
+        const body = await response.json() as TodoBoardItemsResponse
+        expect(body.items).toHaveLength(1)
+        expect(body.items[0]?.title).toBe('Still here')
     })
 })
