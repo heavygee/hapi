@@ -796,21 +796,22 @@ layers:
 
   # tiann/hapi#1509 — spawn-peer remit thin tip (Gap A/B + sticky NewSession seed).
   # HOLD 2026-10-06: tip regresses soup bridge/overlay/settings on absorb.
-  # Superseded 2026-10-10 by driver/1922-peer-rename-proof (whole upstream #1922 tip).
+  # Superseded by driver/1931-spawn-machine-delta + driver/1922-parent-stamp-delta.
   # - branch: driver/spawn-peer-remit-delta
 
-  # DROPPED 2026-10-10: driver/1931-spawn-machine-delta — superseded by full #1922
-  # union tip below (Parent stamps + peerSpawnDefaults UI + --machine).
-  # Was: thin cherry-picks 26bd3141c + 17adbcee2 @ 0286b1d70 on soup tip 0ce638a00.
-  # - branch: driver/1931-spawn-machine-delta
+  # tiann/hapi#1931 — thin MCP/CLI spawn_peer --machine (incident 2026-10-10).
+  # Already ancestor of live soup tip d09a28042 (tip-forward skips). Keep for
+  # full-recipe remats. Thin delta @ 0286b1d70. Never set HAPI_DRIVER_MANIFEST
+  # to a stale /tmp copy.
+  - branch: driver/1931-spawn-machine-delta
 
-  # tiann/hapi#1922 (absorbs #1931) — spawn-peer remit + rename-proof Parent stamps
-  # + MCP/CLI --machine. Open upstream PR tip 17adbcee2 unioned onto live soup
-  # tip d09a28042 as single commit (45 files; needs HAPI_REMAT_ABSORB_FAT=1).
-  # Worktree: ~/coding/hapi/worktrees/1922-peer-rename-soup @ driver/1922-peer-rename-proof
-  # Tip: 2290c737f — re-thin after dogfood bump. Hub+web → remat --build-web + restart.
-  # Never set HAPI_DRIVER_MANIFEST to a stale /tmp copy. No second upstream PR.
-  - branch: driver/1922-peer-rename-proof
+  # tiann/hapi#1922 remainder — Parent UUID stamps + peerSpawnDefaults polish
+  # on soup tip after #1931 --machine (do NOT use fat driver/1922-peer-rename-proof
+  # @ 2290c737f / 45f ABSORB_FAT — tip-forward conflicted). Thin tip 3c/27f.
+  # Worktree: ~/coding/hapi/worktrees/1922-parent-stamp-delta
+  # Tip: edaf743e2 — re-thin after dogfood bump. Hub+web → remat --build-web + restart.
+  # Upstream PR stays https://github.com/tiann/hapi/pull/1922 — no second PR.
+  - branch: driver/1922-parent-stamp-delta
 
   # Soup heal: remat 47ce90965 dropped Claude Happy MCP spawn_peer model/effort
   # (Codex bridge kept them). Restore schema + handler forwarding for Claude sessions.
