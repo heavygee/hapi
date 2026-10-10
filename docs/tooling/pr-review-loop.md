@@ -372,6 +372,20 @@ Operator declined the OpenAI API spend (ChatGPT Plus subscription only). So **we
 
 If the operator ever moves to an OpenAI API plan, re-enabling `Codex PR Review` workflow on heavygee/hapi (`gh workflow enable "Codex PR Review" --repo heavygee/hapi`) plus setting `OPENAI_API_KEY`/`OPENAI_BASE_URL` secrets + `OPENAI_MODEL=gpt-5.5` variable would close the gap to true parity. Until then, the fork-stage gate is a useful but architecturally distinct second cold read.
 
+### Fork Codex debt (do not burn reviews for free)
+
+`chatgpt-codex-connector` reviews **every** open `heavygee/hapi` PR. Unresolved P1/P2 threads with no owning HAPI babysit chip are pure quota waste.
+
+**Rules (2026-10-10):**
+
+1. **Chip within the same turn as `gh pr create` / `hapi-pr-create-fork`.** `hapi link-pr` is not optional garnish.
+2. **Owned debt:** Meta chip `needs_work` / ⚠️ + peer must clear unresolved Codex threads (or apply `cold-review-clean` with a written accept/defer reason) before merge.
+3. **Cold-review stage PRs** (`[cold-review]` title or body "Not for merge") are **temporary**. Close them after the upstream PR opens or the pass finishes — do not leave them open for weeks.
+4. **Inventory:** `hapi-fork-codex-debt.sh` (Meta hourly surfaces the top of this list). `--close-cold-review-corpses` closes abandoned stage PRs.
+5. **Bot-verdict accuracy:** fork clean signal may be a PR-level 👍 — see heavygee/hapi#245 (`hapi-pr-status` must honor it).
+
+Kill criterion: any open non-draft fork PR with unresolved non-outdated Codex threads and no chip owner for >48h → Meta soup escalates; cold-review corpses get closed.
+
 ---
 
 ## Finding thread / comment IDs

@@ -1675,6 +1675,25 @@ _print_queue() {
     _print_section "🧹  COMPLETE — babysit ended:" "${Q_COMPLETE[@]:-}"
     _print_section "🌊 WAVE CLEAR (gate A — owned only; orphans never block):" "${Q_WAVE[@]:-}"
     _print_section "❓ ORPHANS (anomaly — do not block wave-clear):" "${Q_ORPHAN[@]:-}"
+    # Fork Codex debt (chatgpt-codex-connector) — unpaid reviews are waste.
+    # Soft-fail if the inventory script is missing or gh flakes.
+    local _debt_bin
+    _debt_bin="$(pec_resolve_tool "$SCRIPT_DIR" "$HAPI_PRIMARY" "${HAPI_META_CODEX_DEBT_BIN:-}" hapi-fork-codex-debt.sh 2>/dev/null || true)"
+    if [[ -n "${_debt_bin:-}" && -x "$_debt_bin" ]]; then
+        local _debt_json
+        if _debt_json="$("$_debt_bin" --json --min-threads 1 2>/dev/null)"; then
+            local -a Q_CODEX_DEBT=()
+            while IFS= read -r line; do
+                [[ -n "$line" ]] && Q_CODEX_DEBT+=("$line")
+            done < <(printf '%s' "$_debt_json" | jq -r '
+                .prs[:12][]
+                | "#\(.number)  codex=\(.codexUnresolved)  \(.title[0:56])  \(.url)"
+              ' 2>/dev/null)
+            local _tot
+            _tot="$(printf '%s' "$_debt_json" | jq -r '"\(.totals.withCodexDebt) PRs / \(.totals.codexThreads) threads"' 2>/dev/null || echo '?')"
+            _print_section "🤖 FORK CODEX DEBT (heavygee/hapi — top 12; total ${_tot}):" "${Q_CODEX_DEBT[@]:-}"
+        fi
+    fi
     _print_section "😴 INACTIVE (policy wanted a ping; session asleep):" "${Q_INACTIVE[@]:-}"
     _print_section "📨 NEW GITHUB COMMS since last run:" "${Q_NOTIF[@]:-}"
     _print_section "✅ RENAMED this run:" "${Q_RENAMED[@]:-}"
