@@ -65,6 +65,8 @@
   // #154 / #209 / #212: keep draw clear of Cancel/Send only — not the FAB pad.
   // #271: markup has no Cancel/Send foot — draw uses the full viewport.
   var markupOpening = false;
+  /** Saved host scroll while markup/capture locks the page (#437). */
+  var hostScrollLock = null;
   // #161/#286/#287/#396 — mirrors lib/dock-privilege.ts + lib/dock-visibility.ts. Keep in sync.
   var LEGACY_EXECUTE_UNTIL = '2026-09-30';
   var legacySunsetWarned = false;
@@ -1289,6 +1291,57 @@
     };
   }
 
+  /**
+   * Re-assert a locked window scroll position (#437).
+   * Extracted for unit tests — freezeHostScroll installs this on scroll.
+   */
+  function reinstateHostScroll(win, locked) {
+    if (!win || !locked) return;
+    var cx = Math.round((typeof win.scrollX === 'number' ? win.scrollX : win.pageXOffset) || 0);
+    var cy = Math.round((typeof win.scrollY === 'number' ? win.scrollY : win.pageYOffset) || 0);
+    if (cx !== locked.x || cy !== locked.y) {
+      win.scrollTo(locked.x, locked.y);
+    }
+  }
+
+  /**
+   * Pin host scroll before markup capture (#437).
+   * html2canvas-pro clones into an iframe; Chrome can scroll the parent on
+   * document.write. Overflow lock alone used to land only in openOverlay
+   * AFTER capture — Quest/Wardrobe operators saw the page jump mid-shot.
+   * Avoid position:fixed here: that would change layout under html2canvas.
+   */
+  function freezeHostScroll() {
+    if (hostScrollLock) {
+      reinstateHostScroll(window, hostScrollLock);
+      return;
+    }
+    var x = Math.round(window.scrollX || window.pageXOffset || 0);
+    var y = Math.round(window.scrollY || window.pageYOffset || 0);
+    hostScrollLock = { x: x, y: y };
+    function onScroll() {
+      if (!hostScrollLock) return;
+      reinstateHostScroll(window, hostScrollLock);
+    }
+    hostScrollLock.onScroll = onScroll;
+    try { document.documentElement.classList.add('opdock-noscroll'); } catch (e) {}
+    try { document.body.classList.add('opdock-noscroll'); } catch (e) {}
+    // Some engines jump scroll when overflow:hidden lands — pin immediately.
+    window.scrollTo(x, y);
+    window.addEventListener('scroll', onScroll, true);
+  }
+
+  function unfreezeHostScroll() {
+    var locked = hostScrollLock;
+    hostScrollLock = null;
+    if (locked && locked.onScroll) {
+      try { window.removeEventListener('scroll', locked.onScroll, true); } catch (e) {}
+    }
+    try { document.documentElement.classList.remove('opdock-noscroll'); } catch (e) {}
+    try { document.body.classList.remove('opdock-noscroll'); } catch (e) {}
+    if (locked) window.scrollTo(locked.x, locked.y);
+  }
+
   function captureScreenshot() {
     if (typeof html2canvas !== 'function') return Promise.resolve(null);
     // Prefer documentElement so html background fills viewport; body max-width leaves white (#200).
@@ -2143,6 +2196,8 @@
     // Without this an operator with no voice AND no screenshot has no way in at all.
     if (!shotDataUrl && !isTextFirst()) {
       toast('Screenshot capture failed — nothing to annotate', 'err');
+      // beginMarkup may have frozen before calling us — do not leave the host pinned.
+      unfreezeHostScroll();
       return;
     }
     overlay = $('div', 'opdock-overlay');
@@ -2195,7 +2250,8 @@
     // #276: mountAsTopLayer(overlay) puts the canvas above the dock in the top layer —
     // full-bleed pointer-events:auto then traps H/mic. Re-assert dock last.
     reassertTopLayerChrome();
-    document.body.classList.add('opdock-noscroll');
+    // #437: freeze may already be held from beginMarkup (pre-capture); idempotent.
+    freezeHostScroll();
     sizeCanvas();
     window.addEventListener('resize', sizeCanvas);
     attachDrawing();
@@ -2285,7 +2341,7 @@
     hideRecordLabel();
     window.removeEventListener('resize', sizeCanvas);
     if (overlay) { forgetTopLayer(overlay); overlay.remove(); overlay = null; }
-    document.body.classList.remove('opdock-noscroll');
+    unfreezeHostScroll();
     // Tell a native host (Android) the capture surface closed, so it can stop its SpeechRecognizer.
     try { if (window.AndroidOperator && window.AndroidOperator.onCaptureDone) window.AndroidOperator.onCaptureDone(); } catch (e) {}
     strokes = []; curStroke = null; shotImg = null; drawCanvas = null; drawCtx = null;
@@ -3310,6 +3366,8 @@
     // #154: serialize capture — Quest triple-taps otherwise race and look "dead".
     if (markupOpening) return;
     strokes = [];
+    // #437: lock host scroll BEFORE capture — html2canvas-pro can scroll the parent.
+    freezeHostScroll();
     var shot = providedShot || (recording ? pendingShot : null);
     if (shot) {
       openOverlay(shot);
@@ -3320,6 +3378,7 @@
     captureScreenshot().then(function (next) {
       markupOpening = false;
       if (!next && !isTextFirst()) {
+        unfreezeHostScroll();
         toast('Screenshot capture failed — nothing to annotate', 'err');
         setBtnState('idle');
         return;
@@ -3333,6 +3392,7 @@
         openOverlay(null);
         return;
       }
+      unfreezeHostScroll();
       setBtnState('idle');
       toast('Screenshot capture failed — nothing to annotate', 'err');
     });
@@ -4345,7 +4405,7 @@
     return entries.slice(0, 16);
   }
   /* BEGIN GENERATED bundled-changelog */
-  var BUNDLED_CHANGELOG_FALLBACK = "## [0.19.3](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.2...v0.19.3) (2026-10-10)\n\n\n### Bug Fixes\n\n* **dock:** align markup capture to visible viewport ([#432](https://github.com/Heavygee-Projects/hapi-inline/issues/432)) ([bf92ad0](https://github.com/Heavygee-Projects/hapi-inline/commit/bf92ad0202b6f6231b237120806e5af5e3f5708f)), closes [#430](https://github.com/Heavygee-Projects/hapi-inline/issues/430)\n\n## [0.19.2](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.1...v0.19.2) (2026-10-10)\n\n\n### Bug Fixes\n\n* **dock:** keep relative /hapi through requestTarget sync ([#421](https://github.com/Heavygee-Projects/hapi-inline/issues/421)) ([200b9bc](https://github.com/Heavygee-Projects/hapi-inline/commit/200b9bcd02e634f57638ab92010813fc8cb6f561))\n\n## [0.19.1](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.0...v0.19.1) (2026-10-10)\n\n\n### Bug Fixes\n\n* **ci:** no-daemon Gradle + empty browser-hub fail-closed ([#425](https://github.com/Heavygee-Projects/hapi-inline/issues/425)) ([#426](https://github.com/Heavygee-Projects/hapi-inline/issues/426)) ([0239196](https://github.com/Heavygee-Projects/hapi-inline/commit/02391963824587609edb5d255b8ac5f893ab8cfc)), closes [#422](https://github.com/Heavygee-Projects/hapi-inline/issues/422)\n\n## [0.19.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.6...v0.19.0) (2026-10-10)\n\n\n### Features\n\n* **android:** Compose browser-hub remote hub URL ([#422](https://github.com/Heavygee-Projects/hapi-inline/issues/422)) ([#423](https://github.com/Heavygee-Projects/hapi-inline/issues/423)) ([93fa328](https://github.com/Heavygee-Projects/hapi-inline/commit/93fa3289008937f4d32e1a8e1493f9cdb9a569c4))\n\n## [0.18.6](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.5...v0.18.6) (2026-10-06)\n\n\n### Bug Fixes\n\n* **dock:** keep live STT under H fan satellites ([e7610d1](https://github.com/Heavygee-Projects/hapi-inline/commit/e7610d1e9dd138957a6064101b496de1560e4303))\n* **dock:** stop repeating Hide and headings in Settings ([#416](https://github.com/Heavygee-Projects/hapi-inline/issues/416)) ([dfefc6a](https://github.com/Heavygee-Projects/hapi-inline/commit/dfefc6a5a610288a608c09aa57c01e55623114a7))\n\n\n### Documentation\n\n* keep changelog and About free of consumer names ([8e944f7](https://github.com/Heavygee-Projects/hapi-inline/commit/8e944f7f91ce21e113b6f11da1c6745db25fe844))\n* restore 0.18.5 functional notes after history rewrite ([3de9659](https://github.com/Heavygee-Projects/hapi-inline/commit/3de9659f947d11f0cdc2f7f9307894eb42301067))\n\n## [0.18.5](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.4...v0.18.5) (2026-10-05)\n\n\n### Bug Fixes\n\n* **compose:** About shows dock version and bundled changelog ([#402](https://github.com/Heavygee-Projects/hapi-inline/issues/402)), closes [#399](https://github.com/Heavygee-Projects/hapi-inline/issues/399)\n* **compose:** accept hub unread 0/1 in session list ([#401](https://github.com/Heavygee-Projects/hapi-inline/issues/401)), closes [#400](https://github.com/Heavygee-Projects/hapi-inline/issues/400)\n* warn once when legacy privilege sunsets to off ([#396](https://github.com/Heavygee-Projects/hapi-inline/issues/396)) ([#397](https://github.com/Heavygee-Projects/hapi-inline/issues/397))\n\n\n### Documentation\n\n* fail-closed deploy requirements for a new consumer ([#384](https://github.com/Heavygee-Projects/hapi-inline/issues/384))\n\n## [0.18.4](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.3...v0.18.4) (2026-09-21)\n\n## [0.18.3](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.2...v0.18.3) (2026-09-21)\n\n## [0.18.2](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.1...v0.18.2) (2026-09-21)\n\n## [0.18.1](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.0...v0.18.1) (2026-09-20)\n\n## [0.18.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.17.0...v0.18.0) (2026-09-20)\n\n## [Unreleased]\n\n## [0.17.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.16.0...v0.17.0) (2026-09-20)\n\n## [0.16.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.12...v0.16.0) (2026-09-20)\n\n## [0.15.12](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.11...v0.15.12) (2026-09-17)\n\n## [0.15.11](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.10...v0.15.11) (2026-09-17)\n\n## [0.15.10](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.9...v0.15.10) (2026-09-17)\n";
+  var BUNDLED_CHANGELOG_FALLBACK = "## [0.19.4](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.3...v0.19.4) (2026-10-10)\n\n\n### Bug Fixes\n\n* **dock:** freeze host scroll before markup capture ([#439](https://github.com/Heavygee-Projects/hapi-inline/issues/439)) ([1dffa4d](https://github.com/Heavygee-Projects/hapi-inline/commit/1dffa4dd11a4da95990ea8064edd31feac450cb0)), closes [#437](https://github.com/Heavygee-Projects/hapi-inline/issues/437)\n\n## [0.19.3](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.2...v0.19.3) (2026-10-10)\n\n\n### Bug Fixes\n\n* **dock:** align markup capture to visible viewport ([#432](https://github.com/Heavygee-Projects/hapi-inline/issues/432)) ([bf92ad0](https://github.com/Heavygee-Projects/hapi-inline/commit/bf92ad0202b6f6231b237120806e5af5e3f5708f)), closes [#430](https://github.com/Heavygee-Projects/hapi-inline/issues/430)\n\n## [0.19.2](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.1...v0.19.2) (2026-10-10)\n\n\n### Bug Fixes\n\n* **dock:** keep relative /hapi through requestTarget sync ([#421](https://github.com/Heavygee-Projects/hapi-inline/issues/421)) ([200b9bc](https://github.com/Heavygee-Projects/hapi-inline/commit/200b9bcd02e634f57638ab92010813fc8cb6f561))\n\n## [0.19.1](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.0...v0.19.1) (2026-10-10)\n\n\n### Bug Fixes\n\n* **ci:** no-daemon Gradle + empty browser-hub fail-closed ([#425](https://github.com/Heavygee-Projects/hapi-inline/issues/425)) ([#426](https://github.com/Heavygee-Projects/hapi-inline/issues/426)) ([0239196](https://github.com/Heavygee-Projects/hapi-inline/commit/02391963824587609edb5d255b8ac5f893ab8cfc)), closes [#422](https://github.com/Heavygee-Projects/hapi-inline/issues/422)\n\n## [0.19.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.6...v0.19.0) (2026-10-10)\n\n\n### Features\n\n* **android:** Compose browser-hub remote hub URL ([#422](https://github.com/Heavygee-Projects/hapi-inline/issues/422)) ([#423](https://github.com/Heavygee-Projects/hapi-inline/issues/423)) ([93fa328](https://github.com/Heavygee-Projects/hapi-inline/commit/93fa3289008937f4d32e1a8e1493f9cdb9a569c4))\n\n## [0.18.6](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.5...v0.18.6) (2026-10-06)\n\n\n### Bug Fixes\n\n* **dock:** keep live STT under H fan satellites ([e7610d1](https://github.com/Heavygee-Projects/hapi-inline/commit/e7610d1e9dd138957a6064101b496de1560e4303))\n* **dock:** stop repeating Hide and headings in Settings ([#416](https://github.com/Heavygee-Projects/hapi-inline/issues/416)) ([dfefc6a](https://github.com/Heavygee-Projects/hapi-inline/commit/dfefc6a5a610288a608c09aa57c01e55623114a7))\n\n\n### Documentation\n\n* keep changelog and About free of consumer names ([8e944f7](https://github.com/Heavygee-Projects/hapi-inline/commit/8e944f7f91ce21e113b6f11da1c6745db25fe844))\n* restore 0.18.5 functional notes after history rewrite ([3de9659](https://github.com/Heavygee-Projects/hapi-inline/commit/3de9659f947d11f0cdc2f7f9307894eb42301067))\n\n## [0.18.5](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.4...v0.18.5) (2026-10-05)\n\n\n### Bug Fixes\n\n* **compose:** About shows dock version and bundled changelog ([#402](https://github.com/Heavygee-Projects/hapi-inline/issues/402)), closes [#399](https://github.com/Heavygee-Projects/hapi-inline/issues/399)\n* **compose:** accept hub unread 0/1 in session list ([#401](https://github.com/Heavygee-Projects/hapi-inline/issues/401)), closes [#400](https://github.com/Heavygee-Projects/hapi-inline/issues/400)\n* warn once when legacy privilege sunsets to off ([#396](https://github.com/Heavygee-Projects/hapi-inline/issues/396)) ([#397](https://github.com/Heavygee-Projects/hapi-inline/issues/397))\n\n\n### Documentation\n\n* fail-closed deploy requirements for a new consumer ([#384](https://github.com/Heavygee-Projects/hapi-inline/issues/384))\n\n## [0.18.4](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.3...v0.18.4) (2026-09-21)\n\n## [0.18.3](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.2...v0.18.3) (2026-09-21)\n\n## [0.18.2](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.1...v0.18.2) (2026-09-21)\n\n## [0.18.1](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.0...v0.18.1) (2026-09-20)\n\n## [0.18.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.17.0...v0.18.0) (2026-09-20)\n\n## [Unreleased]\n\n## [0.17.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.16.0...v0.17.0) (2026-09-20)\n\n## [0.16.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.12...v0.16.0) (2026-09-20)\n\n## [0.15.12](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.11...v0.15.12) (2026-09-17)\n\n## [0.15.11](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.10...v0.15.11) (2026-09-17)\n";
   /* END GENERATED bundled-changelog */
   function loadBundledChangelog() {
     if (bundledChangelogPromise) return bundledChangelogPromise;
@@ -4860,7 +4920,7 @@
 
   window.HapiInline = {
     init: init,
-    _version: '0.19.3', // x-release-please-version
+    _version: '0.19.4', // x-release-please-version
     openCluster: function () { return openCluster(); },
     /** #287 — host Settings can offer the same hide/show the dock sheet does. */
     hideForThisUser: function () { setUserHidden(true); hideDockChrome(); },

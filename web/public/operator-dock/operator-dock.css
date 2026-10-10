@@ -190,6 +190,7 @@
 .opdock-toast--err { background: #b91c1c; }
 
 /* --- annotation overlay --------------------------------------------------------------- */
+/* #437: applied to html + body while markup/capture freezes host scroll. */
 .opdock-noscroll { overflow: hidden !important; }
 
 .opdock-overlay {
