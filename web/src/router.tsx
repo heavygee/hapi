@@ -26,6 +26,7 @@ import { TodoItemDetail } from '@/components/TodoItemDetail'
 import { resolveTodoItemDirectory } from '@/lib/resolveTodoItemDirectory'
 import { buildTodoItemSpawnMessage } from '@/lib/todoItemSpawnMessage'
 import { clearTodoSpawnBriefing, peekTodoSpawnBriefing, stashTodoSpawnBriefing } from '@/lib/todoSpawnBriefing'
+import { shouldExitTodoModeForSession } from '@/lib/sessionsTodoModeSync'
 import { parseIssueUrl } from '@hapi/protocol/schemas'
 import type { TodoBoardItem } from '@/types/api'
 import { NewSession } from '@/components/NewSession'
@@ -266,13 +267,13 @@ function SessionsPage() {
     // the to-do list, since `isSessionsIndex` alone has no idea a mode
     // switch happened.
     const hasRightPaneContent = sessionsMode === 'todo' ? selectedTodoItem !== null : !isSessionsIndex
-    // Any navigation that targets a session route (a toast click, browser
-    // back/forward, anything other than the explicit to-do-spawn flow, which
-    // already resets this synchronously before navigating) must exit To-Do
-    // mode — otherwise the session stays hidden behind the to-do list/detail
-    // pane indefinitely (hapi#238 Codex review).
+    // See shouldExitTodoModeForSession's doc comment for why this is gated
+    // on a *change* of session id, not merely "a session is selected".
+    const previousSelectedSessionIdRef = useRef(selectedSessionId)
     useEffect(() => {
-        if (selectedSessionId && sessionsMode !== 'sessions') {
+        const previous = previousSelectedSessionIdRef.current
+        previousSelectedSessionIdRef.current = selectedSessionId
+        if (shouldExitTodoModeForSession(previous, selectedSessionId, sessionsMode)) {
             setSessionsMode('sessions')
             setSelectedTodoItemId(null)
         }

@@ -2,17 +2,21 @@ import { describe, expect, it, vi } from 'vitest'
 import { applyLinkIssue } from './sessionIssueLink'
 import type { Metadata } from '@/api/types'
 
-function makeClient(metadata: Metadata, flushResult = true) {
+function makeClient(metadata: Metadata, options: { flushResult?: boolean; skipWrite?: boolean } = {}) {
+    const { flushResult = true, skipWrite = false } = options
     const state = { metadata }
-    return {
-        client: {
-            updateMetadata: vi.fn((handler: (current: Metadata) => Metadata) => {
-                state.metadata = handler(state.metadata)
-            }),
-            flushMetadata: vi.fn(async () => flushResult)
-        },
-        getMetadata: () => state.metadata
+    const client = {
+        updateMetadata: vi.fn((handler: (current: Metadata) => Metadata) => {
+            // Mirrors ApiSessionClient's own hub-archived EXIT branch: the
+            // handler is never invoked and metadata never changes, but
+            // flushMetadata still reports a clean lock drain.
+            if (skipWrite) return
+            state.metadata = handler(state.metadata)
+        }),
+        flushMetadata: vi.fn(async () => flushResult),
+        getMetadata: vi.fn(() => state.metadata)
     }
+    return { client, getMetadata: () => state.metadata }
 }
 
 describe('applyLinkIssue', () => {
@@ -68,12 +72,21 @@ describe('applyLinkIssue', () => {
         expect(client.flushMetadata).not.toHaveBeenCalled()
     })
 
-    it('returns an error when the metadata write never gets acked (session archived/closed)', async () => {
-        const { client } = makeClient({ path: '/tmp/project', host: 'localhost' }, false)
+    it('returns an error when the lock never drains (session closed/unreachable)', async () => {
+        const { client } = makeClient({ path: '/tmp/project', host: 'localhost' }, { flushResult: false })
         const outcome = await applyLinkIssue(client, 'heavygee/hapi#235')
         expect(outcome.ok).toBe(false)
-        if (!outcome.ok) {
-            expect(outcome.error).toMatch(/timed out|unreachable/i)
-        }
+    })
+
+    it('returns an error when the lock drains but the write was skipped (session hub-archived mid-flight)', async () => {
+        // Regression: ApiSessionClient.updateMetadata's hub-archived EXIT
+        // branch skips the handler entirely but still lets the backoff loop
+        // complete "successfully" — flushMetadata alone can't tell this
+        // apart from a real ack, so applyLinkIssue must verify the ref
+        // actually landed in client.metadata afterward.
+        const { client, getMetadata } = makeClient({ path: '/tmp/project', host: 'localhost' }, { skipWrite: true })
+        const outcome = await applyLinkIssue(client, 'heavygee/hapi#235')
+        expect(outcome.ok).toBe(false)
+        expect(getMetadata().externalRefs).toBeUndefined()
     })
 })

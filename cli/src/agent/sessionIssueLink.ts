@@ -2,7 +2,7 @@ import { parseIssueUrl, upsertExternalRef, type ExternalRef } from '@hapi/protoc
 import type { ApiSessionClient } from '@/api/apiSession'
 import type { Metadata } from '@/api/types'
 
-type SessionIssueLinkClient = Pick<ApiSessionClient, 'updateMetadata' | 'flushMetadata'>
+type SessionIssueLinkClient = Pick<ApiSessionClient, 'updateMetadata' | 'flushMetadata' | 'getMetadata'>
 
 export type LinkIssueOutcome =
     | { ok: true; ref: ExternalRef }
@@ -17,10 +17,14 @@ export type LinkIssueOutcome =
  *
  * `updateMetadata` is fire-and-forget by design (hot path for every turn),
  * so without `flushMetadata` this would report success before the write is
- * actually acked — or even after it silently failed (session hub-archived,
- * client closed) — which is wrong for a one-shot tool call the agent only
- * makes once per issue, unlike the high-frequency callers that pattern was
- * built for (hapi#238 Codex review).
+ * actually acked. But `flushMetadata` only proves the metadata lock drained
+ * — if the session was hub-archived mid-flight, `updateMetadata`'s own
+ * backoff loop skips the write entirely (`apiSession.ts`'s hub-archived
+ * EXIT branch) and the lock still drains "successfully" with nothing ever
+ * sent. So after flushing, re-read `client.metadata` and confirm the ref
+ * actually landed before reporting success (hapi#238 Codex review, two
+ * passes — first catching the fire-and-forget gap, then this skipped-write
+ * gap in the fix for it).
  */
 export async function applyLinkIssue(client: SessionIssueLinkClient, url: string): Promise<LinkIssueOutcome> {
     const target = parseIssueUrl(url)
@@ -44,6 +48,16 @@ export async function applyLinkIssue(client: SessionIssueLinkClient, url: string
     const flushed = await client.flushMetadata()
     if (!flushed) {
         return { ok: false, error: 'Timed out waiting for the link to be saved. The session may be closed or unreachable — try again.' }
+    }
+
+    // A drained lock alone doesn't prove the write happened: if the session
+    // was hub-archived mid-flight, updateMetadata's own backoff loop skips
+    // the handler entirely and the lock still drains "successfully."
+    const written = client.getMetadata()?.externalRefs?.some(
+        (existing) => existing.kind === ref.kind && existing.repo === ref.repo && existing.number === ref.number && existing.linkedAt === ref.linkedAt
+    )
+    if (!written) {
+        return { ok: false, error: 'Could not confirm the link was saved. The session may have been archived mid-write — try again.' }
     }
 
     return { ok: true, ref }

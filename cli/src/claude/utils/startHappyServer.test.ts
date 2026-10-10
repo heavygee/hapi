@@ -43,9 +43,13 @@ describe('startHappyServer skill_lookup', () => {
 
     async function connect(enableSkillLookup = true, flushMetadataResult = true): Promise<Client> {
         sendAgentMessage = vi.fn()
+        let metadataState: Record<string, unknown> = {}
         const sessionClient = {
-            updateMetadata: vi.fn(),
+            updateMetadata: vi.fn((handler: (current: Record<string, unknown>) => Record<string, unknown>) => {
+                metadataState = handler(metadataState)
+            }),
             flushMetadata: vi.fn(async () => flushMetadataResult),
+            getMetadata: vi.fn(() => metadataState),
             sendAgentMessage,
             sendClaudeSessionMessage: vi.fn()
         } as unknown as ApiSessionClient
