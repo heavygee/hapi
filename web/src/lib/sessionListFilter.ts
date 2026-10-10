@@ -1,19 +1,25 @@
-export type SessionListFilter = 'all' | 'unread' | 'scratchlist' | 'blocked'
+export type SessionListFilter = 'all' | 'unread' | 'active' | 'working' | 'scratchlist' | 'blocked'
 
 export type SessionListFilterState = {
     unread: boolean
+    active: boolean
+    working: boolean
     scratchlist: boolean
     blocked: boolean
 }
 
 export const DEFAULT_SESSION_LIST_FILTER_STATE: SessionListFilterState = {
     unread: false,
+    active: false,
+    working: false,
     scratchlist: false,
     blocked: false
 }
 
 export const SESSION_LIST_FILTER_OPTIONS = [
     { value: 'unread', labelKey: 'sessions.filter.unread' },
+    { value: 'active', labelKey: 'sessions.filter.active' },
+    { value: 'working', labelKey: 'sessions.filter.working' },
     { value: 'scratchlist', labelKey: 'sessions.filter.scratchlist' },
     { value: 'blocked', labelKey: 'sessions.filter.blocked' },
 ] as const satisfies ReadonlyArray<{ value: Exclude<SessionListFilter, 'all'>; labelKey: string }>
@@ -37,5 +43,5 @@ export function toggleSessionListFilter(
 
 /** Any session-list menu predicate (not date range — that lives outside this state). */
 export function hasActiveSessionListFilter(state: SessionListFilterState): boolean {
-    return state.unread || state.scratchlist || state.blocked
+    return state.unread || state.active || state.working || state.scratchlist || state.blocked
 }

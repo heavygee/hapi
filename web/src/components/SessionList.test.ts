@@ -7,6 +7,7 @@ import {
     filterActiveSessionsOnly,
     filterScratchlistSessionsOnly,
     filterUnreadSessionsOnly,
+    filterWorkingSessionsOnly,
     UNKNOWN_MACHINE_ID,
     bucketRunningSessions,
     getSessionTimeRange,
@@ -532,6 +533,33 @@ describe('filterActiveSessionsOnly', () => {
             makeSession({ id: 'c', active: true, metadata: { path: '/p' } })
         ]
         expect(filterActiveSessionsOnly(sessions).map(s => s.id)).toEqual(['a', 'c'])
+    })
+})
+
+describe('filterWorkingSessionsOnly', () => {
+    it('keeps only thinking / background-task sessions', () => {
+        const sessions = [
+            makeSession({ id: 'thinking', active: true, thinking: true, metadata: { path: '/p' } }),
+            makeSession({
+                id: 'bg',
+                active: true,
+                thinking: false,
+                backgroundTaskCount: 2,
+                metadata: { path: '/p' }
+            }),
+            makeSession({ id: 'quiet-active', active: true, thinking: false, metadata: { path: '/p' } }),
+            makeSession({ id: 'dead', active: false, thinking: true, metadata: { path: '/p' } }),
+        ]
+        expect(filterWorkingSessionsOnly(sessions).map(s => s.id)).toEqual(['thinking', 'bg'])
+    })
+
+    it('keeps the selected quiet session visible', () => {
+        const sessions = [
+            makeSession({ id: 'thinking', active: true, thinking: true, metadata: { path: '/p' } }),
+            makeSession({ id: 'selected-quiet', active: true, thinking: false, metadata: { path: '/p' } }),
+        ]
+        expect(filterWorkingSessionsOnly(sessions, 'selected-quiet').map(s => s.id))
+            .toEqual(['thinking', 'selected-quiet'])
     })
 })
 
