@@ -54,11 +54,80 @@ describe('resolveSessionByPrefix', () => {
         } catch (error) {
             expect(error).toBeInstanceOf(PingPeerError)
             expect((error as PingPeerError).code).toBe('ambiguous')
+            expect((error as PingPeerError).message).toMatch(/hub id prefix/)
+            expect((error as PingPeerError).message).toMatch(/name=/)
         }
     })
 
-    it('refuses unknown prefixes', () => {
+    it('refuses unknown prefixes with actionable hints', () => {
         expect(() => resolveSessionByPrefix(sessions, 'zzzz')).toThrowError(/no session matching/)
+        try {
+            resolveSessionByPrefix(sessions, 'zzzz')
+        } catch (error) {
+            expect((error as PingPeerError).message).toMatch(/agentSessionId prefix/)
+            expect((error as PingPeerError).message).toMatch(/Sample:/)
+        }
+    })
+
+    it('resolves by exact agentSessionId (case insensitive)', () => {
+        const withAgent: PingPeerSessionSummary[] = [
+            {
+                id: '11111111-1111-1111-1111-111111111111',
+                active: false,
+                updatedAt: 100,
+                metadata: { name: 'Stale row', agentSessionId: '8e1f4fd4-durable-agent' }
+            },
+            {
+                id: '22222222-2222-2222-2222-222222222222',
+                active: true,
+                updatedAt: 200,
+                metadata: { name: 'Current row', agentSessionId: '8e1f4fd4-durable-agent' }
+            }
+        ]
+        expect(resolveSessionByPrefix(withAgent, '8e1f4fd4-durable-agent').id).toBe(withAgent[1]!.id)
+        expect(resolveSessionByPrefix(withAgent, '8E1F4FD4-DURABLE-AGENT').id).toBe(withAgent[1]!.id)
+    })
+
+    it('resolves by agentSessionId prefix and prefers active + newest', () => {
+        const withAgent: PingPeerSessionSummary[] = [
+            {
+                id: 'aaaaaaaa-1111-1111-1111-111111111111',
+                active: false,
+                updatedAt: 50,
+                metadata: { name: 'Old', agentSessionId: 'peer-agent-aaaa-old' }
+            },
+            {
+                id: 'bbbbbbbb-2222-2222-2222-222222222222',
+                active: true,
+                updatedAt: 100,
+                metadata: { name: 'Live', agentSessionId: 'peer-agent-bbbb-live' }
+            }
+        ]
+        expect(resolveSessionByPrefix(withAgent, 'peer-agent-bbbb').id).toBe(withAgent[1]!.id)
+    })
+
+    it('refuses ambiguous agentSessionId prefix ties at the same active/updatedAt tier', () => {
+        const withAgent: PingPeerSessionSummary[] = [
+            {
+                id: 'aaaaaaaa-1111-1111-1111-111111111111',
+                active: true,
+                updatedAt: 100,
+                metadata: { name: 'A', agentSessionId: 'shared-prefix-1111' }
+            },
+            {
+                id: 'bbbbbbbb-2222-2222-2222-222222222222',
+                active: true,
+                updatedAt: 100,
+                metadata: { name: 'B', agentSessionId: 'shared-prefix-2222' }
+            }
+        ]
+        expect(() => resolveSessionByPrefix(withAgent, 'shared-prefix')).toThrow(PingPeerError)
+        try {
+            resolveSessionByPrefix(withAgent, 'shared-prefix')
+        } catch (error) {
+            expect((error as PingPeerError).code).toBe('ambiguous')
+            expect((error as PingPeerError).message).toMatch(/agentSessionId prefix/)
+        }
     })
 })
 
@@ -670,5 +739,68 @@ describe('listSessions query params', () => {
         })
         expect(result.sessionId).toBe(sessionId)
         expect(pingParams[0]).toBeUndefined()
+    })
+
+    it('resolves by agentSessionId prefix and posts to the current hub id', async () => {
+        const hubId = 'cccccccc-3333-3333-3333-333333333333'
+        const agentSessionId = '05d9f0f2-durable-cursor-thread'
+        const http = createHttpMock({
+            post: (url, body) => {
+                if (url.endsWith('/api/auth')) {
+                    return { status: 200, data: { token: 'jwt' } }
+                }
+                if (url.endsWith(`/api/sessions/${hubId}/messages`)) {
+                    expect(body).toEqual({ text: 'via agentSessionId' })
+                    return { status: 200, data: { ok: true } }
+                }
+                throw new Error(`unexpected POST ${url}`)
+            },
+            get: (url) => {
+                if (url.endsWith('/api/sessions') && !url.includes(hubId)) {
+                    return {
+                        status: 200,
+                        data: {
+                            sessions: [{
+                                id: hubId,
+                                active: true,
+                                metadata: {
+                                    name: 'Orchestrator',
+                                    flavor: 'cursor',
+                                    agentSessionId
+                                }
+                            }]
+                        }
+                    }
+                }
+                if (url.endsWith(`/api/sessions/${hubId}`)) {
+                    return {
+                        status: 200,
+                        data: {
+                            session: {
+                                id: hubId,
+                                active: true,
+                                metadata: {
+                                    name: 'Orchestrator',
+                                    flavor: 'cursor',
+                                    agentSessionId
+                                }
+                            }
+                        }
+                    }
+                }
+                throw new Error(`unexpected GET ${url}`)
+            }
+        })
+
+        const result = await pingPeer({
+            sessionIdPrefix: '05d9f0f2',
+            message: 'via agentSessionId',
+            accessToken: 'tok',
+            apiUrl: 'http://hub.test',
+            http: http as never
+        })
+
+        expect(result.sessionId).toBe(hubId)
+        expect(result.name).toBe('Orchestrator')
     })
 })
