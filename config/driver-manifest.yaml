@@ -796,16 +796,23 @@ layers:
 
   # tiann/hapi#1509 — spawn-peer remit thin tip (Gap A/B + sticky NewSession seed).
   # HOLD 2026-10-06: tip regresses soup bridge/overlay/settings on absorb.
-  # Superseded 2026-10-10 by driver/1922-peer-rename-proof (whole upstream #1922 tip).
+  # Superseded by driver/1931-spawn-machine-delta + driver/1922-parent-stamp-delta.
   # - branch: driver/spawn-peer-remit-delta
 
   # tiann/hapi#1931 — thin MCP/CLI spawn_peer --machine (incident 2026-10-10).
-  # Full upstream #1922 tip (Parent stamps + peerSpawnDefaults UI) is fat vs soup
-  # (45c/55f, merge conflicts). Thin delta @ 0286b1d70 on soup tip 0ce638a00 —
-  # cherry-picks 26bd3141c + 17adbcee2 from feat/peer-rename-proof-identity.
-  # DO NOT point at whole #1922 tip until re-thinned. Never set HAPI_DRIVER_MANIFEST
-  # to a stale /tmp copy (starved this layer once). Hub+CLI → remat + restart.
+  # Already ancestor of live soup tip d09a28042 (tip-forward skips). Keep for
+  # full-recipe remats. Thin delta @ 0286b1d70. Never set HAPI_DRIVER_MANIFEST
+  # to a stale /tmp copy.
   - branch: driver/1931-spawn-machine-delta
+
+  # tiann/hapi#1922 remainder — Parent UUID stamps + peerSpawnDefaults polish
+  # on soup tip after #1931 --machine (do NOT use fat driver/1922-peer-rename-proof
+  # @ 2290c737f / 45f ABSORB_FAT — tip-forward conflicted). Thin tip 3c/27f.
+  # Worktree: ~/coding/hapi/worktrees/1922-parent-stamp-delta
+  # Tip: 56fb7cda7 — complete NewSession port + hubSettings test seed; keep soup initialMessage.
+  # Hub+web → remat --build-web + restart. 5c/31f (under fat gate).
+  # Upstream PR stays https://github.com/tiann/hapi/pull/1922 — no second PR.
+  - branch: driver/1922-parent-stamp-delta
 
   # Soup heal: remat 47ce90965 dropped Claude Happy MCP spawn_peer model/effort
   # (Codex bridge kept them). Restore schema + handler forwarding for Claude sessions.
