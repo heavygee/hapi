@@ -232,6 +232,12 @@ vi.mock('./PermissionField', () => ({
             <button type="button" data-testid="permission-mode-plan" onClick={() => props.onNativeChange('plan')}>
                 {props.nativeValue}
             </button>
+            <button type="button" data-testid="permission-mode-default" onClick={() => props.onNativeChange('default')}>
+                {props.nativeValue}
+            </button>
+            <button type="button" data-testid="yolo-toggle" onClick={() => props.onYoloToggle(!props.yoloMode)}>
+                {props.yoloMode ? 'yolo-on' : 'yolo-off'}
+            </button>
         </>
     )
 }))
@@ -303,6 +309,16 @@ const api = {
 
 function renderWithQuery(ui: ReactElement) {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    // Settle hub settings so hubDefaultsPending unlocks Create (tiann#1922 gate).
+    client.setQueryData(queryKeys.hubSettings, {
+        sessionSummaryContract: false,
+        sessionSummaryInChat: false,
+        peerSpawnDefaults: {
+            agent: 'claude',
+            permissionMode: 'default',
+            models: {}
+        }
+    })
     const wrap = (node: ReactElement) => (
         <QueryClientProvider client={client}>{node}</QueryClientProvider>
     )

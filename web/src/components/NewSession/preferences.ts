@@ -3,9 +3,13 @@ import {
     getLaunchPermissionModesForFlavor,
     getPermissionModesForFlavor,
     resolveHapiYoloPermissionMode,
+    type AgentFlavor,
     type PermissionMode
 } from '@hapi/protocol'
-import type { ResolvedPeerSpawnDefaults } from '@hapi/protocol/peerSpawnDefaults'
+import {
+    resolvePermissionModeForFlavor,
+    type ResolvedPeerSpawnDefaults
+} from '@hapi/protocol/peerSpawnDefaults'
 import {
     CLAUDE_EFFORT_OPTIONS,
     CODEX_REASONING_EFFORT_OPTIONS,
@@ -103,6 +107,15 @@ export function loadPreferredYoloMode(): boolean {
     }
 }
 
+/** True only when the operator previously persisted a Yolo preference. */
+export function hasSavedPreferredYoloMode(): boolean {
+    try {
+        return localStorage.getItem(YOLO_STORAGE_KEY) !== null
+    } catch {
+        return false
+    }
+}
+
 export function savePreferredYoloMode(enabled: boolean): void {
     try {
         localStorage.setItem(YOLO_STORAGE_KEY, enabled ? 'true' : 'false')
@@ -175,7 +188,7 @@ function resolvePreferredOptionValue(
 export function resolvePreferredLaunchSettings(
     agent: AgentType,
     preferred: PreferredLaunchSettings | null,
-    legacyYolo = false,
+    legacyYolo: boolean | null = false,
     hubPermissionMode?: PermissionMode
 ): PreferredLaunchSettings {
     const preferredModel = preferred?.model ?? 'auto'
@@ -205,20 +218,34 @@ export function resolvePreferredLaunchSettings(
     const usesSharedPermissionMode = usesSharedPermissionModeState(agent)
     const availablePermissionModes = getLaunchPermissionModesForFlavor(agent)
     const preferredPermissionMode = preferred?.permissionMode
-    // A removed explicit mode falls back to Default, never to a stale YOLO toggle.
-    const legacyYoloBridgeMode = preferredPermissionMode === undefined && legacyYolo && LEGACY_YOLO_BRIDGE_AGENTS.includes(agent)
-        ? resolveHapiYoloPermissionMode(agent)
+    // Migrate a saved HAPI YOLO toggle into the native select (true → yolo-equivalent,
+    // false → Default). Absent key leaves hub/stock defaults in place.
+    const legacyYoloBridgeMode = preferredPermissionMode === undefined
+        && legacyYolo !== null
+        && LEGACY_YOLO_BRIDGE_AGENTS.includes(agent)
+        ? (legacyYolo
+            ? resolveHapiYoloPermissionMode(agent)
+            : 'default')
         : null
     const hubMode = hubPermissionMode
-        && availablePermissionModes.includes(hubPermissionMode)
-        ? hubPermissionMode
+        ? (() => {
+            const mapped = resolvePermissionModeForFlavor(
+                hubPermissionMode,
+                agent as AgentFlavor
+            )
+            return availablePermissionModes.includes(mapped) ? mapped : undefined
+        })()
         : undefined
     const permissionMode = usesSharedPermissionMode
         ? preferredPermissionMode && availablePermissionModes.includes(preferredPermissionMode)
             ? preferredPermissionMode
-            : legacyYoloBridgeMode && availablePermissionModes.includes(legacyYoloBridgeMode)
-                ? legacyYoloBridgeMode
-                : hubMode ?? 'default'
+            : preferredPermissionMode !== undefined
+                // Explicit saved mode that left the launch catalog → Default,
+                // never hub yolo (would upgrade sandboxed → unrestricted).
+                ? 'default'
+                : legacyYoloBridgeMode && availablePermissionModes.includes(legacyYoloBridgeMode)
+                    ? legacyYoloBridgeMode
+                    : hubMode ?? 'default'
         : undefined
 
     return {
