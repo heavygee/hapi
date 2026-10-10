@@ -19,10 +19,9 @@ import {
     registerGeneratedImage,
 } from "@/modules/common/generatedImages";
 import type { InlineMediaSource } from "@/modules/common/inlineMediaSource";
-import { DISPLAY_IMAGE_PROMPT_CURSOR, DISPLAY_LINKS_PROMPT_CURSOR, DISPLAY_MEDIA_PROMPT_CURSOR, DISPLAY_VIDEO_PROMPT_CURSOR } from "@/modules/common/displayImagePrompt";
-import { buildDisplayLinksPayload, parseDisplayLinksInput } from "@hapi/protocol";
+import { DISPLAY_IMAGE_PROMPT_CURSOR, DISPLAY_MEDIA_PROMPT_CURSOR, DISPLAY_VIDEO_PROMPT_CURSOR } from "@/modules/common/displayImagePrompt";
 import { resolveSkill } from "@/modules/common/skills";
-import { SESSION_NAME_MAX_LENGTH } from '@hapi/protocol'
+import { SESSION_NAME_MAX_LENGTH, toSessionSummaryMetadata } from '@hapi/protocol'
 import {
     INSPECT_PEER_TOOL_DESCRIPTION,
     PING_PEER_TOOL_DESCRIPTION,
@@ -31,31 +30,9 @@ import {
 } from '@hapi/protocol/sessionCitation'
 import { CREATABLE_AGENT_FLAVORS } from '@hapi/protocol/modes'
 import { PermissionModeSchema } from '@hapi/protocol/schemas'
+import { PingPeerError, formatInspectPeerReport, formatPeerSessionsList, inspectPeer, listPeerSessions, peerListFetchLimit, pingPeer } from "@/modules/pingPeer/pingPeer";
 import { applySessionDisplayRename, normalizeSessionDisplayTitle } from "@/agent/sessionDisplayRename";
-import { applySessionVoiceMode } from "@/agent/sessionVoiceMode";
-import { PingPeerError, formatInspectPeerReport, formatPeerSessionsList, inspectPeer, listPeerSessions, peerListFetchLimit, pingPeer, searchPeerSessions } from "@/modules/pingPeer/pingPeer";
-import {
-    SearchContentError,
-    formatSearchContentMatches,
-    searchSessionContent,
-} from "@/modules/searchContent/searchContent";
-import { applyLinkIssue } from "@/agent/sessionIssueLink";
-import {
-    SESSION_JOB_TOOL_DESCRIPTION,
-    SESSION_JOB_TOOL_NAME,
-    handleSessionJobTool,
-    sessionJobInputSchema,
-    type SessionJobToolArgs,
-} from "@/modules/sessionJob/sessionJobMcp";
 import { SpawnPeerError, spawnPeer } from "@/modules/spawnPeer/spawnPeer";
-
-const SEARCH_CONTENT_DESCRIPTION =
-    'Search transcript text across HAPI sessions on the same hub/namespace (what sessions actually said). ' +
-    'Uses this session\'s CLI credentials — never hand-mint a JWT (expired JWT previously returned an empty list, ' +
-    'indistinguishable from no matches). Optional sessionId scopes to one session. ' +
-    'Returns session id, name, timestamp, and snippet so you can inspect_peer / ping_peer next. ' +
-    'Query tip: short/common substrings match badly via trigram FTS (e.g. "Ian" hits Austral**ian**; ' +
-    '"home" hits every /home/ path) — prefer distinctive nouns. Auth/backend failures surface as errors, never [].';
 
 type StartHappyServerOptions = {
     /**
@@ -66,21 +43,34 @@ type StartHappyServerOptions = {
     emitTitleSummary?: boolean;
     enableChangeTitle?: boolean;
     /**
-     * Cursor-only (#1516): doubled-letter URL recall is a Cursor-routed failure mode.
-     * Defaults on when skillLookup.flavor === 'cursor'.
+     * Session project cwd for resolving relative `spawn_peer` directories.
+     * Prefer the launcher's effective cwd (including Codex `--cd` overrides).
+     * Falls back to `skillLookup.workingDirectory`, then hub metadata.path.
      */
-    enableDisplayLinks?: boolean;
+    workingDirectory?: string;
     skillLookup?: {
         workingDirectory: string;
         flavor: string;
     };
 };
 
-function resolveEnableDisplayLinks(options: StartHappyServerOptions): boolean {
-    if (options.enableDisplayLinks !== undefined) {
-        return options.enableDisplayLinks;
-    }
-    return options.skillLookup?.flavor === 'cursor';
+/**
+ * Resolve the base cwd for MCP spawn_peer relative directories.
+ * Prefer launcher workingDirectory (Codex --cd), then skillLookup, then
+ * session metadata.path so bridges without skillLookup still anchor to the
+ * session tree instead of the long-lived HAPI process cwd.
+ */
+export function resolveMcpSpawnPeerCwd(options: {
+    workingDirectory?: string | null
+    skillWorkingDirectory?: string | null
+    sessionPath?: string | null
+}): string | undefined {
+    const fromLauncher = (options.workingDirectory ?? '').trim()
+    if (fromLauncher) return fromLauncher
+    const fromSkill = (options.skillWorkingDirectory ?? '').trim()
+    if (fromSkill) return fromSkill
+    const fromSession = (options.sessionPath ?? '').trim()
+    return fromSession || undefined
 }
 
 /** Registered on the MCP server, but never pre-approved via Claude --allowedTools. */
@@ -97,8 +87,6 @@ const CLAUDE_MANUAL_APPROVAL_HAPI_TOOLS = new Set([
  * Keeps `display_media` / `display_video` (arbitrary local-path readers), `ping_peer`,
  * `inspect_peer`, and `spawn_peer` off the auto-allow list so they still prompt.
  * `list_peers` stays allowed (discovery shortlist only).
- * `search_peers` stays allowed (keyword inventory; no resume/inject).
- * `search_content` stays allowed (transcript search; read-only hub REST).
  */
 export function toClaudeAllowedHapiMcpTools(toolNames: string[]): string[] {
     return toolNames
@@ -111,7 +99,7 @@ function createHapiMcpServer(
     emitTitleSummary: boolean,
     enableChangeTitle: boolean,
     skillLookup: StartHappyServerOptions['skillLookup'],
-    enableDisplayLinks: boolean
+    workingDirectory: string | undefined
 ): McpServer {
     const handler = async (title: string) => {
         logger.debug('[hapiMCP] Changing title to:', title);
@@ -158,16 +146,6 @@ function createHapiMcpServer(
         title: z.string().trim().min(1).max(255).optional().describe('Optional display title or filename'),
     });
 
-    const displayLinksInputSchema: z.ZodTypeAny = z.object({
-        urls: z.array(z.union([
-            z.object({
-                href: z.string().describe('http(s) URL to paint. Construct by concatenation for landmine strings (tia+nn), never copy from model prose.'),
-                title: z.string().trim().min(1).max(255).optional().describe('Optional link label shown on the card'),
-            }),
-            z.string(),
-        ])).min(1).max(20).describe('One or more http(s) URLs to paint as tappable cards'),
-    });
-
     const pingPeerInputSchema: z.ZodTypeAny = z.object({
         sessionIdPrefix: z.string().trim().min(1).describe(SESSION_ID_PREFIX_PARAM_DESCRIPTION),
         message: z.string().min(1).describe('Message text to deliver to the target session'),
@@ -207,34 +185,9 @@ function createHapiMcpServer(
         ),
     });
 
-    const setVoiceModeInputSchema: z.ZodTypeAny = z.object({
-        enabled: z.boolean().describe('True when this session is bound to a voice relay and should answer in short, one-packet turns'),
-    });
-
     const listPeersInputSchema: z.ZodTypeAny = z.object({
         limit: z.number().int().min(1).max(100).optional().describe(
             'Max sessions to return (default 30, max 100). Newest updatedAt first.'
-        ),
-    });
-
-    const searchPeersInputSchema: z.ZodTypeAny = z.object({
-        query: z.string().trim().min(1).max(256).describe(
-            'Keyword to match against session name, path, agentSessionId, or id.'
-        ),
-        limit: z.number().int().min(1).max(100).optional().describe(
-            'Max matches to return (default 30, max 100). Ranked by match field then updatedAt.'
-        ),
-    });
-
-    const searchContentInputSchema: z.ZodTypeAny = z.object({
-        query: z.string().trim().min(2).max(200).describe(
-            'Distinctive noun/phrase from transcript text. Avoid short/common substrings (trigram FTS noise).'
-        ),
-        sessionId: z.string().min(1).optional().describe(
-            'Optional hub session id to scope search to one conversation.'
-        ),
-        limit: z.number().int().min(1).max(100).optional().describe(
-            'Max matches to return (default 50, hub max 100).'
         ),
     });
 
@@ -311,57 +264,7 @@ function createHapiMcpServer(
         });
     }
 
-    mcp.registerTool<any, any>('set_voice_mode', {
-        description: 'Mark whether this HAPI session is bound to a voice relay. When enabled, this session answers in short, answer-first, one-packet-at-a-time turns instead of screen-shaped structure (no headings/lists/tables). Call once when you start or stop relaying for voice — not inherited by spawned or pinged peer sessions, and takes effect on the next resume rather than mid-turn.',
-        title: 'Set Voice Mode',
-        inputSchema: setVoiceModeInputSchema,
-    }, async (args: { enabled: boolean }) => {
-        applySessionVoiceMode(client, args.enabled);
-        return {
-            content: [
-                {
-                    type: 'text' as const,
-                    text: `Voice mode ${args.enabled ? 'enabled' : 'disabled'} for this session (effective next resume).`,
-                },
-            ],
-            isError: false,
-        };
-    });
-
-    
-    // Always-on issue link (hapi#235/#238) — see feat tip; coexist with soup tools.
-    const linkIssueInputSchema: z.ZodTypeAny = z.object({
-        url: z.string().describe('GitHub issue URL (https://github.com/<owner>/<repo>/issues/<n>) or the <owner>/<repo>#<n> shorthand'),
-    });
-    mcp.registerTool<any, any>('link_issue', {
-        description: 'Attach a GitHub issue reference to the current HAPI session (self-session only). Shows as a chip on the session row/detail. Re-linking the same issue refreshes it rather than duplicating.',
-        title: 'Link GitHub Issue',
-        inputSchema: linkIssueInputSchema,
-    }, async (args: { url: string }) => {
-        const outcome = applyLinkIssue(client, args.url);
-        if (outcome.ok) {
-            return {
-                content: [
-                    {
-                        type: 'text' as const,
-                        text: `Linked ${outcome.ref.repo}#${outcome.ref.number}`,
-                    },
-                ],
-                isError: false,
-            };
-        }
-        return {
-            content: [
-                {
-                    type: 'text' as const,
-                    text: `Failed to link issue: ${outcome.error}`,
-                },
-            ],
-            isError: true,
-        };
-    });
-
-mcp.registerTool<any, any>('display_image', {
+    mcp.registerTool<any, any>('display_image', {
         description: `Display a local image file to the human user inline in the current HAPI chat session. ${DISPLAY_IMAGE_PROMPT_CURSOR}`,
         title: 'Display Image',
         inputSchema: displayImageInputSchema,
@@ -452,46 +355,6 @@ mcp.registerTool<any, any>('display_image', {
         }
     });
 
-    if (enableDisplayLinks) {
-        mcp.registerTool<any, any>('display_links', {
-            description: `Paint clickable http(s) URL cards into the current HAPI chat without a fake user turn. Cursor-only: other flavors type URLs fine. ${DISPLAY_LINKS_PROMPT_CURSOR}`,
-            title: 'Display Links',
-            inputSchema: displayLinksInputSchema,
-        }, async (args: { urls: Array<{ href: string; title?: string } | string> }) => {
-            logger.debug('[hapiMCP] Display links:', args.urls);
-
-            try {
-                const urls = parseDisplayLinksInput(args.urls);
-                client.sendAgentMessage(buildDisplayLinksPayload({
-                    urls,
-                    id: randomUUID(),
-                }));
-
-                return {
-                    content: [
-                        {
-                            type: 'text' as const,
-                            text: `Displayed ${urls.length} link${urls.length === 1 ? '' : 's'}`,
-                        },
-                    ],
-                    isError: false,
-                };
-            } catch (error) {
-                const message = error instanceof Error ? error.message : String(error);
-                logger.debug('[hapiMCP] Failed to display links:', message);
-                return {
-                    content: [
-                        {
-                            type: 'text' as const,
-                            text: `Failed to display links: ${message}`,
-                        },
-                    ],
-                    isError: true,
-                };
-            }
-        });
-    }
-
     mcp.registerTool<any, any>('ping_peer', {
         description: PING_PEER_TOOL_DESCRIPTION,
         title: 'Ping Peer Session',
@@ -502,8 +365,6 @@ mcp.registerTool<any, any>('display_image', {
             const result = await pingPeer({
                 sessionIdPrefix: args.sessionIdPrefix,
                 message: args.message,
-                // Soft nametag via /cli/.../peer-messages using this session id (#1203).
-                authenticatedSourceSessionId: client.sessionId,
             });
             return {
                 content: [
@@ -550,8 +411,15 @@ mcp.registerTool<any, any>('display_image', {
     }) => {
         logger.debug('[hapiMCP] spawn_peer:', args.directory, args.machine ? `machine=${args.machine}` : '');
         try {
+            const metadata = client.getMetadata()
+            const summaryMeta = toSessionSummaryMetadata(metadata)
             const result = await spawnPeer({
                 directory: args.directory,
+                cwd: resolveMcpSpawnPeerCwd({
+                    workingDirectory,
+                    skillWorkingDirectory: skillLookup?.workingDirectory,
+                    sessionPath: metadata?.path,
+                }),
                 message: args.message,
                 name: args.name,
                 machine: args.machine,
@@ -560,6 +428,12 @@ mcp.registerTool<any, any>('display_image', {
                 effort: args.effort,
                 sessionType: args.sessionType,
                 permissionMode: args.permissionMode as Parameters<typeof spawnPeer>[0]['permissionMode'],
+                parent: {
+                    sessionId: client.sessionId,
+                    name: metadata?.name ?? null,
+                    agentSessionId: summaryMeta?.agentSessionId ?? null,
+                },
+                requireParent: true,
             });
             return {
                 content: [
@@ -628,21 +502,8 @@ mcp.registerTool<any, any>('display_image', {
         }
     });
 
-    mcp.registerTool<any, any>(SESSION_JOB_TOOL_NAME, {
-        description: SESSION_JOB_TOOL_DESCRIPTION,
-        title: 'Session-Attached Job',
-        inputSchema: sessionJobInputSchema,
-    }, async (args: SessionJobToolArgs) => {
-        logger.debug('[hapiMCP] session_job:', args.action, args.jobKey);
-        const result = await handleSessionJobTool(args, client.sessionId);
-        return {
-            content: [{ type: 'text' as const, text: result.text }],
-            isError: result.isError,
-        };
-    });
-
     mcp.registerTool<any, any>('list_peers', {
-        description: 'List peer HAPI sessions on the same hub/namespace (id prefix, active, flavor, name). Uses this session\'s hub credentials - works from runner-spawned agents without being on the hub host. Prefer this over shelling `hapi ping-peer --list`. Then call inspect_peer / ping_peer with a listed id, search_peers for keyword inventory beyond the recency window, or spawn_peer to create a new peer with a remit.',
+        description: 'List peer HAPI sessions on the same hub/namespace (id prefix, active, flavor, name). Uses this session\'s hub credentials - works from runner-spawned agents without being on the hub host. Prefer this over shelling `hapi ping-peer --list`. Then call inspect_peer / ping_peer with a listed id, or spawn_peer to create a new peer with a remit.',
         title: 'List Peer Sessions',
         inputSchema: listPeersInputSchema,
     }, async (args: { limit?: number }) => {
@@ -678,97 +539,6 @@ mcp.registerTool<any, any>('display_image', {
                     {
                         type: 'text' as const,
                         text: `Failed to list peers: ${message}`,
-                    },
-                ],
-                isError: true,
-            };
-        }
-    });
-
-    mcp.registerTool<any, any>('search_peers', {
-        description: 'Search peer HAPI sessions on the same hub/namespace by keyword (name, path, agentSessionId, id). Not bounded by list_peers recency — finds quiet/aged sessions. Prefer this over /proc→SQLite archaeology. Then call inspect_peer / ping_peer with a returned id.',
-        title: 'Search Peer Sessions',
-        inputSchema: searchPeersInputSchema,
-    }, async (args: { query: string; limit?: number }) => {
-        logger.debug('[hapiMCP] search_peers:', args.query);
-        try {
-            const limit = args.limit ?? 30;
-            const sessions = await searchPeerSessions({
-                query: args.query,
-                limit: peerListFetchLimit(limit, { excludeCaller: true }),
-            });
-            const peers = sessions.filter((session) => session.id !== client.sessionId);
-            const hasMore = peers.length > limit;
-            return {
-                content: [
-                    {
-                        type: 'text' as const,
-                        text: formatPeerSessionsList(peers, {
-                            maxRows: limit,
-                            hasMore,
-                            preserveOrder: true,
-                            emptyMessage: `No peer sessions matched query '${args.query.trim()}'.`,
-                        }),
-                    },
-                ],
-                isError: false,
-            };
-        } catch (error) {
-            const message = error instanceof PingPeerError
-                ? error.message
-                : error instanceof Error
-                    ? error.message
-                    : String(error);
-            logger.debug('[hapiMCP] search_peers failed:', message);
-            return {
-                content: [
-                    {
-                        type: 'text' as const,
-                        text: `Failed to search peers: ${message}`,
-                    },
-                ],
-                isError: true,
-            };
-        }
-    });
-
-    mcp.registerTool<any, any>('search_content', {
-        description: SEARCH_CONTENT_DESCRIPTION,
-        title: 'Search Session Transcripts',
-        inputSchema: searchContentInputSchema,
-    }, async (args: { query: string; sessionId?: string; limit?: number }) => {
-        logger.debug('[hapiMCP] search_content:', args.query);
-        try {
-            const limit = args.limit ?? 50;
-            const result = await searchSessionContent({
-                query: args.query,
-                sessionId: args.sessionId,
-                limit,
-            });
-            return {
-                content: [
-                    {
-                        type: 'text' as const,
-                        text: formatSearchContentMatches(result, {
-                            query: args.query,
-                            maxRows: limit,
-                        }),
-                    },
-                ],
-                isError: false,
-            };
-        } catch (error) {
-            const message = error instanceof SearchContentError
-                ? error.message
-                : error instanceof Error
-                    ? error.message
-                    : String(error);
-            logger.debug('[hapiMCP] search_content failed:', message);
-            return {
-                content: [
-                    {
-                        type: 'text' as const,
-                        text: `Failed to search content: ${message}`,
                     },
                 ],
                 isError: true,
@@ -838,12 +608,17 @@ function readMcpSessionId(req: IncomingMessage): string | undefined {
 export async function startHappyServer(client: ApiSessionClient, options: StartHappyServerOptions = {}) {
     const emitTitleSummary = options.emitTitleSummary ?? true;
     const enableChangeTitle = options.enableChangeTitle ?? true;
-    const enableDisplayLinks = resolveEnableDisplayLinks(options);
     const transports = new Map<string, StreamableHTTPServerTransport>();
     const mcps = new Map<string, McpServer>();
 
     const createMcpTransport = () => {
-        const mcp = createHapiMcpServer(client, emitTitleSummary, enableChangeTitle, options.skillLookup, enableDisplayLinks);
+        const mcp = createHapiMcpServer(
+            client,
+            emitTitleSummary,
+            enableChangeTitle,
+            options.skillLookup,
+            options.workingDirectory
+        );
         const transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => randomUUID(),
             onsessioninitialized: (sessionId) => {
@@ -898,12 +673,8 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
     }));
 
     const toolNames = enableChangeTitle
-        ? ['change_title', 'set_voice_mode', 'link_issue', 'display_image', 'display_video', 'display_media']
-        : ['set_voice_mode', 'link_issue', 'display_image', 'display_video', 'display_media'];
-    if (enableDisplayLinks) {
-        toolNames.push('display_links');
-    }
-    toolNames.push('list_peers', 'search_peers', 'search_content', 'ping_peer', 'inspect_peer', 'spawn_peer', SESSION_JOB_TOOL_NAME);
+        ? ['change_title', 'display_image', 'display_video', 'display_media', 'list_peers', 'ping_peer', 'inspect_peer', 'spawn_peer']
+        : ['display_image', 'display_video', 'display_media', 'list_peers', 'ping_peer', 'inspect_peer', 'spawn_peer'];
     if (options.skillLookup) {
         toolNames.push('skill_lookup');
     }

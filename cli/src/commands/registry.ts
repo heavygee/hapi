@@ -18,18 +18,10 @@ import { hookForwarderCommand } from './hookForwarder'
 import { mcpCommand } from './mcp'
 import { mcpProxyCommand } from './mcpProxy'
 import { notifyCommand } from './notify'
-import { linkPrCommand } from './linkPr'
 import { hubCommand } from './hub'
 import { pingPeerCommand } from './pingPeer'
 import { inspectPeerCommand } from './inspectPeer'
-import { helpCommand } from './help'
-import { jobCommand } from './job'
 import { spawnPeerCommand } from './spawnPeer'
-import { displayLinksCommand } from './displayLinks'
-import { versionCommand } from './version'
-import { searchPeersCommand } from './searchPeers'
-import { searchContentCommand } from './searchContent'
-import { linkIssueCommand } from './linkIssue'
 import type { CommandContext, CommandDefinition } from './types'
 
 // Gemini CLI was sunset (Google stopped serving the consumer Gemini CLI on
@@ -70,17 +62,9 @@ const COMMANDS: CommandDefinition[] = [
     resumeCommand,
     runnerCommand,
     notifyCommand,
-    linkPrCommand,
     pingPeerCommand,
     inspectPeerCommand,
-    jobCommand,
-    spawnPeerCommand,
-    displayLinksCommand,
-    searchPeersCommand,
-    searchContentCommand,
-    helpCommand,
-    versionCommand,
-    linkIssueCommand
+    spawnPeerCommand
 ]
 
 const commandMap = new Map<string, CommandDefinition>()
@@ -98,7 +82,7 @@ export function resolveCommand(args: string[]): { command: CommandDefinition; co
         context: {
             args,
             subcommand,
-            commandArgs: args.slice(1),
-        },
+            commandArgs: args.slice(1)
+        }
     }
 }

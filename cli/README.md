@@ -28,10 +28,10 @@ Choose a supported coding agent from your terminal and control its sessions remo
 - `hapi` - Choose an agent interactively. Unavailable agents are shown with a reason and cannot be selected.
 - `hapi claude` - Start a Claude Code session (passes through Claude CLI flags).
 - `hapi codex` - Start Codex mode. See `src/codex/runCodex.ts`.
-- `hapi codex resume <sessionId>` - Resume existing Codex session.
+- `hapi codex resume <native-thread-id>` - Resume a Codex conversation by its native thread ID. For a HAPI session ID, use `hapi resume <id>`.
 - `hapi cursor` - Start Cursor Agent mode. See `src/cursor/runCursor.ts`.
   Supports `hapi cursor resume <chatId>`, `hapi cursor --continue`, `--mode plan|ask`, `--yolo`, `--model`.
-  Local and remote modes supported; remote uses `agent -p` with stream-json.
+  Local and remote modes supported; new remote sessions use `agent acp`. Pre-ACP sessions retain the legacy `agent -p` stream-json resume path.
 - `hapi grok` - Start Grok Build mode. See `src/grok/runGrok.ts`.
 - `hapi copilot` - Start GitHub Copilot mode.
 - `hapi kimi` - Start Kimi mode.
@@ -42,11 +42,9 @@ Choose a supported coding agent from your terminal and control its sessions remo
 - `hapi dsh` - Start DeepSeek Harness through ACP. See `src/dsh/runDsh.ts`.
   DSH is remote-only and its ACP server must be configured separately.
 - `hapi resume [sessionId]` - List resumable sessions for this machine or resume one locally.
-- `hapi ping-peer <session-id-prefix> <message>` - Resume (if needed) and message another session. Prefer this or MCP `ping_peer` / `list_peers` / `search_peers` over reinventing JWT+curl. Also `--message-file` / `--list`.
-- `hapi search-peers <query>` - Keyword search for sessions (name/path/agentSessionId) beyond `list_peers` recency. Prefer MCP `search_peers` in-session.
+- `hapi ping-peer <session-id-prefix> <message>` - Resume (if needed) and message another session. Prefer this or MCP `ping_peer` / `list_peers` over reinventing JWT+curl. Also `--message-file` / `--list`.
 - `hapi spawn-peer --dir PATH --name TITLE --message-file -` - Spawn a session and deliver a required first message. Optional `--machine ID|hostname` targets another runner (resolved via GET /api/machines); `--dir` must exist on the target. Machine spawn HTTP 200 is not a working peer; this command fails if the remit does not land. Prefer MCP `spawn_peer`.
 - `hapi inspect-peer <session-id-or-prefix>` - Read-only peer metadata + recent message text (no resume). Prefer this or MCP `inspect_peer` when a user cites `[title](/sessions/<id>)` or Copy-reference `See session "…" (/sessions/<id>) for context`. `/sessions/<id>` is a hub path, not a local file. Optional `--limit`.
-- `hapi job set|update|clear|list|run` - Attach long-running outliving work to a session so the list UI shows progress while the agent is idle (`tiann/hapi#1404`). Prefer `"$HAPI_SESSION_ID"`. Heartbeat via `update` (or `run`); honest `--remaining` or `--done`/`--total` (omit counts if unknown — never invent a percent). Late-attach clock fix: `set --started-at <epoch-ms>` or clear+set. See `docs/guide/session-jobs.md` and `hapi job --help`.
 
 The picker lists agents alphabetically by command name. Use Up/Down and Enter
 to choose; Esc or Ctrl-C cancels. It appears on every bare invocation, even
@@ -147,9 +145,11 @@ See `src/ui/doctor.ts`.
 
 Codex sessions keep the MCP servers configured in the user's Codex
 `config.toml`. HAPI adds its own `hapi` bridge without replacing other user
-servers. Runner-spawned Codex sessions copy only `config.toml` into their
-temporary `CODEX_HOME`, so MCP settings are preserved while authentication
-state remains isolated. The `hapi` server name is reserved by HAPI.
+servers. When a runner spawn supplies a Codex auth token, it copies only
+`config.toml` into a temporary `CODEX_HOME` and writes the supplied `auth.json`,
+preserving MCP settings without copying unrelated authentication state.
+Without a supplied token, Codex uses the runner's normal Codex home/auth.
+The `hapi` server name is reserved by HAPI.
 
 On Windows, known package-manager shims (`uvx`, `npx`, `npm`, `pnpm`, `yarn`,
 `bunx`, and `.cmd`/`.bat` commands) use a short-lived HAPI stdio compatibility
@@ -189,10 +189,10 @@ controls for DSH.
 ### Required
 
 - `CLI_API_TOKEN` - Shared secret; must match the hub. Can be set via env or `~/.hapi/settings.json` (env wins).
-- `HAPI_API_URL` - Hub base URL (default: http://localhost:3006).
 
 ### Optional
 
+- `HAPI_API_URL` - Hub base URL (default: http://localhost:3006). Also accepted via `~/.hapi/settings.json` (`serverUrl` / settings-backed URL); env wins when set.
 - `HAPI_HOME` - Config/data directory (default: ~/.hapi).
 - `HAPI_EXPERIMENTAL` - Enable experimental features (true/1/yes).
 - `HAPI_EXTRA_HEADERS_JSON` - JSON object of extra headers to send on CLI → hub requests, e.g. `{"Cookie":"CF_Authorization=..."}`. Can also be set as the `extraHeaders` object in `~/.hapi/settings.json` (environment variable wins).
@@ -229,6 +229,14 @@ controls for DSH.
 
   Explicit other session (prefix or full uuid) still works; that path may list sessions.
 
+## Session lifecycle invariants
+
+When changing agent bootstrap, handoff, or shared-session plumbing:
+
+- Handoff-capable integrations use `local` (terminal) and `remote` (web-controlled) ownership modes. Codex instead supports concurrent clients without ownership switching; see [Codex shared sessions](../docs/guide/codex-shared-sessions.md).
+- Ordinary wrappers export `HAPI_SESSION_ID` after bootstrap. Shared Codex uses a per-root MCP bridge and `shell_environment_policy.set.HAPI_SESSION_ID`; never put one root's ID into the shared app-server environment. Implementation: `src/codex/shared/root.ts`, `src/codex/shared/runtime.ts`.
+- Gemini remains a historical wire flavor, not a launchable integration. Use the [supported-agent guide](../docs/guide/agents.md) for the launchable set.
+
 ## Storage
 
 Data is stored in `~/.hapi/` (or `$HAPI_HOME`):
@@ -251,8 +259,8 @@ From the repo root:
 
 ```bash
 bun install
-bun run build:cli
-bun run build:cli:exe
+bun run build:cli                 # Type-check the CLI; no executable output
+bun run --cwd cli build:exe       # Host-platform executable in cli/dist-exe/<target>/
 ```
 
 For an all-in-one binary that also embeds the web app:

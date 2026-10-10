@@ -14,9 +14,7 @@ import {
     DISPLAY_VIDEO_PROMPT_HAPI_MCP,
 } from '@/modules/common/displayImagePrompt';
 import { SKILL_LOOKUP_INSTRUCTION } from '@/modules/common/skillLookupInstruction';
-import { withSessionJobInstruction } from '@/modules/common/sessionJobInstruction';
 import { withSessionSummaryInstruction } from '@/modules/common/sessionSummaryInstruction';
-import { withVoiceModeInstruction } from '@/modules/common/voiceModeInstruction';
 
 /**
  * Title and display_image / display_video / display_media instructions for OpenCode to call the hapi MCP tools.
@@ -28,17 +26,12 @@ export const TITLE_INSTRUCTION = trimIdent(`
         pingTool: 'hapi_ping_peer',
         listPeersTool: 'hapi_list_peers',
         spawnTool: 'hapi_spawn_peer',
-        searchPeersTool: 'hapi_search_peers',
-        searchContentTool: 'hapi_search_content',
     })}
     ${SKILL_LOOKUP_INSTRUCTION}
 `);
 
 export function getTitleInstruction(env: NodeJS.ProcessEnv = process.env): string {
-    return withSessionSummaryInstruction(
-        withVoiceModeInstruction(withSessionJobInstruction(TITLE_INSTRUCTION)),
-        env,
-    )
+    return withSessionSummaryInstruction(TITLE_INSTRUCTION, env)
 }
 
 /**
@@ -54,17 +47,12 @@ export const OPENCODE_NATIVE_TOOL_INSTRUCTION = trimIdent(`
         pingTool: 'hapi_ping_peer',
         listPeersTool: 'hapi_list_peers',
         spawnTool: 'hapi_spawn_peer',
-        searchPeersTool: 'hapi_search_peers',
-        searchContentTool: 'hapi_search_content',
     })}
     ${SKILL_LOOKUP_INSTRUCTION}
 `);
 
 export function getOpencodeNativeToolInstruction(env: NodeJS.ProcessEnv = process.env): string {
-    return withSessionSummaryInstruction(
-        withVoiceModeInstruction(withSessionJobInstruction(OPENCODE_NATIVE_TOOL_INSTRUCTION)),
-        env,
-    )
+    return withSessionSummaryInstruction(OPENCODE_NATIVE_TOOL_INSTRUCTION, env)
 }
 
 /**

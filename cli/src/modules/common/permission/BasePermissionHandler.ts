@@ -31,38 +31,20 @@ const AUTO_APPROVE_EXACT_TOOL_NAMES = new Set([
     'hapi_skill_lookup',
     'happy__skill_lookup',
     'mcp__hapi__skill_lookup',
-    // Discovery shortlist / keyword inventory — same as ping-peer --list / search-peers.
+    // Discovery shortlist only (id/active/flavor/name) - same as ping-peer --list.
     'list_peers',
     'hapi_list_peers',
     'happy__list_peers',
     'mcp__hapi__list_peers',
-    'search_peers',
-    'hapi_search_peers',
-    'happy__search_peers',
-    'mcp__hapi__search_peers',
-    // Transcript fleet search — read-only hub REST, same trust as search_peers.
-    'search_content',
-    'hapi_search_content',
-    'happy__search_content',
-    'mcp__hapi__search_content',
     // ACP permission requests often surface MCP tool title, not the snake_case name.
-    'list peer sessions',
-    'search peer sessions',
-    'search session transcripts',
-    // Own-session progress meter (tiann/hapi#1404) — MCP schema has no sessionId;
-    // tool always targets this chat. Cross-session writes use CLI hapi job (not auto).
-    'session_job',
-    'hapi_session_job',
-    'happy__session_job',
-    'mcp__hapi__session_job',
-    'session-attached job'
+    'list peer sessions'
 ]);
 // ping_peer / inspect_peer / spawn_peer intentionally omitted from always-approve:
 // they can resume+inject into another session, read peer histories, or create a
 // new session with an injected remit, so permission modes must still gate them.
 // Treat them as write-like in read-only so ACP titles such as "Ping Peer Session"
 // / "Inspect Peer Session" / "Spawn Peer Session" also require approval.
-// list_peers / search_peers / search_content / own-session session_job are auto-approved above.
+// list_peers is discovery-only and is auto-approved above.
 const AUTO_APPROVE_TOOL_ID_HINTS = ['change_title', 'save_memory'];
 const SENSITIVE_TOOL_NAME_HINTS = [
     'ping_peer',

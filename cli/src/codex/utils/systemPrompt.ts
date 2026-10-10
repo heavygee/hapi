@@ -9,7 +9,6 @@ import { trimIdent } from '@/utils/trimIdent';
 import { buildSessionCitationSteerInstruction } from '@hapi/protocol/sessionCitation';
 import { DISPLAY_IMAGE_PROMPT_CODEX, DISPLAY_MEDIA_PROMPT_CODEX, DISPLAY_VIDEO_PROMPT_CODEX } from '@/modules/common/displayImagePrompt';
 import { withSessionSummaryInstruction } from '@/modules/common/sessionSummaryInstruction';
-import { withVoiceModeInstruction } from '@/modules/common/voiceModeInstruction';
 
 /**
  * Title instruction for Codex to call the hapi MCP tool.
@@ -30,8 +29,6 @@ export const TITLE_INSTRUCTION = trimIdent(`
         pingTool: 'functions.hapi__ping_peer',
         listPeersTool: 'functions.hapi__list_peers',
         spawnTool: 'functions.hapi__spawn_peer',
-        searchPeersTool: 'functions.hapi__search_peers',
-        searchContentTool: 'functions.hapi__search_content',
     })}
 `);
 
@@ -40,7 +37,7 @@ export const TITLE_INSTRUCTION = trimIdent(`
  * Session-summary contract is resolved at call time (hub toggle / env).
  */
 export function getCodexSystemPrompt(env: NodeJS.ProcessEnv = process.env): string {
-    return withSessionSummaryInstruction(withVoiceModeInstruction(TITLE_INSTRUCTION), env)
+    return withSessionSummaryInstruction(TITLE_INSTRUCTION, env)
 }
 
 /** Alias kept for existing call sites / tests that expect a string constant name. */

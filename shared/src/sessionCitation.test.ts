@@ -4,7 +4,6 @@ import {
     SPAWN_PEER_TOOL_DESCRIPTION,
     buildSessionCitationSteerInstruction,
     extractSessionCitationIds,
-    extractSessionCitationLabel,
     normalizeSessionIdPrefix,
 } from './sessionCitation'
 
@@ -99,22 +98,6 @@ describe('normalizeSessionIdPrefix', () => {
     })
 })
 
-describe('extractSessionCitationLabel', () => {
-    it('extracts title from markdown composer chip form', () => {
-        expect(extractSessionCitationLabel(`[Antevorta setup](/sessions/${UUID})`)).toBe('Antevorta setup')
-    })
-
-    it('extracts title from Copy-reference prose', () => {
-        expect(extractSessionCitationLabel(`See session "Antevorta setup" (/sessions/${UUID}) for context`))
-            .toBe('Antevorta setup')
-    })
-
-    it('returns null for bare id pastes', () => {
-        expect(extractSessionCitationLabel(UUID)).toBeNull()
-        expect(extractSessionCitationLabel(`/sessions/${UUID}`)).toBeNull()
-    })
-})
-
 describe('buildSessionCitationSteerInstruction', () => {
     it('mentions both citation forms and forbids local FS search', () => {
         const text = buildSessionCitationSteerInstruction({
@@ -143,28 +126,6 @@ describe('buildSessionCitationSteerInstruction', () => {
         expect(text.toLowerCase()).toMatch(/400|reject/)
         expect(text.toLowerCase()).not.toMatch(/strip/)
     })
-
-    it('mentions search_peers when provided', () => {
-        const text = buildSessionCitationSteerInstruction({
-            inspectTool: 'mcp__hapi__inspect_peer',
-            pingTool: 'mcp__hapi__ping_peer',
-            listPeersTool: 'mcp__hapi__list_peers',
-            searchPeersTool: 'mcp__hapi__search_peers',
-        })
-        expect(text).toContain('mcp__hapi__search_peers')
-        expect(text).toContain('hapi search-peers')
-    })
-
-    it('mentions search_content when searchContentTool is set', () => {
-        const text = buildSessionCitationSteerInstruction({
-            inspectTool: 'mcp__hapi__inspect_peer',
-            pingTool: 'mcp__hapi__ping_peer',
-            searchContentTool: 'mcp__hapi__search_content',
-        })
-        expect(text).toContain('mcp__hapi__search_content')
-        expect(text).toContain('hapi search-content')
-        expect(text).toMatch(/transcript/i)
-    })
 })
 
 describe('SPAWN_PEER_TOOL_DESCRIPTION', () => {
@@ -181,13 +142,24 @@ describe('SPAWN_PEER_TOOL_DESCRIPTION', () => {
         )
     })
 
-    // Parent UUID / "never invent" copy lands with full upstream #1922 tip —
-    // thin soup delta is --machine surface only (incident 2026-10-10).
+    it('forbids inventing peer titles and teaches Parent UUID stamp', () => {
+        expect(SPAWN_PEER_TOOL_DESCRIPTION.toLowerCase()).toMatch(/never invent/)
+        expect(SPAWN_PEER_TOOL_DESCRIPTION.toLowerCase()).toMatch(/parent/)
+        expect(SPAWN_PEER_TOOL_DESCRIPTION.toLowerCase()).toMatch(/uuid/)
+    })
+
     it('documents optional machine targeting beyond this host only', () => {
         expect(SPAWN_PEER_TOOL_DESCRIPTION.toLowerCase()).toMatch(/machine/)
         expect(SPAWN_PEER_TOOL_DESCRIPTION.toLowerCase()).toMatch(/hostname|uuid/)
         expect(SPAWN_PEER_TOOL_DESCRIPTION.toLowerCase()).not.toMatch(
             /spawn a new hapi session on this machine and/
         )
+    })
+})
+
+describe('PING_PEER_TOOL_DESCRIPTION identity rule', () => {
+    it('forbids inventing peer titles', async () => {
+        const { PING_PEER_TOOL_DESCRIPTION } = await import('./sessionCitation')
+        expect(PING_PEER_TOOL_DESCRIPTION.toLowerCase()).toMatch(/never invent/)
     })
 })

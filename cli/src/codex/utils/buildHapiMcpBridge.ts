@@ -48,8 +48,8 @@ export interface HapiMcpBridgeOptions {
     exportSessionEnv?: boolean;
     emitTitleSummary?: boolean;
     enableChangeTitle?: boolean;
-    /** Cursor-only (#1516). Also inferred from skillLookup.flavor === 'cursor'. */
-    enableDisplayLinks?: boolean;
+    /** Session project cwd for relative spawn_peer directories (Codex --cd aware). */
+    workingDirectory?: string;
     skillLookup?: {
         workingDirectory: string;
         flavor: string;
@@ -84,7 +84,7 @@ export async function buildHapiMcpBridge(
     const happyServer = await startHappyServer(client, {
         emitTitleSummary: options.emitTitleSummary,
         enableChangeTitle: options.enableChangeTitle,
-        enableDisplayLinks: options.enableDisplayLinks,
+        workingDirectory: options.workingDirectory ?? options.skillLookup?.workingDirectory,
         skillLookup: options.skillLookup
     });
     const bridgeCommand = getHappyCliCommand([
@@ -105,31 +105,13 @@ export async function buildHapiMcpBridge(
             approval_mode: 'prompt'
         }
     };
-    // Cursor-only (#1516) — no local-file read; auto-approve so the model uses it
-    // instead of typing doubled-letter-mangled URLs.
-    if (happyServer.toolNames.includes('display_links')) {
-        tools.display_links = {
-            approval_mode: 'approve'
-        };
-    }
     if (options.enableChangeTitle !== false) {
         tools.change_title = {
             approval_mode: 'approve'
         };
     }
-    // Discovery shortlist / keyword inventory - same trust as skill_lookup / change_title.
+    // Discovery shortlist only - same trust as skill_lookup / change_title.
     tools.list_peers = {
-        approval_mode: 'approve'
-    };
-    tools.search_peers = {
-        approval_mode: 'approve'
-    };
-    // Transcript fleet search — same trust as search_peers (read-only hub REST).
-    tools.search_content = {
-        approval_mode: 'approve'
-    };
-    // Own-session progress meter (tiann/hapi#1404) — hub REST, not peer inject.
-    tools.session_job = {
         approval_mode: 'approve'
     };
     // ping_peer / inspect_peer / spawn_peer are registered on the HTTP MCP
