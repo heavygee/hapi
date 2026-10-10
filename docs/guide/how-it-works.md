@@ -41,7 +41,7 @@ hapi ping-peer --list  # Shell peer shortlist (prefer MCP list_peers in-session)
 hapi search-peers <q>  # Keyword find beyond recency (prefer MCP search_peers)
 ```
 
-MCP peer tools (same hub/namespace as the session): `list_peers` (hot shortlist), `search_peers` (keyword inventory), `inspect_peer` (read), `ping_peer` (message), `spawn_peer` (create with a required remit). These work from runner-spawned sessions even when the hub is on another host - see [Installation → Split hub + remote runner](./installation.md#split-hub--remote-runner-peer-discovery). Never treat machine-spawn HTTP 200 as a working peer.
+MCP peer tools (same hub/namespace as the session): `list_peers` (hot shortlist), `search_peers` (keyword inventory), `inspect_peer` (read), `ping_peer` (message), `spawn_peer` (create with a required remit). These work from runner-spawned sessions even when the hub is on another host - see [Installation → Split hub + remote runner](./installation.md#split-hub--remote-runner-peer-discovery). Never treat machine-spawn HTTP 200 as a working peer. In-session `spawn_peer` auto-stamps a durable Parent `[title](/sessions/<uuid>)` chip onto the remit (UUID is identity; titles are decoration).
 
 ### HAPI Hub
 
