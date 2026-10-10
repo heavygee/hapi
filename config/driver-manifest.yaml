@@ -799,13 +799,13 @@ layers:
   # Superseded 2026-10-10 by driver/1922-peer-rename-proof (whole upstream #1922 tip).
   # - branch: driver/spawn-peer-remit-delta
 
-  # tiann/hapi#1922 / #1931 — spawn-peer remit + Parent UUID stamps + MCP/CLI --machine.
-  # Incident 2026-10-10: live soup advertised "this machine" only; agents invented
-  # version-skew / SSH. Fresh ls-remote tip 17adbcee2 (feat/peer-rename-proof-identity).
-  # Fat tip (45c/55f) — Meta ABSORB_FAT justified; do not re-thin mid-incident.
-  # Layer MUST match origin/feat/peer-rename-proof-identity / PR tip before remat.
-  # Hub+CLI+web → remat --build-web + hapi-restart-hub.
-  - branch: driver/1922-peer-rename-proof
+  # tiann/hapi#1931 — thin MCP/CLI spawn_peer --machine (incident 2026-10-10).
+  # Full upstream #1922 tip (Parent stamps + peerSpawnDefaults UI) is fat vs soup
+  # (45c/55f, merge conflicts). Thin delta @ 0286b1d70 on soup tip 0ce638a00 —
+  # cherry-picks 26bd3141c + 17adbcee2 from feat/peer-rename-proof-identity.
+  # DO NOT point at whole #1922 tip until re-thinned. Never set HAPI_DRIVER_MANIFEST
+  # to a stale /tmp copy (starved this layer once). Hub+CLI → remat + restart.
+  - branch: driver/1931-spawn-machine-delta
 
   # Soup heal: remat 47ce90965 dropped Claude Happy MCP spawn_peer model/effort
   # (Codex bridge kept them). Restore schema + handler forwarding for Claude sessions.
