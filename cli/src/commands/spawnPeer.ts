@@ -22,6 +22,7 @@ type ParsedSpawnPeerArgs = {
     effort?: string
     sessionType?: 'simple' | 'worktree'
     permissionMode?: PermissionMode
+    machine?: string
     waitActiveSecs?: number
 }
 
@@ -42,15 +43,19 @@ ${chalk.bold('Notes:')}
   Same hub token/namespace as this CLI. Prefer MCP spawn_peer in-session.
 
 ${chalk.bold('Options:')}
-  --dir PATH              Working directory on this machine (required; relative paths resolve here, not in the runner)
+  --dir PATH              Working directory on the target machine (required; relative paths resolve here, not in the runner)
   --name TITLE            Session display name (required, 1-255 chars)
   --message-file PATH|-   Remit text (or - for stdin)
+  --machine ID|hostname   Target runner (UUID or hostname from GET /api/machines; default: this host)
   --agent NAME            Agent flavor (default: hub peerSpawnDefaults, else claude)
   --model ID              Model override for the resolved agent flavor
   --effort LEVEL          Effort override (flavor-dependent; e.g. claude high)
   --session-type TYPE     simple | worktree (default: simple; worktree creates a new tree from PATH)
   --permission-mode MODE  Optional; omit = hub/stock default (yolo). Pass to tighten or when named; not cloned from parent
   --wait SECONDS          Active/verify timeout (default 60, or HAPI_WAIT_ACTIVE_SECS)
+
+  Cross-machine: --dir must exist on the TARGET host. Local existence is not required when
+  --machine resolves to a different runner than this CLI's settings.machineId.
 
 ${chalk.bold('Env:')}
   HAPI_API_URL / CLI_API_TOKEN (or ~/.hapi/settings.json via \`hapi auth login\`)
@@ -185,6 +190,22 @@ export function parseSpawnPeerArgs(args: string[]): ParsedSpawnPeerArgs {
             result.permissionMode = parsePermissionMode(arg.slice('--permission-mode='.length))
             continue
         }
+        if (arg === '--machine') {
+            const value = args[++i]
+            if (!value) {
+                throw new SpawnPeerError('bad_args', '--machine requires a UUID or hostname')
+            }
+            result.machine = value
+            continue
+        }
+        if (arg.startsWith('--machine=')) {
+            const value = arg.slice('--machine='.length)
+            if (!value) {
+                throw new SpawnPeerError('bad_args', '--machine requires a UUID or hostname')
+            }
+            result.machine = value
+            continue
+        }
         if (arg === '--wait') {
             const value = args[++i]
             if (!value) {
@@ -307,6 +328,7 @@ export async function handleSpawnPeerCommand(args: string[]): Promise<void> {
         effort: parsed.effort,
         sessionType: parsed.sessionType,
         permissionMode: parsed.permissionMode,
+        machine: parsed.machine,
         waitActiveSecs: parsed.waitActiveSecs ?? envWaitActiveSecs(),
         onProgress: (line) => console.log(`hapi spawn-peer: ${line}`)
     })

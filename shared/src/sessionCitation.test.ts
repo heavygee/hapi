@@ -180,4 +180,14 @@ describe('SPAWN_PEER_TOOL_DESCRIPTION', () => {
             /pass permissionmode only when the operator asked/
         )
     })
+
+    // Parent UUID / "never invent" copy lands with full upstream #1922 tip —
+    // thin soup delta is --machine surface only (incident 2026-10-10).
+    it('documents optional machine targeting beyond this host only', () => {
+        expect(SPAWN_PEER_TOOL_DESCRIPTION.toLowerCase()).toMatch(/machine/)
+        expect(SPAWN_PEER_TOOL_DESCRIPTION.toLowerCase()).toMatch(/hostname|uuid/)
+        expect(SPAWN_PEER_TOOL_DESCRIPTION.toLowerCase()).not.toMatch(
+            /spawn a new hapi session on this machine and/
+        )
+    })
 })

@@ -12,6 +12,7 @@
  * namespace as ping-peer. Callers must not invent parallel auth.
  */
 
+import { existsSync, statSync } from 'node:fs'
 import { resolve as resolvePath } from 'node:path'
 import axios, { type AxiosInstance } from 'axios'
 import { isObject, SESSION_NAME_MAX_LENGTH } from '@hapi/protocol'
@@ -34,6 +35,12 @@ import {
     extractInspectMessageSnippet,
     pingPeer
 } from '@/modules/pingPeer/pingPeer'
+import {
+    AmbiguousSpawnMachineError,
+    isUuidMachineSelector,
+    resolveSpawnMachineIdFromList,
+    type HubMachineListEntry,
+} from '@/modules/spawnPeer/resolveSpawnMachineId'
 
 export type SpawnPeerErrorCode =
     | 'bad_args'
@@ -66,7 +73,21 @@ export type SpawnPeerOptions = {
     sessionType?: 'simple' | 'worktree'
     worktreeName?: string
     permissionMode?: PermissionMode
+    /**
+     * Already-resolved hub machine id. Prefer this in tests.
+     * When omitted, falls back to `machine` then local settings.machineId.
+     */
     machineId?: string
+    /**
+     * Optional machine selector: UUID or hostname / metadata.host / displayName.
+     * Resolved via GET /api/machines (tiann/hapi#1931).
+     */
+    machine?: string
+    /**
+     * Local runner machine id (defaults to settings.machineId). Used to decide
+     * cross-host dir checks and progress notes.
+     */
+    localMachineId?: string
     waitActiveSecs?: number
     apiUrl?: string
     accessToken?: string
@@ -162,6 +183,110 @@ async function exchangeJwt(
         throw new SpawnPeerError(
             'auth_failed',
             `failed to exchange access token for JWT (${error instanceof Error ? error.message : String(error)}). Hub URL: ${apiUrl}. ${AUTH_RECOVERY_HINT}`
+        )
+    }
+}
+
+async function fetchHubMachines(
+    apiUrl: string,
+    jwt: string,
+    http: AxiosInstance
+): Promise<HubMachineListEntry[]> {
+    try {
+        const response = await http.get(`${apiUrl}/api/machines`, {
+            headers: authHeaders(jwt),
+            timeout: 10_000,
+            validateStatus: () => true
+        })
+        if (response.status < 200 || response.status >= 300) {
+            throw new SpawnPeerError(
+                'spawn_failed',
+                `GET /api/machines failed (HTTP ${response.status})`
+            )
+        }
+        const payload = response.data as { machines?: unknown } | unknown
+        const list = isObject(payload) && Array.isArray(payload.machines)
+            ? payload.machines
+            : Array.isArray(payload)
+                ? payload
+                : null
+        if (!list) {
+            throw new SpawnPeerError('spawn_failed', 'GET /api/machines returned no machines list')
+        }
+        return list as HubMachineListEntry[]
+    } catch (error) {
+        if (error instanceof SpawnPeerError) {
+            throw error
+        }
+        throw new SpawnPeerError(
+            'spawn_failed',
+            `GET /api/machines failed (${error instanceof Error ? error.message : String(error)})`
+        )
+    }
+}
+
+async function resolveTargetMachineId(options: {
+    machineId?: string
+    machine?: string
+    localMachineId: string
+    apiUrl: string
+    jwt: string
+    http: AxiosInstance
+}): Promise<string> {
+    const direct = (options.machineId ?? '').trim()
+    if (direct) {
+        return direct
+    }
+
+    const selector = (options.machine ?? '').trim()
+    if (selector) {
+        // UUID passthrough without a list round-trip (matches estate wrapper).
+        if (isUuidMachineSelector(selector)) {
+            return selector
+        }
+        const machines = await fetchHubMachines(options.apiUrl, options.jwt, options.http)
+        try {
+            const resolved = resolveSpawnMachineIdFromList(selector, machines)
+            if (!resolved) {
+                throw new SpawnPeerError(
+                    'bad_args',
+                    `no hub machine matched machine=${selector} (try UUID or hostname from GET /api/machines)`
+                )
+            }
+            return resolved
+        } catch (error) {
+            if (error instanceof AmbiguousSpawnMachineError) {
+                throw new SpawnPeerError('ambiguous', error.message)
+            }
+            throw error
+        }
+    }
+
+    if (options.localMachineId) {
+        return options.localMachineId
+    }
+
+    throw new SpawnPeerError(
+        'bad_args',
+        `machineId is required (run \`hapi auth login\` / start the runner). ${AUTH_RECOVERY_HINT}`
+    )
+}
+
+function assertLocalSpawnDirectory(directory: string): void {
+    try {
+        if (!existsSync(directory) || !statSync(directory).isDirectory()) {
+            throw new SpawnPeerError(
+                'bad_args',
+                `directory not found on this host: ${directory}`
+            )
+        }
+    } catch (error) {
+        if (error instanceof SpawnPeerError) {
+            throw error
+        }
+        throw new SpawnPeerError(
+            'bad_args',
+            `directory not found on this host: ${directory}`
         )
     }
 }
@@ -306,19 +431,30 @@ export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerRes
     const now = options.now ?? Date.now
     const onProgress = options.onProgress
 
-    let machineId = (options.machineId ?? '').trim()
-    if (!machineId) {
-        const settings = await readSettings()
-        machineId = (settings.machineId ?? '').trim()
-    }
-    if (!machineId) {
-        throw new SpawnPeerError(
-            'bad_args',
-            `machineId is required (run \`hapi auth login\` / start the runner). ${AUTH_RECOVERY_HINT}`
-        )
-    }
-
+    const settings = await readSettings()
+    const localMachineId = (options.localMachineId ?? settings.machineId ?? '').trim()
     const jwt = await exchangeJwt(apiUrl, accessToken, http)
+    const machineId = await resolveTargetMachineId({
+        machineId: options.machineId,
+        machine: options.machine,
+        localMachineId,
+        apiUrl,
+        jwt,
+        http,
+    })
+    // Match estate hapi-spawn-peer.sh (`MACHINE != LOCAL_MACHINE`): empty local
+    // settings.machineId still counts as not-equal, so explicit remote targets
+    // skip the local dir check.
+    const crossHost = machineId !== localMachineId
+    // Local spawn requires the dir here; cross-machine dirs must exist on TARGET.
+    if (crossHost) {
+        onProgress?.(
+            `cross-machine spawn: local=${localMachineId || '(unset)'} target=${machineId} `
+            + `(dir must exist on TARGET)`
+        )
+    } else {
+        assertLocalSpawnDirectory(directory)
+    }
 
     const hubDefaults = options.hubPeerSpawnDefaults !== undefined
         ? options.hubPeerSpawnDefaults

@@ -35,6 +35,27 @@ describe('parseSpawnPeerArgs', () => {
         })
     })
 
+    it('parses --machine UUID or hostname', () => {
+        expect(parseSpawnPeerArgs([
+            '--dir', '/tmp/wt',
+            '--name', 'Peer',
+            '--machine', 'oos-llm-lab',
+            'hello remit'
+        ])).toEqual({
+            help: false,
+            directory: '/tmp/wt',
+            name: 'Peer',
+            machine: 'oos-llm-lab',
+            message: 'hello remit'
+        })
+        expect(parseSpawnPeerArgs([
+            '--dir=/tmp/wt',
+            '--name=Peer',
+            '--machine=5f5a87e8-25b2-4732-ba4c-aba95f695bd7',
+            'hello'
+        ]).machine).toBe('5f5a87e8-25b2-4732-ba4c-aba95f695bd7')
+    })
+
     it('parses --help', () => {
         expect(parseSpawnPeerArgs(['--help']).help).toBe(true)
     })
