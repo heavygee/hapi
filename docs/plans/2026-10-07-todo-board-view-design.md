@@ -2,6 +2,8 @@
 
 Status: draft, cold-read complete, corrections applied, filing as tracking + 4 child issues.
 
+**2026-10-10 operator decision — supersedes every "opt-in, default off" line below:** the feature shipped and was reviewed/approved across 6 rounds on `heavygee/hapi#238` as **always-on chrome with a safe, dull public demo-board default** (not a hub-level opt-in toggle) — clicking the always-visible Sessions/To-Do switch *is* the discovery/opt-in step. What stays genuinely per-action opt-in is **linking** — `hapi link-issue` / `hapi link-pr`, scoped to one session at a time — not a `githubProjectAwareness`-style global capability flag gating the whole board view. The real exposure this doc's "default off" framing was trying to prevent (a configured board leaking real content to installs/namespaces that shouldn't see it) is instead closed by namespace-restricting the board routes to the hub owner and host-allowlisting board-add URLs (both landed in #238). A no-boards-configured empty state explains the feature and offers an "Add a board" action rather than looking broken or 404-like. Read the rest of this doc as historical design-phase reasoning, not the shipped contract.
+
 ## Problem
 
 The operator's task list lives in GitHub (Projects v2 boards), not in HAPI, which means leaving HAPI to find out what's next. HAPI already groups sessions by project; this proposes a second, independent mode that surfaces board items the same way, with cross-links to sessions where they exist.
@@ -31,7 +33,7 @@ The actual mechanism, verified against that fork code: `metadata.externalRefs`, 
 With that corrected scope in mind, the design intent still holds:
 
 - Same write path pattern: explicit action only (`hapi link-issue <url|owner/repo#N>` / MCP `link_issue`), no auto-detection in v1 — mirroring the fork's own deferral for PR auto-detect.
-- Same opt-in toggle philosophy — a Projects-v2 board is, if anything, more opinionated/personal than PR awareness, so default **off** applies at least as strongly. Likely a *separate* toggle (`githubProjectAwareness` or similar) rather than folded into `githubPrAwareness`, since a board can be configured without PR awareness being on.
+- ~~Same opt-in toggle philosophy...~~ **Superseded 2026-10-10** (see status note at top): shipped as always-on chrome with a safe demo-board default, not a `githubProjectAwareness`-style hub toggle.
 - Issue chip sits beside the PR chip on the session row/detail — independent, not merged into one widget.
 - Worktree-picker spawn flow (state D3 below) extends the existing spawn surface, `web/src/components/NewSession/index.tsx` — not new-from-scratch UI, but not yet designed; flagged in Open items.
 
@@ -168,13 +170,13 @@ Per operator direction (relayed via Overseer, 2026-10-09): ship the smallest thi
 - No auto-detection of issue↔session links from branch names or PR bodies — manual `hapi link-issue` only, mirroring the fork's own deferral of PR auto-detect (`linkPr.ts`). Auto-suggest (not silent auto-write) may follow later, same as that precedent leaves open.
 - No live-polling dashboard; board reads are cached/refreshed on an interval, not fetched per render (Projects v2 GraphQL queries are heavier than the REST issue search the rest of HAPI likely uses).
 - No on-demand repo cloning from the "no local checkout" state — `Open in GitHub` only for now.
-- Feature ships opt-in, default off, same as `githubPrAwareness` — no GitHub-board chrome for installs with no Projects-v2 workflow.
+- ~~Feature ships opt-in, default off...~~ **Superseded 2026-10-10**: ships always-on with a safe demo-board default; an empty-state explainer (not a hidden toggle) covers installs with no Projects-v2 workflow configured yet.
 
 ## Open items
 
 1. Exact Projects v2 GraphQL query shape and required `read:project` scope addition to whatever token(s) HAPI already uses for PR awareness — not yet designed. Likely new multi-host/multi-identity auth infrastructure, not an extension of existing single-token plumbing (current PR-awareness code is single-host/single-identity shaped).
 2. Whether per-board `done values` is hand-configured by the operator or guessed with override — not yet designed.
-3. Whether toggle should be a new `githubProjectAwareness` flag or folded into the existing `githubPrAwareness` toggle — leaning new/separate flag since a board can be configured without PR awareness being on at all.
+3. ~~Whether toggle should be...~~ **Resolved 2026-10-10**: no hub-level toggle shipped; see status note at top.
 
 ## Precedent code pointers
 
