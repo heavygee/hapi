@@ -396,8 +396,18 @@ describe('GET /api/todo-boards/:id/items', () => {
         expect(response.status).toBe(404)
     })
 
-    it('502s when the configured status field is missing or not a single-select', async () => {
+    it('502s when the configured status field name does not exist at all (field: null)', async () => {
         const app = await createApp(() => ({ data: { repositoryOwner: { projectV2: { field: null, items: { nodes: [] } } } } }))
+        const response = await app.request('/api/todo-boards/github.com%3A%3Aheavygee%3A%3A6/items')
+        expect(response.status).toBe(502)
+    })
+
+    it('502s when the configured status field exists but is not a single-select (field: {})', async () => {
+        // The inline fragment `... on ProjectV2SingleSelectField { options { name } }`
+        // only contributes `options` when the concrete type matches — a
+        // same-named field of a different type comes back as a truthy empty
+        // object, not null.
+        const app = await createApp(() => ({ data: { repositoryOwner: { projectV2: { field: {}, items: { nodes: [] } } } } }))
         const response = await app.request('/api/todo-boards/github.com%3A%3Aheavygee%3A%3A6/items')
         expect(response.status).toBe(502)
     })

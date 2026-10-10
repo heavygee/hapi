@@ -219,10 +219,13 @@ function SessionsPage() {
         initializeSessionLastSeen(baseUrl, sessions)
         setInitializedHub(baseUrl)
     }, [baseUrl, error, isLoading, sessions])
-    useSelectedSessionSeen(selectedSessionId, selectedSession?.updatedAt)
     const isSessionsIndex = pathname === '/sessions' || pathname === '/sessions/'
     const sidebar = useSidebarResize()
     const [sessionsMode, setSessionsMode] = useState<SessionsMode>('sessions')
+    // Hidden behind the to-do list while not in Sessions mode — marking it
+    // "seen" here would silently clear unread state for messages the user
+    // never actually looked at (hapi#238 Codex review).
+    useSelectedSessionSeen(sessionsMode === 'sessions' ? selectedSessionId : null, selectedSession?.updatedAt)
     const {
         boards: todoBoards,
         isLoading: todoBoardsLoading,
@@ -263,6 +266,17 @@ function SessionsPage() {
     // the to-do list, since `isSessionsIndex` alone has no idea a mode
     // switch happened.
     const hasRightPaneContent = sessionsMode === 'todo' ? selectedTodoItem !== null : !isSessionsIndex
+    // Any navigation that targets a session route (a toast click, browser
+    // back/forward, anything other than the explicit to-do-spawn flow, which
+    // already resets this synchronously before navigating) must exit To-Do
+    // mode — otherwise the session stays hidden behind the to-do list/detail
+    // pane indefinitely (hapi#238 Codex review).
+    useEffect(() => {
+        if (selectedSessionId && sessionsMode !== 'sessions') {
+            setSessionsMode('sessions')
+            setSelectedTodoItemId(null)
+        }
+    }, [selectedSessionId, sessionsMode])
     const onlineMachineIds = useMemo(() => new Set(machines.map(m => m.id)), [machines])
     const handleSpawnFromTodoItem = useCallback((item: TodoBoardItem) => {
         const resolved = resolveTodoItemDirectory(item.repo, sessions, onlineMachineIds)

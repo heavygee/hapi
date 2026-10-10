@@ -1241,6 +1241,17 @@ export function NewSession(props: {
         trimmedDirectory
     ])
 
+    // Every success path (plain spawn, Codex import, Pi import, duplicate
+    // merge) must seed the composer draft the same way — four call sites
+    // independently doing this already produced a missed spot (hapi#238
+    // Codex review, caught twice across two review passes), so centralize it
+    // here instead of leaving a fifth success path to copy-paste wrong.
+    const seedInitialMessageDraft = useCallback((sessionId: string) => {
+        if (props.initialMessage?.trim()) {
+            saveDraft(sessionId, props.initialMessage)
+        }
+    }, [props.initialMessage])
+
     const handleMergeDuplicateSessions = useCallback(async () => {
         if (isMergingDuplicateSessions || pendingDuplicateSessionIds.length === 0) return
 
@@ -1262,7 +1273,10 @@ export function NewSession(props: {
             )
             closeDuplicateMergeDialog()
             await refetchSessions()
-            if (redirectSessionId) props.onSuccess(redirectSessionId)
+            if (redirectSessionId) {
+                seedInitialMessageDraft(redirectSessionId)
+                props.onSuccess(redirectSessionId)
+            }
         } catch (mergeError) {
             addToast({
                 title: t('codexSync.duplicates.merge.failed.title'),
@@ -1287,6 +1301,7 @@ export function NewSession(props: {
         props.api,
         props.onSuccess,
         refetchSessions,
+        seedInitialMessageDraft,
         t
     ])
 
@@ -1631,9 +1646,7 @@ export function NewSession(props: {
                     clearNewSessionFormDraft()
                     setLastUsedMachineId(machineId)
                     addRecentPath(machineId, trimmedDirectory)
-                    if (props.initialMessage?.trim()) {
-                        saveDraft(resumedSessionId, props.initialMessage)
-                    }
+                    seedInitialMessageDraft(resumedSessionId)
                     props.onSuccess(resumedSessionId)
                     return
                 }
@@ -1664,9 +1677,7 @@ export function NewSession(props: {
                 clearNewSessionFormDraft()
                 setLastUsedMachineId(machineId)
                 addRecentPath(machineId, trimmedDirectory)
-                if (props.initialMessage?.trim()) {
-                    saveDraft(reopened.sessionId, props.initialMessage)
-                }
+                seedInitialMessageDraft(reopened.sessionId)
                 props.onSuccess(reopened.sessionId)
                 return
             }
@@ -1698,12 +1709,7 @@ export function NewSession(props: {
                 clearNewSessionFormDraft()
                 setLastUsedMachineId(machineId)
                 addRecentPath(machineId, trimmedDirectory)
-                if (props.initialMessage?.trim()) {
-                    // Seeds the composer draft the session page already restores
-                    // on mount (useComposerDraft) — editable, not sent, same as
-                    // any other draft. No new composer plumbing needed.
-                    saveDraft(result.sessionId, props.initialMessage)
-                }
+                seedInitialMessageDraft(result.sessionId)
                 props.onSuccess(result.sessionId)
                 return
             }

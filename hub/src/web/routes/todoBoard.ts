@@ -468,16 +468,19 @@ export function createTodoBoardRoutes(
                 // would 200 with an empty board instead of surfacing why.
                 return c.json({ error: 'Project not found, or not accessible with the current gh auth' }, 404)
             }
-            if (!projectV2.field) {
-                // `field(name: $statusField)` resolves to null both when no
-                // field has that name and when it exists but isn't a
-                // single-select — either way the configured status field is
-                // wrong, so error instead of silently dumping every item
-                // into "No status".
+            if (!Array.isArray(projectV2.field?.options)) {
+                // `field(name: $statusField)` resolves to null when no field
+                // has that name at all — but when a field DOES exist with
+                // that name and just isn't a single-select, the inline
+                // `... on ProjectV2SingleSelectField { options { name } }`
+                // fragment simply doesn't match and `field` comes back as an
+                // empty object (truthy!), not null. Checking `options` is an
+                // array catches both shapes instead of silently dumping
+                // every item into "No status" for the second one.
                 return c.json({ error: `Status field "${board.statusFieldName}" was not found, or is not a single-select field, on this project` }, 502)
             }
 
-            const statusOrder = projectV2.field.options?.map(o => o.name) ?? []
+            const statusOrder = projectV2.field.options.map(o => o.name)
             const body: TodoBoardItemsResponse = {
                 board: toSummary(board),
                 statusOrder,
