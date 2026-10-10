@@ -245,7 +245,7 @@ function createHapiMcpServer(
         title: 'Link GitHub Issue',
         inputSchema: linkIssueInputSchema,
     }, async (args: { url: string }) => {
-        const outcome = applyLinkIssue(client, args.url);
+        const outcome = await applyLinkIssue(client, args.url);
         if (outcome.ok) {
             return {
                 content: [

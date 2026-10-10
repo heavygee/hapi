@@ -1631,6 +1631,9 @@ export function NewSession(props: {
                     clearNewSessionFormDraft()
                     setLastUsedMachineId(machineId)
                     addRecentPath(machineId, trimmedDirectory)
+                    if (props.initialMessage?.trim()) {
+                        saveDraft(resumedSessionId, props.initialMessage)
+                    }
                     props.onSuccess(resumedSessionId)
                     return
                 }
@@ -1661,6 +1664,9 @@ export function NewSession(props: {
                 clearNewSessionFormDraft()
                 setLastUsedMachineId(machineId)
                 addRecentPath(machineId, trimmedDirectory)
+                if (props.initialMessage?.trim()) {
+                    saveDraft(reopened.sessionId, props.initialMessage)
+                }
                 props.onSuccess(reopened.sessionId)
                 return
             }

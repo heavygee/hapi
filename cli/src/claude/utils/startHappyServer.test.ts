@@ -41,10 +41,11 @@ describe('startHappyServer skill_lookup', () => {
         await rm(sandboxDir, { recursive: true, force: true })
     })
 
-    async function connect(enableSkillLookup = true): Promise<Client> {
+    async function connect(enableSkillLookup = true, flushMetadataResult = true): Promise<Client> {
         sendAgentMessage = vi.fn()
         const sessionClient = {
             updateMetadata: vi.fn(),
+            flushMetadata: vi.fn(async () => flushMetadataResult),
             sendAgentMessage,
             sendClaudeSessionMessage: vi.fn()
         } as unknown as ApiSessionClient
@@ -148,6 +149,30 @@ describe('startHappyServer skill_lookup', () => {
             mimeType: 'audio/wav',
             source: { ingress: 'mcp', toolName: 'display_media' }
         }))
+    })
+
+    it('links a github issue and reports success only after the metadata write is acked', async () => {
+        const mcp = await connect(false, true)
+
+        const result = await mcp.callTool({
+            name: 'link_issue',
+            arguments: { url: 'heavygee/hapi#235' }
+        }) as ToolResult
+
+        expect(result.isError).toBe(false)
+        expect(result.content?.[0]?.text).toContain('Linked heavygee/hapi#235')
+    })
+
+    it('reports failure instead of a false success when the metadata write never gets acked', async () => {
+        const mcp = await connect(false, false)
+
+        const result = await mcp.callTool({
+            name: 'link_issue',
+            arguments: { url: 'heavygee/hapi#235' }
+        }) as ToolResult
+
+        expect(result.isError).toBe(true)
+        expect(result.content?.[0]?.text).toContain('Failed to link issue')
     })
 
     it('preserves the source extension when display_media title omits one', async () => {

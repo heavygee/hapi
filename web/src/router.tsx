@@ -1036,6 +1036,21 @@ function NewSessionPage() {
         })
     }, [navigate, shareTransferId, briefingId])
 
+    // The header Back button calls the generic goBack (browser-history-aware,
+    // not a hardcoded /sessions navigate) rather than handleCancel — but it's
+    // still abandoning the spawn, so the same cleanup must run first, or a
+    // to-do item's briefing (and any pending share transfer) would otherwise
+    // sit in sessionStorage indefinitely (hapi#238 Codex review).
+    const handleHeaderBack = useCallback(() => {
+        if (shareTransferId) {
+            void deleteShareTransfer(shareTransferId)
+        }
+        if (briefingId) {
+            clearTodoSpawnBriefing(briefingId)
+        }
+        goBack()
+    }, [goBack, shareTransferId, briefingId])
+
     const handleSuccess = useCallback((sessionId: string) => {
         if (shareTransferId) {
             setSharePendingTransfer(shareTransferId, sessionId)
@@ -1094,7 +1109,7 @@ function NewSessionPage() {
                 {!isTelegramApp() && (
                     <button
                         type="button"
-                        onClick={goBack}
+                        onClick={handleHeaderBack}
                         className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]"
                     >
                         <BackIcon />
