@@ -799,13 +799,18 @@ layers:
   # Superseded 2026-10-10 by driver/1922-peer-rename-proof (whole upstream #1922 tip).
   # - branch: driver/spawn-peer-remit-delta
 
-  # tiann/hapi#1931 — thin MCP/CLI spawn_peer --machine (incident 2026-10-10).
-  # Full upstream #1922 tip (Parent stamps + peerSpawnDefaults UI) is fat vs soup
-  # (45c/55f, merge conflicts). Thin delta @ 0286b1d70 on soup tip 0ce638a00 —
-  # cherry-picks 26bd3141c + 17adbcee2 from feat/peer-rename-proof-identity.
-  # DO NOT point at whole #1922 tip until re-thinned. Never set HAPI_DRIVER_MANIFEST
-  # to a stale /tmp copy (starved this layer once). Hub+CLI → remat + restart.
-  - branch: driver/1931-spawn-machine-delta
+  # DROPPED 2026-10-10: driver/1931-spawn-machine-delta — superseded by full #1922
+  # union tip below (Parent stamps + peerSpawnDefaults UI + --machine).
+  # Was: thin cherry-picks 26bd3141c + 17adbcee2 @ 0286b1d70 on soup tip 0ce638a00.
+  # - branch: driver/1931-spawn-machine-delta
+
+  # tiann/hapi#1922 (absorbs #1931) — spawn-peer remit + rename-proof Parent stamps
+  # + MCP/CLI --machine. Open upstream PR tip 17adbcee2 unioned onto live soup
+  # tip d09a28042 as single commit (45 files; needs HAPI_REMAT_ABSORB_FAT=1).
+  # Worktree: ~/coding/hapi/worktrees/1922-peer-rename-soup @ driver/1922-peer-rename-proof
+  # Tip: 2290c737f — re-thin after dogfood bump. Hub+web → remat --build-web + restart.
+  # Never set HAPI_DRIVER_MANIFEST to a stale /tmp copy. No second upstream PR.
+  - branch: driver/1922-peer-rename-proof
 
   # Soup heal: remat 47ce90965 dropped Claude Happy MCP spawn_peer model/effort
   # (Codex bridge kept them). Restore schema + handler forwarding for Claude sessions.
