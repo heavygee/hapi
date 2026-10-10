@@ -18,14 +18,21 @@ import axios, { type AxiosInstance } from 'axios'
 import { isObject, SESSION_NAME_MAX_LENGTH } from '@hapi/protocol'
 import {
     CREATABLE_AGENT_FLAVORS,
-    isPermissionModeAllowedForFlavor,
+    getLaunchPermissionModesForFlavor,
     type AgentFlavor,
     type PermissionMode
 } from '@hapi/protocol/modes'
 import {
     resolvePeerSpawnConfig,
-    type PeerSpawnDefaults
+    ResolvedPeerSpawnDefaultsSchema,
+    type PeerSpawnDefaults,
+    type ResolvedPeerSpawnDefaults
 } from '@hapi/protocol/peerSpawnDefaults'
+import {
+    ParentStampError,
+    ensureParentStamp,
+    type PeerParentIdentity,
+} from '@hapi/protocol/peerParentStamp'
 import { configuration } from '@/configuration'
 import { getAuthToken } from '@/api/auth'
 import { buildHubRequestHeaders } from '@/api/hubExtraHeaders'
@@ -47,6 +54,7 @@ export type SpawnPeerErrorCode =
     | 'auth_failed'
     | 'spawn_failed'
     | 'empty_session'
+    | 'verify_failed'
     | 'not_found'
     | 'ambiguous'
     | 'resume_failed'
@@ -93,6 +101,22 @@ export type SpawnPeerOptions = {
     accessToken?: string
     /** Skip hub settings fetch (tests). */
     hubPeerSpawnDefaults?: PeerSpawnDefaults | null
+    /**
+     * Base directory for relative `directory` paths (MCP session cwd).
+     * Absolute directories are unchanged. Defaults to process.cwd().
+     */
+    cwd?: string
+    /**
+     * Orchestrator identity for rename-proof Parent stamp (heavygee/hapi#175).
+     * When omitted, falls back to `HAPI_SESSION_ID` / `HAPI_SESSION_NAME` /
+     * `HAPI_AGENT_SESSION_ID` env (in-session CLI).
+     */
+    parent?: PeerParentIdentity | null
+    /**
+     * MCP / in-session: fail closed when parent id is missing.
+     * Outside-session CLI leaves this false and warns instead.
+     */
+    requireParent?: boolean
     http?: AxiosInstance
     sleep?: (ms: number) => Promise<void>
     now?: () => number
@@ -114,6 +138,21 @@ const AUTH_RECOVERY_HINT =
 
 function defaultSleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/** Resolve parent identity from in-session env when callers omit `parent`. */
+export function parentIdentityFromEnv(
+    env: NodeJS.ProcessEnv = process.env
+): PeerParentIdentity | null {
+    const sessionId = (env.HAPI_SESSION_ID ?? '').trim()
+    if (!sessionId) {
+        return null
+    }
+    return {
+        sessionId,
+        name: (env.HAPI_SESSION_NAME ?? '').trim() || null,
+        agentSessionId: (env.HAPI_AGENT_SESSION_ID ?? '').trim() || null,
+    }
 }
 
 function resolveApiUrl(apiUrl?: string): string {
@@ -295,7 +334,7 @@ async function fetchHubPeerSpawnDefaults(
     apiUrl: string,
     jwt: string,
     http: AxiosInstance
-): Promise<PeerSpawnDefaults | null> {
+): Promise<ResolvedPeerSpawnDefaults> {
     try {
         const response = await http.get(`${apiUrl}/api/hub-settings`, {
             headers: authHeaders(jwt),
@@ -303,101 +342,145 @@ async function fetchHubPeerSpawnDefaults(
             validateStatus: () => true
         })
         if (response.status < 200 || response.status >= 300) {
-            return null
+            throw new SpawnPeerError('spawn_failed', 'Cannot load hub spawn defaults')
         }
-        const peerSpawnDefaults = (response.data as { peerSpawnDefaults?: PeerSpawnDefaults } | undefined)
-            ?.peerSpawnDefaults
-        return peerSpawnDefaults ?? null
-    } catch {
-        return null
-    }
-}
-
-async function archiveFailedSpawn(
-    apiUrl: string,
-    jwt: string,
-    sessionId: string,
-    http: AxiosInstance
-): Promise<boolean> {
-    try {
-        const response = await http.post(
-            `${apiUrl}/api/sessions/${encodeURIComponent(sessionId)}/archive`,
-            {},
-            {
-                headers: authHeaders(jwt),
-                timeout: 15_000,
-                validateStatus: () => true
-            }
+        return ResolvedPeerSpawnDefaultsSchema.parse(
+            (response.data as { peerSpawnDefaults?: unknown } | undefined)?.peerSpawnDefaults
         )
-        return response.status >= 200 && response.status < 300 && response.data?.ok === true
-    } catch {
-        return false
+    } catch (error) {
+        if (error instanceof SpawnPeerError) {
+            throw error
+        }
+        throw new SpawnPeerError('spawn_failed', 'Cannot load valid hub spawn defaults')
     }
-}
-
-function failedChildCleanupNote(sessionId: string, archived: boolean): string {
-    return archived
-        ? `archived the failed child. Retry spawn-peer; do not ping the archived id.`
-        : `archive failed so the child may still be running. Stop or archive ${sessionId} before retrying spawn-peer.`
 }
 
 function collapsedRemitNeedle(message: string): string {
     return message.replace(/\s+/g, ' ').trim().slice(0, 800)
 }
 
-async function sessionHasRemit(
+type RemitVerifyResult = 'found' | 'absent' | 'unavailable'
+
+async function verifySessionRemit(
     apiUrl: string,
     jwt: string,
     sessionId: string,
     message: string,
     http: AxiosInstance
-): Promise<boolean> {
+): Promise<RemitVerifyResult> {
     const needle = collapsedRemitNeedle(message)
     if (!needle) {
-        return false
+        return 'absent'
     }
-    let response: { status: number; data?: { messages?: unknown } }
-    try {
-        response = await http.get(
-            `${apiUrl}/api/sessions/${encodeURIComponent(sessionId)}/messages`,
-            {
-                headers: authHeaders(jwt),
-                params: { limit: 50 },
-                timeout: 20_000,
-                validateStatus: () => true
+    // Paginate oldest-ward: a busy child can push the remit off the latest
+    // 50-row page before verification runs. Cap pages so a broken cursor cannot
+    // loop forever (50 × 40 = 2000 messages).
+    const pageLimit = 50
+    const maxPages = 40
+    let beforeAt: number | undefined
+    let beforeSeq: number | undefined
+    for (let pageIndex = 0; pageIndex < maxPages; pageIndex++) {
+        let response: {
+            status: number
+            data?: {
+                messages?: unknown
+                page?: {
+                    hasMore?: unknown
+                    nextBeforeAt?: unknown
+                    nextBeforeSeq?: unknown
+                }
             }
-        )
-    } catch {
-        return false
-    }
-    if (response.status < 200 || response.status >= 300) {
-        return false
-    }
-    const rows = Array.isArray(response.data?.messages) ? response.data.messages : []
-    for (const row of rows) {
-        if (!isObject(row)) continue
-        const snippet = extractInspectMessageSnippet(row.content)
-        if (snippet?.role === 'user' && snippet.text.includes(needle)) {
-            return true
         }
+        try {
+            response = await http.get(
+                `${apiUrl}/api/sessions/${encodeURIComponent(sessionId)}/messages`,
+                {
+                    headers: authHeaders(jwt),
+                    params: {
+                        limit: pageLimit,
+                        ...(beforeAt !== undefined && beforeSeq !== undefined
+                            ? { beforeAt, beforeSeq }
+                            : {})
+                    },
+                    timeout: 20_000,
+                    validateStatus: () => true
+                }
+            )
+        } catch {
+            return 'unavailable'
+        }
+        if (response.status < 200 || response.status >= 300) {
+            return 'unavailable'
+        }
+        const rows = Array.isArray(response.data?.messages) ? response.data.messages : []
+        for (const row of rows) {
+            if (!isObject(row)) continue
+            const snippet = extractInspectMessageSnippet(row.content)
+            if (snippet?.role === 'user' && snippet.text.includes(needle)) {
+                return 'found'
+            }
+        }
+        const page = response.data?.page
+        const hasMore = page?.hasMore === true
+        const nextBeforeAt = typeof page?.nextBeforeAt === 'number' ? page.nextBeforeAt : null
+        const nextBeforeSeq = typeof page?.nextBeforeSeq === 'number' ? page.nextBeforeSeq : null
+        if (!hasMore || nextBeforeAt === null || nextBeforeSeq === null) {
+            return 'absent'
+        }
+        beforeAt = nextBeforeAt
+        beforeSeq = nextBeforeSeq
     }
-    return false
+    // Page cap hit while hasMore remained true — remit may still exist older.
+    // Do not treat as observed-absent (would archive a live child).
+    return 'unavailable'
 }
 
 export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerResult> {
     const rawDirectory = (options.directory ?? '').trim()
-    const message = options.message ?? ''
+    const onProgress = options.onProgress
     if (!rawDirectory) {
         throw new SpawnPeerError('bad_args', 'directory is required')
     }
     // Runner RPC resolves relative paths against the long-lived runner cwd
     // (`hapi runner start`), not the calling CLI/MCP process. Anchor here.
-    const directory = resolvePath(rawDirectory)
-    if (!message.trim()) {
+    // MCP callers pass cwd=session workingDirectory so "." is the session tree.
+    const directory = options.cwd
+        ? resolvePath(options.cwd, rawDirectory)
+        : resolvePath(rawDirectory)
+
+    const parent = options.parent !== undefined
+        ? options.parent
+        : parentIdentityFromEnv()
+    // Reject blank remits before Parent stamping. Stamping an empty body would
+    // produce a non-empty "## Parent" remit and bypass the idle-session guard.
+    const rawMessage = options.message ?? ''
+    if (!rawMessage.trim()) {
         throw new SpawnPeerError(
             'bad_args',
             'message is required; empty remit would create an idle session'
         )
+    }
+    let message: string
+    try {
+        const stamped = ensureParentStamp(rawMessage, parent, {
+            requireParent: options.requireParent === true,
+        })
+        message = stamped.message
+        if (stamped.stamped) {
+            onProgress?.(
+                `stamped Parent chip /sessions/${(parent?.sessionId ?? '').trim()}`
+            )
+        } else if (!(parent?.sessionId ?? '').trim()) {
+            onProgress?.(
+                'WARNING: no parent session id - remit unattributed '
+                + '(outside-session OK; in-session set HAPI_SESSION_ID or use MCP spawn_peer)'
+            )
+        }
+    } catch (error) {
+        if (error instanceof ParentStampError) {
+            throw new SpawnPeerError('bad_args', error.message)
+        }
+        throw error
     }
     const requestedName = (options.name ?? '').trim()
     if (requestedName.length > SESSION_NAME_MAX_LENGTH) {
@@ -409,13 +492,6 @@ export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerRes
 
     if (options.agent && !(CREATABLE_AGENT_FLAVORS as readonly string[]).includes(options.agent)) {
         throw new SpawnPeerError('bad_args', `unsupported agent: ${options.agent}`)
-    }
-    const previewAgent = options.agent ?? 'claude'
-    if (options.permissionMode && !isPermissionModeAllowedForFlavor(options.permissionMode, previewAgent)) {
-        throw new SpawnPeerError(
-            'bad_args',
-            `permission mode ${options.permissionMode} is not supported by ${previewAgent}`
-        )
     }
 
     const waitActiveSecs = options.waitActiveSecs ?? DEFAULT_WAIT_ACTIVE_SECS
@@ -429,7 +505,6 @@ export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerRes
     const http = options.http ?? axios
     const sleep = options.sleep ?? defaultSleep
     const now = options.now ?? Date.now
-    const onProgress = options.onProgress
 
     const settings = await readSettings()
     const localMachineId = (options.localMachineId ?? settings.machineId ?? '').trim()
@@ -466,11 +541,27 @@ export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerRes
         effort: options.effort
     }, hubDefaults)
 
+    // Validate explicit permission against the resolved agent (hub default when
+    // agent is omitted) — not a Claude preview before settings load.
+    if (
+        options.permissionMode
+        && !getLaunchPermissionModesForFlavor(resolved.agent).includes(options.permissionMode)
+    ) {
+        throw new SpawnPeerError(
+            'bad_args',
+            `permission mode ${options.permissionMode} is not supported by ${resolved.agent}`
+        )
+    }
+
     const spawnBody: Record<string, unknown> = {
         directory,
         sessionType,
-        agent: resolved.agent,
-        permissionMode: resolved.permissionMode
+        agent: resolved.agent
+    }
+    // Pi/DSH have empty launch-permission catalogs — omit permissionMode so the
+    // machine route does not 400 invalid_permission_mode on inherited default.
+    if (getLaunchPermissionModesForFlavor(resolved.agent).length > 0) {
+        spawnBody.permissionMode = resolved.permissionMode
     }
     if (options.worktreeName) {
         spawnBody.worktreeName = options.worktreeName
@@ -479,7 +570,11 @@ export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerRes
         spawnBody.model = resolved.model
     }
     if (resolved.effort) {
-        spawnBody.effort = resolved.effort
+        if (resolved.agent === 'codex' || resolved.agent === 'opencode') {
+            spawnBody.modelReasoningEffort = resolved.effort
+        } else {
+            spawnBody.effort = resolved.effort
+        }
     }
 
     onProgress?.(`spawning agent=${resolved.agent} permission=${resolved.permissionMode} type=${sessionType} dir=${directory}`)
@@ -551,8 +646,14 @@ export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerRes
     }
 
     const deadline = now() + waitActiveSecs * 1000
+    // Failure path never auto-archives (remit POST may still land). Poll only
+    // to recover a late-visible remit; unread GETs must not look like success.
+    // Classify from the *final* verify result: an earlier empty read must not
+    // stick as empty_session once later transcript GETs become unavailable.
+    let lastVerify: Exclude<RemitVerifyResult, 'found'> | null = null
     while (now() <= deadline) {
-        if (await sessionHasRemit(apiUrl, jwt, sessionId, message, http)) {
+        const verify = await verifySessionRemit(apiUrl, jwt, sessionId, message, http)
+        if (verify === 'found') {
             return {
                 sessionId,
                 name: renamed
@@ -560,29 +661,42 @@ export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerRes
                     : pingResult?.name || sessionId.slice(0, 8)
             }
         }
+        lastVerify = verify
         if (now() >= deadline) {
             break
         }
         await sleep(POLL_VERIFY_MS)
     }
 
-    const archived = await archiveFailedSpawn(apiUrl, jwt, sessionId, http)
-    const cleanupNote = failedChildCleanupNote(sessionId, archived)
+    if (lastVerify !== 'absent') {
+        throw new SpawnPeerError(
+            'verify_failed',
+            `could not verify remit for ${sessionId} (transcript unread); `
+            + `left child running - inspect or archive ${sessionId} before retrying spawn-peer`
+        )
+    }
+
+    // Never auto-archive on the failure path. A timed-out remit POST (or a
+    // TOCTOU gap between an empty read and archive) can still land work on
+    // the child; killing it would destroy an in-flight peer. Leave the id
+    // for the caller to inspect / archive.
+    const leaveRunning =
+        `left child running - inspect or archive ${sessionId} before retrying spawn-peer`
     if (deliveryError) {
         if (deliveryError instanceof SpawnPeerError) {
-            throw new SpawnPeerError(deliveryError.code, `${deliveryError.message}; ${cleanupNote}`)
+            throw new SpawnPeerError(deliveryError.code, `${deliveryError.message}; ${leaveRunning}`)
         }
         if (deliveryError instanceof PingPeerError) {
-            throw new SpawnPeerError(deliveryError.code, `${deliveryError.message}; ${cleanupNote}`)
+            throw new SpawnPeerError(deliveryError.code, `${deliveryError.message}; ${leaveRunning}`)
         }
         throw new SpawnPeerError(
             'send_failed',
-            `${deliveryError instanceof Error ? deliveryError.message : String(deliveryError)}; ${cleanupNote}`
+            `${deliveryError instanceof Error ? deliveryError.message : String(deliveryError)}; ${leaveRunning}`
         )
     }
     throw new SpawnPeerError(
         'empty_session',
-        `session ${sessionId} still has no user message after remit delivery (empty shell); ${cleanupNote}`
+        `session ${sessionId} still has no user message after remit delivery (empty shell); ${leaveRunning}`
     )
 }
 
@@ -599,6 +713,7 @@ export function exitCodeForSpawnPeerError(error: SpawnPeerError): number {
         case 'timeout':
         case 'send_failed':
         case 'empty_session':
+        case 'verify_failed':
             return 4
         default:
             return 1

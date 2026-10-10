@@ -50,6 +50,8 @@ export interface HapiMcpBridgeOptions {
     enableChangeTitle?: boolean;
     /** Cursor-only (#1516). Also inferred from skillLookup.flavor === 'cursor'. */
     enableDisplayLinks?: boolean;
+    /** Session project cwd for relative spawn_peer directories (Codex --cd aware). */
+    workingDirectory?: string;
     skillLookup?: {
         workingDirectory: string;
         flavor: string;
@@ -85,6 +87,7 @@ export async function buildHapiMcpBridge(
         emitTitleSummary: options.emitTitleSummary,
         enableChangeTitle: options.enableChangeTitle,
         enableDisplayLinks: options.enableDisplayLinks,
+        workingDirectory: options.workingDirectory ?? options.skillLookup?.workingDirectory,
         skillLookup: options.skillLookup
     });
     const bridgeCommand = getHappyCliCommand([

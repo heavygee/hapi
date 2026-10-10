@@ -8,9 +8,11 @@ import {
 } from '@hapi/protocol'
 import {
     resolvePeerSpawnConfig,
+    STOCK_PEER_SPAWN_DEFAULTS,
     type PeerSpawnDefaults,
     type ResolvedPeerSpawnDefaults
 } from '@hapi/protocol/peerSpawnDefaults'
+import { getLaunchPermissionModesForFlavor } from '@hapi/protocol/modes'
 import { Hono } from 'hono'
 import { RPC_TARGET_MISSING_ERROR_CODE } from '@hapi/protocol/rpcMethods'
 import { readPeerSpawnDefaults } from '../../config/peerSpawnDefaults'
@@ -46,11 +48,9 @@ async function loadPeerSpawnDefaultsForSpawn(
         return await options.getPeerSpawnDefaults()
     }
     if (options?.dataDir) {
-        try {
-            return await readPeerSpawnDefaults(options.dataDir)
-        } catch {
-            return null
-        }
+        // Do not swallow read failures into stock yolo — that would override
+        // operator-configured restrictive defaults on a transient I/O error.
+        return await readPeerSpawnDefaults(options.dataDir)
     }
     return null
 }
@@ -140,19 +140,41 @@ export function createMachinesRoutes(
         if (!parsed.success) {
             return c.json({ error: 'Invalid body' }, 400)
         }
-        if (
-            (parsed.data.agent === 'agy' || parsed.data.agent === 'dsh')
-            && parsed.data.startingMode
-            && parsed.data.startingMode !== 'remote'
-        ) {
-            return c.json({ error: `${parsed.data.agent.toUpperCase()} only supports remote mode` }, 400)
-        }
         const startingMode = parsed.data.startingMode
         const namespace = c.get('namespace')
 
         // Apply hub peerSpawnDefaults when agent / permissionMode / model are omitted
         // so scavenger/raw machine spawn matches Settings → General → Agents (and stock yolo).
-        const hubDefaults = await loadPeerSpawnDefaultsForSpawn(options)
+        let hubDefaults: PeerSpawnDefaults | ResolvedPeerSpawnDefaults | null
+        try {
+            hubDefaults = await loadPeerSpawnDefaultsForSpawn(options)
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Cannot load hub spawn defaults'
+            return c.json({ error: message, code: 'hub_spawn_defaults_unavailable' as const }, 500)
+        }
+
+        const effectiveAgent = parsed.data.agent
+            ?? hubDefaults?.agent
+            ?? STOCK_PEER_SPAWN_DEFAULTS.agent
+        // Validate startingMode against the resolved agent (hub default may be
+        // AGY/DSH even when the request omitted agent).
+        if (
+            (effectiveAgent === 'agy' || effectiveAgent === 'dsh')
+            && startingMode
+            && startingMode !== 'remote'
+        ) {
+            return c.json({ error: `${effectiveAgent.toUpperCase()} only supports remote mode` }, 400)
+        }
+        if (
+            parsed.data.permissionMode !== undefined
+            && !getLaunchPermissionModesForFlavor(effectiveAgent).includes(parsed.data.permissionMode)
+        ) {
+            return c.json({
+                error: `permission mode ${parsed.data.permissionMode} is not supported by ${effectiveAgent}`,
+                code: 'invalid_permission_mode' as const
+            }, 400)
+        }
+
         const resolved = resolvePeerSpawnConfig({
             ...(parsed.data.agent !== undefined ? { agent: parsed.data.agent } : {}),
             ...(parsed.data.permissionMode !== undefined ? { permissionMode: parsed.data.permissionMode } : {}),
@@ -160,18 +182,43 @@ export function createMachinesRoutes(
             ...(parsed.data.effort !== undefined ? { effort: parsed.data.effort } : {})
         }, hubDefaults)
 
+        // When the caller supplies an explicit yolo boolean without a native
+        // permissionMode, preserve the runner's boolean path — injecting a hub
+        // mode would override yolo:false (runner prioritizes permissionMode).
+        // Flavors with an empty launch catalog (pi/dsh) must omit permissionMode.
+        const permissionModeForSpawn =
+            parsed.data.permissionMode === undefined && parsed.data.yolo !== undefined
+                ? undefined
+                : getLaunchPermissionModesForFlavor(resolved.agent).length === 0
+                    ? undefined
+                    : resolved.permissionMode
+
+        // Apply hub model only when the caller omitted agent+model (full defaults
+        // path). An explicit agent with model omitted means native Default —
+        // do not inject the hub model for that flavor.
+        const modelForSpawn = parsed.data.model !== undefined
+            ? parsed.data.model
+            : parsed.data.agent === undefined
+                ? resolved.model
+                : undefined
+        const effortForSpawn = parsed.data.effort !== undefined
+            ? parsed.data.effort
+            : parsed.data.agent === undefined
+                ? resolved.effort
+                : undefined
+
         const result = await engine.spawnSession(
             machineId,
             parsed.data.directory,
             resolved.agent,
-            resolved.model ?? parsed.data.model,
+            modelForSpawn,
             parsed.data.modelReasoningEffort,
             parsed.data.yolo,
             parsed.data.sessionType,
             parsed.data.worktreeName,
             undefined, // resumeSessionId
-            resolved.effort ?? parsed.data.effort,
-            resolved.permissionMode,
+            effortForSpawn,
+            permissionModeForSpawn,
             parsed.data.serviceTier,
             undefined,
             parsed.data.collaborationMode,
@@ -518,34 +565,10 @@ export function createMachinesRoutes(
         if (result.type === 'error') {
             const status = result.code === 'machine_not_found' ? 404
                 : result.code === 'machine_offline' ? 503
-                    : result.code === 'restart_unavailable' ? 400
-                        : 502
+                    : 502
             return c.json({ error: result.message, code: result.code }, status)
         }
         return c.json({ message: result.message })
-    })
-
-    app.post('/machines/:id/upgrade-runner', async (c) => {
-        const engine = getSyncEngine()
-        if (!engine) {
-            return c.json({ error: 'Not connected' }, 503)
-        }
-
-        const machineId = c.req.param('id')
-        const machine = requireMachine(c, engine, machineId)
-        if (machine instanceof Response) {
-            return machine
-        }
-
-        const result = await engine.upgradeMachineRunner(machineId, c.get('namespace'))
-        if (result.type === 'error') {
-            const status = result.code === 'machine_not_found' ? 404
-                : result.code === 'machine_offline' ? 503
-                    : result.code === 'upgrade_unavailable' || result.code === 'upgrade_deferred' ? 503
-                        : 502
-            return c.json({ error: result.message, code: result.code }, status)
-        }
-        return c.json({ message: result.message, response: result.response })
     })
 
     return app

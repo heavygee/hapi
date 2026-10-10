@@ -22,7 +22,7 @@ import type { InlineMediaSource } from "@/modules/common/inlineMediaSource";
 import { DISPLAY_IMAGE_PROMPT_CURSOR, DISPLAY_LINKS_PROMPT_CURSOR, DISPLAY_MEDIA_PROMPT_CURSOR, DISPLAY_VIDEO_PROMPT_CURSOR } from "@/modules/common/displayImagePrompt";
 import { buildDisplayLinksPayload, parseDisplayLinksInput } from "@hapi/protocol";
 import { resolveSkill } from "@/modules/common/skills";
-import { SESSION_NAME_MAX_LENGTH } from '@hapi/protocol'
+import { SESSION_NAME_MAX_LENGTH, toSessionSummaryMetadata } from '@hapi/protocol'
 import {
     INSPECT_PEER_TOOL_DESCRIPTION,
     PING_PEER_TOOL_DESCRIPTION,
@@ -70,6 +70,12 @@ type StartHappyServerOptions = {
      * Defaults on when skillLookup.flavor === 'cursor'.
      */
     enableDisplayLinks?: boolean;
+    /**
+     * Session project cwd for resolving relative `spawn_peer` directories.
+     * Prefer the launcher's effective cwd (including Codex `--cd` overrides).
+     * Falls back to `skillLookup.workingDirectory`, then hub metadata.path.
+     */
+    workingDirectory?: string;
     skillLookup?: {
         workingDirectory: string;
         flavor: string;
@@ -81,6 +87,25 @@ function resolveEnableDisplayLinks(options: StartHappyServerOptions): boolean {
         return options.enableDisplayLinks;
     }
     return options.skillLookup?.flavor === 'cursor';
+}
+
+/**
+ * Resolve the base cwd for MCP spawn_peer relative directories.
+ * Prefer launcher workingDirectory (Codex --cd), then skillLookup, then
+ * session metadata.path so bridges without skillLookup still anchor to the
+ * session tree instead of the long-lived HAPI process cwd.
+ */
+export function resolveMcpSpawnPeerCwd(options: {
+    workingDirectory?: string | null
+    skillWorkingDirectory?: string | null
+    sessionPath?: string | null
+}): string | undefined {
+    const fromLauncher = (options.workingDirectory ?? '').trim()
+    if (fromLauncher) return fromLauncher
+    const fromSkill = (options.skillWorkingDirectory ?? '').trim()
+    if (fromSkill) return fromSkill
+    const fromSession = (options.sessionPath ?? '').trim()
+    return fromSession || undefined
 }
 
 /** Registered on the MCP server, but never pre-approved via Claude --allowedTools. */
@@ -111,7 +136,8 @@ function createHapiMcpServer(
     emitTitleSummary: boolean,
     enableChangeTitle: boolean,
     skillLookup: StartHappyServerOptions['skillLookup'],
-    enableDisplayLinks: boolean
+    enableDisplayLinks: boolean,
+    workingDirectory: string | undefined
 ): McpServer {
     const handler = async (title: string) => {
         logger.debug('[hapiMCP] Changing title to:', title);
@@ -550,8 +576,15 @@ mcp.registerTool<any, any>('display_image', {
     }) => {
         logger.debug('[hapiMCP] spawn_peer:', args.directory, args.machine ? `machine=${args.machine}` : '');
         try {
+            const metadata = client.getMetadata()
+            const summaryMeta = toSessionSummaryMetadata(metadata)
             const result = await spawnPeer({
                 directory: args.directory,
+                cwd: resolveMcpSpawnPeerCwd({
+                    workingDirectory,
+                    skillWorkingDirectory: skillLookup?.workingDirectory,
+                    sessionPath: metadata?.path,
+                }),
                 message: args.message,
                 name: args.name,
                 machine: args.machine,
@@ -560,6 +593,12 @@ mcp.registerTool<any, any>('display_image', {
                 effort: args.effort,
                 sessionType: args.sessionType,
                 permissionMode: args.permissionMode as Parameters<typeof spawnPeer>[0]['permissionMode'],
+                parent: {
+                    sessionId: client.sessionId,
+                    name: metadata?.name ?? null,
+                    agentSessionId: summaryMeta?.agentSessionId ?? null,
+                },
+                requireParent: true,
             });
             return {
                 content: [
@@ -843,7 +882,14 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
     const mcps = new Map<string, McpServer>();
 
     const createMcpTransport = () => {
-        const mcp = createHapiMcpServer(client, emitTitleSummary, enableChangeTitle, options.skillLookup, enableDisplayLinks);
+        const mcp = createHapiMcpServer(
+            client,
+            emitTitleSummary,
+            enableChangeTitle,
+            options.skillLookup,
+            enableDisplayLinks,
+            options.workingDirectory
+        );
         const transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => randomUUID(),
             onsessioninitialized: (sessionId) => {
