@@ -1029,7 +1029,7 @@ layers:
   # Active = connected/non-archived (filterActiveSessionsOnly); Working = thinking or
   # backgroundTaskCount (In-progress working bucket). Ephemeral AND-compose like unread/blocked.
   # Worktree: ~/coding/hapi/worktrees/session-filter-active-working
-  # Tip: fb502599d — 1 commit / 7 files on live driver tip (cf595c7e8).
+  # Tip: 1d2d70661 — 2 commits / 8 files on live driver tip (cf595c7e8).
   # Remat order: after driver/1996-consolidate-blocked-filter (extends that menu).
   # Needs --build-web. Remat owner: this peer (feature promote).
   - branch: driver/2002-session-filter-active-working
