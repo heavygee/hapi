@@ -33,7 +33,8 @@ concurrency:
 
 jobs:
     drift-gate:
-        runs-on: ubuntu-latest
+        # heavygee fork: oos-linux `hapi` runner (no hosted minutes). See docs/tooling/local-ci.md.
+        runs-on: ${{ github.repository_owner == 'heavygee' && fromJSON('["self-hosted","Linux","X64","hapi"]') || 'ubuntu-latest' }}
         steps:
             - uses: actions/checkout@v4
             - uses: oven-sh/setup-bun@v2
