@@ -1,6 +1,6 @@
 # Deliberate fleet push - ninja chicken-egg bootstrap (#247)
 
-**Status:** soup tip `96071c14b` / artifact `hapi-soup-v2026.10.11-96071c1` published. Meta patient hub restart drains WORKING (oos kitchen). **Ninja stays a standalone hub** - do not register it into the oos fleet.
+**Status:** soup tip `42e160795` / artifact `hapi-soup-v2026.10.11-42e1607` published. Meta patient hub restart drains WORKING (oos kitchen). **Ninja stays a standalone hub** - do not register it into the oos fleet.
 
 ## Architecture (hub-local - confirmed)
 
@@ -24,7 +24,7 @@ After in-place swap, ninja's hub process must be the #247 build so those routes 
 
 ## Bootstrap (self-contained on ninja)
 
-### 1. Get tip `hapi-soup-v2026.10.11-96071c1` onto ninja
+### 1. Get tip `hapi-soup-v2026.10.11-42e1607` onto ninja
 
 Same binary-swap you already proved twice:
 
