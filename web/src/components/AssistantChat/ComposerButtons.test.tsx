@@ -12,6 +12,7 @@ import {
     ComposerExpandButton,
     DictationButton,
     getComposerToolbarJustifyContent,
+    isComposerPrimaryFillHeight,
     isLargeEmptyVoicePrimary,
     UnifiedButton,
     unifiedButtonSizeClass,
@@ -139,7 +140,7 @@ describe('UnifiedButton — default send intent', () => {
         fireEvent.click(button, { detail: 1 })
 
         expect(onSend).toHaveBeenCalledOnce()
-        expect(onSend).toHaveBeenCalledWith()
+        expect(onSend).toHaveBeenCalledWith('default')
     })
 
     it('keeps touch tap, desktop mouse hold, and desktop right-click on normal behavior', () => {
@@ -157,8 +158,8 @@ describe('UnifiedButton — default send intent', () => {
         const contextMenuWasNotPrevented = fireEvent.contextMenu(button, { clientX: 10, clientY: 10 })
 
         expect(onSend).toHaveBeenCalledTimes(2)
-        expect(onSend).toHaveBeenNthCalledWith(1)
-        expect(onSend).toHaveBeenNthCalledWith(2)
+        expect(onSend).toHaveBeenNthCalledWith(1, 'default')
+        expect(onSend).toHaveBeenNthCalledWith(2, 'default')
         expect(contextMenuWasNotPrevented).toBe(true)
     })
 })
@@ -168,6 +169,11 @@ describe('UnifiedButton — fill-height primary (voice ↔ send)', () => {
 
     it('fills height when empty with voice/dictate afforded', () => {
         expect(isLargeEmptyVoicePrimary({
+            canSend: false,
+            voiceEnabled: true,
+            voiceStatus: 'disconnected',
+        })).toBe(true)
+        expect(isComposerPrimaryFillHeight({
             canSend: false,
             voiceEnabled: true,
             voiceStatus: 'disconnected',
@@ -194,12 +200,17 @@ describe('UnifiedButton — fill-height primary (voice ↔ send)', () => {
     })
 
     it('keeps the same fill-height layout when a draft swaps the icon to Send', () => {
-        // Draft → Send morph; still fill-height. Helper stays false (not empty-voice FUE).
+        // Draft → Send morph; still fill-height. Empty-voice FUE helper stays false.
         expect(isLargeEmptyVoicePrimary({
             canSend: true,
             voiceEnabled: true,
             voiceStatus: 'disconnected',
         })).toBe(false)
+        expect(isComposerPrimaryFillHeight({
+            canSend: true,
+            voiceEnabled: true,
+            voiceStatus: 'disconnected',
+        })).toBe(true)
 
         renderInProviders(
             <UnifiedButton
