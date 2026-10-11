@@ -61,12 +61,20 @@ export function makeBoardId(host: string, ownerLogin: string, projectNumber: num
     return parts.map(encodeURIComponent).join('::')
 }
 
+// GraphQL's Int is a non-fractional signed 32-bit value — a project number
+// outside that range always 404s against `$number: Int!`, so reject it here
+// instead of advertising a board that can never load.
+const MAX_GRAPHQL_INT = 2_147_483_647
+function isValidProjectNumber(value: number): boolean {
+    return Number.isInteger(value) && value > 0 && value <= MAX_GRAPHQL_INT
+}
+
 function readEnvTodoBoardConfig(): StoredTodoBoard {
     const host = process.env.HAPI_TODO_BOARD_HOST?.trim() || DEFAULT_TODO_BOARD.host
     const ownerLogin = process.env.HAPI_TODO_BOARD_OWNER?.trim() || DEFAULT_TODO_BOARD.ownerLogin
     const numberRaw = process.env.HAPI_TODO_BOARD_NUMBER?.trim()
     const parsedNumber = numberRaw ? Number(numberRaw) : NaN
-    const projectNumber = Number.isFinite(parsedNumber) && parsedNumber > 0 ? parsedNumber : DEFAULT_TODO_BOARD.projectNumber
+    const projectNumber = isValidProjectNumber(parsedNumber) ? parsedNumber : DEFAULT_TODO_BOARD.projectNumber
     const statusFieldName = process.env.HAPI_TODO_BOARD_STATUS_FIELD?.trim() || DEFAULT_TODO_BOARD.statusFieldName
     const doneValuesRaw = process.env.HAPI_TODO_BOARD_DONE_VALUES?.trim()
     const doneValues = doneValuesRaw
@@ -248,6 +256,8 @@ type GhProjectV2Response = {
                 title?: string
                 field?: { options?: Array<{ name: string }> } | null
                 items?: {
+                    // GitHub's ProjectV2ItemConnection declares `nodes` as
+                    // `[ProjectV2Item]!` (nullable elements, non-null list).
                     nodes?: Array<{
                         id: string
                         content: {
@@ -261,7 +271,7 @@ type GhProjectV2Response = {
                             repository?: { nameWithOwner: string }
                         } | null
                         fieldValueByName?: { name: string } | null
-                    }>
+                    } | null>
                 } | null
             } | null
         } | null
@@ -442,7 +452,7 @@ function mapItems(response: GhProjectV2Response): TodoBoardItem[] {
     const nodes = response.data?.repositoryOwner?.projectV2?.items?.nodes ?? []
     const items: TodoBoardItem[] = []
     for (const node of nodes) {
-        if (!node.content) {
+        if (!node?.content) {
             continue
         }
         items.push({
@@ -489,7 +499,7 @@ export function parseProjectUrl(url: string): { host: string; ownerLogin: string
     }
     const [, host, ownerLogin, numberRaw, viewNumberRaw] = match
     const projectNumber = Number(numberRaw)
-    if (!Number.isFinite(projectNumber) || projectNumber <= 0) {
+    if (!isValidProjectNumber(projectNumber)) {
         return null
     }
     if (viewNumberRaw === undefined) {
