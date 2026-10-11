@@ -28,6 +28,7 @@ import type { ExternalRef, AgentFlavor, CodexCollaborationMode, CopilotAgentMode
 import { hasConversationMessageContent, unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
 import type { Server } from 'socket.io'
 import { randomUUID } from 'node:crypto'
+import { getEffectiveFleetUpgradePolicy } from '../upgrade/fleetUpgradePolicy'
 import type { Store, SettingsStore, CancelQueuedMessageResult } from '../store'
 import type {
     MessageContentSearchMatch,
@@ -237,9 +238,11 @@ export type SyncEngineOptions = {
     getUpgradeOffer?: () => HubUpgradeOffer
     /** Ensure hub-artifact bytes exist; returns offer with sha256 filled. */
     prepareArtifactOffer?: (offer: HubUpgradeOffer, platform: string, arch: string) => Promise<HubUpgradeOffer>
-    /** Operator policy: only `auto` lets the hub auto-fire fleet upgrades. */
+    /**
+     * Hub-default fleet policy (banner / fallback). Unattended auto-push is
+     * disabled; deliberate `pushFleetUpgrade` uses per-machine overrides.
+     */
     getFleetUpgradePolicy?: () => FleetUpgradePolicy
-    /** Data dir for cooldowns only — optional. */
 }
 
 export class SyncEngine {
@@ -270,14 +273,8 @@ export class SyncEngine {
     private readonly opencodeClearTails = new Map<string, Promise<ClearOpencodeSessionResult>>()
     /** Serialize fork/rewind per session so concurrent native rollbacks cannot stack. */
     private readonly historyActionsInFlight = new Set<string>()
-    private readonly fleetUpgradeAttemptAt = new Map<string, number>()
-    private lastAutoUpgradeOfferKey: string | null = null
-    private fleetUpgradeStartupSweepTimer: ReturnType<typeof setTimeout> | null = null
-    private static readonly FLEET_UPGRADE_COOLDOWN_MS = 15 * 60_000
-    /** Let runners reconnect + rpc-register after a patient hub restart before sweeping. */
-    private static readonly FLEET_UPGRADE_STARTUP_SWEEP_DELAY_MS = 15_000
     /**
-     * Coalesce concurrent auto + banner Upgrade calls for the same machine so
+     * Coalesce concurrent banner Upgrade / push calls for the same machine so
      * the runner's "already in progress" reply is not toasted as upgrade_failed.
      */
     private readonly fleetUpgradeInFlight = new Map<
@@ -359,10 +356,6 @@ export class SyncEngine {
         if (this.inactivityTimer) {
             clearInterval(this.inactivityTimer)
             this.inactivityTimer = null
-        }
-        if (this.fleetUpgradeStartupSweepTimer) {
-            clearTimeout(this.fleetUpgradeStartupSweepTimer)
-            this.fleetUpgradeStartupSweepTimer = null
         }
     }
 
@@ -744,9 +737,6 @@ export class SyncEngine {
 
         if (event.type === 'machine-updated' && event.machineId) {
             this.machineCache.refreshMachine(event.machineId)
-            void this.maybeFleetUpgradeMachine(event.machineId).catch((error) => {
-                console.warn('[fleet-upgrade] offer resolution failed', error)
-            })
             return
         }
 
@@ -1534,170 +1524,7 @@ export class SyncEngine {
 
     handleMachineAlive(payload: { machineId: string; time: number; health?: unknown }): void {
         this.machineCache.handleMachineAlive(payload)
-        void this.maybeFleetUpgradeMachine(payload.machineId).catch((error) => {
-            console.warn('[fleet-upgrade] offer resolution failed', error)
-        })
-    }
-
-    /**
-     * After hub startup (post-remat / patient restart), sweep once for runners
-     * that trail the hub offer. Heartbeat auto-upgrade alone can miss the
-     * window when a successful upgrade lands on the pre-restart generation and
-     * the 15m cooldown blocks chasing the new hub fingerprint.
-     */
-    scheduleFleetUpgradeStartupSweep(): void {
-        if (this.fleetUpgradeStartupSweepTimer) {
-            clearTimeout(this.fleetUpgradeStartupSweepTimer)
-        }
-        this.fleetUpgradeStartupSweepTimer = setTimeout(() => {
-            this.fleetUpgradeStartupSweepTimer = null
-            void this.runFleetUpgradeStartupSweep().catch((error) => {
-                console.warn('[fleet-upgrade] startup sweep failed', error)
-            })
-        }, SyncEngine.FLEET_UPGRADE_STARTUP_SWEEP_DELAY_MS)
-    }
-
-    private async runFleetUpgradeStartupSweep(): Promise<void> {
-        if (!this.getUpgradeOffer || this.getFleetUpgradePolicy() !== 'auto') {
-            return
-        }
-        const offer = this.getUpgradeOffer()
-        if (offer.channel === 'off') {
-            return
-        }
-
-        const skewed = this.getMachines().filter((machine) => {
-            if (!machine.active || !machine.metadata) {
-                return false
-            }
-            if (machine.metadata.versionHandoffDisabled === true) {
-                return false
-            }
-            return machineTrailsUpgradeOffer(
-                offer,
-                machine.metadata.happyCliVersion,
-                machine.metadata.capabilities,
-                machine.metadata.cliArtifactGeneration,
-            )
-        })
-
-        if (skewed.length === 0) {
-            console.log('[fleet-upgrade] startup sweep: no skewed runners')
-            return
-        }
-
-        console.warn('[fleet-upgrade] startup sweep', {
-            count: skewed.length,
-            hosts: skewed.map((machine) => machine.metadata?.host ?? machine.metadata?.displayName ?? machine.id),
-            targetGeneration: offer.targetGeneration?.slice(0, 16),
-        })
-
-        await Promise.all(skewed.map((machine) =>
-            this.maybeFleetUpgradeMachine(machine.id, { bypassCooldown: true, source: 'startup-sweep' })
-        ))
-    }
-
-    /**
-     * Auto cooldown is per-machine wall clock. When the hub's offer moves
-     * (soup fingerprint) a successful upgrade of the previous target must not
-     * block chasing the new one for 15 minutes.
-     */
-    private clearFleetUpgradeCooldownIfTargetMoved(offer: HubUpgradeOffer): void {
-        const key = `${offer.channel}:${offer.targetVersion}:${offer.targetGeneration ?? ''}`
-        if (this.lastAutoUpgradeOfferKey !== null && this.lastAutoUpgradeOfferKey !== key) {
-            this.fleetUpgradeAttemptAt.clear()
-            console.warn('[fleet-upgrade] target moved; cleared auto cooldown', {
-                from: this.lastAutoUpgradeOfferKey,
-                to: key,
-            })
-        }
-        this.lastAutoUpgradeOfferKey = key
-    }
-
-    /**
-     * When a connected runner is missing required capabilities, ask it to
-     * self-upgrade to the hub's generation (npm or hub-artifact).
-     */
-    private async maybeFleetUpgradeMachine(
-        machineId: string,
-        options?: { bypassCooldown?: boolean; source?: 'machine-alive' | 'machine-updated' | 'startup-sweep' },
-    ): Promise<void> {
-        // Policy-first: default `alert` must not resolve (and fingerprint) the
-        // upgrade offer on every machine-alive heartbeat.
-        if (!this.getUpgradeOffer) {
-            return
-        }
-        if (this.getFleetUpgradePolicy() !== 'auto') {
-            return
-        }
-        const offer = this.getUpgradeOffer()
-        if (offer.channel === 'off') {
-            return
-        }
-        this.clearFleetUpgradeCooldownIfTargetMoved(offer)
-        const machine = this.machineCache.getMachine(machineId)
-        if (!machine?.active || !machine.metadata) {
-            return
-        }
-        // Honor runner opt-out: operators with HAPI_DISABLE_VERSION_HANDOFF=1
-        // must not get hub-initiated upgrade/stop churn (mtime handoff sibling).
-        if (machine.metadata.versionHandoffDisabled === true) {
-            return
-        }
-        // Auto-fire on capability skew OR pure semver drift ("set and forget"):
-        // a runner behind the hub's target version is nudged even when it's
-        // missing no required capability. The 0.0.0/off guards live in the helper.
-        if (!machineTrailsUpgradeOffer(
-            offer,
-            machine.metadata.happyCliVersion,
-            machine.metadata.capabilities,
-            machine.metadata.cliArtifactGeneration,
-        )) {
-            return
-        }
-        if (!options?.bypassCooldown) {
-            const last = this.fleetUpgradeAttemptAt.get(machineId) ?? 0
-            if (Date.now() - last < SyncEngine.FLEET_UPGRADE_COOLDOWN_MS) {
-                return
-            }
-        }
-        this.fleetUpgradeAttemptAt.set(machineId, Date.now())
-        const host = machine.metadata.host ?? machine.metadata.displayName ?? machineId
-        try {
-            const result = await this.upgradeMachineRunner(machineId, machine.namespace)
-            console.warn('[fleet-upgrade] auto attempt', {
-                machineId,
-                host,
-                channel: offer.channel,
-                source: options?.source ?? 'machine-alive',
-                result,
-            })
-            // Only toast hard upgrade failures. `upgrade_deferred` is mid-soup
-            // bun compile (Teemo 2026-08-04); `upgrade_unavailable` is expected
-            // opt-out / channel-off / missing capability. Permanent artifact
-            // prep failures are classified as `upgrade_failed` so they stay visible
-            // under auto (banner hides self-upgrade-capable hosts).
-            if (result.type === 'error' && result.code === 'upgrade_failed') {
-                this.eventPublisher.sendToast(
-                    machine.namespace,
-                    'Runner upgrade failed',
-                    `${host}: ${result.message}`,
-                )
-            }
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error)
-            console.warn('[fleet-upgrade] auto attempt failed', {
-                machineId,
-                message,
-            })
-            // Unexpected throw — still toast; prepare/compile paths return
-            // typed errors instead of throwing into this catch.
-            this.eventPublisher.sendToast(
-                machine.namespace,
-                'Runner upgrade failed',
-                `${host}: ${message}`,
-            )
-        }
+        // Deliberate fleet push only — keepalive must not auto-upgrade.
     }
 
     /**
@@ -1746,6 +1573,108 @@ export class SyncEngine {
                 code: 'restart_failed',
             }
         }
+    }
+
+    /**
+     * Operator-initiated fleet push. Applies hub-artifact upgrade only to
+     * machines whose **effective** policy is `auto` (per-machine override or
+     * hub default). `alert` machines are reported as banner-only; `silent` skipped.
+     */
+    async pushFleetUpgrade(options: {
+        namespace: string
+        machineIds: string[]
+        /** When true, apply even to effective `alert` (owned-host force). */
+        forceAlert?: boolean
+    }): Promise<{
+        results: Array<{
+            machineId: string
+            host: string
+            policy: FleetUpgradePolicy
+            action: 'upgraded' | 'already-current' | 'banner' | 'skipped' | 'error'
+            message: string
+        }>
+    }> {
+        const results: Array<{
+            machineId: string
+            host: string
+            policy: FleetUpgradePolicy
+            action: 'upgraded' | 'already-current' | 'banner' | 'skipped' | 'error'
+            message: string
+        }> = []
+
+        for (const rawId of options.machineIds) {
+            const machineId = rawId.trim()
+            if (!machineId) {
+                continue
+            }
+            const machine = this.machineCache.getMachineByNamespace(machineId, options.namespace)
+                ?? this.machineCache.refreshMachine(machineId)
+            const host = machine?.metadata?.displayName
+                ?? machine?.metadata?.host
+                ?? machineId
+            const policy = getEffectiveFleetUpgradePolicy(machineId)
+
+            if (!machine || machine.namespace !== options.namespace) {
+                results.push({
+                    machineId,
+                    host,
+                    policy,
+                    action: 'error',
+                    message: 'Machine not found',
+                })
+                continue
+            }
+            if (policy === 'silent') {
+                results.push({
+                    machineId,
+                    host,
+                    policy,
+                    action: 'skipped',
+                    message: 'Effective policy is silent',
+                })
+                continue
+            }
+            if (policy === 'alert' && !options.forceAlert) {
+                results.push({
+                    machineId,
+                    host,
+                    policy,
+                    action: 'banner',
+                    message: 'Skew banner only — not auto-applied on push',
+                })
+                continue
+            }
+
+            const result = await this.upgradeMachineRunner(machineId, options.namespace)
+            if (result.type === 'success') {
+                const already = result.response?.status === 'already-current'
+                results.push({
+                    machineId,
+                    host,
+                    policy,
+                    action: already ? 'already-current' : 'upgraded',
+                    message: result.message,
+                })
+            } else {
+                results.push({
+                    machineId,
+                    host,
+                    policy,
+                    action: 'error',
+                    message: result.message,
+                })
+            }
+        }
+
+        console.warn('[fleet-upgrade] deliberate push', {
+            namespace: options.namespace,
+            count: results.length,
+            upgraded: results.filter((row) => row.action === 'upgraded').map((row) => row.host),
+            banner: results.filter((row) => row.action === 'banner').map((row) => row.host),
+            skipped: results.filter((row) => row.action === 'skipped').map((row) => row.host),
+            errors: results.filter((row) => row.action === 'error').map((row) => row.host),
+        })
+        return { results }
     }
 
     /**

@@ -3,6 +3,10 @@ import { MACHINE_CAPABILITIES } from '@hapi/protocol/runnerCapabilities'
 import { Store } from '../store'
 import { RpcRegistry } from '../socket/rpcRegistry'
 import { TransientArtifactBuildError } from '../upgrade/cliArtifact'
+import {
+    resetFleetUpgradePolicyForTests,
+    setFleetUpgradeMachinePolicy,
+} from '../upgrade/fleetUpgradePolicy'
 import { SyncEngine } from './syncEngine'
 import type { HubUpgradeOffer } from '@hapi/protocol/upgradeChannel'
 
@@ -495,7 +499,8 @@ describe('SyncEngine fleet upgrade', () => {
     })
 
 
-    it('auto fleet upgrade fires on pure semver drift (set and forget)', async () => {
+    it('deliberate push upgrades pure semver drift when machine policy is auto', async () => {
+        resetFleetUpgradePolicyForTests()
         const offer: HubUpgradeOffer = {
             channel: 'npm',
             targetVersion: '0.24.0',
@@ -509,7 +514,7 @@ describe('SyncEngine fleet upgrade', () => {
             {} as never,
             registry,
             { broadcast() {} } as never,
-            { getUpgradeOffer: () => offer, getFleetUpgradePolicy: () => 'auto' },
+            { getUpgradeOffer: () => offer, getFleetUpgradePolicy: () => 'alert' },
         )
 
         try {
@@ -520,7 +525,6 @@ describe('SyncEngine fleet upgrade', () => {
             }))
             ;(engine as any).rpcGateway.runnerSelfUpgrade = runnerSelfUpgrade
 
-            // Missing NO required capability, just behind on version.
             engine.getOrCreateMachine(
                 'behind',
                 {
@@ -535,10 +539,18 @@ describe('SyncEngine fleet upgrade', () => {
             registerLiveSelfUpgrade(registry, 'behind')
             engine.handleMachineAlive({ machineId: 'behind', time: Date.now() })
             await Promise.resolve()
-            await new Promise((resolve) => setTimeout(resolve, 10))
+            expect(runnerSelfUpgrade).not.toHaveBeenCalled()
+
+            await setFleetUpgradeMachinePolicy('behind', 'auto')
+            const { results } = await engine.pushFleetUpgrade({
+                namespace: 'default',
+                machineIds: ['behind'],
+            })
             expect(runnerSelfUpgrade).toHaveBeenCalledWith('behind', offer)
+            expect(results[0]?.action).toBe('upgraded')
         } finally {
             engine.stop()
+            resetFleetUpgradePolicyForTests()
         }
     })
 
@@ -906,7 +918,8 @@ describe('SyncEngine fleet upgrade', () => {
         }
     })
 
-    it('auto fleet toasts stable Could not resolve (not mid-rebuild)', async () => {
+    it('deliberate push surfaces stable Could not resolve as error action', async () => {
+        resetFleetUpgradePolicyForTests()
         const offer: HubUpgradeOffer = {
             channel: 'hub-artifact',
             targetVersion: '0.26.0',
@@ -914,30 +927,22 @@ describe('SyncEngine fleet upgrade', () => {
             targetGeneration: 'new-fingerprint',
         }
         const store = new Store(':memory:')
-        const sendToast = mock(async () => {})
         const registry = new RpcRegistry()
         const engine = new SyncEngine(
             store,
             {} as never,
             registry,
-            { broadcast() {}, sendToast } as never,
+            { broadcast() {} } as never,
             {
                 getUpgradeOffer: () => offer,
-                getFleetUpgradePolicy: () => 'auto',
+                getFleetUpgradePolicy: () => 'alert',
                 prepareArtifactOffer: async () => {
-                    // Plain Error: fingerprint unchanged during compile → permanent miss
                     throw new Error('bun compile failed: Could not resolve: "./settingsStore"')
                 },
             },
         )
 
         try {
-            ;(engine as any).rpcGateway.runnerSelfUpgrade = mock(async () => ({
-                status: 'started',
-                message: 'ok',
-                channel: 'hub-artifact',
-            }))
-
             engine.getOrCreateMachine(
                 'teemo-stable',
                 {
@@ -953,24 +958,21 @@ describe('SyncEngine fleet upgrade', () => {
             )
             registerLiveSelfUpgrade(registry, 'teemo-stable')
             engine.handleMachineAlive({ machineId: 'teemo-stable', time: Date.now() })
-            await Promise.resolve()
-            await new Promise((resolve) => setTimeout(resolve, 20))
-            expect(sendToast).toHaveBeenCalledWith(
-                'default',
-                expect.objectContaining({
-                    type: 'toast',
-                    data: expect.objectContaining({
-                        title: 'Runner upgrade failed',
-                        body: expect.stringContaining('Could not resolve'),
-                    }),
-                }),
-            )
+            await setFleetUpgradeMachinePolicy('teemo-stable', 'auto')
+            const { results } = await engine.pushFleetUpgrade({
+                namespace: 'default',
+                machineIds: ['teemo-stable'],
+            })
+            expect(results[0]?.action).toBe('error')
+            expect(results[0]?.message).toContain('Could not resolve')
         } finally {
             engine.stop()
+            resetFleetUpgradePolicyForTests()
         }
     })
 
-    it('auto fleet toasts permanent artifact preparation failures', async () => {
+    it('deliberate push surfaces permanent artifact prep failures as error action', async () => {
+        resetFleetUpgradePolicyForTests()
         const offer: HubUpgradeOffer = {
             channel: 'hub-artifact',
             targetVersion: '0.26.0',
@@ -978,16 +980,15 @@ describe('SyncEngine fleet upgrade', () => {
             targetGeneration: 'new-fingerprint',
         }
         const store = new Store(':memory:')
-        const sendToast = mock(async () => {})
         const registry = new RpcRegistry()
         const engine = new SyncEngine(
             store,
             {} as never,
             registry,
-            { broadcast() {}, sendToast } as never,
+            { broadcast() {} } as never,
             {
                 getUpgradeOffer: () => offer,
-                getFleetUpgradePolicy: () => 'auto',
+                getFleetUpgradePolicy: () => 'alert',
                 prepareArtifactOffer: async () => {
                     throw new Error('Missing tool archive for compile: ripgrep-win32-x64.tar.gz')
                 },
@@ -995,12 +996,6 @@ describe('SyncEngine fleet upgrade', () => {
         )
 
         try {
-            ;(engine as any).rpcGateway.runnerSelfUpgrade = mock(async () => ({
-                status: 'started',
-                message: 'ok',
-                channel: 'hub-artifact',
-            }))
-
             engine.getOrCreateMachine(
                 'teemo',
                 {
@@ -1016,21 +1011,16 @@ describe('SyncEngine fleet upgrade', () => {
             )
             registerLiveSelfUpgrade(registry, 'teemo')
             engine.handleMachineAlive({ machineId: 'teemo', time: Date.now() })
-            await Promise.resolve()
-            await new Promise((resolve) => setTimeout(resolve, 20))
-            // EventPublisher → sseManager.sendToast(namespace, SyncEvent toast)
-            expect(sendToast).toHaveBeenCalledWith(
-                'default',
-                expect.objectContaining({
-                    type: 'toast',
-                    data: expect.objectContaining({
-                        title: 'Runner upgrade failed',
-                        body: expect.stringContaining('Missing tool archive'),
-                    }),
-                }),
-            )
+            await setFleetUpgradeMachinePolicy('teemo', 'auto')
+            const { results } = await engine.pushFleetUpgrade({
+                namespace: 'default',
+                machineIds: ['teemo'],
+            })
+            expect(results[0]?.action).toBe('error')
+            expect(results[0]?.message).toContain('Missing tool archive')
         } finally {
             engine.stop()
+            resetFleetUpgradePolicyForTests()
         }
     })
 })

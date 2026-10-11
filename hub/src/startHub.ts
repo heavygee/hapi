@@ -184,7 +184,11 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     const officialWebUrl = process.env.HAPI_OFFICIAL_WEB_URL || 'https://app.hapi.run'
     const config = await createConfiguration()
     const persistedSettings = await readSettings(config.settingsFile)
-    initFleetUpgradePolicy({ dataDir: config.dataDir, persisted: persistedSettings?.fleetUpgradePolicy })
+    initFleetUpgradePolicy({
+        dataDir: config.dataDir,
+        persisted: persistedSettings?.fleetUpgradePolicy,
+        persistedMachinePolicies: persistedSettings?.fleetUpgradeMachinePolicies,
+    })
     const baseCorsOrigins = normalizeOrigins(config.corsOrigins)
     const relayCorsOrigin = normalizeOrigin(officialWebUrl)
     const corsOrigins = relayFlag.enabled
@@ -504,7 +508,8 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     }
     console.log('')
     console.log('HAPI Hub is ready!')
-    syncEngine.scheduleFleetUpgradeStartupSweep()
+    // Deliberate fleet push only — no keepalive/startup auto-upgrade sweep.
+
 
     return {
         stop: async () => {

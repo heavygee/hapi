@@ -4,9 +4,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { getSettingsFile, readSettings } from '../config/settings'
 import {
+    getEffectiveFleetUpgradePolicy,
+    getFleetUpgradeMachinePolicies,
     getFleetUpgradePolicy,
     initFleetUpgradePolicy,
     resetFleetUpgradePolicyForTests,
+    setFleetUpgradeMachinePolicy,
     setFleetUpgradePolicy,
 } from './fleetUpgradePolicy'
 
@@ -85,5 +88,34 @@ describe('fleetUpgradePolicy', () => {
         expect(persisted?.cliApiToken).toBe('keep-me')
         // File must remain valid JSON (no half-written tmp clobber).
         expect(() => JSON.parse(readFileSync(file, 'utf8'))).not.toThrow()
+    })
+
+    it('stores per-machine overrides without changing hub default', async () => {
+        const dataDir = makeDataDir()
+        initFleetUpgradePolicy({ dataDir, persisted: 'alert' })
+        await setFleetUpgradePolicy('alert') // persist hub default before machine RMW
+        expect(getEffectiveFleetUpgradePolicy('ninja')).toBe('alert')
+
+        await setFleetUpgradeMachinePolicy('ninja', 'auto')
+        expect(getFleetUpgradePolicy()).toBe('alert')
+        expect(getEffectiveFleetUpgradePolicy('ninja')).toBe('auto')
+        expect(getFleetUpgradeMachinePolicies()).toEqual({ ninja: 'auto' })
+
+        const persisted = await readSettings(getSettingsFile(dataDir))
+        expect(persisted?.fleetUpgradePolicy).toBe('alert')
+        expect(persisted?.fleetUpgradeMachinePolicies).toEqual({ ninja: 'auto' })
+
+        resetFleetUpgradePolicyForTests()
+        initFleetUpgradePolicy({
+            dataDir,
+            persisted: persisted?.fleetUpgradePolicy,
+            persistedMachinePolicies: persisted?.fleetUpgradeMachinePolicies,
+        })
+        expect(getEffectiveFleetUpgradePolicy('ninja')).toBe('auto')
+        expect(getEffectiveFleetUpgradePolicy('homelab')).toBe('alert')
+
+        await setFleetUpgradeMachinePolicy('ninja', null)
+        expect(getEffectiveFleetUpgradePolicy('ninja')).toBe('alert')
+        expect(getFleetUpgradeMachinePolicies()).toEqual({})
     })
 })
