@@ -1248,6 +1248,32 @@ export type TodoBoardsResponse = {
     boards: TodoBoardSummary[]
 }
 
+export type TodoBoardItemActor = {
+    login: string
+    avatarUrl: string
+}
+
+export type TodoBoardItemLabel = {
+    name: string
+    color: string
+}
+
+export type TodoBoardItemMilestone = {
+    title: string
+    dueOn: string | null
+}
+
+/**
+ * One of the project's custom fields (anything besides the dedicated Status
+ * field, which gets its own `status`/`statusOrder` treatment) — generic
+ * single-select/text/number/date values, normalized to a display string.
+ * Write support is Status-only for now; these render read-only.
+ */
+export type TodoBoardItemCustomField = {
+    name: string
+    value: string
+}
+
 export type TodoBoardItem = {
     id: string
     title: string
@@ -1258,6 +1284,15 @@ export type TodoBoardItem = {
     status: string | null
     updatedAt: string | null
     body: string | null
+    /** Draft issues (no linked Issue/PR) have neither a url nor write-action support — close/reopen/comment/status-change all require one. */
+    isPullRequest: boolean
+    createdAt: string | null
+    closedAt: string | null
+    author: TodoBoardItemActor | null
+    assignees: TodoBoardItemActor[]
+    labels: TodoBoardItemLabel[]
+    milestone: TodoBoardItemMilestone | null
+    customFields: TodoBoardItemCustomField[]
 }
 
 export type TodoBoardItemsResponse = {
@@ -1272,6 +1307,38 @@ export const AddTodoBoardRequestSchema = z.object({
 })
 
 export type AddTodoBoardRequest = z.infer<typeof AddTodoBoardRequestSchema>
+
+// Write actions all identify the target item by its GitHub issue/PR URL
+// (not a HAPI-side id) — the hub validates it belongs to the board being
+// acted on (same host, well-formed issue/pull path) before shelling out to
+// `gh`, closing the same SSRF-class exposure the board-add host allowlist
+// closed for reads. `isPullRequest` is deliberately NOT part of this wire
+// contract — the hub derives it itself from the validated URL path rather
+// than trusting a client-supplied flag, so a client can't send `isPullRequest:
+// true` for an issue URL (or vice versa) and run the wrong `gh` verb.
+export const TodoItemCloseRequestSchema = z.object({
+    url: z.string().min(1),
+    comment: z.string().optional()
+})
+export type TodoItemCloseRequest = z.infer<typeof TodoItemCloseRequestSchema>
+
+export const TodoItemReopenRequestSchema = z.object({
+    url: z.string().min(1),
+    comment: z.string().optional()
+})
+export type TodoItemReopenRequest = z.infer<typeof TodoItemReopenRequestSchema>
+
+export const TodoItemCommentRequestSchema = z.object({
+    url: z.string().min(1),
+    body: z.string().min(1)
+})
+export type TodoItemCommentRequest = z.infer<typeof TodoItemCommentRequestSchema>
+
+export const TodoItemStatusRequestSchema = z.object({
+    url: z.string().min(1),
+    status: z.string().min(1)
+})
+export type TodoItemStatusRequest = z.infer<typeof TodoItemStatusRequestSchema>
 
 export const LinkIssueRequestSchema = z.object({
     url: z.string().min(1)

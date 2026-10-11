@@ -42,6 +42,8 @@ import { useTodoBoards } from '@/hooks/queries/useTodoBoards'
 import { useTodoBoardItems } from '@/hooks/queries/useTodoBoardItems'
 import { useTodoBoardSelection } from '@/hooks/useTodoBoardSelection'
 import { useTodoBoardActions } from '@/hooks/mutations/useTodoBoardActions'
+import { useTodoItemActions } from '@/hooks/mutations/useTodoItemActions'
+import { getApiErrorMessage } from '@/lib/apiErrorMessage'
 import { useSession } from '@/hooks/queries/useSession'
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
 import { useSessions } from '@/hooks/queries/useSessions'
@@ -349,9 +351,21 @@ function SessionsPage() {
         statusOrder: todoStatusOrder,
         doneValues: todoDoneValues,
         isLoading: todoItemsLoading,
+        isRefetching: todoItemsRefetching,
         error: todoItemsError,
+        refetch: refetchTodoItems,
     } = useTodoBoardItems(api, sessionsMode === 'todo' ? effectiveBoardId : null)
     const { addBoard: addTodoBoard, removeBoard: removeTodoBoard } = useTodoBoardActions(api)
+    const {
+        closeItem: closeTodoItem,
+        reopenItem: reopenTodoItem,
+        commentOnItem: commentOnTodoItem,
+        setItemStatus: setTodoItemStatus,
+        closingUrl: closingTodoItemUrl,
+        reopeningUrl: reopeningTodoItemUrl,
+        commentingUrl: commentingOnTodoItemUrl,
+        settingStatusUrl: settingTodoItemStatusUrl,
+    } = useTodoItemActions(api, effectiveBoardId)
     const [selectedTodoItemId, setSelectedTodoItemId] = useState<string | null>(null)
     useEffect(() => {
         setSelectedTodoItemId(null)
@@ -867,6 +881,8 @@ function SessionsPage() {
                             error={todoBoardsError ?? todoItemsError}
                             selectedItemId={selectedTodoItemId}
                             onSelectItem={(item) => setSelectedTodoItemId(item.id)}
+                            onRefresh={() => { void refetchTodoItems() }}
+                            isRefreshing={todoItemsRefetching}
                         />
                     ) : (
                     <SessionList
@@ -991,9 +1007,48 @@ function SessionsPage() {
                 <div className="flex-1 min-h-0">
                     {selectedTodoItem ? (
                         <TodoItemDetail
+                            // Remount on item switch — local state (comment draft, the
+                            // close-confirm dialog's open flag) must not bleed from the
+                            // previously-selected item onto the newly-selected one.
+                            key={selectedTodoItem.id}
                             item={selectedTodoItem}
+                            statusOrder={todoStatusOrder}
                             onBack={() => setSelectedTodoItemId(null)}
                             onSpawn={() => handleSpawnFromTodoItem(selectedTodoItem)}
+                            onRefresh={() => { void refetchTodoItems() }}
+                            isRefreshing={todoItemsRefetching}
+                            onClose={() => closeTodoItem(selectedTodoItem)}
+                            onReopen={() => {
+                                reopenTodoItem(selectedTodoItem).catch((err) => addToast({
+                                    title: t('todo.detail.reopenFailed'),
+                                    body: getApiErrorMessage(err, t('dialog.error.default')),
+                                    sessionId: '',
+                                    url: ''
+                                }))
+                            }}
+                            onComment={(body) => {
+                                return commentOnTodoItem(selectedTodoItem, body).catch((err) => {
+                                    addToast({
+                                        title: t('todo.detail.commentFailed'),
+                                        body: getApiErrorMessage(err, t('dialog.error.default')),
+                                        sessionId: '',
+                                        url: ''
+                                    })
+                                    throw err
+                                })
+                            }}
+                            onSetStatus={(status) => {
+                                setTodoItemStatus(selectedTodoItem, status).catch((err) => addToast({
+                                    title: t('todo.detail.statusChangeFailed'),
+                                    body: getApiErrorMessage(err, t('dialog.error.default')),
+                                    sessionId: '',
+                                    url: ''
+                                }))
+                            }}
+                            isClosing={closingTodoItemUrl === selectedTodoItem.url}
+                            isReopening={reopeningTodoItemUrl === selectedTodoItem.url}
+                            isCommenting={commentingOnTodoItemUrl === selectedTodoItem.url}
+                            isSettingStatus={settingTodoItemStatusUrl === selectedTodoItem.url}
                         />
                     ) : (
                         <Outlet />

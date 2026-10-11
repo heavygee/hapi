@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { Hono } from 'hono'
 import type { TodoBoardItemsResponse, TodoBoardsResponse } from '@hapi/protocol'
 import type { WebAppEnv } from '../middleware/auth'
-import { createTodoBoardRoutes, makeBoardId, parseProjectUrl, resolveProjectView } from './todoBoard'
+import { createTodoBoardRoutes, makeBoardId, parseProjectUrl, parseValidatedItemUrl, resolveProjectView } from './todoBoard'
 
 const ENV_KEYS = [
     'HAPI_TODO_BOARD_HOST',
@@ -25,11 +25,19 @@ afterEach(async () => {
     await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true })))
 })
 
+const UNUSED_ACTIONS: Parameters<typeof createTodoBoardRoutes>[4] = {
+    close: async () => { throw new Error('close action not mocked for this test') },
+    reopen: async () => { throw new Error('reopen action not mocked for this test') },
+    comment: async () => { throw new Error('comment action not mocked for this test') },
+    setStatus: async () => { throw new Error('setStatus action not mocked for this test') }
+}
+
 async function createApp(
     runGraphql: Parameters<typeof createTodoBoardRoutes>[1],
     runGraphqlTitle?: Parameters<typeof createTodoBoardRoutes>[2],
     namespace = 'default',
-    runGraphqlView?: Parameters<typeof createTodoBoardRoutes>[3]
+    runGraphqlView?: Parameters<typeof createTodoBoardRoutes>[3],
+    actions?: Parameters<typeof createTodoBoardRoutes>[4]
 ) {
     const dataDir = await mkdtemp(join(tmpdir(), 'hapi-todo-board-'))
     directories.push(dataDir)
@@ -45,7 +53,8 @@ async function createApp(
         dataDir,
         runGraphql,
         runGraphqlTitle ?? (() => ({ data: { repositoryOwner: {} } })),
-        runGraphqlView ?? (() => ({ data: { repositoryOwner: {} } }))
+        runGraphqlView ?? (() => ({ data: { repositoryOwner: {} } })),
+        actions ?? UNUSED_ACTIONS
     ))
     return app
 }
@@ -312,6 +321,63 @@ describe('DELETE /api/todo-boards/:id', () => {
     })
 })
 
+describe('parseValidatedItemUrl', () => {
+    const board = { host: 'github.com' }
+
+    it('accepts a well-formed issue URL on the board\'s own host', () => {
+        expect(parseValidatedItemUrl('https://github.com/acme/widgets/issues/12', board)).toEqual({
+            url: 'https://github.com/acme/widgets/issues/12',
+            isPullRequest: false
+        })
+    })
+
+    it('accepts a well-formed pull-request URL', () => {
+        expect(parseValidatedItemUrl('https://github.com/acme/widgets/pull/9', board)).toEqual({
+            url: 'https://github.com/acme/widgets/pull/9',
+            isPullRequest: true
+        })
+    })
+
+    it('rejects a URL on a different host — the SSRF-class case', () => {
+        // The whole point of this check: a JWT caller supplying this URL
+        // must not make the hub shell out `gh issue close` against an
+        // arbitrary attacker-controlled host. GH_HOST does not protect
+        // against this — gh dials the URL's own embedded host regardless —
+        // so this check is the sole defense, not defense-in-depth.
+        expect(parseValidatedItemUrl('https://attacker.example/acme/widgets/issues/12', board)).toBeNull()
+    })
+
+    it('rejects a non-https scheme even on the right host/path', () => {
+        expect(parseValidatedItemUrl('http://github.com/acme/widgets/issues/12', board)).toBeNull()
+        expect(parseValidatedItemUrl('file://github.com/acme/widgets/issues/12', board)).toBeNull()
+    })
+
+    it('matches host case-insensitively, normalizing the host in the rebuilt URL', () => {
+        expect(parseValidatedItemUrl('https://GitHub.com/acme/widgets/issues/12', board)).toEqual({
+            url: 'https://github.com/acme/widgets/issues/12',
+            isPullRequest: false
+        })
+    })
+
+    it('rebuilds a canonical URL rather than passing the raw input through', () => {
+        // Trailing slash and query/fragment noise must not survive into the
+        // string handed to `gh` — it's rebuilt from validated path parts.
+        expect(parseValidatedItemUrl('https://github.com/acme/widgets/issues/12/?foo=bar#x', board)).toEqual({
+            url: 'https://github.com/acme/widgets/issues/12',
+            isPullRequest: false
+        })
+    })
+
+    it('rejects a non-issue, non-pull path on the right host', () => {
+        expect(parseValidatedItemUrl('https://github.com/acme/widgets', board)).toBeNull()
+        expect(parseValidatedItemUrl('https://github.com/acme/widgets/discussions/1', board)).toBeNull()
+    })
+
+    it('rejects a malformed URL instead of throwing', () => {
+        expect(parseValidatedItemUrl('not a url', board)).toBeNull()
+    })
+})
+
 describe('resolveProjectView', () => {
     it('returns the title, view name, and trimmed filter on success', () => {
         const result = resolveProjectView({ data: { repositoryOwner: { projectV2: { title: 'Acme Roadmap', view: { name: 'Sprint board', filter: ' status:"Done" ' } } } } }, 8)
@@ -345,7 +411,7 @@ describe('GET /api/todo-boards/:id/items', () => {
         expect(response.status).toBe(404)
     })
 
-    it('maps gh graphql items, status order, done values, and body', async () => {
+    it('maps gh graphql items, status order, done values, body, and the richer item fields', async () => {
         const app = await createApp(() => ({
             data: {
                 repositoryOwner: {
@@ -362,10 +428,25 @@ describe('GET /api/todo-boards/:id/items', () => {
                                         url: 'https://github.com/acme/widgets/issues/12',
                                         state: 'OPEN',
                                         updatedAt: '2026-10-06T12:00:00Z',
+                                        createdAt: '2026-10-01T09:00:00Z',
+                                        closedAt: null,
                                         body: 'Some **markdown** body.',
-                                        repository: { nameWithOwner: 'acme/widgets' }
+                                        repository: { nameWithOwner: 'acme/widgets' },
+                                        author: { login: 'octocat', avatarUrl: 'https://example.com/octocat.png' },
+                                        assignees: { nodes: [{ login: 'hubot', avatarUrl: 'https://example.com/hubot.png' }, null] },
+                                        labels: { nodes: [{ name: 'bug', color: 'ff0000' }, null] },
+                                        milestone: { title: 'v1.0', dueOn: '2026-12-01' }
                                     },
-                                    fieldValueByName: { name: 'In Progress' }
+                                    fieldValueByName: { name: 'In Progress' },
+                                    fieldValues: {
+                                        nodes: [
+                                            { __typename: 'ProjectV2ItemFieldSingleSelectValue', name: 'In Progress', field: { name: 'Status' } },
+                                            { __typename: 'ProjectV2ItemFieldSingleSelectValue', name: 'High', field: { name: 'Priority' } },
+                                            { __typename: 'ProjectV2ItemFieldNumberValue', number: 3, field: { name: 'Points' } },
+                                            { __typename: 'ProjectV2ItemFieldTextValue', text: '', field: { name: 'Empty text field' } },
+                                            null
+                                        ]
+                                    }
                                 },
                                 {
                                     id: 'item-2',
@@ -395,7 +476,20 @@ describe('GET /api/todo-boards/:id/items', () => {
                 state: 'OPEN',
                 status: 'In Progress',
                 updatedAt: '2026-10-06T12:00:00Z',
-                body: 'Some **markdown** body.'
+                createdAt: '2026-10-01T09:00:00Z',
+                closedAt: null,
+                body: 'Some **markdown** body.',
+                isPullRequest: false,
+                author: { login: 'octocat', avatarUrl: 'https://example.com/octocat.png' },
+                assignees: [{ login: 'hubot', avatarUrl: 'https://example.com/hubot.png' }],
+                labels: [{ name: 'bug', color: 'ff0000' }],
+                milestone: { title: 'v1.0', dueOn: '2026-12-01' },
+                // Status is excluded (already surfaced via `status`); the
+                // empty-string text value is excluded as not worth rendering.
+                customFields: [
+                    { name: 'Priority', value: 'High' },
+                    { name: 'Points', value: '3' }
+                ]
             },
             {
                 id: 'item-2',
@@ -406,9 +500,33 @@ describe('GET /api/todo-boards/:id/items', () => {
                 state: null,
                 status: null,
                 updatedAt: null,
-                body: null
+                createdAt: null,
+                closedAt: null,
+                body: null,
+                isPullRequest: false,
+                author: null,
+                assignees: [],
+                labels: [],
+                milestone: null,
+                customFields: []
             }
         ])
+    })
+
+    it('marks a PullRequest item as isPullRequest', async () => {
+        const app = await createApp(() => ({
+            data: {
+                repositoryOwner: {
+                    projectV2: {
+                        field: { options: [] },
+                        items: { nodes: [{ id: 'item-pr', content: { __typename: 'PullRequest', title: 'Bump deps', url: 'https://github.com/acme/widgets/pull/9' }, fieldValueByName: null }] }
+                    }
+                }
+            }
+        }))
+        const response = await app.request('/api/todo-boards/github.com%3A%3Aheavygee%3A%3A6/items')
+        const body = await response.json() as TodoBoardItemsResponse
+        expect(body.items[0]?.isPullRequest).toBe(true)
     })
 
     it('applies HAPI_TODO_BOARD_DONE_VALUES as a comma-separated override', async () => {
@@ -488,5 +606,141 @@ describe('GET /api/todo-boards/:id/items', () => {
         const app = await createApp(() => { throw new Error('View 8 not found on this project') })
         const response = await app.request('/api/todo-boards/github.com%3A%3Aheavygee%3A%3A6/items')
         expect(response.status).toBe(404)
+    })
+})
+
+const DEFAULT_BOARD_ID = 'github.com::heavygee::6'
+const VALID_ITEM_URL = 'https://github.com/heavygee/hapi-demo-board/issues/1'
+
+describe('POST /api/todo-boards/:id/items/close', () => {
+    it('closes via the close action and reports success', async () => {
+        const calls: unknown[] = []
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, {
+            ...UNUSED_ACTIONS,
+            close: async (target, comment) => { calls.push([target, comment]) }
+        })
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/close`, {
+            method: 'POST',
+            body: JSON.stringify({ url: VALID_ITEM_URL, comment: 'done' })
+        })
+        expect(response.status).toBe(200)
+        expect(calls).toEqual([[{ host: 'github.com', url: VALID_ITEM_URL, isPullRequest: false }, 'done']])
+    })
+
+    it('rejects an item URL that does not belong to the board', async () => {
+        const app = await createApp(() => ({ data: {} }))
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/close`, {
+            method: 'POST',
+            body: JSON.stringify({ url: 'https://attacker.example/a/b/issues/1' })
+        })
+        expect(response.status).toBe(400)
+    })
+
+    it('404s for an unknown board', async () => {
+        const app = await createApp(() => ({ data: {} }))
+        const response = await app.request('/api/todo-boards/unknown/items/close', {
+            method: 'POST',
+            body: JSON.stringify({ url: VALID_ITEM_URL })
+        })
+        expect(response.status).toBe(404)
+    })
+
+    it('403s for a non-default namespace', async () => {
+        const app = await createApp(() => ({ data: {} }), undefined, 'some-other-namespace')
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/close`, {
+            method: 'POST',
+            body: JSON.stringify({ url: VALID_ITEM_URL })
+        })
+        expect(response.status).toBe(403)
+    })
+
+    it('surfaces a failed gh invocation as a 502, not a silently-swallowed success', async () => {
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, {
+            ...UNUSED_ACTIONS,
+            close: async () => { throw new Error('gh issue close failed: already closed') }
+        })
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/close`, {
+            method: 'POST',
+            body: JSON.stringify({ url: VALID_ITEM_URL })
+        })
+        expect(response.status).toBe(502)
+    })
+})
+
+describe('POST /api/todo-boards/:id/items/reopen', () => {
+    it('reopens via the reopen action, deriving isPullRequest from the URL (not part of the request body)', async () => {
+        const calls: unknown[] = []
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, {
+            ...UNUSED_ACTIONS,
+            reopen: async (target, comment) => { calls.push([target, comment]) }
+        })
+        // isPullRequest is deliberately not a client-supplied field at all —
+        // the server derives it from the validated URL path, so a /pull/ URL
+        // must come back as isPullRequest: true without the client ever
+        // asserting that itself.
+        const pullUrl = 'https://github.com/heavygee/hapi-demo-board/pull/1'
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/reopen`, {
+            method: 'POST',
+            body: JSON.stringify({ url: pullUrl })
+        })
+        expect(response.status).toBe(200)
+        expect(calls).toEqual([[{ host: 'github.com', url: pullUrl, isPullRequest: true }, undefined]])
+    })
+})
+
+describe('POST /api/todo-boards/:id/items/comment', () => {
+    it('comments via the comment action', async () => {
+        const calls: unknown[] = []
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, {
+            ...UNUSED_ACTIONS,
+            comment: async (target, body) => { calls.push([target, body]) }
+        })
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/comment`, {
+            method: 'POST',
+            body: JSON.stringify({ url: VALID_ITEM_URL, body: 'Looks good' })
+        })
+        expect(response.status).toBe(200)
+        expect(calls).toEqual([[{ host: 'github.com', url: VALID_ITEM_URL, isPullRequest: false }, 'Looks good']])
+    })
+
+    it('rejects an empty comment body', async () => {
+        const app = await createApp(() => ({ data: {} }))
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/comment`, {
+            method: 'POST',
+            body: JSON.stringify({ url: VALID_ITEM_URL, body: '' })
+        })
+        expect(response.status).toBe(400)
+    })
+})
+
+describe('POST /api/todo-boards/:id/items/status', () => {
+    it('sets status via the setStatus action, resolving project number/owner/field from the board', async () => {
+        const calls: unknown[] = []
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, {
+            ...UNUSED_ACTIONS,
+            setStatus: async (target) => { calls.push(target) }
+        })
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/status`, {
+            method: 'POST',
+            body: JSON.stringify({ url: VALID_ITEM_URL, status: 'Done' })
+        })
+        expect(response.status).toBe(200)
+        expect(calls).toEqual([{
+            host: 'github.com',
+            ownerLogin: 'heavygee',
+            projectNumber: 6,
+            url: VALID_ITEM_URL,
+            fieldName: 'Status',
+            status: 'Done'
+        }])
+    })
+
+    it('rejects a missing status value', async () => {
+        const app = await createApp(() => ({ data: {} }))
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/status`, {
+            method: 'POST',
+            body: JSON.stringify({ url: VALID_ITEM_URL })
+        })
+        expect(response.status).toBe(400)
     })
 })

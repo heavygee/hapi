@@ -4,7 +4,7 @@ import { TodoBoardSwitcherBar, TodoBoardSwitcherMenu, type TodoBoardFilterItem }
 import { AddTodoBoardDialog } from '@/components/AddTodoBoardDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { LoadingState } from '@/components/LoadingState'
-import { ExternalLinkIcon } from '@/components/icons'
+import { ExternalLinkIcon, RefreshIcon } from '@/components/icons'
 import { chipBaseClass, chipIdleClass } from '@/components/filterChipStyles'
 import { getApiErrorMessage } from '@/lib/apiErrorMessage'
 import { formatRelativeTime } from '@/lib/relativeTime'
@@ -118,6 +118,39 @@ function TodoItemCard(props: { item: TodoBoardItem; muted: boolean; selected: bo
                 <div className={cn('mt-2 line-clamp-2 text-sm', muted ? 'text-[var(--app-hint)]' : 'text-[var(--app-fg)]')}>
                     {item.title}
                 </div>
+                {item.labels.length > 0 || item.assignees.length > 0 ? (
+                    <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">
+                        {item.labels.length > 0 ? (
+                            <div className="flex min-w-0 flex-wrap gap-1">
+                                {item.labels.slice(0, 4).map(label => (
+                                    <span
+                                        key={label.name}
+                                        className="inline-flex max-w-24 items-center gap-1 truncate rounded-full border border-[var(--app-border)] px-1.5 py-0.5 text-[10px] text-[var(--app-hint)]"
+                                    >
+                                        <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: `#${label.color}` }} />
+                                        <span className="truncate">{label.name}</span>
+                                    </span>
+                                ))}
+                            </div>
+                        ) : null}
+                        {item.assignees.length > 0 ? (
+                            <div className="flex shrink-0 items-center -space-x-1.5">
+                                {item.assignees.slice(0, 4).map(assignee => (
+                                    <img
+                                        key={assignee.login}
+                                        src={assignee.avatarUrl}
+                                        alt=""
+                                        title={assignee.login}
+                                        className="h-5 w-5 rounded-full border border-[var(--app-bg)]"
+                                    />
+                                ))}
+                                {item.assignees.length > 4 ? (
+                                    <span className="pl-2 text-[10px] text-[var(--app-hint)]">+{item.assignees.length - 4}</span>
+                                ) : null}
+                            </div>
+                        ) : null}
+                    </div>
+                ) : null}
                 {updatedLabel ? <div className="mt-2 text-xs text-[var(--app-hint)]">{updatedLabel}</div> : null}
             </button>
 
@@ -150,6 +183,8 @@ export function TodoBoardList(props: {
     error: string | null
     selectedItemId: string | null
     onSelectItem: (item: TodoBoardItem) => void
+    onRefresh: () => void
+    isRefreshing: boolean
 }) {
     const { t } = useTranslation()
     const [doneExpanded, setDoneExpanded] = useState(false)
@@ -182,6 +217,16 @@ export function TodoBoardList(props: {
                     <>
                         <div className="flex items-center gap-1 px-2 py-1">
                             <div className="flex-1" />
+                            <button
+                                type="button"
+                                onClick={props.onRefresh}
+                                disabled={props.isRefreshing}
+                                aria-label={t('todo.refresh')}
+                                title={t('todo.refresh')}
+                                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] disabled:opacity-50"
+                            >
+                                <RefreshIcon className={cn('h-4 w-4', props.isRefreshing && 'animate-spin')} />
+                            </button>
                             <TodoBoardSwitcherMenu
                                 boards={boardFilterItems}
                                 value={props.selectedBoardId}
