@@ -63,4 +63,40 @@ driver_soup_single_exe_stage_github_assets "$fixture" "$stage" files
     || { echo "FAIL: staged asset names missing"; exit 1; }
 echo "OK: stage github assets"
 
+# Release notes: synthetic repo with two tips (no gh needed for tip-from-short).
+NOTES_REPO="$TMP/notes-git"
+mkdir -p "$NOTES_REPO"
+git -C "$NOTES_REPO" init -q
+git -C "$NOTES_REPO" config user.email "test@example.com"
+git -C "$NOTES_REPO" config user.name "Test"
+echo one >"$NOTES_REPO/a.txt"
+git -C "$NOTES_REPO" add a.txt
+git -C "$NOTES_REPO" commit -qm "feat: first soup tip"
+PREV_SHA="$(git -C "$NOTES_REPO" rev-parse HEAD)"
+PREV_SHORT="${PREV_SHA:0:7}"
+echo two >"$NOTES_REPO/b.txt"
+git -C "$NOTES_REPO" add b.txt
+git -C "$NOTES_REPO" commit -qm "fix: second tip lands (#9999)"
+NEW_SHA="$(git -C "$NOTES_REPO" rev-parse HEAD)"
+FAKE_PREV_TAG="hapi-soup-v2099.01.01-${PREV_SHORT}"
+FAKE_NEW_TAG="hapi-soup-v2099.01.02-${NEW_SHA:0:7}"
+
+# Stub previous-tag lookup (avoid live gh dependency in unit path).
+driver_soup_single_exe_previous_release_tag() {
+    printf '%s\n' "$FAKE_PREV_TAG"
+}
+
+resolved="$(driver_soup_single_exe_tip_from_release_tag "$NOTES_REPO" "heavygee/hapi" "$FAKE_PREV_TAG")"
+[[ "$resolved" == "$PREV_SHA" ]] || { echo "FAIL: tip_from_release_tag ($resolved != $PREV_SHA)"; exit 1; }
+echo "OK: tip_from_release_tag short suffix"
+
+notes="$(driver_soup_single_exe_release_notes "$NOTES_REPO" "$NEW_SHA" "$FAKE_NEW_TAG" "heavygee/hapi")"
+printf '%s\n' "$notes" | grep -q 'fix: second tip lands (#9999)' \
+    || { echo "FAIL: notes missing commit subject"; printf '%s\n' "$notes"; exit 1; }
+printf '%s\n' "$notes" | grep -q 'Composed tip' \
+    || { echo "FAIL: notes missing composed tip"; exit 1; }
+printf '%s\n' "$notes" | grep -q 'Automated soup single-exe publish' \
+    && { echo "FAIL: notes still use boilerplate opener"; exit 1; }
+echo "OK: release notes include changelog subjects"
+
 echo "All driver-soup-single-exe-publish tests passed."
