@@ -71,7 +71,7 @@ describe('shouldInvokeComposerDictateShortcut', () => {
         expect(shouldInvokeComposerDictateShortcut(base)).toBe(true)
     })
 
-    it('starts assistant voice via draft companion when UnifiedButton is Send', () => {
+    it('starts assistant voice via toolbar DictationButton when UnifiedButton is Send', () => {
         expect(shouldInvokeComposerDictateShortcut({ ...base, canSend: true })).toBe(true)
     })
 
