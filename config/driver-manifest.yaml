@@ -1116,9 +1116,10 @@ layers:
   - branch: driver/247-deliberate-fleet-push
 
   # heavygee/hapi#248 — skew-banner "what's new" from soup NOTES.md on HubUpgradeOffer.
-  # Thin tip on #247: driver/248-upgrade-release-notes @ e55c08b58
+  # Re-tip 2026-10-11: driver/248-upgrade-release-notes @ 461b80e51 on live soup
+  # 42e160795 — mobile w-full for NOTES <details>/<pre> (operator-reported).
   # Worktree: ~/coding/hapi/worktrees/deliberate-fleet-push
-  # Hub+web → remat --build-web + hapi-restart-hub after #247 patient restart settles.
+  # Hub+web → remat --build-web + hapi-restart-hub.
   - branch: driver/248-upgrade-release-notes
 
   # DROPPED 2026-10-06: driver/1933-claude-resume-amnesia — squash 94523eb0d is on
