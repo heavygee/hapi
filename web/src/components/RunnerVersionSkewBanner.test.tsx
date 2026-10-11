@@ -701,5 +701,8 @@ describe('RunnerVersionSkewBanner', () => {
         expect(details).toBeInTheDocument()
         expect(details).toHaveTextContent(/What's in hapi-soup-v2026.10.11-abc1234/)
         expect(details).toHaveTextContent(/deliberate fleet push/)
+        // Mobile: details/pre must stretch full banner width (not shrink-wrap).
+        expect(details.className).toMatch(/\bw-full\b/)
+        expect(details.querySelector('pre')?.className).toMatch(/\bw-full\b/)
     })
 })
