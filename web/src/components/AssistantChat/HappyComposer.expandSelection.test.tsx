@@ -32,6 +32,7 @@ vi.mock('@/components/AssistantChat/ComposerButtons', () => ({
             ) : null}
         </div>
     ),
+    UnifiedButton: () => null,
 }))
 
 vi.mock('@/components/AssistantChat/StatusBar', () => ({ StatusBar: () => null }))
