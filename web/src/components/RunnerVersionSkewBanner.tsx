@@ -353,6 +353,21 @@ export function RunnerVersionSkewBanner({
                             ? t('runner.skew.banner.autoProblemBody')
                             : t('runner.skew.banner.summaryBody')}
                     </p>
+                    {offer?.releaseNotes ? (
+                        <details
+                            className="mt-2 rounded border border-amber-400/50 bg-amber-100/50 open:bg-amber-100/70 dark:border-amber-200/20 dark:bg-amber-900/30"
+                            data-testid="runner-version-skew-release-notes"
+                        >
+                            <summary className="cursor-pointer px-2 py-1 text-xs font-medium text-amber-950 dark:text-amber-50">
+                                {offer.soupTag
+                                    ? t('runner.skew.banner.whatsNewTag', { tag: offer.soupTag })
+                                    : t('runner.skew.banner.whatsNew')}
+                            </summary>
+                            <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words border-t border-amber-400/40 px-2 py-1.5 font-mono text-[11px] leading-relaxed text-amber-950 dark:border-amber-200/20 dark:text-amber-50">
+                                {offer.releaseNotes}
+                            </pre>
+                        </details>
+                    ) : null}
                 </div>
                 <div className="flex shrink-0 gap-1">
                     <button

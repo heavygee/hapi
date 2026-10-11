@@ -664,4 +664,42 @@ describe('RunnerVersionSkewBanner', () => {
             expect(screen.queryByTestId('runner-version-skew-banner')).not.toBeInTheDocument()
         })
     })
+
+    it('surfaces offer.releaseNotes in an expandable what\'s-new dump', async () => {
+        useUpgradeInfoMock.mockReturnValue({
+            info: {
+                offer: {
+                    ...TEST_OFFER,
+                    channel: 'hub-artifact',
+                    targetVersion: 'hapi-soup-v2026.10.11-abc1234',
+                    targetGeneration: 'hapi-soup-v2026.10.11-abc1234',
+                    soupTag: 'hapi-soup-v2026.10.11-abc1234',
+                    releaseNotes: '### Changes\n\n- feat: deliberate fleet push (#247)\n',
+                },
+                policy: 'alert',
+            },
+            isLoading: false,
+        })
+        useMachinesMock.mockReturnValue({
+            machines: [
+                makeUpgradeableMachine({
+                    id: 'ninja',
+                    metadata: {
+                        host: 'ninja',
+                        platform: 'linux',
+                        happyCliVersion: '0.20.0',
+                    },
+                }),
+            ],
+            isLoading: false,
+            error: null,
+        })
+
+        renderBanner()
+
+        const details = screen.getByTestId('runner-version-skew-release-notes')
+        expect(details).toBeInTheDocument()
+        expect(details).toHaveTextContent(/What's in hapi-soup-v2026.10.11-abc1234/)
+        expect(details).toHaveTextContent(/deliberate fleet push/)
+    })
 })

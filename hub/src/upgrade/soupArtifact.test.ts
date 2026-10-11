@@ -76,10 +76,34 @@ describe('readPublishedSoupTip / soupTipToUpgradeOffer', () => {
             })
             expect(offer?.targetVersion).toBe(tag)
             expect(offer?.targetGeneration).toBe(tag)
+            expect(offer?.soupTag).toBe(tag)
+            expect(offer?.releaseNotes).toBeUndefined()
             expect(offer?.artifact?.sha256).toBe(found!.entry.sha256)
             expect(isSoupTipOffer(offer!)).toBe(true)
             // Must NOT keep stock semver — that is the stomp footgun.
             expect(offer?.targetVersion).not.toBe('0.30.7')
+        } finally {
+            rmSync(root, { recursive: true, force: true })
+        }
+    })
+
+    it('attaches NOTES.md release notes to the soup tip offer', () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-soup-notes-'))
+        try {
+            const tag = 'hapi-soup-v2026.10.11-abc1234'
+            const tipDir = writeTipFixture(root, tag, 'abc1234deadbeef')
+            writeFileSync(join(tipDir, 'NOTES.md'), '### Changes\n\n- feat: deliberate fleet push (#247)\n')
+            symlinkSync(tag, join(root, 'latest'))
+
+            const tip = readPublishedSoupTip(root)
+            expect(tip?.releaseNotes).toContain('deliberate fleet push')
+            const offer = soupTipToUpgradeOffer(tip!, 'linux', 'x64', {
+                channel: 'hub-artifact',
+                targetVersion: '0.30.7',
+                targetCapabilities: ['runner-self-upgrade'],
+            })
+            expect(offer?.soupTag).toBe(tag)
+            expect(offer?.releaseNotes).toContain('#247')
         } finally {
             rmSync(root, { recursive: true, force: true })
         }
