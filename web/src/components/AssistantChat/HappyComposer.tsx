@@ -2418,8 +2418,8 @@ export function HappyComposer(props: {
                                 omitPrimaryButton
                             />
                         </div>
-                        {/* Full-height primary: empty → voice/dictate; draft → Send. */}
-                        <div className="flex shrink-0 items-stretch p-2 pl-1">
+                        {/* Full-height primary: empty → voice/dictate; draft → Send (flush to card). */}
+                        <div className="flex shrink-0 self-stretch items-stretch">
                             <UnifiedButton
                                 canSend={canSend}
                                 voiceStatus={effectiveVoiceStatus}

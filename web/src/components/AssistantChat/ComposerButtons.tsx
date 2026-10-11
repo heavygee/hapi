@@ -102,7 +102,7 @@ export function unifiedButtonSizeClass(fillHeight: boolean): string {
     // Fill the composer card column: fixed width, stretch height, soft square.
     // Compact remains for isolated toolbar previews / legacy callers.
     return fillHeight
-        ? 'h-full min-h-14 w-14 self-stretch rounded-2xl'
+        ? 'h-full min-h-14 w-16 self-stretch rounded-none rounded-r-[20px]'
         : 'h-8 w-8 rounded-full'
 }
 
