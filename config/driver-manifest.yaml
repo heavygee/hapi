@@ -1034,10 +1034,10 @@ layers:
   # Needs --build-web. Remat owner: this peer (feature promote).
   - branch: driver/2002-session-filter-active-working
 
-  # tiann/hapi#2006 — larger empty-composer voice/dictate hit target (Quest / touch).
-  # Empty idle UnifiedButton → h-12 w-12; Send / Stop stay h-8 w-8. Keeps soup
-  # composer-voice-start FUE wrapper. Upstream tip: feat/large-empty-composer-dictate-target
-  # @ db6e41f9d. Soup tip: driver/large-empty-dictate @ ab0b237ac (1 commit on live tip).
+  # tiann/hapi#2006 — full-height composer primary (voice ↔ send) for Quest / touch.
+  # UnifiedButton beside card: h-full w-14; empty → voice; draft → same giant Send.
+  # Keeps soup composer-voice-start FUE. Upstream: feat/large-empty-composer-dictate-target
+  # @ 1f8b5313f. Soup tip: driver/large-empty-dictate @ e63fc0c22.
   # Worktree: ~/coding/hapi/worktrees/large-empty-dictate-soup
   # Needs --build-web. Remat owner: this peer (feature promote).
   - branch: driver/large-empty-dictate
