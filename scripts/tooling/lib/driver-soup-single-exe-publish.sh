@@ -240,7 +240,10 @@ driver_soup_single_exe_publish_github_release() {
     fi
 
     local notes target_args=()
-    if [[ -n "$driver" && -n "$tip_sha" ]] && { [[ -d "$driver/.git" ]] || [[ -f "$driver/.git" ]]; }; then
+    # Prefer NOTES.md written beside manifest (hub skew-banner source of truth).
+    if [[ -f "$dest/NOTES.md" ]]; then
+        notes="$(cat "$dest/NOTES.md")"
+    elif [[ -n "$driver" && -n "$tip_sha" ]] && { [[ -d "$driver/.git" ]] || [[ -f "$driver/.git" ]]; }; then
         notes="$(driver_soup_single_exe_release_notes "$driver" "$tip_sha" "$tag" "$repo")"
     else
         notes="Soup single-exe fleet artifact \`${tag}\`."
@@ -466,6 +469,22 @@ driver_soup_single_exe_publish() {
             driverPath: $driverPath,
             binaries: $binaries
         }' >"$dest/manifest.json"
+
+    # Persist the same notes the GitHub release will use so the hub can serve
+    # "what's new" on the fleet skew banner without calling gh at runtime (#248).
+    local notes_for_disk repo_for_notes
+    repo_for_notes="$(driver_soup_single_exe_github_repo)"
+    if [[ -n "$tip_sha" ]] && { [[ -d "$driver/.git" ]] || [[ -f "$driver/.git" ]]; }; then
+        notes_for_disk="$(driver_soup_single_exe_release_notes "$driver" "$tip_sha" "$tag" "$repo_for_notes")"
+    else
+        notes_for_disk="Soup single-exe fleet artifact \`${tag}\`."
+        if [[ -n "$tip_sha" ]]; then
+            notes_for_disk+=$'\n\n'"**Composed tip:** \`${tip_sha}\`"
+        fi
+        notes_for_disk+=$'\n\n'"Download per-platform binaries as \`hapi-<platform-dir>\` (see \`manifest.json\` for sha256)."
+    fi
+    printf '%s\n' "$notes_for_disk" >"$dest/NOTES.md"
+    echo "soup-artifact: NOTES.md written ($dest/NOTES.md)"
 
     ln -sfn "$tag" "$root/latest"
     printf '%s\n' "$tag" >"$root/latest-tag.txt"

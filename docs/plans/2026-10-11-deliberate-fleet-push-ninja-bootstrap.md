@@ -1,64 +1,72 @@
 # Deliberate fleet push - ninja chicken-egg bootstrap (#247)
 
-**Status:** layer `driver/247-deliberate-fleet-push` @ `f5c3933b6` pushed; **remat blocked** on Meta hold (`merge conflict on driver/235-todo-board-view`, owner `028d0a86`). Live hub still on tip `326799b` with `fleetUpgradePolicy=alert`.
+**Status:** soup tip `96071c14b` / artifact `hapi-soup-v2026.10.11-96071c1` published. Meta patient hub restart drains WORKING (oos kitchen). **Ninja stays a standalone hub** - do not register it into the oos fleet.
 
-## What landed (code)
+## Architecture (hub-local - confirmed)
 
-- Hub default `fleetUpgradePolicy` stays `alert` (live settings already flipped; unattended keepalive auto is gone).
-- Restored `POST /api/machines/:id/upgrade-runner`.
-- New `POST /api/fleet/push-upgrade` `{ machineIds, forceAlert? }`.
-- Per-machine overrides: `GET/PUT /api/upgrade/machine-policies[/:machineId]` (`auto|alert|silent|null`).
-- Effective `auto` means "apply on deliberate push", not keepalive.
+`POST /api/fleet/push-upgrade`, `PUT /api/upgrade/machine-policies/:id`, and `POST /api/machines/:id/upgrade-runner` are **scoped to whichever hub you call**. They operate on machines registered to *that* hub's SyncEngine + RPC registry. There is no oos-centric path, no "must be a remote fleet runner under the soup kitchen," and no requirement that the target runner live on a different host than the hub.
 
-## Chicken-egg: what ninja needs first
+So for Miss Ninja's gift box (`hapi.quetzal-ghoul.ts.net`):
 
-Per-machine `auto` is **hub-side**. The runner only needs `runner-self-upgrade` (+ online RPC registration) to honor a push. Bootstrap order:
+| Do | Don't |
+|----|-------|
+| Upgrade **ninja's own** hub+runner in-place to tip `96071c1` | Register ninja as a machine on oos's hub |
+| `PUT` / `POST` against `https://hapi.quetzal-ghoul.ts.net/api/...` | Point ninja's runner `HAPI_HUB` / token at oos |
+| Target ninja's **own** machine id (local runner already on that hub) | Fold ninja into estate fleet membership |
 
-### 1. Hub soup tip with #247 (oos primary)
+Local runner on the same host as the hub is fine - `upgradeMachineRunner` only needs the machine online with live `runner-self-upgrade` RPC, not "remote."
 
-Remat absorbing `driver/247-deliberate-fleet-push` @ `f5c3933b6`, then patient hub restart so live `:3006` serves:
+## What the tip binary must provide
 
-- `POST /api/machines/:id/upgrade-runner`
-- `POST /api/fleet/push-upgrade`
-- machine-policy routes
+After in-place swap, ninja's hub process must be the #247 build so those routes exist. Same single-exe tip also carries the runner.
 
-Published single-exe tag will look like `hapi-soup-vYYYY.MM.DD-<7char>` under `/var/lib/hapi/soup-artifacts/` (and `latest` symlink). **That tip is the bootstrap binary for ninja.**
+**Artifact bytes for future pushes:** hub-artifact offers are served from the hub's local disk (`soup-artifacts/latest` → `NOTES.md` + platform binaries, mirrored into `upgrade-artifacts`). Ninja does **not** need to join oos; it needs a **copy of the tip tree** (or equivalent) under its own `/var/lib/hapi/soup-artifacts/` so *its* hub can hand the runner a download URL. Source of those bytes can be oos's publish dir or the GitHub Release for `hapi-soup-v…` - that is file transfer, not fleet enrollment.
 
-### 2. Ninja first install (manual - once)
+## Bootstrap (self-contained on ninja)
 
-If ninja is not yet a hub machine, or lacks `runner-self-upgrade`:
+### 1. Get tip `hapi-soup-v2026.10.11-96071c1` onto ninja
 
-1. Copy the **linux** single-exe from the published tip (oos → ninja), install as fleet binary (`/opt/hapi/hapi` or host convention in `docs/tooling/systemd-install.md` fleet-binary path).
-2. Point ninja runner at the oos hub (CLI token / machine register) and start the unit.
-3. Confirm machine appears online with capability `runner-self-upgrade`.
+Same binary-swap you already proved twice:
 
-Do **not** flip hub-wide policy to `auto`.
+1. Install linux single-exe from that tip as ninja's hub+runner binary.
+2. Restart ninja's `hapi-hub` + `hapi-runner` (patient/local - ninja's units, not oos).
+3. Confirm ninja web/API is up and `GET /api/upgrade/offer` (authed) returns an offer from the new tip.
 
-### 3. Opt ninja into push-apply
+Also place the tip under ninja's soup-artifacts (manifest + linux binary + `NOTES.md`, `latest` → tag) so the next deliberate push has bytes to serve. Do **not** change ninja runner to use oos's CLI token.
+
+### 2. Opt the local runner into push-apply (on ninja's hub)
 
 ```bash
-# hub JWT / cookie as operator
-curl -X PUT "$HUB/api/upgrade/machine-policies/<ninja-machine-id>" \
+HUB=https://hapi.quetzal-ghoul.ts.net
+# machine id = ninja's local runner id from GET $HUB/api/machines
+
+curl -X PUT "$HUB/api/upgrade/machine-policies/<local-machine-id>" \
+  -H "Authorization: Bearer $NINJA_JWT" \
   -H 'content-type: application/json' \
   -d '{"policy":"auto"}'
 ```
 
-Hub default remains `alert`; only ninja effective policy is `auto`.
+Keep ninja hub-wide `fleetUpgradePolicy=alert` (or leave default). Only that machine id gets effective `auto` (= apply when you push).
 
-### 4. Deliberate push thereafter
+### 3. Deliberate push thereafter (still ninja's hub)
 
 ```bash
 curl -X POST "$HUB/api/fleet/push-upgrade" \
+  -H "Authorization: Bearer $NINJA_JWT" \
   -H 'content-type: application/json' \
-  -d '{"machineIds":["<ninja-machine-id>"]}'
+  -d '{"machineIds":["<local-machine-id>"]}'
 ```
 
-Or one-shot without machine auto: `POST /api/machines/<id>/upgrade-runner`.
+Or one-shot: `POST $HUB/api/machines/<id>/upgrade-runner`.
 
-### Shortcut if ninja already has `runner-self-upgrade`
+### 4. Later tips
 
-After hub remat only: skip binary scp; use banner / `upgrade-runner` once to pull the new tip, then set machine policy `auto` and use `push-upgrade` for later tips.
+When oos publishes a new `hapi-soup-v*`: copy that tip tree onto ninja's `soup-artifacts` (and/or swap the single-exe), then `push-upgrade` on **ninja's** API. Still no oos registration.
+
+## What oos's hub is for
+
+Estate fleet (homelab, Teemo, antevorta-when-joined, etc.). Ninja is a separate product instance that **consumes the same published tip artifacts**, not a machine row in oos's DB.
 
 ## Antevorta / Ian
 
-Same recipe after ninja proves push → auto-respond. Keep hub default `alert`; grant per-machine `auto` only for hosts under deliberate test.
+Same **self-contained or estate-fleet** choice per host. Estate pets that should live under oos register there. Gift/standalone hubs copy tip + push locally. Do not conflate the two.
