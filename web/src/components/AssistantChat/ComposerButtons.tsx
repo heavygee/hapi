@@ -70,22 +70,40 @@ function VoiceAssistantIcon(props: { size?: number }) {
     )
 }
 
-/** Empty idle voice/dictate primary control — large hit target (Quest / touch). */
+/**
+ * Primary composer control fills the card height (Quest / touch).
+ * Empty → giant voice/dictate; draft → same giant Send (swap icon only).
+ */
+export function isComposerPrimaryFillHeight(args: {
+    canSend: boolean
+    voiceEnabled: boolean
+    voiceStatus: ConversationStatus
+    routesToScratchlist?: boolean
+}): boolean {
+    if (args.voiceStatus === 'connecting' || args.voiceStatus === 'connected') return true
+    if (args.routesToScratchlist) return true
+    if (args.canSend) return true
+    if (args.voiceEnabled) return true
+    // Disabled grey Send when empty + voice off — still fill so layout does not jump.
+    return true
+}
+
+/** @deprecated Use isComposerPrimaryFillHeight — kept for older test imports. */
 export function isLargeEmptyVoicePrimary(args: {
     canSend: boolean
     voiceEnabled: boolean
     voiceStatus: ConversationStatus
     routesToScratchlist?: boolean
 }): boolean {
-    if (args.canSend) return false
-    if (args.routesToScratchlist) return false
-    if (!args.voiceEnabled) return false
-    if (args.voiceStatus === 'connecting' || args.voiceStatus === 'connected') return false
-    return true
+    return isComposerPrimaryFillHeight(args)
 }
 
-export function unifiedButtonSizeClass(large: boolean): string {
-    return large ? 'h-12 w-12' : 'h-8 w-8'
+export function unifiedButtonSizeClass(fillHeight: boolean): string {
+    // Fill the composer card column: fixed width, stretch height, soft square.
+    // Compact remains for isolated toolbar previews / legacy callers.
+    return fillHeight
+        ? 'h-full min-h-14 w-14 self-stretch rounded-2xl'
+        : 'h-8 w-8 rounded-full'
 }
 
 function SpeakerIcon(props: { muted?: boolean }) {
@@ -498,6 +516,11 @@ export function UnifiedButton(props: {
     onVoiceToggle: () => void
     voiceLabel?: string
     /**
+     * When true, stretch to the composer card height (beside input + toolbar).
+     * Default true — Quest / touch need a full-height primary control.
+     */
+    fillHeight?: boolean
+    /**
      * When true, the send button repaints amber and the aria-label
      * announces "Send to scratchlist" instead of "Send message". The
      * actual routing happens in SessionChat's wrapped onSend - the
@@ -517,12 +540,8 @@ export function UnifiedButton(props: {
     const isVoiceActive = isConnecting || isConnected
     const hasText = props.canSend
     const routesToScratchlist = props.routesToScratchlist ?? false
-    const largeEmptyVoice = isLargeEmptyVoicePrimary({
-        canSend: props.canSend,
-        voiceEnabled: props.voiceEnabled,
-        voiceStatus: props.voiceStatus,
-        routesToScratchlist,
-    })
+    const fillHeight = props.fillHeight ?? true
+    const iconSize = fillHeight ? 28 : 18
 
     const handleClick = () => {
         if (isVoiceActive) {
@@ -558,8 +577,7 @@ export function UnifiedButton(props: {
         className = 'bg-black text-white'
         ariaLabel = t('composer.send')
     } else if (props.voiceEnabled) {
-        // Larger glyph when the empty-state hit target grows (Quest / touch).
-        icon = <VoiceAssistantIcon size={largeEmptyVoice ? 26 : 18} />
+        icon = <VoiceAssistantIcon size={iconSize} />
         className = 'bg-black text-white'
         ariaLabel = props.voiceLabel ?? t('composer.voice')
     } else {
@@ -587,8 +605,8 @@ export function UnifiedButton(props: {
             aria-label={ariaLabel}
             title={ariaLabel}
             data-testid="composer-unified-button"
-            data-size={largeEmptyVoice ? 'large' : 'compact'}
-            className={`ml-1 flex ${unifiedButtonSizeClass(largeEmptyVoice)} items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
+            data-size={fillHeight ? 'fill' : 'compact'}
+            className={`flex ${unifiedButtonSizeClass(fillHeight)} items-center justify-center transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
         >
             {icon}
         </button>
@@ -680,6 +698,11 @@ export function ComposerButtons(props: {
     scratchlistMode?: boolean
     scratchlistCount?: number
     onScratchlistToggle?: () => void
+    /**
+     * When true, omit UnifiedButton — HappyComposer places it in a
+     * full-height column beside the input + toolbar.
+     */
+    omitPrimaryButton?: boolean
 }) {
     const { t } = useTranslation()
     const { layout } = useComposerToolbarLayout()
@@ -925,25 +948,28 @@ export function ComposerButtons(props: {
                 onVoiceToggle={props.onVoiceToggle}
             />
 
-            <UnifiedButton
-                canSend={props.canSend}
-                voiceStatus={props.voiceStatus}
-                voiceEnabled={props.voiceEnabled}
-                controlsDisabled={props.controlsDisabled}
-                onSend={props.onSend}
-                onVoiceToggle={props.onVoiceToggle}
-                voiceLabel={props.dictationEnabled ? t('composer.dictate') : undefined}
-                /*
-                 * Derived, NOT raw scratchlistMode. Mirror SessionChat's
-                 * shouldRouteToScratchlist: amber + "Send to scratchlist"
-                 * whenever mode is on and there is no pending schedule.
-                 * Attachments route to scratchlist too (hub upload adapter).
-                 */
-                routesToScratchlist={
-                    (props.scratchlistMode ?? false)
-                    && props.pendingSchedule == null
-                }
-            />
+            {props.omitPrimaryButton ? null : (
+                <UnifiedButton
+                    canSend={props.canSend}
+                    voiceStatus={props.voiceStatus}
+                    voiceEnabled={props.voiceEnabled}
+                    controlsDisabled={props.controlsDisabled}
+                    onSend={props.onSend}
+                    onVoiceToggle={props.onVoiceToggle}
+                    voiceLabel={props.dictationEnabled ? t('composer.dictate') : undefined}
+                    fillHeight={false}
+                    /*
+                     * Derived, NOT raw scratchlistMode. Mirror SessionChat's
+                     * shouldRouteToScratchlist: amber + "Send to scratchlist"
+                     * whenever mode is on and there is no pending schedule.
+                     * Attachments route to scratchlist too (hub upload adapter).
+                     */
+                    routesToScratchlist={
+                        (props.scratchlistMode ?? false)
+                        && props.pendingSchedule == null
+                    }
+                />
+            )}
         </div>
     )
 }

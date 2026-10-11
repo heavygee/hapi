@@ -163,16 +163,17 @@ describe('UnifiedButton — default send intent', () => {
     })
 })
 
-describe('UnifiedButton — empty voice hit target', () => {
+describe('UnifiedButton — fill-height primary (voice ↔ send)', () => {
     afterEach(cleanup)
 
-    it('uses a large hit target when the composer is empty and voice/dictate is afforded', () => {
+    it('fills height when empty with voice/dictate afforded', () => {
         expect(isLargeEmptyVoicePrimary({
             canSend: false,
             voiceEnabled: true,
             voiceStatus: 'disconnected',
         })).toBe(true)
-        expect(unifiedButtonSizeClass(true)).toContain('h-12')
+        expect(unifiedButtonSizeClass(true)).toContain('h-full')
+        expect(unifiedButtonSizeClass(true)).toContain('w-14')
 
         renderInProviders(
             <UnifiedButton
@@ -183,20 +184,21 @@ describe('UnifiedButton — empty voice hit target', () => {
                 onSend={() => {}}
                 onVoiceToggle={() => {}}
                 voiceLabel="Dictate"
+                fillHeight
             />,
         )
         const btn = getButton(/^Dictate/)
-        expect(btn.getAttribute('data-size')).toBe('large')
-        expect(btn.className).toContain('h-12')
-        expect(btn.className).toContain('w-12')
+        expect(btn.getAttribute('data-size')).toBe('fill')
+        expect(btn.className).toContain('h-full')
+        expect(btn.className).toContain('w-14')
     })
 
-    it('stays compact once there is a draft to send', () => {
+    it('keeps the same fill-height layout when a draft swaps the icon to Send', () => {
         expect(isLargeEmptyVoicePrimary({
             canSend: true,
             voiceEnabled: true,
             voiceStatus: 'disconnected',
-        })).toBe(false)
+        })).toBe(true)
 
         renderInProviders(
             <UnifiedButton
@@ -206,21 +208,16 @@ describe('UnifiedButton — empty voice hit target', () => {
                 controlsDisabled={false}
                 onSend={() => {}}
                 onVoiceToggle={() => {}}
+                fillHeight
             />,
         )
         const btn = getButton('Send')
-        expect(btn.getAttribute('data-size')).toBe('compact')
-        expect(btn.className).toContain('h-8')
-        expect(btn.className).not.toContain('h-12')
+        expect(btn.getAttribute('data-size')).toBe('fill')
+        expect(btn.className).toContain('h-full')
+        expect(btn.className).toContain('w-14')
     })
 
-    it('stays compact while voice is connecting or connected (stop)', () => {
-        expect(isLargeEmptyVoicePrimary({
-            canSend: false,
-            voiceEnabled: true,
-            voiceStatus: 'connected',
-        })).toBe(false)
-
+    it('fills height while voice is connected (stop)', () => {
         renderInProviders(
             <UnifiedButton
                 canSend={false}
@@ -229,10 +226,11 @@ describe('UnifiedButton — empty voice hit target', () => {
                 controlsDisabled={false}
                 onSend={() => {}}
                 onVoiceToggle={() => {}}
+                fillHeight
             />,
         )
         const btn = getButton('Stop')
-        expect(btn.getAttribute('data-size')).toBe('compact')
+        expect(btn.getAttribute('data-size')).toBe('fill')
     })
 })
 
