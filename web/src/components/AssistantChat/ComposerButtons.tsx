@@ -75,7 +75,7 @@ function VoiceAssistantIcon(props: { size?: number }) {
 
 /**
  * Primary composer control fills the card height (Quest / touch).
- * Empty → giant voice/dictate; draft → same giant Send (swap icon only).
+ * Empty → giant voice/dictate; draft → giant Send (+ companion voice to the left).
  */
 export function isComposerPrimaryFillHeight(args: {
     canSend: boolean
@@ -104,11 +104,29 @@ export function isLargeEmptyVoicePrimary(args: {
     return true
 }
 
+/**
+ * When draft steals the primary for Send, keep voice/dictate reachable via a
+ * companion control (toolbar or flush column left of Send).
+ */
+export function shouldShowDraftVoiceButton(args: {
+    canSend: boolean
+    voiceEnabled: boolean
+    voiceStatus: ConversationStatus
+}): boolean {
+    if (!args.canSend || !args.voiceEnabled) return false
+    if (args.voiceStatus === 'connecting' || args.voiceStatus === 'connected') return false
+    return true
+}
+
 export function unifiedButtonSizeClass(fillHeight: boolean): string {
     return fillHeight
         // Flush to composer-card right edge (card is rounded-[20px]); no inset padding.
         ? 'h-full min-h-14 w-16 self-stretch rounded-none rounded-r-[20px]'
         : 'h-8 w-8 rounded-full'
+}
+
+export function draftVoiceCompanionSizeClass(): string {
+    return 'h-full min-h-14 w-12 self-stretch rounded-none'
 }
 
 function SpeakerIcon(props: { muted?: boolean }) {
@@ -939,32 +957,49 @@ export function UnifiedButton(props: {
 }
 
 export function DictationButton(props: {
-    enabled: boolean
+    /**
+     * When false, hide. When true/omitted, show whenever a draft steals Send
+     * from the primary (assistant voice and dictation modes).
+     */
+    enabled?: boolean
     canSend: boolean
     voiceEnabled: boolean
     voiceStatus: ConversationStatus
     controlsDisabled: boolean
     onVoiceToggle: () => void
+    /** Override aria/title (dictate vs voice assistant). */
+    voiceLabel?: string
+    /** Flush companion beside fill-height Send (HappyComposer omitPrimary). */
+    variant?: 'toolbar' | 'companion'
 }) {
     const { t } = useTranslation()
-    if (
-        !props.enabled
-        || !props.canSend
-        || !props.voiceEnabled
-        || props.voiceStatus === 'connecting'
-        || props.voiceStatus === 'connected'
-    ) return null
+    if (props.enabled === false) return null
+    if (!shouldShowDraftVoiceButton({
+        canSend: props.canSend,
+        voiceEnabled: props.voiceEnabled,
+        voiceStatus: props.voiceStatus,
+    })) return null
+
+    const label = props.voiceLabel ?? t('composer.dictate')
+    const companion = props.variant === 'companion'
+    const iconSize = companion ? 24 : 18
 
     return (
         <button
             type="button"
             onClick={props.onVoiceToggle}
             disabled={props.controlsDisabled}
-            aria-label={t('composer.dictate')}
-            title={t('composer.dictate')}
-            className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-fg)]/60 transition-colors hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)] disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label={label}
+            title={label}
+            data-testid="composer-draft-voice-button"
+            data-variant={companion ? 'companion' : 'toolbar'}
+            className={
+                companion
+                    ? `flex ${draftVoiceCompanionSizeClass()} items-center justify-center bg-black text-white transition-colors hover:bg-black/90 disabled:cursor-not-allowed disabled:opacity-50`
+                    : 'flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-fg)]/60 transition-colors hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)] disabled:cursor-not-allowed disabled:opacity-50'
+            }
         >
-            <VoiceAssistantIcon />
+            <VoiceAssistantIcon size={iconSize} />
         </button>
     )
 }
@@ -1224,14 +1259,21 @@ export function ComposerButtons(props: {
                 </OrderedToolbarItems>
             </div>
 
-            <DictationButton
-                enabled={props.dictationEnabled ?? false}
-                canSend={props.canSend}
-                voiceEnabled={props.voiceEnabled}
-                voiceStatus={props.voiceStatus}
-                controlsDisabled={props.controlsDisabled}
-                onVoiceToggle={props.onVoiceToggle}
-            />
+            {/*
+              When HappyComposer owns the fill-height primary (omitPrimaryButton),
+              the draft voice companion lives beside Send in that column — not here.
+            */}
+            {props.omitPrimaryButton ? null : (
+                <DictationButton
+                    enabled={props.voiceEnabled}
+                    canSend={props.canSend}
+                    voiceEnabled={props.voiceEnabled}
+                    voiceStatus={props.voiceStatus}
+                    controlsDisabled={props.controlsDisabled}
+                    onVoiceToggle={props.onVoiceToggle}
+                    voiceLabel={props.dictationEnabled ? t('composer.dictate') : t('composer.voice')}
+                />
+            )}
 
             <div className="flex items-center gap-1">
                 <CodexUsageIndicator usage={props.codexUsage} />
