@@ -1037,7 +1037,7 @@ layers:
   # tiann/hapi#2006 — full-height composer primary (voice ↔ send) for Quest / touch.
   # UnifiedButton beside card: h-full w-14; empty → voice; draft → same giant Send.
   # Keeps soup composer-voice-start FUE. Upstream: feat/large-empty-composer-dictate-target
-  # @ feat tip + soup tip 2893994c1 (draft voice companion).
+  # @ feat 6b0140a6a. Soup tip: a0bb74078 (toolbar draft voice + fill-height Send).
   # Worktree: ~/coding/hapi/worktrees/large-empty-dictate-soup
   # Needs --build-web. Remat owner: tooling meta (hold clear after tip green).
   - branch: driver/large-empty-dictate
@@ -1096,12 +1096,14 @@ layers:
   - branch: driver/1724-auto-continue-delta
 
   # heavygee/hapi#235 / PR #238 — to-do board view (cards/chips/relative-time,
-  # accent wash, detail pane + spawn, board add/remove, github_issue chip).
-  # Re-carry 2026-10-09 from feat tip 60061cf5e (ls-remote confirmed).
+  # accent wash, detail pane + spawn, board add/remove, github_issue chip,
+  # Projects v2 /views/<n> filter capture).
+  # Re-carry 2026-10-11 from feat tip 53f7e79b4 (ls-remote / PR #238 head).
   # Safe default github.com::heavygee::6 — NOT personal project 4.
   # Worktree: peer feat/todo-board-view-ui; layer ref driver/235-todo-board-view
   # MUST match origin/feat/todo-board-view-ui before remat (stale layer = incident).
   # Hub+web → remat --build-web + hapi-restart-hub.
+  # After remat: re-add boards stored without viewNumber (full /views/N URL).
   - branch: driver/235-todo-board-view
 
   # DROPPED 2026-10-06: driver/1933-claude-resume-amnesia — squash 94523eb0d is on
