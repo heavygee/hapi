@@ -48,7 +48,11 @@ import { useComposerEnterBehavior } from '@/hooks/useComposerEnterBehavior'
 import { FloatingOverlay } from '@/components/ChatInput/FloatingOverlay'
 import { Autocomplete } from '@/components/ChatInput/Autocomplete'
 import { StatusBar } from '@/components/AssistantChat/StatusBar'
-import { ComposerButtons, UnifiedButton } from '@/components/AssistantChat/ComposerButtons'
+import {
+    ComposerButtons,
+    UnifiedButton,
+    isComposerPrimaryFillHeight,
+} from '@/components/AssistantChat/ComposerButtons'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import { SortableComposerAttachments } from '@/components/AssistantChat/SortableComposerAttachments'
 import { ComposerParkingContext } from '@/components/AssistantChat/composerParkingContext'
@@ -1627,6 +1631,13 @@ export function HappyComposer(props: {
     const showAbortButton = true
     const voiceEnabled = Boolean(effectiveVoiceToggle)
     const routesToScratchlist = (props.scratchlistMode ?? false) && pendingSchedule == null
+    const primaryFillHeight = isComposerPrimaryFillHeight({
+        canSend,
+        voiceEnabled,
+        voiceStatus: effectiveVoiceStatus,
+        routesToScratchlist,
+        expanded: isExpanded,
+    })
 
     const invokeDictateHotkey = useCallback(() => {
         if (!shouldInvokeComposerDictateShortcut({
@@ -2418,8 +2429,14 @@ export function HappyComposer(props: {
                                 omitPrimaryButton
                             />
                         </div>
-                        {/* Full-height primary: empty → voice; draft → Send. Draft voice is the toolbar circle. */}
-                        <div className="flex shrink-0 self-stretch items-stretch">
+                        {/* Collapsed card: fill-height primary (empty → voice; draft → Send). Expanded: compact. */}
+                        <div
+                            className={
+                                primaryFillHeight
+                                    ? 'flex shrink-0 self-stretch items-stretch'
+                                    : 'flex shrink-0 items-end self-stretch py-3 pr-3'
+                            }
+                        >
                             <UnifiedButton
                                 canSend={canSend}
                                 voiceStatus={effectiveVoiceStatus}
@@ -2428,11 +2445,8 @@ export function HappyComposer(props: {
                                 onSend={handleSend}
                                 onVoiceToggle={effectiveVoiceToggle ?? (() => {})}
                                 voiceLabel={dictationActive ? t('composer.dictate') : undefined}
-                                fillHeight
-                                routesToScratchlist={
-                                    (props.scratchlistMode ?? false)
-                                    && pendingSchedule == null
-                                }
+                                fillHeight={primaryFillHeight}
+                                routesToScratchlist={routesToScratchlist}
                             />
                         </div>
                     </div>

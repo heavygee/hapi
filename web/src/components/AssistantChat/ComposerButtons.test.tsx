@@ -246,6 +246,21 @@ describe('UnifiedButton — fill-height primary (voice ↔ send)', () => {
         const btn = getButton('Stop')
         expect(btn.getAttribute('data-size')).toBe('fill')
     })
+
+    it('stays compact when the composer editor is expanded', () => {
+        expect(isComposerPrimaryFillHeight({
+            canSend: true,
+            voiceEnabled: true,
+            voiceStatus: 'disconnected',
+            expanded: true,
+        })).toBe(false)
+        expect(isComposerPrimaryFillHeight({
+            canSend: false,
+            voiceEnabled: true,
+            voiceStatus: 'connected',
+            expanded: true,
+        })).toBe(false)
+    })
 })
 
 describe('DictationButton', () => {

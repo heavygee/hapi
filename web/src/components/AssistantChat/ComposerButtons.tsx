@@ -71,16 +71,19 @@ function VoiceAssistantIcon(props: { size?: number }) {
 }
 
 /**
- * Primary composer control fills the card height (Quest / touch).
+ * Primary composer control fills the collapsed card height (Quest / touch).
  * Empty → giant voice/dictate; draft → giant Send. Draft voice stays a
  * compact toolbar circle (no width stolen from the text column).
+ * Expanded editor: stay compact — fill-height would become a full-shell strip.
  */
 export function isComposerPrimaryFillHeight(args: {
     canSend: boolean
     voiceEnabled: boolean
     voiceStatus: ConversationStatus
     routesToScratchlist?: boolean
+    expanded?: boolean
 }): boolean {
+    if (args.expanded) return false
     if (args.voiceStatus === 'connecting' || args.voiceStatus === 'connected') return true
     if (args.routesToScratchlist) return true
     if (args.canSend) return true
