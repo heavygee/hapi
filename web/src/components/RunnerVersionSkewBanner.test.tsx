@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CURRENT_MACHINE_CAPABILITIES } from '@hapi/protocol/runnerCapabilities'
-import type { FleetUpgradePolicy } from '@hapi/protocol/upgradeChannel'
+import type { FleetUpgradePolicy, HubUpgradeOffer } from '@hapi/protocol/upgradeChannel'
 import type { Machine } from '@/types/api'
 import {
     RunnerVersionSkewBanner,
@@ -22,13 +22,13 @@ import {
 } from '@/lib/runnerSkewBannerState'
 import { getTokenNamespace } from '@/lib/tokenNamespace'
 
-const TEST_OFFER = {
-    channel: 'npm' as const,
+const TEST_OFFER: HubUpgradeOffer = {
+    channel: 'npm',
     targetVersion: '0.23.0',
     targetCapabilities: [...CURRENT_MACHINE_CAPABILITIES],
     npmPackage: '@twsxtd/hapi',
 }
-type UpgradeInfoMockResult = { info: { offer: typeof TEST_OFFER; policy: FleetUpgradePolicy }; isLoading: boolean }
+type UpgradeInfoMockResult = { info: { offer: HubUpgradeOffer; policy: FleetUpgradePolicy }; isLoading: boolean }
 const useMachinesMock = vi.fn()
 const useUpgradeInfoMock = vi.fn((..._args: unknown[]): UpgradeInfoMockResult => ({ info: { offer: TEST_OFFER, policy: 'alert' }, isLoading: false }))
 const restartMachineRunnerMock = vi.fn(async (): Promise<{ message: string }> => ({ message: 'ok' }))
