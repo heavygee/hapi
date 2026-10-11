@@ -46,12 +46,13 @@ function ChevronIcon() {
     return <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M2.5 3.75L5 6.25L7.5 3.75" /></svg>
 }
 
-function VoiceAssistantIcon() {
+function VoiceAssistantIcon(props: { size?: number }) {
+    const size = props.size ?? 18
     return (
         <svg
             xmlns="http://www.w3.org/2000/svg"
-            width="18"
-            height="18"
+            width={size}
+            height={size}
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -67,6 +68,24 @@ function VoiceAssistantIcon() {
             <path d="M20 11v2" />
         </svg>
     )
+}
+
+/** Empty idle voice/dictate primary control — large hit target (Quest / touch). */
+export function isLargeEmptyVoicePrimary(args: {
+    canSend: boolean
+    voiceEnabled: boolean
+    voiceStatus: ConversationStatus
+    routesToScratchlist?: boolean
+}): boolean {
+    if (args.canSend) return false
+    if (args.routesToScratchlist) return false
+    if (!args.voiceEnabled) return false
+    if (args.voiceStatus === 'connecting' || args.voiceStatus === 'connected') return false
+    return true
+}
+
+export function unifiedButtonSizeClass(large: boolean): string {
+    return large ? 'h-12 w-12' : 'h-8 w-8'
 }
 
 function SpeakerIcon(props: { muted?: boolean }) {
@@ -498,6 +517,12 @@ export function UnifiedButton(props: {
     const isVoiceActive = isConnecting || isConnected
     const hasText = props.canSend
     const routesToScratchlist = props.routesToScratchlist ?? false
+    const largeEmptyVoice = isLargeEmptyVoicePrimary({
+        canSend: props.canSend,
+        voiceEnabled: props.voiceEnabled,
+        voiceStatus: props.voiceStatus,
+        routesToScratchlist,
+    })
 
     const handleClick = () => {
         if (isVoiceActive) {
@@ -533,7 +558,8 @@ export function UnifiedButton(props: {
         className = 'bg-black text-white'
         ariaLabel = t('composer.send')
     } else if (props.voiceEnabled) {
-        icon = <VoiceAssistantIcon />
+        // Larger glyph when the empty-state hit target grows (Quest / touch).
+        icon = <VoiceAssistantIcon size={largeEmptyVoice ? 26 : 18} />
         className = 'bg-black text-white'
         ariaLabel = props.voiceLabel ?? t('composer.voice')
     } else {
@@ -560,7 +586,9 @@ export function UnifiedButton(props: {
             disabled={isDisabled}
             aria-label={ariaLabel}
             title={ariaLabel}
-            className={`ml-1 flex h-8 w-8 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
+            data-testid="composer-unified-button"
+            data-size={largeEmptyVoice ? 'large' : 'compact'}
+            className={`ml-1 flex ${unifiedButtonSizeClass(largeEmptyVoice)} items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
         >
             {icon}
         </button>
