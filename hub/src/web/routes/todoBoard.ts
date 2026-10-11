@@ -47,8 +47,18 @@ const DEFAULT_TODO_BOARD: StoredTodoBoard = {
 // genuinely different boards collide on the same id (e.g. host
 // "github.com::evil" + owner "foo" vs. host "github.com" + owner
 // "evil::foo" both naively join to "github.com::evil::foo::1").
-export function makeBoardId(host: string, ownerLogin: string, projectNumber: number): string {
-    return [host, ownerLogin, String(projectNumber)].map(encodeURIComponent).join('::')
+//
+// `viewNumber` only appends when present, keeping the plain-project id
+// format (`host::owner::number`) byte-for-byte stable for every
+// already-stored board — the view-scoped id (`host::owner::number::view::n`)
+// is a distinct, longer id so the same project and a filtered view onto it
+// can both be stored as separate boards without colliding.
+export function makeBoardId(host: string, ownerLogin: string, projectNumber: number, viewNumber?: number): string {
+    const parts = [host, ownerLogin, String(projectNumber)]
+    if (viewNumber !== undefined) {
+        parts.push('view', String(viewNumber))
+    }
+    return parts.map(encodeURIComponent).join('::')
 }
 
 function readEnvTodoBoardConfig(): StoredTodoBoard {
@@ -129,6 +139,18 @@ async function updateTodoBoards(
 
 const GH_TIMEOUT_MS = 15_000
 
+const ITEM_FIELDS = `
+  id
+  content {
+    __typename
+    ... on Issue { title number url state updatedAt body repository { nameWithOwner } }
+    ... on PullRequest { title number url state updatedAt body repository { nameWithOwner } }
+    ... on DraftIssue { title updatedAt body }
+  }
+  fieldValueByName(name: $statusField) {
+    ... on ProjectV2ItemFieldSingleSelectValue { name }
+  }`
+
 const PROJECT_QUERY = `
 query($login: String!, $number: Int!, $statusField: String!) {
   repositoryOwner(login: $login) {
@@ -141,18 +163,43 @@ query($login: String!, $number: Int!, $statusField: String!) {
           }
         }
         items(first: 100) {
-          nodes {
-            id
-            content {
-              __typename
-              ... on Issue { title number url state updatedAt body repository { nameWithOwner } }
-              ... on PullRequest { title number url state updatedAt body repository { nameWithOwner } }
-              ... on DraftIssue { title updatedAt body }
-            }
-            fieldValueByName(name: $statusField) {
-              ... on ProjectV2ItemFieldSingleSelectValue { name }
-            }
+          nodes { ${ITEM_FIELDS} }
+        }
+      }
+    }
+  }
+}`
+
+// Same as PROJECT_QUERY plus `items(query: $itemsFilter)` — GitHub's own
+// Projects filter-bar syntax, the same string a ProjectV2View's `filter`
+// field stores. Named `$itemsFilter`, not `$query`: `gh api graphql` reads
+// `-f query=<document>` to mean the GraphQL document itself, so a second
+// `-f query=<value>` for a same-named GraphQL *variable* collides at the gh
+// CLI layer ("unexpected override existing field under \"query\""), not the
+// GraphQL server — confirmed by hand against a live view before landing this.
+//
+// A separate query from PROJECT_QUERY (not PROJECT_QUERY with an
+// always-nullable filter variable) on purpose: the `query` argument on
+// `items` is a newer addition (per `gh project item-list --help`,
+// "supported by github.com and GHES 3.20+") — embedding it unconditionally
+// would risk breaking the existing, much more common no-view board read on
+// an older GHES host that doesn't recognize the argument at all, even when
+// the variable is passed as null. Only used when a view is actually
+// configured, so the new argument's host requirement is scoped to the new
+// capability, not the existing one.
+const PROJECT_QUERY_FILTERED = `
+query($login: String!, $number: Int!, $statusField: String!, $itemsFilter: String) {
+  repositoryOwner(login: $login) {
+    ... on ProjectV2Owner {
+      projectV2(number: $number) {
+        title
+        field(name: $statusField) {
+          ... on ProjectV2SingleSelectField {
+            options { name }
           }
+        }
+        items(first: 100, query: $itemsFilter) {
+          nodes { ${ITEM_FIELDS} }
         }
       }
     }
@@ -168,6 +215,27 @@ query($login: String!, $number: Int!) {
     ... on ProjectV2Owner {
       projectV2(number: $number) {
         title
+      }
+    }
+  }
+}`
+
+// Resolves a saved view's name + filter string. Used two ways: validating +
+// labeling a board-add for a `/views/<n>` URL, and (via `runGhGraphql`)
+// turning a view-scoped board's stored viewNumber into the `query` argument
+// for PROJECT_QUERY's `items` field before every items fetch — the view's
+// filter isn't cached, so editing it in GitHub's UI takes effect immediately
+// here too, same as reloading the view on github.com would.
+const PROJECT_VIEW_QUERY = `
+query($login: String!, $number: Int!, $viewNumber: Int!) {
+  repositoryOwner(login: $login) {
+    ... on ProjectV2Owner {
+      projectV2(number: $number) {
+        title
+        view(number: $viewNumber) {
+          name
+          filter
+        }
       }
     }
   }
@@ -210,6 +278,18 @@ type GhProjectTitleResponse = {
     errors?: Array<{ message: string }>
 }
 
+type GhProjectViewResponse = {
+    data?: {
+        repositoryOwner?: {
+            projectV2?: {
+                title?: string
+                view?: { name?: string; filter?: string | null } | null
+            } | null
+        } | null
+    }
+    errors?: Array<{ message: string }>
+}
+
 const execFileAsync = promisify(execFile)
 
 type ProjectQueryTarget = {
@@ -217,6 +297,7 @@ type ProjectQueryTarget = {
     ownerLogin: string
     projectNumber: number
     statusFieldName: string
+    viewNumber?: number
 }
 
 type ProjectLookupTarget = {
@@ -225,12 +306,23 @@ type ProjectLookupTarget = {
     projectNumber: number
 }
 
+type ProjectViewLookupTarget = {
+    host: string
+    ownerLogin: string
+    projectNumber: number
+    viewNumber: number
+}
+
 // Async (not spawnSync): this runs on the shared hub event loop, and a slow
 // or rate-limited GitHub response must not stall every other request in
 // flight (SSE streams, unrelated API calls) for the duration of the call.
-async function execGhGraphql(host: string, query: string, variables: Record<string, string | number>): Promise<string> {
+async function execGhGraphql(host: string, query: string, variables: Record<string, string | number | undefined>): Promise<string> {
     const args = ['api', '--hostname', host, 'graphql', '-f', `query=${query}`]
     for (const [key, value] of Object.entries(variables)) {
+        // Omit entirely rather than sending an empty string — `$itemsFilter:
+        // String` is nullable, and a missing variable resolves to null (no
+        // filter), not an empty-string filter GitHub might interpret differently.
+        if (value === undefined) continue
         args.push(typeof value === 'number' ? '-F' : '-f', `${key}=${value}`)
     }
     try {
@@ -245,16 +337,92 @@ async function execGhGraphql(host: string, query: string, variables: Record<stri
     }
 }
 
-async function runGhGraphql(target: ProjectQueryTarget): Promise<GhProjectV2Response> {
-    const stdout = await execGhGraphql(target.host, PROJECT_QUERY, {
+async function runGhGraphqlView(target: ProjectViewLookupTarget): Promise<GhProjectViewResponse> {
+    const stdout = await execGhGraphql(target.host, PROJECT_VIEW_QUERY, {
         login: target.ownerLogin,
         number: target.projectNumber,
-        statusField: target.statusFieldName
+        viewNumber: target.viewNumber
+    })
+    try {
+        return JSON.parse(stdout) as GhProjectViewResponse
+    } catch {
+        throw new Error('gh api graphql returned non-JSON output')
+    }
+}
+
+async function runGhGraphql(target: ProjectQueryTarget): Promise<GhProjectV2Response> {
+    if (target.viewNumber === undefined) {
+        const stdout = await execGhGraphql(target.host, PROJECT_QUERY, {
+            login: target.ownerLogin,
+            number: target.projectNumber,
+            statusField: target.statusFieldName
+        })
+        try {
+            return JSON.parse(stdout) as GhProjectV2Response
+        } catch {
+            throw new Error('gh api graphql returned non-JSON output')
+        }
+    }
+
+    const viewResponse = await runGhGraphqlView({
+        host: target.host,
+        ownerLogin: target.ownerLogin,
+        projectNumber: target.projectNumber,
+        viewNumber: target.viewNumber
+    })
+    const resolved = resolveProjectView(viewResponse, target.viewNumber)
+    if (!resolved.ok) {
+        throw new Error(resolved.error)
+    }
+
+    const stdout = await execGhGraphql(target.host, PROJECT_QUERY_FILTERED, {
+        login: target.ownerLogin,
+        number: target.projectNumber,
+        statusField: target.statusFieldName,
+        itemsFilter: resolved.itemsFilter
     })
     try {
         return JSON.parse(stdout) as GhProjectV2Response
     } catch {
         throw new Error('gh api graphql returned non-JSON output')
+    }
+}
+
+export type ResolveProjectViewResult =
+    | { ok: true; title: string | undefined; viewName: string | undefined; itemsFilter: string | undefined }
+    | { ok: false; error: string }
+
+/**
+ * Pure (no gh/execFile), so it's unit-testable without mocking a subprocess —
+ * unlike the gh-invoking functions around it. Used by both POST /todo-boards
+ * (needs title + view name for the label) and runGhGraphql's items path
+ * (needs just the filter) so "project not found" vs "view not found" are a
+ * single source of truth instead of two independently-maintained checks that
+ * drifted (hapi#238 Codex-adjacent self-review: GET items used to 502 with a
+ * generic thrown Error for both cases instead of 404 like POST already did).
+ *
+ * Treats an empty/whitespace-only `filter` the same as a missing one — the
+ * underlying GraphQL field is untyped-nullable `String`, and an empty string
+ * is observed in practice (e.g. after a view's filter is cleared via the API
+ * rather than never having been set), not just `null`.
+ */
+export function resolveProjectView(viewResponse: GhProjectViewResponse, viewNumber: number): ResolveProjectViewResult {
+    if (viewResponse.errors?.length) {
+        return { ok: false, error: viewResponse.errors.map(e => e.message).join('; ') }
+    }
+    const projectV2 = viewResponse.data?.repositoryOwner?.projectV2
+    if (!projectV2) {
+        return { ok: false, error: 'Project not found, or not accessible with the current gh auth' }
+    }
+    if (!projectV2.view) {
+        return { ok: false, error: `View ${viewNumber} not found on this project` }
+    }
+    const trimmedFilter = projectV2.view.filter?.trim()
+    return {
+        ok: true,
+        title: projectV2.title,
+        viewName: projectV2.view.name,
+        itemsFilter: trimmedFilter ? trimmedFilter : undefined
     }
 }
 
@@ -299,18 +467,39 @@ function mapItems(response: GhProjectV2Response): TodoBoardItem[] {
  * any other host. `gh project` takes `--owner` uniformly for both users and
  * orgs, so the user/org distinction in the URL only matters for parsing, not
  * for the resulting `gh api` call.
+ *
+ * Also accepts a trailing `/views/<n>` — a saved, filtered view of the same
+ * project (same items, a server-stored `filter` query string applied).
+ * Adding a view URL creates a *separate* board id from the plain project URL
+ * (`makeBoardId`'s optional `viewNumber`), so both can be added side by side:
+ * the unfiltered project and one or more restricted views onto it.
  */
-export function parseProjectUrl(url: string): { host: string; ownerLogin: string; projectNumber: number } | null {
-    const match = /^(?:https?:\/\/)?([^/]+)\/(?:users|orgs)\/([^/]+)\/projects\/(\d+)\/?(?:[/?#].*)?$/i.exec(url.trim())
+export function parseProjectUrl(url: string): { host: string; ownerLogin: string; projectNumber: number; viewNumber?: number } | null {
+    // The trailing catch-all must not swallow a malformed `/views/<non-digit>`
+    // segment as generic trailing junk — without the negative lookahead,
+    // `.../projects/6/views/not-a-number` would silently parse as if the
+    // `/views/...` suffix was never there instead of being rejected. The
+    // lookahead requires a path-segment boundary right after "views" (`/`,
+    // `?`, `#`, or end-of-string) so it only excludes genuine `/views[/...]`
+    // segments — not an unrelated trailing path that merely starts with the
+    // same letters, like `.../projects/6/viewsomething`.
+    const match = /^(?:https?:\/\/)?([^/]+)\/(?:users|orgs)\/([^/]+)\/projects\/(\d+)(?:\/views\/(\d+))?\/?(?:(?!\/views(?:[/?#]|$))[/?#].*)?$/i.exec(url.trim())
     if (!match) {
         return null
     }
-    const [, host, ownerLogin, numberRaw] = match
+    const [, host, ownerLogin, numberRaw, viewNumberRaw] = match
     const projectNumber = Number(numberRaw)
     if (!Number.isFinite(projectNumber) || projectNumber <= 0) {
         return null
     }
-    return { host: host!, ownerLogin: ownerLogin!, projectNumber }
+    if (viewNumberRaw === undefined) {
+        return { host: host!, ownerLogin: ownerLogin!, projectNumber }
+    }
+    const viewNumber = Number(viewNumberRaw)
+    if (!isValidProjectNumber(viewNumber)) {
+        return null
+    }
+    return { host: host!, ownerLogin: ownerLogin!, projectNumber, viewNumber }
 }
 
 function toSummary(board: StoredTodoBoard): { id: string; label: string } {
@@ -320,7 +509,8 @@ function toSummary(board: StoredTodoBoard): { id: string; label: string } {
 export function createTodoBoardRoutes(
     dataDir: string,
     runGraphql: (target: ProjectQueryTarget) => GhProjectV2Response | Promise<GhProjectV2Response> = runGhGraphql,
-    runGraphqlTitle: (target: ProjectLookupTarget) => GhProjectTitleResponse | Promise<GhProjectTitleResponse> = runGhGraphqlTitle
+    runGraphqlTitle: (target: ProjectLookupTarget) => GhProjectTitleResponse | Promise<GhProjectTitleResponse> = runGhGraphqlTitle,
+    runGraphqlView: (target: ProjectViewLookupTarget) => GhProjectViewResponse | Promise<GhProjectViewResponse> = runGhGraphqlView
 ): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
@@ -341,28 +531,50 @@ export function createTodoBoardRoutes(
             return c.json({ error: 'Could not parse a GitHub Projects URL (expected e.g. https://github.com/users/<handle>/projects/<n> or .../orgs/<org>/projects/<n>)' }, 400)
         }
 
-        let ghResponse: GhProjectTitleResponse
-        try {
-            ghResponse = await runGraphqlTitle(target)
-        } catch (error) {
-            return c.json({ error: error instanceof Error ? error.message : 'Failed to reach the board' }, 502)
-        }
-        if (ghResponse.errors?.length) {
-            return c.json({ error: ghResponse.errors.map(e => e.message).join('; ') }, 502)
-        }
-        const projectV2 = ghResponse.data?.repositoryOwner?.projectV2
-        if (!projectV2) {
-            return c.json({ error: 'Project not found, or not accessible with the current gh auth' }, 404)
+        let label: string
+        if (target.viewNumber !== undefined) {
+            let viewResponse: GhProjectViewResponse
+            try {
+                viewResponse = await runGraphqlView({ host: target.host, ownerLogin: target.ownerLogin, projectNumber: target.projectNumber, viewNumber: target.viewNumber })
+            } catch (error) {
+                return c.json({ error: error instanceof Error ? error.message : 'Failed to reach the board' }, 502)
+            }
+            const resolved = resolveProjectView(viewResponse, target.viewNumber)
+            if (!resolved.ok) {
+                // Both "project not found" and "view not found" are 404 —
+                // the GraphQL-errors case (malformed field name etc.) stays
+                // 502, matching the non-view branch below.
+                const status = resolved.error.includes('not found') ? 404 : 502
+                return c.json({ error: resolved.error }, status)
+            }
+            const projectLabel = resolved.title || `${target.ownerLogin}/${target.projectNumber}`
+            label = resolved.viewName ? `${projectLabel} · ${resolved.viewName}` : `${projectLabel} · View ${target.viewNumber}`
+        } else {
+            let ghResponse: GhProjectTitleResponse
+            try {
+                ghResponse = await runGraphqlTitle(target)
+            } catch (error) {
+                return c.json({ error: error instanceof Error ? error.message : 'Failed to reach the board' }, 502)
+            }
+            if (ghResponse.errors?.length) {
+                return c.json({ error: ghResponse.errors.map(e => e.message).join('; ') }, 502)
+            }
+            const projectV2 = ghResponse.data?.repositoryOwner?.projectV2
+            if (!projectV2) {
+                return c.json({ error: 'Project not found, or not accessible with the current gh auth' }, 404)
+            }
+            label = projectV2.title || `${target.ownerLogin}/${target.projectNumber}`
         }
 
         const newBoard: StoredTodoBoard = {
-            id: makeBoardId(target.host, target.ownerLogin, target.projectNumber),
-            label: projectV2.title || `${target.ownerLogin}/${target.projectNumber}`,
+            id: makeBoardId(target.host, target.ownerLogin, target.projectNumber, target.viewNumber),
+            label,
             host: target.host,
             ownerLogin: target.ownerLogin,
             projectNumber: target.projectNumber,
             statusFieldName: DEFAULT_TODO_BOARD.statusFieldName,
-            doneValues: DEFAULT_TODO_BOARD.doneValues
+            doneValues: DEFAULT_TODO_BOARD.doneValues,
+            ...(target.viewNumber !== undefined ? { viewNumber: target.viewNumber } : {})
         }
 
         // "Add" always means add — the env/default board stays in the list
@@ -415,7 +627,16 @@ export function createTodoBoardRoutes(
             }
             return c.json(body)
         } catch (error) {
-            return c.json({ error: error instanceof Error ? error.message : 'Failed to read board' }, 502)
+            const message = error instanceof Error ? error.message : 'Failed to read board'
+            // Matches resolveProjectView's two "not found" messages — a
+            // view-scoped board whose view or underlying project vanished
+            // (deleted/renamed/access revoked) after being added should 404
+            // the same way the plain-project equivalent already does above,
+            // not fall through to a generic 502.
+            if (message.includes('not found')) {
+                return c.json({ error: message }, 404)
+            }
+            return c.json({ error: message }, 502)
         }
     })
 
