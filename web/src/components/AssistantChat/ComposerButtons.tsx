@@ -111,8 +111,11 @@ export function shouldShowDraftVoiceButton(args: {
     canSend: boolean
     voiceEnabled: boolean
     voiceStatus: ConversationStatus
+    /** Mirror UnifiedButton: scratchlist routing owns Send; do not start voice. */
+    routesToScratchlist?: boolean
 }): boolean {
     if (!args.canSend || !args.voiceEnabled) return false
+    if (args.routesToScratchlist) return false
     if (args.voiceStatus === 'connecting' || args.voiceStatus === 'connected') return false
     return true
 }
@@ -651,6 +654,7 @@ export function DictationButton(props: {
     voiceLabel?: string
     /** Flush companion beside fill-height Send (HappyComposer omitPrimary). */
     variant?: 'toolbar' | 'companion'
+    routesToScratchlist?: boolean
 }) {
     const { t } = useTranslation()
     if (props.enabled === false) return null
@@ -658,6 +662,7 @@ export function DictationButton(props: {
         canSend: props.canSend,
         voiceEnabled: props.voiceEnabled,
         voiceStatus: props.voiceStatus,
+        routesToScratchlist: props.routesToScratchlist,
     })) return null
 
     const label = props.voiceLabel ?? t('composer.dictate')
@@ -992,6 +997,10 @@ export function ComposerButtons(props: {
                 controlsDisabled={props.controlsDisabled}
                 onVoiceToggle={props.onVoiceToggle}
                 voiceLabel={props.dictationEnabled ? t('composer.dictate') : t('composer.voice')}
+                routesToScratchlist={
+                    (props.scratchlistMode ?? false)
+                    && props.pendingSchedule == null
+                }
             />
 
             {props.omitPrimaryButton ? null : (

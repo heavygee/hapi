@@ -268,6 +268,27 @@ describe('DictationButton', () => {
         expect(onVoiceToggle).toHaveBeenCalledOnce()
     })
 
+    it('hides draft voice when the draft routes to the scratchlist', () => {
+        expect(shouldShowDraftVoiceButton({
+            canSend: true,
+            voiceEnabled: true,
+            voiceStatus: 'disconnected',
+            routesToScratchlist: true,
+        })).toBe(false)
+
+        const { container } = renderInProviders(
+            <DictationButton
+                canSend
+                voiceEnabled
+                voiceStatus="disconnected"
+                controlsDisabled={false}
+                onVoiceToggle={vi.fn()}
+                routesToScratchlist
+            />,
+        )
+        expect(container.querySelector('[data-testid="composer-draft-voice-button"]')).toBeNull()
+    })
+
     it('keeps assistant voice as a compact toolbar circle when a draft is present', () => {
         expect(shouldShowDraftVoiceButton({
             canSend: true,

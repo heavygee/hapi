@@ -96,4 +96,21 @@ describe('shouldInvokeComposerDictateShortcut', () => {
             routesToScratchlist: true,
         })).toBe(false)
     })
+
+    it('suppresses scratchlist-routed draft starts (toolbar voice also hidden)', () => {
+        expect(shouldInvokeComposerDictateShortcut({
+            ...base,
+            canSend: true,
+            routesToScratchlist: true,
+        })).toBe(false)
+    })
+
+    it('still stops an active voice session while scratchlist routing is on', () => {
+        expect(shouldInvokeComposerDictateShortcut({
+            ...base,
+            canSend: true,
+            routesToScratchlist: true,
+            voiceStatus: 'connected',
+        })).toBe(true)
+    })
 })

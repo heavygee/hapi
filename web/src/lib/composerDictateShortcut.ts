@@ -55,7 +55,8 @@ export function shouldInvokeComposerDictateShortcut(args: {
     if (args.controlsDisabled || !args.voiceEnabled) return false
     const isVoiceActive = args.voiceStatus === 'connecting' || args.voiceStatus === 'connected'
     if (isVoiceActive) return true
-    // Draft → toolbar voice/dictate circle is available (assistant and dictation).
-    if (args.canSend) return true
-    return !args.routesToScratchlist
+    // Scratchlist owns Send — same suppress as UnifiedButton / draft voice button.
+    if (args.routesToScratchlist) return false
+    // Empty primary voice/dictate, or draft toolbar DictationButton.
+    return true
 }
