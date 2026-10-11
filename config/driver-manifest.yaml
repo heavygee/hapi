@@ -1106,6 +1106,14 @@ layers:
   # After remat: re-add boards stored without viewNumber (full /views/N URL).
   - branch: driver/235-todo-board-view
 
+  # heavygee/hapi#247 — deliberate fleet push + restore upgrade-runner; kill
+  # keepalive/startup unattended auto-upgrade. Hub default stays alert; per-machine
+  # auto (ninja) applies only on POST /api/fleet/push-upgrade.
+  # Thin tip on live soup 326799b34: driver/247-deliberate-fleet-push @ f5c3933b6
+  # Worktree: ~/coding/hapi/worktrees/deliberate-fleet-push
+  # Hub+shared → remat needs hapi-restart-hub (no --build-web for this tip alone).
+  - branch: driver/247-deliberate-fleet-push
+
   # DROPPED 2026-10-06: driver/1933-claude-resume-amnesia — squash 94523eb0d is on
   # fork main (heavygee/hapi#204). Soup base is now origin/main, so tip-forward
   # absorbs it from the base; keeping the layer would double-apply / conflict.
