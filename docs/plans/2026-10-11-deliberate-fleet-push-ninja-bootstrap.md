@@ -1,6 +1,6 @@
 # Deliberate fleet push - ninja chicken-egg bootstrap (#247)
 
-**Status:** layer `driver/247-deliberate-fleet-push` @ `f5c3933b6` pushed; waiting remat + soup tip publish.
+**Status:** layer `driver/247-deliberate-fleet-push` @ `f5c3933b6` pushed; **remat blocked** on Meta hold (`merge conflict on driver/235-todo-board-view`, owner `028d0a86`). Live hub still on tip `326799b` with `fleetUpgradePolicy=alert`.
 
 ## What landed (code)
 
