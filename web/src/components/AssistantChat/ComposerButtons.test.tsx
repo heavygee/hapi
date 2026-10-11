@@ -139,7 +139,7 @@ describe('UnifiedButton — default send intent', () => {
         fireEvent.click(button, { detail: 1 })
 
         expect(onSend).toHaveBeenCalledOnce()
-        expect(onSend).toHaveBeenCalledWith('default')
+        expect(onSend).toHaveBeenCalledWith()
     })
 
     it('keeps touch tap, desktop mouse hold, and desktop right-click on normal behavior', () => {
@@ -157,8 +157,8 @@ describe('UnifiedButton — default send intent', () => {
         const contextMenuWasNotPrevented = fireEvent.contextMenu(button, { clientX: 10, clientY: 10 })
 
         expect(onSend).toHaveBeenCalledTimes(2)
-        expect(onSend).toHaveBeenNthCalledWith(1, 'default')
-        expect(onSend).toHaveBeenNthCalledWith(2, 'default')
+        expect(onSend).toHaveBeenNthCalledWith(1)
+        expect(onSend).toHaveBeenNthCalledWith(2)
         expect(contextMenuWasNotPrevented).toBe(true)
     })
 })
@@ -194,11 +194,12 @@ describe('UnifiedButton — fill-height primary (voice ↔ send)', () => {
     })
 
     it('keeps the same fill-height layout when a draft swaps the icon to Send', () => {
+        // Draft → Send morph; still fill-height. Helper stays false (not empty-voice FUE).
         expect(isLargeEmptyVoicePrimary({
             canSend: true,
             voiceEnabled: true,
             voiceStatus: 'disconnected',
-        })).toBe(true)
+        })).toBe(false)
 
         renderInProviders(
             <UnifiedButton

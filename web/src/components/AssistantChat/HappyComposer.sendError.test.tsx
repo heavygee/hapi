@@ -124,7 +124,6 @@ vi.mock('@/components/AssistantChat/ComposerButtons', () => ({
         onModelValueToggle?: () => void
     }) => (
         <div>
-            <button type="button" onClick={props.onSend}>send</button>
             <button type="button" onClick={props.onExpandedToggle}>
                 {props.expanded ? 'collapse' : 'expand'}
             </button>
@@ -135,6 +134,10 @@ vi.mock('@/components/AssistantChat/ComposerButtons', () => ({
             ) : null}
             <output data-testid="pending-schedule">{JSON.stringify(props.pendingSchedule)}</output>
         </div>
+    ),
+    // HappyComposer places UnifiedButton beside the card (omitPrimaryButton).
+    UnifiedButton: (props: { onSend: () => void }) => (
+        <button type="button" onClick={props.onSend}>send</button>
     ),
 }))
 

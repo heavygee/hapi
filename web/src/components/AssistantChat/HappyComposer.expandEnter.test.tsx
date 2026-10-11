@@ -167,11 +167,13 @@ vi.mock('@/components/AssistantChat/ComposerButtons', () => ({
         onExpandedToggle: () => void
     }) => (
         <div>
-            <button type="button" onClick={props.onSend}>send</button>
             <button type="button" onClick={props.onExpandedToggle}>
                 {props.expanded ? 'collapse' : 'expand'}
             </button>
         </div>
+    ),
+    UnifiedButton: (props: { onSend: () => void }) => (
+        <button type="button" onClick={props.onSend}>send</button>
     ),
 }))
 
