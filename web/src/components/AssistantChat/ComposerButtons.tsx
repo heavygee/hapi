@@ -792,7 +792,7 @@ export function UnifiedButton(props: {
     voiceStatus: ConversationStatus
     voiceEnabled: boolean
     controlsDisabled: boolean
-    onSend: () => void
+    onSend: (intent?: ComposerSendIntent) => void
     onVoiceToggle: () => void
     voiceLabel?: string
     /**
@@ -843,7 +843,7 @@ export function UnifiedButton(props: {
         if (isVoiceActive) {
             props.onVoiceToggle() // Stop voice
         } else if (hasText) {
-            props.onSend() // Send message (or scratchlist add — wrapper decides)
+            props.onSend('default') // Send message (or scratchlist add — wrapper decides)
         } else if (props.voiceEnabled && !routesToScratchlist) {
             if (voiceFue.status !== 'acknowledged') {
                 voiceFue.engage()
