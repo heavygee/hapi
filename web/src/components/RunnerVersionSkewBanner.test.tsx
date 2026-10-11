@@ -704,5 +704,9 @@ describe('RunnerVersionSkewBanner', () => {
         // Mobile: details/pre must stretch full banner width (not shrink-wrap).
         expect(details.className).toMatch(/\bw-full\b/)
         expect(details.querySelector('pre')?.className).toMatch(/\bw-full\b/)
+        // Must be a direct child of the banner — not nested beside Minimize/Snooze
+        // in the title flex row (that was the ~half-width mobile bug).
+        const banner = screen.getByTestId('runner-version-skew-banner')
+        expect(details.parentElement).toBe(banner)
     })
 })
