@@ -71,8 +71,8 @@ describe('shouldInvokeComposerDictateShortcut', () => {
         expect(shouldInvokeComposerDictateShortcut(base)).toBe(true)
     })
 
-    it('does not start assistant voice when UnifiedButton is in send mode', () => {
-        expect(shouldInvokeComposerDictateShortcut({ ...base, canSend: true })).toBe(false)
+    it('starts assistant voice via draft companion when UnifiedButton is Send', () => {
+        expect(shouldInvokeComposerDictateShortcut({ ...base, canSend: true })).toBe(true)
     })
 
     it('starts dictation on an empty composer when scratchlist routing is off', () => {

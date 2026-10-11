@@ -175,6 +175,7 @@ vi.mock('@/components/AssistantChat/ComposerButtons', () => ({
     UnifiedButton: (props: { onSend: () => void }) => (
         <button type="button" onClick={props.onSend}>send</button>
     ),
+    DictationButton: () => null,
 }))
 
 function ComposerHarness(props: { initialText: string }) {
