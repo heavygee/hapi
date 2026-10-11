@@ -11,7 +11,6 @@ import {
     ComposerButtons,
     ComposerExpandButton,
     DictationButton,
-    draftVoiceCompanionSizeClass,
     getComposerToolbarJustifyContent,
     isComposerPrimaryFillHeight,
     isLargeEmptyVoicePrimary,
@@ -269,7 +268,7 @@ describe('DictationButton', () => {
         expect(onVoiceToggle).toHaveBeenCalledOnce()
     })
 
-    it('keeps assistant voice available beside Send when a draft is present', () => {
+    it('keeps assistant voice as a compact toolbar circle when a draft is present', () => {
         expect(shouldShowDraftVoiceButton({
             canSend: true,
             voiceEnabled: true,
@@ -280,7 +279,6 @@ describe('DictationButton', () => {
             voiceEnabled: true,
             voiceStatus: 'disconnected',
         })).toBe(false)
-        expect(draftVoiceCompanionSizeClass()).toContain('w-12')
 
         const onVoiceToggle = vi.fn()
         renderInProviders(
@@ -291,12 +289,13 @@ describe('DictationButton', () => {
                 controlsDisabled={false}
                 onVoiceToggle={onVoiceToggle}
                 voiceLabel="Voice assistant"
-                variant="companion"
             />,
         )
         const btn = getButton('Voice assistant')
-        expect(btn.getAttribute('data-variant')).toBe('companion')
-        expect(btn.className).toContain('w-12')
+        expect(btn.getAttribute('data-variant')).toBe('toolbar')
+        expect(btn.className).toContain('h-8')
+        expect(btn.className).toContain('w-8')
+        expect(btn.className).toContain('rounded-full')
         fireEvent.click(btn)
         expect(onVoiceToggle).toHaveBeenCalledOnce()
     })

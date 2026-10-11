@@ -72,7 +72,8 @@ function VoiceAssistantIcon(props: { size?: number }) {
 
 /**
  * Primary composer control fills the card height (Quest / touch).
- * Empty → giant voice/dictate; draft → giant Send (+ companion voice to the left).
+ * Empty → giant voice/dictate; draft → giant Send. Draft voice stays a
+ * compact toolbar circle (no width stolen from the text column).
  */
 export function isComposerPrimaryFillHeight(args: {
     canSend: boolean
@@ -103,8 +104,8 @@ export function isLargeEmptyVoicePrimary(args: {
 }
 
 /**
- * When draft steals the primary for Send, keep voice/dictate reachable via a
- * companion control (toolbar or flush column left of Send).
+ * When draft steals the primary for Send, keep voice/dictate reachable via the
+ * compact toolbar DictationButton (under the text — does not eat composer width).
  */
 export function shouldShowDraftVoiceButton(args: {
     canSend: boolean
@@ -979,20 +980,19 @@ export function ComposerButtons(props: {
             </div>
 
             {/*
-              When HappyComposer owns the fill-height primary (omitPrimaryButton),
-              the draft voice companion lives beside Send in that column — not here.
+              Draft voice/dictate: compact circle in the toolbar row (under text).
+              Primary column stays a single fill-height Send/voice control so we
+              do not steal horizontal space from the composer.
             */}
-            {props.omitPrimaryButton ? null : (
-                <DictationButton
-                    enabled={props.voiceEnabled}
-                    canSend={props.canSend}
-                    voiceEnabled={props.voiceEnabled}
-                    voiceStatus={props.voiceStatus}
-                    controlsDisabled={props.controlsDisabled}
-                    onVoiceToggle={props.onVoiceToggle}
-                    voiceLabel={props.dictationEnabled ? t('composer.dictate') : t('composer.voice')}
-                />
-            )}
+            <DictationButton
+                enabled={props.voiceEnabled}
+                canSend={props.canSend}
+                voiceEnabled={props.voiceEnabled}
+                voiceStatus={props.voiceStatus}
+                controlsDisabled={props.controlsDisabled}
+                onVoiceToggle={props.onVoiceToggle}
+                voiceLabel={props.dictationEnabled ? t('composer.dictate') : t('composer.voice')}
+            />
 
             {props.omitPrimaryButton ? null : (
                 <UnifiedButton

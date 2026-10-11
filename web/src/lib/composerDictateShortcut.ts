@@ -41,8 +41,8 @@ export function isDictateHotkeyBlockedTarget(target: EventTarget | null): boolea
  * Mirrors DictationButton + UnifiedButton voice-start/stop rules so the hotkey
  * does not send chat text or start voice when the mic UI would not.
  *
- * With a draft, primary is Send but the draft-voice companion (and toolbar
- * DictationButton) still start/stop voice — hotkey follows that companion.
+ * With a draft, primary is Send but the toolbar DictationButton still
+ * starts/stops voice — hotkey follows that control.
  */
 export function shouldInvokeComposerDictateShortcut(args: {
     controlsDisabled: boolean
@@ -55,7 +55,7 @@ export function shouldInvokeComposerDictateShortcut(args: {
     if (args.controlsDisabled || !args.voiceEnabled) return false
     const isVoiceActive = args.voiceStatus === 'connecting' || args.voiceStatus === 'connected'
     if (isVoiceActive) return true
-    // Draft → companion voice/dictate is available (assistant and dictation modes).
+    // Draft → toolbar voice/dictate circle is available (assistant and dictation).
     if (args.canSend) return true
     return !args.routesToScratchlist
 }

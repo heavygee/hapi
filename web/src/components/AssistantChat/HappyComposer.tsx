@@ -48,7 +48,7 @@ import { useComposerEnterBehavior } from '@/hooks/useComposerEnterBehavior'
 import { FloatingOverlay } from '@/components/ChatInput/FloatingOverlay'
 import { Autocomplete } from '@/components/ChatInput/Autocomplete'
 import { StatusBar } from '@/components/AssistantChat/StatusBar'
-import { ComposerButtons, DictationButton, UnifiedButton } from '@/components/AssistantChat/ComposerButtons'
+import { ComposerButtons, UnifiedButton } from '@/components/AssistantChat/ComposerButtons'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import { SortableComposerAttachments } from '@/components/AssistantChat/SortableComposerAttachments'
 import { ComposerParkingContext } from '@/components/AssistantChat/composerParkingContext'
@@ -2418,17 +2418,8 @@ export function HappyComposer(props: {
                                 omitPrimaryButton
                             />
                         </div>
-                        {/* Full-height primary: empty → voice; draft → companion voice + Send. */}
+                        {/* Full-height primary: empty → voice; draft → Send. Draft voice is the toolbar circle. */}
                         <div className="flex shrink-0 self-stretch items-stretch">
-                            <DictationButton
-                                canSend={canSend}
-                                voiceEnabled={voiceEnabled}
-                                voiceStatus={effectiveVoiceStatus}
-                                controlsDisabled={controlsDisabled}
-                                onVoiceToggle={effectiveVoiceToggle ?? (() => {})}
-                                voiceLabel={dictationActive ? t('composer.dictate') : t('composer.voice')}
-                                variant="companion"
-                            />
                             <UnifiedButton
                                 canSend={canSend}
                                 voiceStatus={effectiveVoiceStatus}
