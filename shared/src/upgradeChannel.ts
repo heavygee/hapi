@@ -80,6 +80,17 @@ export type HubUpgradeOffer = {
      */
     targetGeneration?: string
     npmPackage?: string
+    /**
+     * Soup tip tag when the offer tracks a published single-exe
+     * (`hapi-soup-v…`). Same string as targetVersion for soup tips.
+     */
+    soupTag?: string
+    /**
+     * Human-readable release notes for the offered tip (markdown/plain).
+     * Sourced from soup-artifacts `NOTES.md` (publish writes the same text
+     * mirrored to GitHub Releases). Omit when unavailable.
+     */
+    releaseNotes?: string
     artifact?: {
         /** Absolute or hub-relative URL path, e.g. /api/upgrade/cli-artifact?... */
         url: string

@@ -44,6 +44,25 @@ export type PublishedSoupTip = {
     composedTipSha: string
     manifestPath: string
     binaries: SoupBinaryEntry[]
+    /** Markdown/plain notes from NOTES.md next to manifest (optional). */
+    releaseNotes?: string
+}
+
+/** Filename publish writes beside manifest.json for in-app "what's new". */
+export const SOUP_RELEASE_NOTES_FILENAME = 'NOTES.md'
+
+/** Read NOTES.md from a published tip directory; undefined when missing/empty. */
+export function readSoupReleaseNotes(tipRoot: string): string | undefined {
+    const notesPath = join(tipRoot, SOUP_RELEASE_NOTES_FILENAME)
+    if (!existsSync(notesPath)) {
+        return undefined
+    }
+    try {
+        const text = readFileSync(notesPath, 'utf8').trim()
+        return text.length > 0 ? text : undefined
+    } catch {
+        return undefined
+    }
 }
 
 /** Default publish root on the soup foundry (oos-linux). */
@@ -105,6 +124,7 @@ export function readPublishedSoupTip(
             composedTipSha: typeof parsed.composedTipSha === 'string' ? parsed.composedTipSha : '',
             manifestPath,
             binaries: parsed.binaries,
+            releaseNotes: readSoupReleaseNotes(tipDir),
         }
     } catch {
         return null
@@ -158,10 +178,13 @@ export function soupTipToUpgradeOffer(
         return null
     }
     const { entry } = found
+    const releaseNotes = tip.releaseNotes ?? readSoupReleaseNotes(tip.root)
     return {
         channel: 'hub-artifact',
         targetVersion: tip.tag,
         targetGeneration: tip.tag,
+        soupTag: tip.tag,
+        ...(releaseNotes ? { releaseNotes } : {}),
         targetCapabilities: baseOffer?.targetCapabilities ?? [],
         artifact: {
             url: `/cli/upgrade/cli-artifact?sha256=${encodeURIComponent(entry.sha256)}`,
