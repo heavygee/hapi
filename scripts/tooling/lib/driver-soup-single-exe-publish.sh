@@ -81,6 +81,102 @@ driver_soup_single_exe_github_asset_name() {
     fi
 }
 
+# Previous hapi-soup-v* GitHub release tag (newest excluding current), or empty.
+driver_soup_single_exe_previous_release_tag() {
+    local repo="${1:?}"
+    local current_tag="${2:?}"
+    local tag
+    # Prefer JSON — default `gh release list` TSV puts the human title in
+    # column 1 and the tag in column 3; title also starts with "Soup release".
+    while IFS= read -r tag; do
+        [[ -n "$tag" ]] || continue
+        [[ "$tag" == "$current_tag" ]] && continue
+        [[ "$tag" == hapi-soup-v* ]] || continue
+        printf '%s\n' "$tag"
+        return 0
+    done < <(gh release list --repo "$repo" --limit 30 --json tagName -q '.[].tagName' 2>/dev/null || true)
+    return 1
+}
+
+# Resolve a soup tip SHA from a release tag suffix (…-<7hex>) or release body.
+driver_soup_single_exe_tip_from_release_tag() {
+    local driver="${1:?}"
+    local repo="${2:?}"
+    local tag="${3:?}"
+    local short body tip
+
+    short="${tag##*-}"
+    if [[ "$short" =~ ^[0-9a-f]{7,40}$ ]]; then
+        tip="$(git -C "$driver" rev-parse --verify "${short}^{commit}" 2>/dev/null || true)"
+        if [[ -n "$tip" ]]; then
+            printf '%s\n' "$tip"
+            return 0
+        fi
+    fi
+
+    body="$(gh release view "$tag" --repo "$repo" --json body -q .body 2>/dev/null || true)"
+    tip="$(printf '%s\n' "$body" | sed -nE 's/.*[Cc]omposed driver tip: *([0-9a-f]{7,40}).*/\1/p' | head -1)"
+    if [[ -n "$tip" ]]; then
+        tip="$(git -C "$driver" rev-parse --verify "${tip}^{commit}" 2>/dev/null || true)"
+        if [[ -n "$tip" ]]; then
+            printf '%s\n' "$tip"
+            return 0
+        fi
+    fi
+    return 1
+}
+
+# Real release notes: commit subjects between previous soup tip and this tip.
+# Soup GitHub tags often target main (tips may be unpublished), so ranges use
+# composed tip SHAs from the driver worktree, not tag^{commit} alone.
+driver_soup_single_exe_release_notes() {
+    local driver="${1:?}"
+    local tip_sha="${2:?}"
+    local tag="${3:?}"
+    local repo="${4:-$(driver_soup_single_exe_github_repo)}"
+    local max_commits="${HAPI_SOUP_RELEASE_NOTES_MAX:-80}"
+
+    local notes prev_tag prev_sha range_label log_lines commit_count truncated=0
+    notes="Soup single-exe fleet artifact \`${tag}\`."
+    notes+=$'\n\n'"**Composed tip:** \`${tip_sha}\`"
+
+    prev_tag=""
+    if prev_tag="$(driver_soup_single_exe_previous_release_tag "$repo" "$tag")"; then
+        notes+=$'\n'"**Previous:** \`${prev_tag}\`"
+        if prev_sha="$(driver_soup_single_exe_tip_from_release_tag "$driver" "$repo" "$prev_tag")"; then
+            if git -C "$driver" merge-base --is-ancestor "$prev_sha" "$tip_sha" 2>/dev/null; then
+                range_label="${prev_sha:0:12}..${tip_sha:0:12}"
+                commit_count="$(git -C "$driver" rev-list --count "${prev_sha}..${tip_sha}" 2>/dev/null || echo 0)"
+                log_lines="$(git -C "$driver" log --pretty=format:'- %s (%h)' --no-merges "${prev_sha}..${tip_sha}" 2>/dev/null \
+                    | head -n "$max_commits" || true)"
+                if [[ -n "$log_lines" ]]; then
+                    local shown
+                    shown="$(printf '%s\n' "$log_lines" | grep -c . || true)"
+                    if [[ "${commit_count:-0}" -gt "$shown" ]]; then
+                        truncated=1
+                    fi
+                    notes+=$'\n\n'"### Changes since previous soup release (\`${range_label}\`, ${commit_count} commit(s))"
+                    notes+=$'\n\n'"$log_lines"
+                    if [[ "$truncated" == "1" ]]; then
+                        notes+=$'\n'"- … and $((commit_count - shown)) more (truncated at ${max_commits})"
+                    fi
+                else
+                    notes+=$'\n\n'"_No non-merge commits between previous tip and this tip (merge-only or identical)._"
+                fi
+            else
+                notes+=$'\n\n'"_Previous tip \`${prev_sha:0:12}\` is not an ancestor of this tip on the driver worktree — skipped changelog range._"
+            fi
+        else
+            notes+=$'\n\n'"_Could not resolve previous tip SHA from \`${prev_tag}\` on this driver — skipped changelog._"
+        fi
+    else
+        notes+=$'\n\n'"_First soup GitHub release (or no prior \`hapi-soup-v*\` tag found) — no changelog range._"
+    fi
+
+    notes+=$'\n\n'"Download per-platform binaries as \`hapi-<platform-dir>\` (see \`manifest.json\` for sha256)."
+    printf '%s\n' "$notes"
+}
+
 # Stage flat release asset filenames under a temp dir for gh upload.
 driver_soup_single_exe_stage_github_assets() {
     local dest="${1:?}"
@@ -122,6 +218,7 @@ driver_soup_single_exe_publish_github_release() {
     local dest="${1:?}"
     local tag="${2:?}"
     local tip_sha="${3:-}"
+    local driver="${4:-}"
 
     if [[ "${HAPI_SKIP_SOUP_GITHUB_RELEASE:-}" == "1" ]]; then
         echo "soup-artifact: skip GitHub Releases mirror (HAPI_SKIP_SOUP_GITHUB_RELEASE=1)"
@@ -143,11 +240,15 @@ driver_soup_single_exe_publish_github_release() {
     fi
 
     local notes target_args=()
-    notes="Automated soup single-exe publish."
-    if [[ -n "$tip_sha" ]]; then
-        notes="$notes Composed driver tip: ${tip_sha}."
+    if [[ -n "$driver" && -n "$tip_sha" ]] && { [[ -d "$driver/.git" ]] || [[ -f "$driver/.git" ]]; }; then
+        notes="$(driver_soup_single_exe_release_notes "$driver" "$tip_sha" "$tag" "$repo")"
+    else
+        notes="Soup single-exe fleet artifact \`${tag}\`."
+        if [[ -n "$tip_sha" ]]; then
+            notes+=$'\n\n'"**Composed tip:** \`${tip_sha}\`"
+        fi
+        notes+=$'\n\n'"Download per-platform binaries as \`hapi-<platform-dir>\` (see \`manifest.json\` for sha256)."
     fi
-    notes="$notes Download per-platform binaries as hapi-<platform-dir> (see manifest.json for sha256)."
 
     if [[ -n "$tip_sha" ]] && gh api "repos/${repo}/commits/${tip_sha}" >/dev/null 2>&1; then
         target_args=(--target "$tip_sha")
@@ -157,15 +258,25 @@ driver_soup_single_exe_publish_github_release() {
 
     local gh_rc=0
     if gh release view "$tag" --repo "$repo" >/dev/null 2>&1; then
-        echo "soup-artifact: release $tag already exists — uploading assets (--clobber)"
+        echo "soup-artifact: release $tag already exists — uploading assets (--clobber) + refreshing notes"
         gh release upload "$tag" --repo "$repo" --clobber "${files[@]}" || gh_rc=$?
+        if [[ "$gh_rc" -eq 0 ]]; then
+            gh release edit "$tag" --repo "$repo" --notes "$notes" || {
+                echo "WARNING: soup-artifact: gh release edit notes failed for $tag (assets uploaded)" >&2
+            }
+        fi
     else
+        # Prefer --notes-file so multiline markdown survives argv quoting.
+        local notes_file
+        notes_file="$(mktemp "${TMPDIR:-/tmp}/hapi-soup-notes.XXXXXX")"
+        printf '%s\n' "$notes" >"$notes_file"
         gh release create "$tag" \
             --repo "$repo" \
             --title "Soup release $tag" \
-            --notes "$notes" \
+            --notes-file "$notes_file" \
             "${target_args[@]}" \
             "${files[@]}" || gh_rc=$?
+        rm -f "$notes_file"
     fi
     rm -rf "$staging"
 
@@ -387,7 +498,7 @@ driver_soup_single_exe_publish() {
     if [[ "${HAPI_SOUP_GITHUB_RELEASE_REQUIRED:-}" == "1" ]] || driver_soup_single_exe_host_ok; then
         github_required=1
     fi
-    if driver_soup_single_exe_publish_github_release "$dest" "$tag" "$tip_sha"; then
+    if driver_soup_single_exe_publish_github_release "$dest" "$tag" "$tip_sha" "$driver"; then
         :
     elif [[ "$github_required" == "1" ]]; then
         echo "ERROR: soup-artifact: GitHub Releases mirror failed (required on soup foundry host)" >&2
