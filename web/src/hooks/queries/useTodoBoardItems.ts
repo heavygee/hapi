@@ -14,6 +14,7 @@ export function useTodoBoardItems(api: ApiClient | null, boardId: string | null)
     statusOrder: string[]
     doneValues: string[]
     isLoading: boolean
+    isRefetching: boolean
     error: string | null
     refetch: () => Promise<unknown>
 } {
@@ -26,12 +27,11 @@ export function useTodoBoardItems(api: ApiClient | null, boardId: string | null)
             return await api.getTodoBoardItems(boardId)
         },
         enabled: Boolean(api && boardId),
-        // GitHub-side changes produce no HAPI SSE event and the global query
-        // client disables refetch-on-focus, so without polling the board can
-        // stay stale indefinitely while the view remains open. Pauses
-        // automatically while the tab is backgrounded (refetchIntervalInBackground
-        // defaults to false).
-        refetchInterval: 60_000,
+        // Deliberately no polling/refetchInterval (operator decision,
+        // 2026-10-11, matching the original design doc's non-goal): GitHub
+        // Projects reads are heavier than a REST poll, so staleness is
+        // handled by an explicit refresh action in the UI instead of
+        // hammering the API on an interval.
     })
 
     return {
@@ -39,6 +39,7 @@ export function useTodoBoardItems(api: ApiClient | null, boardId: string | null)
         statusOrder: query.data?.statusOrder ?? EMPTY_STRINGS,
         doneValues: query.data?.doneValues ?? EMPTY_STRINGS,
         isLoading: query.isLoading,
+        isRefetching: query.isRefetching,
         error: query.error instanceof Error ? query.error.message : query.error ? 'Failed to load board items' : null,
         refetch: query.refetch,
     }

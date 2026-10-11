@@ -1,7 +1,16 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { Hono } from 'hono'
-import { AddTodoBoardRequestSchema, type TodoBoardItem, type TodoBoardItemsResponse, type TodoBoardsResponse } from '@hapi/protocol'
+import {
+    AddTodoBoardRequestSchema,
+    TodoItemCloseRequestSchema,
+    TodoItemCommentRequestSchema,
+    TodoItemReopenRequestSchema,
+    TodoItemStatusRequestSchema,
+    type TodoBoardItem,
+    type TodoBoardItemsResponse,
+    type TodoBoardsResponse
+} from '@hapi/protocol'
 import type { WebAppEnv } from '../middleware/auth'
 import { getSettingsFile, readSettingsOrThrow, updateSettings, type StoredTodoBoard } from '../../config/settings'
 
@@ -147,16 +156,38 @@ async function updateTodoBoards(
 
 const GH_TIMEOUT_MS = 15_000
 
+// Shared by Issue and PullRequest — everything the detail pane needs besides
+// status (handled separately via fieldValueByName) and the project's other
+// custom fields (handled generically via fieldValues below). DraftIssue has
+// none of these — it's a title-only card with no linked Issue/PR, so it also
+// has no author/assignees/labels/milestone/close-reopen-comment support.
+const ISSUE_OR_PR_FIELDS = `
+  title number url state updatedAt createdAt closedAt body
+  repository { nameWithOwner }
+  author { login avatarUrl }
+  assignees(first: 10) { nodes { login avatarUrl } }
+  labels(first: 20) { nodes { name color } }
+  milestone { title dueOn }`
+
 const ITEM_FIELDS = `
   id
   content {
     __typename
-    ... on Issue { title number url state updatedAt body repository { nameWithOwner } }
-    ... on PullRequest { title number url state updatedAt body repository { nameWithOwner } }
+    ... on Issue { ${ISSUE_OR_PR_FIELDS} }
+    ... on PullRequest { ${ISSUE_OR_PR_FIELDS} }
     ... on DraftIssue { title updatedAt body }
   }
   fieldValueByName(name: $statusField) {
     ... on ProjectV2ItemFieldSingleSelectValue { name }
+  }
+  fieldValues(first: 20) {
+    nodes {
+      __typename
+      ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2FieldCommon { name } } }
+      ... on ProjectV2ItemFieldTextValue { text field { ... on ProjectV2FieldCommon { name } } }
+      ... on ProjectV2ItemFieldNumberValue { number field { ... on ProjectV2FieldCommon { name } } }
+      ... on ProjectV2ItemFieldDateValue { date field { ... on ProjectV2FieldCommon { name } } }
+    }
   }`
 
 const PROJECT_QUERY = `
@@ -249,6 +280,13 @@ query($login: String!, $number: Int!, $viewNumber: Int!) {
   }
 }`
 
+type GhFieldValueNode =
+    | { __typename: 'ProjectV2ItemFieldSingleSelectValue'; name?: string; field?: { name?: string } | null }
+    | { __typename: 'ProjectV2ItemFieldTextValue'; text?: string; field?: { name?: string } | null }
+    | { __typename: 'ProjectV2ItemFieldNumberValue'; number?: number; field?: { name?: string } | null }
+    | { __typename: 'ProjectV2ItemFieldDateValue'; date?: string; field?: { name?: string } | null }
+    | { __typename: string; field?: { name?: string } | null }
+
 type GhProjectV2Response = {
     data?: {
         repositoryOwner?: {
@@ -268,10 +306,19 @@ type GhProjectV2Response = {
                             url?: string
                             state?: 'OPEN' | 'CLOSED' | 'MERGED'
                             updatedAt?: string
+                            createdAt?: string
+                            closedAt?: string | null
                             body?: string
                             repository?: { nameWithOwner: string }
+                            author?: { login: string; avatarUrl: string } | null
+                            assignees?: { nodes?: Array<{ login: string; avatarUrl: string } | null> }
+                            labels?: { nodes?: Array<{ name: string; color: string } | null> }
+                            milestone?: { title: string; dueOn: string | null } | null
                         } | null
                         fieldValueByName?: { name: string } | null
+                        fieldValues?: {
+                            nodes?: Array<GhFieldValueNode | null>
+                        } | null
                     } | null>
                 } | null
             } | null
@@ -324,6 +371,19 @@ type ProjectViewLookupTarget = {
     viewNumber: number
 }
 
+// Shared by every `gh` invocation below — surfaces a clear message for the
+// "gh isn't installed" case instead of a raw ENOENT, and otherwise prefers
+// gh's own stderr (the actually-useful part of a failure) over Node's
+// generic "Command failed" error text.
+function normalizeGhError(error: unknown, prefix?: string): Error {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+        return new Error('gh CLI not available: spawn gh ENOENT')
+    }
+    const stderr = error && typeof error === 'object' && 'stderr' in error ? String(error.stderr).trim() : ''
+    const message = stderr || (error instanceof Error ? error.message : String(error))
+    return new Error(prefix ? `${prefix}: ${message}` : message)
+}
+
 // Async (not spawnSync): this runs on the shared hub event loop, and a slow
 // or rate-limited GitHub response must not stall every other request in
 // flight (SSE streams, unrelated API calls) for the duration of the call.
@@ -344,11 +404,113 @@ async function execGhGraphql(host: string, query: string, variables: Record<stri
         const result = await execFileAsync('gh', args, { encoding: 'utf-8', timeout: GH_TIMEOUT_MS, maxBuffer: 20 * 1024 * 1024 })
         return result.stdout
     } catch (error) {
-        if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
-            throw new Error('gh CLI not available: spawn gh ENOENT')
-        }
-        const stderr = error && typeof error === 'object' && 'stderr' in error ? String(error.stderr).trim() : ''
-        throw new Error(`gh api graphql failed: ${stderr || (error instanceof Error ? error.message : String(error))}`)
+        throw normalizeGhError(error, 'gh api graphql failed')
+    }
+}
+
+// Non-GraphQL `gh` subcommands (issue/pr close-reopen-comment, project
+// item-edit) — GH_HOST routes them to the right host the same way
+// `--hostname` does for `gh api`, confirmed by hand against both github.com
+// and the real lhs.ghe.com host before landing this (gh project field-list
+// --owner lockhouse correctly listed that GHE project's fields under
+// GH_HOST=lhs.ghe.com). Set unconditionally rather than relying on `gh`
+// inferring the host from a URL argument, for the same reason execGhGraphql
+// always passes --hostname explicitly: no silent dependency on ambient state.
+async function execGh(args: string[], host: string): Promise<string> {
+    try {
+        const result = await execFileAsync('gh', args, {
+            encoding: 'utf-8',
+            timeout: GH_TIMEOUT_MS,
+            env: { ...process.env, GH_HOST: host }
+        })
+        return result.stdout
+    } catch (error) {
+        throw normalizeGhError(error)
+    }
+}
+
+export type TodoItemActionTarget = { host: string; url: string; isPullRequest: boolean }
+export type TodoItemStatusTarget = { host: string; ownerLogin: string; projectNumber: number; url: string; fieldName: string; status: string }
+
+export type TodoItemActions = {
+    close: (target: TodoItemActionTarget, comment?: string) => Promise<void>
+    reopen: (target: TodoItemActionTarget, comment?: string) => Promise<void>
+    comment: (target: TodoItemActionTarget, body: string) => Promise<void>
+    setStatus: (target: TodoItemStatusTarget) => Promise<void>
+}
+
+export const defaultTodoItemActions: TodoItemActions = {
+    close: async (target, comment) => {
+        const args = [target.isPullRequest ? 'pr' : 'issue', 'close', target.url]
+        if (comment) args.push('--comment', comment)
+        await execGh(args, target.host)
+    },
+    reopen: async (target, comment) => {
+        const args = [target.isPullRequest ? 'pr' : 'issue', 'reopen', target.url]
+        if (comment) args.push('--comment', comment)
+        await execGh(args, target.host)
+    },
+    comment: async (target, body) => {
+        const args = [target.isPullRequest ? 'pr' : 'issue', 'comment', target.url, '--body', body]
+        await execGh(args, target.host)
+    },
+    // Name-based (project number + owner + item URL + field name + option
+    // name), not the ID-based `--id/--field-id/--project-id` form: `gh
+    // project item-edit` resolves all of those from names on its own
+    // (confirmed by hand), so there's no need to thread through GraphQL node
+    // IDs for status-change at all.
+    setStatus: async (target) => {
+        const args = [
+            'project', 'item-edit', String(target.projectNumber),
+            '--owner', target.ownerLogin,
+            '--url', target.url,
+            '--field', target.fieldName,
+            '--value', target.status
+        ]
+        await execGh(args, target.host)
+    }
+}
+
+// A write-action target URL must match the board's own host and be a
+// well-formed issue/pull-request path — without this, a JWT caller could
+// pass an arbitrary URL and have the hub shell out `gh issue close
+// <attacker-controlled-url>` against it, the same SSRF-class exposure the
+// board-add host allowlist closed for reads (hapi#238).
+export type ValidatedItemUrl = { url: string; isPullRequest: boolean }
+
+// Confirmed by hand: `gh issue/pr close|reopen|comment <url>` dials the URL's
+// own embedded host for the network request regardless of GH_HOST or any
+// other ambient config — `GH_HOST=github.com gh issue view
+// https://attacker.example/o/r/issues/1` still attempts to connect to
+// attacker.example. That makes this check the *only* real defense, not
+// defense-in-depth alongside GH_HOST, so it rebuilds a canonical URL from
+// validated parts rather than trusting the client-supplied string to reach
+// `gh` unchanged — eliminates any risk of the hub's URL parser (WHATWG) and
+// gh's own (Go's net/url) disagreeing on what a given string resolves to.
+// Also derives `isPullRequest` from the validated path itself rather than
+// trusting a client-supplied boolean, which could otherwise mismatch the
+// actual resource and run the wrong `gh issue`/`gh pr` verb against it.
+export function parseValidatedItemUrl(url: string, board: Pick<StoredTodoBoard, 'host'>): ValidatedItemUrl | null {
+    let parsed: URL
+    try {
+        parsed = new URL(url)
+    } catch {
+        return null
+    }
+    if (parsed.protocol !== 'https:') {
+        return null
+    }
+    if (parsed.hostname.toLowerCase() !== board.host.toLowerCase()) {
+        return null
+    }
+    const match = /^\/([^/]+)\/([^/]+)\/(issues|pull)\/(\d+)\/?$/.exec(parsed.pathname)
+    if (!match) {
+        return null
+    }
+    const [, owner, repo, kind, number] = match
+    return {
+        url: `https://${parsed.hostname}/${owner}/${repo}/${kind}/${number}`,
+        isPullRequest: kind === 'pull'
     }
 }
 
@@ -453,13 +615,41 @@ async function runGhGraphqlTitle(target: ProjectLookupTarget): Promise<GhProject
     }
 }
 
-function mapItems(response: GhProjectV2Response): TodoBoardItem[] {
+/** Normalizes one of the four scalar-ish field-value shapes to a display string; returns null for a type this UI doesn't render (iteration, reviewer, etc.) rather than guessing. */
+function formatCustomFieldValue(node: GhFieldValueNode | null | undefined): string | null {
+    if (!node) return null
+    switch (node.__typename) {
+        case 'ProjectV2ItemFieldSingleSelectValue':
+            return 'name' in node && node.name ? node.name : null
+        case 'ProjectV2ItemFieldTextValue':
+            return 'text' in node && node.text ? node.text : null
+        case 'ProjectV2ItemFieldNumberValue':
+            return 'number' in node && typeof node.number === 'number' ? String(node.number) : null
+        case 'ProjectV2ItemFieldDateValue':
+            return 'date' in node && node.date ? node.date : null
+        default:
+            return null
+    }
+}
+
+function mapItems(response: GhProjectV2Response, statusFieldName: string): TodoBoardItem[] {
     const nodes = response.data?.repositoryOwner?.projectV2?.items?.nodes ?? []
     const items: TodoBoardItem[] = []
     for (const node of nodes) {
         if (!node?.content) {
             continue
         }
+        const customFields: TodoBoardItem['customFields'] = []
+        for (const fieldValue of node.fieldValues?.nodes ?? []) {
+            const fieldName = fieldValue?.field?.name
+            // Excludes the dedicated Status field — already surfaced via
+            // fieldValueByName/statusOrder, would otherwise duplicate here.
+            if (!fieldName || fieldName === statusFieldName) continue
+            const value = formatCustomFieldValue(fieldValue)
+            if (value === null) continue
+            customFields.push({ name: fieldName, value })
+        }
+
         items.push({
             id: node.id,
             title: node.content.title ?? '(untitled)',
@@ -469,7 +659,15 @@ function mapItems(response: GhProjectV2Response): TodoBoardItem[] {
             state: node.content.state ?? null,
             status: node.fieldValueByName?.name ?? null,
             updatedAt: node.content.updatedAt ?? null,
-            body: node.content.body ?? null
+            body: node.content.body ?? null,
+            isPullRequest: node.content.__typename === 'PullRequest',
+            createdAt: node.content.createdAt ?? null,
+            closedAt: node.content.closedAt ?? null,
+            author: node.content.author ? { login: node.content.author.login, avatarUrl: node.content.author.avatarUrl } : null,
+            assignees: (node.content.assignees?.nodes ?? []).filter((a): a is { login: string; avatarUrl: string } => a !== null),
+            labels: (node.content.labels?.nodes ?? []).filter((l): l is { name: string; color: string } => l !== null),
+            milestone: node.content.milestone ? { title: node.content.milestone.title, dueOn: node.content.milestone.dueOn } : null,
+            customFields
         })
     }
     return items
@@ -548,7 +746,8 @@ export function createTodoBoardRoutes(
     dataDir: string,
     runGraphql: (target: ProjectQueryTarget) => GhProjectV2Response | Promise<GhProjectV2Response> = runGhGraphql,
     runGraphqlTitle: (target: ProjectLookupTarget) => GhProjectTitleResponse | Promise<GhProjectTitleResponse> = runGhGraphqlTitle,
-    runGraphqlView: (target: ProjectViewLookupTarget) => GhProjectViewResponse | Promise<GhProjectViewResponse> = runGhGraphqlView
+    runGraphqlView: (target: ProjectViewLookupTarget) => GhProjectViewResponse | Promise<GhProjectViewResponse> = runGhGraphqlView,
+    actions: TodoItemActions = defaultTodoItemActions
 ): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
@@ -697,7 +896,7 @@ export function createTodoBoardRoutes(
                 board: toSummary(board),
                 statusOrder,
                 doneValues: board.doneValues,
-                items: mapItems(ghResponse)
+                items: mapItems(ghResponse, board.statusFieldName)
             }
             return c.json(body)
         } catch (error) {
@@ -711,6 +910,116 @@ export function createTodoBoardRoutes(
                 return c.json({ error: message }, 404)
             }
             return c.json({ error: message }, 502)
+        }
+    })
+
+    async function requireBoardAndValidUrl(
+        boardId: string,
+        url: string
+    ): Promise<
+        | { ok: true; board: StoredTodoBoard; url: string; isPullRequest: boolean }
+        | { ok: false; error: string; status: 400 | 404 }
+    > {
+        const boards = await loadTodoBoards(dataDir)
+        const board = boards.find(b => b.id === boardId)
+        if (!board) {
+            return { ok: false, error: 'Unknown board', status: 404 }
+        }
+        const validated = parseValidatedItemUrl(url, board)
+        if (!validated) {
+            return { ok: false, error: 'Item URL does not belong to this board', status: 400 }
+        }
+        return { ok: true, board, url: validated.url, isPullRequest: validated.isPullRequest }
+    }
+
+    app.post('/todo-boards/:id/items/close', async (c) => {
+        if (c.get('namespace') !== 'default') {
+            return c.json({ error: OWNER_ONLY_ERROR }, 403)
+        }
+        const json = await c.req.json().catch(() => null)
+        const parsed = TodoItemCloseRequestSchema.safeParse(json)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body — expected { url: string, comment?: string }' }, 400)
+        }
+        const resolved = await requireBoardAndValidUrl(c.req.param('id'), parsed.data.url)
+        if (!resolved.ok) {
+            return c.json({ error: resolved.error }, resolved.status)
+        }
+        try {
+            await actions.close({ host: resolved.board.host, url: resolved.url, isPullRequest: resolved.isPullRequest }, parsed.data.comment)
+            return c.json({ ok: true })
+        } catch (error) {
+            return c.json({ error: error instanceof Error ? error.message : 'Failed to close item' }, 502)
+        }
+    })
+
+    app.post('/todo-boards/:id/items/reopen', async (c) => {
+        if (c.get('namespace') !== 'default') {
+            return c.json({ error: OWNER_ONLY_ERROR }, 403)
+        }
+        const json = await c.req.json().catch(() => null)
+        const parsed = TodoItemReopenRequestSchema.safeParse(json)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body — expected { url: string, comment?: string }' }, 400)
+        }
+        const resolved = await requireBoardAndValidUrl(c.req.param('id'), parsed.data.url)
+        if (!resolved.ok) {
+            return c.json({ error: resolved.error }, resolved.status)
+        }
+        try {
+            await actions.reopen({ host: resolved.board.host, url: resolved.url, isPullRequest: resolved.isPullRequest }, parsed.data.comment)
+            return c.json({ ok: true })
+        } catch (error) {
+            return c.json({ error: error instanceof Error ? error.message : 'Failed to reopen item' }, 502)
+        }
+    })
+
+    app.post('/todo-boards/:id/items/comment', async (c) => {
+        if (c.get('namespace') !== 'default') {
+            return c.json({ error: OWNER_ONLY_ERROR }, 403)
+        }
+        const json = await c.req.json().catch(() => null)
+        const parsed = TodoItemCommentRequestSchema.safeParse(json)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body — expected { url: string, body: string }' }, 400)
+        }
+        const resolved = await requireBoardAndValidUrl(c.req.param('id'), parsed.data.url)
+        if (!resolved.ok) {
+            return c.json({ error: resolved.error }, resolved.status)
+        }
+        try {
+            await actions.comment({ host: resolved.board.host, url: resolved.url, isPullRequest: resolved.isPullRequest }, parsed.data.body)
+            return c.json({ ok: true })
+        } catch (error) {
+            return c.json({ error: error instanceof Error ? error.message : 'Failed to comment on item' }, 502)
+        }
+    })
+
+    app.post('/todo-boards/:id/items/status', async (c) => {
+        if (c.get('namespace') !== 'default') {
+            return c.json({ error: OWNER_ONLY_ERROR }, 403)
+        }
+        const json = await c.req.json().catch(() => null)
+        const parsed = TodoItemStatusRequestSchema.safeParse(json)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body — expected { url: string, status: string }' }, 400)
+        }
+        const resolved = await requireBoardAndValidUrl(c.req.param('id'), parsed.data.url)
+        if (!resolved.ok) {
+            return c.json({ error: resolved.error }, resolved.status)
+        }
+        try {
+            await actions.setStatus({
+                host: resolved.board.host,
+                ownerLogin: resolved.board.ownerLogin,
+                projectNumber: resolved.board.projectNumber,
+                url: resolved.url,
+                fieldName: resolved.board.statusFieldName,
+                status: parsed.data.status
+            })
+            return c.json({ ok: true })
+        } catch (error) {
+            return c.json({ error: error instanceof Error ? error.message : 'Failed to update status' }, 502)
         }
     })
 

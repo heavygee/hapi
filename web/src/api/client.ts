@@ -782,6 +782,34 @@ export class ApiClient {
         })
     }
 
+    async closeTodoItem(boardId: string, url: string, comment?: string): Promise<void> {
+        await this.request(`/api/todo-boards/${encodeURIComponent(boardId)}/items/close`, {
+            method: 'POST',
+            body: JSON.stringify({ url, comment })
+        })
+    }
+
+    async reopenTodoItem(boardId: string, url: string, comment?: string): Promise<void> {
+        await this.request(`/api/todo-boards/${encodeURIComponent(boardId)}/items/reopen`, {
+            method: 'POST',
+            body: JSON.stringify({ url, comment })
+        })
+    }
+
+    async commentOnTodoItem(boardId: string, url: string, body: string): Promise<void> {
+        await this.request(`/api/todo-boards/${encodeURIComponent(boardId)}/items/comment`, {
+            method: 'POST',
+            body: JSON.stringify({ url, body })
+        })
+    }
+
+    async setTodoItemStatus(boardId: string, url: string, status: string): Promise<void> {
+        await this.request(`/api/todo-boards/${encodeURIComponent(boardId)}/items/status`, {
+            method: 'POST',
+            body: JSON.stringify({ url, status })
+        })
+    }
+
     /** Pass an empty string to clear the custom name and fall back to the hostname. */
     async renameMachine(machineId: string, displayName: string): Promise<void> {
         await this.request(`/api/machines/${encodeURIComponent(machineId)}`, {

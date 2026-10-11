@@ -13,6 +13,14 @@ function makeItem(overrides: Partial<TodoBoardItem>): TodoBoardItem {
         status: null,
         updatedAt: null,
         body: null,
+        isPullRequest: false,
+        createdAt: null,
+        closedAt: null,
+        author: null,
+        assignees: [],
+        labels: [],
+        milestone: null,
+        customFields: [],
         ...overrides
     }
 }

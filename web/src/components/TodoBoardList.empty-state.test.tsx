@@ -21,6 +21,8 @@ function renderList() {
                 error={null}
                 selectedItemId={null}
                 onSelectItem={vi.fn()}
+                onRefresh={vi.fn()}
+                isRefreshing={false}
             />
         </I18nProvider>
     )
