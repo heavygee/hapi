@@ -413,7 +413,7 @@ describe('GET /api/todo-boards/:id/items', () => {
 
     it('applies HAPI_TODO_BOARD_DONE_VALUES as a comma-separated override', async () => {
         process.env.HAPI_TODO_BOARD_DONE_VALUES = 'Done, Archived'
-        const app = await createApp(() => ({ data: {} }))
+        const app = await createApp(() => ({ data: { repositoryOwner: { projectV2: { field: { options: [] }, items: { nodes: [] } } } } }))
         const response = await app.request('/api/todo-boards/github.com%3A%3Aheavygee%3A%3A6/items')
         const body = await response.json() as TodoBoardItemsResponse
         expect(body.doneValues).toEqual(['Done', 'Archived'])
