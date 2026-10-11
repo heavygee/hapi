@@ -179,7 +179,8 @@ describe('UnifiedButton — fill-height primary (voice ↔ send)', () => {
             voiceStatus: 'disconnected',
         })).toBe(true)
         expect(unifiedButtonSizeClass(true)).toContain('h-full')
-        expect(unifiedButtonSizeClass(true)).toContain('w-14')
+        expect(unifiedButtonSizeClass(true)).toContain('w-16')
+        expect(unifiedButtonSizeClass(true)).toContain('rounded-r-[20px]')
 
         renderInProviders(
             <UnifiedButton
@@ -196,7 +197,7 @@ describe('UnifiedButton — fill-height primary (voice ↔ send)', () => {
         const btn = getButton(/^Dictate/)
         expect(btn.getAttribute('data-size')).toBe('fill')
         expect(btn.className).toContain('h-full')
-        expect(btn.className).toContain('w-14')
+        expect(btn.className).toContain('w-16')
     })
 
     it('keeps the same fill-height layout when a draft swaps the icon to Send', () => {
@@ -226,7 +227,7 @@ describe('UnifiedButton — fill-height primary (voice ↔ send)', () => {
         const btn = getButton('Send')
         expect(btn.getAttribute('data-size')).toBe('fill')
         expect(btn.className).toContain('h-full')
-        expect(btn.className).toContain('w-14')
+        expect(btn.className).toContain('w-16')
     })
 
     it('fills height while voice is connected (stop)', () => {

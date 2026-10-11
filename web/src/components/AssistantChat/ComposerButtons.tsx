@@ -106,7 +106,8 @@ export function isLargeEmptyVoicePrimary(args: {
 
 export function unifiedButtonSizeClass(fillHeight: boolean): string {
     return fillHeight
-        ? 'h-full min-h-14 w-14 self-stretch rounded-2xl'
+        // Flush to composer-card right edge (card is rounded-[20px]); no inset padding.
+        ? 'h-full min-h-14 w-16 self-stretch rounded-none rounded-r-[20px]'
         : 'h-8 w-8 rounded-full'
 }
 
