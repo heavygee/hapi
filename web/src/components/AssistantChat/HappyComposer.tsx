@@ -49,7 +49,7 @@ import { useComposerEnterBehavior } from '@/hooks/useComposerEnterBehavior'
 import { FloatingOverlay } from '@/components/ChatInput/FloatingOverlay'
 import { Autocomplete } from '@/components/ChatInput/Autocomplete'
 import { StatusBar } from '@/components/AssistantChat/StatusBar'
-import { ComposerButtons } from '@/components/AssistantChat/ComposerButtons'
+import { ComposerButtons, UnifiedButton } from '@/components/AssistantChat/ComposerButtons'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import { SortableComposerAttachments } from '@/components/AssistantChat/SortableComposerAttachments'
 import { ComposerParkingContext } from '@/components/AssistantChat/composerParkingContext'
@@ -2285,126 +2285,149 @@ export function HappyComposer(props: {
                     ) : null}
 
                     <div
-                        className={`overflow-hidden rounded-[20px] bg-[var(--app-secondary-bg)] ${
-                            isExpanded ? 'flex min-h-0 flex-1 flex-col' : ''
+                        className={`flex overflow-hidden rounded-[20px] bg-[var(--app-secondary-bg)] ${
+                            isExpanded ? 'min-h-0 flex-1' : ''
                         } ${
                             sendError ? 'ring-1 ring-red-500' : ''
                         }`}
+                        data-testid="composer-card"
                     >
-                        {attachments.length > 0 ? (
-                            <div className={`flex flex-wrap gap-2 px-4 pt-3 ${
-                                isExpanded ? 'max-h-[35%] shrink-0 overflow-y-auto' : ''
-                            }`}>
-                                <SortableComposerAttachments
-                                    attachments={attachments}
-                                    orderedAttachmentIds={orderedAttachmentIds}
-                                    disabled={controlsDisabled}
-                                    onReorder={handleAttachmentReorder}
-                                />
-                            </div>
-                        ) : null}
-
-                        <div className={`flex px-4 py-3 ${
-                            isExpanded ? 'min-h-0 flex-1 items-stretch' : 'items-center'
+                        <div className={`flex min-w-0 flex-1 flex-col ${
+                            isExpanded ? 'min-h-0' : ''
                         }`}>
-                            {richMentionsEnabled ? (
-                                <RichComposerInput
-                                    ref={richInputRef}
-                                    value={composerText}
-                                    autoFocus={!controlsDisabled && !isTouch}
-                                    placeholder={showContinueHint ? t('misc.typeMessage') : t('misc.typeAMessage')}
-                                    disabled={controlsDisabled}
-                                    onValueChange={handleRichValueChange}
-                                    onMirrorChange={handleRichMirrorChange}
-                                    onKeyDown={handleKeyDown}
-                                    onPaste={handlePaste}
-                                    resolveSessionMentionTooltip={resolveSessionMentionTooltip}
-                                    onEdit={handleRichEdit}
-                                    className={editorClassName}
-                                />
-                            ) : isExpanded ? (
-                                <ComposerPrimitive.Input
-                                    asChild
-                                    ref={textareaRef}
-                                    autoFocus={!controlsDisabled && !isTouch}
-                                    submitOnEnter={false}
-                                    cancelOnEscape={false}
-                                    onChange={handleChange}
-                                    onSelect={handleSelect}
-                                    onKeyDown={handleKeyDown}
-                                    onPaste={handlePaste}
-                                >
-                                    <textarea
+                            {attachments.length > 0 ? (
+                                <div className={`flex flex-wrap gap-2 px-4 pt-3 ${
+                                    isExpanded ? 'max-h-[35%] shrink-0 overflow-y-auto' : ''
+                                }`}>
+                                    <SortableComposerAttachments
+                                        attachments={attachments}
+                                        orderedAttachmentIds={orderedAttachmentIds}
+                                        disabled={controlsDisabled}
+                                        onReorder={handleAttachmentReorder}
+                                    />
+                                </div>
+                            ) : null}
+
+                            <div className={`flex px-4 py-3 ${
+                                isExpanded ? 'min-h-0 flex-1 items-stretch' : 'items-center'
+                            }`}>
+                                {richMentionsEnabled ? (
+                                    <RichComposerInput
+                                        ref={richInputRef}
+                                        value={composerText}
+                                        autoFocus={!controlsDisabled && !isTouch}
                                         placeholder={showContinueHint ? t('misc.typeMessage') : t('misc.typeAMessage')}
                                         disabled={controlsDisabled}
-                                        className="h-full min-h-0 flex-1 resize-none overflow-y-auto bg-transparent text-base leading-snug text-[var(--app-fg)] placeholder-[var(--app-hint)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                                        onValueChange={handleRichValueChange}
+                                        onMirrorChange={handleRichMirrorChange}
+                                        onKeyDown={handleKeyDown}
+                                        onPaste={handlePaste}
+                                        resolveSessionMentionTooltip={resolveSessionMentionTooltip}
+                                        onEdit={handleRichEdit}
+                                        className={editorClassName}
                                     />
-                                </ComposerPrimitive.Input>
-                            ) : (
-                                <ComposerPrimitive.Input
-                                    ref={textareaRef}
-                                    autoFocus={!controlsDisabled && !isTouch}
-                                    placeholder={showContinueHint ? t('misc.typeMessage') : t('misc.typeAMessage')}
-                                    disabled={controlsDisabled}
-                                    maxRows={5}
-                                    submitOnEnter={false}
-                                    cancelOnEscape={false}
-                                    onChange={handleChange}
-                                    onSelect={handleSelect}
-                                    onKeyDown={handleKeyDown}
-                                    onPaste={handlePaste}
-                                    className="flex-1 resize-none bg-transparent text-base leading-snug text-[var(--app-fg)] placeholder-[var(--app-hint)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-                                />
-                            )}
-                        </div>
+                                ) : isExpanded ? (
+                                    <ComposerPrimitive.Input
+                                        asChild
+                                        ref={textareaRef}
+                                        autoFocus={!controlsDisabled && !isTouch}
+                                        submitOnEnter={false}
+                                        cancelOnEscape={false}
+                                        onChange={handleChange}
+                                        onSelect={handleSelect}
+                                        onKeyDown={handleKeyDown}
+                                        onPaste={handlePaste}
+                                    >
+                                        <textarea
+                                            placeholder={showContinueHint ? t('misc.typeMessage') : t('misc.typeAMessage')}
+                                            disabled={controlsDisabled}
+                                            className="h-full min-h-0 flex-1 resize-none overflow-y-auto bg-transparent text-base leading-snug text-[var(--app-fg)] placeholder-[var(--app-hint)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                                        />
+                                    </ComposerPrimitive.Input>
+                                ) : (
+                                    <ComposerPrimitive.Input
+                                        ref={textareaRef}
+                                        autoFocus={!controlsDisabled && !isTouch}
+                                        placeholder={showContinueHint ? t('misc.typeMessage') : t('misc.typeAMessage')}
+                                        disabled={controlsDisabled}
+                                        maxRows={5}
+                                        submitOnEnter={false}
+                                        cancelOnEscape={false}
+                                        onChange={handleChange}
+                                        onSelect={handleSelect}
+                                        onKeyDown={handleKeyDown}
+                                        onPaste={handlePaste}
+                                        className="flex-1 resize-none bg-transparent text-base leading-snug text-[var(--app-fg)] placeholder-[var(--app-hint)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                                    />
+                                )}
+                            </div>
 
-                        <ComposerButtons
-                            canSend={canSend}
-                            controlsDisabled={controlsDisabled}
-                            showSettingsButton={showSettingsButton}
-                            settingsButtonRef={settingsButtonRef}
-                            settingsDisabled={modelEffortControlsDisabled}
-                            modelValueButtonRef={modelValueButtonRef}
-                            effortValueButtonRef={effortValueButtonRef}
-                            onSettingsToggle={handleGearToggle}
-                            expanded={isExpanded}
-                            onExpandedToggle={handleExpandedToggle}
-                            showTerminalButton={showTerminalButton}
-                            terminalDisabled={terminalDisabled}
-                            terminalLabel={terminalLabel}
-                            onTerminal={onTerminal ?? (() => {})}
-                            showAbortButton={showAbortButton}
-                            abortDisabled={abortDisabled}
-                            isAborting={isAborting}
-                            onAbort={handleAbort}
-                            showSwitchButton={showSwitchButton}
-                            switchDisabled={switchDisabled}
-                            isSwitching={isSwitching}
-                            onSwitch={handleSwitch}
-                            voiceEnabled={voiceEnabled}
-                            dictationEnabled={dictationActive}
-                            voiceStatus={effectiveVoiceStatus}
-                            voiceMicMuted={dictationActive ? false : voiceMicMuted}
-                            onVoiceToggle={effectiveVoiceToggle ?? (() => {})}
-                            onVoiceMicToggle={dictationActive ? undefined : onVoiceMicToggle}
-                            onSend={handleSend}
-                            pendingSchedule={pendingSchedule}
-                            onSchedule={handleUserSchedule}
-                            onClearSchedule={onUserClearSchedule}
-                            hasAttachments={blocksScheduling}
-                            modelValueLabel={modelValueLabel}
-                            modelValueDisabled={modelEffortControlsDisabled}
-                            modelValueOpen={showSettings && settingsSection !== 'effort'}
-                            onModelValueToggle={handleModelValueToggle}
-                            effortValueLabel={effortValueLabel}
-                            effortValueDisabled={modelEffortControlsDisabled}
-                            effortValueOpen={showSettings && settingsSection !== 'model'}
-                            onEffortValueToggle={handleEffortValueToggle}
-                            scratchlistMode={props.scratchlistMode}
-                            scratchlistCount={props.scratchlistCount}
-                            onScratchlistToggle={props.onScratchlistToggle}
-                            codexUsage={composerCodexUsageForGauge(agentFlavor, codexUsage)}
-                        />
+                            <ComposerButtons
+                                canSend={canSend}
+                                controlsDisabled={controlsDisabled}
+                                showSettingsButton={showSettingsButton}
+                                settingsButtonRef={settingsButtonRef}
+                                settingsDisabled={modelEffortControlsDisabled}
+                                modelValueButtonRef={modelValueButtonRef}
+                                effortValueButtonRef={effortValueButtonRef}
+                                onSettingsToggle={handleGearToggle}
+                                expanded={isExpanded}
+                                onExpandedToggle={handleExpandedToggle}
+                                showTerminalButton={showTerminalButton}
+                                terminalDisabled={terminalDisabled}
+                                terminalLabel={terminalLabel}
+                                onTerminal={onTerminal ?? (() => {})}
+                                showAbortButton={showAbortButton}
+                                abortDisabled={abortDisabled}
+                                isAborting={isAborting}
+                                onAbort={handleAbort}
+                                showSwitchButton={showSwitchButton}
+                                switchDisabled={switchDisabled}
+                                isSwitching={isSwitching}
+                                onSwitch={handleSwitch}
+                                voiceEnabled={voiceEnabled}
+                                dictationEnabled={dictationActive}
+                                voiceStatus={effectiveVoiceStatus}
+                                voiceMicMuted={dictationActive ? false : voiceMicMuted}
+                                onVoiceToggle={effectiveVoiceToggle ?? (() => {})}
+                                onVoiceMicToggle={dictationActive ? undefined : onVoiceMicToggle}
+                                onSend={handleSend}
+                                pendingSchedule={pendingSchedule}
+                                onSchedule={handleUserSchedule}
+                                onClearSchedule={onUserClearSchedule}
+                                hasAttachments={blocksScheduling}
+                                modelValueLabel={modelValueLabel}
+                                modelValueDisabled={modelEffortControlsDisabled}
+                                modelValueOpen={showSettings && settingsSection !== 'effort'}
+                                onModelValueToggle={handleModelValueToggle}
+                                effortValueLabel={effortValueLabel}
+                                effortValueDisabled={modelEffortControlsDisabled}
+                                effortValueOpen={showSettings && settingsSection !== 'model'}
+                                onEffortValueToggle={handleEffortValueToggle}
+                                scratchlistMode={props.scratchlistMode}
+                                scratchlistCount={props.scratchlistCount}
+                                onScratchlistToggle={props.onScratchlistToggle}
+                                codexUsage={composerCodexUsageForGauge(agentFlavor, codexUsage)}
+                                omitPrimaryButton
+                            />
+                        </div>
+                        {/* Full-height primary: empty → voice/dictate; draft → Send. */}
+                        <div className="flex shrink-0 items-stretch p-2 pl-1">
+                            <UnifiedButton
+                                canSend={canSend}
+                                voiceStatus={effectiveVoiceStatus}
+                                voiceEnabled={voiceEnabled}
+                                controlsDisabled={controlsDisabled}
+                                onSend={handleSend}
+                                onVoiceToggle={effectiveVoiceToggle ?? (() => {})}
+                                voiceLabel={dictationActive ? t('composer.dictate') : undefined}
+                                fillHeight
+                                routesToScratchlist={
+                                    (props.scratchlistMode ?? false)
+                                    && pendingSchedule == null
+                                }
+                            />
+                        </div>
                     </div>
                 </ComposerPrimitive.Root>
             </div>
