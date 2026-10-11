@@ -28,9 +28,9 @@ import {
     RichComposerInput,
     type RichComposerInputHandle,
 } from '@/components/AssistantChat/RichComposerInput'
-import { useFue } from '@/lib/use-fue'
-import { FueCallout, FueDot } from '@/components/Fue'
 import type { AgentState, CodexCollaborationMode, PermissionMode, PiModelSummary } from '@/types/api'
+import type { CodexUsage } from '@hapi/protocol/types'
+import { composerCodexUsageForGauge } from '@/components/AssistantChat/codexBudgetAdapter'
 import type { Suggestion } from '@/hooks/useActiveSuggestions'
 import type { ConversationStatus } from '@/realtime/types'
 import { useActiveWord } from '@/hooks/useActiveWord'
@@ -42,13 +42,14 @@ import { supportsEffort, supportsModelChange, PI_THINKING_LEVEL_LABELS } from '@
 import type { PiThinkingLevel } from '@hapi/protocol'
 import { markSkillUsed } from '@/lib/recent-skills'
 import { useComposerDraft } from '@/hooks/useComposerDraft'
+import { saveDraft } from '@/lib/composer-drafts'
 import type { AttachmentDraftInput } from '@/lib/composer-attachment-drafts'
-import { persistInactiveComposerAttachments, setComposerDraftSnapshot, updateComposerDraftTextSnapshot, attachmentDraftRevision, resetInactiveComposerAttachmentVisibility } from '@/lib/composer-draft-transfer'
+import { clearComposerDraftSnapshot, persistInactiveComposerAttachments, setComposerDraftSnapshot, updateComposerDraftTextSnapshot, attachmentDraftRevision, resetInactiveComposerAttachmentVisibility } from '@/lib/composer-draft-transfer'
 import { useComposerEnterBehavior } from '@/hooks/useComposerEnterBehavior'
 import { FloatingOverlay } from '@/components/ChatInput/FloatingOverlay'
 import { Autocomplete } from '@/components/ChatInput/Autocomplete'
 import { StatusBar } from '@/components/AssistantChat/StatusBar'
-import { ComposerButtons, UnifiedButton } from '@/components/AssistantChat/ComposerButtons'
+import { ComposerButtons, DictationButton, UnifiedButton } from '@/components/AssistantChat/ComposerButtons'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import { SortableComposerAttachments } from '@/components/AssistantChat/SortableComposerAttachments'
 import { ComposerParkingContext } from '@/components/AssistantChat/composerParkingContext'
@@ -84,6 +85,31 @@ export function getComposerEscapeAction(input: {
 }
 
 /**
+ * Enter key after IME / Shift+Enter / suggestions / Alt+Enter queue are handled.
+ *
+ * Expanded composer always uses newline semantics (long-form drafting) even when
+ * Settings → Chat → Enter behavior is `send`. Collapsed honors that setting.
+ * Ctrl/Cmd+Enter sends in newline (or expanded) mode; plain modifiers otherwise
+ * are ignored (and the caller still preventDefaults in send mode).
+ */
+export type ComposerEnterKeyAction = 'send' | 'newline' | 'ignore'
+
+export function resolveComposerEnterKeyAction(input: {
+    composerEnterBehavior: 'send' | 'newline'
+    isExpanded: boolean
+    ctrlOrMeta: boolean
+    altKey: boolean
+}): ComposerEnterKeyAction {
+    const insertNewline = input.isExpanded || input.composerEnterBehavior === 'newline'
+    if (insertNewline) {
+        if (input.ctrlOrMeta && !input.altKey) return 'send'
+        return 'newline'
+    }
+    if (!input.ctrlOrMeta && !input.altKey) return 'send'
+    return 'ignore'
+}
+
+/**
  * One rejected send.  `id` is bumped per failure so two failures with the
  * same `text` still trigger a fresh restore (the dedupe key is the id, not
  * the text).
@@ -112,10 +138,10 @@ export type ComposerSendError = {
     scheduledAt: number | null
     /** False for guards that reject before the underlying message mutation starts. */
     mutationStarted: boolean
-    /** Wire mode retained for retry/error provenance; composer rendering is mode-agnostic. */
-    deliveryMode?: MessageDeliveryMode
     /** True once the user has retried; retain UI but never restore this id again. */
     restoreSuppressed: boolean
+    /** Preferred retry delivery when the failed send was queued vs steered. */
+    deliveryMode?: 'queue' | 'steer'
     action?: {
         label: string
         onClick: () => void
@@ -303,6 +329,7 @@ export function HappyComposer(props: {
     contextWindow?: number | null
     /** Model for the context-window heuristic; see StatusBar.contextModel. */
     contextModel?: string | null
+    codexUsage?: CodexUsage | null
     controlledByUser?: boolean
     concurrentClients?: boolean
     agentFlavor?: string | null
@@ -412,6 +439,7 @@ export function HappyComposer(props: {
         contextCacheRead,
         contextWindow,
         contextModel,
+        codexUsage,
         controlledByUser = false,
         concurrentClients = false,
         agentFlavor,
@@ -614,20 +642,7 @@ export function HappyComposer(props: {
     // Kill-switch only (?richMentions=0 / localStorage=0 / VITE=false). Mount-time
     // read — hard reload required, so no per-keystroke localStorage/URL parse.
     const [richMentionsEnabled] = useState(() => isRichComposerMentionsEnabled())
-    const {
-        status: richComposerFueStatus,
-        engage: engageRichComposerFue,
-        dismiss: dismissRichComposerFue,
-    } = useFue('rich-composer-mentions')
     const prevControlledByUser = useRef(controlledByUser)
-
-    // Composer itself is the affordance: open the FUE callout once the rich
-    // path is live. Relying on DOM focus alone is flaky (programmatic
-    // autofocus / Playwright headless often skip the focus event).
-    useEffect(() => {
-        if (!richMentionsEnabled) return
-        engageRichComposerFue()
-    }, [richMentionsEnabled, engageRichComposerFue])
 
     const recordUserEdit = useCallback(() => {
         userEditGenerationRef.current += 1
@@ -721,6 +736,20 @@ export function HappyComposer(props: {
             console.warn('[composer-draft] inactive persistence failed', error)
         })
     }, [active, attachmentRevision, draftHydration.complete, draftHydration.sessionId, props.canRestoreAttachments, sessionId])
+
+    useEffect(() => {
+        if (draftHydration.sessionId !== sessionId || !draftHydration.complete || !sessionId) return
+        // Inactive sessions keep attachments in IndexedDB only. Publishing an
+        // empty live snapshot here would shadow those files on reopen/transfer.
+        const canHydrateAttachments = props.canRestoreAttachments ?? active
+        if (canHydrateAttachments) {
+            setComposerDraftSnapshot(sessionId, composerText, attachmentDrafts)
+            props.onUploadDraftSnapshot?.(composerText, attachmentDrafts)
+        } else {
+            saveDraft(sessionId, composerText)
+            clearComposerDraftSnapshot(sessionId)
+        }
+    }, [active, attachmentDrafts, composerText, draftHydration.complete, draftHydration.sessionId, props.canRestoreAttachments, props.onUploadDraftSnapshot, sessionId])
 
     // assistant-ui clears `composer.text` synchronously the moment a send is
     // invoked AND `SessionChat.handleSend` clears `pendingSchedule` after the
@@ -1143,6 +1172,8 @@ export function HappyComposer(props: {
         // queue retries remain queue, while an ordinary fresh send always
         // starts from the explicit/default argument. Capture it before the
         // mandatory early-path reset below, then consume it at send time.
+        // Tip-forward absorb 64a116f47 kept the consume site but dropped this
+        // declaration — that shipped as restoredIntent ReferenceError in dist.
         const restoredIntent = intent === 'default'
             ? (pendingSendIntentRef?.current ?? 'default')
             : intent
@@ -1242,9 +1273,11 @@ export function HappyComposer(props: {
         hasText,
         onSuppressSendErrorRestore,
         pendingSchedule,
+        pendingSendIntentRef,
         props.onParkScratchlist,
         props.onResumeStoredDraft,
         props.scratchlistMode,
+        resetPendingSendIntent,
         richMentionsEnabled,
         sendError,
         attachmentOrderRef,
@@ -1277,18 +1310,20 @@ export function HappyComposer(props: {
             return
         }
 
-        // Only plain Enter (no modifiers) sends; other modifier combos are ignored
+        // Collapsed: honor Settings Enter behavior. Expanded: always newline
+        // (plain Enter inserts; Ctrl/Cmd+Enter or the send button submits).
         if (key === 'Enter') {
-            if (composerEnterBehavior === 'newline') {
-                if ((e.ctrlKey || e.metaKey) && !e.altKey && canSend) {
-                    e.preventDefault()
-                    flushAndSend()
-                    setShowContinueHint(false)
-                }
+            const action = resolveComposerEnterKeyAction({
+                composerEnterBehavior,
+                isExpanded,
+                ctrlOrMeta: e.ctrlKey || e.metaKey,
+                altKey: e.altKey,
+            })
+            if (action === 'newline') {
                 return
             }
             e.preventDefault()
-            if (!e.ctrlKey && !e.altKey && !e.metaKey && canSend) {
+            if (action === 'send' && canSend) {
                 flushAndSend()
                 setShowContinueHint(false)
             }
@@ -1315,14 +1350,6 @@ export function HappyComposer(props: {
         }
 
         if (key === 'Escape') {
-            // FUE callout also listens on window; dismiss it first so Escape
-            // does not also abort a running thread or collapse the editor.
-            if (richComposerFueStatus === 'engaging') {
-                e.preventDefault()
-                e.stopPropagation()
-                dismissRichComposerFue()
-                return
-            }
             const action = getComposerEscapeAction({
                 hasSuggestions: suggestions.length > 0,
                 threadIsRunning,
@@ -1362,8 +1389,6 @@ export function HappyComposer(props: {
         haptic,
         composerEnterBehavior,
         richMentionsEnabled,
-        richComposerFueStatus,
-        dismissRichComposerFue,
         flushAndSend,
         isExpanded,
         handleExpandedToggle,
@@ -2287,36 +2312,20 @@ export function HappyComposer(props: {
                                 isExpanded ? 'min-h-0 flex-1 items-stretch' : 'items-center'
                             }`}>
                                 {richMentionsEnabled ? (
-                                    <div
-                                        ref={richComposerFueAnchorRef}
-                                        className="relative flex min-w-0 flex-1"
-                                        data-testid="rich-composer-fue-anchor"
-                                    >
-                                        <RichComposerInput
-                                            ref={richInputRef}
-                                            value={composerText}
-                                            autoFocus={!controlsDisabled && !isTouch}
-                                            placeholder={t(resolveComposerPlaceholderKey({
-                                                richMentionsEnabled: true,
-                                                showContinueHint,
-                                            }))}
-                                            disabled={controlsDisabled}
-                                            onValueChange={handleRichValueChange}
-                                            onMirrorChange={handleRichMirrorChange}
-                                            onKeyDown={handleKeyDown}
-                                            onPaste={handlePaste}
-                                            onFocus={() => engageRichComposerFue()}
-                                            resolveSessionMentionTooltip={resolveSessionMentionTooltip}
-                                            onEdit={handleRichEdit}
-                                            className={editorClassName}
-                                        />
-                                        {richComposerFueStatus !== 'acknowledged' ? (
-                                            <FueDot
-                                                pulsing={richComposerFueStatus === 'unseen'}
-                                                ariaLabel={t('fue.newFeatureDot')}
-                                            />
-                                        ) : null}
-                                    </div>
+                                    <RichComposerInput
+                                        ref={richInputRef}
+                                        value={composerText}
+                                        autoFocus={!controlsDisabled && !isTouch}
+                                        placeholder={showContinueHint ? t('misc.typeMessage') : t('misc.typeAMessage')}
+                                        disabled={controlsDisabled}
+                                        onValueChange={handleRichValueChange}
+                                        onMirrorChange={handleRichMirrorChange}
+                                        onKeyDown={handleKeyDown}
+                                        onPaste={handlePaste}
+                                        resolveSessionMentionTooltip={resolveSessionMentionTooltip}
+                                        onEdit={handleRichEdit}
+                                        className={editorClassName}
+                                    />
                                 ) : isExpanded ? (
                                     <ComposerPrimitive.Input
                                         asChild
@@ -2330,10 +2339,7 @@ export function HappyComposer(props: {
                                         onPaste={handlePaste}
                                     >
                                         <textarea
-                                            placeholder={t(resolveComposerPlaceholderKey({
-                                                richMentionsEnabled: false,
-                                                showContinueHint,
-                                            }))}
+                                            placeholder={showContinueHint ? t('misc.typeMessage') : t('misc.typeAMessage')}
                                             disabled={controlsDisabled}
                                             className="h-full min-h-0 flex-1 resize-none overflow-y-auto bg-transparent text-base leading-snug text-[var(--app-fg)] placeholder-[var(--app-hint)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
                                         />
@@ -2342,10 +2348,7 @@ export function HappyComposer(props: {
                                     <ComposerPrimitive.Input
                                         ref={textareaRef}
                                         autoFocus={!controlsDisabled && !isTouch}
-                                        placeholder={t(resolveComposerPlaceholderKey({
-                                            richMentionsEnabled: false,
-                                            showContinueHint,
-                                        }))}
+                                        placeholder={showContinueHint ? t('misc.typeMessage') : t('misc.typeAMessage')}
                                         disabled={controlsDisabled}
                                         maxRows={5}
                                         submitOnEnter={false}
@@ -2358,17 +2361,6 @@ export function HappyComposer(props: {
                                     />
                                 )}
                             </div>
-                            {richMentionsEnabled && richComposerFueStatus === 'engaging' ? (
-                                <FueCallout
-                                    title={t('richComposer.fueTitle')}
-                                    body={t('richComposer.fueBody')}
-                                    onDismiss={dismissRichComposerFue}
-                                    dismissLabel={t('fue.gotIt')}
-                                    closeAriaLabel={t('fue.closeAriaLabel')}
-                                    anchorRef={richComposerFueAnchorRef}
-                                    width={288}
-                                />
-                            ) : null}
 
                             <ComposerButtons
                                 canSend={canSend}
@@ -2415,11 +2407,21 @@ export function HappyComposer(props: {
                                 scratchlistMode={props.scratchlistMode}
                                 scratchlistCount={props.scratchlistCount}
                                 onScratchlistToggle={props.onScratchlistToggle}
+                                codexUsage={composerCodexUsageForGauge(agentFlavor, codexUsage)}
                                 omitPrimaryButton
                             />
                         </div>
-                        {/* Full-height primary: empty → voice/dictate; draft → Send (flush to card). */}
+                        {/* Full-height primary: empty → voice; draft → companion voice + Send. */}
                         <div className="flex shrink-0 self-stretch items-stretch">
+                            <DictationButton
+                                canSend={canSend}
+                                voiceEnabled={voiceEnabled}
+                                voiceStatus={effectiveVoiceStatus}
+                                controlsDisabled={controlsDisabled}
+                                onVoiceToggle={effectiveVoiceToggle ?? (() => {})}
+                                voiceLabel={dictationActive ? t('composer.dictate') : t('composer.voice')}
+                                variant="companion"
+                            />
                             <UnifiedButton
                                 canSend={canSend}
                                 voiceStatus={effectiveVoiceStatus}

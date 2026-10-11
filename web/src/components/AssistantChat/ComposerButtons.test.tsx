@@ -12,8 +12,10 @@ import {
     ComposerExpandButton,
     DictationButton,
     getComposerToolbarJustifyContent,
+    draftVoiceCompanionSizeClass,
     isComposerPrimaryFillHeight,
     isLargeEmptyVoicePrimary,
+    shouldShowDraftVoiceButton,
     UnifiedButton,
     unifiedButtonSizeClass,
 } from './ComposerButtons'
@@ -254,16 +256,48 @@ describe('DictationButton', () => {
         const onVoiceToggle = vi.fn()
         renderInProviders(
             <DictationButton
-                enabled
                 canSend
                 voiceEnabled
                 voiceStatus="disconnected"
                 controlsDisabled={false}
                 onVoiceToggle={onVoiceToggle}
+                voiceLabel="Dictate (Ctrl/Cmd+Shift+D)"
             />,
         )
 
         fireEvent.click(getButton(/^Dictate/))
+        expect(onVoiceToggle).toHaveBeenCalledOnce()
+    })
+
+    it('keeps assistant voice available beside Send when a draft is present', () => {
+        expect(shouldShowDraftVoiceButton({
+            canSend: true,
+            voiceEnabled: true,
+            voiceStatus: 'disconnected',
+        })).toBe(true)
+        expect(shouldShowDraftVoiceButton({
+            canSend: false,
+            voiceEnabled: true,
+            voiceStatus: 'disconnected',
+        })).toBe(false)
+        expect(draftVoiceCompanionSizeClass()).toContain('w-12')
+
+        const onVoiceToggle = vi.fn()
+        renderInProviders(
+            <DictationButton
+                canSend
+                voiceEnabled
+                voiceStatus="disconnected"
+                controlsDisabled={false}
+                onVoiceToggle={onVoiceToggle}
+                voiceLabel="Voice assistant"
+                variant="companion"
+            />,
+        )
+        const btn = getButton('Voice assistant')
+        expect(btn.getAttribute('data-variant')).toBe('companion')
+        expect(btn.className).toContain('w-12')
+        fireEvent.click(btn)
         expect(onVoiceToggle).toHaveBeenCalledOnce()
     })
 })
