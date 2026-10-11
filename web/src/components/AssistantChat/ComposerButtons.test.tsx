@@ -12,7 +12,9 @@ import {
     ComposerExpandButton,
     DictationButton,
     getComposerToolbarJustifyContent,
+    isLargeEmptyVoicePrimary,
     UnifiedButton,
+    unifiedButtonSizeClass,
 } from './ComposerButtons'
 
 const adapter: ChatModelAdapter = {
@@ -158,6 +160,79 @@ describe('UnifiedButton — default send intent', () => {
         expect(onSend).toHaveBeenNthCalledWith(1)
         expect(onSend).toHaveBeenNthCalledWith(2)
         expect(contextMenuWasNotPrevented).toBe(true)
+    })
+})
+
+describe('UnifiedButton — empty voice hit target', () => {
+    afterEach(cleanup)
+
+    it('uses a large hit target when the composer is empty and voice/dictate is afforded', () => {
+        expect(isLargeEmptyVoicePrimary({
+            canSend: false,
+            voiceEnabled: true,
+            voiceStatus: 'disconnected',
+        })).toBe(true)
+        expect(unifiedButtonSizeClass(true)).toContain('h-12')
+
+        renderInProviders(
+            <UnifiedButton
+                canSend={false}
+                voiceStatus="disconnected"
+                voiceEnabled
+                controlsDisabled={false}
+                onSend={() => {}}
+                onVoiceToggle={() => {}}
+                voiceLabel="Dictate"
+            />,
+        )
+        const btn = getButton(/^Dictate/)
+        expect(btn.getAttribute('data-size')).toBe('large')
+        expect(btn.className).toContain('h-12')
+        expect(btn.className).toContain('w-12')
+    })
+
+    it('stays compact once there is a draft to send', () => {
+        expect(isLargeEmptyVoicePrimary({
+            canSend: true,
+            voiceEnabled: true,
+            voiceStatus: 'disconnected',
+        })).toBe(false)
+
+        renderInProviders(
+            <UnifiedButton
+                canSend
+                voiceStatus="disconnected"
+                voiceEnabled
+                controlsDisabled={false}
+                onSend={() => {}}
+                onVoiceToggle={() => {}}
+            />,
+        )
+        const btn = getButton('Send')
+        expect(btn.getAttribute('data-size')).toBe('compact')
+        expect(btn.className).toContain('h-8')
+        expect(btn.className).not.toContain('h-12')
+    })
+
+    it('stays compact while voice is connecting or connected (stop)', () => {
+        expect(isLargeEmptyVoicePrimary({
+            canSend: false,
+            voiceEnabled: true,
+            voiceStatus: 'connected',
+        })).toBe(false)
+
+        renderInProviders(
+            <UnifiedButton
+                canSend={false}
+                voiceStatus="connected"
+                voiceEnabled
+                controlsDisabled={false}
+                onSend={() => {}}
+                onVoiceToggle={() => {}}
+            />,
+        )
+        const btn = getButton('Stop')
+        expect(btn.getAttribute('data-size')).toBe('compact')
     })
 })
 
