@@ -235,7 +235,7 @@ export function TodoBoardList(props: {
                 />
             ) : null}
 
-            <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+            <div data-testid="todo-item-list" className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
                 {props.isLoading ? (
                     <div className="flex justify-center py-6">
                         <LoadingState label={t('todo.loading')} />

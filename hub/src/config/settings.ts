@@ -12,6 +12,8 @@ export interface StoredTodoBoard {
     projectNumber: number
     statusFieldName: string
     doneValues: string[]
+    /** Present when this board is a specific saved view (filter) onto the project, not the whole unfiltered board. */
+    viewNumber?: number
 }
 
 export interface Settings {

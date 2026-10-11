@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { Hono } from 'hono'
 import type { TodoBoardItemsResponse, TodoBoardsResponse } from '@hapi/protocol'
 import type { WebAppEnv } from '../middleware/auth'
-import { createTodoBoardRoutes, makeBoardId, parseProjectUrl } from './todoBoard'
+import { createTodoBoardRoutes, makeBoardId, parseProjectUrl, resolveProjectView } from './todoBoard'
 
 const ENV_KEYS = [
     'HAPI_TODO_BOARD_HOST',
@@ -54,7 +54,8 @@ afterEach(async () => {
 async function createApp(
     runGraphql: Parameters<typeof createTodoBoardRoutes>[1],
     runGraphqlTitle?: Parameters<typeof createTodoBoardRoutes>[2],
-    namespace = 'default'
+    namespace = 'default',
+    runGraphqlView?: Parameters<typeof createTodoBoardRoutes>[3]
 ) {
     const dataDir = await mkdtemp(join(tmpdir(), 'hapi-todo-board-'))
     directories.push(dataDir)
@@ -63,10 +64,15 @@ async function createApp(
         c.set('namespace', namespace)
         await next()
     })
-    // Default the title lookup to a 404-shaped response (not the real `gh`
-    // CLI) so items-focused tests that never add a board don't accidentally
-    // make a network call just because they didn't pass a second mock.
-    app.route('/api', createTodoBoardRoutes(dataDir, runGraphql, runGraphqlTitle ?? (() => ({ data: { repositoryOwner: {} } }))))
+    // Default the title/view lookups to 404-shaped responses (not the real
+    // `gh` CLI) so items-focused tests that never add a board don't
+    // accidentally make a network call just because they didn't pass a mock.
+    app.route('/api', createTodoBoardRoutes(
+        dataDir,
+        runGraphql,
+        runGraphqlTitle ?? (() => ({ data: { repositoryOwner: {} } })),
+        runGraphqlView ?? (() => ({ data: { repositoryOwner: {} } }))
+    ))
     return app
 }
 
@@ -82,6 +88,13 @@ describe('makeBoardId', () => {
 
     it('still produces the plain, readable id for normal inputs', () => {
         expect(makeBoardId('github.com', 'heavygee', 6)).toBe('github.com::heavygee::6')
+    })
+
+    it('appends a distinct view segment so the project and a view onto it can both be stored', () => {
+        const plainId = makeBoardId('github.com', 'heavygee', 6)
+        const viewId = makeBoardId('github.com', 'heavygee', 6, 8)
+        expect(viewId).not.toBe(plainId)
+        expect(viewId).toBe('github.com::heavygee::6::view::8')
     })
 })
 
@@ -104,6 +117,36 @@ describe('parseProjectUrl', () => {
     it('parses a GHE host', () => {
         expect(parseProjectUrl('https://lhs.ghe.com/orgs/lockhouse/projects/3')).toEqual({
             host: 'lhs.ghe.com', ownerLogin: 'lockhouse', projectNumber: 3
+        })
+    })
+
+    it('parses a trailing /views/<n> as a restrictive view onto the same project', () => {
+        expect(parseProjectUrl('https://lhs.ghe.com/orgs/lockhouse/projects/3/views/8')).toEqual({
+            host: 'lhs.ghe.com', ownerLogin: 'lockhouse', projectNumber: 3, viewNumber: 8
+        })
+    })
+
+    it('parses a view URL with a trailing slash or query/hash', () => {
+        expect(parseProjectUrl('https://github.com/users/heavygee/projects/6/views/1/')).toEqual({
+            host: 'github.com', ownerLogin: 'heavygee', projectNumber: 6, viewNumber: 1
+        })
+        expect(parseProjectUrl('https://github.com/users/heavygee/projects/6/views/1?pane=info')).toEqual({
+            host: 'github.com', ownerLogin: 'heavygee', projectNumber: 6, viewNumber: 1
+        })
+    })
+
+    it('rejects an invalid view number the same way it rejects an invalid project number', () => {
+        expect(parseProjectUrl('https://github.com/users/heavygee/projects/6/views/0')).toBeNull()
+        expect(parseProjectUrl('https://github.com/users/heavygee/projects/6/views/not-a-number')).toBeNull()
+    })
+
+    it('does not mistake an unrelated trailing path that merely starts with "views" for a view segment', () => {
+        // The "/views" rejection must be boundary-aware — otherwise a
+        // trailing path like "/viewsomething" (which happens to start with
+        // the same five letters) would be wrongly rejected as a malformed
+        // view segment instead of accepted as ordinary trailing junk.
+        expect(parseProjectUrl('https://github.com/users/heavygee/projects/6/viewsomething')).toEqual({
+            host: 'github.com', ownerLogin: 'heavygee', projectNumber: 6
         })
     })
 
@@ -238,6 +281,67 @@ describe('POST /api/todo-boards', () => {
         ])
     })
 
+    it('adds a view-scoped board as a distinct board, labeled with the view name', async () => {
+        const app = await createApp(
+            () => ({ data: {} }),
+            () => { throw new Error('should not use the plain title lookup for a view URL') },
+            'default',
+            () => ({ data: { repositoryOwner: { projectV2: { title: 'Acme Roadmap', view: { name: 'Sprint board' } } } } })
+        )
+        const response = await app.request('/api/todo-boards', {
+            method: 'POST',
+            body: JSON.stringify({ url: 'https://github.com/orgs/acme/projects/9/views/8' })
+        })
+        expect(response.status).toBe(200)
+        const body = await response.json() as TodoBoardsResponse
+        expect(body.boards).toEqual([
+            { id: 'github.com::heavygee::6', label: 'heavygee/6' },
+            { id: 'github.com::acme::9::view::8', label: 'Acme Roadmap · Sprint board' }
+        ])
+    })
+
+    it('falls back to a generic "View N" label when the view has no name', async () => {
+        const app = await createApp(
+            () => ({ data: {} }),
+            undefined,
+            'default',
+            () => ({ data: { repositoryOwner: { projectV2: { title: 'Acme Roadmap', view: {} } } } })
+        )
+        const response = await app.request('/api/todo-boards', {
+            method: 'POST',
+            body: JSON.stringify({ url: 'https://github.com/orgs/acme/projects/9/views/8' })
+        })
+        const body = await response.json() as TodoBoardsResponse
+        expect(body.boards.find(b => b.id === 'github.com::acme::9::view::8')?.label).toBe('Acme Roadmap · View 8')
+    })
+
+    it('404s when the view number does not exist on the project', async () => {
+        const app = await createApp(
+            () => ({ data: {} }),
+            undefined,
+            'default',
+            () => ({ data: { repositoryOwner: { projectV2: { title: 'Acme Roadmap', view: null } } } })
+        )
+        const response = await app.request('/api/todo-boards', {
+            method: 'POST',
+            body: JSON.stringify({ url: 'https://github.com/orgs/acme/projects/9/views/999' })
+        })
+        expect(response.status).toBe(404)
+    })
+
+    it('allows adding both the plain project and a view onto it, as two separate boards', async () => {
+        const app = await createApp(
+            () => ({ data: {} }),
+            () => ({ data: { repositoryOwner: { projectV2: { title: 'Acme Roadmap' } } } }),
+            'default',
+            () => ({ data: { repositoryOwner: { projectV2: { title: 'Acme Roadmap', view: { name: 'Sprint board' } } } } })
+        )
+        await app.request('/api/todo-boards', { method: 'POST', body: JSON.stringify({ url: 'https://github.com/orgs/acme/projects/9' }) })
+        const response = await app.request('/api/todo-boards', { method: 'POST', body: JSON.stringify({ url: 'https://github.com/orgs/acme/projects/9/views/8' }) })
+        const body = await response.json() as TodoBoardsResponse
+        expect(body.boards.map(b => b.id)).toEqual(['github.com::heavygee::6', 'github.com::acme::9', 'github.com::acme::9::view::8'])
+    })
+
     it('validates via the lightweight title-only query, never the full items query', async () => {
         const itemsQuery = () => { throw new Error('should not call the heavy items query to add a board') }
         const app = await createApp(itemsQuery, () => ({ data: { repositoryOwner: { projectV2: { title: 'Acme Roadmap' } } } }))
@@ -287,6 +391,32 @@ describe('DELETE /api/todo-boards/:id', () => {
         const response = await app.request('/api/todo-boards/unknown', { method: 'DELETE' })
         const body = await response.json() as TodoBoardsResponse
         expect(body.boards).toEqual([{ id: 'github.com::heavygee::6', label: 'heavygee/6' }])
+    })
+})
+
+describe('resolveProjectView', () => {
+    it('returns the title, view name, and trimmed filter on success', () => {
+        const result = resolveProjectView({ data: { repositoryOwner: { projectV2: { title: 'Acme Roadmap', view: { name: 'Sprint board', filter: ' status:"Done" ' } } } } }, 8)
+        expect(result).toEqual({ ok: true, title: 'Acme Roadmap', viewName: 'Sprint board', itemsFilter: 'status:"Done"' })
+    })
+
+    it('treats an empty or whitespace-only filter the same as no filter', () => {
+        expect(resolveProjectView({ data: { repositoryOwner: { projectV2: { title: 'Acme Roadmap', view: { filter: '' } } } } }, 8)).toMatchObject({ ok: true, itemsFilter: undefined })
+        expect(resolveProjectView({ data: { repositoryOwner: { projectV2: { title: 'Acme Roadmap', view: { filter: '   ' } } } } }, 8)).toMatchObject({ ok: true, itemsFilter: undefined })
+        expect(resolveProjectView({ data: { repositoryOwner: { projectV2: { title: 'Acme Roadmap', view: { filter: null } } } } }, 8)).toMatchObject({ ok: true, itemsFilter: undefined })
+    })
+
+    it('fails distinctly for a missing project vs. a missing view, both as "not found"', () => {
+        const missingProject = resolveProjectView({ data: { repositoryOwner: {} } }, 8)
+        expect(missingProject).toEqual({ ok: false, error: 'Project not found, or not accessible with the current gh auth' })
+
+        const missingView = resolveProjectView({ data: { repositoryOwner: { projectV2: { title: 'Acme Roadmap', view: null } } } }, 8)
+        expect(missingView).toEqual({ ok: false, error: 'View 8 not found on this project' })
+    })
+
+    it('surfaces top-level GraphQL errors without a "not found" message', () => {
+        const result = resolveProjectView({ errors: [{ message: 'Could not resolve to a ProjectV2Owner' }] }, 8)
+        expect(result).toEqual({ ok: false, error: 'Could not resolve to a ProjectV2Owner' })
     })
 })
 
@@ -428,5 +558,17 @@ describe('GET /api/todo-boards/:id/items', () => {
         const body = await response.json() as TodoBoardItemsResponse
         expect(body.items).toHaveLength(1)
         expect(body.items[0]?.title).toBe('Still here')
+    })
+
+    it('maps a "not found" error from a view-scoped board\'s filter resolution to 404, not 502', async () => {
+        // Simulates what the real runGhGraphql throws (via resolveProjectView)
+        // when a stored view-scoped board's view or project has since been
+        // deleted/renamed/access-revoked — should 404 the same way the
+        // plain-project "projectV2: null" case does above, not fall through
+        // to the generic 502 catch-all (which the existing "gh CLI not
+        // available" test above already covers for non-"not found" errors).
+        const app = await createApp(() => { throw new Error('View 8 not found on this project') })
+        const response = await app.request('/api/todo-boards/github.com%3A%3Aheavygee%3A%3A6/items')
+        expect(response.status).toBe(404)
     })
 })
