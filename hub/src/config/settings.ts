@@ -68,8 +68,14 @@ export interface Settings {
      * Env vars still win when set at process start (ops override).
      */
     providerCredentials?: Partial<Record<string, string>>
-    /** Operator fleet-upgrade policy (no alert / alert / auto-upgrade). */
+    /** Operator fleet-upgrade policy (no alert / alert / auto-upgrade). Hub default. */
     fleetUpgradePolicy?: FleetUpgradePolicy
+    /**
+     * Per-machine fleet-upgrade policy overrides (machineId → silent|alert|auto).
+     * Used by deliberate `push-upgrade`: `auto` applies on push; hub default stays
+     * alert so keepalive never unattended-pushes the whole fleet.
+     */
+    fleetUpgradeMachinePolicies?: Record<string, FleetUpgradePolicy>
     /**
      * To-do board view (hapi#235) — user-added GitHub Projects v2 boards.
      * Empty/missing means "fall back to the env-configured default board"

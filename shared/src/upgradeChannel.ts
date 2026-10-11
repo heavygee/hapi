@@ -197,21 +197,19 @@ export function machineTrailsUpgradeOffer(
  * Operator-facing fleet-management policy (3-pole switch in Settings):
  * - silent: hub neither alerts nor auto-upgrades drifted runners
  * - alert: hub surfaces the skew banner; operator upgrades manually
- * - auto: hub auto-upgrades drifted runners; banner only for hosts that
- *   cannot auto-upgrade (legacy / handoff-disabled). Success is a toast.
+ * - auto: on a **deliberate operator push**, apply immediately (no confirm).
+ *   Keepalive/startup must not unattended-push. Per-machine overrides let one
+ *   host be `auto` while the hub default stays `alert`.
  *
  * Orthogonal to {@link UpgradeChannel}: `HAPI_UPGRADE_CHANNEL=off` is a hard
- * kill (no upgrades at all); this policy governs whether the hub acts/alerts
- * when a channel IS available.
+ * kill (no upgrades at all); this policy governs banner vs push-apply behavior.
  *
  * Vocabulary: a *machine* is a host record in the hub registry; its *runner*
  * is the daemon (`hapi runner start`) that handles spawn + self-upgrade RPCs.
  * Skew banners list machines whose runners trail the hub offer.
  *
  * Default is `alert`, not `auto`: mutating someone's remote machines without
- * an explicit opt-in is too aggressive for the 99% single-machine case. A
- * dismissible banner is the safe default; multi-machine operators opt into
- * `auto` ("set and forget") in Settings > General > Runner management.
+ * an explicit opt-in is too aggressive for the 99% single-machine case.
  */
 export type FleetUpgradePolicy = 'silent' | 'alert' | 'auto'
 

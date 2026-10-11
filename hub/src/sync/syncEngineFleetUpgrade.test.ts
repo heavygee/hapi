@@ -3,6 +3,10 @@ import { CURRENT_MACHINE_CAPABILITIES } from '@hapi/protocol/runnerCapabilities'
 import type { HubUpgradeOffer } from '@hapi/protocol/upgradeChannel'
 import { Store } from '../store'
 import { RpcRegistry } from '../socket/rpcRegistry'
+import {
+    resetFleetUpgradePolicyForTests,
+    setFleetUpgradeMachinePolicy,
+} from '../upgrade/fleetUpgradePolicy'
 import { SyncEngine } from './syncEngine'
 
 const TEST_OFFER: HubUpgradeOffer = {
@@ -28,7 +32,7 @@ function makeEngine(options?: {
             getUpgradeOffer: options?.offer === null
                 ? undefined
                 : () => options?.offer ?? TEST_OFFER,
-            getFleetUpgradePolicy: () => options?.policy ?? 'auto',
+            getFleetUpgradePolicy: () => options?.policy ?? 'alert',
         },
     )
     return { store, engine }
@@ -55,10 +59,10 @@ function registerSkewedRunner(
     engine.handleMachineAlive({ machineId: id, time: Date.now() })
 }
 
-describe('SyncEngine fleet upgrade startup sweep', () => {
-    it('does nothing when fleet policy is not auto', async () => {
-        const { engine } = makeEngine({ policy: 'alert' })
-        const upgrade = mock(async (_machineId: string, _namespace: string) => ({
+describe('SyncEngine deliberate fleet push', () => {
+    it('keepalive does not auto-upgrade even when hub policy is auto', async () => {
+        const { engine } = makeEngine({ policy: 'auto' })
+        const upgrade = mock(async () => ({
             type: 'success' as const,
             message: 'ok',
             response: { status: 'started' as const, message: 'ok' },
@@ -67,90 +71,95 @@ describe('SyncEngine fleet upgrade startup sweep', () => {
 
         try {
             registerSkewedRunner(engine, 'homelab')
-            await (engine as unknown as { runFleetUpgradeStartupSweep(): Promise<void> }).runFleetUpgradeStartupSweep()
+            engine.handleMachineAlive({ machineId: 'homelab', time: Date.now() })
+            await Bun.sleep(10)
             expect(upgrade).not.toHaveBeenCalled()
         } finally {
             engine.stop()
         }
     })
 
-    it('upgrades every active skewed runner and bypasses cooldown', async () => {
-        const { engine } = makeEngine()
+    it('push upgrades only machines with effective auto policy', async () => {
+        resetFleetUpgradePolicyForTests()
+        const { engine } = makeEngine({ policy: 'alert' })
         const upgraded: string[] = []
-        engine.upgradeMachineRunner = mock(async (machineId: string, _namespace: string) => {
+        engine.upgradeMachineRunner = mock(async (machineId: string) => {
             upgraded.push(machineId)
-            return { type: 'success' as const, message: 'ok', response: { status: 'started' as const } }
+            return {
+                type: 'success' as const,
+                message: 'ok',
+                response: { status: 'started' as const, message: 'ok' },
+            }
         }) as unknown as UpgradeRunner
 
         try {
+            registerSkewedRunner(engine, 'ninja')
             registerSkewedRunner(engine, 'homelab')
-            registerSkewedRunner(engine, 'personal-win')
-            upgraded.length = 0
+            await setFleetUpgradeMachinePolicy('ninja', 'auto')
 
-            const internals = engine as unknown as { fleetUpgradeAttemptAt: Map<string, number> }
-            internals.fleetUpgradeAttemptAt.set('homelab', Date.now())
-            internals.fleetUpgradeAttemptAt.set('personal-win', Date.now())
-
-            await (engine as unknown as { runFleetUpgradeStartupSweep(): Promise<void> }).runFleetUpgradeStartupSweep()
-            expect(upgraded.sort()).toEqual(['homelab', 'personal-win'])
+            const { results } = await engine.pushFleetUpgrade({
+                namespace: 'default',
+                machineIds: ['ninja', 'homelab'],
+            })
+            expect(upgraded).toEqual(['ninja'])
+            expect(results.find((row) => row.machineId === 'ninja')?.action).toBe('upgraded')
+            expect(results.find((row) => row.machineId === 'homelab')?.action).toBe('banner')
         } finally {
             engine.stop()
+            resetFleetUpgradePolicyForTests()
         }
     })
 
-    it('skips versionHandoffDisabled hosts', async () => {
-        const { engine } = makeEngine()
-        const upgraded: string[] = []
-        engine.upgradeMachineRunner = mock(async (machineId: string, _namespace: string) => {
-            upgraded.push(machineId)
-            return { type: 'success' as const, message: 'ok', response: { status: 'started' as const } }
-        }) as unknown as UpgradeRunner
+    it('push skips silent machines', async () => {
+        resetFleetUpgradePolicyForTests()
+        const { engine } = makeEngine({ policy: 'alert' })
+        const upgrade = mock(async () => ({
+            type: 'success' as const,
+            message: 'ok',
+            response: { status: 'started' as const, message: 'ok' },
+        }))
+        engine.upgradeMachineRunner = upgrade as unknown as UpgradeRunner
 
         try {
-            registerSkewedRunner(engine, 'homelab')
-            registerSkewedRunner(engine, 'oos', { versionHandoffDisabled: true })
-            upgraded.length = 0
-
-            await (engine as unknown as { runFleetUpgradeStartupSweep(): Promise<void> }).runFleetUpgradeStartupSweep()
-            expect(upgraded).toEqual(['homelab'])
+            registerSkewedRunner(engine, 'ian')
+            await setFleetUpgradeMachinePolicy('ian', 'silent')
+            const { results } = await engine.pushFleetUpgrade({
+                namespace: 'default',
+                machineIds: ['ian'],
+            })
+            expect(upgrade).not.toHaveBeenCalled()
+            expect(results[0]?.action).toBe('skipped')
         } finally {
             engine.stop()
+            resetFleetUpgradePolicyForTests()
         }
     })
 
-    it('clears auto cooldown when hub targetGeneration moves', async () => {
-        let targetGeneration = 'gen-old'
-        const store = new Store(':memory:')
-        const engine = new SyncEngine(
-            store,
-            {} as never,
-            new RpcRegistry(),
-            { broadcast() {} } as never,
-            {
-                getUpgradeOffer: () => ({ ...TEST_OFFER, targetGeneration }),
-                getFleetUpgradePolicy: () => 'auto',
-            },
-        )
+    it('forceAlert applies to alert machines on deliberate push', async () => {
+        resetFleetUpgradePolicyForTests()
+        const { engine } = makeEngine({ policy: 'alert' })
         const upgraded: string[] = []
-        engine.upgradeMachineRunner = mock(async (machineId: string, _namespace: string) => {
+        engine.upgradeMachineRunner = mock(async (machineId: string) => {
             upgraded.push(machineId)
-            return { type: 'success' as const, message: 'ok', response: { status: 'started' as const } }
+            return {
+                type: 'success' as const,
+                message: 'ok',
+                response: { status: 'started' as const, message: 'ok' },
+            }
         }) as unknown as UpgradeRunner
-        const maybeUpgrade = (engine as unknown as {
-            maybeFleetUpgradeMachine(id: string): Promise<void>
-        }).maybeFleetUpgradeMachine.bind(engine)
 
         try {
             registerSkewedRunner(engine, 'homelab')
-            upgraded.length = 0
-            await maybeUpgrade('homelab')
-            expect(upgraded).toEqual([])
-
-            targetGeneration = 'gen-new'
-            await maybeUpgrade('homelab')
+            const { results } = await engine.pushFleetUpgrade({
+                namespace: 'default',
+                machineIds: ['homelab'],
+                forceAlert: true,
+            })
             expect(upgraded).toEqual(['homelab'])
+            expect(results[0]?.action).toBe('upgraded')
         } finally {
             engine.stop()
+            resetFleetUpgradePolicyForTests()
         }
     })
 })

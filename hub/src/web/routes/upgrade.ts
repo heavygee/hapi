@@ -11,7 +11,13 @@ import {
     readPublishedSoupTip,
     soupTipToUpgradeOffer,
 } from '../../upgrade/soupArtifact'
-import { getFleetUpgradePolicy, setFleetUpgradePolicy } from '../../upgrade/fleetUpgradePolicy'
+import {
+    getEffectiveFleetUpgradePolicy,
+    getFleetUpgradeMachinePolicies,
+    getFleetUpgradePolicy,
+    setFleetUpgradeMachinePolicy,
+    setFleetUpgradePolicy,
+} from '../../upgrade/fleetUpgradePolicy'
 import { getConfiguration } from '../../configuration'
 import { constantTimeEquals } from '../../utils/crypto'
 import { parseAccessToken } from '../../utils/accessToken'
@@ -72,6 +78,75 @@ export function createUpgradeRoutes(getSyncEngine: () => SyncEngine | null): Hon
             return c.json({ error: message }, 500)
         }
         return c.json({ policy: getFleetUpgradePolicy() })
+    })
+
+    app.get('/upgrade/machine-policies', (c) => {
+        if (c.get('namespace') !== 'default') {
+            return c.json({ error: 'Fleet upgrade machine policies are only available in the default namespace' }, 403)
+        }
+        return c.json({
+            hubPolicy: getFleetUpgradePolicy(),
+            machines: getFleetUpgradeMachinePolicies(),
+        })
+    })
+
+    const machinePolicyBody = z.object({
+        policy: z.union([
+            z.enum(FLEET_UPGRADE_POLICIES as unknown as [string, ...string[]]),
+            z.null(),
+        ]),
+    })
+
+    app.put('/upgrade/machine-policies/:machineId', async (c) => {
+        if (c.get('namespace') !== 'default') {
+            return c.json({ error: 'Fleet upgrade machine policies are only available in the default namespace' }, 403)
+        }
+        const machineId = c.req.param('machineId')
+        const parsed = machinePolicyBody.safeParse(await c.req.json().catch(() => null))
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid policy (silent|alert|auto|null)' }, 400)
+        }
+        try {
+            const machines = await setFleetUpgradeMachinePolicy(
+                machineId,
+                parsed.data.policy as (typeof FLEET_UPGRADE_POLICIES)[number] | null,
+            )
+            return c.json({
+                machineId,
+                policy: parsed.data.policy,
+                effective: getEffectiveFleetUpgradePolicy(machineId),
+                machines,
+            })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to update machine policy'
+            return c.json({ error: message }, 500)
+        }
+    })
+
+    const pushBody = z.object({
+        machineIds: z.array(z.string().min(1)).min(1),
+        forceAlert: z.boolean().optional(),
+    })
+
+    /** Operator-initiated fan-out. Does not run on keepalive. */
+    app.post('/fleet/push-upgrade', async (c) => {
+        if (c.get('namespace') !== 'default') {
+            return c.json({ error: 'Fleet push is only available in the default namespace' }, 403)
+        }
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ error: 'Not connected' }, 503)
+        }
+        const parsed = pushBody.safeParse(await c.req.json().catch(() => null))
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body; expected { machineIds: string[], forceAlert?: boolean }' }, 400)
+        }
+        const { results } = await engine.pushFleetUpgrade({
+            namespace: c.get('namespace'),
+            machineIds: parsed.data.machineIds,
+            forceAlert: parsed.data.forceAlert,
+        })
+        return c.json({ results })
     })
 
     return app

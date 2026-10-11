@@ -972,4 +972,27 @@ describe('machines routes', () => {
 
         expect(calls).toEqual([{ refresh: false }, { refresh: true }])
     })
+
+    it('exposes POST /machines/:id/upgrade-runner as a deliberate one-shot', async () => {
+        const machine = createMachine()
+        const engine = {
+            getMachine: () => machine,
+            getMachineByNamespace: () => machine,
+            upgradeMachineRunner: async () => ({
+                type: 'success' as const,
+                message: 'Upgrade started',
+                response: { status: 'started' as const, message: 'Upgrade started', channel: 'hub-artifact' as const },
+            }),
+        } as unknown as Partial<SyncEngine>
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => { c.set('namespace', 'default'); await next() })
+        app.route('/api', createMachinesRoutes(() => engine as SyncEngine))
+
+        const response = await app.request('/api/machines/machine-1/upgrade-runner', { method: 'POST' })
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({
+            message: 'Upgrade started',
+            response: { status: 'started', message: 'Upgrade started', channel: 'hub-artifact' },
+        })
+    })
 })
