@@ -49,12 +49,49 @@ function renderWithProviders(children: ReactNode) {
     )
 }
 
-// Regression for hapi#238 Codex review: IssueRefChip used to render inside
-// the row's own <button>, so clicking it also selected the session (and, on
-// touch/keyboard, the link was unreachable at all). The row is now a
-// role="button" div with the chip as a real sibling-in-DOM link that stops
-// propagation on every event useLongPress listens for.
+// Regression for hapi#238 Codex review, three passes: (1) IssueRefChip used
+// to render inside the row's own native <button>, so clicking it also
+// selected the session and the link was unreachable via keyboard/touch; (2)
+// switching to `role="button"` fixed the keyboard trap but WAI-ARIA still
+// forbids a focusable descendant of a button role, so the chip is now a true
+// DOM sibling of the row's role="button" div, not nested inside it — which
+// also means it never needs to stop event propagation to avoid
+// double-activating the row, since it's no longer inside the element
+// useLongPress binds its handlers to.
 describe('SessionList issue-ref chip isolation', () => {
+    it('renders as a DOM sibling of the row, not a descendant of its role="button"', () => {
+        const session = makeSession({
+            id: 'session-1',
+            updatedAt: Date.now(),
+            metadata: {
+                path: '/home/ubuntu',
+                name: 'Fix the thing',
+                flavor: 'codex',
+                externalRefs: [
+                    { kind: 'github_issue', url: 'https://github.com/heavygee/hapi/issues/235', repo: 'heavygee/hapi', number: 235, linkedAt: 1 }
+                ]
+            }
+        })
+
+        renderWithProviders(
+            <SessionList
+                sessions={[session]}
+                selectedSessionId={null}
+                onSelect={vi.fn()}
+                onNewSession={vi.fn()}
+                onRefresh={vi.fn()}
+                isLoading={false}
+                renderHeader={false}
+                api={null}
+            />
+        )
+
+        const chip = screen.getByTestId('issue-ref-chip')
+        const row = screen.getByText('Fix the thing').closest('[role="button"]')
+        expect(row).not.toBeNull()
+        expect(row?.contains(chip)).toBe(false)
+    })
+
     it('does not select the session when the issue chip is clicked', () => {
         const onSelect = vi.fn()
         const session = makeSession({

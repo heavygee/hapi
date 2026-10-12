@@ -35,6 +35,8 @@ function renderDetail(overrides: Partial<Parameters<typeof TodoItemDetail>[0]> =
         statusOrder: ['Todo', 'In Progress', 'Done'],
         onBack: vi.fn(),
         onSpawn: vi.fn(),
+        linkedSessionId: null,
+        onOpenLinkedSession: vi.fn(),
         onRefresh: vi.fn(),
         isRefreshing: false,
         onClose: vi.fn().mockResolvedValue(undefined),
@@ -156,5 +158,18 @@ describe('TodoItemDetail', () => {
         const { onRefresh } = renderDetail()
         fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
         expect(onRefresh).toHaveBeenCalledTimes(1)
+    })
+
+    it('offers "Open session" instead of "Spawn session" when a session is already linked', () => {
+        const { onOpenLinkedSession } = renderDetail({ linkedSessionId: 'session-42' })
+        expect(screen.queryByRole('button', { name: 'Spawn session' })).not.toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Open session' }))
+        expect(onOpenLinkedSession).toHaveBeenCalledWith('session-42')
+    })
+
+    it('offers "Spawn session" when no session is linked', () => {
+        renderDetail({ linkedSessionId: null })
+        expect(screen.queryByRole('button', { name: 'Open session' })).not.toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Spawn session' })).toBeInTheDocument()
     })
 })
