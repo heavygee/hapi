@@ -667,6 +667,8 @@ export default {
   'terminal.paste.fallbackTitle': '粘贴输入',
   'terminal.paste.fallbackDescription': '无法读取剪贴板，请在下方粘贴文本。',
   'terminal.paste.placeholder': '在此粘贴终端输入…',
+  'terminal.toAgent.buffer': '发送给 Agent',
+  'terminal.toAgent.selection': '选区发送给 Agent',
 
   // Code block
   'code.copy': '复制',

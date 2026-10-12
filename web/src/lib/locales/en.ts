@@ -699,6 +699,8 @@ export default {
   'terminal.paste.fallbackTitle': 'Paste input',
   'terminal.paste.fallbackDescription': 'Clipboard read is unavailable. Paste your text below.',
   'terminal.paste.placeholder': 'Paste terminal input here…',
+  'terminal.toAgent.buffer': 'To agent',
+  'terminal.toAgent.selection': 'Selection to agent',
 
   // Code block
   'code.copy': 'Copy',
