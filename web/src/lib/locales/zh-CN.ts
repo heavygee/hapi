@@ -101,6 +101,8 @@ export default {
   'sessions.modeSwitch.sessions': '会话',
   'sessions.modeSwitch.boards': '看板',
   'boards.boardSwitcher.label': '按看板筛选事项',
+  'boards.fueTitle': '看板',
+  'boards.fueBody': '接入一个 GitHub Projects 看板，无需离开 HAPI 即可查看和操作。进入后可通过切换器选择要查看的看板。',
   'boards.refresh': '刷新',
   'boards.loading': '正在加载看板…',
   'boards.error': '看板加载失败：{message}',

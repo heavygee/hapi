@@ -101,6 +101,8 @@ export default {
   'sessions.modeSwitch.sessions': 'Sessions',
   'sessions.modeSwitch.boards': 'Boards',
   'boards.boardSwitcher.label': 'Filter items by board',
+  'boards.fueTitle': 'Boards',
+  'boards.fueBody': 'Pulls in a GitHub Projects board so you can see and act on it without leaving HAPI. Pick which board via the switcher once you’re in.',
   'boards.refresh': 'Refresh',
   'boards.loading': 'Loading board…',
   'boards.error': 'Failed to load board: {message}',

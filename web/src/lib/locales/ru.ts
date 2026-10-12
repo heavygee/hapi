@@ -101,6 +101,8 @@ export default {
   'sessions.modeSwitch.sessions': 'Сессии',
   'sessions.modeSwitch.boards': 'Доски',
   'boards.boardSwitcher.label': 'Фильтр элементов по доске',
+  'boards.fueTitle': 'Доски',
+  'boards.fueBody': 'Подключает доску GitHub Projects, чтобы видеть её и работать с ней, не покидая HAPI. Выберите доску через переключатель, когда окажетесь здесь.',
   'boards.refresh': 'Обновить',
   'boards.loading': 'Загрузка доски…',
   'boards.error': 'Не удалось загрузить доску: {message}',
