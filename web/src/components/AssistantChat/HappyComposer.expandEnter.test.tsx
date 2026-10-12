@@ -176,6 +176,7 @@ vi.mock('@/components/AssistantChat/ComposerButtons', () => ({
         <button type="button" onClick={props.onSend}>send</button>
     ),
     DictationButton: () => null,
+    isComposerPrimaryFillHeight: () => true,
 }))
 
 function ComposerHarness(props: { initialText: string }) {
