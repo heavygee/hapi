@@ -710,9 +710,16 @@ export type FormatPeerSessionsListOptions = {
     preserveOrder?: boolean
     /** Override empty-list copy (e.g. search miss). */
     emptyMessage?: string
+    /**
+     * Compact MCP/CLI layout for large result pages (search_peers up to 100).
+     * One legend line + `id a|i flavor title` rows (full UUID; no key=value noise).
+     */
+    dense?: boolean
 }
 
 const MAX_PEER_LABEL_CHARS = 255
+/** Dense search rows: keep titles short so 100 hits stay cheap in model context. */
+const MAX_DENSE_PEER_LABEL_CHARS = 72
 
 /**
  * Hub fetch size for peer discovery: enough rows for the requested page, plus
@@ -728,7 +735,11 @@ export function peerListFetchLimit(requestedLimit: number, options?: { excludeCa
  * Web-parity title for peer shortlists: name → summary.text → basename(path) → id prefix.
  * Collapses whitespace so agent-readable rows stay one line each.
  */
-export function resolvePeerSessionLabel(session: PingPeerSessionSummary): string {
+export function resolvePeerSessionLabel(
+    session: PingPeerSessionSummary,
+    options?: { maxChars?: number }
+): string {
+    const maxChars = options?.maxChars ?? MAX_PEER_LABEL_CHARS
     const meta = session.metadata
     const pathLabel = meta?.path?.split(/[\\/]/).filter(Boolean).pop()?.trim()
     const raw = meta?.name?.trim()
@@ -739,8 +750,8 @@ export function resolvePeerSessionLabel(session: PingPeerSessionSummary): string
     if (!collapsed) {
         return session.id.slice(0, 8)
     }
-    return collapsed.length > MAX_PEER_LABEL_CHARS
-        ? collapsed.slice(0, MAX_PEER_LABEL_CHARS)
+    return collapsed.length > maxChars
+        ? collapsed.slice(0, maxChars)
         : collapsed
 }
 
@@ -748,12 +759,14 @@ export function resolvePeerSessionLabel(session: PingPeerSessionSummary): string
  * Human/agent-readable shortlist for MCP `list_peers` / `search_peers`
  * and `hapi ping-peer --list` / `hapi search-peers`.
  * Newest `updatedAt` first for list; search results keep hub rank order.
+ * Use `dense: true` for search_peers so large pages stay cheap in MCP context.
  */
 export function formatPeerSessionsList(
     sessions: PingPeerSessionSummary[],
     options: FormatPeerSessionsListOptions = {}
 ): string {
     const maxRows = options.maxRows ?? 30
+    const dense = options.dense === true
     const excludeId = options.excludeSessionId?.trim() ?? ''
     const filtered = excludeId
         ? sessions.filter((session) => session.id !== excludeId)
@@ -767,16 +780,27 @@ export function formatPeerSessionsList(
     const ordered = options.preserveOrder
         ? filtered
         : [...filtered].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
-    const rows = ordered.slice(0, Math.max(1, maxRows)).map((session) => {
-        const flavor = session.metadata?.flavor ?? '?'
-        const name = resolvePeerSessionLabel(session)
-        return `  ${session.id}  active=${session.active}  flavor=${flavor}  ${name}`
-    })
-    const omitted = ordered.length - rows.length
+    const page = ordered.slice(0, Math.max(1, maxRows))
+    const rows = dense
+        ? [
+            '# id a|i flavor title',
+            ...page.map((session) => {
+                const flavor = (session.metadata?.flavor ?? '?').replace(/\s+/g, '')
+                const name = resolvePeerSessionLabel(session, { maxChars: MAX_DENSE_PEER_LABEL_CHARS })
+                const active = session.active ? 'a' : 'i'
+                return `${session.id} ${active} ${flavor} ${name}`
+            })
+        ]
+        : page.map((session) => {
+            const flavor = session.metadata?.flavor ?? '?'
+            const name = resolvePeerSessionLabel(session)
+            return `  ${session.id}  active=${session.active}  flavor=${flavor}  ${name}`
+        })
+    const omitted = ordered.length - page.length
     if (options.hasMore) {
-        rows.push('  … more sessions available (narrow with inspect_peer / ping_peer by id)')
+        rows.push(dense ? '…+' : '  … more sessions available (narrow with inspect_peer / ping_peer by id)')
     } else if (omitted > 0) {
-        rows.push(`  … ${omitted} more (narrow with inspect_peer / ping_peer by id)`)
+        rows.push(dense ? `…+${omitted}` : `  … ${omitted} more (narrow with inspect_peer / ping_peer by id)`)
     }
     return rows.join('\n')
 }
