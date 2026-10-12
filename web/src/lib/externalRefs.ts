@@ -21,8 +21,16 @@ export function getLinkedGithubIssue(metadata: { externalRefs?: ExternalRef[] } 
  * offered another spawn, funneling the user toward duplicate work). First
  * match wins; a URL spawned twice some other way (outside this flow's own
  * dedup) is an edge case not worth picking a "best" session for.
+ *
+ * Scans every retained `github_issue` ref, not just `getLinkedGithubIssue`'s
+ * most-recent one (Codex review, second pass): a session linked to issue A
+ * and later also linked to issue B keeps BOTH refs (`upsertExternalRef` only
+ * dedups same-issue re-links), so checking only the most-recent ref would
+ * stop finding the session while viewing A, even though A is still linked.
  */
 export function findSessionLinkedToIssue(sessions: SessionSummary[], issueUrl: string | null): SessionSummary | null {
     if (!issueUrl) return null
-    return sessions.find(session => getLinkedGithubIssue(session.metadata)?.url === issueUrl) ?? null
+    return sessions.find(session =>
+        session.metadata?.externalRefs?.some(ref => ref.kind === 'github_issue' && ref.url === issueUrl)
+    ) ?? null
 }
