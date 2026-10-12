@@ -1,9 +1,9 @@
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
 
-export type SessionsMode = 'sessions' | 'todo'
+export type SessionsMode = 'sessions' | 'boards'
 
-// Global [Sessions] [To-Do] switch — one toggle for the whole left pane, not
+// Global [Sessions] [Boards] switch — one toggle for the whole left pane, not
 // per-group (hapi#235 design doc: a per-group toggle would compound the
 // orientation problem across 137+ existing session groups).
 export function SessionsModeSwitch(props: {
@@ -19,7 +19,7 @@ export function SessionsModeSwitch(props: {
         >
             {([
                 { key: 'sessions' as const, label: t('sessions.modeSwitch.sessions') },
-                { key: 'todo' as const, label: t('sessions.modeSwitch.todo') },
+                { key: 'boards' as const, label: t('sessions.modeSwitch.boards') },
             ]).map((option) => (
                 <button
                     key={option.key}

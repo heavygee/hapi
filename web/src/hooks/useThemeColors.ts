@@ -77,7 +77,7 @@ export const THEME_COLOR_KEYS: readonly ThemeColorKey[] = [
         // default accent in light/dark because both those defaults happen to
         // be neutral. Deriving it here makes the name finally true: a custom
         // accent now actually tints its own "muted" wash (markdown link
-        // underlines, the StatusBar progress track, and the to-do card
+        // underlines, the StatusBar progress track, and the board card
         // background wash all read this token).
         derivedTargets: ['--app-link-muted'],
         derive: (hex, scheme) => ({

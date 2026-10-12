@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { groupItemsByStatus } from './TodoBoardList'
-import type { TodoBoardItem } from '@/types/api'
+import { groupItemsByStatus } from './BoardList'
+import type { BoardItem } from '@/types/api'
 
-function makeItem(overrides: Partial<TodoBoardItem>): TodoBoardItem {
+function makeItem(overrides: Partial<BoardItem>): BoardItem {
     return {
         id: overrides.id ?? 'id',
         title: overrides.title ?? 'title',

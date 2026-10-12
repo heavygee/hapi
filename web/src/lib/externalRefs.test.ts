@@ -97,7 +97,7 @@ describe('findSessionLinkedToIssue', () => {
                 externalRefs: [{ kind: 'github_issue', url: 'https://github.com/acme/widgets/issues/12', repo: 'acme/widgets', number: 12, linkedAt: 1 }]
             }
         })
-        // The to-do item's own URL, as returned by the GraphQL API.
+        // The board item's own URL, as returned by the GraphQL API.
         expect(findSessionLinkedToIssue([session], 'https://github.com/Acme/Widgets/issues/12')).toBe(session)
     })
 

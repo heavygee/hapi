@@ -995,26 +995,26 @@ export type UsageSummaryBucket = {
     requests: number
 }
 
-export type TodoBoardSummary = {
+export type BoardSummary = {
     id: string
     label: string
 }
 
-export type TodoBoardsResponse = {
-    boards: TodoBoardSummary[]
+export type BoardsResponse = {
+    boards: BoardSummary[]
 }
 
-export type TodoBoardItemActor = {
+export type BoardItemActor = {
     login: string
     avatarUrl: string
 }
 
-export type TodoBoardItemLabel = {
+export type BoardItemLabel = {
     name: string
     color: string
 }
 
-export type TodoBoardItemMilestone = {
+export type BoardItemMilestone = {
     title: string
     dueOn: string | null
 }
@@ -1025,12 +1025,12 @@ export type TodoBoardItemMilestone = {
  * single-select/text/number/date values, normalized to a display string.
  * Write support is Status-only for now; these render read-only.
  */
-export type TodoBoardItemCustomField = {
+export type BoardItemCustomField = {
     name: string
     value: string
 }
 
-export type TodoBoardItem = {
+export type BoardItem = {
     id: string
     title: string
     url: string | null
@@ -1044,25 +1044,25 @@ export type TodoBoardItem = {
     isPullRequest: boolean
     createdAt: string | null
     closedAt: string | null
-    author: TodoBoardItemActor | null
-    assignees: TodoBoardItemActor[]
-    labels: TodoBoardItemLabel[]
-    milestone: TodoBoardItemMilestone | null
-    customFields: TodoBoardItemCustomField[]
+    author: BoardItemActor | null
+    assignees: BoardItemActor[]
+    labels: BoardItemLabel[]
+    milestone: BoardItemMilestone | null
+    customFields: BoardItemCustomField[]
 }
 
-export type TodoBoardItemsResponse = {
-    board: TodoBoardSummary
+export type BoardItemsResponse = {
+    board: BoardSummary
     statusOrder: string[]
     doneValues: string[]
-    items: TodoBoardItem[]
+    items: BoardItem[]
 }
 
-export const AddTodoBoardRequestSchema = z.object({
+export const AddBoardRequestSchema = z.object({
     url: z.string().min(1)
 })
 
-export type AddTodoBoardRequest = z.infer<typeof AddTodoBoardRequestSchema>
+export type AddBoardRequest = z.infer<typeof AddBoardRequestSchema>
 
 // Write actions all identify the target item by its GitHub issue/PR URL
 // (not a HAPI-side id) — the hub validates it belongs to the board being
@@ -1072,29 +1072,29 @@ export type AddTodoBoardRequest = z.infer<typeof AddTodoBoardRequestSchema>
 // contract — the hub derives it itself from the validated URL path rather
 // than trusting a client-supplied flag, so a client can't send `isPullRequest:
 // true` for an issue URL (or vice versa) and run the wrong `gh` verb.
-export const TodoItemCloseRequestSchema = z.object({
+export const BoardItemCloseRequestSchema = z.object({
     url: z.string().min(1),
     comment: z.string().optional()
 })
-export type TodoItemCloseRequest = z.infer<typeof TodoItemCloseRequestSchema>
+export type BoardItemCloseRequest = z.infer<typeof BoardItemCloseRequestSchema>
 
-export const TodoItemReopenRequestSchema = z.object({
+export const BoardItemReopenRequestSchema = z.object({
     url: z.string().min(1),
     comment: z.string().optional()
 })
-export type TodoItemReopenRequest = z.infer<typeof TodoItemReopenRequestSchema>
+export type BoardItemReopenRequest = z.infer<typeof BoardItemReopenRequestSchema>
 
-export const TodoItemCommentRequestSchema = z.object({
+export const BoardItemCommentRequestSchema = z.object({
     url: z.string().min(1),
     body: z.string().min(1)
 })
-export type TodoItemCommentRequest = z.infer<typeof TodoItemCommentRequestSchema>
+export type BoardItemCommentRequest = z.infer<typeof BoardItemCommentRequestSchema>
 
-export const TodoItemStatusRequestSchema = z.object({
+export const BoardItemStatusRequestSchema = z.object({
     url: z.string().min(1),
     status: z.string().min(1)
 })
-export type TodoItemStatusRequest = z.infer<typeof TodoItemStatusRequestSchema>
+export type BoardItemStatusRequest = z.infer<typeof BoardItemStatusRequestSchema>
 
 export const LinkIssueRequestSchema = z.object({
     url: z.string().min(1)

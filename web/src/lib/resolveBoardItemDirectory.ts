@@ -2,7 +2,7 @@ import type { SessionSummary } from '@/types/api'
 import { groupSessionsByDirectory } from '@/components/SessionList'
 import { basename } from '@/utils/path'
 
-export type ResolvedTodoItemDirectory = {
+export type ResolvedBoardItemDirectory = {
     directory: string
     machineId: string
 }
@@ -45,11 +45,11 @@ export type ResolvedTodoItemDirectory = {
  * nonexistent directory, pairing a path from one host with another
  * (hapi#238 Codex review).
  */
-export function resolveTodoItemDirectory(
+export function resolveBoardItemDirectory(
     repo: string | null,
     sessions: SessionSummary[],
     onlineMachineIds: ReadonlySet<string>
-): ResolvedTodoItemDirectory | null {
+): ResolvedBoardItemDirectory | null {
     if (!repo) {
         return null
     }

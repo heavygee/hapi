@@ -1,7 +1,7 @@
 /**
  * Decodes the `ns` (namespace) claim from a HAPI access token's JWT payload,
  * client-side only — used to gate owner-only UI (Settings categories, the
- * To-Do mode switch) before the request round-trips to the hub, which
+ * Boards mode switch) before the request round-trips to the hub, which
  * enforces the real check server-side regardless.
  */
 export function getNamespaceFromToken(token: string | null): string | null {

@@ -27,8 +27,8 @@ const SESSION_ROUTE = /^\/sessions\/([^/]+)\/?$/
  * never routed through "exit To-Do", and nothing about this fix changes
  * that scope.
  */
-export function shouldExitTodoModeForNavigation(pathname: string, sessionsMode: SessionsMode): boolean {
-    if (sessionsMode !== 'todo') return false
+export function shouldExitBoardsModeForNavigation(pathname: string, sessionsMode: SessionsMode): boolean {
+    if (sessionsMode !== 'boards') return false
     const match = SESSION_ROUTE.exec(pathname)
     if (!match) return false
     return match[1] !== 'new'

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
-import type { TodoBoardItem, TodoBoardSummary } from '@/types/api'
-import { TodoBoardSwitcherBar, TodoBoardSwitcherMenu, type TodoBoardFilterItem } from '@/components/TodoBoardSwitcher'
-import { AddTodoBoardDialog } from '@/components/AddTodoBoardDialog'
+import type { BoardItem, BoardSummary } from '@/types/api'
+import { BoardSwitcherBar, BoardSwitcherMenu, type BoardFilterItem } from '@/components/BoardSwitcher'
+import { AddBoardDialog } from '@/components/AddBoardDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Button } from '@/components/ui/button'
 import { LoadingState } from '@/components/LoadingState'
@@ -18,7 +18,7 @@ type StatusGroup = {
     // collide with the missing-status bucket (same React key, mislabeled
     // group header).
     status: string | null
-    items: TodoBoardItem[]
+    items: BoardItem[]
     isDone: boolean
 }
 
@@ -37,15 +37,15 @@ function statusDotClass(colorIndex: number): string {
 // order, with any "no status" items last among the open groups. Done-value
 // groups are pulled out into a single collapsed/folded section at the bottom
 // regardless of where "Done" sits in the column order (hapi#235 design doc:
-// "Grouping inside To-Do mode: board status, not repo").
-export function groupItemsByStatus(items: TodoBoardItem[], statusOrder: string[], doneValues: string[]): {
+// "Grouping inside Boards mode: board status, not repo").
+export function groupItemsByStatus(items: BoardItem[], statusOrder: string[], doneValues: string[]): {
     openGroups: StatusGroup[]
-    doneItems: TodoBoardItem[]
+    doneItems: BoardItem[]
 } {
     const doneSet = new Set(doneValues)
-    const byStatus = new Map<string, TodoBoardItem[]>()
-    const noStatus: TodoBoardItem[] = []
-    const doneItems: TodoBoardItem[] = []
+    const byStatus = new Map<string, BoardItem[]>()
+    const noStatus: BoardItem[] = []
+    const doneItems: BoardItem[] = []
 
     for (const item of items) {
         if (item.status && doneSet.has(item.status)) {
@@ -83,16 +83,16 @@ export function groupItemsByStatus(items: TodoBoardItem[], statusOrder: string[]
     return { openGroups, doneItems }
 }
 
-// Card, not a text row — operator feedback (hapi#235): the to-do list needs
+// Card, not a text row — operator feedback (hapi#235): the board list needs
 // "some shape, some structure in time," comparable to GitHub's own board
 // cards. Clicking the card body opens item detail in the right pane (a
 // plain <button>, not a GitHub anchor — that moved to the explicit corner
-// icon, see TodoBoardList's own comment below for why they're siblings, not
+// icon, see BoardList's own comment below for why they're siblings, not
 // nested).
-function TodoItemCard(props: { item: TodoBoardItem; muted: boolean; selected: boolean; onSelect: () => void }) {
+function BoardItemCard(props: { item: BoardItem; muted: boolean; selected: boolean; onSelect: () => void }) {
     const { t } = useTranslation()
     const { item, muted, selected } = props
-    const repoLabel = item.repo ?? t('todo.noRepo')
+    const repoLabel = item.repo ?? t('boards.noRepo')
     const updatedLabel = item.updatedAt ? formatRelativeTime(new Date(item.updatedAt).getTime(), t) : null
     const infoChipClass = cn(chipBaseClass, chipIdleClass, 'pointer-events-none h-6 px-2')
 
@@ -164,8 +164,8 @@ function TodoItemCard(props: { item: TodoBoardItem; muted: boolean; selected: bo
                     href={item.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    title={t('todo.openInGithub')}
-                    aria-label={`${t('todo.openInGithub')}: ${item.title}`}
+                    title={t('boards.openInGithub')}
+                    aria-label={`${t('boards.openInGithub')}: ${item.title}`}
                     className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
                 >
                     <ExternalLinkIcon className="h-3.5 w-3.5" />
@@ -175,26 +175,26 @@ function TodoItemCard(props: { item: TodoBoardItem; muted: boolean; selected: bo
     )
 }
 
-export function TodoBoardList(props: {
-    boards: TodoBoardSummary[]
+export function BoardList(props: {
+    boards: BoardSummary[]
     selectedBoardId: string | null
     onSelectBoard: (id: string) => void
     onAddBoard: (url: string) => Promise<void>
     onRemoveBoard: (id: string) => Promise<void>
-    items: TodoBoardItem[]
+    items: BoardItem[]
     statusOrder: string[]
     doneValues: string[]
     isLoading: boolean
     error: string | null
     selectedItemId: string | null
-    onSelectItem: (item: TodoBoardItem) => void
+    onSelectItem: (item: BoardItem) => void
     onRefresh: () => void
     isRefreshing: boolean
 }) {
     const { t } = useTranslation()
     const [doneExpanded, setDoneExpanded] = useState(false)
     const [addDialogOpen, setAddDialogOpen] = useState(false)
-    const [removeTarget, setRemoveTarget] = useState<TodoBoardFilterItem | null>(null)
+    const [removeTarget, setRemoveTarget] = useState<BoardFilterItem | null>(null)
     const [isRemoving, setIsRemoving] = useState(false)
     const boardFilterItems = useMemo(
         () => props.boards.map(board => ({ id: board.id, label: board.label })),
@@ -226,13 +226,13 @@ export function TodoBoardList(props: {
                                 type="button"
                                 onClick={props.onRefresh}
                                 disabled={props.isRefreshing}
-                                aria-label={t('todo.refresh')}
-                                title={t('todo.refresh')}
+                                aria-label={t('boards.refresh')}
+                                title={t('boards.refresh')}
                                 className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] disabled:opacity-50"
                             >
                                 <RefreshIcon className={cn('h-4 w-4', props.isRefreshing && 'animate-spin')} />
                             </button>
-                            <TodoBoardSwitcherMenu
+                            <BoardSwitcherMenu
                                 boards={boardFilterItems}
                                 value={props.selectedBoardId}
                                 onChange={props.onSelectBoard}
@@ -240,7 +240,7 @@ export function TodoBoardList(props: {
                                 onAddClick={() => setAddDialogOpen(true)}
                             />
                         </div>
-                        <TodoBoardSwitcherBar
+                        <BoardSwitcherBar
                             boards={boardFilterItems}
                             value={props.selectedBoardId}
                             onChange={props.onSelectBoard}
@@ -251,7 +251,7 @@ export function TodoBoardList(props: {
                 ) : null}
             </div>
 
-            <AddTodoBoardDialog
+            <AddBoardDialog
                 isOpen={addDialogOpen}
                 onClose={() => setAddDialogOpen(false)}
                 onAdd={props.onAddBoard}
@@ -261,10 +261,10 @@ export function TodoBoardList(props: {
                 <ConfirmDialog
                     isOpen={true}
                     onClose={() => setRemoveTarget(null)}
-                    title={t('todo.removeBoard.confirmTitle')}
-                    description={t('todo.removeBoard.confirmDescription', { label: removeTarget.label })}
-                    confirmLabel={t('todo.removeBoard.confirm')}
-                    confirmingLabel={t('todo.removeBoard.removing')}
+                    title={t('boards.removeBoard.confirmTitle')}
+                    description={t('boards.removeBoard.confirmDescription', { label: removeTarget.label })}
+                    confirmLabel={t('boards.removeBoard.confirm')}
+                    confirmingLabel={t('boards.removeBoard.removing')}
                     onConfirm={async () => {
                         setIsRemoving(true)
                         try {
@@ -280,38 +280,38 @@ export function TodoBoardList(props: {
                 />
             ) : null}
 
-            <div data-testid="todo-item-list" className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+            <div data-testid="board-item-list" className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
                 {props.isLoading ? (
                     <div className="flex justify-center py-6">
-                        <LoadingState label={t('todo.loading')} />
+                        <LoadingState label={t('boards.loading')} />
                     </div>
                 ) : props.error && props.items.length === 0 ? (
                     <div className="px-1 py-4 text-sm text-red-600">
-                        {t('todo.error', { message: props.error })}
+                        {t('boards.error', { message: props.error })}
                     </div>
                 ) : props.items.length === 0 ? (
                     <div className="flex flex-col items-center gap-3 px-4 py-10 text-center">
-                        <div className="text-sm font-medium text-[var(--app-fg)]">{t('todo.empty.title')}</div>
-                        <div className="max-w-sm text-sm text-[var(--app-hint)]">{t('todo.empty.body')}</div>
+                        <div className="text-sm font-medium text-[var(--app-fg)]">{t('boards.empty.title')}</div>
+                        <div className="max-w-sm text-sm text-[var(--app-hint)]">{t('boards.empty.body')}</div>
                         <Button type="button" variant="outline" onClick={() => setAddDialogOpen(true)}>
-                            {t('todo.addBoard.chipLabel')}
+                            {t('boards.addBoard.chipLabel')}
                         </Button>
                     </div>
                 ) : (
                     <>
                         {props.error ? (
                             <div className="mb-2 rounded-md border border-amber-600/40 bg-amber-600/10 px-2 py-1.5 text-xs text-amber-700 dark:text-amber-400">
-                                {t('todo.staleError', { message: props.error })}
+                                {t('boards.staleError', { message: props.error })}
                             </div>
                         ) : null}
                         {groupsWithDot.map(({ group, isNoStatus, dotClass }) => (
                             <div key={group.status ?? '__no_status__'} className="mb-3">
                                 <div className="flex items-center gap-1.5 px-1 py-1 text-xs font-semibold uppercase tracking-wide text-[var(--app-hint)]">
                                     <span aria-hidden className={cn('h-2 w-2 shrink-0 rounded-full', dotClass)} />
-                                    {isNoStatus ? t('todo.noStatus') : group.status} ({group.items.length})
+                                    {isNoStatus ? t('boards.noStatus') : group.status} ({group.items.length})
                                 </div>
                                 {group.items.map((item) => (
-                                    <TodoItemCard
+                                    <BoardItemCard
                                         key={item.id}
                                         item={item}
                                         muted={false}
@@ -330,11 +330,11 @@ export function TodoBoardList(props: {
                                     className="w-full rounded-lg px-1 py-1 text-left text-xs font-semibold uppercase tracking-wide text-[var(--app-hint)] hover:text-[var(--app-fg)]"
                                 >
                                     {doneExpanded
-                                        ? t('todo.doneSection.collapse', { n: doneItems.length })
-                                        : t('todo.doneSection.expand', { n: doneItems.length })}
+                                        ? t('boards.doneSection.collapse', { n: doneItems.length })
+                                        : t('boards.doneSection.expand', { n: doneItems.length })}
                                 </button>
                                 {doneExpanded ? doneItems.map((item) => (
-                                    <TodoItemCard
+                                    <BoardItemCard
                                         key={item.id}
                                         item={item}
                                         muted

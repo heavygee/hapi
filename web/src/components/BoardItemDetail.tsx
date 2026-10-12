@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { TodoBoardItem } from '@/types/api'
+import type { BoardItem } from '@/types/api'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -36,7 +36,7 @@ function TimestampRow(props: { label: string; iso: string | null; t: (key: strin
     )
 }
 
-// Right-pane detail for a to-do card click (hapi#235) — same slot session
+// Right-pane detail for a board card click (hapi#235) — same slot session
 // detail occupies today. "Spawn session" reuses the existing new-session
 // flow entirely (NewSession's initialDirectory/initialMachineId/
 // initialMessage props) — resolving a directory and building the briefing
@@ -51,8 +51,8 @@ function TimestampRow(props: { label: string; iso: string | null; t: (key: strin
 // (operator decision, hapi#238: "the whole reason to bring these cards here
 // is to not have to go to GitHub" — but that's only possible for items that
 // actually link to something on GitHub).
-export function TodoItemDetail(props: {
-    item: TodoBoardItem
+export function BoardItemDetail(props: {
+    item: BoardItem
     statusOrder: string[]
     onBack: () => void
     onSpawn: () => void
@@ -72,7 +72,7 @@ export function TodoItemDetail(props: {
 }) {
     const { t } = useTranslation()
     const { item, linkedSessionId } = props
-    const repoLabel = item.repo ?? t('todo.noRepo')
+    const repoLabel = item.repo ?? t('boards.noRepo')
     const updatedLabel = item.updatedAt ? formatRelativeTime(new Date(item.updatedAt).getTime(), t) : null
     const chipClass = cn(chipBaseClass, chipIdleClass, 'pointer-events-none h-6 px-2')
     const [closeConfirmOpen, setCloseConfirmOpen] = useState(false)
@@ -93,12 +93,12 @@ export function TodoItemDetail(props: {
     }
 
     return (
-        <div data-testid="todo-item-detail" className="flex h-full min-h-0 flex-col bg-[var(--app-bg)]">
+        <div data-testid="board-item-detail" className="flex h-full min-h-0 flex-col bg-[var(--app-bg)]">
             <div className="flex shrink-0 items-start gap-2 border-b border-[var(--app-border)] p-3 pt-[calc(env(safe-area-inset-top)+0.75rem)]">
                 <button
                     type="button"
                     onClick={props.onBack}
-                    aria-label={t('todo.detail.back')}
+                    aria-label={t('boards.detail.back')}
                     className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] split:hidden"
                 >
                     <BackIcon />
@@ -116,8 +116,8 @@ export function TodoItemDetail(props: {
                     type="button"
                     onClick={props.onRefresh}
                     disabled={props.isRefreshing}
-                    aria-label={t('todo.detail.refresh')}
-                    title={t('todo.detail.refresh')}
+                    aria-label={t('boards.detail.refresh')}
+                    title={t('boards.detail.refresh')}
                     className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] disabled:opacity-50"
                 >
                     <RefreshIcon className={cn('h-4 w-4', props.isRefreshing && 'animate-spin')} />
@@ -137,12 +137,12 @@ export function TodoItemDetail(props: {
                     {item.author ? (
                         <span className="inline-flex items-center gap-1.5">
                             <img src={item.author.avatarUrl} alt="" className="h-4 w-4 rounded-full" />
-                            {t('todo.detail.openedBy', { login: item.author.login })}
+                            {t('boards.detail.openedBy', { login: item.author.login })}
                         </span>
                     ) : null}
                     {item.assignees.length > 0 ? (
                         <span className="inline-flex flex-wrap items-center gap-1.5">
-                            {t('todo.detail.assignees')}:
+                            {t('boards.detail.assignees')}:
                             {item.assignees.map(assignee => (
                                 <span key={assignee.login} className="inline-flex items-center gap-1">
                                     <img src={assignee.avatarUrl} alt="" className="h-4 w-4 rounded-full" />
@@ -162,13 +162,13 @@ export function TodoItemDetail(props: {
                     ))}
                     {item.milestone ? (
                         <span>
-                            {t('todo.detail.milestone')}: {item.milestone.title}
-                            {item.milestone.dueOn ? ` (${t('todo.detail.dueOn', { date: item.milestone.dueOn })})` : ''}
+                            {t('boards.detail.milestone')}: {item.milestone.title}
+                            {item.milestone.dueOn ? ` (${t('boards.detail.dueOn', { date: item.milestone.dueOn })})` : ''}
                         </span>
                     ) : null}
-                    <TimestampRow label={t('todo.detail.created')} iso={item.createdAt} t={t} />
-                    <TimestampRow label={t('todo.detail.updated')} iso={item.updatedAt} t={t} />
-                    <TimestampRow label={t('todo.detail.closed')} iso={item.closedAt} t={t} />
+                    <TimestampRow label={t('boards.detail.created')} iso={item.createdAt} t={t} />
+                    <TimestampRow label={t('boards.detail.updated')} iso={item.updatedAt} t={t} />
+                    <TimestampRow label={t('boards.detail.closed')} iso={item.closedAt} t={t} />
                     {item.customFields.map(field => (
                         <span
                             key={field.name}
@@ -179,7 +179,7 @@ export function TodoItemDetail(props: {
                     ))}
                     {canWrite ? (
                         <label className="inline-flex items-center gap-1.5">
-                            {t('todo.detail.status')}:
+                            {t('boards.detail.status')}:
                             <select
                                 value={item.status ?? ''}
                                 disabled={props.isSettingStatus}
@@ -191,7 +191,7 @@ export function TodoItemDetail(props: {
                                 }}
                                 className="rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-2 py-1 text-xs text-[var(--app-fg)]"
                             >
-                                {item.status === null ? <option value="">{t('todo.noStatus')}</option> : null}
+                                {item.status === null ? <option value="">{t('boards.noStatus')}</option> : null}
                                 {props.statusOrder.map(status => (
                                     <option key={status} value={status}>{status}</option>
                                 ))}
@@ -204,27 +204,27 @@ export function TodoItemDetail(props: {
                     {item.body ? (
                         <MarkdownRenderer standalone content={item.body} />
                     ) : (
-                        <p className="text-sm text-[var(--app-hint)]">{t('todo.detail.noBody')}</p>
+                        <p className="text-sm text-[var(--app-hint)]">{t('boards.detail.noBody')}</p>
                     )}
                 </div>
 
                 {canWrite ? (
                     <div className="mt-4 border-t border-[var(--app-border)] pt-4">
-                        <label htmlFor="todo-item-comment" className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--app-hint)]">
-                            {t('todo.detail.comment')}
+                        <label htmlFor="board-item-comment" className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--app-hint)]">
+                            {t('boards.detail.comment')}
                         </label>
                         <textarea
-                            id="todo-item-comment"
+                            id="board-item-comment"
                             value={commentDraft}
                             onChange={(event) => setCommentDraft(event.target.value)}
                             disabled={props.isCommenting}
-                            placeholder={t('todo.detail.commentPlaceholder')}
+                            placeholder={t('boards.detail.commentPlaceholder')}
                             rows={3}
                             className="w-full resize-none rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] p-2 text-sm text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
                         />
                         <div className="mt-1.5 flex justify-end">
                             <Button type="button" variant="outline" disabled={props.isCommenting || !commentDraft.trim()} onClick={handleSendComment}>
-                                {props.isCommenting ? t('todo.detail.commenting') : t('todo.detail.sendComment')}
+                                {props.isCommenting ? t('boards.detail.commenting') : t('boards.detail.sendComment')}
                             </Button>
                         </div>
                     </div>
@@ -236,7 +236,7 @@ export function TodoItemDetail(props: {
                     <Button asChild variant="outline">
                         <a href={item.url} target="_blank" rel="noopener noreferrer">
                             <ExternalLinkIcon className="h-4 w-4" />
-                            {t('todo.detail.openInGithub')}
+                            {t('boards.detail.openInGithub')}
                         </a>
                     </Button>
                 ) : null}
@@ -246,7 +246,7 @@ export function TodoItemDetail(props: {
                         variant="outline"
                         onClick={() => props.onOpenLinkedSession(linkedSessionId)}
                     >
-                        {t('todo.detail.openSession')}
+                        {t('boards.detail.openSession')}
                     </Button>
                 ) : (
                     <Button
@@ -255,7 +255,7 @@ export function TodoItemDetail(props: {
                         onClick={props.onSpawn}
                     >
                         <PlusCircleIcon className="h-4 w-4" />
-                        {t('todo.detail.spawnSession')}
+                        {t('boards.detail.spawnSession')}
                     </Button>
                 )}
                 {/* A merged PR can't be reopened via `gh pr reopen` (GitHub rejects it) and is
@@ -264,11 +264,11 @@ export function TodoItemDetail(props: {
                 {canWrite && item.state !== 'MERGED' ? (
                     isClosed ? (
                         <Button type="button" variant="outline" disabled={props.isReopening} onClick={props.onReopen}>
-                            {props.isReopening ? t('todo.detail.reopening') : t('todo.detail.reopen')}
+                            {props.isReopening ? t('boards.detail.reopening') : t('boards.detail.reopen')}
                         </Button>
                     ) : (
                         <Button type="button" variant="outline" disabled={props.isClosing} onClick={() => setCloseConfirmOpen(true)}>
-                            {props.isClosing ? t('todo.detail.closing') : t('todo.detail.close')}
+                            {props.isClosing ? t('boards.detail.closing') : t('boards.detail.close')}
                         </Button>
                     )
                 ) : null}
@@ -277,10 +277,10 @@ export function TodoItemDetail(props: {
             <ConfirmDialog
                 isOpen={closeConfirmOpen}
                 onClose={() => setCloseConfirmOpen(false)}
-                title={t('todo.detail.closeConfirmTitle')}
-                description={t('todo.detail.closeConfirmDescription', { title: item.title })}
-                confirmLabel={t('todo.detail.close')}
-                confirmingLabel={t('todo.detail.closing')}
+                title={t('boards.detail.closeConfirmTitle')}
+                description={t('boards.detail.closeConfirmDescription', { title: item.title })}
+                confirmLabel={t('boards.detail.close')}
+                confirmingLabel={t('boards.detail.closing')}
                 onConfirm={async () => {
                     try {
                         await props.onClose()

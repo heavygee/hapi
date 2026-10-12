@@ -23,8 +23,8 @@ import type {
     SlashCommandsResponse,
     SkillsResponse,
     SpawnResponse,
-    TodoBoardItemsResponse,
-    TodoBoardsResponse,
+    BoardItemsResponse,
+    BoardsResponse,
     VisibilityPayload,
     HapiSessionExportResponse,
     HubHealthResponse,
@@ -761,49 +761,49 @@ export class ApiClient {
         return await this.request<MachinesResponse>('/api/machines')
     }
 
-    async getTodoBoards(): Promise<TodoBoardsResponse> {
-        return await this.request<TodoBoardsResponse>('/api/todo-boards')
+    async getBoards(): Promise<BoardsResponse> {
+        return await this.request<BoardsResponse>('/api/todo-boards')
     }
 
-    async getTodoBoardItems(boardId: string): Promise<TodoBoardItemsResponse> {
-        return await this.request<TodoBoardItemsResponse>(`/api/todo-boards/${encodeURIComponent(boardId)}/items`)
+    async getBoardItems(boardId: string): Promise<BoardItemsResponse> {
+        return await this.request<BoardItemsResponse>(`/api/todo-boards/${encodeURIComponent(boardId)}/items`)
     }
 
-    async addTodoBoard(url: string): Promise<TodoBoardsResponse> {
-        return await this.request<TodoBoardsResponse>('/api/todo-boards', {
+    async addBoard(url: string): Promise<BoardsResponse> {
+        return await this.request<BoardsResponse>('/api/todo-boards', {
             method: 'POST',
             body: JSON.stringify({ url })
         })
     }
 
-    async removeTodoBoard(boardId: string): Promise<TodoBoardsResponse> {
-        return await this.request<TodoBoardsResponse>(`/api/todo-boards/${encodeURIComponent(boardId)}`, {
+    async removeBoard(boardId: string): Promise<BoardsResponse> {
+        return await this.request<BoardsResponse>(`/api/todo-boards/${encodeURIComponent(boardId)}`, {
             method: 'DELETE'
         })
     }
 
-    async closeTodoItem(boardId: string, url: string, comment?: string): Promise<void> {
+    async closeBoardItem(boardId: string, url: string, comment?: string): Promise<void> {
         await this.request(`/api/todo-boards/${encodeURIComponent(boardId)}/items/close`, {
             method: 'POST',
             body: JSON.stringify({ url, comment })
         })
     }
 
-    async reopenTodoItem(boardId: string, url: string, comment?: string): Promise<void> {
+    async reopenBoardItem(boardId: string, url: string, comment?: string): Promise<void> {
         await this.request(`/api/todo-boards/${encodeURIComponent(boardId)}/items/reopen`, {
             method: 'POST',
             body: JSON.stringify({ url, comment })
         })
     }
 
-    async commentOnTodoItem(boardId: string, url: string, body: string): Promise<void> {
+    async commentOnBoardItem(boardId: string, url: string, body: string): Promise<void> {
         await this.request(`/api/todo-boards/${encodeURIComponent(boardId)}/items/comment`, {
             method: 'POST',
             body: JSON.stringify({ url, body })
         })
     }
 
-    async setTodoItemStatus(boardId: string, url: string, status: string): Promise<void> {
+    async setBoardItemStatus(boardId: string, url: string, status: string): Promise<void> {
         await this.request(`/api/todo-boards/${encodeURIComponent(boardId)}/items/status`, {
             method: 'POST',
             body: JSON.stringify({ url, status })

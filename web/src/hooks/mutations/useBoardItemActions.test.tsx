@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import type { ApiClient } from '@/api/client'
-import { useTodoItemActions } from './useTodoItemActions'
+import { useBoardItemActions } from './useBoardItemActions'
 
 function wrapper(queryClient: QueryClient) {
     return ({ children }: { children: ReactNode }) => (
@@ -11,27 +11,27 @@ function wrapper(queryClient: QueryClient) {
     )
 }
 
-describe('useTodoItemActions', () => {
+describe('useBoardItemActions', () => {
     it('closes an item and invalidates the board items query on success', async () => {
         const queryClient = new QueryClient()
         const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
-        const closeTodoItem = vi.fn().mockResolvedValue(undefined)
-        const api = { closeTodoItem } as unknown as ApiClient
+        const closeBoardItem = vi.fn().mockResolvedValue(undefined)
+        const api = { closeBoardItem } as unknown as ApiClient
 
-        const { result } = renderHook(() => useTodoItemActions(api, 'board-1'), { wrapper: wrapper(queryClient) })
+        const { result } = renderHook(() => useBoardItemActions(api, 'board-1'), { wrapper: wrapper(queryClient) })
         await result.current.closeItem({ url: 'https://github.com/a/b/issues/1' })
 
-        expect(closeTodoItem).toHaveBeenCalledWith('board-1', 'https://github.com/a/b/issues/1')
+        expect(closeBoardItem).toHaveBeenCalledWith('board-1', 'https://github.com/a/b/issues/1')
         expect(invalidateSpy).toHaveBeenCalled()
     })
 
     it('tracks closingUrls across the call, scoped to the acting item', async () => {
         const queryClient = new QueryClient()
         let resolveClose: () => void = () => {}
-        const closeTodoItem = vi.fn(() => new Promise<void>((resolve) => { resolveClose = resolve }))
-        const api = { closeTodoItem } as unknown as ApiClient
+        const closeBoardItem = vi.fn(() => new Promise<void>((resolve) => { resolveClose = resolve }))
+        const api = { closeBoardItem } as unknown as ApiClient
 
-        const { result } = renderHook(() => useTodoItemActions(api, 'board-1'), { wrapper: wrapper(queryClient) })
+        const { result } = renderHook(() => useBoardItemActions(api, 'board-1'), { wrapper: wrapper(queryClient) })
         expect(result.current.closingUrls.size).toBe(0)
 
         const promise = result.current.closeItem({ url: 'https://github.com/a/b/issues/1' })
@@ -51,14 +51,14 @@ describe('useTodoItemActions', () => {
         let resolveA: () => void = () => {}
         let resolveB: () => void = () => {}
         let callCount = 0
-        const closeTodoItem = vi.fn(() => new Promise<void>((resolve) => {
+        const closeBoardItem = vi.fn(() => new Promise<void>((resolve) => {
             callCount += 1
             if (callCount === 1) resolveA = resolve
             else resolveB = resolve
         }))
-        const api = { closeTodoItem } as unknown as ApiClient
+        const api = { closeBoardItem } as unknown as ApiClient
 
-        const { result } = renderHook(() => useTodoItemActions(api, 'board-1'), { wrapper: wrapper(queryClient) })
+        const { result } = renderHook(() => useBoardItemActions(api, 'board-1'), { wrapper: wrapper(queryClient) })
 
         const promiseA = result.current.closeItem({ url: 'https://github.com/a/b/issues/1' })
         await waitFor(() => expect(result.current.closingUrls.has('https://github.com/a/b/issues/1')).toBe(true))
@@ -83,43 +83,43 @@ describe('useTodoItemActions', () => {
 
     it('rejects without calling the API when the item has no url (draft issue)', async () => {
         const queryClient = new QueryClient()
-        const closeTodoItem = vi.fn()
-        const api = { closeTodoItem } as unknown as ApiClient
+        const closeBoardItem = vi.fn()
+        const api = { closeBoardItem } as unknown as ApiClient
 
-        const { result } = renderHook(() => useTodoItemActions(api, 'board-1'), { wrapper: wrapper(queryClient) })
+        const { result } = renderHook(() => useBoardItemActions(api, 'board-1'), { wrapper: wrapper(queryClient) })
         await expect(result.current.closeItem({ url: null })).rejects.toThrow()
-        expect(closeTodoItem).not.toHaveBeenCalled()
+        expect(closeBoardItem).not.toHaveBeenCalled()
     })
 
     it('rejects without calling the API when there is no board selected', async () => {
         const queryClient = new QueryClient()
-        const setTodoItemStatus = vi.fn()
-        const api = { setTodoItemStatus } as unknown as ApiClient
+        const setBoardItemStatus = vi.fn()
+        const api = { setBoardItemStatus } as unknown as ApiClient
 
-        const { result } = renderHook(() => useTodoItemActions(api, null), { wrapper: wrapper(queryClient) })
+        const { result } = renderHook(() => useBoardItemActions(api, null), { wrapper: wrapper(queryClient) })
         await expect(result.current.setItemStatus({ url: 'https://github.com/a/b/issues/1' }, 'Done')).rejects.toThrow()
-        expect(setTodoItemStatus).not.toHaveBeenCalled()
+        expect(setBoardItemStatus).not.toHaveBeenCalled()
     })
 
     it('propagates a failed write without invalidating the query', async () => {
         const queryClient = new QueryClient()
         const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
-        const commentOnTodoItem = vi.fn().mockRejectedValue(new Error('gh issue comment failed'))
-        const api = { commentOnTodoItem } as unknown as ApiClient
+        const commentOnBoardItem = vi.fn().mockRejectedValue(new Error('gh issue comment failed'))
+        const api = { commentOnBoardItem } as unknown as ApiClient
 
-        const { result } = renderHook(() => useTodoItemActions(api, 'board-1'), { wrapper: wrapper(queryClient) })
+        const { result } = renderHook(() => useBoardItemActions(api, 'board-1'), { wrapper: wrapper(queryClient) })
         await expect(result.current.commentOnItem({ url: 'https://github.com/a/b/issues/1' }, 'hi')).rejects.toThrow('gh issue comment failed')
         expect(invalidateSpy).not.toHaveBeenCalled()
     })
 
     it('sets status via the API, resolving the board id and item url', async () => {
         const queryClient = new QueryClient()
-        const setTodoItemStatus = vi.fn().mockResolvedValue(undefined)
-        const api = { setTodoItemStatus } as unknown as ApiClient
+        const setBoardItemStatus = vi.fn().mockResolvedValue(undefined)
+        const api = { setBoardItemStatus } as unknown as ApiClient
 
-        const { result } = renderHook(() => useTodoItemActions(api, 'board-1'), { wrapper: wrapper(queryClient) })
+        const { result } = renderHook(() => useBoardItemActions(api, 'board-1'), { wrapper: wrapper(queryClient) })
         await result.current.setItemStatus({ url: 'https://github.com/a/b/issues/1' }, 'Done')
 
-        expect(setTodoItemStatus).toHaveBeenCalledWith('board-1', 'https://github.com/a/b/issues/1', 'Done')
+        expect(setBoardItemStatus).toHaveBeenCalledWith('board-1', 'https://github.com/a/b/issues/1', 'Done')
     })
 })

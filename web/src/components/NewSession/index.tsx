@@ -93,7 +93,7 @@ export function NewSession(props: {
     onChooseFolder?: (args: { machineId: string | null; directory: string }) => void
     initialDirectory?: string
     initialMachineId?: string
-    /** Seeds the new session's composer draft (editable, not sent automatically) once creation succeeds — e.g. a to-do item's title/URL/body (hapi#235/#238). */
+    /** Seeds the new session's composer draft (editable, not sent automatically) once creation succeeds — e.g. a board item's title/URL/body (hapi#235/#238). */
     initialMessage?: string
 }) {
     const { haptic } = usePlatform()

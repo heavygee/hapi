@@ -1,8 +1,8 @@
 import { randomId } from '@/lib/randomId'
 
-const STORAGE_PREFIX = 'hapi:todo-spawn-briefing:'
+const STORAGE_PREFIX = 'hapi:board-spawn-briefing:'
 
-export type TodoSpawnBriefing = {
+export type BoardSpawnBriefing = {
     initialMessage: string
     linkIssueUrl?: string
 }
@@ -19,10 +19,10 @@ export type TodoSpawnBriefing = {
  * can detour through /browse and back to `/sessions/new` with the same id
  * (same pattern as `shareTransferId`) before the session is actually
  * created, so `NewSessionPage` must be able to re-read it on each mount.
- * Call `clearTodoSpawnBriefing` once the flow actually completes or is
+ * Call `clearBoardSpawnBriefing` once the flow actually completes or is
  * cancelled, so the stash doesn't accumulate across spawns.
  */
-export function stashTodoSpawnBriefing(briefing: TodoSpawnBriefing): string {
+export function stashBoardSpawnBriefing(briefing: BoardSpawnBriefing): string {
     const id = randomId()
     if (typeof window !== 'undefined') {
         try {
@@ -36,7 +36,7 @@ export function stashTodoSpawnBriefing(briefing: TodoSpawnBriefing): string {
     return id
 }
 
-export function peekTodoSpawnBriefing(id: string): TodoSpawnBriefing | null {
+export function peekBoardSpawnBriefing(id: string): BoardSpawnBriefing | null {
     if (typeof window === 'undefined') return null
     try {
         const raw = sessionStorage.getItem(STORAGE_PREFIX + id)
@@ -54,7 +54,7 @@ export function peekTodoSpawnBriefing(id: string): TodoSpawnBriefing | null {
     }
 }
 
-export function clearTodoSpawnBriefing(id: string): void {
+export function clearBoardSpawnBriefing(id: string): void {
     if (typeof window === 'undefined') return
     try {
         sessionStorage.removeItem(STORAGE_PREFIX + id)

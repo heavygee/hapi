@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
-function getTodoBoardSelectionStorageKey(): string {
-    return 'hapi-todo-board-selection'
+function getBoardSelectionStorageKey(): string {
+    return 'hapi-board-selection'
 }
 
 function isBrowser(): boolean {
@@ -30,17 +30,17 @@ function safeSetItem(key: string, value: string): void {
     }
 }
 
-export function getInitialTodoBoardSelection(): string | null {
-    const raw = safeGetItem(getTodoBoardSelectionStorageKey())
+export function getInitialBoardSelection(): string | null {
+    const raw = safeGetItem(getBoardSelectionStorageKey())
     return raw && raw.trim().length > 0 ? raw : null
 }
 
 /** Last-selected board persists across reopening To-Do mode (hapi#235). */
-export function useTodoBoardSelection(): {
+export function useBoardSelection(): {
     selectedBoardId: string | null
     setSelectedBoardId: (id: string) => void
 } {
-    const [selectedBoardId, setSelectedBoardIdState] = useState<string | null>(getInitialTodoBoardSelection)
+    const [selectedBoardId, setSelectedBoardIdState] = useState<string | null>(getInitialBoardSelection)
 
     useEffect(() => {
         if (!isBrowser()) {
@@ -48,7 +48,7 @@ export function useTodoBoardSelection(): {
         }
 
         const onStorage = (event: StorageEvent) => {
-            if (event.key !== getTodoBoardSelectionStorageKey()) {
+            if (event.key !== getBoardSelectionStorageKey()) {
                 return
             }
             setSelectedBoardIdState(event.newValue && event.newValue.trim().length > 0 ? event.newValue : null)
@@ -60,7 +60,7 @@ export function useTodoBoardSelection(): {
 
     const setSelectedBoardId = useCallback((id: string) => {
         setSelectedBoardIdState(id)
-        safeSetItem(getTodoBoardSelectionStorageKey(), id)
+        safeSetItem(getBoardSelectionStorageKey(), id)
     }, [])
 
     return { selectedBoardId, setSelectedBoardId }

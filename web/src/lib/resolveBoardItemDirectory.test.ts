@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionSummary } from '@/types/api'
-import { resolveTodoItemDirectory } from './resolveTodoItemDirectory'
+import { resolveBoardItemDirectory } from './resolveBoardItemDirectory'
 
 function makeSession(overrides: Partial<SessionSummary> & { id: string }): SessionSummary {
     return {
@@ -27,19 +27,19 @@ function makeSession(overrides: Partial<SessionSummary> & { id: string }): Sessi
 
 const ALL_ONLINE = new Set(['m1', 'm2', 'machine-1'])
 
-describe('resolveTodoItemDirectory', () => {
+describe('resolveBoardItemDirectory', () => {
     it('returns null when the item has no repo', () => {
-        expect(resolveTodoItemDirectory(null, [], ALL_ONLINE)).toBeNull()
+        expect(resolveBoardItemDirectory(null, [], ALL_ONLINE)).toBeNull()
     })
 
     it('returns null when no known directory matches the repo name', () => {
         const sessions = [makeSession({ id: 's1', metadata: { path: '/home/user/some-other-project', machineId: 'm1' } })]
-        expect(resolveTodoItemDirectory('heavygee/hapi-demo-board', sessions, ALL_ONLINE)).toBeNull()
+        expect(resolveBoardItemDirectory('heavygee/hapi-demo-board', sessions, ALL_ONLINE)).toBeNull()
     })
 
     it('resolves a single matching directory by its final path segment', () => {
         const sessions = [makeSession({ id: 's1', metadata: { path: '/home/user/hapi-demo-board', machineId: 'machine-1' } })]
-        expect(resolveTodoItemDirectory('heavygee/hapi-demo-board', sessions, ALL_ONLINE)).toEqual({
+        expect(resolveBoardItemDirectory('heavygee/hapi-demo-board', sessions, ALL_ONLINE)).toEqual({
             directory: '/home/user/hapi-demo-board',
             machineId: 'machine-1'
         })
@@ -47,7 +47,7 @@ describe('resolveTodoItemDirectory', () => {
 
     it('matches case-insensitively', () => {
         const sessions = [makeSession({ id: 's1', metadata: { path: '/home/user/Hapi-Demo-Board', machineId: 'm1' } })]
-        expect(resolveTodoItemDirectory('heavygee/hapi-demo-board', sessions, ALL_ONLINE)).toEqual({
+        expect(resolveBoardItemDirectory('heavygee/hapi-demo-board', sessions, ALL_ONLINE)).toEqual({
             directory: '/home/user/Hapi-Demo-Board',
             machineId: 'm1'
         })
@@ -58,7 +58,7 @@ describe('resolveTodoItemDirectory', () => {
         // host while initialDirectory still points at a real path elsewhere)
         // is worse than just leaving the form blank.
         const sessions = [makeSession({ id: 's1', metadata: { path: '/home/user/hapi-demo-board' } })]
-        expect(resolveTodoItemDirectory('heavygee/hapi-demo-board', sessions, ALL_ONLINE)).toBeNull()
+        expect(resolveBoardItemDirectory('heavygee/hapi-demo-board', sessions, ALL_ONLINE)).toBeNull()
     })
 
     it('treats a matching directory on an offline machine as no match', () => {
@@ -68,7 +68,7 @@ describe('resolveTodoItemDirectory', () => {
         // it would let NewSession pair this directory with a different
         // (online) machine instead (hapi#238 Codex review).
         const sessions = [makeSession({ id: 's1', metadata: { path: '/home/user/hapi-demo-board', machineId: 'offline-machine' } })]
-        expect(resolveTodoItemDirectory('heavygee/hapi-demo-board', sessions, ALL_ONLINE)).toBeNull()
+        expect(resolveBoardItemDirectory('heavygee/hapi-demo-board', sessions, ALL_ONLINE)).toBeNull()
     })
 
     it('picks the most recently active directory when multiple match', () => {
@@ -76,7 +76,7 @@ describe('resolveTodoItemDirectory', () => {
             makeSession({ id: 'old', metadata: { path: '/home/user/hapi-demo-board', machineId: 'm1' }, updatedAt: 100 }),
             makeSession({ id: 'new', metadata: { path: '/srv/worktrees/hapi-demo-board', machineId: 'm2' }, updatedAt: 999 }),
         ]
-        expect(resolveTodoItemDirectory('heavygee/hapi-demo-board', sessions, ALL_ONLINE)).toEqual({
+        expect(resolveBoardItemDirectory('heavygee/hapi-demo-board', sessions, ALL_ONLINE)).toEqual({
             directory: '/srv/worktrees/hapi-demo-board',
             machineId: 'm2'
         })
@@ -91,7 +91,7 @@ describe('resolveTodoItemDirectory', () => {
                 worktree: { basePath: '/home/user/hapi-demo-board', branch: 'main', name: 'hapi-demo-board' }
             }
         })]
-        expect(resolveTodoItemDirectory('heavygee/hapi-demo-board', sessions, ALL_ONLINE)).toEqual({
+        expect(resolveBoardItemDirectory('heavygee/hapi-demo-board', sessions, ALL_ONLINE)).toEqual({
             directory: '/home/user/hapi-demo-board',
             machineId: 'm1'
         })

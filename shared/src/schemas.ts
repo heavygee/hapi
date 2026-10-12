@@ -79,7 +79,7 @@ export type ExternalRef = z.infer<typeof ExternalRefSchema>
 /**
  * Accepts both the full GitHub issue URL and the `owner/repo#N` shorthand
  * (`hapi link-issue <url|owner/repo#N>`, hapi#235/#238). GHE/other hosts
- * aren't supported here — unlike the to-do board's `parseProjectUrl`, the
+ * aren't supported here — unlike the board feature's `parseProjectUrl`, the
  * issue link is for the operator's own quick reference, not a board read
  * that already had to handle multiple hosts. Lives in `shared/` (not
  * hub-only) so both the hub REST route and the MCP tool's socket-based

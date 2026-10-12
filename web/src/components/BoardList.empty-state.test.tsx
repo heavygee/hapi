@@ -1,14 +1,14 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { I18nProvider } from '@/lib/i18n-context'
-import { TodoBoardList } from './TodoBoardList'
+import { BoardList } from './BoardList'
 
 afterEach(() => cleanup())
 
 function renderList() {
     return render(
         <I18nProvider>
-            <TodoBoardList
+            <BoardList
                 boards={[{ id: 'board-1', label: 'heavygee/6' }]}
                 selectedBoardId="board-1"
                 onSelectBoard={vi.fn()}
@@ -31,7 +31,7 @@ function renderList() {
 // Operator feedback (hapi#238): a zero-item board must explain what the
 // feature is and offer an obvious way to add a real board — not read like a
 // broken/404 state.
-describe('TodoBoardList empty state', () => {
+describe('BoardList empty state', () => {
     it('explains the feature and offers an Add a board action instead of a bare "no items" line', () => {
         renderList()
 

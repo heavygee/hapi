@@ -1,4 +1,4 @@
-// Shared chip styling between MachineFilterBar and TodoBoardSwitcher — both
+// Shared chip styling between MachineFilterBar and BoardSwitcher — both
 // render a wrapping row of selectable pill buttons with the same selected/idle
 // treatment.
 export const chipBaseClass = 'flex h-7 shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-xs transition-colors'

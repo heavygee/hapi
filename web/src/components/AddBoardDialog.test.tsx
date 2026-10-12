@@ -2,19 +2,19 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/api/client'
 import { I18nProvider } from '@/lib/i18n-context'
-import { AddTodoBoardDialog } from './AddTodoBoardDialog'
+import { AddBoardDialog } from './AddBoardDialog'
 
 function renderDialog(onAdd: (url: string) => Promise<void>, onClose: () => void) {
     return render(
         <I18nProvider>
-            <AddTodoBoardDialog isOpen onClose={onClose} onAdd={onAdd} />
+            <AddBoardDialog isOpen onClose={onClose} onAdd={onAdd} />
         </I18nProvider>
     )
 }
 
 afterEach(() => cleanup())
 
-describe('AddTodoBoardDialog', () => {
+describe('AddBoardDialog', () => {
     it('submits the trimmed url and closes on success', async () => {
         const onAdd = vi.fn().mockResolvedValue(undefined)
         const onClose = vi.fn()
