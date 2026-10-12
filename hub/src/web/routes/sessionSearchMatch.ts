@@ -1,6 +1,7 @@
 /**
  * Keyword match + rank for GET /api/sessions/search (Layer 0 inventory).
- * v1: name, path, agentSessionId, and session id — not message body FTS.
+ * v1: name, summary.text (displayed title fallback), path, agentSessionId, and
+ * session id — not message body FTS.
  */
 
 import { toSessionSummaryMetadata } from '@hapi/protocol'
@@ -9,6 +10,8 @@ import type { Session } from '../../sync/syncEngine'
 export type SessionSearchFields = {
     id: string
     name: string
+    /** metadata.summary.text — web/list title when name is unset (Claude native titles). */
+    summaryText: string
     path: string
     agentSessionId: string
 }
@@ -27,6 +30,7 @@ export function sessionSearchFields(session: Session): SessionSearchFields {
     return {
         id: session.id,
         name: (meta?.name ?? '').trim(),
+        summaryText: (meta?.summary?.text ?? '').trim(),
         path: (meta?.path ?? '').trim(),
         agentSessionId: (meta?.agentSessionId ?? '').trim(),
     }
@@ -46,7 +50,9 @@ export function scoreSessionSearchMatch(session: Session, normalizedQuery: strin
     }
     const fields = sessionSearchFields(session)
     let score = 0
-    if (fieldContains(fields.name, normalizedQuery)) {
+    // name and summary.text are both displayed-title paths (resolvePeerSessionLabel /
+    // getSessionTitle). Score them equally so quiet Claude titles stay findable.
+    if (fieldContains(fields.name, normalizedQuery) || fieldContains(fields.summaryText, normalizedQuery)) {
         score = Math.max(score, SCORE_NAME)
     }
     if (fieldContains(fields.path, normalizedQuery)) {
