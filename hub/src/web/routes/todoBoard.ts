@@ -57,13 +57,22 @@ const DEFAULT_TODO_BOARD: StoredTodoBoard = {
 // "github.com::evil" + owner "foo" vs. host "github.com" + owner
 // "evil::foo" both naively join to "github.com::evil::foo::1").
 //
+// Lowercased before joining — GitHub hostnames and owner logins are
+// case-insensitive, so adding the same project twice with different casing
+// (e.g. `orgs/Acme/projects/1` after `orgs/acme/projects/1`) must resolve to
+// the same id for the idempotent-add check below to actually work, instead
+// of silently persisting a second board that issues identical GraphQL
+// requests (Codex review). `StoredTodoBoard.host`/`ownerLogin` themselves
+// keep whatever casing the caller used — only the opaque id is normalized,
+// never shown to the operator.
+//
 // `viewNumber` only appends when present, keeping the plain-project id
 // format (`host::owner::number`) byte-for-byte stable for every
 // already-stored board — the view-scoped id (`host::owner::number::view::n`)
 // is a distinct, longer id so the same project and a filtered view onto it
 // can both be stored as separate boards without colliding.
 export function makeBoardId(host: string, ownerLogin: string, projectNumber: number, viewNumber?: number): string {
-    const parts = [host, ownerLogin, String(projectNumber)]
+    const parts = [host.toLowerCase(), ownerLogin.toLowerCase(), String(projectNumber)]
     if (viewNumber !== undefined) {
         parts.push('view', String(viewNumber))
     }

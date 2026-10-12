@@ -1164,7 +1164,7 @@ function NewSessionPage() {
     useEffect(() => {
         return router.subscribe('onBeforeNavigate', (event) => {
             if (spawnedRef.current) return
-            if (!isAbandoningSpawnFlow(event.toLocation.pathname)) return
+            if (!isAbandoningSpawnFlow('/sessions/new', event.toLocation.pathname)) return
             if (shareTransferId) void deleteShareTransfer(shareTransferId)
             if (briefingId) clearTodoSpawnBriefing(briefingId)
         })
@@ -1281,9 +1281,24 @@ function BrowsePage() {
     const { api } = useAppContext()
     const navigate = useNavigate()
     const goBack = useAppGoBack()
+    const router = useRouter()
     const { machines, isLoading: machinesLoading } = useMachines(api, true)
     const { t } = useTranslation()
     const { machineId: initialMachineId, shareTransferId, briefingId } = browseRoute.useSearch()
+
+    // Mirrors NewSessionPage's own cleanup — a to-do spawn's "Choose folder"
+    // detour carries the same briefing/share-transfer into this route's own
+    // search params, and abandoning from HERE (a toast click, browser back,
+    // anything other than completing the round trip back to `/sessions/new`)
+    // needs the same cleanup `/sessions/new` has, or the stash is orphaned
+    // just as easily from this leg of the flow (Codex review).
+    useEffect(() => {
+        return router.subscribe('onBeforeNavigate', (event) => {
+            if (!isAbandoningSpawnFlow('/browse', event.toLocation.pathname)) return
+            if (shareTransferId) void deleteShareTransfer(shareTransferId)
+            if (briefingId) clearTodoSpawnBriefing(briefingId)
+        })
+    }, [router, shareTransferId, briefingId])
 
     const handleStartSession = useCallback((machineId: string, directory: string) => {
         navigate({
