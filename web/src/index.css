@@ -2,6 +2,16 @@
 @import "katex/dist/katex.min.css";
 @config "../tailwind.config.ts";
 
+/*
+ * Appearance is html[data-theme=light|dark|oled] (useTheme). Tailwind's default
+ * dark: variant is prefers-color-scheme, which desyncs when the operator picks
+ * Light while the OS/browser is dark (Quest) — e.g. dark:text-amber-50 on
+ * bg-amber-100 → light-on-light. Bind dark: to our appearance attribute instead.
+ * OLED is a dark surface; include it so dark: utilities apply there too.
+ * See heavygee/hapi#250.
+ */
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *, [data-theme=oled], [data-theme=oled] *));
+
 :root {
     --app-bg: var(--tg-theme-bg-color, #ffffff);
     --app-fg: var(--tg-theme-text-color, #111827);
