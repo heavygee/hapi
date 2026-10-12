@@ -26,8 +26,24 @@ import {
     tempDismissRunnerSkew,
 } from '@/lib/runnerSkewBannerState'
 import { getTokenNamespace } from '@/lib/tokenNamespace'
+import { ApiError } from '@/api/client'
 
 type RunnerSelfUpgradeStatus = 'started' | 'already-current' | 'unsupported' | 'failed'
+
+/** Transient hub/runner gap — not a sticky red error (operator asked for silent retry). */
+function isTransientUpgradeError(error: unknown): boolean {
+    if (!(error instanceof ApiError)) {
+        return typeof error === 'object'
+            && error !== null
+            && 'message' in error
+            && typeof (error as { message: unknown }).message === 'string'
+            && /upgrade_unavailable|upgrade_deferred|RPC is not registered/i.test((error as { message: string }).message)
+    }
+    if (error.code === 'upgrade_unavailable' || error.code === 'upgrade_deferred') {
+        return true
+    }
+    return /upgrade_unavailable|upgrade_deferred|RPC is not registered/i.test(error.message)
+}
 
 function upgradeResponseStatus(response: unknown): RunnerSelfUpgradeStatus | null {
     if (!response || typeof response !== 'object') {
@@ -278,7 +294,12 @@ export function RunnerVersionSkewBanner({
             }
             await refreshFleetQueries()
         } catch (error) {
-            setActionError(error instanceof Error ? error.message : t('runner.skew.upgradeFailed'))
+            if (isTransientUpgradeError(error)) {
+                // Soft info — auto machines retry on keepalive; no red sticky 503.
+                setActionInfo(t('runner.skew.upgradeWaitingRpc'))
+            } else {
+                setActionError(error instanceof Error ? error.message : t('runner.skew.upgradeFailed'))
+            }
         } finally {
             setBusyId(null)
         }

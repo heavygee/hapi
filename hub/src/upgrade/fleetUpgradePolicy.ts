@@ -2,9 +2,10 @@
  * Fleet-upgrade policy: hub default + optional per-machine overrides.
  *
  * Hub default (Settings) is silent/alert/auto for banner UX and as the
- * fallback when a machine has no override. Unattended keepalive auto-push
- * is gone — apply only happens via deliberate `upgradeMachineRunner` /
- * `pushFleetUpgrade`. Per-machine `auto` means "apply when operator pushes".
+ * fallback when a machine has no override. Hub-wide `auto` does **not**
+ * keepalive-apply (deliberate push only — #247 tip thrash). Per-machine
+ * `auto` means "apply when you can": keepalive / machine-updated retry once
+ * the live self-upgrade RPC is registered, plus deliberate push.
  */
 import {
     DEFAULT_FLEET_UPGRADE_POLICY,

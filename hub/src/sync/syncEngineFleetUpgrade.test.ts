@@ -60,7 +60,7 @@ function registerSkewedRunner(
 }
 
 describe('SyncEngine deliberate fleet push', () => {
-    it('keepalive does not auto-upgrade even when hub policy is auto', async () => {
+    it('keepalive does not auto-upgrade when only hub policy is auto (no machine override)', async () => {
         const { engine } = makeEngine({ policy: 'auto' })
         const upgrade = mock(async () => ({
             type: 'success' as const,
@@ -73,9 +73,66 @@ describe('SyncEngine deliberate fleet push', () => {
             registerSkewedRunner(engine, 'homelab')
             engine.handleMachineAlive({ machineId: 'homelab', time: Date.now() })
             await Bun.sleep(10)
+            // Hub-wide auto alone stays push-only (#247 tip thrash).
             expect(upgrade).not.toHaveBeenCalled()
         } finally {
             engine.stop()
+        }
+    })
+
+    it('keepalive auto-upgrades machines with effective per-machine auto', async () => {
+        resetFleetUpgradePolicyForTests()
+        const { engine } = makeEngine({ policy: 'alert' })
+        const upgrade = mock(async () => ({
+            type: 'success' as const,
+            message: 'ok',
+            response: { status: 'started' as const, message: 'ok' },
+        }))
+        engine.upgradeMachineRunner = upgrade as unknown as UpgradeRunner
+
+        try {
+            registerSkewedRunner(engine, 'homelab')
+            await setFleetUpgradeMachinePolicy('homelab', 'auto')
+            engine.handleMachineAlive({ machineId: 'homelab', time: Date.now() })
+            await Bun.sleep(20)
+            expect(upgrade).toHaveBeenCalled()
+        } finally {
+            engine.stop()
+            resetFleetUpgradePolicyForTests()
+        }
+    })
+
+    it('keepalive retries after upgrade_unavailable without 15m cooldown', async () => {
+        resetFleetUpgradePolicyForTests()
+        const { engine } = makeEngine({ policy: 'alert' })
+        let calls = 0
+        engine.upgradeMachineRunner = mock(async () => {
+            calls += 1
+            if (calls === 1) {
+                return {
+                    type: 'error' as const,
+                    message: 'RPC not registered',
+                    code: 'upgrade_unavailable' as const,
+                }
+            }
+            return {
+                type: 'success' as const,
+                message: 'ok',
+                response: { status: 'started' as const, message: 'ok' },
+            }
+        }) as unknown as UpgradeRunner
+
+        try {
+            registerSkewedRunner(engine, 'homelab')
+            await setFleetUpgradeMachinePolicy('homelab', 'auto')
+            engine.handleMachineAlive({ machineId: 'homelab', time: Date.now() })
+            await Bun.sleep(20)
+            engine.handleMachineAlive({ machineId: 'homelab', time: Date.now() })
+            await Bun.sleep(20)
+            expect(calls).toBe(2)
+        } finally {
+            engine.stop()
+            resetFleetUpgradePolicyForTests()
         }
     })
 
