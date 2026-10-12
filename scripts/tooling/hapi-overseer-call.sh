@@ -92,11 +92,25 @@ if [ "$1" = "ntfy" ]; then
         exit 1
     fi
     NTFY_TOKEN="$(cat "$NTFY_TOKEN_FILE")"
-    curl -sS -X POST "$NTFY_URL" \
-        -H "Authorization: Bearer $NTFY_TOKEN" \
-        -H "Title: $TITLE" \
-        -H "Priority: $PRIORITY" \
-        -d "$MESSAGE"
+    ACTIONS=""
+    if [ -x /home/heavygee/coding/server-setup/scripts/ntfy/lib/investigate_action.py ] || [ -f /home/heavygee/coding/server-setup/scripts/ntfy/lib/investigate_action.py ]; then
+        TOPIC_NAME="${NTFY_URL##*/}"
+        ACTIONS="$(python3 /home/heavygee/coding/server-setup/scripts/ntfy/lib/investigate_action.py --topic "$TOPIC_NAME" --title "$TITLE" --message "$MESSAGE" --priority "$PRIORITY" 2>/dev/null || true)"
+    fi
+    if [ -n "$ACTIONS" ]; then
+        curl -sS -X POST "$NTFY_URL" \
+            -H "Authorization: Bearer $NTFY_TOKEN" \
+            -H "Title: $TITLE" \
+            -H "Priority: $PRIORITY" \
+            -H "Actions: $ACTIONS" \
+            -d "$MESSAGE"
+    else
+        curl -sS -X POST "$NTFY_URL" \
+            -H "Authorization: Bearer $NTFY_TOKEN" \
+            -H "Title: $TITLE" \
+            -H "Priority: $PRIORITY" \
+            -d "$MESSAGE"
+    fi
     echo
     exit 0
 fi

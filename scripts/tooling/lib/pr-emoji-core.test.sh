@@ -137,6 +137,13 @@ eq "closed superseded hint action" "$(action_of "$r" | grep -c 'closed supersede
 r="$(pec_decide_emoji 1 0 0 1 0 0 0 1 0 0 0 0)"
 eq "no CI checks seen → NOT ✅" "$(emoji_of "$r")" "🔁"
 
+# Fork PRs often have empty check rollups; open Codex threads must still ⚠️
+# (🔁 never sticky-pings — #238 silent debt).
+r="$(pec_decide_emoji 1 0 0 0 0 0 7 0 0 1 0 0)"
+eq "no CI checks + open threads → ⚠️ not 🔁" "$(emoji_of "$r")" "⚠️"
+[[ "$(action_of "$r")" == *"7 open thread"* ]] && PASS=$((PASS + 1)) \
+    || { echo "FAIL: empty-CI+threads action should mention open threads (got: $(action_of "$r"))" >&2; FAIL=$((FAIL + 1)); }
+
 r="$(pec_decide_emoji 1 0 0 0 0 0 0 1 0 0 0 0 0 0 1)"
 eq "CRC + no rollup (503 path) → ✅ not ⚠️" "$(emoji_of "$r")" "✅"
 [[ "$(action_of "$r")" == *"cold-review-clean"* ]] && PASS=$((PASS + 1)) \

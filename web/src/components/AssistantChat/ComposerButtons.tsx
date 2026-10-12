@@ -1,18 +1,15 @@
 import { ComposerPrimitive } from '@assistant-ui/react'
-import { Children, isValidElement, useCallback, useLayoutEffect, useRef, useState, type ReactElement, type ReactNode, type Ref } from 'react'
-import type { CodexUsage } from '@hapi/protocol/types'
 import type { ConversationStatus } from '@/realtime/types'
 import { useTranslation } from '@/lib/use-translation'
 import { ScheduleIcon } from '@/components/icons'
 import { ScheduleTimePicker } from './ScheduleTimePicker'
 import type { PendingSchedule } from './ScheduleTimePicker'
-import { disableAllFue, useFue } from '@/lib/use-fue'
+import { useFue } from '@/lib/use-fue'
 import { FueCallout, FueDot } from '@/components/Fue'
+import { Children, isValidElement, useRef, useState, type ReactElement, type ReactNode, type Ref } from 'react'
 import { useComposerToolbarLayout, type ComposerToolbarItemId, type ComposerToolbarLayout } from '@/hooks/useComposerToolbarLayout'
 import { useNarrowViewport } from '@/hooks/useNarrowViewport'
 import type { ComposerSendIntent } from '@/lib/messageDelivery'
-import { AgentBudgetIndicator } from './AgentBudgetIndicator'
-import { toCodexBudgetState } from './codexBudgetAdapter'
 
 function ToolbarItemSlot(props: { item: ComposerToolbarItemId; children: ReactNode }) {
     return <>{props.children}</>
@@ -74,20 +71,24 @@ function VoiceAssistantIcon(props: { size?: number }) {
 }
 
 /**
- * Primary composer control fills the card height (Quest / touch).
+ * Primary composer control fills the collapsed card height (Quest / touch).
  * Empty → giant voice/dictate; draft → giant Send. Draft voice stays a
  * compact toolbar circle (no width stolen from the text column).
+ * Expanded editor: stay compact — fill-height would become a full-shell strip.
  */
 export function isComposerPrimaryFillHeight(args: {
     canSend: boolean
     voiceEnabled: boolean
     voiceStatus: ConversationStatus
     routesToScratchlist?: boolean
+    expanded?: boolean
 }): boolean {
+    if (args.expanded) return false
     if (args.voiceStatus === 'connecting' || args.voiceStatus === 'connected') return true
     if (args.routesToScratchlist) return true
     if (args.canSend) return true
     if (args.voiceEnabled) return true
+    // Disabled grey Send when empty + voice off — still fill so layout does not jump.
     return true
 }
 
@@ -113,15 +114,19 @@ export function shouldShowDraftVoiceButton(args: {
     canSend: boolean
     voiceEnabled: boolean
     voiceStatus: ConversationStatus
+    /** Mirror UnifiedButton: scratchlist routing owns Send; do not start voice. */
+    routesToScratchlist?: boolean
 }): boolean {
     if (!args.canSend || !args.voiceEnabled) return false
+    if (args.routesToScratchlist) return false
     if (args.voiceStatus === 'connecting' || args.voiceStatus === 'connected') return false
     return true
 }
 
 export function unifiedButtonSizeClass(fillHeight: boolean): string {
+    // Fill the composer card column: fixed width, stretch height, soft square.
+    // Compact remains for isolated toolbar previews / legacy callers.
     return fillHeight
-        // Flush to composer-card right edge (card is rounded-[20px]); no inset padding.
         ? 'h-full min-h-14 w-16 self-stretch rounded-none rounded-r-[20px]'
         : 'h-8 w-8 rounded-full'
 }
@@ -493,285 +498,9 @@ function ScratchlistToggleButton(props: {
                     dismissLabel={t('fue.gotIt')}
                     closeAriaLabel={t('fue.closeAriaLabel')}
                     anchorRef={buttonRef}
-                    onSecondaryAction={disableAllFue}
-                    secondaryActionLabel={t('fue.dontShowAgain')}
                 />
             ) : null}
         </>
-    )
-}
-
-/**
- * TerminalButton — just-in-time FUE for the remote-terminal affordance.
- *
- * Unlike scratchlist, this icon has no header/menu equivalent anywhere in
- * the shell — it's the only entry point into a live terminal for the
- * session, and nothing else hints it exists besides the hover title. Same
- * useFue + FueDot + FueCallout wiring as ScratchlistToggleButton above,
- * with one deliberate difference: `onTerminal` navigates to a different
- * route, which would unmount this component (button + callout) before the
- * callout ever had a chance to render. So the first click only shows the
- * explainer; the callout's own dismiss both acknowledges the FUE and then
- * performs the navigation the operator originally clicked for.
- */
-function TerminalButton(props: {
-    label: string
-    onTerminal: () => void
-    disabled: boolean
-}) {
-    const { t } = useTranslation()
-    const fue = useFue('composer-terminal')
-    const buttonRef = useRef<HTMLButtonElement>(null)
-
-    return (
-        <>
-            <button
-                ref={buttonRef}
-                type="button"
-                aria-label={props.label}
-                title={props.label}
-                className="relative flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-fg)]/60 transition-colors hover:bg-[var(--app-bg)] hover:text-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
-                onClick={() => {
-                    if (fue.status !== 'acknowledged') {
-                        fue.engage()
-                        return
-                    }
-                    props.onTerminal()
-                }}
-                disabled={props.disabled}
-            >
-                <TerminalIcon />
-                {fue.status !== 'acknowledged' ? (
-                    <FueDot
-                        pulsing={fue.status === 'unseen'}
-                        ariaLabel={t('fue.newFeatureDot')}
-                    />
-                ) : null}
-            </button>
-            {fue.status === 'engaging' ? (
-                <FueCallout
-                    title={t('composerTerminal.fueTitle')}
-                    body={t('composerTerminal.fueBody')}
-                    onDismiss={() => {
-                        fue.dismiss()
-                        props.onTerminal()
-                    }}
-                    dismissLabel={t('fue.gotIt')}
-                    closeAriaLabel={t('fue.closeAriaLabel')}
-                    anchorRef={buttonRef}
-                    onSecondaryAction={disableAllFue}
-                    secondaryActionLabel={t('fue.dontShowAgain')}
-                />
-            ) : null}
-        </>
-    )
-}
-
-/**
- * PerSessionSettingsButton — just-in-time FUE for the per-session config
- * gear (model / effort / permission mode / collaboration / fast-mode
- * overrides — whichever apply to the active agent). A plain gear icon
- * with no visible label until hover; opening it just flips a local panel
- * open/closed (no navigation), so this is the same safe click-through
- * pattern as scratchlist — no unmount-on-click risk to guard against.
- */
-function PerSessionSettingsButton(props: {
-    onToggle: () => void
-    disabled: boolean
-    buttonRef?: Ref<HTMLButtonElement>
-}) {
-    const { t } = useTranslation()
-    const fue = useFue('composer-per-session-settings')
-    const localRef = useRef<HTMLButtonElement>(null)
-    const setButtonRef = (el: HTMLButtonElement | null) => {
-        localRef.current = el
-        const ext = props.buttonRef
-        if (typeof ext === 'function') ext(el)
-        else if (ext && typeof ext === 'object') (ext as { current: HTMLButtonElement | null }).current = el
-    }
-
-    return (
-        <>
-            <button
-                ref={setButtonRef}
-                type="button"
-                aria-label={t('composer.settings')}
-                title={t('composer.settings')}
-                className="settings-button relative flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-fg)]/60 transition-colors hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]"
-                onClick={() => {
-                    fue.engage()
-                    props.onToggle()
-                }}
-                disabled={props.disabled}
-            >
-                <SettingsIcon />
-                {fue.status !== 'acknowledged' ? (
-                    <FueDot
-                        pulsing={fue.status === 'unseen'}
-                        ariaLabel={t('fue.newFeatureDot')}
-                    />
-                ) : null}
-            </button>
-            {fue.status === 'engaging' ? (
-                <FueCallout
-                    title={t('composerSettings.fueTitle')}
-                    body={t('composerSettings.fueBody')}
-                    onDismiss={fue.dismiss}
-                    dismissLabel={t('fue.gotIt')}
-                    closeAriaLabel={t('fue.closeAriaLabel')}
-                    anchorRef={localRef}
-                    onSecondaryAction={disableAllFue}
-                    secondaryActionLabel={t('fue.dontShowAgain')}
-                />
-            ) : null}
-        </>
-    )
-}
-
-/**
- * SwitchToRemoteButton — just-in-time FUE for converting a locally-run
- * session to web-remote control. Same delayed-action pattern as
- * TerminalButton: `onSwitch` fires a real async mode change immediately,
- * so the first click only shows the explainer — "Got it" both
- * acknowledges and performs the switch the operator originally clicked
- * for.
- */
-function SwitchToRemoteButton(props: {
-    onSwitch: () => void
-    disabled: boolean
-}) {
-    const { t } = useTranslation()
-    const fue = useFue('composer-switch-remote')
-    const buttonRef = useRef<HTMLButtonElement>(null)
-
-    return (
-        <>
-            <button
-                ref={buttonRef}
-                type="button"
-                aria-label={t('composer.switchRemote')}
-                title={t('composer.switchRemote')}
-                disabled={props.disabled}
-                className="relative flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-fg)]/60 transition-colors hover:bg-[var(--app-bg)] hover:text-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-                onClick={() => {
-                    if (fue.status !== 'acknowledged') {
-                        fue.engage()
-                        return
-                    }
-                    props.onSwitch()
-                }}
-            >
-                <SwitchToRemoteIcon />
-                {fue.status !== 'acknowledged' ? (
-                    <FueDot
-                        pulsing={fue.status === 'unseen'}
-                        ariaLabel={t('fue.newFeatureDot')}
-                    />
-                ) : null}
-            </button>
-            {fue.status === 'engaging' ? (
-                <FueCallout
-                    title={t('composerSwitchRemote.fueTitle')}
-                    body={t('composerSwitchRemote.fueBody')}
-                    onDismiss={() => {
-                        fue.dismiss()
-                        props.onSwitch()
-                    }}
-                    dismissLabel={t('fue.gotIt')}
-                    closeAriaLabel={t('fue.closeAriaLabel')}
-                    anchorRef={buttonRef}
-                    onSecondaryAction={disableAllFue}
-                    secondaryActionLabel={t('fue.dontShowAgain')}
-                />
-            ) : null}
-        </>
-    )
-}
-
-/**
- * ScheduleButton — just-in-time FUE for delaying a message to send later.
- * A textbook "20% feature" (AGENTS.md § Adding new web features): the
- * clock icon carries no hint that it opens a time picker. Clicking it
- * already opens `ScheduleTimePicker` — a second popover (the FUE callout)
- * competing for the same anchor at the same time would be a mess, so the
- * first click shows only the explainer; "Got it" both acknowledges and
- * opens the real picker the operator originally clicked for. Once a
- * schedule is already set, clicking clears it directly — no FUE gate,
- * since by definition the operator has already used the feature.
- */
-function ScheduleButton(props: {
-    pendingSchedule?: PendingSchedule | null
-    onSchedule?: (pending: PendingSchedule) => void
-    onClearSchedule?: () => void
-    controlsDisabled: boolean
-    hasAttachments: boolean
-}) {
-    const { t } = useTranslation()
-    const fue = useFue('composer-schedule-send')
-    const buttonRef = useRef<HTMLButtonElement>(null)
-    const [showPicker, setShowPicker] = useState(false)
-    const hasSchedule = props.pendingSchedule != null
-
-    return (
-        <div>
-            <button
-                ref={buttonRef}
-                type="button"
-                aria-label={t('composer.scheduleSend')}
-                title={t('composer.scheduleSend')}
-                disabled={props.controlsDisabled || props.hasAttachments}
-                onClick={() => {
-                    if (hasSchedule && props.onClearSchedule) {
-                        props.onClearSchedule()
-                        return
-                    }
-                    if (fue.status !== 'acknowledged') {
-                        fue.engage()
-                        return
-                    }
-                    setShowPicker((v) => !v)
-                }}
-                className={`relative flex h-8 w-8 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                    hasSchedule
-                        ? 'bg-blue-500 text-white hover:bg-blue-600'
-                        : 'text-[var(--app-fg)]/60 hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]'
-                }`}
-            >
-                <ScheduleIcon className="h-[18px] w-[18px]" />
-                {fue.status !== 'acknowledged' ? (
-                    <FueDot
-                        pulsing={fue.status === 'unseen'}
-                        ariaLabel={t('fue.newFeatureDot')}
-                    />
-                ) : null}
-            </button>
-            {showPicker && (
-                <ScheduleTimePicker
-                    anchorRef={buttonRef}
-                    onSchedule={(pending) => {
-                        props.onSchedule!(pending)
-                        setShowPicker(false)
-                    }}
-                    onClose={() => setShowPicker(false)}
-                    pendingSchedule={props.pendingSchedule}
-                />
-            )}
-            {fue.status === 'engaging' ? (
-                <FueCallout
-                    title={t('composerSchedule.fueTitle')}
-                    body={t('composerSchedule.fueBody')}
-                    onDismiss={() => {
-                        fue.dismiss()
-                        setShowPicker(true)
-                    }}
-                    dismissLabel={t('fue.gotIt')}
-                    closeAriaLabel={t('fue.closeAriaLabel')}
-                    anchorRef={buttonRef}
-                    onSecondaryAction={disableAllFue}
-                    secondaryActionLabel={t('fue.dontShowAgain')}
-                />
-            ) : null}
-        </div>
     )
 }
 
@@ -834,15 +563,6 @@ export function UnifiedButton(props: {
     routesToScratchlist?: boolean
 }) {
     const { t } = useTranslation()
-    // Just-in-time FUE: this is the *same physical button* as send — it
-    // silently morphs into a voice-start control when the composer is
-    // empty and voice is enabled. A first-timer has no way to know a
-    // button they already understand (send) does something completely
-    // different depending on state. onVoiceToggle starts a live call
-    // immediately, so — same delayed-action pattern as Terminal/Switch —
-    // the first appearance-triggered click only shows the explainer.
-    const voiceFue = useFue('composer-voice-start')
-    const buttonRef = useRef<HTMLButtonElement>(null)
 
     const isConnecting = props.voiceStatus === 'connecting'
     const isConnected = props.voiceStatus === 'connected'
@@ -851,13 +571,6 @@ export function UnifiedButton(props: {
     const routesToScratchlist = props.routesToScratchlist ?? false
     const fillHeight = props.fillHeight ?? true
     const iconSize = fillHeight ? 28 : 18
-    // FUE only on empty idle voice morph (send → voice start), not on Send / Stop.
-    const isVoiceStartState = isLargeEmptyVoicePrimary({
-        canSend: props.canSend,
-        voiceEnabled: props.voiceEnabled,
-        voiceStatus: props.voiceStatus,
-        routesToScratchlist,
-    })
 
     const handleClick = () => {
         if (isVoiceActive) {
@@ -865,10 +578,6 @@ export function UnifiedButton(props: {
         } else if (hasText) {
             props.onSend('default') // Send message (or scratchlist add — wrapper decides)
         } else if (props.voiceEnabled && !routesToScratchlist) {
-            if (voiceFue.status !== 'acknowledged') {
-                voiceFue.engage()
-                return
-            }
             props.onVoiceToggle() // Start voice (suppressed in scratchlist mode)
         }
     }
@@ -918,42 +627,18 @@ export function UnifiedButton(props: {
     )
 
     return (
-        <>
-            <button
-                ref={buttonRef}
-                type="button"
-                onClick={handleClick}
-                disabled={isDisabled}
-                aria-label={ariaLabel}
-                title={ariaLabel}
-                data-testid="composer-unified-button"
-                data-size={fillHeight ? 'fill' : 'compact'}
-                className={`relative flex ${unifiedButtonSizeClass(fillHeight)} items-center justify-center transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
-            >
-                {icon}
-                {isVoiceStartState && voiceFue.status !== 'acknowledged' ? (
-                    <FueDot
-                        pulsing={voiceFue.status === 'unseen'}
-                        ariaLabel={t('fue.newFeatureDot')}
-                    />
-                ) : null}
-            </button>
-            {voiceFue.status === 'engaging' && isVoiceStartState ? (
-                <FueCallout
-                    title={t('composerVoiceStart.fueTitle')}
-                    body={t('composerVoiceStart.fueBody')}
-                    onDismiss={() => {
-                        voiceFue.dismiss()
-                        props.onVoiceToggle()
-                    }}
-                    dismissLabel={t('fue.gotIt')}
-                    closeAriaLabel={t('fue.closeAriaLabel')}
-                    anchorRef={buttonRef}
-                    onSecondaryAction={disableAllFue}
-                    secondaryActionLabel={t('fue.dontShowAgain')}
-                />
-            ) : null}
-        </>
+        <button
+            type="button"
+            onClick={handleClick}
+            disabled={isDisabled}
+            aria-label={ariaLabel}
+            title={ariaLabel}
+            data-testid="composer-unified-button"
+            data-size={fillHeight ? 'fill' : 'compact'}
+            className={`flex ${unifiedButtonSizeClass(fillHeight)} items-center justify-center transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
+        >
+            {icon}
+        </button>
     )
 }
 
@@ -972,6 +657,7 @@ export function DictationButton(props: {
     voiceLabel?: string
     /** Flush companion beside fill-height Send (HappyComposer omitPrimary). */
     variant?: 'toolbar' | 'companion'
+    routesToScratchlist?: boolean
 }) {
     const { t } = useTranslation()
     if (props.enabled === false) return null
@@ -979,6 +665,7 @@ export function DictationButton(props: {
         canSend: props.canSend,
         voiceEnabled: props.voiceEnabled,
         voiceStatus: props.voiceStatus,
+        routesToScratchlist: props.routesToScratchlist,
     })) return null
 
     const label = props.voiceLabel ?? t('composer.dictate')
@@ -1003,11 +690,6 @@ export function DictationButton(props: {
             <VoiceAssistantIcon size={iconSize} />
         </button>
     )
-}
-
-function CodexUsageIndicator(props: { usage?: CodexUsage | null }) {
-    const state = toCodexBudgetState(props.usage)
-    return <AgentBudgetIndicator state={state} popoverTitle="Codex Usage" />
 }
 
 export function ComposerButtons(props: {
@@ -1037,7 +719,7 @@ export function ComposerButtons(props: {
     voiceMicMuted?: boolean
     onVoiceToggle: () => void
     onVoiceMicToggle?: () => void
-    onSend: () => void
+    onSend: (intent?: ComposerSendIntent) => void
     pendingSchedule?: PendingSchedule | null
     onSchedule?: (pending: PendingSchedule) => void
     onClearSchedule?: () => void
@@ -1064,7 +746,6 @@ export function ComposerButtons(props: {
     scratchlistMode?: boolean
     scratchlistCount?: number
     onScratchlistToggle?: () => void
-    codexUsage?: CodexUsage | null
     /**
      * When true, omit UnifiedButton — HappyComposer places it in a
      * full-height column beside the input + toolbar.
@@ -1086,6 +767,8 @@ export function ComposerButtons(props: {
         }
         : layout
     const isVoiceConnected = props.voiceStatus === 'connected'
+    const [showSchedulePicker, setShowSchedulePicker] = useState(false)
+    const scheduleButtonRef = useRef<HTMLButtonElement>(null)
 
     const hasSchedule = props.pendingSchedule != null
     const hasAttachments = props.hasAttachments ?? false
@@ -1112,11 +795,17 @@ export function ComposerButtons(props: {
 
                 <ToolbarItemSlot item="settings">
                 {props.showSettingsButton ? (
-                    <PerSessionSettingsButton
-                        onToggle={props.onSettingsToggle}
-                        buttonRef={props.settingsButtonRef}
+                    <button
+                        ref={props.settingsButtonRef}
+                        type="button"
+                        aria-label={t('composer.settings')}
+                        title={t('composer.settings')}
+                        className="settings-button flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-fg)]/60 transition-colors hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]"
+                        onClick={props.onSettingsToggle}
                         disabled={props.settingsDisabled ?? props.controlsDisabled}
-                    />
+                    >
+                        <SettingsIcon />
+                    </button>
                 ) : null}
                 </ToolbarItemSlot>
 
@@ -1171,11 +860,16 @@ export function ComposerButtons(props: {
 
                 <ToolbarItemSlot item="terminal">
                 {props.showTerminalButton ? (
-                    <TerminalButton
-                        label={props.terminalLabel}
-                        onTerminal={props.onTerminal}
+                    <button
+                        type="button"
+                        aria-label={props.terminalLabel}
+                        title={props.terminalLabel}
+                        className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-fg)]/60 transition-colors hover:bg-[var(--app-bg)] hover:text-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+                        onClick={props.onTerminal}
                         disabled={props.terminalDisabled}
-                    />
+                    >
+                        <TerminalIcon />
+                    </button>
                 ) : null}
                 </ToolbarItemSlot>
 
@@ -1196,10 +890,16 @@ export function ComposerButtons(props: {
 
                 <ToolbarItemSlot item="switch">
                 {props.showSwitchButton ? (
-                    <SwitchToRemoteButton
-                        onSwitch={props.onSwitch}
+                    <button
+                        type="button"
+                        aria-label={t('composer.switchRemote')}
+                        title={t('composer.switchRemote')}
                         disabled={props.switchDisabled}
-                    />
+                        className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-fg)]/60 transition-colors hover:bg-[var(--app-bg)] hover:text-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                        onClick={props.onSwitch}
+                    >
+                        <SwitchToRemoteIcon />
+                    </button>
                 ) : null}
                 </ToolbarItemSlot>
 
@@ -1248,13 +948,40 @@ export function ComposerButtons(props: {
                 {/* Schedule button — only shown when onSchedule handler is provided */}
                 <ToolbarItemSlot item="schedule">
                 {props.onSchedule ? (
-                    <ScheduleButton
-                        pendingSchedule={props.pendingSchedule}
-                        onSchedule={props.onSchedule}
-                        onClearSchedule={props.onClearSchedule}
-                        controlsDisabled={props.controlsDisabled}
-                        hasAttachments={props.hasAttachments ?? false}
-                    />
+                    <div>
+                        <button
+                            ref={scheduleButtonRef}
+                            type="button"
+                            aria-label={t('composer.scheduleSend')}
+                            title={t('composer.scheduleSend')}
+                            disabled={props.controlsDisabled || hasAttachments}
+                            onClick={() => {
+                                if (hasSchedule && props.onClearSchedule) {
+                                    props.onClearSchedule()
+                                } else {
+                                    setShowSchedulePicker((v) => !v)
+                                }
+                            }}
+                            className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                                hasSchedule
+                                    ? 'bg-blue-500 text-white hover:bg-blue-600'
+                                    : 'text-[var(--app-fg)]/60 hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]'
+                            }`}
+                        >
+                            <ScheduleIcon className="h-[18px] w-[18px]" />
+                        </button>
+                        {showSchedulePicker && (
+                            <ScheduleTimePicker
+                                anchorRef={scheduleButtonRef}
+                                onSchedule={(pending) => {
+                                    props.onSchedule!(pending)
+                                    setShowSchedulePicker(false)
+                                }}
+                                onClose={() => setShowSchedulePicker(false)}
+                                pendingSchedule={props.pendingSchedule}
+                            />
+                        )}
+                    </div>
                 ) : null}
                 </ToolbarItemSlot>
                 </OrderedToolbarItems>
@@ -1273,33 +1000,34 @@ export function ComposerButtons(props: {
                 controlsDisabled={props.controlsDisabled}
                 onVoiceToggle={props.onVoiceToggle}
                 voiceLabel={props.dictationEnabled ? t('composer.dictate') : t('composer.voice')}
+                routesToScratchlist={
+                    (props.scratchlistMode ?? false)
+                    && props.pendingSchedule == null
+                }
             />
 
-            <div className="flex items-center gap-1">
-                <CodexUsageIndicator usage={props.codexUsage} />
-                {props.omitPrimaryButton ? null : (
-                    <UnifiedButton
-                        canSend={props.canSend}
-                        voiceStatus={props.voiceStatus}
-                        voiceEnabled={props.voiceEnabled}
-                        controlsDisabled={props.controlsDisabled}
-                        onSend={props.onSend}
-                        onVoiceToggle={props.onVoiceToggle}
-                        voiceLabel={props.dictationEnabled ? t('composer.dictate') : undefined}
-                        fillHeight={false}
-                        /*
-                         * Derived, NOT raw scratchlistMode. Mirror SessionChat's
-                         * shouldRouteToScratchlist: amber + "Send to scratchlist"
-                         * whenever mode is on and there is no pending schedule.
-                         * Attachments route to scratchlist too (hub upload adapter).
-                         */
-                        routesToScratchlist={
-                            (props.scratchlistMode ?? false)
-                            && props.pendingSchedule == null
-                        }
-                    />
-                )}
-            </div>
+            {props.omitPrimaryButton ? null : (
+                <UnifiedButton
+                    canSend={props.canSend}
+                    voiceStatus={props.voiceStatus}
+                    voiceEnabled={props.voiceEnabled}
+                    controlsDisabled={props.controlsDisabled}
+                    onSend={props.onSend}
+                    onVoiceToggle={props.onVoiceToggle}
+                    voiceLabel={props.dictationEnabled ? t('composer.dictate') : undefined}
+                    fillHeight={false}
+                    /*
+                     * Derived, NOT raw scratchlistMode. Mirror SessionChat's
+                     * shouldRouteToScratchlist: amber + "Send to scratchlist"
+                     * whenever mode is on and there is no pending schedule.
+                     * Attachments route to scratchlist too (hub upload adapter).
+                     */
+                    routesToScratchlist={
+                        (props.scratchlistMode ?? false)
+                        && props.pendingSchedule == null
+                    }
+                />
+            )}
         </div>
     )
 }
