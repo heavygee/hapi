@@ -1,7 +1,7 @@
 export type SpawnFlowRoute = '/sessions/new' | '/browse'
 
 /**
- * Whether a navigation away from `fromPathname` (either leg of the to-do
+ * Whether a navigation away from `fromPathname` (either leg of the board
  * spawn flow — `/sessions/new`, or its "Choose folder" detour through
  * `/browse`) should be treated as abandoning the flow, and so should clean
  * up its briefing/share-transfer stash. False only for staying put or

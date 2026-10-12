@@ -24,16 +24,16 @@ import { SessionList } from '@/components/SessionList'
 import { AgentSessionImportDialog } from '@/components/AgentSessionImportDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { SessionsModeSwitch, type SessionsMode } from '@/components/SessionsModeSwitch'
-import { TodoBoardList } from '@/components/TodoBoardList'
-import { TodoItemDetail } from '@/components/TodoItemDetail'
-import { resolveTodoItemDirectory } from '@/lib/resolveTodoItemDirectory'
-import { buildTodoItemSpawnMessage } from '@/lib/todoItemSpawnMessage'
-import { clearTodoSpawnBriefing, peekTodoSpawnBriefing, stashTodoSpawnBriefing } from '@/lib/todoSpawnBriefing'
-import { shouldExitTodoModeForNavigation } from '@/lib/sessionsTodoModeSync'
+import { BoardList } from '@/components/BoardList'
+import { BoardItemDetail } from '@/components/BoardItemDetail'
+import { resolveBoardItemDirectory } from '@/lib/resolveBoardItemDirectory'
+import { buildBoardItemSpawnMessage } from '@/lib/boardItemSpawnMessage'
+import { clearBoardSpawnBriefing, peekBoardSpawnBriefing, stashBoardSpawnBriefing } from '@/lib/boardSpawnBriefing'
+import { shouldExitBoardsModeForNavigation } from '@/lib/sessionsBoardsModeSync'
 import { isAbandoningSpawnFlow } from '@/lib/spawnFlowAbandonment'
 import { parseIssueUrl } from '@hapi/protocol/schemas'
 import { findSessionLinkedToIssue } from '@/lib/externalRefs'
-import type { TodoBoardItem } from '@/types/api'
+import type { BoardItem } from '@/types/api'
 import { NewSession } from '@/components/NewSession'
 import { WorkspaceBrowser } from '@/components/WorkspaceBrowser'
 import { LoadingState } from '@/components/LoadingState'
@@ -45,11 +45,11 @@ import { useSidebarResize } from '@/hooks/useSidebarResize'
 import { useMessages } from '@/hooks/queries/useMessages'
 import { useMachines } from '@/hooks/queries/useMachines'
 import { useMachineLabels } from '@/hooks/useMachineLabels'
-import { useTodoBoards } from '@/hooks/queries/useTodoBoards'
-import { useTodoBoardItems } from '@/hooks/queries/useTodoBoardItems'
-import { useTodoBoardSelection } from '@/hooks/useTodoBoardSelection'
-import { useTodoBoardActions } from '@/hooks/mutations/useTodoBoardActions'
-import { useTodoItemActions } from '@/hooks/mutations/useTodoItemActions'
+import { useBoards } from '@/hooks/queries/useBoards'
+import { useBoardItems } from '@/hooks/queries/useBoardItems'
+import { useBoardSelection } from '@/hooks/useBoardSelection'
+import { useBoardActions } from '@/hooks/mutations/useBoardActions'
+import { useBoardItemActions } from '@/hooks/mutations/useBoardItemActions'
 import { getApiErrorMessage } from '@/lib/apiErrorMessage'
 import { useSession } from '@/hooks/queries/useSession'
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
@@ -352,7 +352,7 @@ function SessionsPage() {
     // there would otherwise be no way back — every /api/todo-boards call
     // 403s and the switch that could flip back to Sessions mode is gone.
     useEffect(() => {
-        if (!isOwner && sessionsMode === 'todo') {
+        if (!isOwner && sessionsMode === 'boards') {
             setSessionsMode('sessions')
         }
     }, [isOwner, sessionsMode])
@@ -361,46 +361,46 @@ function SessionsPage() {
     // never actually looked at (hapi#238 Codex review).
     useSelectedSessionSeen(sessionsMode === 'sessions' ? selectedSessionId : null, selectedSession?.updatedAt)
     const {
-        boards: todoBoards,
-        isLoading: todoBoardsLoading,
-        isRefetching: todoBoardsRefetching,
-        error: todoBoardsError,
-        refetch: refetchTodoBoards,
-    } = useTodoBoards(api, sessionsMode === 'todo')
-    const { selectedBoardId, setSelectedBoardId } = useTodoBoardSelection()
+        boards: boards,
+        isLoading: boardsLoading,
+        isRefetching: boardsRefetching,
+        error: boardsError,
+        refetch: refetchBoards,
+    } = useBoards(api, sessionsMode === 'boards')
+    const { selectedBoardId, setSelectedBoardId } = useBoardSelection()
     const effectiveBoardId = useMemo(() => {
-        if (selectedBoardId && todoBoards.some(board => board.id === selectedBoardId)) {
+        if (selectedBoardId && boards.some(board => board.id === selectedBoardId)) {
             return selectedBoardId
         }
-        return todoBoards[0]?.id ?? null
-    }, [selectedBoardId, todoBoards])
+        return boards[0]?.id ?? null
+    }, [selectedBoardId, boards])
     const {
-        items: todoItems,
-        statusOrder: todoStatusOrder,
-        doneValues: todoDoneValues,
-        isLoading: todoItemsLoading,
-        isRefetching: todoItemsRefetching,
-        error: todoItemsError,
-        refetch: refetchTodoItems,
-    } = useTodoBoardItems(api, sessionsMode === 'todo' ? effectiveBoardId : null)
-    const { addBoard: addTodoBoard, removeBoard: removeTodoBoard } = useTodoBoardActions(api)
+        items: boardItems,
+        statusOrder: boardStatusOrder,
+        doneValues: boardDoneValues,
+        isLoading: boardItemsLoading,
+        isRefetching: boardItemsRefetching,
+        error: boardItemsError,
+        refetch: refetchBoardItems,
+    } = useBoardItems(api, sessionsMode === 'boards' ? effectiveBoardId : null)
+    const { addBoard: addBoard, removeBoard: removeBoard } = useBoardActions(api)
     const {
-        closeItem: closeTodoItem,
-        reopenItem: reopenTodoItem,
-        commentOnItem: commentOnTodoItem,
-        setItemStatus: setTodoItemStatus,
+        closeItem: closeBoardItem,
+        reopenItem: reopenBoardItem,
+        commentOnItem: commentOnBoardItem,
+        setItemStatus: setBoardItemStatus,
         closingUrls: closingTodoItemUrls,
         reopeningUrls: reopeningTodoItemUrls,
         commentingUrls: commentingOnTodoItemUrls,
         settingStatusUrls: settingTodoItemStatusUrls,
-    } = useTodoItemActions(api, effectiveBoardId)
-    const [selectedTodoItemId, setSelectedTodoItemId] = useState<string | null>(null)
+    } = useBoardItemActions(api, effectiveBoardId)
+    const [selectedBoardItemId, setSelectedBoardItemId] = useState<string | null>(null)
     useEffect(() => {
-        setSelectedTodoItemId(null)
+        setSelectedBoardItemId(null)
     }, [sessionsMode, effectiveBoardId])
     const selectedTodoItem = useMemo(
-        () => (selectedTodoItemId ? todoItems.find(item => item.id === selectedTodoItemId) ?? null : null),
-        [selectedTodoItemId, todoItems]
+        () => (selectedBoardItemId ? boardItems.find(item => item.id === selectedBoardItemId) ?? null : null),
+        [selectedBoardItemId, boardItems]
     )
     const linkedTodoSession = useMemo(
         () => findSessionLinkedToIssue(sessions, selectedTodoItem?.url ?? null),
@@ -424,41 +424,41 @@ function SessionsPage() {
     // previous session's chat showing in the right pane on mobile instead of
     // the to-do list, since `isSessionsIndex` alone has no idea a mode
     // switch happened.
-    const hasRightPaneContent = sessionsMode === 'todo' ? selectedTodoItem !== null : !isSessionsIndex
-    // See shouldExitTodoModeForNavigation's doc comment for why this reacts
+    const hasRightPaneContent = sessionsMode === 'boards' ? selectedTodoItem !== null : !isSessionsIndex
+    // See shouldExitBoardsModeForNavigation's doc comment for why this reacts
     // to the navigation event itself rather than comparing selected-session
     // ids before/after.
     useEffect(() => {
         return router.subscribe('onBeforeNavigate', (event) => {
-            if (shouldExitTodoModeForNavigation(event.toLocation.pathname, sessionsMode)) {
+            if (shouldExitBoardsModeForNavigation(event.toLocation.pathname, sessionsMode)) {
                 setSessionsMode('sessions')
-                setSelectedTodoItemId(null)
+                setSelectedBoardItemId(null)
             }
         })
     }, [router, sessionsMode])
     const onlineMachineIds = useMemo(() => new Set(machines.map(m => m.id)), [machines])
-    const handleSpawnFromTodoItem = useCallback((item: TodoBoardItem) => {
-        const resolved = resolveTodoItemDirectory(item.repo, sessions)
+    const handleSpawnFromTodoItem = useCallback((item: BoardItem) => {
+        const resolved = resolveBoardItemDirectory(item.repo, sessions)
         // `/sessions/new` is a sibling route under the same `/sessions`
         // parent, so SessionsPage never remounts — without clearing the
         // selected item (and switching back to Sessions mode, so
         // `hasRightPaneContent` stops gating on `selectedTodoItem`), the
-        // right pane would keep rendering the stale TodoItemDetail instead
+        // right pane would keep rendering the stale BoardItemDetail instead
         // of <Outlet/> picking up the new-session form; the URL would change
         // but the screen wouldn't.
-        setSelectedTodoItemId(null)
+        setSelectedBoardItemId(null)
         setSessionsMode('sessions')
         navigate({
             to: '/sessions/new',
             search: {
                 ...(resolved ? { directory: resolved.directory } : {}),
                 ...(resolved ? { machineId: resolved.machineId } : {}),
-                initialMessage: buildTodoItemSpawnMessage(item),
+                initialMessage: buildBoardItemSpawnMessage(item),
                 ...(item.url ? { linkIssueUrl: item.url } : {}),
             },
             ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
-    }, [navigate, sessions, setSelectedTodoItemId, setSessionsMode])
+    }, [navigate, sessions, setSelectedBoardItemId, setSessionsMode])
     const handleNewSessionInDirectory = useCallback((args: { machineId: string | null; directory: string }) => {
         navigate({
             to: '/sessions/new',
@@ -908,20 +908,20 @@ function SessionsPage() {
                             <div className="text-sm text-red-600">{error}</div>
                         </div>
                     ) : null}
-                    {sessionsMode === 'todo' ? (
-                        <TodoBoardList
-                            boards={todoBoards}
+                    {sessionsMode === 'boards' ? (
+                        <BoardList
+                            boards={boards}
                             selectedBoardId={effectiveBoardId}
                             onSelectBoard={setSelectedBoardId}
-                            onAddBoard={addTodoBoard}
-                            onRemoveBoard={removeTodoBoard}
-                            items={todoItems}
-                            statusOrder={todoStatusOrder}
-                            doneValues={todoDoneValues}
-                            isLoading={todoBoardsLoading || todoItemsLoading}
-                            error={todoBoardsError ?? todoItemsError}
-                            selectedItemId={selectedTodoItemId}
-                            onSelectItem={(item) => setSelectedTodoItemId(item.id)}
+                            onAddBoard={addBoard}
+                            onRemoveBoard={removeBoard}
+                            items={boardItems}
+                            statusOrder={boardStatusOrder}
+                            doneValues={boardDoneValues}
+                            isLoading={boardsLoading || boardItemsLoading}
+                            error={boardsError ?? boardItemsError}
+                            selectedItemId={selectedBoardItemId}
+                            onSelectItem={(item) => setSelectedBoardItemId(item.id)}
                             onRefresh={() => {
                                 // The items query is disabled (and its own
                                 // refetch a no-op) whenever no board is
@@ -930,10 +930,10 @@ function SessionsPage() {
                                 // in, so the boards list itself must also be
                                 // refetched or this button does nothing in
                                 // that failure mode (Codex review).
-                                void refetchTodoBoards()
-                                void refetchTodoItems()
+                                void refetchBoards()
+                                void refetchBoardItems()
                             }}
-                            isRefreshing={todoBoardsRefetching || todoItemsRefetching}
+                            isRefreshing={boardsRefetching || boardItemsRefetching}
                         />
                     ) : (
                     <SessionList
@@ -1057,22 +1057,22 @@ function SessionsPage() {
             <div className={`${hasRightPaneContent ? 'flex' : 'hidden split:flex'} min-w-0 flex-1 flex-col bg-[var(--app-bg)]`}>
                 <div className="flex-1 min-h-0">
                     {selectedTodoItem ? (
-                        <TodoItemDetail
+                        <BoardItemDetail
                             // Remount on item switch — local state (comment draft, the
                             // close-confirm dialog's open flag) must not bleed from the
                             // previously-selected item onto the newly-selected one.
                             key={selectedTodoItem.id}
                             item={selectedTodoItem}
-                            statusOrder={todoStatusOrder}
-                            onBack={() => setSelectedTodoItemId(null)}
+                            statusOrder={boardStatusOrder}
+                            onBack={() => setSelectedBoardItemId(null)}
                             onSpawn={() => handleSpawnFromTodoItem(selectedTodoItem)}
                             linkedSessionId={linkedTodoSession?.id ?? null}
                             onOpenLinkedSession={handleOpenLinkedTodoSession}
-                            onRefresh={() => { void refetchTodoItems() }}
-                            isRefreshing={todoItemsRefetching}
-                            onClose={() => closeTodoItem(selectedTodoItem)}
+                            onRefresh={() => { void refetchBoardItems() }}
+                            isRefreshing={boardItemsRefetching}
+                            onClose={() => closeBoardItem(selectedTodoItem)}
                             onReopen={() => {
-                                reopenTodoItem(selectedTodoItem).catch((err) => addToast({
+                                reopenBoardItem(selectedTodoItem).catch((err) => addToast({
                                     title: t('todo.detail.reopenFailed'),
                                     body: getApiErrorMessage(err, t('dialog.error.default')),
                                     sessionId: '',
@@ -1080,7 +1080,7 @@ function SessionsPage() {
                                 }))
                             }}
                             onComment={(body) => {
-                                return commentOnTodoItem(selectedTodoItem, body).catch((err) => {
+                                return commentOnBoardItem(selectedTodoItem, body).catch((err) => {
                                     addToast({
                                         title: t('todo.detail.commentFailed'),
                                         body: getApiErrorMessage(err, t('dialog.error.default')),
@@ -1091,7 +1091,7 @@ function SessionsPage() {
                                 })
                             }}
                             onSetStatus={(status) => {
-                                setTodoItemStatus(selectedTodoItem, status).catch((err) => addToast({
+                                setBoardItemStatus(selectedTodoItem, status).catch((err) => addToast({
                                     title: t('todo.detail.statusChangeFailed'),
                                     body: getApiErrorMessage(err, t('dialog.error.default')),
                                     sessionId: '',
@@ -1818,7 +1818,7 @@ function NewSessionPage() {
     const { addToast } = useToast()
     const { directory: initialDirectory, machineId: initialMachineId, shareTransferId, initialMessage, linkIssueUrl, briefingId } = newSessionRoute.useSearch()
 
-    const briefing = useMemo(() => briefingId ? peekTodoSpawnBriefing(briefingId) : null, [briefingId])
+    const briefing = useMemo(() => briefingId ? peekBoardSpawnBriefing(briefingId) : null, [briefingId])
 
     // Set synchronously (before the success navigate) so the generic
     // abandonment cleanup below skips the success path — `handleSuccess`
@@ -1846,7 +1846,7 @@ function NewSessionPage() {
             if (spawnedRef.current) return
             if (!isAbandoningSpawnFlow('/sessions/new', event.toLocation.pathname)) return
             if (shareTransferId) void deleteShareTransfer(shareTransferId)
-            if (briefingId) clearTodoSpawnBriefing(briefingId)
+            if (briefingId) clearBoardSpawnBriefing(briefingId)
         })
     }, [router, shareTransferId, briefingId])
 
@@ -1854,7 +1854,7 @@ function NewSessionPage() {
         if (shareTransferId) {
             void deleteShareTransfer(shareTransferId)
         }
-        if (briefingId) clearTodoSpawnBriefing(briefingId)
+        if (briefingId) clearBoardSpawnBriefing(briefingId)
         navigate({
             to: '/sessions',
             ...PRESERVE_SESSION_SIDEBAR_SCROLL,
@@ -1971,7 +1971,7 @@ function BrowsePage() {
         return router.subscribe('onBeforeNavigate', (event) => {
             if (!isAbandoningSpawnFlow('/browse', event.toLocation.pathname)) return
             if (shareTransferId) void deleteShareTransfer(shareTransferId)
-            if (briefingId) clearTodoSpawnBriefing(briefingId)
+            if (briefingId) clearBoardSpawnBriefing(briefingId)
         })
     }, [router, shareTransferId, briefingId])
 

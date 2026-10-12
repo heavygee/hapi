@@ -2,20 +2,20 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { Hono } from 'hono'
 import {
-    AddTodoBoardRequestSchema,
-    TodoItemCloseRequestSchema,
-    TodoItemCommentRequestSchema,
-    TodoItemReopenRequestSchema,
-    TodoItemStatusRequestSchema,
-    type TodoBoardItem,
-    type TodoBoardItemsResponse,
-    type TodoBoardsResponse
+    AddBoardRequestSchema,
+    BoardItemCloseRequestSchema,
+    BoardItemCommentRequestSchema,
+    BoardItemReopenRequestSchema,
+    BoardItemStatusRequestSchema,
+    type BoardItem,
+    type BoardItemsResponse,
+    type BoardsResponse
 } from '@hapi/protocol'
 import type { WebAppEnv } from '../middleware/auth'
 import { getSettingsFile, readSettingsOrThrow, updateSettings, type StoredTodoBoard } from '../../config/settings'
 
 /**
- * First shippable slice of the to-do/board view (hapi#235): GitHub Projects
+ * First shippable slice of the board view (hapi#235): GitHub Projects
  * v2 boards, read via the host's already-authenticated `gh` CLI. No
  * multi-identity auth, caching, or pagination beyond a single page of items
  * — that's the full data-layer issue (#234).
@@ -27,7 +27,7 @@ import { getSettingsFile, readSettingsOrThrow, updateSettings, type StoredTodoBo
  * (`heavygee/hapi-demo-board`, project 6) so a forgotten env var never
  * surfaces anyone's real data, and the stored list must never go empty
  * (removal re-seeds the default instead) — both are load-bearing safety
- * invariants, not incidental defaults. See `withTodoBoardsInvariant` below —
+ * invariants, not incidental defaults. See `updateBoards` below —
  * every settings.json writer for `todoBoards` must go through it, not
  * reimplement the empty-list fallback inline.
  *
@@ -40,7 +40,7 @@ import { getSettingsFile, readSettingsOrThrow, updateSettings, type StoredTodoBo
  * out-of-scope for this slice (#234), but it's worth knowing before
  * debugging a "board looks broken" report.
  */
-const DEFAULT_TODO_BOARD: StoredTodoBoard = {
+const DEFAULT_BOARD: StoredTodoBoard = {
     id: 'github.com::heavygee::6',
     label: 'heavygee/6',
     host: 'github.com',
@@ -87,18 +87,18 @@ function isValidProjectNumber(value: number): boolean {
     return Number.isInteger(value) && value > 0 && value <= MAX_GRAPHQL_INT
 }
 
-function readEnvTodoBoardConfig(): StoredTodoBoard {
-    const host = process.env.HAPI_TODO_BOARD_HOST?.trim() || DEFAULT_TODO_BOARD.host
-    const ownerLogin = process.env.HAPI_TODO_BOARD_OWNER?.trim() || DEFAULT_TODO_BOARD.ownerLogin
-    const numberRaw = process.env.HAPI_TODO_BOARD_NUMBER?.trim()
+function readEnvBoardConfig(): StoredTodoBoard {
+    const host = process.env.HAPI_BOARD_HOST?.trim() || DEFAULT_BOARD.host
+    const ownerLogin = process.env.HAPI_BOARD_OWNER?.trim() || DEFAULT_BOARD.ownerLogin
+    const numberRaw = process.env.HAPI_BOARD_NUMBER?.trim()
     const parsedNumber = numberRaw ? Number(numberRaw) : NaN
-    const projectNumber = isValidProjectNumber(parsedNumber) ? parsedNumber : DEFAULT_TODO_BOARD.projectNumber
-    const statusFieldName = process.env.HAPI_TODO_BOARD_STATUS_FIELD?.trim() || DEFAULT_TODO_BOARD.statusFieldName
-    const doneValuesRaw = process.env.HAPI_TODO_BOARD_DONE_VALUES?.trim()
+    const projectNumber = isValidProjectNumber(parsedNumber) ? parsedNumber : DEFAULT_BOARD.projectNumber
+    const statusFieldName = process.env.HAPI_BOARD_STATUS_FIELD?.trim() || DEFAULT_BOARD.statusFieldName
+    const doneValuesRaw = process.env.HAPI_BOARD_DONE_VALUES?.trim()
     const doneValues = doneValuesRaw
         ? doneValuesRaw.split(',').map(value => value.trim()).filter(Boolean)
-        : DEFAULT_TODO_BOARD.doneValues
-    const label = process.env.HAPI_TODO_BOARD_LABEL?.trim() || `${ownerLogin}/${projectNumber}`
+        : DEFAULT_BOARD.doneValues
+    const label = process.env.HAPI_BOARD_LABEL?.trim() || `${ownerLogin}/${projectNumber}`
 
     return {
         id: makeBoardId(host, ownerLogin, projectNumber),
@@ -120,7 +120,7 @@ function readEnvTodoBoardConfig(): StoredTodoBoard {
  * ongoing config source. The moment any board is added (the entire point of
  * this feature), the then-current env-derived default is snapshotted into
  * settings.json as a plain stored board — further changes to
- * HAPI_TODO_BOARD_* env vars afterward have zero effect on it (or on any
+ * HAPI_BOARD_* env vars afterward have zero effect on it (or on any
  * newly-added board, which always gets the hardcoded 'Status'/['Done']
  * defaults, not live env values either). The only way back to env-driven
  * behavior is deleting every stored board down to zero. This matches the
@@ -129,12 +129,12 @@ function readEnvTodoBoardConfig(): StoredTodoBoard {
  * since it's easy to assume env vars stay authoritative after a restart —
  * they don't, once settings.json has any todoBoards entry.
  */
-async function loadTodoBoards(dataDir: string): Promise<StoredTodoBoard[]> {
+async function loadBoards(dataDir: string): Promise<StoredTodoBoard[]> {
     const settings = await readSettingsOrThrow(getSettingsFile(dataDir))
     if (settings.todoBoards && settings.todoBoards.length > 0) {
         return settings.todoBoards
     }
-    return [readEnvTodoBoardConfig()]
+    return [readEnvBoardConfig()]
 }
 
 /**
@@ -148,17 +148,17 @@ async function loadTodoBoards(dataDir: string): Promise<StoredTodoBoard[]> {
  * DELETE silently pinning the env-derived default into settings.json as a
  * side effect of writing back a list that didn't actually change.
  */
-async function updateTodoBoards(
+async function updateBoards(
     dataDir: string,
     mutate: (current: StoredTodoBoard[]) => StoredTodoBoard[]
 ): Promise<StoredTodoBoard[]> {
     return updateSettings(getSettingsFile(dataDir), (current) => {
-        const existing = current.todoBoards && current.todoBoards.length > 0 ? current.todoBoards : [readEnvTodoBoardConfig()]
+        const existing = current.todoBoards && current.todoBoards.length > 0 ? current.todoBoards : [readEnvBoardConfig()]
         const next = mutate(existing)
         if (next === existing) {
             return { settings: current, result: existing, write: false }
         }
-        const finalBoards = next.length > 0 ? next : [readEnvTodoBoardConfig()]
+        const finalBoards = next.length > 0 ? next : [readEnvBoardConfig()]
         return { settings: { ...current, todoBoards: finalBoards }, result: finalBoards }
     })
 }
@@ -304,7 +304,8 @@ type GhProjectV2Response = {
                 field?: { options?: Array<{ name: string }> } | null
                 items?: {
                     // GitHub's ProjectV2ItemConnection declares `nodes` as
-                    // `[ProjectV2Item]!` (nullable elements, non-null list).
+                    // `[ProjectV2Item]` — individual entries can be null
+                    // (e.g. an item the viewer lost access to).
                     nodes?: Array<{
                         id: string
                         content: {
@@ -312,7 +313,7 @@ type GhProjectV2Response = {
                             title?: string
                             number?: number
                             url?: string
-                            state?: 'OPEN' | 'CLOSED'
+                            state?: 'OPEN' | 'CLOSED' | 'MERGED'
                             updatedAt?: string
                             createdAt?: string
                             closedAt?: string | null
@@ -467,7 +468,11 @@ async function execGhGraphql(host: string, query: string, variables: Record<stri
         args.push(typeof value === 'number' ? '-F' : '-f', `${key}=${value}`)
     }
     try {
-        const result = await execFileAsync('gh', args, { encoding: 'utf-8', timeout: GH_TIMEOUT_MS })
+        // Node's execFile defaults maxBuffer to 1MB — the items query pulls
+        // every item's full markdown body (up to 100 items), which can
+        // exceed that on a board with long descriptions; without raising it
+        // here `gh` gets SIGTERM'd mid-response and the whole board 502s.
+        const result = await execFileAsync('gh', args, { encoding: 'utf-8', timeout: GH_TIMEOUT_MS, maxBuffer: 20 * 1024 * 1024 })
         return result.stdout
     } catch (error) {
         throw normalizeGhError(error, 'gh api graphql failed')
@@ -495,17 +500,17 @@ async function execGh(args: string[], host: string): Promise<string> {
     }
 }
 
-export type TodoItemActionTarget = { host: string; url: string; isPullRequest: boolean }
-export type TodoItemStatusTarget = { host: string; ownerLogin: string; projectNumber: number; url: string; fieldName: string; status: string }
+export type BoardItemActionTarget = { host: string; url: string; isPullRequest: boolean }
+export type BoardItemStatusTarget = { host: string; ownerLogin: string; projectNumber: number; url: string; fieldName: string; status: string }
 
-export type TodoItemActions = {
-    close: (target: TodoItemActionTarget, comment?: string) => Promise<void>
-    reopen: (target: TodoItemActionTarget, comment?: string) => Promise<void>
-    comment: (target: TodoItemActionTarget, body: string) => Promise<void>
-    setStatus: (target: TodoItemStatusTarget) => Promise<void>
+export type BoardItemActions = {
+    close: (target: BoardItemActionTarget, comment?: string) => Promise<void>
+    reopen: (target: BoardItemActionTarget, comment?: string) => Promise<void>
+    comment: (target: BoardItemActionTarget, body: string) => Promise<void>
+    setStatus: (target: BoardItemStatusTarget) => Promise<void>
 }
 
-export const defaultTodoItemActions: TodoItemActions = {
+export const defaultBoardItemActions: BoardItemActions = {
     close: async (target, comment) => {
         const args = [target.isPullRequest ? 'pr' : 'issue', 'close', target.url]
         if (comment) args.push('--comment', comment)
@@ -706,14 +711,14 @@ function formatCustomFieldValue(node: GhFieldValueNode | null | undefined): stri
     }
 }
 
-function mapItems(response: GhProjectV2Response, statusFieldName: string): TodoBoardItem[] {
+function mapItems(response: GhProjectV2Response, statusFieldName: string): BoardItem[] {
     const nodes = response.data?.repositoryOwner?.projectV2?.items?.nodes ?? []
-    const items: TodoBoardItem[] = []
+    const items: BoardItem[] = []
     for (const node of nodes) {
         if (!node?.content) {
             continue
         }
-        const customFields: TodoBoardItem['customFields'] = []
+        const customFields: BoardItem['customFields'] = []
         for (const fieldValue of node.fieldValues?.nodes ?? []) {
             const fieldName = fieldValue?.field?.name
             // Excludes the dedicated Status field — already surfaced via
@@ -789,37 +794,68 @@ export function parseProjectUrl(url: string): { host: string; ownerLogin: string
     return { host: host!, ownerLogin: ownerLogin!, projectNumber, viewNumber }
 }
 
+// Board hosts default to github.com only — a board-add request's host comes
+// straight from a JWT caller's POST body and is passed to `gh api
+// --hostname`, which resolves credentials (including any
+// GH_ENTERPRISE_TOKEN/GITHUB_ENTERPRISE_TOKEN) for that host. Without an
+// allowlist, an attacker-controlled hostname in the URL would make the hub
+// send its own enterprise token to that host. Operators who actually run a
+// GHE board add it explicitly via HAPI_BOARD_ALLOWED_HOSTS.
+function getAllowedBoardHosts(): string[] {
+    const raw = process.env.HAPI_BOARD_ALLOWED_HOSTS?.trim()
+    if (!raw) {
+        return ['github.com']
+    }
+    return raw.split(',').map(host => host.trim().toLowerCase()).filter(Boolean)
+}
+
 function toSummary(board: StoredTodoBoard): { id: string; label: string } {
     return { id: board.id, label: board.label }
 }
 
+// To-do boards are read with the hub process's own host-wide `gh` auth, not
+// per-namespace credentials. On a hub with more than one JWT namespace, any
+// namespace could otherwise request the configured board (which may name a
+// real, non-public project via HAPI_BOARD_*) and get its titles and
+// drafts back through the operator's own authenticated session. Scope the
+// whole feature to the owner namespace, same pattern as hub-settings/usage.
 const OWNER_ONLY_ERROR = 'To-do boards are only available to the hub owner'
 
-export function createTodoBoardRoutes(
+export function createBoardRoutes(
     dataDir: string,
     runGraphql: (target: ProjectQueryTarget) => GhProjectV2Response | Promise<GhProjectV2Response> = runGhGraphql,
     runGraphqlTitle: (target: ProjectLookupTarget) => GhProjectTitleResponse | Promise<GhProjectTitleResponse> = runGhGraphqlTitle,
     runGraphqlView: (target: ProjectViewLookupTarget) => GhProjectViewResponse | Promise<GhProjectViewResponse> = runGhGraphqlView,
-    actions: TodoItemActions = defaultTodoItemActions,
+    actions: BoardItemActions = defaultBoardItemActions,
     runGraphqlMembership: (target: ProjectMembershipTarget) => GhResourceProjectMembershipResponse | Promise<GhResourceProjectMembershipResponse> = runGhGraphqlProjectMembership
 ): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
     app.get('/todo-boards', async (c) => {
-        const boards = await loadTodoBoards(dataDir)
-        const body: TodoBoardsResponse = { boards: boards.map(toSummary) }
+        if (c.get('namespace') !== 'default') {
+            return c.json({ error: OWNER_ONLY_ERROR }, 403)
+        }
+        const boards = await loadBoards(dataDir)
+        const body: BoardsResponse = { boards: boards.map(toSummary) }
         return c.json(body)
     })
 
     app.post('/todo-boards', async (c) => {
+        if (c.get('namespace') !== 'default') {
+            return c.json({ error: OWNER_ONLY_ERROR }, 403)
+        }
         const json = await c.req.json().catch(() => null)
-        const parsed = AddTodoBoardRequestSchema.safeParse(json)
+        const parsed = AddBoardRequestSchema.safeParse(json)
         if (!parsed.success) {
             return c.json({ error: 'Invalid body — expected { url: string }' }, 400)
         }
         const target = parseProjectUrl(parsed.data.url)
         if (!target) {
             return c.json({ error: 'Could not parse a GitHub Projects URL (expected e.g. https://github.com/users/<handle>/projects/<n> or .../orgs/<org>/projects/<n>)' }, 400)
+        }
+        const allowedHosts = getAllowedBoardHosts()
+        if (!allowedHosts.includes(target.host.toLowerCase())) {
+            return c.json({ error: `Host "${target.host}" is not in the allowed board hosts (${allowedHosts.join(', ')}). Set HAPI_BOARD_ALLOWED_HOSTS to permit it.` }, 400)
         }
 
         let label: string
@@ -863,41 +899,47 @@ export function createTodoBoardRoutes(
             host: target.host,
             ownerLogin: target.ownerLogin,
             projectNumber: target.projectNumber,
-            statusFieldName: DEFAULT_TODO_BOARD.statusFieldName,
-            doneValues: DEFAULT_TODO_BOARD.doneValues,
+            statusFieldName: DEFAULT_BOARD.statusFieldName,
+            doneValues: DEFAULT_BOARD.doneValues,
             ...(target.viewNumber !== undefined ? { viewNumber: target.viewNumber } : {})
         }
 
         // "Add" always means add — the env/default board stays in the list
         // on the very first add rather than being silently dropped. Returning
         // the same `existing` reference back when the id already exists is
-        // what makes this idempotent (see updateTodoBoards' no-op write skip).
-        const boards = await updateTodoBoards(dataDir, (existing) =>
+        // what makes this idempotent (see updateBoards' no-op write skip).
+        const boards = await updateBoards(dataDir, (existing) =>
             existing.some(b => b.id === newBoard.id) ? existing : [...existing, newBoard]
         )
 
-        const body: TodoBoardsResponse = { boards: boards.map(toSummary) }
+        const body: BoardsResponse = { boards: boards.map(toSummary) }
         return c.json(body)
     })
 
     app.delete('/todo-boards/:id', async (c) => {
+        if (c.get('namespace') !== 'default') {
+            return c.json({ error: OWNER_ONLY_ERROR }, 403)
+        }
         const id = c.req.param('id')
         // Safety invariant, non-negotiable: never leave the list empty —
-        // enforced inside updateTodoBoards itself, not here. Returning
+        // enforced inside updateBoards itself, not here. Returning
         // `existing` unchanged for an id that was never there keeps this a
         // true no-op (skips the write) rather than silently pinning the
         // env-derived default into settings.json for nothing.
-        const boards = await updateTodoBoards(dataDir, (existing) => {
+        const boards = await updateBoards(dataDir, (existing) => {
             const filtered = existing.filter(b => b.id !== id)
             return filtered.length === existing.length ? existing : filtered
         })
 
-        const body: TodoBoardsResponse = { boards: boards.map(toSummary) }
+        const body: BoardsResponse = { boards: boards.map(toSummary) }
         return c.json(body)
     })
 
     app.get('/todo-boards/:id/items', async (c) => {
-        const boards = await loadTodoBoards(dataDir)
+        if (c.get('namespace') !== 'default') {
+            return c.json({ error: OWNER_ONLY_ERROR }, 403)
+        }
+        const boards = await loadBoards(dataDir)
         const board = boards.find(b => b.id === c.req.param('id'))
         if (!board) {
             return c.json({ error: 'Unknown board' }, 404)
@@ -930,7 +972,7 @@ export function createTodoBoardRoutes(
             }
 
             const statusOrder = projectV2.field.options.map(o => o.name)
-            const body: TodoBoardItemsResponse = {
+            const body: BoardItemsResponse = {
                 board: toSummary(board),
                 statusOrder,
                 doneValues: board.doneValues,
@@ -958,7 +1000,7 @@ export function createTodoBoardRoutes(
         | { ok: true; board: StoredTodoBoard; url: string; isPullRequest: boolean }
         | { ok: false; error: string; status: 400 | 404 | 502 }
     > {
-        const boards = await loadTodoBoards(dataDir)
+        const boards = await loadBoards(dataDir)
         const board = boards.find(b => b.id === boardId)
         if (!board) {
             return { ok: false, error: 'Unknown board', status: 404 }
@@ -1031,7 +1073,7 @@ export function createTodoBoardRoutes(
             return c.json({ error: OWNER_ONLY_ERROR }, 403)
         }
         const json = await c.req.json().catch(() => null)
-        const parsed = TodoItemCloseRequestSchema.safeParse(json)
+        const parsed = BoardItemCloseRequestSchema.safeParse(json)
         if (!parsed.success) {
             return c.json({ error: 'Invalid body — expected { url: string, comment?: string }' }, 400)
         }
@@ -1052,7 +1094,7 @@ export function createTodoBoardRoutes(
             return c.json({ error: OWNER_ONLY_ERROR }, 403)
         }
         const json = await c.req.json().catch(() => null)
-        const parsed = TodoItemReopenRequestSchema.safeParse(json)
+        const parsed = BoardItemReopenRequestSchema.safeParse(json)
         if (!parsed.success) {
             return c.json({ error: 'Invalid body — expected { url: string, comment?: string }' }, 400)
         }
@@ -1073,7 +1115,7 @@ export function createTodoBoardRoutes(
             return c.json({ error: OWNER_ONLY_ERROR }, 403)
         }
         const json = await c.req.json().catch(() => null)
-        const parsed = TodoItemCommentRequestSchema.safeParse(json)
+        const parsed = BoardItemCommentRequestSchema.safeParse(json)
         if (!parsed.success) {
             return c.json({ error: 'Invalid body — expected { url: string, body: string }' }, 400)
         }
@@ -1094,7 +1136,7 @@ export function createTodoBoardRoutes(
             return c.json({ error: OWNER_ONLY_ERROR }, 403)
         }
         const json = await c.req.json().catch(() => null)
-        const parsed = TodoItemStatusRequestSchema.safeParse(json)
+        const parsed = BoardItemStatusRequestSchema.safeParse(json)
         if (!parsed.success) {
             return c.json({ error: 'Invalid body — expected { url: string, status: string }' }, 400)
         }

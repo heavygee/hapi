@@ -1,12 +1,12 @@
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { TodoBoardItem } from '@/types/api'
+import type { BoardItem } from '@/types/api'
 import { I18nProvider } from '@/lib/i18n-context'
-import { TodoBoardList } from './TodoBoardList'
+import { BoardList } from './BoardList'
 
 afterEach(() => cleanup())
 
-function makeItem(overrides: Partial<TodoBoardItem> = {}): TodoBoardItem {
+function makeItem(overrides: Partial<BoardItem> = {}): BoardItem {
     return {
         id: 'item-1',
         title: 'Fix the thing',
@@ -29,10 +29,10 @@ function makeItem(overrides: Partial<TodoBoardItem> = {}): TodoBoardItem {
     }
 }
 
-function renderList(items: TodoBoardItem[], overrides: { onRefresh?: () => void; isRefreshing?: boolean } = {}) {
+function renderList(items: BoardItem[], overrides: { onRefresh?: () => void; isRefreshing?: boolean } = {}) {
     return render(
         <I18nProvider>
-            <TodoBoardList
+            <BoardList
                 boards={[{ id: 'board-1', label: 'heavygee/6' }]}
                 selectedBoardId="board-1"
                 onSelectBoard={vi.fn()}
@@ -55,7 +55,7 @@ function renderList(items: TodoBoardItem[], overrides: { onRefresh?: () => void;
 // Operator feedback (hapi#238): "the whole reason to bring these cards here
 // is to not have to go to GitHub" — cards must show assignees and labels at
 // a glance, not just title/repo/number.
-describe('TodoBoardList card content', () => {
+describe('BoardList card content', () => {
     it('shows label chips on a card', () => {
         renderList([makeItem({ labels: [{ name: 'bug', color: 'ff0000' }, { name: 'urgent', color: '00ff00' }] })])
         expect(screen.getByText('bug')).toBeInTheDocument()

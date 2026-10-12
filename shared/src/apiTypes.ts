@@ -6,37 +6,18 @@ import {
     DecryptedMessageSchema,
     MachineSchema,
     PermissionModeSchema,
-    SessionSchema,
-    ExternalRefSchema,
-    GithubPrExternalRefSchema,
+    SessionSchema
 } from './schemas'
 import { AgentFlavorSchema } from './modes'
-import {
-    PeerSpawnDefaultsSchema,
-    ResolvedPeerSpawnDefaultsSchema
-} from './peerSpawnDefaults'
 import type {
     DecryptedMessage,
     Machine,
     Session
 } from './schemas'
-import { BLOCKED_ACK_REASON_MAX_CHARS } from './notifyAttention'
 import type { SessionSummary } from './sessionSummary'
 
 export const CreateOrLoadMachineRequestSchema = z.object({
     id: z.string().min(1),
-    /**
-     * Create-time machine secret (#1203). Required to bind machine-scoped RPC
-     * (including resume peer-mint nonce delivery). Client-generated; hub stores
-     * on first bind and requires a match thereafter. Never echoed on GET.
-     */
-    tag: z.string().min(1).optional(),
-    /**
-     * Memory/runner-local generation proof (#1473). Hub stores only sha256(proof)
-     * on first bind; websocket auth proves it and never first-claims a new hash.
-     * Never echoed on GET.
-     */
-    runnerProof: z.string().min(1).optional(),
     metadata: z.unknown(),
     runnerState: z.unknown().nullable().optional()
 })
@@ -84,13 +65,7 @@ export type CliMessagesResponse = z.infer<typeof CliMessagesResponseSchema>
 export const CreateSessionResponseSchema = z.object({
     session: SessionSchema,
     /** Hub opt-in for AGENT_NOTIFY_SUMMARY prompt injection (default off when omitted). */
-    sessionSummaryContract: z.boolean().optional(),
-    /**
-     * Session-scoped peer-delivery capability (#1203). HMAC over hub JWT secret;
-     * required for attributed `POST /cli/sessions/:id/peer-messages`. Never an
-     * agent/env/tool argument — only the creating ApiSessionClient holds it.
-     */
-    sessionCapability: z.string().min(1).optional()
+    sessionSummaryContract: z.boolean().optional()
 })
 
 export type CreateSessionResponse = z.infer<typeof CreateSessionResponseSchema>
@@ -98,8 +73,7 @@ export type CreateSessionResponse = z.infer<typeof CreateSessionResponseSchema>
 export const HubSettingsResponseSchema = z.object({
     sessionSummaryContract: z.boolean(),
     /** Show compact AGENT_NOTIFY_SUMMARY in chat (default off / hide). */
-    sessionSummaryInChat: z.boolean(),
-    peerSpawnDefaults: ResolvedPeerSpawnDefaultsSchema
+    sessionSummaryInChat: z.boolean()
 })
 
 export type HubSettingsResponse = z.infer<typeof HubSettingsResponseSchema>
@@ -107,14 +81,10 @@ export type HubSettingsResponse = z.infer<typeof HubSettingsResponseSchema>
 export const UpdateHubSettingsRequestSchema = z
     .object({
         sessionSummaryContract: z.boolean().optional(),
-        sessionSummaryInChat: z.boolean().optional(),
-        peerSpawnDefaults: PeerSpawnDefaultsSchema.optional()
+        sessionSummaryInChat: z.boolean().optional()
     })
     .refine(
-        (data) =>
-            data.sessionSummaryContract !== undefined
-            || data.sessionSummaryInChat !== undefined
-            || data.peerSpawnDefaults !== undefined,
+        (data) => data.sessionSummaryContract !== undefined || data.sessionSummaryInChat !== undefined,
         { message: 'At least one hub setting field is required' }
     )
 
@@ -151,24 +121,6 @@ export type AuthResponse = {
 }
 
 export type SessionsResponse = { sessions: SessionSummary[] }
-export type SessionContentMatch = {
-    messageId: string
-    role: 'user' | 'assistant'
-    seq: number
-    createdAt: number
-    snippet: string
-}
-export type SessionContentSearchResponse = {
-    results: Array<{
-        session: SessionSummary
-        match: SessionContentMatch
-    }>
-}
-export type SessionContentMatchesResponse = {
-    matches: SessionContentMatch[]
-    total: number
-}
-export type ScratchlistSessionIdsResponse = { sessionIds: string[] }
 export type SessionResponse = { session: Session }
 export type MessagesResponse = {
     messages: DecryptedMessage[]
@@ -184,26 +136,8 @@ export type MessagesResponse = {
         snapshotHeadSeq: number | null
         snapshotHeadAt: number | null
         hasMore: boolean
-        /** Present on aroundId seeks: more messages exist toward live tip. */
-        hasMoreNewer?: boolean
-        /** Present on aroundId seeks: the hub message id that was centered. */
-        aroundId?: string
         /** Total durable message rows for the session (all pages). */
         totalCount?: number
-    }
-}
-
-/** A bounded history window centered on a message selected from search results. */
-export type MessageContextResponse = {
-    messages: DecryptedMessage[]
-    targetMessageId: string
-    page: {
-        epoch: number
-        nextBeforeSeq: number | null
-        nextBeforeAt: number | null
-        snapshotHeadSeq: number | null
-        snapshotHeadAt: number | null
-        hasMore: boolean
     }
 }
 
@@ -317,48 +251,6 @@ export type ListCodexSessionsRpcResponse = z.infer<typeof ListCodexSessionsRpcRe
 export type ArchiveCodexSessionRpcRequest = z.infer<typeof ArchiveCodexSessionRpcRequestSchema>
 export type ArchiveCodexSessionRpcResponse = z.infer<typeof ArchiveCodexSessionRpcResponseSchema>
 
-/** Claude import messages use the same wire shape as Codex agent payloads (`type: 'codex'`). */
-
-export const SetExternalRefsRequestSchema = z.object({
-    externalRefs: z.array(ExternalRefSchema)
-})
-export type SetExternalRefsRequest = z.infer<typeof SetExternalRefsRequestSchema>
-
-/** Atomic primary/secondary attach — hub merges against the latest metadata version.
- *  PR-awareness CLI route only accepts github_pr (issues use link-issue / todo board). */
-export const UpsertExternalRefRequestSchema = z.object({
-    ref: GithubPrExternalRefSchema
-})
-export type UpsertExternalRefRequest = z.infer<typeof UpsertExternalRefRequestSchema>
-
-export const FeaturesPatchRequestSchema = z.object({
-    githubPrAwareness: z.boolean().optional()
-}).refine((value) => value.githubPrAwareness !== undefined, {
-    message: 'at least one feature flag is required'
-})
-
-export type FeaturesPatchRequest = z.infer<typeof FeaturesPatchRequestSchema>
-
-export const ClaudeImportedMessageSchema = z.object({
-    content: CodexImportedMessageSchema,
-    createdAt: z.number().optional()
-})
-
-export const ClaudeLocalSessionSummarySchema = z.object({
-    id: z.string().min(1),
-    title: z.string(),
-    lastUserMessage: z.string().nullable().optional(),
-    cwd: z.string().nullable().optional(),
-    file: z.string().min(1),
-    modifiedAt: z.number(),
-    originator: z.string().nullable().optional(),
-    cliVersion: z.string().nullable().optional()
-})
-
-export const ClaudeLocalSessionWithMessagesSchema = ClaudeLocalSessionSummarySchema.extend({
-    messages: z.array(ClaudeImportedMessageSchema)
-})
-
 export const PiImportedMessageContentSchema = CodexImportedMessageSchema
 
 export const PiImportedMessageSchema = z.object({
@@ -403,73 +295,6 @@ export type PiLocalSessionSummary = z.infer<typeof PiLocalSessionSummarySchema>
 export type PiLocalSessionWithMessages = z.infer<typeof PiLocalSessionWithMessagesSchema>
 export type ListPiSessionsRpcRequest = z.infer<typeof ListPiSessionsRpcRequestSchema>
 export type ListPiSessionsRpcResponse = z.infer<typeof ListPiSessionsRpcResponseSchema>
-
-export const ListClaudeSessionsRpcRequestSchema = z.object({
-    cwd: z.string().nullable().optional(),
-    sessionIds: z.array(z.string().min(1)).optional()
-})
-
-export const ListClaudeSessionsRpcResponseSchema = z.union([
-    z.object({
-        success: z.literal(true),
-        sessions: z.array(z.union([ClaudeLocalSessionWithMessagesSchema, ClaudeLocalSessionSummarySchema]))
-    }),
-    z.object({ success: z.literal(false), error: z.string() })
-])
-
-export type ListClaudeSessionsRpcRequest = z.infer<typeof ListClaudeSessionsRpcRequestSchema>
-export type ListClaudeSessionsRpcResponse = z.infer<typeof ListClaudeSessionsRpcResponseSchema>
-
-export const CursorImportableSessionSummaryRpcSchema = z.object({
-    id: z.string().min(1),
-    title: z.string(),
-    firstUserMessage: z.string().nullable().optional(),
-    workspacePath: z.string().nullable().optional(),
-    storeDbPath: z.string().min(1),
-    sourceFormat: z.enum(['acp', 'legacy']),
-    modifiedAt: z.number(),
-    sizeBytes: z.number(),
-    alreadyImportedHapiSessionId: z.string().nullable().optional()
-})
-
-export const ListCursorImportableSessionsRpcRequestSchema = z.object({
-    candidateWorkspacePaths: z.array(z.string()).optional(),
-    limit: z.number().int().positive().optional()
-})
-
-export const ListCursorImportableSessionsRpcResponseSchema = z.union([
-    z.object({ success: z.literal(true), sessions: z.array(CursorImportableSessionSummaryRpcSchema) }),
-    z.object({ success: z.literal(false), error: z.string() })
-])
-
-export const PrepareCursorImportRpcRequestSchema = z.object({
-    uuid: z.string().min(1),
-    workspacePath: z.string().nullable().optional()
-})
-
-export const PrepareCursorImportRpcResponseSchema = z.union([
-    z.object({
-        success: z.literal(true),
-        uuid: z.string().min(1),
-        sourceFormat: z.enum(['acp', 'legacy']),
-        workspacePath: z.string().min(1),
-        title: z.string(),
-        hostName: z.string(),
-        durationMs: z.number()
-    }),
-    z.object({
-        success: z.literal(false),
-        uuid: z.string().min(1),
-        reason: z.string().min(1),
-        message: z.string().min(1),
-        durationMs: z.number()
-    })
-])
-
-export type ListCursorImportableSessionsRpcRequest = z.infer<typeof ListCursorImportableSessionsRpcRequestSchema>
-export type ListCursorImportableSessionsRpcResponse = z.infer<typeof ListCursorImportableSessionsRpcResponseSchema>
-export type PrepareCursorImportRpcRequest = z.infer<typeof PrepareCursorImportRpcRequestSchema>
-export type PrepareCursorImportRpcResponse = z.infer<typeof PrepareCursorImportRpcResponseSchema>
 
 export const SessionCollaborationModeRequestSchema = z.object({
     mode: CodexCollaborationModeSchema
@@ -517,11 +342,8 @@ export const SessionServiceTierRequestSchema = z.object({
 
 export type SessionServiceTierRequest = z.infer<typeof SessionServiceTierRequestSchema>
 
-/** Hub session display-name ceiling (`PATCH /api/sessions/:id`). */
-export const SESSION_NAME_MAX_LENGTH = 255
-
 export const RenameSessionRequestSchema = z.object({
-    name: z.string().min(1).max(SESSION_NAME_MAX_LENGTH)
+    name: z.string().min(1).max(255)
 })
 
 export type RenameSessionRequest = z.infer<typeof RenameSessionRequestSchema>
@@ -543,12 +365,6 @@ export const SetSessionPinnedRequestSchema = z.object({
 })
 
 export type SetSessionPinnedRequest = z.infer<typeof SetSessionPinnedRequestSchema>
-
-/** Manual unblock (#1717). Reason is required — see `SessionBlockedAck`. */
-export const SetSessionBlockedAckRequestSchema = z.object({
-    reason: z.string().trim().min(1).max(BLOCKED_ACK_REASON_MAX_CHARS)
-})
-export type SetSessionBlockedAckRequest = z.infer<typeof SetSessionBlockedAckRequestSchema>
 export type SessionPinMode = SetSessionPinnedRequest['mode']
 
 /**
@@ -642,13 +458,6 @@ export const ScratchlistEntryUpdateRequestSchema = z.object({
 
 export type ScratchlistEntryUpdateRequest = z.infer<typeof ScratchlistEntryUpdateRequestSchema>
 
-/** Dismiss the model-error banner for a specific displayed error (by atTs). */
-export const AcknowledgeModelErrorRequestSchema = z.object({
-    atTs: z.number()
-})
-
-export type AcknowledgeModelErrorRequest = z.infer<typeof AcknowledgeModelErrorRequestSchema>
-
 /** Per-session legacy stream-json → ACP migrator request. See tiann/hapi#824. */
 export const CursorMigrateToAcpRequestSchema = z.object({
     /** Skip removing the legacy ~/.cursor/chats source store.db even after verify passes. */
@@ -708,19 +517,10 @@ export const MessagesQuerySchema = z.object({
     untilSeq: z.coerce.number().int().min(1).optional(),
     untilAt: z.coerce.number().int().min(0).optional(),
     epoch: z.coerce.number().int().min(0).optional(),
-    /** Hub message id — return a bounded window centered on that row (seek/snap). */
-    aroundId: z.string().min(1).max(200).optional(),
 })
     .refine((data) => (data.beforeAt === undefined) === (data.beforeSeq === undefined), {
         message: 'beforeAt and beforeSeq must be provided together',
         path: ['beforeAt'],
-    })
-    .refine((data) => {
-        if (data.aroundId === undefined) return true
-        return data.beforeAt === undefined && data.beforeSeq === undefined
-    }, {
-        message: 'aroundId cannot be combined with beforeAt/beforeSeq',
-        path: ['aroundId'],
     })
     .refine((data) => (data.afterAt === undefined) === (data.afterSeq === undefined), {
         message: 'afterAt and afterSeq must be provided together',
@@ -748,56 +548,12 @@ export type MessagesQuery = z.infer<typeof MessagesQuerySchema>
 export const MessageDeliveryModeSchema = z.enum(['queue', 'steer'])
 export type MessageDeliveryMode = z.infer<typeof MessageDeliveryModeSchema>
 
-/**
- * Soft peer nametag on user-message meta (#1203 / A2A Layer 0.1).
- *
- * Not a security / anti-impersonation boundary. Shared `CLI_API_TOKEN` already
- * lets a holder act as any session in the namespace (same as every other
- * `/cli/sessions/:id/*` route). The nametag is a UX routing hint for chips and
- * agent `From:` lines — spoof-within-token is accepted by design.
- *
- * Web JWT bodies must not invent `sourceSessionId` (that path is unattributed
- * peer delivery via {@link HAPI_PEER_DELIVERY_HEADER}). Named-source sends use
- * {@link CliPeerDeliverRequestSchema} on
- * `POST /cli/sessions/:sourceSessionId/peer-messages` (path id + session row
- * lookup for an optional display name snapshot).
- */
-export const PeerDeliveryMetaSchema = z.object({
-    sourceSessionId: z.string().trim().min(1).max(128).optional(),
-    sourceName: z.string().trim().min(1).max(255).optional()
-})
-export type PeerDeliveryMeta = z.infer<typeof PeerDeliveryMetaSchema>
-
-/** Lower-case header name; HTTP headers are case-insensitive. */
-export const HAPI_PEER_DELIVERY_HEADER = 'x-hapi-peer-delivery'
-export const HAPI_PEER_DELIVERY_HEADER_VALUE = '1'
-
-/**
- * Soft-nametag peer deliver: path `:id` is the claimed source session for the
- * chip / From line. Same namespace-token trust as other `/cli/sessions/:id`
- * routes — not HMAC/session-proof theater.
- */
-export const CliPeerDeliverRequestSchema = z.object({
-    targetSessionId: z.string().trim().min(1).max(128),
-    text: z.string().min(1),
-    localId: z.string().min(1).optional(),
-    deliveryMode: MessageDeliveryModeSchema.optional()
-})
-export type CliPeerDeliverRequest = z.infer<typeof CliPeerDeliverRequestSchema>
-
-/** Hub session ids are UUIDs today; single validator for CLI provenance gates. */
-export function isSessionId(value: string): boolean {
-    return z.string().uuid().safeParse(value).success
-}
-
 export const SendMessageRequestSchema = z.object({
     text: z.string(),
     localId: z.string().min(1).optional(),
     attachments: z.array(AttachmentMetadataSchema).optional(),
     scheduledAt: z.number().int().positive().nullable().optional(),
-    deliveryMode: MessageDeliveryModeSchema.optional(),
-    // Ignored by hub on the web JWT path (soft nametag is CLI path-only).
-    peer: PeerDeliveryMetaSchema.optional()
+    deliveryMode: MessageDeliveryModeSchema.optional()
 }).refine(
     (data) => data.scheduledAt == null || typeof data.localId === 'string',
     { message: 'scheduledAt requires localId', path: ['localId'] }
@@ -1239,26 +995,26 @@ export type UsageSummaryBucket = {
     requests: number
 }
 
-export type TodoBoardSummary = {
+export type BoardSummary = {
     id: string
     label: string
 }
 
-export type TodoBoardsResponse = {
-    boards: TodoBoardSummary[]
+export type BoardsResponse = {
+    boards: BoardSummary[]
 }
 
-export type TodoBoardItemActor = {
+export type BoardItemActor = {
     login: string
     avatarUrl: string
 }
 
-export type TodoBoardItemLabel = {
+export type BoardItemLabel = {
     name: string
     color: string
 }
 
-export type TodoBoardItemMilestone = {
+export type BoardItemMilestone = {
     title: string
     dueOn: string | null
 }
@@ -1269,12 +1025,12 @@ export type TodoBoardItemMilestone = {
  * single-select/text/number/date values, normalized to a display string.
  * Write support is Status-only for now; these render read-only.
  */
-export type TodoBoardItemCustomField = {
+export type BoardItemCustomField = {
     name: string
     value: string
 }
 
-export type TodoBoardItem = {
+export type BoardItem = {
     id: string
     title: string
     url: string | null
@@ -1288,25 +1044,25 @@ export type TodoBoardItem = {
     isPullRequest: boolean
     createdAt: string | null
     closedAt: string | null
-    author: TodoBoardItemActor | null
-    assignees: TodoBoardItemActor[]
-    labels: TodoBoardItemLabel[]
-    milestone: TodoBoardItemMilestone | null
-    customFields: TodoBoardItemCustomField[]
+    author: BoardItemActor | null
+    assignees: BoardItemActor[]
+    labels: BoardItemLabel[]
+    milestone: BoardItemMilestone | null
+    customFields: BoardItemCustomField[]
 }
 
-export type TodoBoardItemsResponse = {
-    board: TodoBoardSummary
+export type BoardItemsResponse = {
+    board: BoardSummary
     statusOrder: string[]
     doneValues: string[]
-    items: TodoBoardItem[]
+    items: BoardItem[]
 }
 
-export const AddTodoBoardRequestSchema = z.object({
+export const AddBoardRequestSchema = z.object({
     url: z.string().min(1)
 })
 
-export type AddTodoBoardRequest = z.infer<typeof AddTodoBoardRequestSchema>
+export type AddBoardRequest = z.infer<typeof AddBoardRequestSchema>
 
 // Write actions all identify the target item by its GitHub issue/PR URL
 // (not a HAPI-side id) — the hub validates it belongs to the board being
@@ -1316,29 +1072,29 @@ export type AddTodoBoardRequest = z.infer<typeof AddTodoBoardRequestSchema>
 // contract — the hub derives it itself from the validated URL path rather
 // than trusting a client-supplied flag, so a client can't send `isPullRequest:
 // true` for an issue URL (or vice versa) and run the wrong `gh` verb.
-export const TodoItemCloseRequestSchema = z.object({
+export const BoardItemCloseRequestSchema = z.object({
     url: z.string().min(1),
     comment: z.string().optional()
 })
-export type TodoItemCloseRequest = z.infer<typeof TodoItemCloseRequestSchema>
+export type BoardItemCloseRequest = z.infer<typeof BoardItemCloseRequestSchema>
 
-export const TodoItemReopenRequestSchema = z.object({
+export const BoardItemReopenRequestSchema = z.object({
     url: z.string().min(1),
     comment: z.string().optional()
 })
-export type TodoItemReopenRequest = z.infer<typeof TodoItemReopenRequestSchema>
+export type BoardItemReopenRequest = z.infer<typeof BoardItemReopenRequestSchema>
 
-export const TodoItemCommentRequestSchema = z.object({
+export const BoardItemCommentRequestSchema = z.object({
     url: z.string().min(1),
     body: z.string().min(1)
 })
-export type TodoItemCommentRequest = z.infer<typeof TodoItemCommentRequestSchema>
+export type BoardItemCommentRequest = z.infer<typeof BoardItemCommentRequestSchema>
 
-export const TodoItemStatusRequestSchema = z.object({
+export const BoardItemStatusRequestSchema = z.object({
     url: z.string().min(1),
     status: z.string().min(1)
 })
-export type TodoItemStatusRequest = z.infer<typeof TodoItemStatusRequestSchema>
+export type BoardItemStatusRequest = z.infer<typeof BoardItemStatusRequestSchema>
 
 export const LinkIssueRequestSchema = z.object({
     url: z.string().min(1)
@@ -1366,27 +1122,3 @@ export type UsageSummaryResponse = {
     byModel: UsageSummaryBucket[]
     updatedAt: number
 }
-
-// Fork/estate-only: hub-host kitchen hygiene snapshot from
-// scripts/tooling/hapi-kitchen-status.sh --json. Not applicable outside this
-// estate's soup workflow, so the shape mirrors the script's own fields.
-export type KitchenStatusResponse =
-    | {
-        available: true
-        status: string
-        driverHead: string
-        driverLayers: number | string
-        mirror: string
-        mirrorDirty: boolean
-        forkAhead: number
-        forkBehind: number
-        working: string
-        holdActive: boolean
-        holdReason: string
-        lease: string
-        driverBusy: boolean
-        ruleChopped: boolean
-        oneliner: string
-        checkedAt: number
-    }
-    | { available: false }

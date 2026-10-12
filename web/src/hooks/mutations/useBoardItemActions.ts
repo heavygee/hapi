@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import type { ApiClient } from '@/api/client'
-import type { TodoBoardItem } from '@/types/api'
+import type { BoardItem } from '@/types/api'
 import { queryKeys } from '@/lib/query-keys'
 
 function addUrl(current: ReadonlySet<string>, url: string): ReadonlySet<string> {
@@ -26,7 +26,7 @@ const EMPTY_URLS: ReadonlySet<string> = new Set()
  * auto-invalidates the board's items query on success (operator requirement:
  * acting from HAPI reflects immediately, no manual refresh needed after a
  * write specifically) and throws on failure, same contract as
- * useTodoBoardActions, leaving toast/dialog-error presentation to the caller.
+ * useBoardActions, leaving toast/dialog-error presentation to the caller.
  *
  * Pending state is tracked as a *set* of the acting items' urls, not a
  * single nullable one — one hook instance is shared across the whole board,
@@ -39,11 +39,11 @@ const EMPTY_URLS: ReadonlySet<string> = new Set()
  * still read as idle (and re-submittable) while A's own request was still
  * genuinely in flight, whenever B started after it.
  */
-export function useTodoItemActions(api: ApiClient | null, boardId: string | null): {
-    closeItem: (item: Pick<TodoBoardItem, 'url'>) => Promise<void>
-    reopenItem: (item: Pick<TodoBoardItem, 'url'>) => Promise<void>
-    commentOnItem: (item: Pick<TodoBoardItem, 'url'>, body: string) => Promise<void>
-    setItemStatus: (item: Pick<TodoBoardItem, 'url'>, status: string) => Promise<void>
+export function useBoardItemActions(api: ApiClient | null, boardId: string | null): {
+    closeItem: (item: Pick<BoardItem, 'url'>) => Promise<void>
+    reopenItem: (item: Pick<BoardItem, 'url'>) => Promise<void>
+    commentOnItem: (item: Pick<BoardItem, 'url'>, body: string) => Promise<void>
+    setItemStatus: (item: Pick<BoardItem, 'url'>, status: string) => Promise<void>
     closingUrls: ReadonlySet<string>
     reopeningUrls: ReadonlySet<string>
     commentingUrls: ReadonlySet<string>
@@ -57,7 +57,7 @@ export function useTodoItemActions(api: ApiClient | null, boardId: string | null
 
     const invalidate = useCallback(() => {
         if (!boardId) return Promise.resolve()
-        return queryClient.invalidateQueries({ queryKey: queryKeys.todoBoardItems(boardId) })
+        return queryClient.invalidateQueries({ queryKey: queryKeys.boardItems(boardId) })
     }, [queryClient, boardId])
 
     const requireTarget = useCallback((url: string | null) => {
@@ -66,44 +66,44 @@ export function useTodoItemActions(api: ApiClient | null, boardId: string | null
         return { api, boardId, url }
     }, [api, boardId])
 
-    const closeItem = useCallback(async (item: Pick<TodoBoardItem, 'url'>) => {
+    const closeItem = useCallback(async (item: Pick<BoardItem, 'url'>) => {
         const { api: client, boardId: id, url } = requireTarget(item.url)
         setClosingUrls(current => addUrl(current, url))
         try {
-            await client.closeTodoItem(id, url)
+            await client.closeBoardItem(id, url)
             await invalidate()
         } finally {
             setClosingUrls(current => removeUrl(current, url))
         }
     }, [requireTarget, invalidate])
 
-    const reopenItem = useCallback(async (item: Pick<TodoBoardItem, 'url'>) => {
+    const reopenItem = useCallback(async (item: Pick<BoardItem, 'url'>) => {
         const { api: client, boardId: id, url } = requireTarget(item.url)
         setReopeningUrls(current => addUrl(current, url))
         try {
-            await client.reopenTodoItem(id, url)
+            await client.reopenBoardItem(id, url)
             await invalidate()
         } finally {
             setReopeningUrls(current => removeUrl(current, url))
         }
     }, [requireTarget, invalidate])
 
-    const commentOnItem = useCallback(async (item: Pick<TodoBoardItem, 'url'>, body: string) => {
+    const commentOnItem = useCallback(async (item: Pick<BoardItem, 'url'>, body: string) => {
         const { api: client, boardId: id, url } = requireTarget(item.url)
         setCommentingUrls(current => addUrl(current, url))
         try {
-            await client.commentOnTodoItem(id, url, body)
+            await client.commentOnBoardItem(id, url, body)
             await invalidate()
         } finally {
             setCommentingUrls(current => removeUrl(current, url))
         }
     }, [requireTarget, invalidate])
 
-    const setItemStatus = useCallback(async (item: Pick<TodoBoardItem, 'url'>, status: string) => {
+    const setItemStatus = useCallback(async (item: Pick<BoardItem, 'url'>, status: string) => {
         const { api: client, boardId: id, url } = requireTarget(item.url)
         setSettingStatusUrls(current => addUrl(current, url))
         try {
-            await client.setTodoItemStatus(id, url, status)
+            await client.setBoardItemStatus(id, url, status)
             await invalidate()
         } finally {
             setSettingStatusUrls(current => removeUrl(current, url))

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { groupItemsByStatus } from './TodoBoardList'
-import type { TodoBoardItem } from '@/types/api'
+import { groupItemsByStatus } from './BoardList'
+import type { BoardItem } from '@/types/api'
 
-function makeItem(overrides: Partial<TodoBoardItem>): TodoBoardItem {
+function makeItem(overrides: Partial<BoardItem>): BoardItem {
     return {
         id: overrides.id ?? 'id',
         title: overrides.title ?? 'title',
@@ -40,15 +40,27 @@ describe('groupItemsByStatus', () => {
         expect(doneItems.map(i => i.id)).toEqual(['a'])
     })
 
-    it('buckets items with no status value into a trailing noStatus group', () => {
+    it('buckets items with no status value into a trailing null-status group', () => {
         const items = [
             makeItem({ id: 'a', status: 'Todo' }),
             makeItem({ id: 'b', status: null }),
         ]
         const { openGroups } = groupItemsByStatus(items, ['Todo'], ['Done'])
 
-        expect(openGroups.map(g => g.status)).toEqual(['Todo', 'noStatus'])
+        expect(openGroups.map(g => g.status)).toEqual(['Todo', null])
         expect(openGroups[1].items.map(i => i.id)).toEqual(['b'])
+    })
+
+    it('keeps a real status column literally named "noStatus" distinct from the missing-status bucket', () => {
+        const items = [
+            makeItem({ id: 'a', status: 'noStatus' }),
+            makeItem({ id: 'b', status: null }),
+        ]
+        const { openGroups } = groupItemsByStatus(items, ['noStatus'], ['Done'])
+
+        expect(openGroups).toHaveLength(2)
+        expect(openGroups[0]).toMatchObject({ status: 'noStatus', items: [items[0]] })
+        expect(openGroups[1]).toMatchObject({ status: null, items: [items[1]] })
     })
 
     it('appends statuses not present in statusOrder after the known ones', () => {

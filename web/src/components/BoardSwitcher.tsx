@@ -5,7 +5,7 @@ import { getMachineFilterMenuClampStyle } from '@/components/MachineFilterBar'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
 
-export type TodoBoardFilterItem = {
+export type BoardFilterItem = {
     id: string
     label: string
 }
@@ -15,8 +15,8 @@ export type TodoBoardFilterItem = {
 // always selected (hapi#235). Each chip is a wrapping <div>, not a <button>,
 // because it holds two independent actions (select, remove) — nesting a
 // remove <button> inside a select <button> would be invalid HTML.
-export function TodoBoardSwitcherBar(props: {
-    boards: TodoBoardFilterItem[]
+export function BoardSwitcherBar(props: {
+    boards: BoardFilterItem[]
     value: string | null
     onChange: (id: string) => void
     onRemove: (id: string) => void
@@ -26,7 +26,7 @@ export function TodoBoardSwitcherBar(props: {
     return (
         <div
             role="radiogroup"
-            aria-label={t('todo.boardSwitcher.label')}
+            aria-label={t('boards.boardSwitcher.label')}
             className="flex flex-wrap items-center gap-1.5 px-2 pb-2 max-md:hidden"
         >
             {props.boards.map((board) => {
@@ -45,8 +45,8 @@ export function TodoBoardSwitcherBar(props: {
                         <button
                             type="button"
                             onClick={() => props.onRemove(board.id)}
-                            aria-label={t('todo.removeBoard.label', { label: board.label })}
-                            title={t('todo.removeBoard.label', { label: board.label })}
+                            aria-label={t('boards.removeBoard.label', { label: board.label })}
+                            title={t('boards.removeBoard.label', { label: board.label })}
                             className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full opacity-60 hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
                         >
                             <CloseIcon className="h-3 w-3" />
@@ -57,8 +57,8 @@ export function TodoBoardSwitcherBar(props: {
             <button
                 type="button"
                 onClick={props.onAddClick}
-                aria-label={t('todo.addBoard.chipLabel')}
-                title={t('todo.addBoard.chipLabel')}
+                aria-label={t('boards.addBoard.chipLabel')}
+                title={t('boards.addBoard.chipLabel')}
                 className={cn(chipBaseClass, chipIdleClass, 'px-2')}
             >
                 <PlusIcon className="h-3.5 w-3.5" />
@@ -69,8 +69,8 @@ export function TodoBoardSwitcherBar(props: {
 
 // Mobile (below md) counterpart: collapses the board switcher into a single
 // header icon button with a dropdown, mirroring MachineFilterMenu.
-export function TodoBoardSwitcherMenu(props: {
-    boards: TodoBoardFilterItem[]
+export function BoardSwitcherMenu(props: {
+    boards: BoardFilterItem[]
     value: string | null
     onChange: (id: string) => void
     onRemove: (id: string) => void
@@ -150,8 +150,8 @@ export function TodoBoardSwitcherMenu(props: {
                 ref={triggerRef}
                 type="button"
                 onClick={() => setOpen(value => !value)}
-                aria-label={t('todo.boardSwitcher.label')}
-                title={t('todo.boardSwitcher.label')}
+                aria-label={t('boards.boardSwitcher.label')}
+                title={t('boards.boardSwitcher.label')}
                 aria-haspopup="menu"
                 aria-expanded={open}
                 className="relative flex rounded-full p-1.5 text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]"
@@ -170,7 +170,7 @@ export function TodoBoardSwitcherMenu(props: {
                     <div
                         ref={menuRef}
                         role="menu"
-                        aria-label={t('todo.boardSwitcher.label')}
+                        aria-label={t('boards.boardSwitcher.label')}
                         style={anchor ? getMachineFilterMenuClampStyle(anchor) : undefined}
                         className="absolute right-0 top-full z-30 mt-1 max-h-80 w-64 overflow-y-auto rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] p-1 shadow-xl"
                     >
@@ -191,8 +191,8 @@ export function TodoBoardSwitcherMenu(props: {
                                 <button
                                     type="button"
                                     onClick={() => props.onRemove(board.id)}
-                                    aria-label={t('todo.removeBoard.label', { label: board.label })}
-                                    title={t('todo.removeBoard.label', { label: board.label })}
+                                    aria-label={t('boards.removeBoard.label', { label: board.label })}
+                                    title={t('boards.removeBoard.label', { label: board.label })}
                                     className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] opacity-60 hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
                                 >
                                     <CloseIcon className="h-3.5 w-3.5" />
@@ -207,7 +207,7 @@ export function TodoBoardSwitcherMenu(props: {
                             <span className="flex h-5 w-4 shrink-0 items-center justify-center">
                                 <PlusIcon className="h-4 w-4" />
                             </span>
-                            {t('todo.addBoard.chipLabel')}
+                            {t('boards.addBoard.chipLabel')}
                         </button>
                     </div>
                 </>

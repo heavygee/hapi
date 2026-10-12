@@ -1,12 +1,12 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { TodoBoardItem } from '@/types/api'
+import type { BoardItem } from '@/types/api'
 import { I18nProvider } from '@/lib/i18n-context'
-import { TodoItemDetail } from './TodoItemDetail'
+import { BoardItemDetail } from './BoardItemDetail'
 
 afterEach(() => cleanup())
 
-function makeItem(overrides: Partial<TodoBoardItem> = {}): TodoBoardItem {
+function makeItem(overrides: Partial<BoardItem> = {}): BoardItem {
     return {
         id: 'item-1',
         title: 'Fix the thing',
@@ -29,7 +29,7 @@ function makeItem(overrides: Partial<TodoBoardItem> = {}): TodoBoardItem {
     }
 }
 
-function renderDetail(overrides: Partial<Parameters<typeof TodoItemDetail>[0]> = {}) {
+function renderDetail(overrides: Partial<Parameters<typeof BoardItemDetail>[0]> = {}) {
     const props = {
         item: makeItem(),
         statusOrder: ['Todo', 'In Progress', 'Done'],
@@ -51,13 +51,13 @@ function renderDetail(overrides: Partial<Parameters<typeof TodoItemDetail>[0]> =
     }
     render(
         <I18nProvider>
-            <TodoItemDetail {...props} />
+            <BoardItemDetail {...props} />
         </I18nProvider>
     )
     return props
 }
 
-describe('TodoItemDetail', () => {
+describe('BoardItemDetail', () => {
     it('renders assignees, labels, milestone, author, and custom fields', () => {
         renderDetail({
             item: makeItem({
@@ -74,7 +74,7 @@ describe('TodoItemDetail', () => {
         expect(screen.getByText('bug')).toBeInTheDocument()
         expect(screen.getByText(/v1\.0/)).toBeInTheDocument()
         expect(screen.getByText('Priority')).toBeInTheDocument()
-        expect(screen.getByText('High')).toBeInTheDocument()
+        expect(screen.getByText(/High/)).toBeInTheDocument()
     })
 
     it('fires onSetStatus only when the dropdown value actually changes', () => {

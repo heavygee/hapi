@@ -1,12 +1,12 @@
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { TodoBoardItem } from '@/types/api'
+import type { BoardItem } from '@/types/api'
 import { I18nProvider } from '@/lib/i18n-context'
-import { TodoBoardList } from './TodoBoardList'
+import { BoardList } from './BoardList'
 
 afterEach(() => cleanup())
 
-function makeItem(overrides: Partial<TodoBoardItem> = {}): TodoBoardItem {
+function makeItem(overrides: Partial<BoardItem> = {}): BoardItem {
     return {
         id: 'item-1',
         title: 'Fix the thing',
@@ -29,10 +29,10 @@ function makeItem(overrides: Partial<TodoBoardItem> = {}): TodoBoardItem {
     }
 }
 
-function renderList(items: TodoBoardItem[], error: string | null) {
+function renderList(items: BoardItem[], error: string | null) {
     return render(
         <I18nProvider>
-            <TodoBoardList
+            <BoardList
                 boards={[{ id: 'board-1', label: 'heavygee/6' }]}
                 selectedBoardId="board-1"
                 onSelectBoard={vi.fn()}
@@ -59,7 +59,7 @@ function renderList(items: TodoBoardItem[], error: string | null) {
 // hapi#238: originally reported against the since-removed 60s poll, but the
 // same "any refetch failure hides cached items" behavior applies to manual
 // refresh and write-triggered refetches too).
-describe('TodoBoardList error states', () => {
+describe('BoardList error states', () => {
     it('shows the full error state only when there are no cached items', () => {
         renderList([], 'Failed to load board items')
         expect(screen.getByText('Failed to load board: Failed to load board items')).toBeInTheDocument()

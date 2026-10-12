@@ -9,13 +9,13 @@ import { Button } from '@/components/ui/button'
 import { getApiErrorMessage } from '@/lib/apiErrorMessage'
 import { useTranslation } from '@/lib/use-translation'
 
-type AddTodoBoardDialogProps = {
+type AddBoardDialogProps = {
     isOpen: boolean
     onClose: () => void
     onAdd: (url: string) => Promise<void>
 }
 
-export function AddTodoBoardDialog(props: AddTodoBoardDialogProps) {
+export function AddBoardDialog(props: AddBoardDialogProps) {
     const { t } = useTranslation()
     const { isOpen, onClose, onAdd } = props
     const [url, setUrl] = useState('')
@@ -41,7 +41,7 @@ export function AddTodoBoardDialog(props: AddTodoBoardDialogProps) {
             await onAdd(trimmed)
             onClose()
         } catch (err) {
-            setError(getApiErrorMessage(err, t('todo.addBoard.error')))
+            setError(getApiErrorMessage(err, t('boards.addBoard.error')))
         } finally {
             setIsSubmitting(false)
         }
@@ -52,7 +52,7 @@ export function AddTodoBoardDialog(props: AddTodoBoardDialogProps) {
             <DialogContent className="max-w-sm">
                 <DialogHeader className="pr-0">
                     <DialogTitle className="min-h-6 px-10 text-center leading-6">
-                        {t('todo.addBoard.title')}
+                        {t('boards.addBoard.title')}
                     </DialogTitle>
                 </DialogHeader>
                 <form onSubmit={handleSubmit} className="mt-4 flex flex-col gap-4">
@@ -61,7 +61,7 @@ export function AddTodoBoardDialog(props: AddTodoBoardDialogProps) {
                         type="text"
                         value={url}
                         onChange={(e) => setUrl(e.target.value)}
-                        placeholder={t('todo.addBoard.placeholder')}
+                        placeholder={t('boards.addBoard.placeholder')}
                         className="w-full px-3 py-2.5 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none focus:ring-2 focus:ring-[var(--app-button)] focus:border-transparent"
                         disabled={isSubmitting}
                     />
@@ -77,7 +77,7 @@ export function AddTodoBoardDialog(props: AddTodoBoardDialogProps) {
                             {t('button.cancel')}
                         </Button>
                         <Button type="submit" disabled={isSubmitting || !url.trim()}>
-                            {isSubmitting ? t('todo.addBoard.adding') : t('todo.addBoard.submit')}
+                            {isSubmitting ? t('boards.addBoard.adding') : t('boards.addBoard.submit')}
                         </Button>
                     </div>
                 </form>

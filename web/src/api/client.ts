@@ -10,17 +10,9 @@ import type {
     CodexArchiveSessionResponse,
     DecryptedMessage,
     CodexCollaborationMode,
-    ClaudeLocalSessionsResponse,
-    ClaudeImportScriptResponse,
-    ClaudeImportSyncRequest,
-    ClaudeStatusResponse,
-    CursorImportableSessionsResponse,
-    CursorImportRequest,
-    CursorImportResponse,
     CopilotAgentMode,
     FileSearchResponse,
     MachinesResponse,
-    MessageContextResponse,
     MessagesResponse,
     PermissionMode,
     PiImportSessionsResponse,
@@ -31,17 +23,14 @@ import type {
     SlashCommandsResponse,
     SkillsResponse,
     SpawnResponse,
-    TodoBoardItemsResponse,
-    TodoBoardsResponse,
+    BoardItemsResponse,
+    BoardsResponse,
     VisibilityPayload,
     HapiSessionExportResponse,
     HubHealthResponse,
     SessionResponse,
-    SessionContentMatchesResponse,
     SessionTitleSuggestionResponse,
-    ScratchlistSessionIdsResponse,
-    SessionsResponse,
-    SessionContentSearchResponse
+    SessionsResponse
 } from '@/types/api'
 import type {
     AgyModelsResponse,
@@ -69,7 +58,6 @@ import type {
     ReopenSessionResponse,
     SqliteStorageUsageResponse,
     HubSettingsResponse,
-    KitchenStatusResponse,
     UpdateHubSettingsRequest,
     UsageSummaryResponse,
     UploadFileResponse
@@ -77,12 +65,6 @@ import type {
 import type { AgentFlavor, MessageDeliveryMode } from '@hapi/protocol'
 import type { CancelMessageResponse, SteerQueuedMessageResponse } from '@hapi/protocol/schemas'
 import type { TranscriptionMode, TranscriptionProvider, TranscriptionProviderInfo } from '@hapi/protocol/voice'
-import type { FleetUpgradePolicy, HubUpgradeOffer } from '@hapi/protocol/upgradeChannel'
-
-export type UpgradeInfoResponse = {
-    offer: HubUpgradeOffer
-    policy: FleetUpgradePolicy
-}
 
 export type RetryIndeterminateMessageResponse =
     | { status: 'retried' | 'already-queued' | 'retry-unavailable'; localId: string | null }
@@ -117,12 +99,6 @@ export interface TranscriptionCredentialStatus {
         geminiLive: MaskedCredentialStatus
         qwenRealtime: MaskedCredentialStatus
     }
-    /** Optional: older hub versions won't send this. */
-    elevenLabsMaxDurationSeconds?: {
-        value: number
-        source: ProviderCredentialSource
-        editable: boolean
-    }
 }
 
 export interface TranscriptionCredentialsUpdate {
@@ -137,8 +113,6 @@ export interface TranscriptionCredentialsUpdate {
     }
     geminiLive?: string | null
     qwenRealtime?: string | null
-    /** null resets to the hub default (1800s) */
-    elevenLabsMaxDurationSeconds?: number | null
 }
 
 type ApiClientOptions = {
@@ -287,55 +261,8 @@ export class ApiClient {
         return await this.request<SessionsResponse>('/api/sessions')
     }
 
-    async getScratchlistSessionIds(): Promise<string[]> {
-        const response = await this.request<ScratchlistSessionIdsResponse>('/api/sessions/scratchlist-status')
-        return response.sessionIds
-    }
-
     async getHealth(): Promise<HubHealthResponse> {
         return await this.request<HubHealthResponse>('/health')
-    }
-
-    async searchSessionContent(
-        query: string,
-        limit: number = 50,
-        signal?: AbortSignal,
-        sessionIds?: readonly string[]
-    ): Promise<SessionContentSearchResponse> {
-        const normalizedQuery = query.trim()
-        if (sessionIds !== undefined) {
-            const normalizedSessionIds = [...new Set(sessionIds.map((sessionId) => sessionId.trim()).filter(Boolean))]
-            return await this.request<SessionContentSearchResponse>(
-                '/api/sessions/content-search',
-                {
-                    method: 'POST',
-                    signal,
-                    body: JSON.stringify({
-                        query: normalizedQuery,
-                        limit,
-                        sessionIds: normalizedSessionIds
-                    })
-                }
-            )
-        }
-        const params = new URLSearchParams({ query: normalizedQuery, limit: String(limit) })
-        return await this.request<SessionContentSearchResponse>(
-            `/api/sessions/content-search?${params.toString()}`,
-            { signal }
-        )
-    }
-
-    async searchSessionContentMatches(
-        sessionId: string,
-        query: string,
-        limit: number = 500,
-        signal?: AbortSignal
-    ): Promise<SessionContentMatchesResponse> {
-        const params = new URLSearchParams({ query: query.trim(), limit: String(limit) })
-        return await this.request<SessionContentMatchesResponse>(
-            `/api/sessions/${encodeURIComponent(sessionId)}/content-search?${params.toString()}`,
-            { signal }
-        )
     }
 
     async getPushVapidPublicKey(): Promise<PushVapidPublicKeyResponse> {
@@ -413,40 +340,6 @@ export class ApiClient {
         })
     }
 
-    async syncClaudeSession(payload?: ClaudeImportSyncRequest): Promise<ClaudeImportScriptResponse> {
-        // 中文注释：提交本地 transcript 对应的 Claude session ID 列表，后端按这些会话直接导入到 Hapi。
-        return await this.request<ClaudeImportScriptResponse>('/api/claude/sync-session', {
-            method: 'POST',
-            ...(payload ? { body: JSON.stringify(payload) } : {})
-        })
-    }
-
-    async getClaudeSessions(cwd?: string | null, machineId?: string | null): Promise<ClaudeLocalSessionsResponse> {
-        const params = new URLSearchParams()
-        if (cwd?.trim()) params.set('cwd', cwd.trim())
-        if (machineId?.trim()) params.set('machineId', machineId.trim())
-        const query = params.size ? `?${params.toString()}` : ''
-        return await this.request<ClaudeLocalSessionsResponse>(`/api/claude/sessions${query}`)
-    }
-
-    async getClaudeStatus(): Promise<ClaudeStatusResponse> {
-        return await this.request<ClaudeStatusResponse>('/api/claude/status')
-    }
-
-    async getCursorImportableSessions(machineId?: string | null): Promise<CursorImportableSessionsResponse> {
-        const params = new URLSearchParams()
-        if (machineId?.trim()) params.set('machineId', machineId.trim())
-        const query = params.size ? `?${params.toString()}` : ''
-        return await this.request<CursorImportableSessionsResponse>(`/api/cursor/importable-sessions${query}`)
-    }
-
-    async importCursorSessions(payload: CursorImportRequest): Promise<CursorImportResponse> {
-        return await this.request<CursorImportResponse>('/api/cursor/import', {
-            method: 'POST',
-            body: JSON.stringify(payload)
-        })
-    }
-
     async unsubscribePushNotifications(payload: PushUnsubscribePayload): Promise<void> {
         await this.request('/api/push/subscribe', {
             method: 'DELETE',
@@ -486,7 +379,6 @@ export class ApiClient {
             untilSeq?: number | null
             untilAt?: number | null
             epoch?: number | null
-            aroundId?: string | null
             limit?: number
         }
     ): Promise<MessagesResponse> {
@@ -512,9 +404,6 @@ export class ApiClient {
         if (options.epoch !== undefined && options.epoch !== null) {
             params.set('epoch', `${options.epoch}`)
         }
-        if (options.aroundId) {
-            params.set('aroundId', options.aroundId)
-        }
         if (options.limit !== undefined && options.limit !== null) {
             params.set('limit', `${options.limit}`)
         }
@@ -522,12 +411,6 @@ export class ApiClient {
         const qs = params.toString()
         const url = `/api/sessions/${encodeURIComponent(sessionId)}/messages${qs ? `?${qs}` : ''}`
         return await this.request<MessagesResponse>(url)
-    }
-
-    async getMessageContext(sessionId: string, messageId: string): Promise<MessageContextResponse | null> {
-        return await this.request<MessageContextResponse | null>(
-            `/api/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/context`
-        )
     }
 
     async getGitStatus(sessionId: string): Promise<GitCommandResponse> {
@@ -738,56 +621,6 @@ export class ApiClient {
         })
     }
 
-    async acknowledgeModelError(sessionId: string, atTs: number): Promise<void> {
-        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/model-error/acknowledge`, {
-            method: 'POST',
-            body: JSON.stringify({ atTs })
-        })
-    }
-
-    async bridgeModelError(sessionId: string): Promise<{ ok: boolean; reason?: string }> {
-        const path = `/api/sessions/${encodeURIComponent(sessionId)}/model-error/bridge`
-        const headers = new Headers({ 'content-type': 'application/json' })
-        const authToken = this.getToken ? this.getToken() : this.token
-        if (authToken) {
-            headers.set('authorization', `Bearer ${authToken}`)
-        }
-
-        const res = await fetch(this.buildUrl(path), {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({})
-        })
-
-        if (res.status === 401) {
-            throw new Error('Session expired. Please sign in again.')
-        }
-
-        const body = await res.json().catch(() => null) as { ok?: boolean; reason?: string; error?: string } | null
-        if (res.status === 409 && body && typeof body.ok === 'boolean') {
-            return { ok: body.ok, reason: body.reason }
-        }
-
-        if (!res.ok) {
-            const detail = body?.error ?? (typeof body === 'object' ? JSON.stringify(body) : '')
-            throw new ApiError(
-                `HTTP ${res.status} ${res.statusText}: ${detail}`,
-                res.status,
-                undefined,
-                detail || undefined
-            )
-        }
-
-        return { ok: true }
-    }
-
-    async setModelErrorAutoBridge(sessionId: string, enabled: boolean): Promise<void> {
-        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/model-error/auto-bridge-setting`, {
-            method: 'POST',
-            body: JSON.stringify({ enabled })
-        })
-    }
-
     async reopenSession(sessionId: string): Promise<ReopenSessionResponse> {
         return await this.request<ReopenSessionResponse>(
             `/api/sessions/${encodeURIComponent(sessionId)}/reopen`,
@@ -928,49 +761,49 @@ export class ApiClient {
         return await this.request<MachinesResponse>('/api/machines')
     }
 
-    async getTodoBoards(): Promise<TodoBoardsResponse> {
-        return await this.request<TodoBoardsResponse>('/api/todo-boards')
+    async getBoards(): Promise<BoardsResponse> {
+        return await this.request<BoardsResponse>('/api/todo-boards')
     }
 
-    async getTodoBoardItems(boardId: string): Promise<TodoBoardItemsResponse> {
-        return await this.request<TodoBoardItemsResponse>(`/api/todo-boards/${encodeURIComponent(boardId)}/items`)
+    async getBoardItems(boardId: string): Promise<BoardItemsResponse> {
+        return await this.request<BoardItemsResponse>(`/api/todo-boards/${encodeURIComponent(boardId)}/items`)
     }
 
-    async addTodoBoard(url: string): Promise<TodoBoardsResponse> {
-        return await this.request<TodoBoardsResponse>('/api/todo-boards', {
+    async addBoard(url: string): Promise<BoardsResponse> {
+        return await this.request<BoardsResponse>('/api/todo-boards', {
             method: 'POST',
             body: JSON.stringify({ url })
         })
     }
 
-    async removeTodoBoard(boardId: string): Promise<TodoBoardsResponse> {
-        return await this.request<TodoBoardsResponse>(`/api/todo-boards/${encodeURIComponent(boardId)}`, {
+    async removeBoard(boardId: string): Promise<BoardsResponse> {
+        return await this.request<BoardsResponse>(`/api/todo-boards/${encodeURIComponent(boardId)}`, {
             method: 'DELETE'
         })
     }
 
-    async closeTodoItem(boardId: string, url: string, comment?: string): Promise<void> {
+    async closeBoardItem(boardId: string, url: string, comment?: string): Promise<void> {
         await this.request(`/api/todo-boards/${encodeURIComponent(boardId)}/items/close`, {
             method: 'POST',
             body: JSON.stringify({ url, comment })
         })
     }
 
-    async reopenTodoItem(boardId: string, url: string, comment?: string): Promise<void> {
+    async reopenBoardItem(boardId: string, url: string, comment?: string): Promise<void> {
         await this.request(`/api/todo-boards/${encodeURIComponent(boardId)}/items/reopen`, {
             method: 'POST',
             body: JSON.stringify({ url, comment })
         })
     }
 
-    async commentOnTodoItem(boardId: string, url: string, body: string): Promise<void> {
+    async commentOnBoardItem(boardId: string, url: string, body: string): Promise<void> {
         await this.request(`/api/todo-boards/${encodeURIComponent(boardId)}/items/comment`, {
             method: 'POST',
             body: JSON.stringify({ url, body })
         })
     }
 
-    async setTodoItemStatus(boardId: string, url: string, status: string): Promise<void> {
+    async setBoardItemStatus(boardId: string, url: string, status: string): Promise<void> {
         await this.request(`/api/todo-boards/${encodeURIComponent(boardId)}/items/status`, {
             method: 'POST',
             body: JSON.stringify({ url, status })
@@ -982,32 +815,6 @@ export class ApiClient {
         await this.request(`/api/machines/${encodeURIComponent(machineId)}`, {
             method: 'PATCH',
             body: JSON.stringify({ displayName })
-        })
-    }
-
-
-    async getFeatures(): Promise<{
-        githubPrAwareness: { enabled: boolean; source: 'env' | 'file' | 'default' }
-    }> {
-        return await this.request('/api/features')
-    }
-
-    async patchFeatures(patch: { githubPrAwareness?: boolean }): Promise<{
-        githubPrAwareness: { enabled: boolean; source: 'env' | 'file' | 'default' }
-    }> {
-        return await this.request('/api/features', {
-            method: 'PATCH',
-            body: JSON.stringify(patch)
-        })
-    }
-
-    async setSessionExternalRefs(
-        sessionId: string,
-        externalRefs: import('@/types/api').ExternalRef[]
-    ): Promise<{ ok: true; externalRefs: import('@/types/api').ExternalRef[] }> {
-        return await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/external-refs`, {
-            method: 'PUT',
-            body: JSON.stringify({ externalRefs })
         })
     }
 
@@ -1037,32 +844,10 @@ export class ApiClient {
         return await this.request<UsageSummaryResponse>(`/api/usage/summary?${params.toString()}`)
     }
 
-    async getKitchenStatus(): Promise<KitchenStatusResponse> {
-        return await this.request<KitchenStatusResponse>('/api/kitchen-status')
-    }
-
     async restartMachineRunner(machineId: string): Promise<{ message: string }> {
         return await this.request<{ message: string }>(
             `/api/machines/${encodeURIComponent(machineId)}/restart-runner`,
             { method: 'POST', body: '{}' }
-        )
-    }
-
-    async upgradeMachineRunner(machineId: string): Promise<{ message: string; response?: unknown }> {
-        return await this.request<{ message: string; response?: unknown }>(
-            `/api/machines/${encodeURIComponent(machineId)}/upgrade-runner`,
-            { method: 'POST', body: '{}' }
-        )
-    }
-
-    async getUpgradeInfo(): Promise<UpgradeInfoResponse> {
-        return await this.request<UpgradeInfoResponse>('/api/upgrade/offer')
-    }
-
-    async setFleetUpgradePolicy(policy: FleetUpgradePolicy): Promise<{ policy: FleetUpgradePolicy }> {
-        return await this.request<{ policy: FleetUpgradePolicy }>(
-            '/api/upgrade/policy',
-            { method: 'PUT', body: JSON.stringify({ policy }) }
         )
     }
 
@@ -1304,27 +1089,9 @@ export class ApiClient {
         })
     }
 
-    /** #1717: manually mark a blocked session as not blocked, with a rationale. */
-    async acknowledgeSessionBlocked(sessionId: string, reason: string): Promise<void> {
-        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/blocked-ack`, {
-            method: 'PUT',
-            body: JSON.stringify({ reason })
-        })
-    }
-
-    async deleteSession(sessionId: string, options?: { requireArchived?: boolean }): Promise<void> {
-        const params = new URLSearchParams()
-        if (options?.requireArchived) params.set('requireArchived', '1')
-        const suffix = params.size > 0 ? `?${params}` : ''
-        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}${suffix}`, {
+    async deleteSession(sessionId: string): Promise<void> {
+        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}`, {
             method: 'DELETE'
-        })
-    }
-
-    async deleteArchivedSessions(options: { sessionIds: string[]; requireAllArchived: true }): Promise<void> {
-        await this.request('/api/sessions/delete-archived', {
-            method: 'POST',
-            body: JSON.stringify(options)
         })
     }
 
@@ -1555,122 +1322,5 @@ export class ApiClient {
             method: 'POST',
             body: JSON.stringify({})
         })
-    }
-
-    async fetchSystemEvents(params: {
-        limit?: number
-        beforeId?: number
-        sessionId?: string
-        attentionCandidate?: 0 | 1
-        eventType?: string
-    } = {}): Promise<{ total: number; events: unknown[] }> {
-        const query = new URLSearchParams()
-        if (params.limit !== undefined) query.set('limit', String(params.limit))
-        if (params.beforeId !== undefined) query.set('beforeId', String(params.beforeId))
-        if (params.sessionId) query.set('sessionId', params.sessionId)
-        if (params.attentionCandidate !== undefined) query.set('attentionCandidate', String(params.attentionCandidate))
-        if (params.eventType) query.set('eventType', params.eventType)
-        const suffix = query.toString()
-        return await this.request(`/api/system-events${suffix ? `?${suffix}` : ''}`)
-    }
-
-    async fetchInboxItems(params: {
-        limit?: number
-        activeOnly?: boolean
-        sessionId?: string
-    } = {}): Promise<{ total: number; items: unknown[] }> {
-        const query = new URLSearchParams()
-        if (params.limit !== undefined) query.set('limit', String(params.limit))
-        if (params.activeOnly) query.set('activeOnly', '1')
-        if (params.sessionId) query.set('sessionId', params.sessionId)
-        const suffix = query.toString()
-        return await this.request(`/api/inbox-items${suffix ? `?${suffix}` : ''}`)
-    }
-
-    async recordInboxOperatorAction(
-        inboxItemId: number,
-        action: import('@hapi/protocol').InboxOperatorAction,
-        feedback?: string | null,
-        snoozedUntil?: number | null
-    ): Promise<{ item: unknown }> {
-        return await this.request(`/api/inbox-items/${inboxItemId}/actions`, {
-            method: 'POST',
-            body: JSON.stringify({
-                action,
-                feedback: feedback ?? undefined,
-                snoozedUntil: snoozedUntil ?? undefined
-            })
-        })
-    }
-
-    async overseerConverse(
-        messages: import('@hapi/protocol').OverseerConverseMessage[],
-        opts: { relatedSessionId?: string | null; model?: string; profile?: string } = {}
-    ): Promise<import('@hapi/protocol').OverseerConverseResponse> {
-        return await this.request('/api/overseer/converse', {
-            method: 'POST',
-            body: JSON.stringify({
-                messages,
-                relatedSessionId: opts.relatedSessionId ?? undefined,
-                model: opts.model?.trim() || undefined,
-                profile: opts.profile || undefined
-            })
-        })
-    }
-
-    /** Hub-owned recent Overseer turns for talk-to / voice hydrate after reload. */
-    async fetchOverseerConverseRecent(
-        limit = 20
-    ): Promise<{ turns: import('@hapi/protocol').OverseerRecentConvoTurn[] }> {
-        const q = new URLSearchParams({ limit: String(limit) })
-        return await this.request(`/api/overseer/converse/recent?${q}`)
-    }
-
-    async fetchOverseerBrains(): Promise<{
-        profiles: import('@hapi/protocol').OverseerBrainProfileInfo[]
-        active: { profile: string; model: string | null } | null
-    }> {
-        return await this.request('/api/overseer/brains')
-    }
-
-    async fetchOverseerBrainModels(
-        profileId: string
-    ): Promise<{ profile: string; defaultModel: string | null; models: string[]; error?: string; reachable?: boolean }> {
-        return await this.request(`/api/overseer/brains/${encodeURIComponent(profileId)}/models`)
-    }
-
-    /** Persist the active brain (profile + optional model) — survives restart, no env bounce. */
-    async setOverseerActiveBrain(
-        profile: string,
-        model: string | null
-    ): Promise<{ active: { profile: string; model: string | null } }> {
-        return await this.request('/api/overseer/brain/active', {
-            method: 'PUT',
-            body: JSON.stringify({ profile, model })
-        })
-    }
-
-    async fetchOverseerIdentity(): Promise<{
-        identity: import('@hapi/protocol').OverseerIdentity
-        systemPrompt: string
-    }> {
-        return await this.request('/api/overseer/identity')
-    }
-
-    async pinSessionMessage(
-        sessionId: string,
-        input: { messageId: string; summary: string; targetMessageId?: string }
-    ): Promise<{ event: unknown }> {
-        return await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/pins`, {
-            method: 'POST',
-            body: JSON.stringify(input)
-        })
-    }
-
-    async unpinSessionMessage(sessionId: string, messageId: string): Promise<{ ok: boolean }> {
-        return await this.request(
-            `/api/sessions/${encodeURIComponent(sessionId)}/pins/${encodeURIComponent(messageId)}`,
-            { method: 'DELETE' }
-        )
     }
 }
