@@ -285,7 +285,7 @@ export function TodoBoardList(props: {
                     <div className="flex justify-center py-6">
                         <LoadingState label={t('todo.loading')} />
                     </div>
-                ) : props.error ? (
+                ) : props.error && props.items.length === 0 ? (
                     <div className="px-1 py-4 text-sm text-red-600">
                         {t('todo.error', { message: props.error })}
                     </div>
@@ -299,6 +299,11 @@ export function TodoBoardList(props: {
                     </div>
                 ) : (
                     <>
+                        {props.error ? (
+                            <div className="mb-2 rounded-md border border-amber-600/40 bg-amber-600/10 px-2 py-1.5 text-xs text-amber-700 dark:text-amber-400">
+                                {t('todo.staleError', { message: props.error })}
+                            </div>
+                        ) : null}
                         {groupsWithDot.map(({ group, isNoStatus, dotClass }) => (
                             <div key={group.status ?? '__no_status__'} className="mb-3">
                                 <div className="flex items-center gap-1.5 px-1 py-1 text-xs font-semibold uppercase tracking-wide text-[var(--app-hint)]">
