@@ -1124,6 +1124,13 @@ layers:
   # Web-only → remat --build-web; hard-reload (no hub restart required for CSS).
   - branch: driver/250-dark-variant-data-theme
 
+  # heavygee/hapi#251 — per-machine auto keepalive-apply + soft RPC gaps.
+  # Effective machine policy auto retries upgrade on alive once live RPC
+  # re-registers; hub-wide alert stays push-only. Banner: no sticky red 503
+  # for upgrade_unavailable. Tip @ this commit on soup tip at mint.
+  # Hub+web → remat --build-web + hapi-restart-hub (hub policy path).
+  - branch: driver/251-auto-keepalive-apply
+
   # DROPPED 2026-10-06: driver/1933-claude-resume-amnesia — squash 94523eb0d is on
   # fork main (heavygee/hapi#204). Soup base is now origin/main, so tip-forward
   # absorbs it from the base; keeping the layer would double-apply / conflict.
