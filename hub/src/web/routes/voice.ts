@@ -12,13 +12,13 @@ import {
     OPENAI_TRANSCRIPTION_MODEL,
     VOICE_AGENT_NAME,
     buildVoiceAgentConfig,
-    resolveVoiceMaxDurationSeconds,
     listConfiguredTranscriptionProviders,
     listConfiguredVoiceBackends,
     resolveHubVoiceBackend
 } from '@hapi/protocol/voice'
 import type { TranscriptionProvider, VoiceBackendType } from '@hapi/protocol/voice'
 import {
+    getConfiguredElevenLabsMaxDurationSeconds,
     getProviderEnvironment,
     getTranscriptionCredentialStatus,
     updateTranscriptionCredentials,
@@ -257,7 +257,7 @@ const overridesEnsuredAgents = new Set<string>()
 
 /** Configured ConvAI conversation cap; throws if ELEVENLABS_MAX_DURATION_SECONDS is invalid. */
 function getMaxDurationSeconds(): number {
-    return resolveVoiceMaxDurationSeconds(process.env.ELEVENLABS_MAX_DURATION_SECONDS)
+    return getConfiguredElevenLabsMaxDurationSeconds()
 }
 
 interface ElevenLabsAgent {
@@ -489,6 +489,7 @@ const transcriptionCredentialsUpdateSchema = z.object({
     }).optional(),
     geminiLive: z.string().nullable().optional(),
     qwenRealtime: z.string().nullable().optional(),
+    elevenLabsMaxDurationSeconds: z.number().int().nullable().optional(),
 }).strict()
 
 export function createVoiceRoutes(options: { dataDir?: string } = {}): Hono<WebAppEnv> {
@@ -530,6 +531,9 @@ export function createVoiceRoutes(options: { dataDir?: string } = {}): Hono<WebA
             const message = error instanceof Error ? error.message : 'Failed to update credentials'
             if (message.includes('environment variable')) {
                 return c.json({ error: message }, 409)
+            }
+            if (message.includes('must be an integer between')) {
+                return c.json({ error: message }, 400)
             }
             return c.json({ error: message }, 500)
         }

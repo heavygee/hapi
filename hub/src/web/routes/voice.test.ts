@@ -1,5 +1,5 @@
 import { describe, expect, it, mock, test, afterEach } from 'bun:test'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Hono } from 'hono'
@@ -863,6 +863,7 @@ describe('transcription credentials onboarding', () => {
         'TRANSCRIPTION_BASE_URL',
         'TRANSCRIPTION_MODEL',
         'TRANSCRIPTION_API_KEY',
+        'ELEVENLABS_MAX_DURATION_SECONDS',
     ] as const
     const previous = new Map<string, string | undefined>()
     let dir: string | null = null
@@ -970,5 +971,100 @@ describe('transcription credentials onboarding', () => {
             providerCredentials?: Record<string, string>
         }
         expect(saved.providerCredentials?.OPENAI_API_KEY).toBeUndefined()
+    })
+
+    test('PUT elevenLabsMaxDurationSeconds persists and takes effect on the next token request without a restart', async () => {
+        clearManagedEnv()
+        dir = mkdtempSync(join(tmpdir(), 'hapi-voice-creds-maxdur-'))
+        writeFileSync(join(dir, 'settings.json'), JSON.stringify({}))
+        const app = createApp(dir)
+        const headers = { ...(await authHeaders()), 'content-type': 'application/json' }
+
+        const defaultGet = await app.request('/api/voice/transcription/credentials', { headers })
+        expect((await defaultGet.json() as { elevenLabsMaxDurationSeconds: { value: number; source: string } }).elevenLabsMaxDurationSeconds)
+            .toEqual({ value: 1800, source: 'none', editable: true })
+
+        const put = await app.request('/api/voice/transcription/credentials', {
+            method: 'PUT',
+            headers,
+            body: JSON.stringify({ elevenLabsMaxDurationSeconds: 3600 }),
+        })
+        expect(put.status).toBe(200)
+        expect((await put.json() as { elevenLabsMaxDurationSeconds: { value: number; source: string } }).elevenLabsMaxDurationSeconds)
+            .toEqual({ value: 3600, source: 'settings', editable: true })
+
+        // Same process, no restart: the next token request's agent-creation payload
+        // must already reflect the new cap.
+        process.env.ELEVENLABS_API_KEY = 'maxdur-live-key'
+        const calls: Array<{ url: string; body: unknown }> = []
+        const originalFetch = global.fetch
+        // @ts-expect-error test override
+        global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+            const url = String(input)
+            const body = init?.body ? JSON.parse(String(init.body)) : null
+            calls.push({ url, body })
+            if (url.endsWith('/convai/agents') && init?.method === 'GET') {
+                return new Response(JSON.stringify({ agents: [] }), { status: 200 })
+            }
+            if (url.endsWith('/convai/agents/create')) {
+                return new Response(JSON.stringify({ agent_id: 'agent_maxdur' }), { status: 200 })
+            }
+            if (url.includes('/convai/conversation/token?agent_id=')) {
+                return new Response(JSON.stringify({ token: 'tok' }), { status: 200 })
+            }
+            return new Response('not found', { status: 404 })
+        }) as typeof fetch
+
+        const tokenRes = await app.request('/api/voice/token', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ voiceId: 'maxdur-voice' }),
+        })
+        expect(tokenRes.status).toBe(200)
+        const create = calls.find((call) => call.url.endsWith('/convai/agents/create'))
+        expect((create?.body as any).conversation_config.conversation.max_duration_seconds).toBe(3600)
+
+        global.fetch = originalFetch
+    })
+
+    test('PUT elevenLabsMaxDurationSeconds rejects out-of-range values', async () => {
+        clearManagedEnv()
+        dir = mkdtempSync(join(tmpdir(), 'hapi-voice-creds-maxdur-bad-'))
+        writeFileSync(join(dir, 'settings.json'), JSON.stringify({}))
+        const app = createApp(dir)
+        const headers = { ...(await authHeaders()), 'content-type': 'application/json' }
+
+        const put = await app.request('/api/voice/transcription/credentials', {
+            method: 'PUT',
+            headers,
+            body: JSON.stringify({ elevenLabsMaxDurationSeconds: 30 }),
+        })
+        expect(put.status).toBe(400)
+        const body = await put.json() as { error: string }
+        expect(body.error).toContain('must be an integer between 60 and 7200')
+
+        const saved = JSON.parse(readFileSync(join(dir, 'settings.json'), 'utf8')) as {
+            elevenLabsMaxDurationSeconds?: number
+        }
+        expect(saved.elevenLabsMaxDurationSeconds).toBeUndefined()
+    })
+
+    test('PUT elevenLabsMaxDurationSeconds refuses to override an env-locked value', async () => {
+        clearManagedEnv()
+        process.env.ELEVENLABS_MAX_DURATION_SECONDS = '3600'
+        resetProviderCredentialEnvLocksForTests()
+        const { applyProviderCredentialsFromSettings } = await import('../../config/providerCredentials')
+        dir = mkdtempSync(join(tmpdir(), 'hapi-voice-creds-maxdur-locked-'))
+        writeFileSync(join(dir, 'settings.json'), JSON.stringify({}))
+        await applyProviderCredentialsFromSettings(dir)
+
+        const app = createApp(dir)
+        const headers = { ...(await authHeaders()), 'content-type': 'application/json' }
+        const put = await app.request('/api/voice/transcription/credentials', {
+            method: 'PUT',
+            headers,
+            body: JSON.stringify({ elevenLabsMaxDurationSeconds: 1800 }),
+        })
+        expect(put.status).toBe(409)
     })
 })
