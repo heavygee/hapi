@@ -950,9 +950,10 @@ layers:
 
   # tiann/hapi#1710 / PR #2010 — search_peers review fixes (summary.text match +
   # fetch-limit pad). Densify already in tip ancestry; this layer is the hub fix tip.
-  # Upstream thin: feat/search-peers @ 38db8d8bb. Soup: driver/search-peers.
+  # Upstream thin: feat/search-peers @ 273c7b85d. Soup: driver/search-peers
+  # (CLI hasMore overflow only — hub summary.text/limit pad already on tip).
   # Worktree: ~/coding/hapi/worktrees/search-peers-soup
-  # Tip: 8fff3336b — re-thin after dogfood bump if tip-forward SKIP.
+  # Tip: bee618daf — re-thin after dogfood bump if tip-forward SKIP.
   - branch: driver/search-peers
 
   # tiann/hapi#1756 — in-session (open chat) FTS search + jump. Reuses #1554 indexer;
