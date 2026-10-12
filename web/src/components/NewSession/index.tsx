@@ -27,7 +27,7 @@ import { useSessions } from '@/hooks/queries/useSessions'
 import { useActiveSuggestions, type Suggestion } from '@/hooks/useActiveSuggestions'
 import { useDirectorySuggestions } from '@/hooks/useDirectorySuggestions'
 import { useRecentPaths } from '@/hooks/useRecentPaths'
-import { saveDraft } from '@/lib/composer-drafts'
+import { seedComposerDraftIfEmpty } from '@/lib/seedComposerDraft'
 import { useTranslation } from '@/lib/use-translation'
 import { queryKeys } from '@/lib/query-keys'
 import { getCodexModelReasoningEfforts } from '@/lib/codexModelCapabilities'
@@ -1410,6 +1410,17 @@ export function NewSession(props: {
         t,
         trimmedDirectory
     ])
+
+    // Every success path (plain spawn, Codex import, Pi import, duplicate
+    // merge) must seed the composer draft the same way — four call sites
+    // independently doing this already produced a missed spot (hapi#238
+    // Codex review, caught twice across two review passes), so centralize it
+    // here instead of leaving a fifth success path to copy-paste wrong.
+    // See seedComposerDraftIfEmpty's doc comment for why an existing draft
+    // at the target session id is preserved, not overwritten.
+    const seedInitialMessageDraft = useCallback((sessionId: string) => {
+        seedComposerDraftIfEmpty(sessionId, props.initialMessage)
+    }, [props.initialMessage])
 
     const handleMergeDuplicateSessions = useCallback(async () => {
         if (isMergingDuplicateSessions || pendingDuplicateSessionIds.length === 0) return

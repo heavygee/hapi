@@ -67,4 +67,23 @@ describe('findSessionLinkedToIssue', () => {
         const session = makeSession({ id: 'session-1', metadata: null })
         expect(findSessionLinkedToIssue([session], null)).toBeNull()
     })
+
+    it('finds a session by an OLDER linked issue even after it was also linked to a newer one (Codex review)', () => {
+        // upsertExternalRef only dedups same-issue re-links — linking a
+        // second, different issue retains both refs. getLinkedGithubIssue
+        // (used for the chip display) only surfaces the newest one; this
+        // function must still find the session by the older issue's URL.
+        const session = makeSession({
+            id: 'session-1',
+            metadata: {
+                path: '/x', name: 'n', flavor: 'codex',
+                externalRefs: [
+                    { kind: 'github_issue', url: 'https://github.com/a/b/issues/1', repo: 'a/b', number: 1, linkedAt: 1 },
+                    { kind: 'github_issue', url: 'https://github.com/a/b/issues/2', repo: 'a/b', number: 2, linkedAt: 2 }
+                ]
+            }
+        })
+        expect(findSessionLinkedToIssue([session], 'https://github.com/a/b/issues/1')).toBe(session)
+        expect(findSessionLinkedToIssue([session], 'https://github.com/a/b/issues/2')).toBe(session)
+    })
 })

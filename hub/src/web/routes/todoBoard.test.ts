@@ -388,6 +388,17 @@ describe('parseValidatedItemUrl', () => {
     it('rejects a malformed URL instead of throwing', () => {
         expect(parseValidatedItemUrl('not a url', board)).toBeNull()
     })
+
+    it('preserves a non-default port — a GHE board on a custom port must not reject every write (Codex review)', () => {
+        const portedBoard = { host: 'ghe.example:8443' }
+        expect(parseValidatedItemUrl('https://ghe.example:8443/acme/widgets/issues/12', portedBoard)).toEqual({
+            url: 'https://ghe.example:8443/acme/widgets/issues/12',
+            isPullRequest: false
+        })
+        // Same hostname, different (or default/missing) port must still be rejected.
+        expect(parseValidatedItemUrl('https://ghe.example/acme/widgets/issues/12', portedBoard)).toBeNull()
+        expect(parseValidatedItemUrl('https://ghe.example:9999/acme/widgets/issues/12', portedBoard)).toBeNull()
+    })
 })
 
 describe('resolveProjectView', () => {

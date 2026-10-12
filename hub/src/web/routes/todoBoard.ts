@@ -557,7 +557,15 @@ export function parseValidatedItemUrl(url: string, board: Pick<StoredTodoBoard, 
     if (parsed.protocol !== 'https:') {
         return null
     }
-    if (parsed.hostname.toLowerCase() !== board.host.toLowerCase()) {
+    // `.host` (not `.hostname`) — a GHE board on a non-default port stores
+    // `board.host` as `host:port` (parseProjectUrl captures everything up to
+    // the next `/`), while `.hostname` silently drops the port. Comparing
+    // against `.hostname` rejected every write for a port-qualified board
+    // even though the board itself can be added and read fine (Codex
+    // review); rebuilding the canonical URL from `.hostname` had the same
+    // bug the other direction — it would have handed `gh` a URL pointed at
+    // the default port instead of the board's actual one.
+    if (parsed.host.toLowerCase() !== board.host.toLowerCase()) {
         return null
     }
     const match = /^\/([^/]+)\/([^/]+)\/(issues|pull)\/(\d+)\/?$/.exec(parsed.pathname)
@@ -566,7 +574,7 @@ export function parseValidatedItemUrl(url: string, board: Pick<StoredTodoBoard, 
     }
     const [, owner, repo, kind, number] = match
     return {
-        url: `https://${parsed.hostname}/${owner}/${repo}/${kind}/${number}`,
+        url: `https://${parsed.host}/${owner}/${repo}/${kind}/${number}`,
         isPullRequest: kind === 'pull'
     }
 }

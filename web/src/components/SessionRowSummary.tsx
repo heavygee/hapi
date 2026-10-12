@@ -243,8 +243,7 @@ export function SessionRowSummary(props: {
                             {blockedLabel}
                         </span>
                     ) : null}
-                    {linkedIssue ? <IssueRefChip ref={linkedIssue} /> : null}
-{showIssueChip && linkedIssue ? <IssueRefChip ref={linkedIssue} /> : null}
+                    {showIssueChip && linkedIssue ? <IssueRefChip ref={linkedIssue} /> : null}
                     {attention?.kind === 'unread' && nestedTooltips && attentionId ? (
                         <SessionAttentionIndicator
                             attention={attention}
