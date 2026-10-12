@@ -123,7 +123,7 @@ vi.mock('@/components/Terminal/TerminalView', () => ({
                             ]
                             const value = lines[index]
                             if (value === undefined) return undefined
-                            return { translateToString: () => value }
+                            return { isWrapped: false, translateToString: () => value }
                         },
                     },
                 },
