@@ -465,6 +465,8 @@ export default {
   'terminal.paste.placeholder': 'Paste terminal input here…',
   'terminal.toAgent.buffer': 'To agent',
   'terminal.toAgent.selection': 'Selection to agent',
+  'terminal.toAgent.fueTitle': 'Send terminal to agent',
+  'terminal.toAgent.fueBody': 'Open the session terminal, then tap To agent to put the full scrollback in your composer — or select text first and the button becomes Selection to agent. Add a note if you want, then Send.',
 
   // Code block
   'code.copy': 'Copy',
