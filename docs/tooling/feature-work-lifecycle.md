@@ -180,7 +180,7 @@ Manifest format, atomic swap mechanics, DB jiu-jitsu: [`driver-soup.md`](./drive
 | **Done on soup (web-only)** | Manifest layer + rebuild/build-web + **`hapi-verify-web-dist` OK** + operator hard-reload |
 | **Done on soup (hub/cli)** | Rebuild `--verify` + verify-web-dist (if web touched) + **`hapi-restart-hub`** + operator proof on `:3006` |
 
-**Fleet push rule (#247):** `latest` / soup tip is dogfood. Fleet hosts only advance on **operator fleet seal** (above). Do not gate fleet on upstream merge or bot green. Ninja is self-contained — not in oos fleet push unless the operator names it.
+**Fleet push rule (#247 / #251):** `latest` / soup tip is dogfood. Hub-wide policy stays `alert` (banner, no keepalive apply). **Per-machine `auto`** (Homelab/Teemo) means upgrade when you can: keepalive retries once the live self-upgrade RPC is registered; transient RPC gaps are not sticky errors. Deliberate `push-upgrade` / operator **fleet seal** still the path for alert hosts and for an explicit fleet wave. Do not gate fleet on upstream merge. Ninja is self-contained — not in oos fleet push unless named.
 
 **Ship After Fix (fork):** when your branch is already in the manifest and you pushed **`web/` only**, `hapi-driver-rebuild --build-web` is part of done — not "wait for operator."
 
