@@ -26,6 +26,7 @@ ${chalk.bold('Notes:')}
   Searches name, path, and agentSessionId on the hub (namespace-scoped).
   Not bounded by "most recently updated N" — use this for quiet/aged sessions
   that fall out of MCP list_peers / \`hapi ping-peer --list\`.
+  Output is dense (MCP-context friendly): legend then \`id a|i flavor title\` rows.
   Prefer MCP search_peers inside a session. Then inspect_peer / ping_peer by id.
 
 ${chalk.bold('Env:')}
@@ -92,6 +93,7 @@ export async function handleSearchPeersCommand(args: string[]): Promise<void> {
     console.log(formatPeerSessionsList(sessions, {
         maxRows: limit,
         preserveOrder: true,
+        dense: true,
         emptyMessage: `No peer sessions matched query '${query}'.`
     }))
 }

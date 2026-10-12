@@ -777,6 +777,46 @@ describe('formatPeerSessionsList', () => {
         expect(peerListFetchLimit(100)).toBe(101)
         expect(peerListFetchLimit(499, { excludeCaller: true })).toBe(500)
     })
+
+    it('dense layout uses a legend and compact a|i rows for MCP context', async () => {
+        const { formatPeerSessionsList } = await import('./pingPeer')
+        const longTitle = `ExcuseMe ${'x'.repeat(120)}`
+        const text = formatPeerSessionsList([
+            {
+                id: '3df6f984-44f4-4885-8a87-86fc4fedf833',
+                active: false,
+                updatedAt: 1,
+                metadata: { name: longTitle, flavor: 'cursor' }
+            },
+            {
+                id: 'aaaaaaaa-1111-1111-1111-111111111111',
+                active: true,
+                updatedAt: 2,
+                metadata: { name: 'Hot', flavor: 'claude' }
+            }
+        ], { dense: true, preserveOrder: true, maxRows: 2 })
+        const lines = text.split('\n')
+        expect(lines[0]).toBe('# id a|i flavor title')
+        expect(lines[1]).toBe(
+            `3df6f984-44f4-4885-8a87-86fc4fedf833 i cursor ${longTitle.slice(0, 72)}`
+        )
+        expect(lines[2]).toBe('aaaaaaaa-1111-1111-1111-111111111111 a claude Hot')
+        expect(text).not.toContain('active=')
+        expect(text).not.toContain('flavor=')
+    })
+
+    it('dense overflow footer stays short', async () => {
+        const { formatPeerSessionsList } = await import('./pingPeer')
+        const text = formatPeerSessionsList([
+            {
+                id: 'aaaaaaaa-1111-1111-1111-111111111111',
+                active: true,
+                updatedAt: 1,
+                metadata: { name: 'Only', flavor: 'claude' }
+            }
+        ], { dense: true, maxRows: 1, hasMore: true })
+        expect(text.split('\n').at(-1)).toBe('…+')
+    })
 })
 
 describe('listPeerSessions auth failures', () => {
