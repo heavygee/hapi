@@ -4,6 +4,7 @@ import {
     PingPeerError,
     exitCodeForPingPeerError,
     formatPeerSessionsList,
+    peerListFetchLimit,
     searchPeerSessions
 } from '@/modules/pingPeer/pingPeer'
 import type { CommandDefinition } from './types'
@@ -23,10 +24,11 @@ ${chalk.bold('Usage:')}
   hapi search-peers <query> --limit 50
 
 ${chalk.bold('Notes:')}
-  Searches name, path, and agentSessionId on the hub (namespace-scoped).
-  Not bounded by "most recently updated N" — use this for quiet/aged sessions
-  that fall out of MCP list_peers / \`hapi ping-peer --list\`.
+  Searches name, summary/displayed title, path, and agentSessionId on the hub
+  (namespace-scoped). Not bounded by "most recently updated N" — use this for
+  quiet/aged sessions that fall out of MCP list_peers / \`hapi ping-peer --list\`.
   Output is dense (MCP-context friendly): legend then \`id a|i flavor title\` rows.
+  When more matches exist than --limit, a short overflow footer is shown.
   Prefer MCP search_peers inside a session. Then inspect_peer / ping_peer by id.
 
 ${chalk.bold('Env:')}
@@ -88,10 +90,17 @@ export async function handleSearchPeersCommand(args: string[]): Promise<void> {
         throw new PingPeerError('bad_args', 'missing query; usage: hapi search-peers <query>')
     }
 
-    const limit = parsed.limit ?? 30
-    const sessions = await searchPeerSessions({ query, limit })
+    // Hub search max is 500; leave one slot for the overflow probe (same as
+    // ping-peer --list). MCP page stays ≤100 separately.
+    const MAX_CLI_PAGE = 499
+    const limit = Math.min(MAX_CLI_PAGE, parsed.limit ?? 30)
+    const sessions = await searchPeerSessions({
+        query,
+        limit: peerListFetchLimit(limit),
+    })
     console.log(formatPeerSessionsList(sessions, {
         maxRows: limit,
+        hasMore: sessions.length > limit,
         preserveOrder: true,
         dense: true,
         emptyMessage: `No peer sessions matched query '${query}'.`
