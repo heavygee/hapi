@@ -984,6 +984,34 @@ export function createTodoBoardRoutes(
         if (!isMemberOfProject(membership, board.ownerLogin, board.projectNumber)) {
             return { ok: false, error: 'Item is not part of this board', status: 400 }
         }
+        // A view-scoped board exists specifically to restrict exposure to a
+        // filtered subset of the project's items — project membership alone
+        // isn't enough here, or a write could reach an item the view's
+        // filter deliberately hides (Codex review). Reuses the exact
+        // view-filtered items fetch the read path already makes (same
+        // runGraphql call, same view→itemsFilter resolution) rather than
+        // re-implementing GitHub's view-filter query syntax server-side.
+        if (board.viewNumber !== undefined) {
+            let itemsResponse: GhProjectV2Response
+            try {
+                itemsResponse = await runGraphql({
+                    host: board.host,
+                    ownerLogin: board.ownerLogin,
+                    projectNumber: board.projectNumber,
+                    statusFieldName: board.statusFieldName,
+                    viewNumber: board.viewNumber
+                })
+            } catch (error) {
+                return { ok: false, error: error instanceof Error ? error.message : 'Failed to verify item is visible in this view', status: 502 }
+            }
+            if (itemsResponse.errors?.length) {
+                return { ok: false, error: itemsResponse.errors.map(e => e.message).join('; '), status: 502 }
+            }
+            const visibleItems = mapItems(itemsResponse, board.statusFieldName)
+            if (!visibleItems.some(item => item.url === validated.url)) {
+                return { ok: false, error: 'Item is not visible in this board\'s view', status: 400 }
+            }
+        }
         return { ok: true, board, url: validated.url, isPullRequest: validated.isPullRequest }
     }
 
