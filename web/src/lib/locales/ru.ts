@@ -463,6 +463,8 @@ export default {
   'terminal.paste.fallbackTitle': 'Вставить ввод',
   'terminal.paste.fallbackDescription': 'Чтение из буфера обмена недоступно. Вставьте текст ниже.',
   'terminal.paste.placeholder': 'Вставьте ввод терминала сюда…',
+  'terminal.toAgent.buffer': 'Агенту',
+  'terminal.toAgent.selection': 'Выделение агенту',
 
   // Блок кода
   'code.copy': 'Копировать',
