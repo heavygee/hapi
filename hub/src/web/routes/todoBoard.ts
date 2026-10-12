@@ -347,6 +347,68 @@ type GhProjectViewResponse = {
     errors?: Array<{ message: string }>
 }
 
+// `projectItems` isn't on a shared GraphQL interface — Issue and PullRequest
+// each declare it independently (confirmed via introspection: neither
+// `ProjectV2Owner` nor any interface both implement exposes it) — so the
+// identical field selection has to be repeated across both inline fragments
+// at the GraphQL level. Interpolating one JS constant into both keeps that
+// duplication to a single source of truth at least. 100 (not GitHub's
+// default page size) matches this file's own items(first: 100) convention;
+// an issue/PR attached to more than 100 projects — implausible but not
+// impossible for a heavily cross-referenced issue in a very large org —
+// would still be missed with no pagination fallback.
+const PROJECT_ITEMS_MEMBERSHIP_FIELDS = `projectItems(first: 100) {
+        nodes { project { number owner { ... on User { login } ... on Organization { login } } } }
+      }`
+
+// A well-formed, same-host issue/pull URL isn't necessarily an item on THIS
+// board's project — a GitHub Projects v2 project can span arbitrary repos on
+// its host, so the only way to confirm membership is to ask GitHub directly:
+// `resource(url:)` resolves the URL to its Issue/PullRequest node and lists
+// every project it's attached to via `projectItems`. Matched by project
+// number + owner login (not a cached node ID — boards don't store one).
+const RESOURCE_PROJECT_MEMBERSHIP_QUERY = `
+query($url: URI!) {
+  resource(url: $url) {
+    ... on Issue {
+      ${PROJECT_ITEMS_MEMBERSHIP_FIELDS}
+    }
+    ... on PullRequest {
+      ${PROJECT_ITEMS_MEMBERSHIP_FIELDS}
+    }
+  }
+}`
+
+type GhResourceProjectMembershipResponse = {
+    data?: {
+        resource?: {
+            projectItems?: {
+                nodes?: Array<{ project?: { number?: number; owner?: { login?: string } | null } | null } | null>
+            } | null
+        } | null
+    }
+    errors?: Array<{ message: string }>
+}
+
+type ProjectMembershipTarget = ProjectLookupTarget & { url: string }
+
+async function runGhGraphqlProjectMembership(target: ProjectMembershipTarget): Promise<GhResourceProjectMembershipResponse> {
+    const stdout = await execGhGraphql(target.host, RESOURCE_PROJECT_MEMBERSHIP_QUERY, { url: target.url })
+    try {
+        return JSON.parse(stdout) as GhResourceProjectMembershipResponse
+    } catch {
+        throw new Error('gh api graphql returned non-JSON output')
+    }
+}
+
+function isMemberOfProject(response: GhResourceProjectMembershipResponse, ownerLogin: string, projectNumber: number): boolean {
+    const nodes = response.data?.resource?.projectItems?.nodes ?? []
+    return nodes.some(node =>
+        node?.project?.number === projectNumber &&
+        node.project.owner?.login?.toLowerCase() === ownerLogin.toLowerCase()
+    )
+}
+
 const execFileAsync = promisify(execFile)
 
 type ProjectQueryTarget = {
@@ -719,7 +781,8 @@ export function createTodoBoardRoutes(
     runGraphql: (target: ProjectQueryTarget) => GhProjectV2Response | Promise<GhProjectV2Response> = runGhGraphql,
     runGraphqlTitle: (target: ProjectLookupTarget) => GhProjectTitleResponse | Promise<GhProjectTitleResponse> = runGhGraphqlTitle,
     runGraphqlView: (target: ProjectViewLookupTarget) => GhProjectViewResponse | Promise<GhProjectViewResponse> = runGhGraphqlView,
-    actions: TodoItemActions = defaultTodoItemActions
+    actions: TodoItemActions = defaultTodoItemActions,
+    runGraphqlMembership: (target: ProjectMembershipTarget) => GhResourceProjectMembershipResponse | Promise<GhResourceProjectMembershipResponse> = runGhGraphqlProjectMembership
 ): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
@@ -874,7 +937,7 @@ export function createTodoBoardRoutes(
         url: string
     ): Promise<
         | { ok: true; board: StoredTodoBoard; url: string; isPullRequest: boolean }
-        | { ok: false; error: string; status: 400 | 404 }
+        | { ok: false; error: string; status: 400 | 404 | 502 }
     > {
         const boards = await loadTodoBoards(dataDir)
         const board = boards.find(b => b.id === boardId)
@@ -884,6 +947,25 @@ export function createTodoBoardRoutes(
         const validated = parseValidatedItemUrl(url, board)
         if (!validated) {
             return { ok: false, error: 'Item URL does not belong to this board', status: 400 }
+        }
+        // Host + path shape alone don't prove this issue/PR is actually on
+        // the board's project — a project can contain items from any repo on
+        // its host. Without this, an authenticated owner-namespace caller
+        // could use the hub's `gh` credentials to close/reopen/comment on any
+        // same-host issue or PR, not just ones on this board (Codex review).
+        let membership: GhResourceProjectMembershipResponse
+        try {
+            membership = await runGraphqlMembership({
+                host: board.host,
+                url: validated.url,
+                ownerLogin: board.ownerLogin,
+                projectNumber: board.projectNumber
+            })
+        } catch (error) {
+            return { ok: false, error: error instanceof Error ? error.message : 'Failed to verify item membership', status: 502 }
+        }
+        if (!isMemberOfProject(membership, board.ownerLogin, board.projectNumber)) {
+            return { ok: false, error: 'Item is not part of this board', status: 400 }
         }
         return { ok: true, board, url: validated.url, isPullRequest: validated.isPullRequest }
     }

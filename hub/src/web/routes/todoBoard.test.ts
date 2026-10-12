@@ -32,12 +32,23 @@ const UNUSED_ACTIONS: Parameters<typeof createTodoBoardRoutes>[4] = {
     setStatus: async () => { throw new Error('setStatus action not mocked for this test') }
 }
 
+// Matches whichever board is asking — the safe default for tests that
+// exercise close/reopen/comment/status success paths and don't care about
+// membership verification specifically (that gets its own dedicated
+// describe block). Echoes the target's own owner/number back so it always
+// satisfies isMemberOfProject's comparison, regardless of which board/env
+// config a given test uses.
+const ALWAYS_MEMBER: Parameters<typeof createTodoBoardRoutes>[5] = (target) => ({
+    data: { resource: { projectItems: { nodes: [{ project: { number: target.projectNumber, owner: { login: target.ownerLogin } } }] } } }
+})
+
 async function createApp(
     runGraphql: Parameters<typeof createTodoBoardRoutes>[1],
     runGraphqlTitle?: Parameters<typeof createTodoBoardRoutes>[2],
     namespace = 'default',
     runGraphqlView?: Parameters<typeof createTodoBoardRoutes>[3],
-    actions?: Parameters<typeof createTodoBoardRoutes>[4]
+    actions?: Parameters<typeof createTodoBoardRoutes>[4],
+    runGraphqlMembership?: Parameters<typeof createTodoBoardRoutes>[5]
 ) {
     const dataDir = await mkdtemp(join(tmpdir(), 'hapi-todo-board-'))
     directories.push(dataDir)
@@ -54,7 +65,8 @@ async function createApp(
         runGraphql,
         runGraphqlTitle ?? (() => ({ data: { repositoryOwner: {} } })),
         runGraphqlView ?? (() => ({ data: { repositoryOwner: {} } })),
-        actions ?? UNUSED_ACTIONS
+        actions ?? UNUSED_ACTIONS,
+        runGraphqlMembership ?? ALWAYS_MEMBER
     ))
     return app
 }
@@ -611,6 +623,73 @@ describe('GET /api/todo-boards/:id/items', () => {
 
 const DEFAULT_BOARD_ID = 'github.com::heavygee::6'
 const VALID_ITEM_URL = 'https://github.com/heavygee/hapi-demo-board/issues/1'
+
+// Shared by every write route via requireBoardAndValidUrl — exercised once
+// here through `close` rather than duplicated across all four routes.
+describe('write-target project membership verification', () => {
+    it('rejects a same-host, well-formed URL that is not actually on this board\'s project', async () => {
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, UNUSED_ACTIONS, () => ({
+            data: { resource: { projectItems: { nodes: [] } } }
+        }))
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/close`, {
+            method: 'POST',
+            body: JSON.stringify({ url: VALID_ITEM_URL })
+        })
+        expect(response.status).toBe(400)
+    })
+
+    it('rejects when the URL is on a different project under the same owner', async () => {
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, UNUSED_ACTIONS, () => ({
+            data: { resource: { projectItems: { nodes: [{ project: { number: 999, owner: { login: 'heavygee' } } }] } } }
+        }))
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/close`, {
+            method: 'POST',
+            body: JSON.stringify({ url: VALID_ITEM_URL })
+        })
+        expect(response.status).toBe(400)
+    })
+
+    it('allows the write when the membership check confirms the item is on this project', async () => {
+        const calls: unknown[] = []
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, {
+            ...UNUSED_ACTIONS,
+            close: async (target, comment) => { calls.push([target, comment]) }
+        }, () => ({
+            data: { resource: { projectItems: { nodes: [{ project: { number: 6, owner: { login: 'heavygee' } } }] } } }
+        }))
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/close`, {
+            method: 'POST',
+            body: JSON.stringify({ url: VALID_ITEM_URL })
+        })
+        expect(response.status).toBe(200)
+        expect(calls).toHaveLength(1)
+    })
+
+    it('matches the owner login case-insensitively', async () => {
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, {
+            ...UNUSED_ACTIONS,
+            close: async () => {}
+        }, () => ({
+            data: { resource: { projectItems: { nodes: [{ project: { number: 6, owner: { login: 'HeavyGee' } } }] } } }
+        }))
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/close`, {
+            method: 'POST',
+            body: JSON.stringify({ url: VALID_ITEM_URL })
+        })
+        expect(response.status).toBe(200)
+    })
+
+    it('surfaces a failed membership lookup as a 502, not a silent pass-through', async () => {
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, UNUSED_ACTIONS, () => {
+            throw new Error('gh api graphql failed: rate limited')
+        })
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/close`, {
+            method: 'POST',
+            body: JSON.stringify({ url: VALID_ITEM_URL })
+        })
+        expect(response.status).toBe(502)
+    })
+})
 
 describe('POST /api/todo-boards/:id/items/close', () => {
     it('closes via the close action and reports success', async () => {
