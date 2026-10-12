@@ -521,6 +521,32 @@ describe('RunnerVersionSkewBanner', () => {
         expect(screen.queryByTestId('runner-version-skew-action-error')).toBeNull()
     })
 
+    it('soft-handles upgrade_unavailable instead of sticky red error', async () => {
+        const { ApiError } = await import('@/api/client')
+        upgradeMachineRunnerMock.mockRejectedValueOnce(
+            new ApiError(
+                'HTTP 503: {"error":"RPC is not registered","code":"upgrade_unavailable"}',
+                503,
+                'upgrade_unavailable',
+            ),
+        )
+        useMachinesMock.mockReturnValue({
+            machines: [
+                makeUpgradeableMachine({ id: 'homelab', metadata: { host: 'homelab', platform: 'linux', happyCliVersion: '0.20.0' } }),
+            ],
+            isLoading: false,
+            error: null,
+        })
+
+        renderBanner()
+
+        fireEvent.click(screen.getByTestId('runner-version-skew-upgrade-homelab'))
+        await waitFor(() => {
+            expect(screen.getByTestId('runner-version-skew-action-info')).toHaveTextContent(/reconnect|automatically|no action/i)
+        })
+        expect(screen.queryByTestId('runner-version-skew-action-error')).toBeNull()
+    })
+
     it('calls restartMachineRunner when Restart is clicked on a supervised host', async () => {
         useMachinesMock.mockReturnValue({
             machines: [

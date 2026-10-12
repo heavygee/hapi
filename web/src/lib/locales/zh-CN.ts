@@ -455,6 +455,7 @@ export default {
   'runner.skew.banner.handoffHint': '集群升级：Hub 会识别 npm 或源码安装，并据此升级远端（npm 仓库或 Hub 构建的产物）。Upgrade 不经 SSH；由运行器自行安装。设置 HAPI_UPGRADE_CHANNEL=off 可关闭。',
   'runner.skew.restartFailed': '重启运行器失败',
   'runner.skew.upgradeFailed': '升级运行器失败',
+  'runner.skew.upgradeWaitingRpc': '运行器正在重连升级通道 — 将自动重试，无需操作',
   'runner.skew.alreadyCurrent': '运行器报告已处于 Hub 目标版本',
   'runner.skew.upgradeStarted': '已在运行器上开始升级',
   'toast.runnerUpgrade.success.title': '运行器已升级',

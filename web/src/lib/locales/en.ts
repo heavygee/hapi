@@ -485,6 +485,7 @@ export default {
   'runner.skew.banner.whatsNewEmpty': 'No release notes published for this tip yet.',
   'runner.skew.restartFailed': 'Failed to restart runner',
   'runner.skew.upgradeFailed': 'Failed to upgrade runner',
+  'runner.skew.upgradeWaitingRpc': 'Runner is reconnecting its upgrade channel — will retry automatically; no action needed',
   'runner.skew.alreadyCurrent': 'Runner reports it is already at the hub target',
   'runner.skew.upgradeStarted': 'Upgrade started on the runner',
   'toast.runnerUpgrade.success.title': 'Runner upgraded',

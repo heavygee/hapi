@@ -239,8 +239,8 @@ export type SyncEngineOptions = {
     /** Ensure hub-artifact bytes exist; returns offer with sha256 filled. */
     prepareArtifactOffer?: (offer: HubUpgradeOffer, platform: string, arch: string) => Promise<HubUpgradeOffer>
     /**
-     * Hub-default fleet policy (banner / fallback). Unattended auto-push is
-     * disabled; deliberate `pushFleetUpgrade` uses per-machine overrides.
+     * Hub-default fleet policy (banner / fallback). Keepalive apply uses
+     * per-machine effective `auto` only — hub-wide `auto` still needs push.
      */
     getFleetUpgradePolicy?: () => FleetUpgradePolicy
 }
@@ -284,6 +284,10 @@ export class SyncEngine {
             | { type: 'error'; message: string; code: 'machine_not_found' | 'machine_offline' | 'upgrade_unavailable' | 'upgrade_deferred' | 'upgrade_failed' }
         >
     >()
+    /** Per-machine wall-clock cooldown for successful / hard-fail auto attempts. */
+    private readonly fleetUpgradeAttemptAt = new Map<string, number>()
+    private lastAutoUpgradeOfferKey: string | null = null
+    private static readonly FLEET_UPGRADE_COOLDOWN_MS = 15 * 60_000
     private readonly getUpgradeOffer: (() => HubUpgradeOffer) | null
     private readonly prepareArtifactOffer: SyncEngineOptions['prepareArtifactOffer']
     private readonly getFleetUpgradePolicy: () => FleetUpgradePolicy
@@ -737,6 +741,9 @@ export class SyncEngine {
 
         if (event.type === 'machine-updated' && event.machineId) {
             this.machineCache.refreshMachine(event.machineId)
+            void this.maybeFleetUpgradeMachine(event.machineId, { source: 'machine-updated' }).catch((error) => {
+                console.warn('[fleet-upgrade] offer resolution failed', error)
+            })
             return
         }
 
@@ -1524,7 +1531,102 @@ export class SyncEngine {
 
     handleMachineAlive(payload: { machineId: string; time: number; health?: unknown }): void {
         this.machineCache.handleMachineAlive(payload)
-        // Deliberate fleet push only — keepalive must not auto-upgrade.
+        // Per-machine effective `auto` only — hub-wide alert/silent stay push-only.
+        void this.maybeFleetUpgradeMachine(payload.machineId, { source: 'machine-alive' }).catch((error) => {
+            console.warn('[fleet-upgrade] offer resolution failed', error)
+        })
+    }
+
+    /**
+     * When a connected runner with effective policy `auto` trails the hub offer,
+     * ask it to self-upgrade. Hub-default `alert`/`silent` never enter here.
+     * Transient `upgrade_unavailable` (RPC not live yet) does **not** start the
+     * 15m cooldown so the next keepalive (~20s) can retry after re-register.
+     */
+    private clearFleetUpgradeCooldownIfTargetMoved(offer: HubUpgradeOffer): void {
+        const key = `${offer.channel}:${offer.targetVersion}:${offer.targetGeneration ?? ''}`
+        if (this.lastAutoUpgradeOfferKey !== null && this.lastAutoUpgradeOfferKey !== key) {
+            this.fleetUpgradeAttemptAt.clear()
+            console.warn('[fleet-upgrade] target moved; cleared auto cooldown', {
+                from: this.lastAutoUpgradeOfferKey,
+                to: key,
+            })
+        }
+        this.lastAutoUpgradeOfferKey = key
+    }
+
+    private async maybeFleetUpgradeMachine(
+        machineId: string,
+        options?: { bypassCooldown?: boolean; source?: 'machine-alive' | 'machine-updated' },
+    ): Promise<void> {
+        if (!this.getUpgradeOffer) {
+            return
+        }
+        // Per-machine effective policy — hub-wide `auto` alone does not keepalive-apply.
+        if (getEffectiveFleetUpgradePolicy(machineId) !== 'auto') {
+            return
+        }
+        const offer = this.getUpgradeOffer()
+        if (offer.channel === 'off') {
+            return
+        }
+        this.clearFleetUpgradeCooldownIfTargetMoved(offer)
+        const machine = this.machineCache.getMachine(machineId)
+        if (!machine?.active || !machine.metadata) {
+            return
+        }
+        if (machine.metadata.versionHandoffDisabled === true) {
+            return
+        }
+        if (!machineTrailsUpgradeOffer(
+            offer,
+            machine.metadata.happyCliVersion,
+            machine.metadata.capabilities,
+            machine.metadata.cliArtifactGeneration,
+        )) {
+            return
+        }
+        if (!options?.bypassCooldown) {
+            const last = this.fleetUpgradeAttemptAt.get(machineId) ?? 0
+            if (Date.now() - last < SyncEngine.FLEET_UPGRADE_COOLDOWN_MS) {
+                return
+            }
+        }
+        const host = machine.metadata.host ?? machine.metadata.displayName ?? machineId
+        try {
+            const result = await this.upgradeMachineRunner(machineId, machine.namespace)
+            console.warn('[fleet-upgrade] auto attempt', {
+                machineId,
+                host,
+                channel: offer.channel,
+                source: options?.source ?? 'machine-alive',
+                result,
+            })
+            // Cooldown only after a real attempt outcome that should not hammer.
+            // upgrade_unavailable / deferred: RPC not live or soup mid-build — retry next keepalive.
+            if (result.type === 'success' || (result.type === 'error' && result.code === 'upgrade_failed')) {
+                this.fleetUpgradeAttemptAt.set(machineId, Date.now())
+            }
+            if (result.type === 'error' && result.code === 'upgrade_failed') {
+                this.eventPublisher.sendToast(
+                    machine.namespace,
+                    'Runner upgrade failed',
+                    `${host}: ${result.message}`,
+                )
+            }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            console.warn('[fleet-upgrade] auto attempt failed', {
+                machineId,
+                message,
+            })
+            this.fleetUpgradeAttemptAt.set(machineId, Date.now())
+            this.eventPublisher.sendToast(
+                machine.namespace,
+                'Runner upgrade failed',
+                `${host}: ${message}`,
+            )
+        }
     }
 
     /**
