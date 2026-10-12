@@ -128,12 +128,11 @@ layers:
   - branch: feat/mermaid-parse-failure-feedback
 
   # Codex budget gauge (tiann/hapi#1901 — thin re-thin of #847).
-  # Ring + popover: context %, 5h/weekly windows, credits covering/blocked.
-  # Driven by token_count / account rate-limits → metadata.codexUsage + SSE.
-  # Budget-only (no New Session resume surface; adopt #1088 for listing).
-  # Umbrella: tiann/hapi#846. Authorship lineage: Ethan Wang + heavygee re-thin.
-  # Re-enabled 2026-09-22 after #847 closed as superseded by #1901.
-  - branch: feat/codex-budget-gauge
+  # DROPPED 2026-10-12 (operator): feat/codex-budget-gauge — remat tip-forward
+  # conflict poison; not worth soup babysit. Upstream tip still OPEN as tiann/hapi#1901
+  # if wanted later; do not resurrect without operator ask.
+  # Was: Ring + popover Codex budget gauge (metadata.codexUsage + SSE); umbrella #846 / #1901.
+  # - branch: feat/codex-budget-gauge
 
   # Bridge: FCM sendModelError for wrist push on model errors (#878).
   # MUST be thin tip on upstream (or post-#803 base) — was on companion-fcm tip —
