@@ -440,8 +440,11 @@ pec_decide_emoji() {
         # cold-review-clean + merge clean but GH returned empty rollup / 503 — do not
         # invent ⚠️ or "push to trigger bot review" (#91 / #132 flake noise).
         emoji="✅"; action="cold-review-clean — CI rollup empty/unavailable (merge clean)"
-    elif [[ "$checks_seen" == "0" && "$merge_bad" == "0" && "$bot_major_actionable" == "0" && "$review_changes" == "0" ]]; then
+    elif [[ "$checks_seen" == "0" && "$merge_bad" == "0" && "$bot_major_actionable" == "0" && "$review_changes" == "0" ]] \
+        && ! [[ "$threads_n" -gt 0 ]] 2>/dev/null; then
         # No CI evidence yet: never call it green. Nudge instead of false ✅.
+        # Open unresolved threads still win (fork PRs often have empty check
+        # rollups — do not hide Codex debt behind 🔁; 🔁 never sticky-pings).
         emoji="🔁"; action="no CI checks visible yet — push/retry then re-sweep"
     elif [[ "$checks_pending" == "1" && "$threads_n" == "0" && "$merge_bad" == "0" && "$review_changes" == "0" ]]; then
         # Prefer 🔁 while CI/pr-review is in flight and threads are clear —
