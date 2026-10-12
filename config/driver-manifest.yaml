@@ -1118,6 +1118,13 @@ layers:
   # Hub+web → remat --build-web + hapi-restart-hub.
   - branch: driver/248-upgrade-release-notes
 
+  # heavygee/hapi#250 — bind Tailwind dark: to data-theme (dark|oled), not OS
+  # prefers-color-scheme. Fixes Light appearance + dark OS (Quest) light-on-light
+  # on skew-banner NOTES/body. Thin tip on soup 58302d79b: @ 05f26ce10.
+  # Worktree: ~/coding/hapi/worktrees/skew-dark-variant (+ soup thin 250-dark-variant-soup)
+  # Web-only → remat --build-web; hard-reload (no hub restart required for CSS).
+  - branch: driver/250-dark-variant-data-theme
+
   # DROPPED 2026-10-06: driver/1933-claude-resume-amnesia — squash 94523eb0d is on
   # fork main (heavygee/hapi#204). Soup base is now origin/main, so tip-forward
   # absorbs it from the base; keeping the layer would double-apply / conflict.
