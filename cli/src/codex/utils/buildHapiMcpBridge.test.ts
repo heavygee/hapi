@@ -129,7 +129,8 @@ describe('buildHapiMcpBridge skill lookup config', () => {
             enableDisplayLinks: true,
             skillLookup: { workingDirectory: '/repo', flavor: 'cursor' }
         })
-        expect(harness.cliArgs.at(-1)).toContain('display_links')
+        const toolsArg = harness.cliArgs[harness.cliArgs.indexOf('--tools') + 1]
+        expect(toolsArg).toContain('display_links')
         expect(bridge.mcpServers.hapi.tools?.display_links).toEqual({ approval_mode: 'approve' })
     })
 
