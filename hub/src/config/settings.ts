@@ -83,6 +83,11 @@ export interface Settings {
      * list, never silently emptied (removal re-seeds the default instead).
      */
     todoBoards?: StoredTodoBoard[]
+    /**
+     * Cap (seconds) on one ElevenLabs ConvAI conversation. Env
+     * ELEVENLABS_MAX_DURATION_SECONDS still wins when set at process start.
+     */
+    elevenLabsMaxDurationSeconds?: number
 }
 
 export function getSettingsFile(dataDir: string): string {
