@@ -144,6 +144,38 @@ EOF
 # for 1413 (dropped matcher), not attributed as active.
 if mw_manifest_pr_layer_active "$MANIFEST_OWNER_REPO" 1413; then bad "tiann/hapi#1413 DROPPED must be clean"; else ok; fi
 
+# --- issue≠PR / ancestor-ref footgun (w-241-2007 premature WAVE CLEAR) ---
+MANIFEST_ISSUE_NOT_PR=$(cat <<'EOF'
+base: upstream/main
+layers:
+  # tiann/hapi#2006 — full-height composer primary (voice ↔ send) for Quest / touch.
+  # Worktree: ~/coding/hapi/worktrees/large-empty-dictate-soup
+  - branch: driver/large-empty-dictate
+
+  # tiann/hapi#1724 / heavygee#209 — restore auto-Continue after post-tool ACP death.
+  # Worktree: ~/coding/hapi/worktrees/1724-auto-continue-delta
+  - branch: driver/1724-auto-continue-delta
+EOF
+)
+EMPTY_WT_ROOT="$(mktemp -d)"
+export HAPI_META_WORKTREES_ROOT="$EMPTY_WT_ROOT"
+# Blind PR-number check falsely reports clean (the bug that unlocked w-241-2007).
+got="$(mw_wave_member_clean "$MANIFEST_ISSUE_NOT_PR" "" 2007)" && ok || bad "2007 alone exit"
+eq "2007 alone false-clean without related" "$got" "clean"
+got="$(mw_wave_member_clean "$MANIFEST_ISSUE_NOT_PR" "" 241)" && ok || bad "241 alone exit"
+eq "241 alone false-clean without related" "$got" "clean"
+# Closing-issue / title "(#2006)" related ref catches the live layer.
+reason="$(mw_wave_member_clean "$MANIFEST_ISSUE_NOT_PR" "" 2007 "2006" || true)"
+eq "2007 dirty via related #2006" "$reason" "layer"
+# Body/soup branch hint catches the live driver/ layer when comments cite ancestors.
+reason="$(mw_wave_member_clean "$MANIFEST_ISSUE_NOT_PR" "" 241 "" "driver/1724-auto-continue-delta" || true)"
+eq "241 dirty via branch hint" "$reason" "layer"
+if mw_manifest_branch_layer_active "$MANIFEST_ISSUE_NOT_PR" "driver/large-empty-dictate"; then ok; else bad "exact branch active"; fi
+eq "title paren issues" "$(mw_extract_title_paren_issues 'feat Enlarge (#2006)' | tr '\n' ' ' | sed 's/ *$//')" "2006"
+eq "body branch hints" "$(mw_extract_branch_hints_from_text 'dogfooded as driver/1724-auto-continue-delta @ b5dd' | tr '\n' ' ' | sed 's/ *$//')" "driver/1724-auto-continue-delta"
+unset HAPI_META_WORKTREES_ROOT
+rmdir "$EMPTY_WT_ROOT"
+
 # --- wave id ---
 eq "wave id sorted" "$(mw_wave_id_from_prs 945 896)" "w-896-945"
 
