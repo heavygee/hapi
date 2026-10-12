@@ -389,22 +389,22 @@ function SessionsPage() {
         reopenItem: reopenBoardItem,
         commentOnItem: commentOnBoardItem,
         setItemStatus: setBoardItemStatus,
-        closingUrls: closingTodoItemUrls,
-        reopeningUrls: reopeningTodoItemUrls,
-        commentingUrls: commentingOnTodoItemUrls,
-        settingStatusUrls: settingTodoItemStatusUrls,
+        closingUrls: closingBoardItemUrls,
+        reopeningUrls: reopeningBoardItemUrls,
+        commentingUrls: commentingOnBoardItemUrls,
+        settingStatusUrls: settingBoardItemStatusUrls,
     } = useBoardItemActions(api, effectiveBoardId)
     const [selectedBoardItemId, setSelectedBoardItemId] = useState<string | null>(null)
     useEffect(() => {
         setSelectedBoardItemId(null)
     }, [sessionsMode, effectiveBoardId])
-    const selectedTodoItem = useMemo(
+    const selectedBoardItem = useMemo(
         () => (selectedBoardItemId ? boardItems.find(item => item.id === selectedBoardItemId) ?? null : null),
         [selectedBoardItemId, boardItems]
     )
     const linkedTodoSession = useMemo(
-        () => findSessionLinkedToIssue(sessions, selectedTodoItem?.url ?? null),
-        [sessions, selectedTodoItem]
+        () => findSessionLinkedToIssue(sessions, selectedBoardItem?.url ?? null),
+        [sessions, selectedBoardItem]
     )
     const handleOpenLinkedTodoSession = useCallback((sessionId: string) => {
         navigate({
@@ -417,14 +417,14 @@ function SessionsPage() {
     // same mobile show/hide signal `isSessionsIndex` drives for sessions —
     // but it's local state, not a route, so it has to opt in explicitly here
     // rather than coming from `pathname` for free. Branching on `sessionsMode`
-    // (not `!isSessionsIndex || selectedTodoItem !== null`) matters: mode
+    // (not `!isSessionsIndex || selectedBoardItem !== null`) matters: mode
     // switching never touches the URL, so a session route can still be live
     // underneath while the operator is in To-Do mode — without this branch,
     // switching to To-Do mode with no item selected yet would leave the
     // previous session's chat showing in the right pane on mobile instead of
     // the to-do list, since `isSessionsIndex` alone has no idea a mode
     // switch happened.
-    const hasRightPaneContent = sessionsMode === 'boards' ? selectedTodoItem !== null : !isSessionsIndex
+    const hasRightPaneContent = sessionsMode === 'boards' ? selectedBoardItem !== null : !isSessionsIndex
     // See shouldExitBoardsModeForNavigation's doc comment for why this reacts
     // to the navigation event itself rather than comparing selected-session
     // ids before/after.
@@ -437,12 +437,12 @@ function SessionsPage() {
         })
     }, [router, sessionsMode])
     const onlineMachineIds = useMemo(() => new Set(machines.map(m => m.id)), [machines])
-    const handleSpawnFromTodoItem = useCallback((item: BoardItem) => {
+    const handleSpawnFromBoardItem = useCallback((item: BoardItem) => {
         const resolved = resolveBoardItemDirectory(item.repo, sessions)
         // `/sessions/new` is a sibling route under the same `/sessions`
         // parent, so SessionsPage never remounts — without clearing the
         // selected item (and switching back to Sessions mode, so
-        // `hasRightPaneContent` stops gating on `selectedTodoItem`), the
+        // `hasRightPaneContent` stops gating on `selectedBoardItem`), the
         // right pane would keep rendering the stale BoardItemDetail instead
         // of <Outlet/> picking up the new-session form; the URL would change
         // but the screen wouldn't.
@@ -1056,23 +1056,23 @@ function SessionsPage() {
 
             <div className={`${hasRightPaneContent ? 'flex' : 'hidden split:flex'} min-w-0 flex-1 flex-col bg-[var(--app-bg)]`}>
                 <div className="flex-1 min-h-0">
-                    {selectedTodoItem ? (
+                    {selectedBoardItem ? (
                         <BoardItemDetail
                             // Remount on item switch — local state (comment draft, the
                             // close-confirm dialog's open flag) must not bleed from the
                             // previously-selected item onto the newly-selected one.
-                            key={selectedTodoItem.id}
-                            item={selectedTodoItem}
+                            key={selectedBoardItem.id}
+                            item={selectedBoardItem}
                             statusOrder={boardStatusOrder}
                             onBack={() => setSelectedBoardItemId(null)}
-                            onSpawn={() => handleSpawnFromTodoItem(selectedTodoItem)}
+                            onSpawn={() => handleSpawnFromBoardItem(selectedBoardItem)}
                             linkedSessionId={linkedTodoSession?.id ?? null}
                             onOpenLinkedSession={handleOpenLinkedTodoSession}
                             onRefresh={() => { void refetchBoardItems() }}
                             isRefreshing={boardItemsRefetching}
-                            onClose={() => closeBoardItem(selectedTodoItem)}
+                            onClose={() => closeBoardItem(selectedBoardItem)}
                             onReopen={() => {
-                                reopenBoardItem(selectedTodoItem).catch((err) => addToast({
+                                reopenBoardItem(selectedBoardItem).catch((err) => addToast({
                                     title: t('todo.detail.reopenFailed'),
                                     body: getApiErrorMessage(err, t('dialog.error.default')),
                                     sessionId: '',
@@ -1080,7 +1080,7 @@ function SessionsPage() {
                                 }))
                             }}
                             onComment={(body) => {
-                                return commentOnBoardItem(selectedTodoItem, body).catch((err) => {
+                                return commentOnBoardItem(selectedBoardItem, body).catch((err) => {
                                     addToast({
                                         title: t('todo.detail.commentFailed'),
                                         body: getApiErrorMessage(err, t('dialog.error.default')),
@@ -1091,17 +1091,17 @@ function SessionsPage() {
                                 })
                             }}
                             onSetStatus={(status) => {
-                                setBoardItemStatus(selectedTodoItem, status).catch((err) => addToast({
+                                setBoardItemStatus(selectedBoardItem, status).catch((err) => addToast({
                                     title: t('todo.detail.statusChangeFailed'),
                                     body: getApiErrorMessage(err, t('dialog.error.default')),
                                     sessionId: '',
                                     url: ''
                                 }))
                             }}
-                            isClosing={selectedTodoItem.url !== null && closingTodoItemUrls.has(selectedTodoItem.url)}
-                            isReopening={selectedTodoItem.url !== null && reopeningTodoItemUrls.has(selectedTodoItem.url)}
-                            isCommenting={selectedTodoItem.url !== null && commentingOnTodoItemUrls.has(selectedTodoItem.url)}
-                            isSettingStatus={selectedTodoItem.url !== null && settingTodoItemStatusUrls.has(selectedTodoItem.url)}
+                            isClosing={selectedBoardItem.url !== null && closingBoardItemUrls.has(selectedBoardItem.url)}
+                            isReopening={selectedBoardItem.url !== null && reopeningBoardItemUrls.has(selectedBoardItem.url)}
+                            isCommenting={selectedBoardItem.url !== null && commentingOnBoardItemUrls.has(selectedBoardItem.url)}
+                            isSettingStatus={selectedBoardItem.url !== null && settingBoardItemStatusUrls.has(selectedBoardItem.url)}
                         />
                     ) : (
                         <Outlet />

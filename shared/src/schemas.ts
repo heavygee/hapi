@@ -52,16 +52,103 @@ export const WorktreeMetadataSchema = z.object({
 
 export type WorktreeMetadata = z.infer<typeof WorktreeMetadataSchema>
 
-/**
- * Lightweight external reference attached to a session (hapi#235/#238) — a
- * session is only ever "briefed" by its first composer message unless this
- * exists; this is the actual structured, persisted link. Built fresh here:
- * `main` has no prior externalRefs mechanism to generalize (that work is
- * fork-local to `driver/`, tangled with unrelated unmerged features, and
- * irrelevant to this schema). Self-session write path only (`hapi link-issue`
- * CLI / MCP `link_issue`), always-on — no opt-in toggle, since nobody sees
- * this chrome unless they actually link something.
- */
+export const CodexTokenUsageSchema = z.object({
+    inputTokens: z.number(),
+    cachedInputTokens: z.number(),
+    outputTokens: z.number(),
+    reasoningOutputTokens: z.number(),
+    totalTokens: z.number()
+})
+
+export type CodexTokenUsage = z.infer<typeof CodexTokenUsageSchema>
+
+export const CodexUsageRateLimitSchema = z.object({
+    usedPercent: z.number(),
+    windowMinutes: z.number(),
+    resetAt: z.number().optional()
+})
+
+export type CodexUsageRateLimit = z.infer<typeof CodexUsageRateLimitSchema>
+
+// Credit-based plans (e.g. Codex Pro on `limit_id: premium`) bill from a
+// balance instead of a 5h/weekly rolling window. When the subscription
+// is also exhausted the codex transcript shows primary=null + secondary=null
+// + credits.has_credits=false; the indicator needs to surface that
+// distinctly from a fresh-account "no rate-limit data yet" state.
+export const CodexUsageCreditsSchema = z.object({
+    hasCredits: z.boolean().optional(),
+    unlimited: z.boolean().optional(),
+    balance: z.string().optional()
+})
+
+export type CodexUsageCredits = z.infer<typeof CodexUsageCreditsSchema>
+
+export const CodexUsageSchema = z.object({
+    contextWindow: z.object({
+        usedTokens: z.number(),
+        limitTokens: z.number(),
+        percent: z.number(),
+        updatedAt: z.number()
+    }).optional(),
+    rateLimits: z.object({
+        fiveHour: CodexUsageRateLimitSchema.optional(),
+        weekly: CodexUsageRateLimitSchema.optional()
+    }).optional().default({}),
+    credits: CodexUsageCreditsSchema.optional(),
+    // Codex surfaces 'primary' / 'secondary' / 'credits' as the canonical
+    // names. Carry through as-is so the UI can render the exact phrase
+    // (e.g. 'You have exceeded your weekly limit', or 'You have run out
+    // of credits') without re-deriving from the boolean state.
+    rateLimitReachedType: z.string().optional(),
+    planType: z.string().optional(),
+    limitId: z.string().optional(),
+    totalTokenUsage: CodexTokenUsageSchema.optional(),
+    lastTokenUsage: CodexTokenUsageSchema.optional()
+})
+
+export type CodexUsage = z.infer<typeof CodexUsageSchema>
+
+export const GithubRepoSlugSchema = z.string().regex(
+    /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/,
+    'expected owner/name'
+)
+
+export const GithubPrStatusSchema = z.enum([
+    'clean',
+    'pending',
+    'needs_work',
+    'needs_operator',
+    'pre_pr',
+    'merged',
+    'complete',
+    'unknown'
+])
+export type GithubPrStatus = z.infer<typeof GithubPrStatusSchema>
+
+export const GithubPrExternalRefSchema = z.object({
+    kind: z.literal('github_pr'),
+    repo: GithubRepoSlugSchema,
+    number: z.number().int().positive(),
+    url: z.string().url(),
+    role: z.enum(['primary', 'secondary']),
+    source: z.enum(['agent', 'user', 'inferred']).optional(),
+    linkedAt: z.number().int().positive().optional(),
+    status: GithubPrStatusSchema.optional(),
+    statusCheckedAt: z.number().int().positive().optional(),
+    statusAction: z.string().max(400).optional()
+}).superRefine((ref, ctx) => {
+    const expectedUrl = `https://github.com/${ref.repo}/pull/${ref.number}`
+    if (ref.url !== expectedUrl) {
+        ctx.addIssue({
+            code: 'custom',
+            path: ['url'],
+            message: 'expected GitHub PR URL matching repo and number'
+        })
+    }
+})
+
+export type GithubPrExternalRef = z.infer<typeof GithubPrExternalRefSchema>
+
 export const GithubIssueExternalRefSchema = z.object({
     kind: z.literal('github_issue'),
     url: z.string(),
@@ -70,38 +157,21 @@ export const GithubIssueExternalRefSchema = z.object({
     linkedAt: z.number()
 })
 
-/**
- * The fork's existing PR-chip mechanism (`scripts/tooling/hapi-meta-daily.sh`
- * --backfill-refs / md_refs_apply_status) already writes `kind: 'github_pr'`
- * entries into this same `metadata.externalRefs` array, in production,
- * today — entirely from bash/jq, independent of this schema. Its shape
- * grows fields over time (role, source, linkedAt, status, statusCheckedAt,
- * estateCode, statusAction, openState, checks, merge, ...) as that tooling
- * evolves, so this only pins down the fields every write path shares
- * (`kind`/`repo`/`number`/`url`) and `.passthrough()`es the rest — a
- * discriminated union member that validated only `github_issue`'s exact
- * shape would make `ExternalRefSchema` (and therefore `MetadataSchema`)
- * reject the entire metadata object for any session already carrying a
- * `github_pr` chip (Codex review, hapi#238).
- */
-export const GithubPrExternalRefSchema = z.object({
-    kind: z.literal('github_pr'),
-    url: z.string(),
-    repo: z.string(),
-    number: z.number()
-}).passthrough()
-
 export const ExternalRefSchema = z.discriminatedUnion('kind', [
     GithubIssueExternalRefSchema,
     GithubPrExternalRefSchema
 ])
 
 export type ExternalRef = z.infer<typeof ExternalRefSchema>
+export type GithubIssueExternalRef = z.infer<typeof GithubIssueExternalRefSchema>
+export const ExternalRefsSchema = z.array(ExternalRefSchema)
+export type ExternalRefs = z.infer<typeof ExternalRefsSchema>
+
 
 /**
  * Accepts both the full GitHub issue URL and the `owner/repo#N` shorthand
  * (`hapi link-issue <url|owner/repo#N>`, hapi#235/#238). GHE/other hosts
- * aren't supported here — unlike the board feature's `parseProjectUrl`, the
+ * aren't supported here — unlike the to-do board's `parseProjectUrl`, the
  * issue link is for the operator's own quick reference, not a board read
  * that already had to handle multiple hosts. Lives in `shared/` (not
  * hub-only) so both the hub REST route and the MCP tool's socket-based
@@ -185,6 +255,12 @@ export const MetadataSchema = z.object({
     agySessionId: z.string().optional(),
     cursorSessionId: z.string().optional(),
     cursorSessionProtocol: z.enum(['acp', 'stream-json']).optional(),
+    /**
+     * Hub-authored nonce/timestamp. When it changes, a live Cursor ACP launcher
+     * refreshes CURSOR_API_KEY from ~/.hapi/cursor.env and relaunches ACP in
+     * place (same hub id + session/load) — credential twin of #1909 Auto relaunch.
+     */
+    cursorCredentialRefreshAt: z.string().optional(),
     // Drives the web `CursorMigrationBanner`:
     //   'in_progress' = legacy-to-ACP transplant currently running; banner shows spinner + "Upgrading..."
     //   'ambiguous'   = migrator refused to transplant (ambiguous source drawer OR size mismatch);
@@ -239,11 +315,29 @@ export const MetadataSchema = z.object({
     // sit quiet indefinitely (operator holding pens, sessions owning work the
     // hub cannot see). Never reconciled to 'idle' while true.
     idleReconcileExempt: z.boolean().optional(),
+    // Set when a voice relay is bound to this session (operator voice agent,
+    // Overseer, etc). Agent-facing instructions switch to short, answer-first,
+    // one-packet-at-a-time replies instead of screen-shaped structure. Not
+    // inherited by spawned/pinged peers — only the session actually bound to
+    // voice needs its own output shaped this way.
+    voiceMode: z.boolean().optional(),
     archivedBy: z.string().optional(),
     archiveReason: z.string().optional(),
     // Set only after a completed fresh-session clear. The source row remains
     // archived; web clients use this durable link to follow the replacement.
     supersededBySessionId: z.string().optional(),
+    // After session merge/dedup transfers session_jobs: the target remembers
+    // which source ids it absorbed (so job REST can follow a deleted
+    // pre-merge $HAPI_SESSION_ID), and a kept-alive source points at the
+    // post-merge owner. Must be declared here — SessionCache.refreshSession
+    // parses via MetadataSchema and strips unknown keys (tiann/hapi#1404).
+    // Hub-owned: CLI update-metadata cannot forge/erase (HUB_OWNED_METADATA_KEYS).
+    jobsAcceptedFromSessionIds: z.array(z.string()).optional(),
+    jobsTransferredToSessionId: z.string().optional(),
+    // When merge remaps a live source job key (same-key dual-running), map
+    // `${fromSessionId}/${fromKey}` → toKey on the post-merge owner so
+    // pre-merge supervisors keep PATCHing the right row.
+    jobKeyRedirects: z.record(z.string(), z.string()).optional(),
     // Durable in-progress state for runner-backed OpenCode /clear.
     opencodeClearOperation: OpencodeClearOperationSchema.optional(),
     preferredPermissionMode: PermissionModeSchema.optional(),
@@ -286,9 +380,19 @@ export const MetadataSchema = z.object({
     // the provider so web can resolve the exact model when two providers
     // share a modelId.
     piSelectedModel: z.object({ provider: z.string(), modelId: z.string() }).nullable().optional(),
-    // Structured links to external resources (hapi#235/#238) — see
-    // ExternalRefSchema above for the "why build fresh, not port driver/" note.
-    externalRefs: z.array(ExternalRefSchema).optional()
+lastModelError: z.object({
+        kind: z.string(),
+        transient: z.boolean(),
+        rawSnippet: z.string(),
+        atTs: z.number(),
+        priorAssistantClaimsDone: z.boolean(),
+        lastUserMessage: z.string().optional(),
+        bridgedForAtTs: z.number().optional(),
+        retriedAndFailed: z.boolean().optional(),
+        acknowledgedAt: z.number().optional()
+    }).optional(),
+    externalRefs: z.array(ExternalRefSchema).optional(),
+    codexUsage: CodexUsageSchema.optional()
 })
 
 export type Metadata = z.infer<typeof MetadataSchema>
@@ -392,6 +496,19 @@ export const TeamStateSchema = z.object({
 
 export type TeamState = z.infer<typeof TeamStateSchema>
 
+/** Last `AGENT_NOTIFY_SUMMARY` footer the agent emitted (see `notifyAttention`). */
+export const SessionNotifySignalSchema = z.object({
+    status: z.string(),
+    at: z.number(),
+    note: z.string().nullable().default(null)
+})
+
+/** Operator's manual unblock acknowledgement (#1717). */
+export const SessionBlockedAckSchema = z.object({
+    at: z.number(),
+    reason: z.string()
+})
+
 export const ThreadGoalStatusSchema = z.enum([
     'active',
     'paused',
@@ -464,13 +581,19 @@ export const SessionSchema = z.object({
     activeTurnStartedAt: z.number().nullable().optional(),
     backgroundTaskCount: z.number().optional(),
     todos: TodosSchema.optional(),
+    todosUpdatedAt: z.number().optional(),
     teamState: TeamStateSchema.optional(),
     // Watermarks for structured SSE patches (PR #897). Dual EventSource
     // connections can deliver todos/teamState out of order; caches reject
     // stale patches with version <= these fields. Optional so older
     // full-session payloads and hand-built Session literals stay valid.
-    todosUpdatedAt: z.number().optional(),
     teamStateUpdatedAt: z.number().optional(),
+    /** Last agent notify footer. Drives the session list's blocked chrome;
+     *  nullish on hubs that have not seen a footer for this session yet. */
+    lastNotify: SessionNotifySignalSchema.nullish(),
+    /** Operator dismissed blocked chrome up to this point; newer blockers still
+     *  count. See `SessionBlockedAck`. */
+    blockedAck: SessionBlockedAckSchema.nullish(),
     model: z.string().nullable().optional().default(null),
     modelReasoningEffort: z.string().nullable().optional().default(null),
     effort: z.string().nullable().optional().default(null),
@@ -511,6 +634,68 @@ const VersionedTeamStatePatchSchema = z.object({
     value: TeamStateSchema.nullable()
 })
 
+/** Opt-in long-running work owned by a session (tiann/hapi#1404). */
+export const AttachedJobStatusSchema = z.enum(['running', 'completed', 'failed'])
+
+export const AttachedJobSchema = z.object({
+    key: z.string().min(1).max(128),
+    label: z.string().min(1).max(200),
+    status: AttachedJobStatusSchema,
+    done: z.number().nonnegative().optional(),
+    total: z.number().positive().optional(),
+    remaining: z.number().nonnegative().optional(),
+    unit: z.string().min(1).max(64).optional(),
+    detail: z.string().max(500).optional(),
+    /** Opt-in terminal wake (#1489). */
+    wakeOnTerminal: z.boolean().optional(),
+    wakePrompt: z.string().max(2000).optional(),
+    heartbeatAt: z.number(),
+    startedAt: z.number(),
+    updatedAt: z.number()
+}).strict()
+
+export type AttachedJob = z.infer<typeof AttachedJobSchema>
+export type AttachedJobStatus = z.infer<typeof AttachedJobStatusSchema>
+
+export const AttachedJobUpsertSchema = z.object({
+    label: z.string().min(1).max(200),
+    status: AttachedJobStatusSchema.optional().default('running'),
+    done: z.number().nonnegative().optional(),
+    total: z.number().positive().optional(),
+    remaining: z.number().nonnegative().optional(),
+    unit: z.string().min(1).max(64).optional(),
+    detail: z.string().max(500).optional(),
+    heartbeatAt: z.number().optional(),
+    startedAt: z.number().optional(),
+    wakeOnTerminal: z.boolean().optional(),
+    wakePrompt: z.string().max(2000).optional()
+}).strict()
+
+export type AttachedJobUpsert = z.infer<typeof AttachedJobUpsertSchema>
+
+/** Progress/heartbeat only — no startedAt (use PUT upsert with explicit startedAt to correct). */
+export const AttachedJobPatchSchema = z.object({
+    label: z.string().min(1).max(200).optional(),
+    status: AttachedJobStatusSchema.optional(),
+    done: z.number().nonnegative().nullable().optional(),
+    total: z.number().positive().nullable().optional(),
+    remaining: z.number().nonnegative().nullable().optional(),
+    unit: z.string().min(1).max(64).nullable().optional(),
+    detail: z.string().max(500).nullable().optional(),
+    heartbeatAt: z.number().optional(),
+    wakeOnTerminal: z.boolean().optional(),
+    wakePrompt: z.string().max(2000).nullable().optional()
+}).strict()
+
+export type AttachedJobPatch = z.infer<typeof AttachedJobPatchSchema>
+
+// monotonic per-session emit watermark (not primary.updatedAt — primary
+// switches can go backwards). Lagged heartbeats cannot resurrect a clear.
+const VersionedAttachedJobPatchSchema = z.object({
+    version: z.number(),
+    value: AttachedJobSchema.nullable()
+})
+
 export const SessionPatchSchema = z.object({
     active: z.boolean().optional(),
     thinking: z.boolean().optional(),
@@ -543,7 +728,12 @@ export const SessionPatchSchema = z.object({
     // signal, not the payload. Keep this minimal: per the operator's 80/20
     // ruling, scratchlist mutations are rare relative to keep-alive
     // patches, so a fresh event type would be overkill.
-    scratchlistUpdatedAt: z.number().optional()
+    scratchlistUpdatedAt: z.number().optional(),
+    // tiann/hapi#1404 — session-attached long-running jobs. Unlike
+    // scratchlist (watermark → refetch), the list row needs the progress
+    // payload inline, so patches carry the primary running job (or null
+    // payload inline. Versioned like todos so dual-SSE reorder is safe.
+    attachedJob: VersionedAttachedJobPatchSchema.optional()
 }).strict()
 
 export type SessionPatch = z.infer<typeof SessionPatchSchema>
@@ -580,21 +770,30 @@ export const MachineMetadataSchema = z.object({
     platform: z.string(),
     happyCliVersion: z.string(),
     displayName: z.string().optional(),
+    /** process.arch when the runner last registered (x64, arm64, …). */
+    arch: z.string().optional(),
     homeDir: z.string().optional(),
     happyHomeDir: z.string().optional(),
     happyLibDir: z.string().optional(),
     workspaceRoots: z.array(z.string()).optional(),
     /** Machine-scoped RPC capability ids this runner registers (see runnerCapabilities). */
     capabilities: z.array(z.string()).optional(),
-    /** CLI binary/package mtime when this runner process started. */
-    startedCliMtimeMs: z.number().optional(),
-    /** Current on-disk CLI binary/package mtime (may differ after upgrade). */
-    installedCliMtimeMs: z.number().optional(),
+    /** True when this runner process started with HAPI_DISABLE_VERSION_HANDOFF=1. */
+    versionHandoffDisabled: z.boolean().optional(),
     /**
      * Runner is under systemd/pm2 (HAPI_RUNNER_SUPERVISED=1). Banner Restart
      * may stop-runner; unsupervised detached runners must not use that path.
      */
     supervisedRestart: z.boolean().optional(),
+    /** CLI binary/package mtime when this runner process started. */
+    startedCliMtimeMs: z.number().optional(),
+    /** Current on-disk CLI binary/package mtime (may differ after upgrade). */
+    installedCliMtimeMs: z.number().optional(),
+    /**
+     * Hub-artifact build generation this runner last applied (source fingerprint).
+     * Used to detect same-semver soup rebuilds that still need fleet upgrade.
+     */
+    cliArtifactGeneration: z.string().optional(),
 })
 
 export type MachineMetadata = z.infer<typeof MachineMetadataSchema>
@@ -778,6 +977,13 @@ export const CancelMessageResponseSchema = z.discriminatedUnion('status', [
 ])
 
 export type CancelMessageResponse = z.infer<typeof CancelMessageResponseSchema>
+
+export const DeleteArchivedSessionsRequestSchema = z.object({
+    sessionIds: z.array(z.string().min(1)).min(1),
+    requireAllArchived: z.literal(true)
+})
+
+export type DeleteArchivedSessionsRequest = z.infer<typeof DeleteArchivedSessionsRequestSchema>
 
 export const SteerQueuedMessageResponseSchema = z.discriminatedUnion('status', [
     z.object({ status: z.literal('steered'), localId: z.string() }),
