@@ -58,9 +58,7 @@ export type WorktreeMetadata = z.infer<typeof WorktreeMetadataSchema>
  * exists; this is the actual structured, persisted link. Built fresh here:
  * `main` has no prior externalRefs mechanism to generalize (that work is
  * fork-local to `driver/`, tangled with unrelated unmerged features, and
- * irrelevant to this schema). `kind` is a discriminated union from the start
- * even with one case today, so a future PR-chip (`kind: 'github_pr'`) slots
- * in without a redesign. Self-session write path only (`hapi link-issue`
+ * irrelevant to this schema). Self-session write path only (`hapi link-issue`
  * CLI / MCP `link_issue`), always-on — no opt-in toggle, since nobody sees
  * this chrome unless they actually link something.
  */
@@ -72,7 +70,31 @@ export const GithubIssueExternalRefSchema = z.object({
     linkedAt: z.number()
 })
 
-export const ExternalRefSchema = z.discriminatedUnion('kind', [GithubIssueExternalRefSchema])
+/**
+ * The fork's existing PR-chip mechanism (`scripts/tooling/hapi-meta-daily.sh`
+ * --backfill-refs / md_refs_apply_status) already writes `kind: 'github_pr'`
+ * entries into this same `metadata.externalRefs` array, in production,
+ * today — entirely from bash/jq, independent of this schema. Its shape
+ * grows fields over time (role, source, linkedAt, status, statusCheckedAt,
+ * estateCode, statusAction, openState, checks, merge, ...) as that tooling
+ * evolves, so this only pins down the fields every write path shares
+ * (`kind`/`repo`/`number`/`url`) and `.passthrough()`es the rest — a
+ * discriminated union member that validated only `github_issue`'s exact
+ * shape would make `ExternalRefSchema` (and therefore `MetadataSchema`)
+ * reject the entire metadata object for any session already carrying a
+ * `github_pr` chip (Codex review, hapi#238).
+ */
+export const GithubPrExternalRefSchema = z.object({
+    kind: z.literal('github_pr'),
+    url: z.string(),
+    repo: z.string(),
+    number: z.number()
+}).passthrough()
+
+export const ExternalRefSchema = z.discriminatedUnion('kind', [
+    GithubIssueExternalRefSchema,
+    GithubPrExternalRefSchema
+])
 
 export type ExternalRef = z.infer<typeof ExternalRefSchema>
 
