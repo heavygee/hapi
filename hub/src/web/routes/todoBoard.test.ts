@@ -54,7 +54,7 @@ async function createApp(
     directories.push(dataDir)
     const app = new Hono<WebAppEnv>()
     app.use('*', async (c, next) => {
-        c.set('namespace', 'default')
+        c.set('namespace', namespace)
         await next()
     })
     // Default the title/view lookups to 404-shaped responses (not the real
