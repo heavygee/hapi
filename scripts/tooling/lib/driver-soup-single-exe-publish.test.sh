@@ -99,4 +99,26 @@ printf '%s\n' "$notes" | grep -q 'Automated soup single-exe publish' \
     && { echo "FAIL: notes still use boilerplate opener"; exit 1; }
 echo "OK: release notes include changelog subjects"
 
+# Retention prune: keep newest N + active latest target.
+PRUNE_ROOT="$TMP/soup-artifacts-prune"
+export HAPI_SOUP_ARTIFACTS_ROOT="$PRUNE_ROOT"
+export HAPI_SOUP_ARTIFACTS_KEEP=3
+mkdir -p "$PRUNE_ROOT"
+for t in hapi-soup-v2099.01.01-aaaaaaa hapi-soup-v2099.01.02-bbbbbbb \
+    hapi-soup-v2099.01.03-ccccccc hapi-soup-v2099.01.04-ddddddd \
+    hapi-soup-v2099.01.05-eeeeeee; do
+    mkdir -p "$PRUNE_ROOT/$t"
+    echo x >"$PRUNE_ROOT/$t/marker"
+done
+ln -sfn hapi-soup-v2099.01.05-eeeeeee "$PRUNE_ROOT/latest"
+printf '%s\n' hapi-soup-v2099.01.05-eeeeeee >"$PRUNE_ROOT/latest-tag.txt"
+driver_soup_single_exe_prune_artifacts
+[[ -d "$PRUNE_ROOT/hapi-soup-v2099.01.01-aaaaaaa" ]] && { echo "FAIL: oldest should be pruned"; exit 1; }
+[[ -d "$PRUNE_ROOT/hapi-soup-v2099.01.02-bbbbbbb" ]] && { echo "FAIL: second oldest should be pruned"; exit 1; }
+[[ -d "$PRUNE_ROOT/hapi-soup-v2099.01.03-ccccccc" && -d "$PRUNE_ROOT/hapi-soup-v2099.01.04-ddddddd" \
+    && -d "$PRUNE_ROOT/hapi-soup-v2099.01.05-eeeeeee" ]] \
+    || { echo "FAIL: newest 3 should remain"; exit 1; }
+[[ -L "$PRUNE_ROOT/latest" ]] || { echo "FAIL: latest symlink missing"; exit 1; }
+echo "OK: soup artifacts keep-N prune"
+
 echo "All driver-soup-single-exe-publish tests passed."

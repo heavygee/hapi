@@ -15,6 +15,8 @@
 #
 # Env:
 #   HAPI_SOUP_ARTIFACTS_ROOT  default /var/lib/hapi/soup-artifacts
+#   HAPI_SOUP_ARTIFACTS_KEEP  default 5 — keep newest hapi-soup-v* dirs (+ active latest); prune older after publish
+#   HAPI_SKIP_SOUP_ARTIFACTS_PRUNE=1  skip local retention prune
 #   HAPI_SKIP_SOUP_SINGLE_EXE=1   skip (rebuild hook respects this)
 #   HAPI_SOUP_SINGLE_EXE_REQUIRED=1  fail hard on publish errors (default when hooked from rebuild --verify --build-web)
 #   HAPI_SOUP_GITHUB_REPO       default heavygee/hapi (GitHub Releases mirror)
@@ -23,6 +25,57 @@
 
 driver_soup_single_exe_artifacts_root() {
     printf '%s\n' "${HAPI_SOUP_ARTIFACTS_ROOT:-/var/lib/hapi/soup-artifacts}"
+}
+
+# Keep newest N versioned soup artifact dirs. Always preserves `latest` target + keep list.
+# Safe to call when root is missing or nearly empty.
+driver_soup_single_exe_prune_artifacts() {
+    local root keep active removed d
+    root="$(driver_soup_single_exe_artifacts_root)"
+    keep="${HAPI_SOUP_ARTIFACTS_KEEP:-5}"
+    [[ "${HAPI_SKIP_SOUP_ARTIFACTS_PRUNE:-}" == "1" ]] && return 0
+    [[ -d "$root" ]] || return 0
+    [[ "$keep" =~ ^[0-9]+$ ]] && ((keep >= 1)) || keep=5
+
+    active=""
+    if [[ -L "$root/latest" ]]; then
+        active="$(readlink -f "$root/latest" 2>/dev/null || true)"
+        active="$(basename "${active:-}")"
+    elif [[ -f "$root/latest-tag.txt" ]]; then
+        active="$(tr -d '[:space:]' <"$root/latest-tag.txt")"
+    fi
+
+    mapfile -t all < <(ls -1 "$root" 2>/dev/null | grep '^hapi-soup-v' | sort || true)
+    ((${#all[@]} <= keep)) && return 0
+
+    local -a keep_list=()
+    local i start=$((${#all[@]} - keep))
+    ((start < 0)) && start=0
+    for ((i = start; i < ${#all[@]}; i++)); do
+        keep_list+=("${all[$i]}")
+    done
+    if [[ -n "$active" ]]; then
+        local found=0 k
+        for k in "${keep_list[@]}"; do
+            [[ "$k" == "$active" ]] && found=1 && break
+        done
+        ((found == 0)) && keep_list+=("$active")
+    fi
+
+    removed=0
+    for d in "${all[@]}"; do
+        local skip=0 k
+        for k in "${keep_list[@]}"; do
+            [[ "$d" == "$k" ]] && skip=1 && break
+        done
+        ((skip == 1)) && continue
+        rm -rf "$root/$d"
+        removed=$((removed + 1))
+    done
+    if ((removed > 0)); then
+        echo "soup-artifact: pruned $removed old dir(s); keep=$keep active=${active:-none}"
+    fi
+    return 0
 }
 
 # True when this host is the soup foundry (oos-linux pattern).
@@ -488,6 +541,9 @@ driver_soup_single_exe_publish() {
 
     ln -sfn "$tag" "$root/latest"
     printf '%s\n' "$tag" >"$root/latest-tag.txt"
+
+    # Retention: hot disk fills if every promote keeps forever (oos 2026-10 space relief).
+    driver_soup_single_exe_prune_artifacts || echo "WARNING: soup-artifact: prune failed (non-fatal)" >&2
 
     # Fleet SCP playbook: mirror primary linux x64 baseline into upgrade-artifacts.
     local upgrade_root="/var/lib/hapi/upgrade-artifacts"
