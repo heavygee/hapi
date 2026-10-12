@@ -255,6 +255,12 @@ const agentIdCache = new Map<string, string>()
 // reconciled with the canonical buildVoiceAgentConfig() shape. Reset on process restart.
 const overridesEnsuredAgents = new Set<string>()
 
+// Per-agent max_duration_seconds last confirmed applied. Compared against the live
+// setting on every call (even for agentIdCache hits) so a Settings change reaches
+// an already-cached agent on its next token request instead of waiting for a
+// process restart to clear the caches above.
+const reconciledMaxDurationByAgent = new Map<string, number>()
+
 /** Configured ConvAI conversation cap; throws if ELEVENLABS_MAX_DURATION_SECONDS is invalid. */
 function getMaxDurationSeconds(): number {
     return getConfiguredElevenLabsMaxDurationSeconds()
@@ -281,13 +287,16 @@ async function ensureAgentOverrides(
     agentId: string,
     options: { reconcileMaxDuration?: boolean } = {}
 ): Promise<void> {
-    if (overridesEnsuredAgents.has(agentId)) return
-    overridesEnsuredAgents.add(agentId)
-
     // The conversation cap is only enforced on agents the hub itself manages
     // (found/created by name); operator-supplied agents keep their own cap.
+    const desiredMaxDuration = options.reconcileMaxDuration ? getMaxDurationSeconds() : undefined
+    const overridesNeeded = !overridesEnsuredAgents.has(agentId)
+    const maxDurationNeeded = desiredMaxDuration !== undefined
+        && reconciledMaxDurationByAgent.get(agentId) !== desiredMaxDuration
+    if (!overridesNeeded && !maxDurationNeeded) return
+
     const canonicalConfig = buildVoiceAgentConfig(
-        options.reconcileMaxDuration ? { maxDurationSeconds: getMaxDurationSeconds() } : {}
+        desiredMaxDuration !== undefined ? { maxDurationSeconds: desiredMaxDuration } : {}
     )
     const canonical = canonicalConfig.platform_settings
     if (!canonical) return
@@ -324,17 +333,19 @@ async function ensureAgentOverrides(
                 status: response.status,
                 errorMessage
             })
-            overridesEnsuredAgents.delete(agentId)
             return
         }
 
+        // Only mark state once the PATCH actually succeeds, so a failed attempt
+        // retries on the next call instead of being silently assumed current.
+        overridesEnsuredAgents.add(agentId)
+        if (desiredMaxDuration !== undefined) reconciledMaxDurationByAgent.set(agentId, desiredMaxDuration)
         console.log('[Voice] Reconciled platform_settings.overrides and max duration on agent', { agentId })
     } catch (error) {
         console.warn('[Voice] Error reconciling agent overrides (non-fatal)', {
             agentId,
             error: error instanceof Error ? error.message : String(error)
         })
-        overridesEnsuredAgents.delete(agentId)
     }
 }
 
@@ -440,6 +451,10 @@ async function getOrCreateAgentIdForVoice(apiKey: string, voiceId?: string): Pro
     const cacheKey = `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}::${voiceId ?? 'default'}`
     const cached = agentIdCache.get(cacheKey)
     if (cached) {
+        // Still check the live max-duration setting against a cached agent — a
+        // Settings change must reach it on the next request, not wait for a
+        // process restart to clear this cache.
+        await ensureAgentOverrides(apiKey, cached, { reconcileMaxDuration: true })
         return cached
     }
 
@@ -460,12 +475,15 @@ async function getOrCreateAgentIdForVoice(apiKey: string, voiceId?: string): Pro
     } else {
         // Create new agent
         console.log('[Voice] No existing agent found, creating new one...')
+        const maxDurationAtCreation = getMaxDurationSeconds()
         agentId = await createNamedHapiAgent(apiKey, agentName, voiceId)
         if (agentId) {
             console.log('[Voice] Created new agent:', agentId)
-            // Newly-created agents already carry the canonical overrides, but
-            // mark as ensured so we don't re-PATCH on every token request.
+            // Newly-created agents already carry the canonical overrides and the
+            // cap in effect at creation time; record both so a later Settings
+            // change is detected as drift instead of assumed current forever.
             overridesEnsuredAgents.add(agentId)
+            reconciledMaxDurationByAgent.set(agentId, maxDurationAtCreation)
         }
     }
 

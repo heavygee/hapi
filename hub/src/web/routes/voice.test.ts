@@ -996,17 +996,20 @@ describe('transcription credentials onboarding', () => {
         // Same process, no restart: the next token request's agent-creation payload
         // must already reflect the new cap.
         process.env.ELEVENLABS_API_KEY = 'maxdur-live-key'
-        const calls: Array<{ url: string; body: unknown }> = []
+        const calls: Array<{ url: string; method?: string; body: unknown }> = []
         const originalFetch = global.fetch
         // @ts-expect-error test override
         global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
             const url = String(input)
             const body = init?.body ? JSON.parse(String(init.body)) : null
-            calls.push({ url, body })
+            calls.push({ url, method: init?.method, body })
             if (url.endsWith('/convai/agents') && init?.method === 'GET') {
                 return new Response(JSON.stringify({ agents: [] }), { status: 200 })
             }
             if (url.endsWith('/convai/agents/create')) {
+                return new Response(JSON.stringify({ agent_id: 'agent_maxdur' }), { status: 200 })
+            }
+            if (url.endsWith('/convai/agents/agent_maxdur') && init?.method === 'PATCH') {
                 return new Response(JSON.stringify({ agent_id: 'agent_maxdur' }), { status: 200 })
             }
             if (url.includes('/convai/conversation/token?agent_id=')) {
@@ -1023,6 +1026,40 @@ describe('transcription credentials onboarding', () => {
         expect(tokenRes.status).toBe(200)
         const create = calls.find((call) => call.url.endsWith('/convai/agents/create'))
         expect((create?.body as any).conversation_config.conversation.max_duration_seconds).toBe(3600)
+
+        // Regression for a real finding: the in-process agent-id cache must not
+        // shield an already-used agent from a later Settings change. Change the
+        // cap again and request a token for the SAME voice (now cached) a second
+        // time — the cached agent must be PATCHed to the new cap, not left stale
+        // until a hub restart.
+        calls.length = 0
+        const secondPut = await app.request('/api/voice/transcription/credentials', {
+            method: 'PUT',
+            headers,
+            body: JSON.stringify({ elevenLabsMaxDurationSeconds: 900 }),
+        })
+        expect(secondPut.status).toBe(200)
+
+        const secondTokenRes = await app.request('/api/voice/token', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ voiceId: 'maxdur-voice' }),
+        })
+        expect(secondTokenRes.status).toBe(200)
+        expect(calls.some((call) => call.url.endsWith('/convai/agents/create'))).toBe(false)
+        expect(calls.some((call) => call.url.endsWith('/convai/agents') && call.method === 'GET')).toBe(false)
+        const patch = calls.find((call) => call.method === 'PATCH')
+        expect((patch?.body as any)?.conversation_config?.conversation?.max_duration_seconds).toBe(900)
+
+        // A third request for the same (now up-to-date) voice must not re-PATCH.
+        calls.length = 0
+        const thirdTokenRes = await app.request('/api/voice/token', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ voiceId: 'maxdur-voice' }),
+        })
+        expect(thirdTokenRes.status).toBe(200)
+        expect(calls.some((call) => call.method === 'PATCH')).toBe(false)
 
         global.fetch = originalFetch
     })
