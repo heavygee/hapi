@@ -18,7 +18,7 @@
 
 ## Promote?
 
-- [x] `tooling issue` — lane-B gate should not consume grant on dry-run / standalone `hapi-pr-merge-gate.sh` (only when `gh pr merge` via wrapper). Title: "hapi-pr-merge-gate consumes Lane B auth on preflight PASS".
+- [x] `tooling issue` — lane-B gate should not consume grant on dry-run / standalone `hapi-pr-merge-gate.sh` (only when `gh pr merge` via wrapper). Filed: [heavygee/hapi#253](https://github.com/heavygee/hapi/issues/253).
 - [ ] `none`
 - [ ] `High-signal index`
 - [ ] `lifecycle / tooling doc`
