@@ -6,7 +6,7 @@
 
 **Goal:** operator picks a fleet shard (a group of users on a shared HAPI instance) and an artifact version, says "go," and a new VM carrying the latest HAPI state gets attached in place of the old one. Users notice nothing except new features after a normal page reload — no re-login, no lost sessions, no manual re-pointing.
 
-**Progress vs. this goal, stated plainly (2026-09-13): the goal above is unproven and largely unbuilt.** Every "PASS" recorded in §4 is an **in-place binary upgrade on a single, unchanged VM** — same machine, same IP, no VM ever created or destroyed, front door never touched because it never needed to move. That proves Stage 1 (externalized state survives a version bump) and validates the separate "pet" self-upgrade design in §6. It proves **nothing** about the actual goal stated above: no new VM has ever been booted as part of a swap, no disk has ever been reattached across VMs, no front door has ever been repointed, and Stage 2's generic per-shard proxy pattern doesn't exist beyond one hand-built instance. Read every "PASS" below with that scope, not as progress toward seamless VM swap-out.
+**Progress vs. this goal, stated plainly (2026-10-11):** Throwaway Janus cattle (2093→2094, then gaps on 2095→2096) proved disk reattach, MagicDNS Serve front door, mid-turn cutover, JWT/UI spawn, and hostname steal under load — see §4c and `janus-oos/docs/cattle-vm-swap-rehearsal.md`. That is **not** antevorta, **not** `svc:` VIP, **not** a one-command orchestrator. §4 in-place "PASS" rows remain same-VM upgrades. Stage 2 generic proxy still unbuilt.
 
 ---
 
@@ -148,25 +148,39 @@ Operator said "Upgrade" after §4a's investigate-only fact-find. Proceeded with 
 
 ## 5. Status
 
-**Reminder:** every `[x]` below marked "in-place upgrade" or "PASS" is Stage 1 / pet-path validation only — same VM, no swap. Stages 2 (generic), 3, and 4-9 (the actual VM-swap mechanism this doc's Goal describes) remain not started, full stop.
+**Reminder:** in-place "PASS" rows are Stage 1 / pet-path only. Throwaway cattle is §4c — not antevorta, not `svc:` VIP, not a product orchestrator.
 
 - [x] Stage 0 golden artifact — `hapi-soup-v2026.09.11-9622798` published; antevorta installed from it
 - [x] Stage 1 externalize state — proven on antevorta/in-linux (150G LVM data disk, `HAPI_HOME` + `work` split)
 - [x] Stage 2 front door (antevorta shard) — `svc:hapi-antevorta` live at `https://hapi-antevorta.forest-adder.ts.net`
 - [ ] Stage 2 (generic per-shard proxy pattern) — not automated/scripted beyond antevorta manual bring-up
 - [ ] Stage 3 (versioning) — proposed above, awaiting operator sign-off
-- [ ] Stages 4-9 (orchestrator + VM swap) — design confirmed 2026-09-11; **next real test** is swap cutover (not bring-up)
+- [ ] Stages 4-9 (orchestrator + VM swap) — **throwaway proven** (disk move, MagicDNS Serve, mid-turn cutover, JWT/UI spawn, hostname steal) — see §4c; **product orchestrator + antevorta + `svc:` still not**
 - [x] Antevorta first install — complete 2026-09-11 (hub + runner healthy, Doug logged in). Runbook: `lockhouse/producer/docs/hapi-vm-bringup.md`
 - [x] Antevorta in-place upgrade test — **PASS 2026-09-13** (9622798 → cd7d515, state/token/login survived, see §4). Caveat: no active sessions during the swap — drain-under-load unproven. **Correction (2026-09-30):** this test's zero-usage snapshot was two days post-build, not a steady state — Doug uses this box daily now, so the caveat below is live, not theoretical
-- [ ] Antevorta VM swap rehearsal (full disk reattach to a new VM root) — not started
-- [ ] Drain-under-load test (upgrade with `WORKING` sessions in flight) — not started, **the real remaining gap on antevorta, now with an active daily user** — and `hapi-restart-hub` (the patient-drain mechanism every other upgrade relies on) is **confirmed absent** on this box (2026-09-30 fact-find, §4a — full filesystem search, not just "not on the fleet-machine list"), so this needs building, not just testing
-- [x] **Antevorta fact-find (2026-09-30)** — see §4a: version confirmed via sha256↔manifest match (still `cd7d515`), `hapi-restart-hub` confirmed absent, `hapi-hub` confirmed plain `Type=simple` with no drain-aware stop, `hapi-runner` confirmed `KillMode=control-group` (violates standing `tiann/hapi#915` policy — **operator decision: investigate only, no fix applied, none scheduled**), `HAPI_HOME` externalization confirmed genuinely active (growing `hapi.db` + WAL), original `WORKING`-poll method found invalid on re-check (see correction in §4a)
-- [x] **Antevorta upgraded, `cd7d515` → `17908b4` (2026-09-30)** — see §4b: Tier-1 hardening + binary swap verified (sha256, MainPID, oom, `cliApiToken`, `protocolVersion`). Live `--resume` sessions survived. **Correction 2026-10-01:** the same-night "missing credentials.json is fine, UI injects `options.token`" retraction was false — see §4b and the new §1 hard-constraint. Doug's real new-session UI test failed `/login`. Fixed by restoring runner `EnvironmentFile` from the live-child token (runner-only restart, children kept). `verify-hapi-install.sh` 16/0/0 did not catch this; it now has a runner-vs-child token presence check.
-- [x] Janus `in-svc-01` in-place upgrade test — **PASS 2026-09-13**, same artifact bump as antevorta (9622798 → cd7d515), same result (state/token survived), see §4. Confirmed untangled from the blocked official IN-zone network rebuild (bridges/CIDR) — that's a separate host-network process, not touched. VM stopped again afterward, not running 24/7 yet. Same drain-under-load caveat as antevorta
-- [x] **Two-host proof (2026-09-13):** persistent-volume + in-place-upgrade design confirmed on two independent physical hosts (antevorta, janus), not just one
+- [ ] Antevorta VM swap rehearsal (full disk reattach to a new VM root) — **not started on antevorta**. Closest proof is throwaway §4c.
+- [ ] Drain-under-load test **on antevorta** — still not started there. Throwaway mid-turn cutover done 2026-10-11 (§4c); `hapi-restart-hub` still confirmed absent on antevorta (2026-09-30)
+- [x] **Antevorta fact-find (2026-09-30)** — see §4a
+- [x] **Antevorta upgraded, `cd7d515` → `17908b4` (2026-09-30)** — see §4b; OAuth drop-in fix 2026-10-01
+- [x] Janus `in-svc-01` in-place upgrade test — **PASS 2026-09-13**
+- [x] **Two-host proof (2026-09-13)**
 - [x] Quiesce resolved 2026-09-11 (Gavin sign-off): reuse `hapi-restart-hub`'s existing patient drain unchanged
-- [x] Stage 0 automation (2026-09-11): `hapi-driver-rebuild --build-web --verify` on oos publishes soup single-exe artifacts
-- [x] Pet-install cheat sheet (§6) — **VERIFIED 2026-09-13** after two rewrite rounds across three independent fresh-box tests (CTID 9001 fail → CTID 9002 partial-fix-with-new-bugs → CTID 9003 clean). See §6 for full detail
+- [x] Stage 0 automation (2026-09-11)
+- [x] Pet-install cheat sheet (§6) — **VERIFIED 2026-09-13**
+- [x] **Throwaway cattle** — round 1 2026-10-06 (2093→2094, destroyed 10-08); round 2 gaps 2026-10-11 (2095→2096) — see §4c
+
+## 4c. Throwaway cattle (Janus OOS) — 2026-10-06 / gaps 2026-10-11
+
+Canon write-up: `janus-oos/docs/cattle-vm-swap-rehearsal.md`. Never antevorta.
+
+| Check | Outcome |
+|-------|---------|
+| Disk reattach + Claude resume + canary | **ok** (2093→2094) |
+| MagicDNS Serve (`oos-cattle-rehearsal.forest-adder.ts.net`, `tag:oos`) | **ok** |
+| Mid-turn cutover (live Claude+sleep; `/work` busy) | **ok** with caveats — state intact; turn yanked; hub `thinking` flag stayed false for `-p` |
+| JWT / UI spawn (`POST /api/auth` then `/api/machines/:id/spawn`) | **ok** — raw `cliApiToken` Bearer is 401 by design |
+| Hostname steal under client hold | **ok** with ~48s blackout |
+| `svc:` VIP / zero-downtime / one-command orchestrator / antevorta | **not ok** |
 
 ## 6. Self-upgrade path for non-fleet ("pet") installs — new 2026-09-13
 
