@@ -1,6 +1,24 @@
 import type { ExternalRef } from '@hapi/protocol/types'
 import type { SessionSummary } from '@/types/api'
 
+// Host-agnostic — to-do boards aren't github.com-only (GHE hosts too), unlike
+// `@hapi/protocol/schemas`' parseIssueUrl, which is hardcoded to github.com
+// and would silently fail to match every GHE-hosted item.
+const ISSUE_URL_PATH = /^\/([^/]+)\/([^/]+)\/issues\/(\d+)\/?$/
+
+function parseRepoAndNumber(url: string): { repo: string; number: number } | null {
+    let parsed: URL
+    try {
+        parsed = new URL(url)
+    } catch {
+        return null
+    }
+    const match = ISSUE_URL_PATH.exec(parsed.pathname)
+    if (!match) return null
+    const [, owner, repo, numberRaw] = match
+    return { repo: `${owner}/${repo}`, number: Number(numberRaw) }
+}
+
 /**
  * Most recently linked GitHub issue ref, if any. Every known writer
  * (`sessionCache.linkIssue`, `applyLinkIssue`) appends via `upsertExternalRef`,
@@ -27,10 +45,21 @@ export function getLinkedGithubIssue(metadata: { externalRefs?: ExternalRef[] } 
  * and later also linked to issue B keeps BOTH refs (`upsertExternalRef` only
  * dedups same-issue re-links), so checking only the most-recent ref would
  * stop finding the session while viewing A, even though A is still linked.
+ *
+ * Matches by parsed repo+number, not raw URL string equality (Codex review,
+ * third pass): GitHub repo paths are case-insensitive, and a ref created via
+ * `hapi link-issue owner/repo#N` preserves whatever casing the caller typed,
+ * which can differ from the to-do item's own canonically-cased URL for the
+ * same issue. `upsertExternalRef` already treats `repo` case-insensitively
+ * for its own dedup; this mirrors that convention.
  */
 export function findSessionLinkedToIssue(sessions: SessionSummary[], issueUrl: string | null): SessionSummary | null {
     if (!issueUrl) return null
+    const target = parseRepoAndNumber(issueUrl)
+    if (!target) return null
     return sessions.find(session =>
-        session.metadata?.externalRefs?.some(ref => ref.kind === 'github_issue' && ref.url === issueUrl)
+        session.metadata?.externalRefs?.some(ref =>
+            ref.kind === 'github_issue' && ref.number === target.number && ref.repo.toLowerCase() === target.repo.toLowerCase()
+        )
     ) ?? null
 }

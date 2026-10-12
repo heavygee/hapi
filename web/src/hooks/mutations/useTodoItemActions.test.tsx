@@ -42,6 +42,38 @@ describe('useTodoItemActions', () => {
         await waitFor(() => expect(result.current.closingUrl).toBeNull())
     })
 
+    it('does not clear closingUrl for a still-running item when an earlier one on a different item settles first (Codex review)', async () => {
+        const queryClient = new QueryClient()
+        let resolveA: () => void = () => {}
+        let resolveB: () => void = () => {}
+        let callCount = 0
+        const closeTodoItem = vi.fn(() => new Promise<void>((resolve) => {
+            callCount += 1
+            if (callCount === 1) resolveA = resolve
+            else resolveB = resolve
+        }))
+        const api = { closeTodoItem } as unknown as ApiClient
+
+        const { result } = renderHook(() => useTodoItemActions(api, 'board-1'), { wrapper: wrapper(queryClient) })
+
+        const promiseA = result.current.closeItem({ url: 'https://github.com/a/b/issues/1' })
+        await waitFor(() => expect(result.current.closingUrl).toBe('https://github.com/a/b/issues/1'))
+
+        const promiseB = result.current.closeItem({ url: 'https://github.com/a/b/issues/2' })
+        await waitFor(() => expect(result.current.closingUrl).toBe('https://github.com/a/b/issues/2'))
+
+        // Item A's request settles first, but item B's is still in flight —
+        // the slot must keep pointing at B, not clear to null (which would
+        // wrongly re-enable B's button mid-request).
+        resolveA()
+        await promiseA
+        await waitFor(() => expect(result.current.closingUrl).toBe('https://github.com/a/b/issues/2'))
+
+        resolveB()
+        await promiseB
+        await waitFor(() => expect(result.current.closingUrl).toBeNull())
+    })
+
     it('rejects without calling the API when the item has no url (draft issue)', async () => {
         const queryClient = new QueryClient()
         const closeTodoItem = vi.fn()
