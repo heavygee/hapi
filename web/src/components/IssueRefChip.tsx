@@ -13,7 +13,6 @@ export function IssueRefChip(props: { ref: ExternalRef; className?: string }) {
             title={`${ref.repo}#${ref.number}`}
             data-testid="issue-ref-chip"
             className={cn(chipBaseClass, chipIdleClass, 'h-5 shrink-0 px-1.5 font-mono text-[11px] leading-none', props.className)}
-            onClick={(event) => event.stopPropagation()}
         >
             #{ref.number}
         </a>

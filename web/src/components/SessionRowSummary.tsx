@@ -142,6 +142,13 @@ export function SessionRowSummary(props: {
     machineLabel?: string
     /** Context returned by the opt-in session message-content search. */
     contentSnippet?: string
+/**
+     * False when the parent renders the issue chip itself as a sibling of an
+     * enclosing `role="button"` row (ARIA forbids a focusable descendant of
+     * a button role — see SessionList.tsx's row wrapper). Defaults to true
+     * for callers like the mention-chip tooltip, which aren't inside one.
+     */
+    showIssueChip?: boolean
 }) {
     const {
         session: s,
@@ -149,6 +156,7 @@ export function SessionRowSummary(props: {
         showDetailedStatus = true,
         selected = false,
         nestedTooltips = true,
+        showIssueChip = true,
         attentionTooltipId: attentionTooltipIdProp,
         lastSeenVersion,
         scheduleTooltipId: scheduleTooltipIdProp,
@@ -236,6 +244,7 @@ export function SessionRowSummary(props: {
                         </span>
                     ) : null}
                     {linkedIssue ? <IssueRefChip ref={linkedIssue} /> : null}
+{showIssueChip && linkedIssue ? <IssueRefChip ref={linkedIssue} /> : null}
                     {attention?.kind === 'unread' && nestedTooltips && attentionId ? (
                         <SessionAttentionIndicator
                             attention={attention}

@@ -16,6 +16,7 @@ import { useFeatures, usePatchFeatures } from '@/hooks/queries/useFeatures'
 import { CompanionPairing } from '@/components/settings/CompanionPairing'
 import { SettingsChoiceGroup, SettingsLinkRow, SettingsPageContent, SettingsRow, SettingsSection, SettingsSwitch } from '@/components/settings/SettingsPrimitives'
 import { disableAllFue, enableAllFue, isFueDisabledGlobally } from '@/lib/use-fue'
+import { isOwnerNamespace } from '@/lib/namespace'
 import { queryKeys } from '@/lib/query-keys'
 import { useOperatorDock } from '@/hooks/useOperatorDock'
 
@@ -25,25 +26,12 @@ const locales: ReadonlyArray<{ value: Locale; label: string }> = [
     { value: 'ru', label: 'Русский' },
 ]
 
-function getNamespace(token: string | null): string | null {
-    if (!token) return null
-    try {
-        const payload = token.split('.')[1]
-        if (!payload) return null
-        const base64 = payload.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(payload.length / 4) * 4, '=')
-        const decoded = JSON.parse(atob(base64)) as { ns?: unknown }
-        return typeof decoded.ns === 'string' ? decoded.ns : null
-    } catch {
-        return null
-    }
-}
-
 export default function SettingsGeneralPage() {
     const { t, locale, setLocale } = useTranslation()
     const { api, baseUrl, token } = useAppContext()
     const navigate = useNavigate()
     const queryClient = useQueryClient()
-    const isOwner = getNamespace(token) === 'default'
+    const isOwner = isOwnerNamespace(token)
     const showRunnerManagement = isDefaultNamespaceToken(token)
     const { features } = useFeatures(api)
     const { setGithubPrAwareness, isPending } = usePatchFeatures(api)

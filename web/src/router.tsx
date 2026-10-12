@@ -10,6 +10,7 @@ import {
     useMatchRoute,
     useNavigate,
     useParams,
+    useRouter,
     useSearch,
 } from '@tanstack/react-router'
 import { getScrollRestorationKey } from '@/lib/scrollRestorationKey'
@@ -27,11 +28,16 @@ import { TodoBoardList } from '@/components/TodoBoardList'
 import { TodoItemDetail } from '@/components/TodoItemDetail'
 import { resolveTodoItemDirectory } from '@/lib/resolveTodoItemDirectory'
 import { buildTodoItemSpawnMessage } from '@/lib/todoItemSpawnMessage'
+import { clearTodoSpawnBriefing, peekTodoSpawnBriefing, stashTodoSpawnBriefing } from '@/lib/todoSpawnBriefing'
+import { shouldExitTodoModeForNavigation } from '@/lib/sessionsTodoModeSync'
+import { parseIssueUrl } from '@hapi/protocol/schemas'
+import { findSessionLinkedToIssue } from '@/lib/externalRefs'
 import type { TodoBoardItem } from '@/types/api'
 import { NewSession } from '@/components/NewSession'
 import { WorkspaceBrowser } from '@/components/WorkspaceBrowser'
 import { LoadingState } from '@/components/LoadingState'
 import { useAppContext } from '@/lib/app-context'
+import { isOwnerNamespace } from '@/lib/namespace'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { isTelegramApp } from '@/hooks/useTelegram'
 import { useSidebarResize } from '@/hooks/useSidebarResize'
@@ -219,9 +225,10 @@ function SettingsIcon(props: { className?: string }) {
 }
 
 function SessionsPage() {
-    const { api, baseUrl } = useAppContext()
+    const { api, baseUrl, token, titleSuggestionAvailable = false } = useAppContext()
     const navigate = useNavigate()
     const queryClient = useQueryClient()
+    const router = useRouter()
     const pathname = useLocation({ select: location => location.pathname })
     const matchRoute = useMatchRoute()
     const { t } = useTranslation()
@@ -334,6 +341,24 @@ function SessionsPage() {
     // callout in sight, since the callout alone was gated on isSessionsIndex.
     const visibleTourStep = isSessionsIndex ? tour.activeStepId : null
     const [sessionsMode, setSessionsMode] = useState<SessionsMode>('sessions')
+    // Every /api/todo-boards route 403s outside the owner namespace — hide
+    // the switch itself rather than let a non-owner select it and land on a
+    // permanent error (same pattern as the owner-only Settings categories).
+    const isOwner = isOwnerNamespace(token)
+    // Defensive: hiding the switch (below) only stops a non-owner from
+    // ever *entering* To-Do mode. If the effective namespace changes away
+    // from owner while already in it (a token refresh mid-session, say),
+    // there would otherwise be no way back — every /api/todo-boards call
+    // 403s and the switch that could flip back to Sessions mode is gone.
+    useEffect(() => {
+        if (!isOwner && sessionsMode === 'todo') {
+            setSessionsMode('sessions')
+        }
+    }, [isOwner, sessionsMode])
+    // Hidden behind the to-do list while not in Sessions mode — marking it
+    // "seen" here would silently clear unread state for messages the user
+    // never actually looked at (hapi#238 Codex review).
+    useSelectedSessionSeen(sessionsMode === 'sessions' ? selectedSessionId : null, selectedSession?.updatedAt)
     const {
         boards: todoBoards,
         isLoading: todoBoardsLoading,
@@ -374,6 +399,17 @@ function SessionsPage() {
         () => (selectedTodoItemId ? todoItems.find(item => item.id === selectedTodoItemId) ?? null : null),
         [selectedTodoItemId, todoItems]
     )
+    const linkedTodoSession = useMemo(
+        () => findSessionLinkedToIssue(sessions, selectedTodoItem?.url ?? null),
+        [sessions, selectedTodoItem]
+    )
+    const handleOpenLinkedTodoSession = useCallback((sessionId: string) => {
+        navigate({
+            to: '/sessions/$sessionId',
+            params: { sessionId },
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
+        })
+    }, [navigate])
     // Item detail reuses the session-detail right-pane slot, so it needs the
     // same mobile show/hide signal `isSessionsIndex` drives for sessions —
     // but it's local state, not a route, so it has to opt in explicitly here
@@ -386,6 +422,18 @@ function SessionsPage() {
     // the to-do list, since `isSessionsIndex` alone has no idea a mode
     // switch happened.
     const hasRightPaneContent = sessionsMode === 'todo' ? selectedTodoItem !== null : !isSessionsIndex
+    // See shouldExitTodoModeForNavigation's doc comment for why this reacts
+    // to the navigation event itself rather than comparing selected-session
+    // ids before/after.
+    useEffect(() => {
+        return router.subscribe('onBeforeNavigate', (event) => {
+            if (shouldExitTodoModeForNavigation(event.toLocation.pathname, sessionsMode)) {
+                setSessionsMode('sessions')
+                setSelectedTodoItemId(null)
+            }
+        })
+    }, [router, sessionsMode])
+    const onlineMachineIds = useMemo(() => new Set(machines.map(m => m.id)), [machines])
     const handleSpawnFromTodoItem = useCallback((item: TodoBoardItem) => {
         const resolved = resolveTodoItemDirectory(item.repo, sessions)
         // `/sessions/new` is a sibling route under the same `/sessions`
@@ -846,23 +894,13 @@ function SessionsPage() {
                 className={`${hasRightPaneContent ? 'hidden split:flex' : 'flex'} w-full shrink-0 flex-col bg-[var(--app-bg)]`}
                 style={{ '--sidebar-w': `${sidebar.width}px` } as React.CSSProperties}
             >
-                {/* Soup meta row only — tools live once in SessionList headerActions
-                    (upstream #collapse-search). Remat debris that keeps BOTH is the
-                    "double tools" regression; heal 89 must strip outer chrome. */}
-                <div className="session-list-scrollbar-offset shrink-0 bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
-                    <div className="mx-auto flex w-full max-w-content items-center gap-2 px-2 py-2">
-                        <div className="shrink-0 text-xs text-[var(--app-hint)]">
-                            {t('sessions.count', { n: sessions.length, m: projectCount })}
+                <div className="flex min-h-0 flex-1 flex-col pt-[env(safe-area-inset-top)]">
+                    {isOwner ? (
+                        <div className="mx-auto w-full max-w-content shrink-0">
+                            <SessionsModeSwitch mode={sessionsMode} onChange={setSessionsMode} />
                         </div>
-                        <GardenXrEntryChip />
-                    </div>
-                </div>
-
-                <div className="flex min-h-0 flex-1 flex-col">
-                    <div className="mx-auto w-full max-w-content shrink-0">
-                        <SessionsModeSwitch mode={sessionsMode} onChange={setSessionsMode} />
-                    </div>
-                    {error ? (
+                    ) : null}
+                    {error && sessionsMode === 'sessions' ? (
                         <div className="mx-auto w-full max-w-content px-3 py-2">
                             <div className="text-sm text-red-600">{error}</div>
                         </div>
@@ -1015,6 +1053,8 @@ function SessionsPage() {
                             statusOrder={todoStatusOrder}
                             onBack={() => setSelectedTodoItemId(null)}
                             onSpawn={() => handleSpawnFromTodoItem(selectedTodoItem)}
+                            linkedSessionId={linkedTodoSession?.id ?? null}
+                            onOpenLinkedSession={handleOpenLinkedTodoSession}
                             onRefresh={() => { void refetchTodoItems() }}
                             isRefreshing={todoItemsRefetching}
                             onClose={() => closeTodoItem(selectedTodoItem)}

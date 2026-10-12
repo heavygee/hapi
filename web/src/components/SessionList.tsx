@@ -100,6 +100,8 @@ import {
     DEFAULT_SESSION_LIST_FILTER_STATE,
     type SessionListFilterState
 } from '@/lib/sessionListFilter'
+import { IssueRefChip } from '@/components/IssueRefChip'
+import { getLinkedGithubIssue } from '@/lib/externalRefs'
 import { Spinner } from '@/components/Spinner'
 import { useToast } from '@/lib/toast-context'
 import { transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
@@ -1664,6 +1666,7 @@ function SessionItem(props: {
         Boolean(attention),
         hasScheduleTooltip
     )
+    const linkedIssue = getLinkedGithubIssue(s.metadata)
     return (
         <>
             <button
@@ -1709,6 +1712,57 @@ function SessionItem(props: {
                     contentSnippet={contentSnippet}
                 />
             </button>
+            {/* The issue chip renders as a sibling of the role="button" div,
+                not a descendant — WAI-ARIA disallows a focusable descendant
+                of a button role (hiding-semantics guidance), which a merely
+                non-native `<button>` tag doesn't exempt. Two prior fixes here
+                addressed the *native*-button keyboard-trap case (switching
+                `<button>` to `<div role="button">`) but left this ARIA
+                validity gap open (hapi#238 Codex review, third pass). The
+                chip no longer needs its own stopPropagation handlers now
+                that it's outside the row's long-press-bound element.
+                Visible side effect, not just internal restructuring: the
+                chip moves from inline-beside-the-title (inside
+                SessionRowSummary's own layout) to the row's trailing edge,
+                top-aligned — true DOM sibling-hood and "still sitting
+                exactly where it used to, mid-title-row" aren't both
+                achievable without SessionRowSummary exposing its title row
+                as a separate slot, which is more surface area than this fix
+                warrants. */}
+            {/* `session-list-item` and `data-session-scroll-anchor` must stay
+                on this same outer element — SessionListScrollAnchor queries
+                by the attribute, then checks the class on that SAME element
+                to decide a row (vs. a group header) tolerates being
+                partially scrolled off the viewport top and still anchoring.
+                Splitting them across the outer/inner divs silently broke
+                that distinction for every session row. */}
+            <div data-session-scroll-anchor className={`session-list-item group/session-row flex w-full items-start gap-1 rounded-lg py-2 pl-2.5 pr-2 transition-colors ${selected ? 'bg-[var(--app-secondary-bg)]' : ''}`}>
+                <div
+                    role="button"
+                    tabIndex={0}
+                    {...longPressHandlers}
+                    className="flex min-w-0 flex-1 flex-col gap-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none rounded-lg cursor-pointer"
+                    style={{ WebkitTouchCallout: 'none' }}
+                    aria-current={selected ? 'page' : undefined}
+                    aria-describedby={describedBy}
+                >
+                    <SessionRowSummary
+                        session={s}
+                        showPath={showPath}
+                        showDetailedStatus={showDetailedStatus}
+                        selected={selected}
+                        nestedTooltips
+                        attentionTooltipId={attentionId}
+                        lastSeenVersion={lastSeenVersion}
+                        scheduleTooltipId={scheduleId}
+                        inRunningSection={inRunningSection}
+                        projectLabel={projectLabel}
+                        machineLabel={machineLabel}
+                        showIssueChip={false}
+                    />
+                </div>
+                {linkedIssue ? <IssueRefChip ref={linkedIssue} className="mt-0.5 shrink-0" /> : null}
+            </div>
 
             <SessionActionMenu
                 isOpen={menuOpen}

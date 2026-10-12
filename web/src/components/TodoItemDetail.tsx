@@ -56,6 +56,9 @@ export function TodoItemDetail(props: {
     statusOrder: string[]
     onBack: () => void
     onSpawn: () => void
+    /** Session id already linked to this item's issue, if any — offers "Open session" instead of another spawn. */
+    linkedSessionId: string | null
+    onOpenLinkedSession: (sessionId: string) => void
     onRefresh: () => void
     isRefreshing: boolean
     onClose: () => Promise<void>
@@ -68,7 +71,7 @@ export function TodoItemDetail(props: {
     isSettingStatus: boolean
 }) {
     const { t } = useTranslation()
-    const { item } = props
+    const { item, linkedSessionId } = props
     const repoLabel = item.repo ?? t('todo.noRepo')
     const updatedLabel = item.updatedAt ? formatRelativeTime(new Date(item.updatedAt).getTime(), t) : null
     const chipClass = cn(chipBaseClass, chipIdleClass, 'pointer-events-none h-6 px-2')
@@ -242,14 +245,24 @@ export function TodoItemDetail(props: {
                         </a>
                     </Button>
                 ) : null}
-                <Button
-                    type="button"
-                    variant="outline"
-                    onClick={props.onSpawn}
-                >
-                    <PlusCircleIcon className="h-4 w-4" />
-                    {t('todo.detail.spawnSession')}
-                </Button>
+                {linkedSessionId ? (
+                    <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => props.onOpenLinkedSession(linkedSessionId)}
+                    >
+                        {t('todo.detail.openSession')}
+                    </Button>
+                ) : (
+                    <Button
+                        type="button"
+                        variant="outline"
+                        onClick={props.onSpawn}
+                    >
+                        <PlusCircleIcon className="h-4 w-4" />
+                        {t('todo.detail.spawnSession')}
+                    </Button>
+                )}
                 {/* A merged PR can't be reopened via `gh pr reopen` (GitHub rejects it) and is
                     already terminally closed, so neither action applies — unlike a plain closed
                     issue/PR, which `gh ... reopen` handles fine. */}
