@@ -782,6 +782,23 @@ describe('write-target project membership verification', () => {
         })
         expect(response.status).toBe(502)
     })
+
+    it('surfaces a GraphQL-level error in a parseable membership response as a 502, not a misleading 400 (Codex review)', async () => {
+        // A partial-data response (scope/resolver failure) can still parse
+        // fine while carrying an `errors` array and an empty `projectItems` —
+        // that must not read identically to "genuinely not a member".
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, UNUSED_ACTIONS, () => ({
+            data: { resource: { projectItems: { nodes: [] } } },
+            errors: [{ message: 'Resource not accessible by integration' }]
+        }))
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/close`, {
+            method: 'POST',
+            body: JSON.stringify({ url: VALID_ITEM_URL })
+        })
+        expect(response.status).toBe(502)
+        const body = await response.json() as { error: string }
+        expect(body.error).toContain('Resource not accessible by integration')
+    })
 })
 
 describe('POST /api/todo-boards/:id/items/close', () => {

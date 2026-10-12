@@ -86,4 +86,29 @@ describe('findSessionLinkedToIssue', () => {
         expect(findSessionLinkedToIssue([session], 'https://github.com/a/b/issues/1')).toBe(session)
         expect(findSessionLinkedToIssue([session], 'https://github.com/a/b/issues/2')).toBe(session)
     })
+
+    it('matches case-insensitively — a ref created via a differently-cased `hapi link-issue` URL still matches the item\'s canonical URL (Codex review)', () => {
+        const session = makeSession({
+            id: 'session-1',
+            metadata: {
+                path: '/x', name: 'n', flavor: 'codex',
+                // Whatever casing the caller typed into `hapi link-issue` —
+                // not normalized to GitHub's canonical owner/repo casing.
+                externalRefs: [{ kind: 'github_issue', url: 'https://github.com/acme/widgets/issues/12', repo: 'acme/widgets', number: 12, linkedAt: 1 }]
+            }
+        })
+        // The to-do item's own URL, as returned by the GraphQL API.
+        expect(findSessionLinkedToIssue([session], 'https://github.com/Acme/Widgets/issues/12')).toBe(session)
+    })
+
+    it('matches on a non-github.com (GHE) host — not hardcoded to github.com', () => {
+        const session = makeSession({
+            id: 'session-1',
+            metadata: {
+                path: '/x', name: 'n', flavor: 'codex',
+                externalRefs: [{ kind: 'github_issue', url: 'https://ghe.example/acme/widgets/issues/12', repo: 'acme/widgets', number: 12, linkedAt: 1 }]
+            }
+        })
+        expect(findSessionLinkedToIssue([session], 'https://ghe.example/acme/widgets/issues/12')).toBe(session)
+    })
 })

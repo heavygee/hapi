@@ -1016,6 +1016,15 @@ export function createTodoBoardRoutes(
         } catch (error) {
             return { ok: false, error: error instanceof Error ? error.message : 'Failed to verify item membership', status: 502 }
         }
+        // A parseable response can still carry a GraphQL-level error (partial
+        // data from a scope/resolver failure) alongside an empty/missing
+        // `projectItems` — without this check, that reads identically to
+        // "genuinely not a member" and 400s with a misleading message instead
+        // of the 502 every other GraphQL failure in this file gets (Codex
+        // review).
+        if (membership.errors?.length) {
+            return { ok: false, error: membership.errors.map(e => e.message).join('; '), status: 502 }
+        }
         if (!isMemberOfProject(membership, board.ownerLogin, board.projectNumber)) {
             return { ok: false, error: 'Item is not part of this board', status: 400 }
         }
