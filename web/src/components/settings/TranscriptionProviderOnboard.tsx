@@ -232,7 +232,7 @@ export function TranscriptionProviderOnboard(props: {
             setMaxDurationInput(String(next.elevenLabsMaxDurationSeconds?.value ?? parsed))
             setMaxDurationMessage(t('settings.voice.credentials.maxDuration.saved'))
         } catch (err) {
-            setMaxDurationError(errorMessage(err, t('settings.voice.credentials.saveFailed')))
+            setMaxDurationError(getApiErrorMessage(err, t('settings.voice.credentials.saveFailed')))
         } finally {
             setMaxDurationBusy(false)
         }
@@ -248,7 +248,7 @@ export function TranscriptionProviderOnboard(props: {
             setMaxDurationInput(String(next.elevenLabsMaxDurationSeconds?.value ?? VOICE_MAX_DURATION_DEFAULT_SECONDS))
             setMaxDurationMessage(t('settings.voice.credentials.maxDuration.saved'))
         } catch (err) {
-            setMaxDurationError(errorMessage(err, t('settings.voice.credentials.saveFailed')))
+            setMaxDurationError(getApiErrorMessage(err, t('settings.voice.credentials.saveFailed')))
         } finally {
             setMaxDurationBusy(false)
         }

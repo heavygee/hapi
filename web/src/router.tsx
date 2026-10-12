@@ -438,7 +438,7 @@ function SessionsPage() {
     }, [router, sessionsMode])
     const onlineMachineIds = useMemo(() => new Set(machines.map(m => m.id)), [machines])
     const handleSpawnFromBoardItem = useCallback((item: BoardItem) => {
-        const resolved = resolveBoardItemDirectory(item.repo, sessions)
+        const resolved = resolveBoardItemDirectory(item.repo, sessions, onlineMachineIds)
         // `/sessions/new` is a sibling route under the same `/sessions`
         // parent, so SessionsPage never remounts — without clearing the
         // selected item (and switching back to Sessions mode, so
@@ -458,7 +458,7 @@ function SessionsPage() {
             },
             ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
-    }, [navigate, sessions, setSelectedBoardItemId, setSessionsMode])
+    }, [navigate, sessions, setSelectedBoardItemId, setSessionsMode, onlineMachineIds])
     const handleNewSessionInDirectory = useCallback((args: { machineId: string | null; directory: string }) => {
         navigate({
             to: '/sessions/new',
