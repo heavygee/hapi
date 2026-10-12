@@ -341,8 +341,11 @@ export function createSessionsRoutes(
 
         const limitRaw = c.req.query('limit')
         const parsedLimit = limitRaw === undefined ? 30 : Number(limitRaw)
+        // Cap matches GET /sessions (500). MCP/CLI public page stays ≤100; clients
+        // request peerListFetchLimit (= page + caller/overflow pad, e.g. 102) so
+        // hasMore stays honest after excluding the caller.
         const limit = Number.isFinite(parsedLimit)
-            ? Math.min(100, Math.max(1, Math.floor(parsedLimit)))
+            ? Math.min(500, Math.max(1, Math.floor(parsedLimit)))
             : 30
 
         const namespace = c.get('namespace')
