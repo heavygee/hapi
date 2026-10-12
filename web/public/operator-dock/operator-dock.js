@@ -50,6 +50,8 @@
   var strokes = [], curStroke = null, penColor = COLORS[0], penWidth = 4;
   var shotImg = null; // Image of the frozen screenshot
   var replies = null, replyPoll = null;
+  /** #466: lightweight STT into replies compose (not primary mic / send). */
+  var repliesDict = null;
   var pendingShot = null, liveTranscript = '', liveInterim = '', recordLabel = null;
   // #343: true only after setTranscript/appendTranscript (speech). Host listening
   // hints must use setRecordStatus — otherwise finishRecording can Send the hint
@@ -2757,6 +2759,212 @@
     try { sessionStorage.setItem(REPLIES_COLLAPSE_KEY, on ? '1' : '0'); } catch (e) {}
   }
 
+  function joinComposePrefix(base, spoken) {
+    var b = String(base || '').trim();
+    var s = String(spoken || '').trim();
+    if (!s) return b;
+    return b ? (b + ' ' + s) : s;
+  }
+
+  /** Same gate as fan mic (#293) — hide replies mic when speech-off. */
+  function repliesComposeVoiceAllowed() {
+    return isExecuteSurface() && voiceCapability().usable;
+  }
+
+  function repliesDictRefreshText(d) {
+    if (!d || !d.ta) return;
+    var spoken = joinComposePrefix(d.liveTranscript, d.liveInterim).trim();
+    d.ta.value = joinComposePrefix(d.basePrefix, spoken);
+  }
+
+  function repliesDictUpdateUi(on) {
+    if (!repliesDict || !repliesDict.micBtn) return;
+    repliesDict.micBtn.classList.toggle('opdock-replies-mic--on', !!on);
+    repliesDict.micBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    repliesDict.micBtn.setAttribute('title', on
+      ? 'Stop dictation — review text, then Send'
+      : 'Dictate into the box — tap again when done, then Send');
+  }
+
+  function stopRepliesDictRecognition(d) {
+    if (!d || !d.recognition) return;
+    try {
+      d.recognizing = false;
+      d.recognition.onresult = null;
+      d.recognition.onerror = null;
+      d.recognition.stop();
+    } catch (e) {}
+    d.recognition = null;
+  }
+
+  function abortRepliesDictation() {
+    if (!repliesDict) return;
+    var d = repliesDict;
+    repliesDict = null;
+    stopRepliesDictRecognition(d);
+    if (d.ownsMedia) {
+      d.ownsMedia = false;
+      stopMediaCapture(true);
+    }
+    if (d.native) {
+      try {
+        if (window.AndroidOperator && typeof window.AndroidOperator.onCaptureDone === 'function') {
+          window.AndroidOperator.onCaptureDone();
+        }
+      } catch (e) {}
+    }
+    if (d.micBtn) {
+      d.micBtn.classList.remove('opdock-replies-mic--on');
+      d.micBtn.setAttribute('aria-pressed', 'false');
+      d.micBtn.disabled = false;
+    }
+  }
+
+  /** Stop replies dictation and fill the textarea; does not Send (#466). */
+  function finishRepliesDictation() {
+    if (!repliesDict) return Promise.resolve();
+    if (recording) {
+      toast('Stop the main mic recording first', 'err');
+      return Promise.resolve();
+    }
+    var d = repliesDict;
+    repliesDict = null;
+    stopRepliesDictRecognition(d);
+
+    function applySpoken(spoken) {
+      if (d.ta) d.ta.value = joinComposePrefix(d.basePrefix, spoken);
+      if (d.micBtn) {
+        d.micBtn.classList.remove('opdock-replies-mic--on');
+        d.micBtn.setAttribute('aria-pressed', 'false');
+        d.micBtn.disabled = false;
+      }
+    }
+
+    if (d.native) {
+      var nativeText = '';
+      try {
+        if (window.AndroidOperator && typeof window.AndroidOperator.onCaptureDone === 'function') {
+          nativeText = String(window.AndroidOperator.onCaptureDone() || '');
+        }
+      } catch (e) {}
+      applySpoken(nativeText.trim());
+      return Promise.resolve();
+    }
+
+    var transcript = '';
+    if (d.liveFromSpeech) transcript = (d.liveTranscript || '').trim();
+    else transcript = (d.liveTranscript || '').trim();
+    if (!transcript && d.liveFromSpeech && d.liveInterim) transcript = String(d.liveInterim).trim();
+
+    if (transcript) {
+      if (d.ownsMedia) {
+        d.ownsMedia = false;
+        stopMediaCapture(true);
+      }
+      applySpoken(transcript);
+      return Promise.resolve();
+    }
+    if (!d.ownsMedia || !cfg || !cfg.sttUrl) {
+      if (d.ownsMedia) {
+        d.ownsMedia = false;
+        stopMediaCapture(true);
+      }
+      applySpoken('');
+      if (repliesComposeVoiceAllowed()) {
+        toast('No speech captured — tap mic, talk, then tap mic again', 'err');
+      }
+      return Promise.resolve();
+    }
+    if (d.micBtn) d.micBtn.disabled = true;
+    return stopMediaCapture(false).then(function (audio) {
+      if (!needsWhisperFallback('', !!(audio && audio.b64))) {
+        applySpoken('');
+        toast('No speech captured — tap mic, talk, then tap mic again', 'err');
+        return;
+      }
+      return whisperTranscribe(audio.b64, audio.mime).then(function (out) {
+        applySpoken((out || '').trim());
+        if (!(out || '').trim()) {
+          toast('No speech captured — tap mic, talk, then tap mic again', 'err');
+        }
+      }).catch(function (e) {
+        applySpoken('');
+        toast('Transcription failed: ' + ((e && e.message) || e), 'err');
+      });
+    });
+  }
+
+  function startRepliesDictation(ta, micBtn) {
+    if (recording) {
+      toast('Stop the main mic recording first', 'err');
+      return;
+    }
+    if (!repliesComposeVoiceAllowed()) return;
+    if (repliesDict) {
+      finishRepliesDictation();
+      return;
+    }
+    var d = {
+      ta: ta,
+      micBtn: micBtn,
+      basePrefix: String(ta.value || '').trim(),
+      liveTranscript: '',
+      liveInterim: '',
+      liveFromSpeech: false,
+      recognition: null,
+      recognizing: false,
+      ownsMedia: false,
+      native: hasNativeHost(),
+    };
+    repliesDict = d;
+    repliesDictUpdateUi(true);
+
+    if (d.native) {
+      try {
+        if (window.AndroidOperator && typeof window.AndroidOperator.startNativeStt === 'function') {
+          window.AndroidOperator.startNativeStt();
+        }
+      } catch (e) {}
+      return;
+    }
+
+    d.recognition = makeRecognition(
+      function (fin) {
+        if (repliesDict !== d) return;
+        if (fin) {
+          d.liveFromSpeech = true;
+          d.liveTranscript = (d.liveTranscript ? d.liveTranscript + ' ' : '') + fin;
+          d.liveInterim = '';
+        }
+        repliesDictRefreshText(d);
+      },
+      function (txt) {
+        if (repliesDict !== d) return;
+        d.liveInterim = txt || '';
+        if (d.liveInterim) d.liveFromSpeech = true;
+        repliesDictRefreshText(d);
+      }
+    );
+    if (d.recognition) {
+      try {
+        d.recognizing = true;
+        d.recognition.start();
+      } catch (e) {
+        d.recognition = null;
+        d.recognizing = false;
+      }
+    }
+
+    startMediaCapture().then(function (ok) {
+      if (repliesDict !== d) return;
+      if (ok) d.ownsMedia = true;
+      if (!d.recognition && !ok && !(cfg && cfg.sttUrl)) {
+        toast('Mic unavailable here — type your follow-up instead', 'err');
+        abortRepliesDictation();
+      }
+    });
+  }
+
   function sendOperatorFollowUp(secret, session, raw) {
     var text = String(raw || '').trim();
     if (!secret || !session || !text) return Promise.resolve(false);
@@ -2866,17 +3074,23 @@
     var sendBtn = $('button', 'opdock-btn2 opdock-send', 'Send');
     sendBtn.type = 'button';
     function submitFollowUp() {
-      var text = (ta.value || '').trim();
-      if (!text || sendBtn.disabled) return;
+      if (sendBtn.disabled) return;
       sendBtn.disabled = true;
-      setCollapsed(false);
-      sendOperatorFollowUp(secret, session, text).then(function (ok) {
-        sendBtn.disabled = false;
-        if (ok) {
-          ta.value = '';
-          startReplyPolling();
-          tick();
+      finishRepliesDictation().then(function () {
+        var text = (ta.value || '').trim();
+        if (!text) {
+          sendBtn.disabled = false;
+          return;
         }
+        setCollapsed(false);
+        sendOperatorFollowUp(secret, session, text).then(function (ok) {
+          sendBtn.disabled = false;
+          if (ok) {
+            ta.value = '';
+            startReplyPolling();
+            tick();
+          }
+        });
       });
     }
     sendBtn.addEventListener('click', function (ev) {
@@ -2891,6 +3105,20 @@
       }
     });
     compose.appendChild(ta);
+    if (repliesComposeVoiceAllowed()) {
+      var micBtn = $('button', 'opdock-btn2 opdock-replies-mic');
+      micBtn.type = 'button';
+      micBtn.setAttribute('data-testid', 'opdock-replies-mic');
+      micBtn.setAttribute('aria-label', 'Dictate follow-up');
+      micBtn.setAttribute('aria-pressed', 'false');
+      micBtn.innerHTML = micIconSvg();
+      micBtn.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        startRepliesDictation(ta, micBtn);
+      });
+      compose.appendChild(micBtn);
+    }
     compose.appendChild(sendBtn);
     replies.appendChild(head);
     replies.appendChild(body);
@@ -2976,6 +3204,7 @@
     startReplyPolling();
   }
   function closeReplies() {
+    abortRepliesDictation();
     if (replyPoll) { clearInterval(replyPoll); replyPoll = null; }
     if (replies) { forgetTopLayer(replies); replies.remove(); replies = null; }
   }
@@ -3402,6 +3631,12 @@
     if (!text) return;
     var t = String(text).trim();
     if (!t) return;
+    if (repliesDict) {
+      repliesDict.liveFromSpeech = true;
+      repliesDict.liveTranscript = (repliesDict.liveTranscript ? repliesDict.liveTranscript + ' ' : '') + t;
+      repliesDictRefreshText(repliesDict);
+      return;
+    }
     liveFromSpeech = true;
     liveTranscript = (liveTranscript ? liveTranscript + ' ' : '') + t;
     if (overlay && overlay._ta) {
@@ -3412,6 +3647,13 @@
 
   /** Replace the in-memory transcript (native SpeechRecognizer pushes full text each partial). */
   function setTranscript(text) {
+    if (repliesDict) {
+      repliesDict.liveFromSpeech = true;
+      repliesDict.liveTranscript = text ? String(text) : '';
+      repliesDict.liveInterim = '';
+      repliesDictRefreshText(repliesDict);
+      return;
+    }
     liveFromSpeech = true;
     liveTranscript = text ? String(text) : '';
     liveInterim = '';
@@ -4405,7 +4647,7 @@
     return entries.slice(0, 16);
   }
   /* BEGIN GENERATED bundled-changelog */
-  var BUNDLED_CHANGELOG_FALLBACK = "## [0.19.5](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.4...v0.19.5) (2026-10-12)\n\n\n### Bug Fixes\n\n* **compose:** derive browser-hub STT when sttUrl is null ([#453](https://github.com/Heavygee-Projects/hapi-inline/issues/453)) ([7d51a9c](https://github.com/Heavygee-Projects/hapi-inline/commit/7d51a9c2e6a18e180ce7dcbca7a0c4112973422a))\n\n\n### Documentation\n\n* dock-spawned sessions are workers, not nested routers ([#443](https://github.com/Heavygee-Projects/hapi-inline/issues/443)) ([6337c9e](https://github.com/Heavygee-Projects/hapi-inline/commit/6337c9e0a1d54ae67a3ea122b16b007bc5f677b5)), closes [#442](https://github.com/Heavygee-Projects/hapi-inline/issues/442)\n\n## [0.19.4](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.3...v0.19.4) (2026-10-10)\n\n\n### Bug Fixes\n\n* **dock:** freeze host scroll before markup capture ([#439](https://github.com/Heavygee-Projects/hapi-inline/issues/439)) ([1dffa4d](https://github.com/Heavygee-Projects/hapi-inline/commit/1dffa4dd11a4da95990ea8064edd31feac450cb0)), closes [#437](https://github.com/Heavygee-Projects/hapi-inline/issues/437)\n\n## [0.19.3](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.2...v0.19.3) (2026-10-10)\n\n\n### Bug Fixes\n\n* **dock:** align markup capture to visible viewport ([#432](https://github.com/Heavygee-Projects/hapi-inline/issues/432)) ([bf92ad0](https://github.com/Heavygee-Projects/hapi-inline/commit/bf92ad0202b6f6231b237120806e5af5e3f5708f)), closes [#430](https://github.com/Heavygee-Projects/hapi-inline/issues/430)\n\n## [0.19.2](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.1...v0.19.2) (2026-10-10)\n\n\n### Bug Fixes\n\n* **dock:** keep relative /hapi through requestTarget sync ([#421](https://github.com/Heavygee-Projects/hapi-inline/issues/421)) ([200b9bc](https://github.com/Heavygee-Projects/hapi-inline/commit/200b9bcd02e634f57638ab92010813fc8cb6f561))\n\n## [0.19.1](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.0...v0.19.1) (2026-10-10)\n\n\n### Bug Fixes\n\n* **ci:** no-daemon Gradle + empty browser-hub fail-closed ([#425](https://github.com/Heavygee-Projects/hapi-inline/issues/425)) ([#426](https://github.com/Heavygee-Projects/hapi-inline/issues/426)) ([0239196](https://github.com/Heavygee-Projects/hapi-inline/commit/02391963824587609edb5d255b8ac5f893ab8cfc)), closes [#422](https://github.com/Heavygee-Projects/hapi-inline/issues/422)\n\n## [0.19.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.6...v0.19.0) (2026-10-10)\n\n\n### Features\n\n* **android:** Compose browser-hub remote hub URL ([#422](https://github.com/Heavygee-Projects/hapi-inline/issues/422)) ([#423](https://github.com/Heavygee-Projects/hapi-inline/issues/423)) ([93fa328](https://github.com/Heavygee-Projects/hapi-inline/commit/93fa3289008937f4d32e1a8e1493f9cdb9a569c4))\n\n## [0.18.6](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.5...v0.18.6) (2026-10-06)\n\n\n### Bug Fixes\n\n* **dock:** keep live STT under H fan satellites ([e7610d1](https://github.com/Heavygee-Projects/hapi-inline/commit/e7610d1e9dd138957a6064101b496de1560e4303))\n* **dock:** stop repeating Hide and headings in Settings ([#416](https://github.com/Heavygee-Projects/hapi-inline/issues/416)) ([dfefc6a](https://github.com/Heavygee-Projects/hapi-inline/commit/dfefc6a5a610288a608c09aa57c01e55623114a7))\n\n\n### Documentation\n\n* keep changelog and About free of consumer names ([8e944f7](https://github.com/Heavygee-Projects/hapi-inline/commit/8e944f7f91ce21e113b6f11da1c6745db25fe844))\n* restore 0.18.5 functional notes after history rewrite ([3de9659](https://github.com/Heavygee-Projects/hapi-inline/commit/3de9659f947d11f0cdc2f7f9307894eb42301067))\n\n## [0.18.5](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.4...v0.18.5) (2026-10-05)\n\n\n### Bug Fixes\n\n* **compose:** About shows dock version and bundled changelog ([#402](https://github.com/Heavygee-Projects/hapi-inline/issues/402)), closes [#399](https://github.com/Heavygee-Projects/hapi-inline/issues/399)\n* **compose:** accept hub unread 0/1 in session list ([#401](https://github.com/Heavygee-Projects/hapi-inline/issues/401)), closes [#400](https://github.com/Heavygee-Projects/hapi-inline/issues/400)\n* warn once when legacy privilege sunsets to off ([#396](https://github.com/Heavygee-Projects/hapi-inline/issues/396)) ([#397](https://github.com/Heavygee-Projects/hapi-inline/issues/397))\n\n\n### Documentation\n\n* fail-closed deploy requirements for a new consumer ([#384](https://github.com/Heavygee-Projects/hapi-inline/issues/384))\n\n## [0.18.4](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.3...v0.18.4) (2026-09-21)\n\n## [0.18.3](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.2...v0.18.3) (2026-09-21)\n\n## [0.18.2](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.1...v0.18.2) (2026-09-21)\n\n## [0.18.1](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.0...v0.18.1) (2026-09-20)\n\n## [0.18.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.17.0...v0.18.0) (2026-09-20)\n\n## [Unreleased]\n\n## [0.17.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.16.0...v0.17.0) (2026-09-20)\n\n## [0.16.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.12...v0.16.0) (2026-09-20)\n\n## [0.15.12](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.11...v0.15.12) (2026-09-17)\n";
+  var BUNDLED_CHANGELOG_FALLBACK = "## [0.19.6](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.5...v0.19.6) (2026-10-12)\n\n\n### Documentation\n\n* hubJwtProvider / getHubJwt must be hub JWT ([#460](https://github.com/Heavygee-Projects/hapi-inline/issues/460)) ([#461](https://github.com/Heavygee-Projects/hapi-inline/issues/461)) ([2e3d17c](https://github.com/Heavygee-Projects/hapi-inline/commit/2e3d17cfe4eabce680203c1ee096a3499f75ab08))\n\n## [0.19.5](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.4...v0.19.5) (2026-10-12)\n\n\n### Bug Fixes\n\n* **compose:** derive browser-hub STT when sttUrl is null ([#453](https://github.com/Heavygee-Projects/hapi-inline/issues/453)) ([7d51a9c](https://github.com/Heavygee-Projects/hapi-inline/commit/7d51a9c2e6a18e180ce7dcbca7a0c4112973422a))\n\n\n### Documentation\n\n* dock-spawned sessions are workers, not nested routers ([#443](https://github.com/Heavygee-Projects/hapi-inline/issues/443)) ([6337c9e](https://github.com/Heavygee-Projects/hapi-inline/commit/6337c9e0a1d54ae67a3ea122b16b007bc5f677b5)), closes [#442](https://github.com/Heavygee-Projects/hapi-inline/issues/442)\n\n## [0.19.4](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.3...v0.19.4) (2026-10-10)\n\n\n### Bug Fixes\n\n* **dock:** freeze host scroll before markup capture ([#439](https://github.com/Heavygee-Projects/hapi-inline/issues/439)) ([1dffa4d](https://github.com/Heavygee-Projects/hapi-inline/commit/1dffa4dd11a4da95990ea8064edd31feac450cb0)), closes [#437](https://github.com/Heavygee-Projects/hapi-inline/issues/437)\n\n## [0.19.3](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.2...v0.19.3) (2026-10-10)\n\n\n### Bug Fixes\n\n* **dock:** align markup capture to visible viewport ([#432](https://github.com/Heavygee-Projects/hapi-inline/issues/432)) ([bf92ad0](https://github.com/Heavygee-Projects/hapi-inline/commit/bf92ad0202b6f6231b237120806e5af5e3f5708f)), closes [#430](https://github.com/Heavygee-Projects/hapi-inline/issues/430)\n\n## [0.19.2](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.1...v0.19.2) (2026-10-10)\n\n\n### Bug Fixes\n\n* **dock:** keep relative /hapi through requestTarget sync ([#421](https://github.com/Heavygee-Projects/hapi-inline/issues/421)) ([200b9bc](https://github.com/Heavygee-Projects/hapi-inline/commit/200b9bcd02e634f57638ab92010813fc8cb6f561))\n\n## [0.19.1](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.0...v0.19.1) (2026-10-10)\n\n\n### Bug Fixes\n\n* **ci:** no-daemon Gradle + empty browser-hub fail-closed ([#425](https://github.com/Heavygee-Projects/hapi-inline/issues/425)) ([#426](https://github.com/Heavygee-Projects/hapi-inline/issues/426)) ([0239196](https://github.com/Heavygee-Projects/hapi-inline/commit/02391963824587609edb5d255b8ac5f893ab8cfc)), closes [#422](https://github.com/Heavygee-Projects/hapi-inline/issues/422)\n\n## [0.19.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.6...v0.19.0) (2026-10-10)\n\n\n### Features\n\n* **android:** Compose browser-hub remote hub URL ([#422](https://github.com/Heavygee-Projects/hapi-inline/issues/422)) ([#423](https://github.com/Heavygee-Projects/hapi-inline/issues/423)) ([93fa328](https://github.com/Heavygee-Projects/hapi-inline/commit/93fa3289008937f4d32e1a8e1493f9cdb9a569c4))\n\n## [0.18.6](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.5...v0.18.6) (2026-10-06)\n\n\n### Bug Fixes\n\n* **dock:** keep live STT under H fan satellites ([e7610d1](https://github.com/Heavygee-Projects/hapi-inline/commit/e7610d1e9dd138957a6064101b496de1560e4303))\n* **dock:** stop repeating Hide and headings in Settings ([#416](https://github.com/Heavygee-Projects/hapi-inline/issues/416)) ([dfefc6a](https://github.com/Heavygee-Projects/hapi-inline/commit/dfefc6a5a610288a608c09aa57c01e55623114a7))\n\n\n### Documentation\n\n* keep changelog and About free of consumer names ([8e944f7](https://github.com/Heavygee-Projects/hapi-inline/commit/8e944f7f91ce21e113b6f11da1c6745db25fe844))\n* restore 0.18.5 functional notes after history rewrite ([3de9659](https://github.com/Heavygee-Projects/hapi-inline/commit/3de9659f947d11f0cdc2f7f9307894eb42301067))\n\n## [0.18.5](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.4...v0.18.5) (2026-10-05)\n\n\n### Bug Fixes\n\n* **compose:** About shows dock version and bundled changelog ([#402](https://github.com/Heavygee-Projects/hapi-inline/issues/402)), closes [#399](https://github.com/Heavygee-Projects/hapi-inline/issues/399)\n* **compose:** accept hub unread 0/1 in session list ([#401](https://github.com/Heavygee-Projects/hapi-inline/issues/401)), closes [#400](https://github.com/Heavygee-Projects/hapi-inline/issues/400)\n* warn once when legacy privilege sunsets to off ([#396](https://github.com/Heavygee-Projects/hapi-inline/issues/396)) ([#397](https://github.com/Heavygee-Projects/hapi-inline/issues/397))\n\n\n### Documentation\n\n* fail-closed deploy requirements for a new consumer ([#384](https://github.com/Heavygee-Projects/hapi-inline/issues/384))\n\n## [0.18.4](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.3...v0.18.4) (2026-09-21)\n\n## [0.18.3](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.2...v0.18.3) (2026-09-21)\n\n## [0.18.2](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.1...v0.18.2) (2026-09-21)\n\n## [0.18.1](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.0...v0.18.1) (2026-09-20)\n\n## [0.18.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.17.0...v0.18.0) (2026-09-20)\n\n## [Unreleased]\n\n## [0.17.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.16.0...v0.17.0) (2026-09-20)\n\n## [0.16.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.15.12...v0.16.0) (2026-09-20)\n";
   /* END GENERATED bundled-changelog */
   function loadBundledChangelog() {
     if (bundledChangelogPromise) return bundledChangelogPromise;
@@ -4920,7 +5162,7 @@
 
   window.HapiInline = {
     init: init,
-    _version: '0.19.5', // x-release-please-version
+    _version: '0.20.0', // x-release-please-version
     openCluster: function () { return openCluster(); },
     /** #287 — host Settings can offer the same hide/show the dock sheet does. */
     hideForThisUser: function () { setUserHidden(true); hideDockChrome(); },
@@ -4946,6 +5188,7 @@
     _probeSttRouteOrDisable: probeSttRouteOrDisable,
     _voiceIsUsable: voiceIsUsable,
     _voiceCapability: voiceCapability,
+    _repliesComposeVoiceAllowed: repliesComposeVoiceAllowed,
     _isTextFirst: isTextFirst,
     _extractMessage: extractMessage,
     isReady: function () { return ready; },

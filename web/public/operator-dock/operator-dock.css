@@ -385,6 +385,20 @@
   padding: 8px 10px;
 }
 .opdock-replies-compose textarea:focus { outline: 2px solid #7c3aed; outline-offset: 0; }
+.opdock-replies-compose .opdock-replies-mic {
+  flex-shrink: 0;
+  min-width: 40px;
+  min-height: 40px;
+  padding: 8px 10px;
+  line-height: 0;
+}
+.opdock-replies-compose .opdock-replies-mic svg {
+  display: block;
+}
+.opdock-replies-compose .opdock-replies-mic--on {
+  background: #dc2626;
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.45);
+}
 .opdock-replies-compose .opdock-send {
   flex-shrink: 0;
   min-width: 52px;
