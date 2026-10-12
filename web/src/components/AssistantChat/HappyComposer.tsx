@@ -31,6 +31,8 @@ import {
 import { useFue } from '@/lib/use-fue'
 import { FueCallout, FueDot } from '@/components/Fue'
 import type { AgentState, CodexCollaborationMode, PermissionMode, PiModelSummary } from '@/types/api'
+import type { CodexUsage } from '@hapi/protocol/types'
+import { composerCodexUsageForGauge } from '@/components/AssistantChat/codexBudgetAdapter'
 import type { Suggestion } from '@/hooks/useActiveSuggestions'
 import type { ConversationStatus } from '@/realtime/types'
 import { useActiveWord } from '@/hooks/useActiveWord'
@@ -2450,6 +2452,7 @@ export function HappyComposer(props: {
                                 scratchlistCount={props.scratchlistCount}
                                 onScratchlistToggle={props.onScratchlistToggle}
                                 omitPrimaryButton
+                                codexUsage={composerCodexUsageForGauge(agentFlavor, codexUsage)}
                             />
                         </div>
                         {/* Collapsed card: fill-height primary (empty → voice; draft → Send). Expanded: compact. */}
