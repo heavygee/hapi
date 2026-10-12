@@ -1629,7 +1629,14 @@ function SessionItem(props: {
         },
         onClick: () => {
             if (!menuOpen) {
-                onSelect(s.id, targetMessageId, targetMessageQuery)
+                // Only forward optional scroll-to-message args when set —
+                // callers (and wave-6 chip isolation tests) treat a bare
+                // session-id select as a one-arg call.
+                if (targetMessageId != null || targetMessageQuery != null) {
+                    onSelect(s.id, targetMessageId, targetMessageQuery)
+                } else {
+                    onSelect(s.id)
+                }
             }
         },
         threshold: 500
@@ -1657,7 +1664,7 @@ function SessionItem(props: {
             : null,
         [s, selected, showDetailedStatus, lastSeenVersion]
     )
-    // The rail lives on the button rather than inside SessionRowSummary so it
+    // The rail lives on the outer shell rather than inside SessionRowSummary so it
     // escapes the `opacity-50` disconnected-row treatment — a blocked agent
     // whose CLI dropped is precisely the one worth spotting.
     const blocked = getSessionBlockedState(s, { now: Date.now() })
@@ -1669,49 +1676,6 @@ function SessionItem(props: {
     const linkedIssue = getLinkedGithubIssue(s.metadata)
     return (
         <>
-            <button
-                type="button"
-                {...longPressHandlers}
-                data-session-id={s.id}
-                data-session-blocked={blocked ? (blocked.stale ? 'stale' : 'active') : undefined}
-                data-session-scroll-anchor
-                className={cn(
-                    'session-list-item group/session-row flex w-full flex-col gap-1 py-2 pr-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none rounded-lg',
-                    // Reserve the rail width on every row so blocked rows do
-                    // not shift their neighbours when the flag appears.
-                    'border-l-2 pl-2',
-                    blocked && blocked.stale
-                        ? 'border-[var(--app-hint)]'
-                        : blocked && sessionBlockedIsError(blocked)
-                            ? 'border-[var(--app-badge-error-text)]'
-                            : blocked
-                                ? 'border-[var(--app-badge-warning-text)]'
-                                : 'border-transparent',
-                    flashHighlight ? 'ring-2 ring-[var(--app-badge-warning-text)]' : '',
-                    selected ? 'bg-[var(--app-secondary-bg)]' : ''
-                )}
-                style={{ WebkitTouchCallout: 'none' }}
-                aria-current={selected ? 'page' : undefined}
-                aria-describedby={describedBy}
-            >
-                <SessionRowSummary
-                    session={s}
-                    showPath={showPath}
-                    showDetailedStatus={showDetailedStatus}
-                    selected={selected}
-                    nestedTooltips
-                    attentionTooltipId={attentionId}
-                    lastSeenVersion={lastSeenVersion}
-                    scheduleTooltipId={scheduleId}
-                    inRunningSection={inRunningSection}
-                    projectLabel={projectLabel}
-                    machineLabel={machineLabel}
-                    trailing={githubPrAwarenessEnabled && primaryPrRef ? (
-                        <SessionPrChip refs={s.metadata?.externalRefs} />
-                    ) : null}
-                    contentSnippet={contentSnippet}
-                />
-            </button>
             {/* The issue chip renders as a sibling of the role="button" div,
                 not a descendant — WAI-ARIA disallows a focusable descendant
                 of a button role (hiding-semantics guidance), which a merely
@@ -1736,11 +1700,32 @@ function SessionItem(props: {
                 partially scrolled off the viewport top and still anchoring.
                 Splitting them across the outer/inner divs silently broke
                 that distinction for every session row. */}
-            <div data-session-scroll-anchor className={`session-list-item group/session-row flex w-full items-start gap-1 rounded-lg py-2 pl-2.5 pr-2 transition-colors ${selected ? 'bg-[var(--app-secondary-bg)]' : ''}`}>
+            {/* Blocked rail stays on the outer shell so it escapes SessionRowSummary's
+                disconnected-row opacity treatment (soup #1717). */}
+            <div
+                data-session-scroll-anchor
+                className={cn(
+                    'session-list-item group/session-row flex w-full items-start gap-1 rounded-lg py-2 pr-2 transition-colors',
+                    // Reserve the rail width on every row so blocked rows do
+                    // not shift their neighbours when the flag appears.
+                    'border-l-2 pl-2',
+                    blocked && blocked.stale
+                        ? 'border-[var(--app-hint)]'
+                        : blocked && sessionBlockedIsError(blocked)
+                            ? 'border-[var(--app-badge-error-text)]'
+                            : blocked
+                                ? 'border-[var(--app-badge-warning-text)]'
+                                : 'border-transparent',
+                    flashHighlight ? 'ring-2 ring-[var(--app-badge-warning-text)]' : '',
+                    selected ? 'bg-[var(--app-secondary-bg)]' : ''
+                )}
+            >
                 <div
                     role="button"
                     tabIndex={0}
                     {...longPressHandlers}
+                    data-session-id={s.id}
+                    data-session-blocked={blocked ? (blocked.stale ? 'stale' : 'active') : undefined}
                     className="flex min-w-0 flex-1 flex-col gap-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none rounded-lg cursor-pointer"
                     style={{ WebkitTouchCallout: 'none' }}
                     aria-current={selected ? 'page' : undefined}
@@ -1759,6 +1744,10 @@ function SessionItem(props: {
                         projectLabel={projectLabel}
                         machineLabel={machineLabel}
                         showIssueChip={false}
+                        trailing={githubPrAwarenessEnabled && primaryPrRef ? (
+                            <SessionPrChip refs={s.metadata?.externalRefs} />
+                        ) : null}
+                        contentSnippet={contentSnippet}
                     />
                 </div>
                 {linkedIssue ? <IssueRefChip ref={linkedIssue} className="mt-0.5 shrink-0" /> : null}

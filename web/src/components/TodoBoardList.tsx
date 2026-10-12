@@ -3,6 +3,7 @@ import type { TodoBoardItem, TodoBoardSummary } from '@/types/api'
 import { TodoBoardSwitcherBar, TodoBoardSwitcherMenu, type TodoBoardFilterItem } from '@/components/TodoBoardSwitcher'
 import { AddTodoBoardDialog } from '@/components/AddTodoBoardDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { Button } from '@/components/ui/button'
 import { LoadingState } from '@/components/LoadingState'
 import { ExternalLinkIcon, RefreshIcon } from '@/components/icons'
 import { chipBaseClass, chipIdleClass } from '@/components/filterChipStyles'
@@ -285,7 +286,13 @@ export function TodoBoardList(props: {
                         {t('todo.error', { message: props.error })}
                     </div>
                 ) : props.items.length === 0 ? (
-                    <div className="px-1 py-4 text-sm text-[var(--app-hint)]">{t('todo.empty')}</div>
+                    <div className="flex flex-col items-center gap-3 px-4 py-10 text-center">
+                        <div className="text-sm font-medium text-[var(--app-fg)]">{t('todo.empty.title')}</div>
+                        <div className="max-w-sm text-sm text-[var(--app-hint)]">{t('todo.empty.body')}</div>
+                        <Button type="button" variant="outline" onClick={() => setAddDialogOpen(true)}>
+                            {t('todo.addBoard.chipLabel')}
+                        </Button>
+                    </div>
                 ) : (
                     <>
                         {props.error ? (

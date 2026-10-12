@@ -101,7 +101,12 @@ describe('SessionList blocked chrome (#1717)', () => {
 
         const row = document.querySelector('[data-session-id="stuck-one"]')
         expect(row?.getAttribute('data-session-blocked')).toBe('active')
-        expect(row?.className).toContain('border-[var(--app-badge-warning-text)]')
+        // Rail classes live on the scroll-anchor shell (sibling wrapper of the
+        // role="button" + issue-chip), not on the interactive element itself —
+        // hapi#238 ARIA restructure split those concerns.
+        expect(row?.closest('[data-session-scroll-anchor]')?.className).toContain(
+            'border-[var(--app-badge-warning-text)]'
+        )
     })
 
     it('does not leave a blocked-but-connected session duplicated in the Active bucket', () => {
