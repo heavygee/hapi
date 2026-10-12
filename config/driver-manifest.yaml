@@ -1090,11 +1090,12 @@ layers:
   # Was: driver/1724-auto-continue-delta @ b5dd9ff77
   # - branch: driver/1724-auto-continue-delta
 
-  # heavygee/hapi#235 / PR #238 — to-do board view (cards/chips/relative-time,
+  # heavygee/hapi#235 / PR #238 — Boards view (cards/chips/relative-time,
   # accent wash, detail pane + spawn, board add/remove, github_issue chip,
-  # Projects v2 /views/<n> filter capture).
-  # Re-tip 2026-10-12: driver/235-todo-board-view @ 932112059 (feat/todo-board-view-ui
-  # wave-6 — rich content, write actions, review cleanup). Was 53f7e79b4 / 60061cf5e.
+  # Projects v2 /views/<n> filter capture). Renamed To-Do → Boards.
+  # Re-tip 2026-10-12: driver/235-todo-board-view @ 8b2695ef1 (= feat/todo-board-view-ui
+  # tip — Boards rename, HAPI_BOARD_*, FUE toggle badge, ExternalRefSchema).
+  # Was 932112059 / 53f7e79b4 / 60061cf5e.
   # Safe default github.com::heavygee::6 — NOT personal project 4.
   # Worktree: peer feat/todo-board-view-ui; layer ref driver/235-todo-board-view
   # MUST match origin/feat/todo-board-view-ui before remat (stale layer = incident).
@@ -1139,6 +1140,20 @@ layers:
   # Worktree: ~/coding/hapi/worktrees/terminal-to-agent (+ soup thin 2011-terminal-to-agent-soup)
   # Web-only → remat --build-web; hard-reload (no hub restart required).
   - branch: driver/2011-terminal-to-agent
+
+  # heavygee/hapi#229 — ElevenLabs ConvAI agents never set
+  # conversation.max_duration_seconds, so new agents got ElevenLabs' 600s
+  # default and cut real conversations off. Adds ELEVENLABS_MAX_DURATION_SECONDS
+  # (default 1800, 60-7200) applied on agent create + reconciled onto existing
+  # hub-managed agents, plus a Settings -> Voice -> manage providers UI field.
+  # Fork-stage: heavygee/hapi#230 (also lane-B candidate for tiann/hapi).
+  # Upstream-aimed tip: feat/elevenlabs-max-duration @ 89e3b5c65
+  # Soup thin tip (trivial union merge vs settings.ts/voice.test.ts — see
+  # hub/src/config/settings.ts, hub/src/web/routes/voice.test.ts for the other
+  # layers it merges past): driver/elevenlabs-max-duration @ 605e89d21
+  # Worktree: ~/coding/hapi/worktrees/elevenlabs-max-duration-soup
+  # Hub+web → remat --build-web + hapi-restart-hub (hub policy path).
+  - branch: driver/elevenlabs-max-duration
 
   # DROPPED 2026-10-06: driver/1933-claude-resume-amnesia — squash 94523eb0d is on
   # fork main (heavygee/hapi#204). Soup base is now origin/main, so tip-forward

@@ -81,7 +81,9 @@ describe('buildHapiMcpBridge skill lookup config', () => {
             '--url',
             'http://127.0.0.1:43006/',
             '--tools',
-            'change_title,display_image,display_video,display_media,list_peers,search_peers,search_content,ping_peer,inspect_peer,spawn_peer,session_job,skill_lookup'
+            'change_title,display_image,display_video,display_media,list_peers,search_peers,search_content,ping_peer,inspect_peer,spawn_peer,session_job,skill_lookup',
+            '--hapi-session-id',
+            'hub-session-1',
         ])
         expect(bridge.mcpServers.hapi.tools).toEqual({
             display_image: { approval_mode: 'prompt' },
@@ -100,9 +102,15 @@ describe('buildHapiMcpBridge skill lookup config', () => {
     it('does not expose skill_lookup for native-skill bridge callers', async () => {
         const bridge = await buildHapiMcpBridge(createClient())
 
-        expect(harness.cliArgs.at(-1)).toBe(
-            'change_title,display_image,display_video,display_media,list_peers,search_peers,search_content,ping_peer,inspect_peer,spawn_peer,session_job'
-        )
+        expect(harness.cliArgs).toEqual([
+            'mcp',
+            '--url',
+            'http://127.0.0.1:43006/',
+            '--tools',
+            'change_title,display_image,display_video,display_media,list_peers,search_peers,search_content,ping_peer,inspect_peer,spawn_peer,session_job',
+            '--hapi-session-id',
+            'hub-session-1',
+        ])
         expect(bridge.mcpServers.hapi.tools).toEqual({
             display_image: { approval_mode: 'prompt' },
             display_video: { approval_mode: 'prompt' },

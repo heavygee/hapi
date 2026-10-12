@@ -17,7 +17,9 @@ const harness = vi.hoisted(() => ({
 
 vi.mock('@/agent/sessionFactory', () => ({
     bootstrapSession: vi.fn(async () => ({
+        // bootstrapSession returns ApiSessionClient as `session` (not a wrapper).
         session: {
+            sessionId: 'hub-session-acp-1',
             updateAgentState: vi.fn(),
             onUserMessage: vi.fn((handler) => {
                 harness.userMessageHandler = handler
@@ -169,7 +171,9 @@ describe('runAgentSession', () => {
             '--url',
             'http://127.0.0.1:1234',
             '--tools',
-            'change_title,display_image,display_video,display_media,list_peers,search_peers,ping_peer,inspect_peer,spawn_peer,session_job,skill_lookup'
+            'change_title,display_image,display_video,display_media,list_peers,search_peers,ping_peer,inspect_peer,spawn_peer,session_job,skill_lookup',
+            '--hapi-session-id',
+            'hub-session-acp-1',
         ])
         expect(harness.newSessionOptions).toMatchObject({
             cwd: '/tmp/project',
