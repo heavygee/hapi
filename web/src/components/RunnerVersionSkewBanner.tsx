@@ -342,18 +342,11 @@ export function RunnerVersionSkewBanner({
             className={`${positionClass} max-h-[40vh] overflow-y-auto rounded-lg border-2 border-amber-500 bg-amber-50 p-3 shadow-lg dark:bg-amber-950/90`}
         >
             <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-amber-950 dark:text-amber-50">
-                        {policy === 'auto'
-                            ? t('runner.skew.banner.autoProblemTitle', { count: skewed.length })
-                            : t('runner.skew.banner.summaryTitle', { count: skewed.length })}
-                    </p>
-                    <p className="mt-1 text-xs leading-relaxed text-amber-900 dark:text-amber-100">
-                        {policy === 'auto'
-                            ? t('runner.skew.banner.autoProblemBody')
-                            : t('runner.skew.banner.summaryBody')}
-                    </p>
-                </div>
+                <p className="min-w-0 flex-1 text-sm font-semibold text-amber-950 dark:text-amber-50">
+                    {policy === 'auto'
+                        ? t('runner.skew.banner.autoProblemTitle', { count: skewed.length })
+                        : t('runner.skew.banner.summaryTitle', { count: skewed.length })}
+                </p>
                 <div className="flex shrink-0 gap-1">
                     <button
                         type="button"
@@ -373,6 +366,17 @@ export function RunnerVersionSkewBanner({
                     </button>
                 </div>
             </div>
+
+            {/* Full banner width — body must not share the title row with Minimize/Snooze
+                or mobile leaves a dead column beside the prose (same class of bug as NOTES). */}
+            <p
+                className="mt-1 w-full min-w-0 text-xs leading-relaxed text-amber-900 dark:text-amber-100"
+                data-testid="runner-version-skew-banner-body"
+            >
+                {policy === 'auto'
+                    ? t('runner.skew.banner.autoProblemBody')
+                    : t('runner.skew.banner.summaryBody')}
+            </p>
 
             {/* Full banner width — must sit outside the title/actions flex row or mobile
                 shrink-wraps NOTES beside Minimize/Snooze (~half width). */}

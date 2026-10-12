@@ -708,5 +708,8 @@ describe('RunnerVersionSkewBanner', () => {
         // in the title flex row (that was the ~half-width mobile bug).
         const banner = screen.getByTestId('runner-version-skew-banner')
         expect(details.parentElement).toBe(banner)
+        const body = screen.getByTestId('runner-version-skew-banner-body')
+        expect(body.parentElement).toBe(banner)
+        expect(body.className).toMatch(/\bw-full\b/)
     })
 })
