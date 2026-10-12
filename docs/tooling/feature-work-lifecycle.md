@@ -172,12 +172,15 @@ Manifest format, atomic swap mechanics, DB jiu-jitsu: [`driver-soup.md`](./drive
 | Stage | Meaning |
 |-------|---------|
 | **Ready for operator** | Peer gates passed; links + inline proof delivered |
-| **Operator approved** | Explicit OK to open upstream PR |
-| **Shipped upstream** | PR merged on `tiann/hapi` |
+| **Operator dogfood OK / fleet seal** | **Operator-spoken only** (not agent-proposed). Phrases: `fleet seal`, `good enough for fleet`, `seal tip <soupTag>`. Means: seal this tip as fleet-facing + `push-upgrade` to fleet hosts; **and** open the upstream PR if that code is destined upstream. Fork-only tooling gets the fleet half only. Dogfood remat / tip thrash ≠ seal. Agents must ask if unclear; never invent seal. |
+| **Operator approved** | Legacy alias for the upstream-PR half of fleet seal (explicit OK to open upstream PR). Prefer the fleet-seal phrases above when both apply. |
+| **Shipped upstream** | PR merged on `tiann/hapi` — **not** the fleet gate (upstream is slow; do not wait on merge to push fleet) |
 | **Post-merge cleanup done** | Session notified; peer dropped soup layer(s); worktree + branch gone (or audit-clean) |
 | **Soup rematerialized** | After **all** merged peers in the wave finished cleanup — one `hapi-sync-fork-main` + one `hapi-driver-rebuild --build-web --verify` |
 | **Done on soup (web-only)** | Manifest layer + rebuild/build-web + **`hapi-verify-web-dist` OK** + operator hard-reload |
 | **Done on soup (hub/cli)** | Rebuild `--verify` + verify-web-dist (if web touched) + **`hapi-restart-hub`** + operator proof on `:3006` |
+
+**Fleet push rule (#247):** `latest` / soup tip is dogfood. Fleet hosts only advance on **operator fleet seal** (above). Do not gate fleet on upstream merge or bot green. Ninja is self-contained — not in oos fleet push unless the operator names it.
 
 **Ship After Fix (fork):** when your branch is already in the manifest and you pushed **`web/` only**, `hapi-driver-rebuild --build-web` is part of done — not "wait for operator."
 
