@@ -793,6 +793,8 @@ function toSummary(board: StoredTodoBoard): { id: string; label: string } {
     return { id: board.id, label: board.label }
 }
 
+const OWNER_ONLY_ERROR = 'To-do boards are only available to the hub owner'
+
 export function createTodoBoardRoutes(
     dataDir: string,
     runGraphql: (target: ProjectQueryTarget) => GhProjectV2Response | Promise<GhProjectV2Response> = runGhGraphql,

@@ -1816,7 +1816,9 @@ function NewSessionPage() {
     const { machines, isLoading: machinesLoading, error: machinesError } = useMachines(api, true)
     const { t } = useTranslation()
     const { addToast } = useToast()
-    const { directory: initialDirectory, machineId: initialMachineId, shareTransferId, initialMessage, linkIssueUrl } = newSessionRoute.useSearch()
+    const { directory: initialDirectory, machineId: initialMachineId, shareTransferId, initialMessage, linkIssueUrl, briefingId } = newSessionRoute.useSearch()
+
+    const briefing = useMemo(() => briefingId ? peekTodoSpawnBriefing(briefingId) : null, [briefingId])
 
     // Set synchronously (before the success navigate) so the generic
     // abandonment cleanup below skips the success path — `handleSuccess`
@@ -1852,11 +1854,12 @@ function NewSessionPage() {
         if (shareTransferId) {
             void deleteShareTransfer(shareTransferId)
         }
+        if (briefingId) clearTodoSpawnBriefing(briefingId)
         navigate({
             to: '/sessions',
             ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
-    }, [navigate, shareTransferId])
+    }, [navigate, shareTransferId, briefingId])
 
     // The header Back button calls the generic goBack (browser-history-aware,
     // not a hardcoded /sessions navigate) rather than handleCancel.
@@ -1899,13 +1902,14 @@ function NewSessionPage() {
         // Forward the currently-selected machine so /browse opens scoped to
         // it rather than falling back to `hapi:lastMachineId`, which can
         // disagree if the user changed machines without yet creating a
-        // session. Preserve shareTransferId so a share-target spawn that
-        // detours through /browse still seeds the composer after success.
-        const search: { machineId?: string; shareTransferId?: string } = {}
+        // session. Preserve shareTransferId/briefingId so a share-target or
+        // to-do spawn that detours through /browse still seeds after success.
+        const search: { machineId?: string; shareTransferId?: string; briefingId?: string } = {}
         if (args.machineId) search.machineId = args.machineId
         if (shareTransferId) search.shareTransferId = shareTransferId
+        if (briefingId) search.briefingId = briefingId
         navigate({ to: '/browse', search })
-    }, [navigate, shareTransferId])
+    }, [navigate, shareTransferId, briefingId])
 
     return (
         <div className="flex h-full min-h-0 flex-col">
@@ -1955,7 +1959,7 @@ function BrowsePage() {
     const router = useRouter()
     const { machines, isLoading: machinesLoading } = useMachines(api, true)
     const { t } = useTranslation()
-    const { machineId: initialMachineId, shareTransferId } = browseRoute.useSearch()
+    const { machineId: initialMachineId, shareTransferId, briefingId } = browseRoute.useSearch()
 
     // Mirrors NewSessionPage's own cleanup — a to-do spawn's "Choose folder"
     // detour carries the same briefing/share-transfer into this route's own
@@ -1974,11 +1978,14 @@ function BrowsePage() {
     const handleStartSession = useCallback((machineId: string, directory: string) => {
         navigate({
             to: '/sessions/new',
-            search: shareTransferId
-                ? { directory, machineId, shareTransferId }
-                : { directory, machineId }
+            search: {
+                directory,
+                machineId,
+                ...(shareTransferId ? { shareTransferId } : {}),
+                ...(briefingId ? { briefingId } : {}),
+            },
         })
-    }, [navigate, shareTransferId])
+    }, [navigate, shareTransferId, briefingId])
 
     return (
         <div className="flex h-full min-h-0 flex-col">
@@ -2134,6 +2141,7 @@ type NewSessionSearch = {
     shareTransferId?: string
     initialMessage?: string
     linkIssueUrl?: string
+    briefingId?: string
 }
 
 const newSessionRoute = createRoute({
@@ -2156,6 +2164,9 @@ const newSessionRoute = createRoute({
         if (typeof search.linkIssueUrl === 'string' && search.linkIssueUrl) {
             result.linkIssueUrl = search.linkIssueUrl
         }
+        if (typeof search.briefingId === 'string' && search.briefingId) {
+            result.briefingId = search.briefingId
+        }
         return result
     },
     component: NewSessionPage,
@@ -2164,13 +2175,16 @@ const newSessionRoute = createRoute({
 const browseRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: '/browse',
-    validateSearch: (search: Record<string, unknown>): { machineId?: string; shareTransferId?: string } => {
-        const result: { machineId?: string; shareTransferId?: string } = {}
+    validateSearch: (search: Record<string, unknown>): { machineId?: string; shareTransferId?: string; briefingId?: string } => {
+        const result: { machineId?: string; shareTransferId?: string; briefingId?: string } = {}
         if (typeof search.machineId === 'string' && search.machineId) {
             result.machineId = search.machineId
         }
         if (typeof search.shareTransferId === 'string' && search.shareTransferId) {
             result.shareTransferId = search.shareTransferId
+        }
+        if (typeof search.briefingId === 'string' && search.briefingId) {
+            result.briefingId = search.briefingId
         }
         return result
     },

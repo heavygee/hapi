@@ -1877,13 +1877,8 @@ export function NewSession(props: {
                 setLastUsedMachineId(machineId)
                 addRecentPath(machineId, trimmedDirectory)
     
-                if (props.initialMessage?.trim()) {
-                    // Seeds the composer draft the session page already restores
-                    // on mount (useComposerDraft) — editable, not sent, same as
-                    // any other draft. No new composer plumbing needed.
-                    saveDraft(result.sessionId, props.initialMessage)
-                }
-            props.onSuccess(result.sessionId)
+                seedInitialMessageDraft(result.sessionId)
+                props.onSuccess(result.sessionId)
                 return
             }
 
