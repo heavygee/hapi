@@ -1131,6 +1131,14 @@ layers:
   # Hub+web → remat --build-web + hapi-restart-hub (hub policy path).
   - branch: driver/251-auto-keepalive-apply
 
+  # tiann/hapi#2011 — terminal To agent / Selection to agent: append xterm
+  # buffer or selection to composer draft, navigate back to chat.
+  # Upstream tip: feat/terminal-to-agent @ 6c12bafb9
+  # Soup thin tip on live driver HEAD: driver/2011-terminal-to-agent @ b1154a6b1
+  # Worktree: ~/coding/hapi/worktrees/terminal-to-agent (+ soup thin 2011-terminal-to-agent-soup)
+  # Web-only → remat --build-web; hard-reload (no hub restart required).
+  - branch: driver/2011-terminal-to-agent
+
   # DROPPED 2026-10-06: driver/1933-claude-resume-amnesia — squash 94523eb0d is on
   # fork main (heavygee/hapi#204). Soup base is now origin/main, so tip-forward
   # absorbs it from the base; keeping the layer would double-apply / conflict.
