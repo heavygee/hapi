@@ -29,4 +29,4 @@ Optional soft note (not promote): dogfood→upstream checklist already says proo
 
 ## Skip
 
-- n/a (reflection filed)
+- n/a
