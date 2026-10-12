@@ -948,8 +948,12 @@ layers:
   # Upstream #1598 still OPEN — feature lives on soup tip ancestry until merge/remat.
   # Was: - branch: driver/session-content-search
 
-  # DROPPED 2026-10-12 — tiann/hapi#1710 feat/search-peers (space relief; never PR'd;
-  # already absorbed into soup tip @ a3313d9a4 / live driver). Issue still OPEN.
+  # tiann/hapi#1710 — search_peers densify (feature already in tip ancestry; this layer
+  # is the dense MCP row layout only). Thin tip on live soup HEAD.
+  # Upstream thin: feat/search-peers @ b9c9a02a0. Soup union: driver/search-peers.
+  # Worktree: ~/coding/hapi/worktrees/search-peers-soup
+  # Tip: 8eb70a9df — re-thin after dogfood bump if tip-forward SKIP.
+  - branch: driver/search-peers
 
   # tiann/hapi#1756 — in-session (open chat) FTS search + jump. Reuses #1554 indexer;
   # web-only tip (header SessionInChatSearch → ?messageId=&messageQuery=).
