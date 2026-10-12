@@ -1093,7 +1093,8 @@ layers:
   # heavygee/hapi#235 / PR #238 — to-do board view (cards/chips/relative-time,
   # accent wash, detail pane + spawn, board add/remove, github_issue chip,
   # Projects v2 /views/<n> filter capture).
-  # Re-carry 2026-10-11 from feat tip 53f7e79b4 (ls-remote / PR #238 head).
+  # Re-tip 2026-10-12: driver/235-todo-board-view @ 932112059 (feat/todo-board-view-ui
+  # wave-6 — rich content, write actions, review cleanup). Was 53f7e79b4 / 60061cf5e.
   # Safe default github.com::heavygee::6 — NOT personal project 4.
   # Worktree: peer feat/todo-board-view-ui; layer ref driver/235-todo-board-view
   # MUST match origin/feat/todo-board-view-ui before remat (stale layer = incident).

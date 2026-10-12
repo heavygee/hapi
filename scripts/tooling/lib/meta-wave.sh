@@ -12,15 +12,92 @@
 #      (fail-closed legacy).
 # Orphans (merged PR, no HAPI session) never enter the wave and never block.
 #
-# Attribution footgun (w-241-2007 / 2026-10-12): soup layer comments often cite the
-# *issue* (#2006) or an ancestor (#1724 / #209), not the merged PR (#2007 / #241).
-# Callers MUST pass relatedRefs (closingIssues + title "(#N)") and branchHints
-# (headRef + driver|feat|fix|chore|soup/… tokens from the PR body) into
-# mw_wave_member_clean so Gate A still sees the live `- branch:` line.
+# Attribution footguns (w-241-2007 / 2026-10-12):
+#   1) Soup layer comments often cite the *issue* (#2006) or an ancestor
+#      (#1724 / #209), not the merged PR (#2007 / #241). Callers MUST pass
+#      relatedRefs (closingIssues + title "(#N)") and branchHints (headRef +
+#      driver|feat|fix|chore|soup/… tokens from the PR body) into
+#      mw_wave_member_clean so Gate A still sees the live `- branch:` line.
+#   2) Incomplete drop: comment says DROPPED #N but the `- branch:` line for
+#      that layer is still uncommented. That must stay Gate A dirty — a DROPPED
+#      prose marker alone never clears soup.
 #
 # Sourced by hapi-meta-daily.sh. Unit tests: lib/meta-wave.test.sh
 # NO network. Callers inject manifest text + worktree existence checks.
 # Optional: HAPI_META_WORKTREES_ROOT — override …/worktrees dir for declared names.
+
+# Branch refs named inside a DROPPED/Was comment block (newline-separated).
+_mw_block_named_branches() {
+    local block="$1"
+    {
+        printf '%s' "$block" | grep -Eio '(feat|fix|chore|driver|soup)/[A-Za-z0-9._-]+' || true
+        printf '%s' "$block" | grep -Eio 'Was:[[:space:]]*[^[:space:]@]+' \
+            | sed -E 's/^[Ww]as:[[:space:]]*//' || true
+        printf '%s' "$block" | grep -Eio '\-[[:space:]]*branch:[[:space:]]*[^[:space:]]+' \
+            | sed -E 's/.*branch:[[:space:]]*//' || true
+    } | sed '/^$/d' | sort -u
+}
+
+# Exit 0 if a DROPPED comment for this PR still has a matching live `- branch:` line
+# (incomplete drop — prose said DROPPED but soup layer remains).
+mw_manifest_incomplete_drop_active() {
+    local text="$1" pr="$2"
+    [[ -n "$pr" && "$pr" =~ ^[0-9]+$ ]] || return 1
+    local block="" line stripped branch
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        stripped="${line#"${line%%[![:space:]]*}"}"
+        if [[ -z "$stripped" ]]; then
+            if _mw_block_mentions_pr "$block" "$pr" && _mw_block_dropped_pr "$block" "$pr"; then
+                while IFS= read -r branch; do
+                    [[ -z "$branch" ]] && continue
+                    if mw_manifest_branch_layer_active "$text" "$branch"; then
+                        return 0
+                    fi
+                done < <(_mw_block_named_branches "$block")
+            fi
+            block=""
+            continue
+        fi
+        if [[ "$stripped" == \#* ]]; then
+            block+="$stripped"$'\n'
+            continue
+        fi
+        # Active layer line ends the comment block — still evaluate incomplete drop
+        # against the whole-file branch list (layer may be this line or elsewhere).
+        if [[ "$stripped" =~ ^-[[:space:]]*(branch|pr|integrate): ]]; then
+            if _mw_block_mentions_pr "$block" "$pr" && _mw_block_dropped_pr "$block" "$pr"; then
+                while IFS= read -r branch; do
+                    [[ -z "$branch" ]] && continue
+                    if mw_manifest_branch_layer_active "$text" "$branch"; then
+                        return 0
+                    fi
+                done < <(_mw_block_named_branches "$block")
+            fi
+            block=""
+            continue
+        fi
+        if [[ "$stripped" != \#* ]]; then
+            if _mw_block_mentions_pr "$block" "$pr" && _mw_block_dropped_pr "$block" "$pr"; then
+                while IFS= read -r branch; do
+                    [[ -z "$branch" ]] && continue
+                    if mw_manifest_branch_layer_active "$text" "$branch"; then
+                        return 0
+                    fi
+                done < <(_mw_block_named_branches "$block")
+            fi
+            block=""
+        fi
+    done <<<"$text"
+    if _mw_block_mentions_pr "$block" "$pr" && _mw_block_dropped_pr "$block" "$pr"; then
+        while IFS= read -r branch; do
+            [[ -z "$branch" ]] && continue
+            if mw_manifest_branch_layer_active "$text" "$branch"; then
+                return 0
+            fi
+        done < <(_mw_block_named_branches "$block")
+    fi
+    return 1
+}
 
 # mw_manifest_pr_layer_active <manifest_text> <pr_number>
 # Exit 0 if an active (uncommented) layer is attributable to PR; 1 if clean.
@@ -30,6 +107,11 @@ mw_manifest_pr_layer_active() {
 
     # Active `- pr: N` layer
     if printf '%s\n' "$text" | grep -Eiq "^[[:space:]]*-[[:space:]]*pr:[[:space:]]*${pr}[[:space:]]*$"; then
+        return 0
+    fi
+
+    # Incomplete drop: DROPPED #N prose but named `- branch:` still uncommented.
+    if mw_manifest_incomplete_drop_active "$text" "$pr"; then
         return 0
     fi
 
