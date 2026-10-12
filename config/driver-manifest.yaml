@@ -1116,9 +1116,8 @@ layers:
   - branch: driver/247-deliberate-fleet-push
 
   # heavygee/hapi#248 — skew-banner "what's new" from soup NOTES.md on HubUpgradeOffer.
-  # Re-tip 2026-10-11: driver/248-upgrade-release-notes @ ed6f7114f on live soup
-  # f616ef861 — NOTES <details> is a banner-level sibling (not beside Minimize/Snooze);
-  # prior w-full-only tip still measured ~0.47 banner width on mobile viewport.
+  # Re-tip 2026-10-12: driver/248-upgrade-release-notes @ c49eb83ca on live soup
+  # 00908a486 — explanatory body also banner-level w-full (same dead-column bug as NOTES).
   # Worktree: ~/coding/hapi/worktrees/deliberate-fleet-push
   # Hub+web → remat --build-web + hapi-restart-hub.
   - branch: driver/248-upgrade-release-notes
