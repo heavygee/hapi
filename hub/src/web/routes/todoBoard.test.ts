@@ -91,6 +91,11 @@ describe('makeBoardId', () => {
         expect(viewId).not.toBe(plainId)
         expect(viewId).toBe('github.com::heavygee::6::view::8')
     })
+
+    it('normalizes host and owner casing — GitHub hostnames and owner logins are case-insensitive (Codex review)', () => {
+        expect(makeBoardId('GitHub.com', 'HeavyGee', 6)).toBe(makeBoardId('github.com', 'heavygee', 6))
+        expect(makeBoardId('GitHub.com', 'HeavyGee', 6)).toBe('github.com::heavygee::6')
+    })
 })
 
 describe('parseProjectUrl', () => {
@@ -300,6 +305,20 @@ describe('POST /api/todo-boards', () => {
         const second = await app.request('/api/todo-boards', {
             method: 'POST',
             body: JSON.stringify({ url: 'https://github.com/orgs/acme/projects/9' })
+        })
+        const body = await second.json() as TodoBoardsResponse
+        expect(body.boards).toHaveLength(2)
+    })
+
+    it('is idempotent across different casing of the same host/owner (Codex review)', async () => {
+        const app = await createApp(() => ({ data: {} }), () => ({ data: { repositoryOwner: { projectV2: { title: 'Acme Roadmap' } } } }))
+        await app.request('/api/todo-boards', {
+            method: 'POST',
+            body: JSON.stringify({ url: 'https://github.com/orgs/acme/projects/9' })
+        })
+        const second = await app.request('/api/todo-boards', {
+            method: 'POST',
+            body: JSON.stringify({ url: 'https://GitHub.com/orgs/Acme/projects/9' })
         })
         const body = await second.json() as TodoBoardsResponse
         expect(body.boards).toHaveLength(2)

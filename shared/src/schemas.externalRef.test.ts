@@ -29,6 +29,24 @@ describe('parseIssueUrl', () => {
         expect(parseIssueUrl('not an issue url')).toBeNull()
         expect(parseIssueUrl('heavygee/hapi#0')).toBeNull()
     })
+
+    it('rejects a URL delimiter embedded in the owner/repo shorthand instead of mis-parsing it (Codex review)', () => {
+        // Regression: the repo-capture group previously excluded only `/`,
+        // whitespace, and `#` — not `?`/`&`/`=` — so "owner/repo?tab=x#12"
+        // matched with repo captured as "repo?tab=x", producing the
+        // malformed "https://github.com/owner/repo?tab=x/issues/12" (a
+        // browser treats everything after `?` as a query string).
+        expect(parseIssueUrl('owner/repo?tab=x#12')).toBeNull()
+        expect(parseIssueUrl('https://github.com/owner/repo?tab=x/issues/12')).toBeNull()
+    })
+
+    it('still accepts every character GitHub actually allows in owner/repo names', () => {
+        expect(parseIssueUrl('my-org/my_repo.js#1')).toEqual({
+            url: 'https://github.com/my-org/my_repo.js/issues/1',
+            repo: 'my-org/my_repo.js',
+            number: 1
+        })
+    })
 })
 
 describe('upsertExternalRef', () => {

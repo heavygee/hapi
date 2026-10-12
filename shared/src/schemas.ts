@@ -184,16 +184,31 @@ function finishIssueMatch(repo: string, numberRaw: string): { url: string; repo:
     return { url: `https://github.com/${repo}/issues/${number}`, repo, number }
 }
 
+// GitHub owner/org and repo names are only ever letters, digits, hyphens,
+// underscores, and periods — never URL delimiters. The previous
+// `[^/\s#]+` character class excluded only `/`, whitespace, and `#`, so an
+// input like `owner/repo?tab=x#12` matched with "repo?tab=x" captured as the
+// repo component, producing the malformed
+// `https://github.com/owner/repo?tab=x/issues/12` (the browser treats
+// everything after `?` as a query string, pointing the resulting chip at the
+// repo instead of the issue, and this same string later fails to re-parse
+// for linked-session matching). Restricting to GitHub's actual allowed
+// character set rejects that input outright instead of silently mis-parsing
+// it (Codex review).
+const GH_NAME_SEGMENT = '[A-Za-z0-9_.-]+'
+const ISSUE_URL_RE = new RegExp(`^(?:https?:\\/\\/)?github\\.com\\/(${GH_NAME_SEGMENT}\\/${GH_NAME_SEGMENT})\\/issues\\/(\\d+)\\/?(?:[/?#].*)?$`, 'i')
+const ISSUE_SHORTHAND_RE = new RegExp(`^(${GH_NAME_SEGMENT}\\/${GH_NAME_SEGMENT})#(\\d+)$`)
+
 export function parseIssueUrl(input: string): { url: string; repo: string; number: number } | null {
     const trimmed = input.trim()
 
-    const urlMatch = /^(?:https?:\/\/)?github\.com\/([^/\s#]+\/[^/\s#]+)\/issues\/(\d+)\/?(?:[/?#].*)?$/i.exec(trimmed)
+    const urlMatch = ISSUE_URL_RE.exec(trimmed)
     if (urlMatch) {
         const [, repo, numberRaw] = urlMatch
         return finishIssueMatch(repo!, numberRaw!)
     }
 
-    const shorthandMatch = /^([^/\s#]+\/[^/\s#]+)#(\d+)$/.exec(trimmed)
+    const shorthandMatch = ISSUE_SHORTHAND_RE.exec(trimmed)
     if (shorthandMatch) {
         const [, repo, numberRaw] = shorthandMatch
         return finishIssueMatch(repo!, numberRaw!)
