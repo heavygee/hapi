@@ -84,6 +84,28 @@ describe('sessionSearchMatch', () => {
         expect(scoreSessionSearchMatch(session, 'hetzner')).toBe(0)
     })
 
+    it('matches summary.text when name is empty (generated / Claude native titles)', () => {
+        const session = createSession({
+            id: 'summary-only-title',
+            metadata: {
+                path: '/tmp/quiet-project',
+                host: 'localhost',
+                flavor: 'claude',
+                claudeSessionId: 'claude-xyz',
+                summary: { text: 'Arthur Scout deploy (hetzner)' }
+            }
+        })
+        const q = normalizeSessionSearchQuery('hetzner')
+        expect(scoreSessionSearchMatch(session, q)).toBe(400)
+        // Keyword lives only in summary.text — not path or ids.
+        const fields = sessionSearchFields(session)
+        expect(fields.name).toBe('')
+        expect(fields.summaryText).toContain('hetzner')
+        expect(fields.path.toLowerCase()).not.toContain('hetzner')
+        expect(fields.agentSessionId.toLowerCase()).not.toContain('hetzner')
+        expect(fields.id.toLowerCase()).not.toContain('hetzner')
+    })
+
     it('exposes search fields from summary metadata', () => {
         const fields = sessionSearchFields(createSession({
             metadata: {
@@ -91,12 +113,14 @@ describe('sessionSearchMatch', () => {
                 path: '/work/coding/hapi',
                 host: 'localhost',
                 flavor: 'cursor',
-                cursorSessionId: 'cursor-abc'
+                cursorSessionId: 'cursor-abc',
+                summary: { text: 'generated title' }
             }
         }))
         expect(fields).toEqual({
             id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
             name: 'Peer search',
+            summaryText: 'generated title',
             path: '/work/coding/hapi',
             agentSessionId: 'cursor-abc'
         })
