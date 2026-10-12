@@ -45,6 +45,7 @@ import { useComposerDraft } from '@/hooks/useComposerDraft'
 import type { AttachmentDraftInput } from '@/lib/composer-attachment-drafts'
 import { persistInactiveComposerAttachments, setComposerDraftSnapshot, updateComposerDraftTextSnapshot, attachmentDraftRevision, resetInactiveComposerAttachmentVisibility } from '@/lib/composer-draft-transfer'
 import { useComposerEnterBehavior } from '@/hooks/useComposerEnterBehavior'
+import type { CodexUsage } from '@hapi/protocol/types'
 import { FloatingOverlay } from '@/components/ChatInput/FloatingOverlay'
 import { Autocomplete } from '@/components/ChatInput/Autocomplete'
 import { StatusBar } from '@/components/AssistantChat/StatusBar'
@@ -285,6 +286,23 @@ export function ModelEffortSettingsSection(props: {
     )
 }
 
+export type ComposerEnterKeyAction = 'send' | 'newline' | 'ignore'
+
+export function resolveComposerEnterKeyAction(input: {
+    composerEnterBehavior: 'send' | 'newline'
+    isExpanded: boolean
+    ctrlOrMeta: boolean
+    altKey: boolean
+}): ComposerEnterKeyAction {
+    const insertNewline = input.isExpanded || input.composerEnterBehavior === 'newline'
+    if (insertNewline) {
+        if (input.ctrlOrMeta && !input.altKey) return 'send'
+        return 'newline'
+    }
+    if (!input.ctrlOrMeta && !input.altKey) return 'send'
+    return 'ignore'
+}
+
 export function HappyComposer(props: {
     sessionId?: string
     focusInputRef?: MutableRefObject<(() => void) | null>
@@ -307,6 +325,7 @@ export function HappyComposer(props: {
     contextWindow?: number | null
     /** Model for the context-window heuristic; see StatusBar.contextModel. */
     contextModel?: string | null
+    codexUsage?: CodexUsage | null
     controlledByUser?: boolean
     concurrentClients?: boolean
     agentFlavor?: string | null
@@ -416,6 +435,7 @@ export function HappyComposer(props: {
         contextCacheRead,
         contextWindow,
         contextModel,
+        codexUsage,
         controlledByUser = false,
         concurrentClients = false,
         agentFlavor,
@@ -469,6 +489,7 @@ export function HappyComposer(props: {
 
     const api = useAui()
     const { composerEnterBehavior } = useComposerEnterBehavior()
+    void codexUsage
     const composerText = useAuiState((s) => s.composer.text)
     const attachments = useAuiState((s) => s.composer.attachments)
     const localAttachmentOrderRef = useRef<string[]>([])
@@ -1281,18 +1302,20 @@ export function HappyComposer(props: {
             return
         }
 
-        // Only plain Enter (no modifiers) sends; other modifier combos are ignored
+        // Collapsed: honor Settings Enter behavior. Expanded: always newline
+        // (plain Enter inserts; Ctrl/Cmd+Enter or the send button submits).
         if (key === 'Enter') {
-            if (composerEnterBehavior === 'newline') {
-                if ((e.ctrlKey || e.metaKey) && !e.altKey && canSend) {
-                    e.preventDefault()
-                    flushAndSend()
-                    setShowContinueHint(false)
-                }
+            const action = resolveComposerEnterKeyAction({
+                composerEnterBehavior,
+                isExpanded,
+                ctrlOrMeta: e.ctrlKey || e.metaKey,
+                altKey: e.altKey,
+            })
+            if (action === 'newline') {
                 return
             }
             e.preventDefault()
-            if (!e.ctrlKey && !e.altKey && !e.metaKey && canSend) {
+            if (action === 'send' && canSend) {
                 flushAndSend()
                 setShowContinueHint(false)
             }
