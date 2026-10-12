@@ -141,8 +141,29 @@ layers:
 EOF
 )
 # The active - branch: after a DROPPED block that mentions 1413 should be clean
-# for 1413 (dropped matcher), not attributed as active.
+# for 1413 (dropped matcher), not attributed as active — unless the DROPPED
+# prose names that same branch (incomplete drop; covered below).
 if mw_manifest_pr_layer_active "$MANIFEST_OWNER_REPO" 1413; then bad "tiann/hapi#1413 DROPPED must be clean"; else ok; fi
+
+# Incomplete drop: DROPPED #N prose but `- branch:` for that named layer still live.
+MANIFEST_INCOMPLETE_DROP=$(cat <<'EOF'
+base: upstream/main
+layers:
+  # DROPPED 2026-10-12: driver/large-empty-dictate MERGED upstream as tiann/hapi#2007
+  # Was: driver/large-empty-dictate @ a0bb74078
+  - branch: driver/large-empty-dictate
+
+  # DROPPED 2026-10-12: driver/1724-auto-continue-delta MERGED fork as heavygee/hapi#241
+  # Was: driver/1724-auto-continue-delta @ b5dd9ff77
+  # - branch: driver/1724-auto-continue-delta
+EOF
+)
+if mw_manifest_pr_layer_active "$MANIFEST_INCOMPLETE_DROP" 2007; then ok; else bad "incomplete drop #2007 must stay dirty"; fi
+reason="$(mw_wave_member_clean "$MANIFEST_INCOMPLETE_DROP" "" 2007 || true)"
+eq "incomplete drop #2007 dirty" "$reason" "layer"
+# Fully commented drop for #241 stays clean.
+got="$(mw_wave_member_clean "$MANIFEST_INCOMPLETE_DROP" "" 241)" && ok || bad "complete drop #241 exit"
+eq "complete drop #241 clean" "$got" "clean"
 
 # --- issue≠PR / ancestor-ref footgun (w-241-2007 premature WAVE CLEAR) ---
 MANIFEST_ISSUE_NOT_PR=$(cat <<'EOF'
