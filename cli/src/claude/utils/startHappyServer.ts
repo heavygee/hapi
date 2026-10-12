@@ -431,7 +431,7 @@ function createHapiMcpServer(
     });
 
     mcp.registerTool<any, any>('search_peers', {
-        description: 'Search peer HAPI sessions on the same hub/namespace by keyword (name, path, agentSessionId, id). Not bounded by list_peers recency — finds quiet/aged sessions. Returns a dense table: legend `# id a|i flavor title` then one row per hit (full UUID; a=active i=idle; title truncated). Prefer this over /proc→SQLite archaeology. Then call inspect_peer / ping_peer with a returned id.',
+        description: 'Search peer HAPI sessions on the same hub/namespace by keyword (name, summary/displayed title, path, agentSessionId, id). Not bounded by list_peers recency — finds quiet/aged sessions. Returns a dense table: legend `# id a|i flavor title` then one row per hit (full UUID; a=active i=idle; title truncated). Prefer this over /proc→SQLite archaeology. Then call inspect_peer / ping_peer with a returned id.',
         title: 'Search Peer Sessions',
         inputSchema: searchPeersInputSchema,
     }, async (args: { query: string; limit?: number }) => {

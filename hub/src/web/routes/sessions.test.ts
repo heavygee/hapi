@@ -1808,6 +1808,79 @@ describe('sessions routes', () => {
         expect(body.sessions.map((s) => s.id)).not.toContain('hot-unrelated')
     })
 
+    it('GET /sessions/search matches summary.text when name is unset', async () => {
+        const sessions = [
+            createSession({
+                id: 'summary-title-only',
+                active: false,
+                updatedAt: 5,
+                metadata: {
+                    path: '/tmp/quiet-project',
+                    host: 'localhost',
+                    flavor: 'claude',
+                    claudeSessionId: 'claude-quiet',
+                    summary: { text: 'Arthur Scout deploy (hetzner)' }
+                }
+            })
+        ]
+        const engine = {
+            getSessionsByNamespace: () => sessions,
+            getFutureScheduledMessageCounts: (ids: string[]) => new Map(ids.map((id) => [id, 0])),
+            getNextScheduledAtBySessionIds: (_ids: string[]) => new Map<string, number>(),
+            resolveSessionAccess: () => ({ ok: false, reason: 'not-found' as const })
+        } as unknown as Partial<SyncEngine>
+
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createSessionsRoutes(() => engine as SyncEngine))
+
+        const response = await app.request('/api/sessions/search?q=hetzner')
+        expect(response.status).toBe(200)
+        const body = await response.json() as { sessions: Array<{ id: string }> }
+        expect(body.sessions.map((s) => s.id)).toEqual(['summary-title-only'])
+    })
+
+    it('GET /sessions/search honors peerListFetchLimit padding above MCP page size 100', async () => {
+        const sessions = Array.from({ length: 105 }, (_, i) => createSession({
+            id: `match-${String(i).padStart(3, '0')}`,
+            active: false,
+            updatedAt: 1000 - i,
+            metadata: {
+                name: `hetzner peer ${i}`,
+                path: `/tmp/p${i}`,
+                host: 'localhost',
+                flavor: 'codex',
+                codexSessionId: `cx-${i}`
+            }
+        }))
+        const engine = {
+            getSessionsByNamespace: () => sessions,
+            getFutureScheduledMessageCounts: (ids: string[]) => new Map(ids.map((id) => [id, 0])),
+            getNextScheduledAtBySessionIds: (_ids: string[]) => new Map<string, number>(),
+            resolveSessionAccess: () => ({ ok: false, reason: 'not-found' as const })
+        } as unknown as Partial<SyncEngine>
+
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createSessionsRoutes(() => engine as SyncEngine))
+
+        // peerListFetchLimit(100, { excludeCaller: true }) === 102
+        const response = await app.request('/api/sessions/search?q=hetzner&limit=102')
+        expect(response.status).toBe(200)
+        const body = await response.json() as { sessions: Array<{ id: string }> }
+        expect(body.sessions).toHaveLength(102)
+        // Still clamps to hub max 500 (not the old MCP page cap of 100).
+        const capped = await app.request('/api/sessions/search?q=hetzner&limit=1000')
+        const cappedBody = await capped.json() as { sessions: Array<{ id: string }> }
+        expect(cappedBody.sessions).toHaveLength(105)
+    })
+
     it('GET /sessions/search is not captured by /sessions/:id', async () => {
         const engine = {
             getSessionsByNamespace: () => [],

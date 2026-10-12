@@ -392,8 +392,9 @@ export async function listPeerSessions(
 }
 
 /**
- * Keyword search across the hub namespace (name / path / agentSessionId / id).
- * Not recency-bounded — finds quiet sessions that fall out of `list_peers`.
+ * Keyword search across the hub namespace (name / summary.text / path /
+ * agentSessionId / id). Not recency-bounded — finds quiet sessions that fall
+ * out of `list_peers`.
  */
 export async function searchPeerSessions(
     options: SearchPeerSessionsOptions
