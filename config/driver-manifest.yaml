@@ -1133,8 +1133,8 @@ layers:
 
   # tiann/hapi#2011 — terminal To agent / Selection to agent: append xterm
   # buffer or selection to composer draft, navigate back to chat.
-  # Upstream tip: feat/terminal-to-agent @ 6c12bafb9
-  # Soup thin tip on live driver HEAD: driver/2011-terminal-to-agent @ b1154a6b1
+  # Upstream tip: feat/terminal-to-agent @ c853efbe9
+  # Soup thin tip on live driver HEAD: driver/2011-terminal-to-agent @ e89bcf2bd
   # Worktree: ~/coding/hapi/worktrees/terminal-to-agent (+ soup thin 2011-terminal-to-agent-soup)
   # Web-only → remat --build-web; hard-reload (no hub restart required).
   - branch: driver/2011-terminal-to-agent
