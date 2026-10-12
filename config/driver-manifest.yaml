@@ -820,12 +820,12 @@ layers:
   # Tip: f0803e996
   - branch: fix/claude-mcp-spawn-model-effort
 
-  # heavygee/hapi#120 / Heavygee-Projects/hapi-inline#466 — vendor hapi-inline operator dock (fork-local, not tiann).
-  # Tip: 7911134bd (driver/hapi-inline-revendor-0200) — pin v0.20.0 replies mic (#466/#467).
-  # Replaces driver/hapi-inline-revendor-0195 / operator-dock v0.19.5. Keeps #453/#437/#432/#419.
-  # Worktree: ~/coding/hapi/worktrees/hapi-inline-revendor-0200
+  # heavygee/hapi#120 / Heavygee-Projects/hapi-inline#474 — vendor hapi-inline operator dock (fork-local, not tiann).
+  # Tip: 756aa72f3 (driver/hapi-inline-revendor-0201) — pin v0.20.1 markup AndroidOperator path (#474/#473).
+  # Replaces driver/hapi-inline-revendor-0200 / operator-dock v0.20.0. Keeps #466/#453/#419.
+  # Worktree: ~/coding/hapi/worktrees/hapi-inline-revendor-0201
   # Hub+web → remat needs --build-web + hapi-restart-hub (embedded web assets).
-  - branch: driver/hapi-inline-revendor-0200
+  - branch: driver/hapi-inline-revendor-0201
 
   # heavygee/hapi#121 — operator-hold chip pulse (🛑 needs_operator / babysit.hold).
   # Soup UI on awareness ancestry (schema enum + SessionPrChip FueDot). Classifier
