@@ -92,7 +92,7 @@ describe('sessionSearchMatch', () => {
                 host: 'localhost',
                 flavor: 'claude',
                 claudeSessionId: 'claude-xyz',
-                summary: { text: 'Arthur Scout deploy (hetzner)' }
+                summary: { text: 'Arthur Scout deploy (hetzner)', updatedAt: 1 }
             }
         })
         const q = normalizeSessionSearchQuery('hetzner')
@@ -114,7 +114,7 @@ describe('sessionSearchMatch', () => {
                 host: 'localhost',
                 flavor: 'cursor',
                 cursorSessionId: 'cursor-abc',
-                summary: { text: 'generated title' }
+                summary: { text: 'generated title', updatedAt: 1 }
             }
         }))
         expect(fields).toEqual({
