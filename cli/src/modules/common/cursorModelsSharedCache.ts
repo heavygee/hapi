@@ -8,7 +8,15 @@ function getHapiHomeDir(): string {
 }
 
 function getSharedCachePath(): string {
-    return join(getHapiHomeDir(), 'cache', 'cursor-models.json');
+    // Vitest runs CLI tests in a pool of workers that all share HAPI_HOME.
+    // Isolate the on-disk catalog per worker so parallel suites cannot clobber
+    // each other's writeSharedCursorModelsCache fixtures (flake: #1428 bare-ACP
+    // spawn remap saw an empty cache mid-test and returned the raw wire id).
+    const worker = process.env.VITEST_POOL_ID ?? process.env.VITEST_WORKER_ID;
+    const file = worker
+        ? `cursor-models.vitest-${worker}.json`
+        : 'cursor-models.json';
+    return join(getHapiHomeDir(), 'cache', file);
 }
 
 function isUsableModelsResponse(response: CursorModelsResponse | null): response is CursorModelsResponse {

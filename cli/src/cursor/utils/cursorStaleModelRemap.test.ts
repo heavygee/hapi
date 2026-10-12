@@ -71,17 +71,21 @@ describe('cursorStaleModelRemap', () => {
     });
 
     it('pre-spawns bare base when cache only lists bare ACP catalog ids (#1428)', () => {
-        writeSharedCursorModelsCache({
-            success: true,
+        const bareCatalog = {
+            success: true as const,
             availableModels: [
                 { modelId: 'gpt-5.3-codex' },
                 { modelId: 'composer-2.5' },
             ],
             currentModelId: 'gpt-5.3-codex',
             cliModelSkus: [{ modelId: 'gpt-5.3-codex' }],
-        });
+        };
+        writeSharedCursorModelsCache(bareCatalog);
 
         expect(resolveCursorSpawnModel('gpt-5.3-codex[fast=false]')).toBe('gpt-5.3-codex');
+        // Re-write before the second resolve: other vitest workers share HAPI_HOME
+        // and can truncate cursor-models.json between expects (see cache helper).
+        writeSharedCursorModelsCache(bareCatalog);
         expect(resolveCursorSpawnModel('composer-2.5[fast=true]')).toBe('composer-2.5');
     });
 
