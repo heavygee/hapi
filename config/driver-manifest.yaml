@@ -898,10 +898,10 @@ layers:
   # Tip: 498430d3c
   - branch: driver/overseer-brain-active
 
-  # tiann/hapi#1686 — local TUI: queue hub follow-ups until process exit (no implicit doSwitch).
-  # Worktree: ~/coding/hapi/worktrees/local-followup-abort @ fix/local-followup-queue
-  # Tip: f2f12bdf5 (origin/fix/local-followup-queue). CLI-only; BaseLocalLauncher untouched by other soup layers.
-  - branch: fix/local-followup-queue
+  # DROPPED 2026-10-12: fix/local-followup-queue — space relief (volumes).
+  # tiann/hapi#1686 CLOSED 2026-09-14 pending verification (not claimed fixed); no upstream PR.
+  # Tip was f2f12bdf5 @ ~/coding/hapi/worktrees/local-followup-abort — never dogfood-greenlit.
+  # - branch: fix/local-followup-queue
 
   # tiann/hapi#1705 — archiveSession false-archive when session socket id is stale but runner child lives.
   # PR: tiann/hapi#1706 fix/archive-verify-runner-before-marking-gone
@@ -943,17 +943,17 @@ layers:
   # Tip: fa9a3dbaa
   - branch: fix/cursor-unexpected-stop-blocked-footer
 
-  # tiann/hapi#1554 / PR #1598 — FTS5 session message content search (dogfood)
-  # Worktree: ~/coding/hapi/worktrees/session-content-search-soup @ driver/session-content-search
-  # Tip: ba7b3f96d — SCHEMA v29→v30 union (PR claimed v25–v28); re-thin after dogfood bump
-  # Absorbed: soup HEAD 418179d4b (merge + Meta fix 1de2e14dc). Live DB user_version=30.
-  - branch: driver/session-content-search
+  # DROPPED 2026-10-12: tiann/hapi#1554 / PR #1598 FTS5 session content search (dogfood).
+  # Tip ba7b3f96d absorbed into soup (418179d4b + later tips); wt cleaned for /work space relief.
+  # Upstream #1598 still OPEN — feature lives on soup tip ancestry until merge/remat.
+  # Was: - branch: driver/session-content-search
 
-  # tiann/hapi#1710 — search_peers MCP/CLI: keyword find beyond list_peers recency.
-  # Hub GET /api/sessions/search + MCP search_peers + hapi search-peers.
-  # Worktree: ~/coding/hapi/worktrees/search-peers @ feat/search-peers
-  # Tip: f7a290740 (rebased onto upstream/main)
-  - branch: feat/search-peers
+  # tiann/hapi#1710 — search_peers densify (feature already in tip ancestry; this layer
+  # is the dense MCP row layout only). Thin tip on live soup HEAD.
+  # Upstream thin: feat/search-peers @ b9c9a02a0. Soup union: driver/search-peers.
+  # Worktree: ~/coding/hapi/worktrees/search-peers-soup
+  # Tip: 8eb70a9df — re-thin after dogfood bump if tip-forward SKIP.
+  - branch: driver/search-peers
 
   # tiann/hapi#1756 — in-session (open chat) FTS search + jump. Reuses #1554 indexer;
   # web-only tip (header SessionInChatSearch → ?messageId=&messageQuery=).
