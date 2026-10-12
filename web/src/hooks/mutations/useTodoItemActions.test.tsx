@@ -25,24 +25,28 @@ describe('useTodoItemActions', () => {
         expect(invalidateSpy).toHaveBeenCalled()
     })
 
-    it('tracks closingUrl across the call, scoped to the acting item', async () => {
+    it('tracks closingUrls across the call, scoped to the acting item', async () => {
         const queryClient = new QueryClient()
         let resolveClose: () => void = () => {}
         const closeTodoItem = vi.fn(() => new Promise<void>((resolve) => { resolveClose = resolve }))
         const api = { closeTodoItem } as unknown as ApiClient
 
         const { result } = renderHook(() => useTodoItemActions(api, 'board-1'), { wrapper: wrapper(queryClient) })
-        expect(result.current.closingUrl).toBeNull()
+        expect(result.current.closingUrls.size).toBe(0)
 
         const promise = result.current.closeItem({ url: 'https://github.com/a/b/issues/1' })
-        await waitFor(() => expect(result.current.closingUrl).toBe('https://github.com/a/b/issues/1'))
+        await waitFor(() => expect(result.current.closingUrls.has('https://github.com/a/b/issues/1')).toBe(true))
 
         resolveClose()
         await promise
-        await waitFor(() => expect(result.current.closingUrl).toBeNull())
+        await waitFor(() => expect(result.current.closingUrls.size).toBe(0))
     })
 
-    it('does not clear closingUrl for a still-running item when an earlier one on a different item settles first (Codex review)', async () => {
+    it('shows two genuinely concurrent actions on different items as pending at the same time (Codex review, second pass)', async () => {
+        // A single nullable slot can only ever reflect the most recently
+        // started item — it couldn't show A as pending once B started, even
+        // though A's own request was still genuinely in flight. A set must
+        // hold both.
         const queryClient = new QueryClient()
         let resolveA: () => void = () => {}
         let resolveB: () => void = () => {}
@@ -57,21 +61,24 @@ describe('useTodoItemActions', () => {
         const { result } = renderHook(() => useTodoItemActions(api, 'board-1'), { wrapper: wrapper(queryClient) })
 
         const promiseA = result.current.closeItem({ url: 'https://github.com/a/b/issues/1' })
-        await waitFor(() => expect(result.current.closingUrl).toBe('https://github.com/a/b/issues/1'))
+        await waitFor(() => expect(result.current.closingUrls.has('https://github.com/a/b/issues/1')).toBe(true))
 
         const promiseB = result.current.closeItem({ url: 'https://github.com/a/b/issues/2' })
-        await waitFor(() => expect(result.current.closingUrl).toBe('https://github.com/a/b/issues/2'))
+        await waitFor(() => expect(result.current.closingUrls.has('https://github.com/a/b/issues/2')).toBe(true))
 
-        // Item A's request settles first, but item B's is still in flight —
-        // the slot must keep pointing at B, not clear to null (which would
-        // wrongly re-enable B's button mid-request).
+        // Both still in flight — both must read as pending simultaneously.
+        expect(result.current.closingUrls.has('https://github.com/a/b/issues/1')).toBe(true)
+        expect(result.current.closingUrls.size).toBe(2)
+
+        // A settles first — only A's entry is removed, B's stays.
         resolveA()
         await promiseA
-        await waitFor(() => expect(result.current.closingUrl).toBe('https://github.com/a/b/issues/2'))
+        await waitFor(() => expect(result.current.closingUrls.has('https://github.com/a/b/issues/1')).toBe(false))
+        expect(result.current.closingUrls.has('https://github.com/a/b/issues/2')).toBe(true)
 
         resolveB()
         await promiseB
-        await waitFor(() => expect(result.current.closingUrl).toBeNull())
+        await waitFor(() => expect(result.current.closingUrls.size).toBe(0))
     })
 
     it('rejects without calling the API when the item has no url (draft issue)', async () => {

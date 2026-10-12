@@ -4,6 +4,22 @@ import type { ApiClient } from '@/api/client'
 import type { TodoBoardItem } from '@/types/api'
 import { queryKeys } from '@/lib/query-keys'
 
+function addUrl(current: ReadonlySet<string>, url: string): ReadonlySet<string> {
+    if (current.has(url)) return current
+    const next = new Set(current)
+    next.add(url)
+    return next
+}
+
+function removeUrl(current: ReadonlySet<string>, url: string): ReadonlySet<string> {
+    if (!current.has(url)) return current
+    const next = new Set(current)
+    next.delete(url)
+    return next
+}
+
+const EMPTY_URLS: ReadonlySet<string> = new Set()
+
 /**
  * Close/reopen/comment/status-change for a to-do item — the first
  * write-capable piece of the to-do view (hapi#238). Every action
@@ -12,36 +28,32 @@ import { queryKeys } from '@/lib/query-keys'
  * write specifically) and throws on failure, same contract as
  * useTodoBoardActions, leaving toast/dialog-error presentation to the caller.
  *
- * Pending state is tracked as the acting item's *url*, not a bare boolean —
- * one hook instance is shared across the whole board, so a boolean would
- * misattribute an in-flight action on item A as pending for item B the
- * moment the user switches the detail pane to B before A's request settles.
- *
- * Each `finally` only clears the slot if it still holds *that* call's own
- * url (Codex review): starting the same action on item B while item A's is
- * still in flight overwrites the slot to B's url; without this guard,
- * whichever of A/B's request settles first would blindly null the slot even
- * though the other is still running, re-enabling that item's button mid-
- * request and allowing a duplicate submission (e.g. two comments posted).
- * This doesn't let two items show as pending *simultaneously* for the same
- * action — only the most recent one does — but it does guarantee a still-
- * running item is never wrongly shown as idle.
+ * Pending state is tracked as a *set* of the acting items' urls, not a
+ * single nullable one — one hook instance is shared across the whole board,
+ * so two genuinely concurrent actions of the same kind (e.g. closing item A
+ * while also closing item B, started before A's request settles) must both
+ * be able to show as pending at once. A single-value slot (an earlier
+ * version of this hook, Codex review: two passes) could only ever reflect
+ * the most recently started one — guarding against a stale `finally`
+ * clearing the WRONG item's slot fixed one symptom, but item A's button
+ * still read as idle (and re-submittable) while A's own request was still
+ * genuinely in flight, whenever B started after it.
  */
 export function useTodoItemActions(api: ApiClient | null, boardId: string | null): {
     closeItem: (item: Pick<TodoBoardItem, 'url'>) => Promise<void>
     reopenItem: (item: Pick<TodoBoardItem, 'url'>) => Promise<void>
     commentOnItem: (item: Pick<TodoBoardItem, 'url'>, body: string) => Promise<void>
     setItemStatus: (item: Pick<TodoBoardItem, 'url'>, status: string) => Promise<void>
-    closingUrl: string | null
-    reopeningUrl: string | null
-    commentingUrl: string | null
-    settingStatusUrl: string | null
+    closingUrls: ReadonlySet<string>
+    reopeningUrls: ReadonlySet<string>
+    commentingUrls: ReadonlySet<string>
+    settingStatusUrls: ReadonlySet<string>
 } {
     const queryClient = useQueryClient()
-    const [closingUrl, setClosingUrl] = useState<string | null>(null)
-    const [reopeningUrl, setReopeningUrl] = useState<string | null>(null)
-    const [commentingUrl, setCommentingUrl] = useState<string | null>(null)
-    const [settingStatusUrl, setSettingStatusUrl] = useState<string | null>(null)
+    const [closingUrls, setClosingUrls] = useState<ReadonlySet<string>>(EMPTY_URLS)
+    const [reopeningUrls, setReopeningUrls] = useState<ReadonlySet<string>>(EMPTY_URLS)
+    const [commentingUrls, setCommentingUrls] = useState<ReadonlySet<string>>(EMPTY_URLS)
+    const [settingStatusUrls, setSettingStatusUrls] = useState<ReadonlySet<string>>(EMPTY_URLS)
 
     const invalidate = useCallback(() => {
         if (!boardId) return Promise.resolve()
@@ -56,47 +68,50 @@ export function useTodoItemActions(api: ApiClient | null, boardId: string | null
 
     const closeItem = useCallback(async (item: Pick<TodoBoardItem, 'url'>) => {
         const { api: client, boardId: id, url } = requireTarget(item.url)
-        setClosingUrl(url)
+        setClosingUrls(current => addUrl(current, url))
         try {
             await client.closeTodoItem(id, url)
             await invalidate()
         } finally {
-            setClosingUrl(current => current === url ? null : current)
+            setClosingUrls(current => removeUrl(current, url))
         }
     }, [requireTarget, invalidate])
 
     const reopenItem = useCallback(async (item: Pick<TodoBoardItem, 'url'>) => {
         const { api: client, boardId: id, url } = requireTarget(item.url)
-        setReopeningUrl(url)
+        setReopeningUrls(current => addUrl(current, url))
         try {
             await client.reopenTodoItem(id, url)
             await invalidate()
         } finally {
-            setReopeningUrl(current => current === url ? null : current)
+            setReopeningUrls(current => removeUrl(current, url))
         }
     }, [requireTarget, invalidate])
 
     const commentOnItem = useCallback(async (item: Pick<TodoBoardItem, 'url'>, body: string) => {
         const { api: client, boardId: id, url } = requireTarget(item.url)
-        setCommentingUrl(url)
+        setCommentingUrls(current => addUrl(current, url))
         try {
             await client.commentOnTodoItem(id, url, body)
             await invalidate()
         } finally {
-            setCommentingUrl(current => current === url ? null : current)
+            setCommentingUrls(current => removeUrl(current, url))
         }
     }, [requireTarget, invalidate])
 
     const setItemStatus = useCallback(async (item: Pick<TodoBoardItem, 'url'>, status: string) => {
         const { api: client, boardId: id, url } = requireTarget(item.url)
-        setSettingStatusUrl(url)
+        setSettingStatusUrls(current => addUrl(current, url))
         try {
             await client.setTodoItemStatus(id, url, status)
             await invalidate()
         } finally {
-            setSettingStatusUrl(current => current === url ? null : current)
+            setSettingStatusUrls(current => removeUrl(current, url))
         }
     }, [requireTarget, invalidate])
 
-    return { closeItem, reopenItem, commentOnItem, setItemStatus, closingUrl, reopeningUrl, commentingUrl, settingStatusUrl }
+    return {
+        closeItem, reopenItem, commentOnItem, setItemStatus,
+        closingUrls, reopeningUrls, commentingUrls, settingStatusUrls
+    }
 }

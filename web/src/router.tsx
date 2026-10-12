@@ -30,6 +30,7 @@ import { resolveTodoItemDirectory } from '@/lib/resolveTodoItemDirectory'
 import { buildTodoItemSpawnMessage } from '@/lib/todoItemSpawnMessage'
 import { clearTodoSpawnBriefing, peekTodoSpawnBriefing, stashTodoSpawnBriefing } from '@/lib/todoSpawnBriefing'
 import { shouldExitTodoModeForNavigation } from '@/lib/sessionsTodoModeSync'
+import { isAbandoningSpawnFlow } from '@/lib/spawnFlowAbandonment'
 import { parseIssueUrl } from '@hapi/protocol/schemas'
 import { findSessionLinkedToIssue } from '@/lib/externalRefs'
 import type { TodoBoardItem } from '@/types/api'
@@ -388,10 +389,10 @@ function SessionsPage() {
         reopenItem: reopenTodoItem,
         commentOnItem: commentOnTodoItem,
         setItemStatus: setTodoItemStatus,
-        closingUrl: closingTodoItemUrl,
-        reopeningUrl: reopeningTodoItemUrl,
-        commentingUrl: commentingOnTodoItemUrl,
-        settingStatusUrl: settingTodoItemStatusUrl,
+        closingUrls: closingTodoItemUrls,
+        reopeningUrls: reopeningTodoItemUrls,
+        commentingUrls: commentingOnTodoItemUrls,
+        settingStatusUrls: settingTodoItemStatusUrls,
     } = useTodoItemActions(api, effectiveBoardId)
     const [selectedTodoItemId, setSelectedTodoItemId] = useState<string | null>(null)
     useEffect(() => {
@@ -1097,10 +1098,10 @@ function SessionsPage() {
                                     url: ''
                                 }))
                             }}
-                            isClosing={closingTodoItemUrl === selectedTodoItem.url}
-                            isReopening={reopeningTodoItemUrl === selectedTodoItem.url}
-                            isCommenting={commentingOnTodoItemUrl === selectedTodoItem.url}
-                            isSettingStatus={settingTodoItemStatusUrl === selectedTodoItem.url}
+                            isClosing={selectedTodoItem.url !== null && closingTodoItemUrls.has(selectedTodoItem.url)}
+                            isReopening={selectedTodoItem.url !== null && reopeningTodoItemUrls.has(selectedTodoItem.url)}
+                            isCommenting={selectedTodoItem.url !== null && commentingOnTodoItemUrls.has(selectedTodoItem.url)}
+                            isSettingStatus={selectedTodoItem.url !== null && settingTodoItemStatusUrls.has(selectedTodoItem.url)}
                         />
                     ) : (
                         <Outlet />
@@ -1810,20 +1811,62 @@ function NewSessionPage() {
     const { api } = useAppContext()
     const navigate = useNavigate()
     const goBack = useAppGoBack()
+    const router = useRouter()
     const queryClient = useQueryClient()
     const { machines, isLoading: machinesLoading, error: machinesError } = useMachines(api, true)
     const { t } = useTranslation()
     const { addToast } = useToast()
     const { directory: initialDirectory, machineId: initialMachineId, shareTransferId, initialMessage, linkIssueUrl } = newSessionRoute.useSearch()
 
+    // Set synchronously (before the success navigate) so the generic
+    // abandonment cleanup below skips the success path — `handleSuccess`
+    // handles shareTransferId/briefingId itself, and differently: it marks
+    // the share transfer as *completed into this session* (setSharePendingTransfer),
+    // not deleted, so the receiving flow can still look it up. Deleting it
+    // out from under that on the same navigate() call would break it.
+    const spawnedRef = useRef(false)
+
+    // Abandoning the spawn flow — by any means — must clean up the stash, or
+    // a to-do item's briefing (private board content; the whole reason this
+    // travels via sessionStorage instead of the URL) sits there indefinitely
+    // and a later browser Forward can resurrect it in the composer (hapi#238
+    // Codex review, two passes: the first only covered the explicit Cancel/
+    // header-Back buttons, missing browser/device back-driven abandonment
+    // entirely, since neither button's onClick runs for that). Subscribing
+    // to the router's own navigation event covers every abandonment path
+    // uniformly — explicit buttons, a toast/link click elsewhere, and
+    // browser-history navigation alike — the same mechanism already proven
+    // for exiting To-Do mode on any session-targeting navigation. `/browse`
+    // is excluded: `handleChooseFolder`'s round-trip through it and back is
+    // a deliberate continuation of this same spawn, not an abandonment.
+    useEffect(() => {
+        return router.subscribe('onBeforeNavigate', (event) => {
+            if (spawnedRef.current) return
+            if (!isAbandoningSpawnFlow(event.toLocation.pathname)) return
+            if (shareTransferId) void deleteShareTransfer(shareTransferId)
+            if (briefingId) clearTodoSpawnBriefing(briefingId)
+        })
+    }, [router, shareTransferId, briefingId])
+
     const handleCancel = useCallback(() => {
         if (shareTransferId) {
             void deleteShareTransfer(shareTransferId)
         }
-        navigate({ to: '/sessions' })
+        navigate({
+            to: '/sessions',
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
+        })
     }, [navigate, shareTransferId])
 
+    // The header Back button calls the generic goBack (browser-history-aware,
+    // not a hardcoded /sessions navigate) rather than handleCancel.
+    const handleHeaderBack = useCallback(() => {
+        goBack()
+    }, [goBack])
+
+
     const handleSuccess = useCallback((sessionId: string) => {
+        spawnedRef.current = true
         if (shareTransferId) {
             setSharePendingTransfer(shareTransferId, sessionId)
         }
