@@ -6,7 +6,7 @@ import type { SessionSummary } from '@/types/api'
 // and would silently fail to match every GHE-hosted item.
 const ISSUE_URL_PATH = /^\/([^/]+)\/([^/]+)\/issues\/(\d+)\/?$/
 
-function parseRepoAndNumber(url: string): { repo: string; number: number } | null {
+function parseHostRepoAndNumber(url: string): { host: string; repo: string; number: number } | null {
     let parsed: URL
     try {
         parsed = new URL(url)
@@ -16,7 +16,7 @@ function parseRepoAndNumber(url: string): { repo: string; number: number } | nul
     const match = ISSUE_URL_PATH.exec(parsed.pathname)
     if (!match) return null
     const [, owner, repo, numberRaw] = match
-    return { repo: `${owner}/${repo}`, number: Number(numberRaw) }
+    return { host: parsed.host.toLowerCase(), repo: `${owner}/${repo}`, number: Number(numberRaw) }
 }
 
 /**
@@ -46,20 +46,26 @@ export function getLinkedGithubIssue(metadata: { externalRefs?: ExternalRef[] } 
  * dedups same-issue re-links), so checking only the most-recent ref would
  * stop finding the session while viewing A, even though A is still linked.
  *
- * Matches by parsed repo+number, not raw URL string equality (Codex review,
- * third pass): GitHub repo paths are case-insensitive, and a ref created via
- * `hapi link-issue owner/repo#N` preserves whatever casing the caller typed,
- * which can differ from the to-do item's own canonically-cased URL for the
- * same issue. `upsertExternalRef` already treats `repo` case-insensitively
- * for its own dedup; this mirrors that convention.
+ * Matches by parsed host+repo+number, not raw URL string equality (Codex
+ * review, third and fourth passes): GitHub repo paths are case-insensitive,
+ * and a ref created via `hapi link-issue owner/repo#N` preserves whatever
+ * casing the caller typed, which can differ from the to-do item's own
+ * canonically-cased URL for the same issue — `upsertExternalRef` already
+ * treats `repo` case-insensitively for its own dedup, so this mirrors that
+ * convention. The host must also match: GHE boards are explicitly supported
+ * alongside github.com, so `Owner/Repo#12` on github.com and on a GHE host
+ * are different issues that happen to share a repo path and number — only
+ * comparing repo+number would conflate them into a false "already linked".
  */
 export function findSessionLinkedToIssue(sessions: SessionSummary[], issueUrl: string | null): SessionSummary | null {
     if (!issueUrl) return null
-    const target = parseRepoAndNumber(issueUrl)
+    const target = parseHostRepoAndNumber(issueUrl)
     if (!target) return null
     return sessions.find(session =>
-        session.metadata?.externalRefs?.some(ref =>
-            ref.kind === 'github_issue' && ref.number === target.number && ref.repo.toLowerCase() === target.repo.toLowerCase()
-        )
+        session.metadata?.externalRefs?.some(ref => {
+            if (ref.kind !== 'github_issue' || ref.number !== target.number) return false
+            const refParsed = parseHostRepoAndNumber(ref.url)
+            return refParsed?.host === target.host && refParsed.repo.toLowerCase() === target.repo.toLowerCase()
+        })
     ) ?? null
 }

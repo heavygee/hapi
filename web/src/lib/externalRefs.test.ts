@@ -111,4 +111,18 @@ describe('findSessionLinkedToIssue', () => {
         })
         expect(findSessionLinkedToIssue([session], 'https://ghe.example/acme/widgets/issues/12')).toBe(session)
     })
+
+    it('does NOT match the same repo/number on a different host (Codex review, fourth pass)', () => {
+        // A session linked to acme/widgets#12 on github.com must not be
+        // reported as the linked session for the unrelated acme/widgets#12
+        // on a GHE host, even though repo and number happen to coincide.
+        const session = makeSession({
+            id: 'session-1',
+            metadata: {
+                path: '/x', name: 'n', flavor: 'codex',
+                externalRefs: [{ kind: 'github_issue', url: 'https://github.com/acme/widgets/issues/12', repo: 'acme/widgets', number: 12, linkedAt: 1 }]
+            }
+        })
+        expect(findSessionLinkedToIssue([session], 'https://ghe.example/acme/widgets/issues/12')).toBeNull()
+    })
 })

@@ -799,6 +799,40 @@ describe('write-target project membership verification', () => {
         const body = await response.json() as { error: string }
         expect(body.error).toContain('Resource not accessible by integration')
     })
+
+    it('rejects a write to an item that is on the project but hidden by the board\'s view filter (Codex review)', async () => {
+        // Project membership alone isn't enough for a view-scoped board — the
+        // whole point of adding one is to restrict exposure to the view's
+        // filtered subset, so a write must also be checked against it.
+        const viewItemsResponse = {
+            data: { repositoryOwner: { projectV2: { items: { nodes: [
+                { id: 'item-1', content: { __typename: 'Issue', url: 'https://github.com/acme/widgets/issues/1', title: 'Visible' } }
+            ] } } } }
+        }
+        const app = await createApp(
+            () => viewItemsResponse,
+            () => ({ data: { repositoryOwner: { projectV2: { title: 'Acme Roadmap' } } } }),
+            'default',
+            () => ({ data: { repositoryOwner: { projectV2: { title: 'Acme Roadmap', view: { name: 'Sprint board' } } } } }),
+            { ...UNUSED_ACTIONS, close: async () => {} }
+        )
+        await app.request('/api/todo-boards', { method: 'POST', body: JSON.stringify({ url: 'https://github.com/orgs/acme/projects/9/views/8' }) })
+
+        // Item #1 is in the view's filtered items — write succeeds.
+        const visible = await app.request('/api/todo-boards/github.com%3A%3Aacme%3A%3A9%3A%3Aview%3A%3A8/items/close', {
+            method: 'POST',
+            body: JSON.stringify({ url: 'https://github.com/acme/widgets/issues/1' })
+        })
+        expect(visible.status).toBe(200)
+
+        // Item #2 is on the same project (membership check alone would pass
+        // it) but absent from the view's filtered items — write rejected.
+        const hidden = await app.request('/api/todo-boards/github.com%3A%3Aacme%3A%3A9%3A%3Aview%3A%3A8/items/close', {
+            method: 'POST',
+            body: JSON.stringify({ url: 'https://github.com/acme/widgets/issues/2' })
+        })
+        expect(hidden.status).toBe(400)
+    })
 })
 
 describe('POST /api/todo-boards/:id/items/close', () => {

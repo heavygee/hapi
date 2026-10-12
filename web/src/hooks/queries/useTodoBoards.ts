@@ -11,7 +11,9 @@ const EMPTY_BOARDS: TodoBoardSummary[] = []
 export function useTodoBoards(api: ApiClient | null, enabled: boolean): {
     boards: TodoBoardSummary[]
     isLoading: boolean
+    isRefetching: boolean
     error: string | null
+    refetch: () => Promise<unknown>
 } {
     const query = useQuery({
         queryKey: queryKeys.todoBoards,
@@ -27,6 +29,8 @@ export function useTodoBoards(api: ApiClient | null, enabled: boolean): {
     return {
         boards: query.data?.boards ?? EMPTY_BOARDS,
         isLoading: query.isLoading,
+        isRefetching: query.isRefetching,
         error: query.error instanceof Error ? query.error.message : query.error ? 'Failed to load boards' : null,
+        refetch: query.refetch,
     }
 }

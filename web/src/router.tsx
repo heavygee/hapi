@@ -250,7 +250,9 @@ function SessionsPage() {
     const {
         boards: todoBoards,
         isLoading: todoBoardsLoading,
+        isRefetching: todoBoardsRefetching,
         error: todoBoardsError,
+        refetch: refetchTodoBoards,
     } = useTodoBoards(api, sessionsMode === 'todo')
     const { selectedBoardId, setSelectedBoardId } = useTodoBoardSelection()
     const effectiveBoardId = useMemo(() => {
@@ -396,8 +398,18 @@ function SessionsPage() {
                             error={todoBoardsError ?? todoItemsError}
                             selectedItemId={selectedTodoItemId}
                             onSelectItem={(item) => setSelectedTodoItemId(item.id)}
-                            onRefresh={() => { void refetchTodoItems() }}
-                            isRefreshing={todoItemsRefetching}
+                            onRefresh={() => {
+                                // The items query is disabled (and its own
+                                // refetch a no-op) whenever no board is
+                                // loaded — which is exactly the state an
+                                // initial /todo-boards failure leaves this
+                                // in, so the boards list itself must also be
+                                // refetched or this button does nothing in
+                                // that failure mode (Codex review).
+                                void refetchTodoBoards()
+                                void refetchTodoItems()
+                            }}
+                            isRefreshing={todoBoardsRefetching || todoItemsRefetching}
                         />
                     ) : (
                     <SessionList
