@@ -307,7 +307,7 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
       server.registerTool<any, any>(
         'search_peers',
         {
-          description: 'Search peer HAPI sessions on the same hub/namespace by keyword (name, path, agentSessionId, id). Not bounded by list_peers recency — finds quiet/aged sessions. Prefer this over /proc→SQLite archaeology. Then call inspect_peer / ping_peer with a returned id.',
+          description: 'Search peer HAPI sessions on the same hub/namespace by keyword (name, path, agentSessionId, id). Not bounded by list_peers recency — finds quiet/aged sessions. Returns a dense table: legend `# id a|i flavor title` then one row per hit (full UUID; a=active i=idle; title truncated). Prefer this over /proc→SQLite archaeology. Then call inspect_peer / ping_peer with a returned id.',
           title: 'Search Peer Sessions',
           inputSchema: searchPeersInputSchema,
         },
