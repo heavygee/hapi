@@ -2245,7 +2245,7 @@ describe('sessions routes', () => {
                     host: 'localhost',
                     flavor: 'claude',
                     claudeSessionId: 'claude-quiet',
-                    summary: { text: 'Arthur Scout deploy (hetzner)' }
+                    summary: { text: 'Arthur Scout deploy (hetzner)', updatedAt: 5 }
                 }
             })
         ]
