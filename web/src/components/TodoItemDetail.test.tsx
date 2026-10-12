@@ -74,7 +74,7 @@ describe('TodoItemDetail', () => {
         expect(screen.getByText('bug')).toBeInTheDocument()
         expect(screen.getByText(/v1\.0/)).toBeInTheDocument()
         expect(screen.getByText('Priority')).toBeInTheDocument()
-        expect(screen.getByText('High')).toBeInTheDocument()
+        expect(screen.getByText(/High/)).toBeInTheDocument()
     })
 
     it('fires onSetStatus only when the dropdown value actually changes', () => {

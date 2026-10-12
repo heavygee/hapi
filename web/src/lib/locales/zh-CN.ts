@@ -139,7 +139,6 @@ export default {
   'todo.detail.updated': '更新于',
   'todo.detail.closed': '关闭于',
   'todo.detail.status': '状态',
-  'todo.detail.customFields': '项目字段',
   'todo.detail.comment': '评论',
   'todo.detail.commentPlaceholder': '发表评论…',
   'todo.detail.sendComment': '评论',

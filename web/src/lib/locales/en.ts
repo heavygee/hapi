@@ -139,7 +139,6 @@ export default {
   'todo.detail.updated': 'Updated',
   'todo.detail.closed': 'Closed',
   'todo.detail.status': 'Status',
-  'todo.detail.customFields': 'Project fields',
   'todo.detail.comment': 'Comment',
   'todo.detail.commentPlaceholder': 'Leave a comment…',
   'todo.detail.sendComment': 'Comment',

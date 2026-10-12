@@ -139,7 +139,6 @@ export default {
   'todo.detail.updated': 'Обновлено',
   'todo.detail.closed': 'Закрыто',
   'todo.detail.status': 'Статус',
-  'todo.detail.customFields': 'Поля проекта',
   'todo.detail.comment': 'Комментарий',
   'todo.detail.commentPlaceholder': 'Оставить комментарий…',
   'todo.detail.sendComment': 'Комментировать',

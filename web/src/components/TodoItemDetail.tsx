@@ -125,51 +125,60 @@ export function TodoItemDetail(props: {
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
-                <div className="flex flex-col gap-2 border-b border-[var(--app-border)] pb-4">
+                {/* One unified wrapping flow, not a stack of separately-forced
+                    full-width sections — short items (a single assignee, a
+                    label, a date) sit side by side on a wide pane and only
+                    drop to their own line when the container genuinely runs
+                    out of width, instead of each piling up vertically
+                    regardless of how little space its content needs
+                    (operator feedback, live on a real board: "make better
+                    use of available horizontal space"). */}
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-[var(--app-border)] pb-4 text-xs text-[var(--app-hint)]">
                     {item.author ? (
-                        <div className="flex items-center gap-1.5 text-xs text-[var(--app-hint)]">
+                        <span className="inline-flex items-center gap-1.5">
                             <img src={item.author.avatarUrl} alt="" className="h-4 w-4 rounded-full" />
-                            <span>{t('todo.detail.openedBy', { login: item.author.login })}</span>
-                        </div>
+                            {t('todo.detail.openedBy', { login: item.author.login })}
+                        </span>
                     ) : null}
                     {item.assignees.length > 0 ? (
-                        <div className="flex flex-wrap items-center gap-1.5 text-xs text-[var(--app-hint)]">
-                            <span>{t('todo.detail.assignees')}:</span>
+                        <span className="inline-flex flex-wrap items-center gap-1.5">
+                            {t('todo.detail.assignees')}:
                             {item.assignees.map(assignee => (
                                 <span key={assignee.login} className="inline-flex items-center gap-1">
                                     <img src={assignee.avatarUrl} alt="" className="h-4 w-4 rounded-full" />
                                     {assignee.login}
                                 </span>
                             ))}
-                        </div>
+                        </span>
                     ) : null}
-                    {item.labels.length > 0 ? (
-                        <div className="flex flex-wrap items-center gap-1.5">
-                            {item.labels.map(label => (
-                                <span
-                                    key={label.name}
-                                    className="inline-flex items-center gap-1 rounded-full border border-[var(--app-border)] px-1.5 py-0.5 text-[10px] text-[var(--app-hint)]"
-                                >
-                                    <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: `#${label.color}` }} />
-                                    {label.name}
-                                </span>
-                            ))}
-                        </div>
-                    ) : null}
+                    {item.labels.map(label => (
+                        <span
+                            key={label.name}
+                            className="inline-flex items-center gap-1 rounded-full border border-[var(--app-border)] px-1.5 py-0.5 text-[10px]"
+                        >
+                            <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: `#${label.color}` }} />
+                            {label.name}
+                        </span>
+                    ))}
                     {item.milestone ? (
-                        <div className="text-xs text-[var(--app-hint)]">
+                        <span>
                             {t('todo.detail.milestone')}: {item.milestone.title}
                             {item.milestone.dueOn ? ` (${t('todo.detail.dueOn', { date: item.milestone.dueOn })})` : ''}
-                        </div>
+                        </span>
                     ) : null}
-                    <div className="flex flex-wrap gap-x-3 gap-y-1">
-                        <TimestampRow label={t('todo.detail.created')} iso={item.createdAt} t={t} />
-                        <TimestampRow label={t('todo.detail.updated')} iso={item.updatedAt} t={t} />
-                        <TimestampRow label={t('todo.detail.closed')} iso={item.closedAt} t={t} />
-                    </div>
-
+                    <TimestampRow label={t('todo.detail.created')} iso={item.createdAt} t={t} />
+                    <TimestampRow label={t('todo.detail.updated')} iso={item.updatedAt} t={t} />
+                    <TimestampRow label={t('todo.detail.closed')} iso={item.closedAt} t={t} />
+                    {item.customFields.map(field => (
+                        <span
+                            key={field.name}
+                            className="inline-flex items-center gap-1 rounded-full border border-[var(--app-border)] px-1.5 py-0.5 text-[10px]"
+                        >
+                            <span className="font-medium text-[var(--app-fg)]">{field.name}</span>: {field.value}
+                        </span>
+                    ))}
                     {canWrite ? (
-                        <label className="mt-1 flex items-center gap-2 text-xs text-[var(--app-hint)]">
+                        <label className="inline-flex items-center gap-1.5">
                             {t('todo.detail.status')}:
                             <select
                                 value={item.status ?? ''}
@@ -198,20 +207,6 @@ export function TodoItemDetail(props: {
                         <p className="text-sm text-[var(--app-hint)]">{t('todo.detail.noBody')}</p>
                     )}
                 </div>
-
-                {item.customFields.length > 0 ? (
-                    <div className="mt-4 border-t border-[var(--app-border)] pt-4">
-                        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--app-hint)]">{t('todo.detail.customFields')}</div>
-                        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-xs">
-                            {item.customFields.map(field => (
-                                <div key={field.name} className="contents">
-                                    <dt className="text-[var(--app-hint)]">{field.name}</dt>
-                                    <dd className="text-[var(--app-fg)]">{field.value}</dd>
-                                </div>
-                            ))}
-                        </dl>
-                    </div>
-                ) : null}
 
                 {canWrite ? (
                     <div className="mt-4 border-t border-[var(--app-border)] pt-4">
