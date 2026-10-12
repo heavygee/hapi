@@ -943,17 +943,13 @@ layers:
   # Tip: fa9a3dbaa
   - branch: fix/cursor-unexpected-stop-blocked-footer
 
-  # tiann/hapi#1554 / PR #1598 — FTS5 session message content search (dogfood)
-  # Worktree: ~/coding/hapi/worktrees/session-content-search-soup @ driver/session-content-search
-  # Tip: ba7b3f96d — SCHEMA v29→v30 union (PR claimed v25–v28); re-thin after dogfood bump
-  # Absorbed: soup HEAD 418179d4b (merge + Meta fix 1de2e14dc). Live DB user_version=30.
-  - branch: driver/session-content-search
+  # DROPPED 2026-10-12: tiann/hapi#1554 / PR #1598 FTS5 session content search (dogfood).
+  # Tip ba7b3f96d absorbed into soup (418179d4b + later tips); wt cleaned for /work space relief.
+  # Upstream #1598 still OPEN — feature lives on soup tip ancestry until merge/remat.
+  # Was: - branch: driver/session-content-search
 
-  # tiann/hapi#1710 — search_peers MCP/CLI: keyword find beyond list_peers recency.
-  # Hub GET /api/sessions/search + MCP search_peers + hapi search-peers.
-  # Worktree: ~/coding/hapi/worktrees/search-peers @ feat/search-peers
-  # Tip: f7a290740 (rebased onto upstream/main)
-  - branch: feat/search-peers
+  # DROPPED 2026-10-12 — tiann/hapi#1710 feat/search-peers (space relief; never PR'd;
+  # already absorbed into soup tip @ a3313d9a4 / live driver). Issue still OPEN.
 
   # tiann/hapi#1756 — in-session (open chat) FTS search + jump. Reuses #1554 indexer;
   # web-only tip (header SessionInChatSearch → ?messageId=&messageQuery=).
