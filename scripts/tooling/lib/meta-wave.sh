@@ -12,6 +12,12 @@
 #      (fail-closed legacy).
 # Orphans (merged PR, no HAPI session) never enter the wave and never block.
 #
+# Attribution footgun (w-241-2007 / 2026-10-12): soup layer comments often cite the
+# *issue* (#2006) or an ancestor (#1724 / #209), not the merged PR (#2007 / #241).
+# Callers MUST pass relatedRefs (closingIssues + title "(#N)") and branchHints
+# (headRef + driver|feat|fix|chore|soup/… tokens from the PR body) into
+# mw_wave_member_clean so Gate A still sees the live `- branch:` line.
+#
 # Sourced by hapi-meta-daily.sh. Unit tests: lib/meta-wave.test.sh
 # NO network. Callers inject manifest text + worktree existence checks.
 # Optional: HAPI_META_WORKTREES_ROOT — override …/worktrees dir for declared names.
@@ -177,10 +183,91 @@ mw_declared_worktree_present_for_pr() {
     return 1
 }
 
+# mw_manifest_branch_layer_active <manifest_text> <branch>
+# Exit 0 if an uncommented `- branch: <branch>` line exists (exact ref match).
+mw_manifest_branch_layer_active() {
+    local text="$1" branch="$2"
+    [[ -n "$branch" && "$branch" != HEAD ]] || return 1
+    # Escape nothing exotic — soup refs are [A-Za-z0-9._/-]+; fail closed on oddballs.
+    [[ "$branch" =~ ^[A-Za-z0-9._/-]+$ ]] || return 1
+    printf '%s\n' "$text" | grep -Eq "^[[:space:]]*-[[:space:]]*branch:[[:space:]]*${branch}[[:space:]]*$"
+}
+
+# mw_extract_title_paren_issues <title> — newline-separated issue numbers from "(#N)".
+mw_extract_title_paren_issues() {
+    local title="$1"
+    [[ -n "$title" ]] || return 0
+    printf '%s' "$title" | grep -oE '\(#[0-9]+\)' | tr -d '(#)' | sort -nu
+}
+
+# mw_extract_branch_hints_from_text <text> — soup-ish branch refs in prose/body.
+mw_extract_branch_hints_from_text() {
+    local text="$1"
+    [[ -n "$text" ]] || return 0
+    printf '%s' "$text" | grep -oE '(driver|feat|fix|chore|soup)/[A-Za-z0-9._-]+' | sort -u
+}
+
+# Union basenames from branch hints (driver/foo → foo).
+_mw_hint_basenames() {
+    local hints="$1" h
+    for h in $hints; do
+        [[ -z "$h" ]] && continue
+        printf '%s\n' "${h##*/}"
+    done | sed '/^$/d' | sort -u
+}
+
+# Exit 0 if any hint basename still has a live worktree checkout.
+mw_declared_worktree_present_for_hints() {
+    local hints="$1"
+    local base resolved
+    while IFS= read -r base; do
+        [[ -z "$base" ]] && continue
+        resolved="$(_mw_resolve_worktree_basename "$base")"
+        if mw_worktree_present "$resolved"; then
+            return 0
+        fi
+    done < <(_mw_hint_basenames "$hints")
+    return 1
+}
+
+# Layer dirty for primary PR + related issue/PR numbers + exact branch hints.
+mw_manifest_layer_active_for_member() {
+    local manifest="$1" pr="$2" related="${3:-}" hints="${4:-}"
+    local ref h
+    if mw_manifest_pr_layer_active "$manifest" "$pr"; then
+        return 0
+    fi
+    for ref in $related; do
+        [[ "$ref" =~ ^[0-9]+$ ]] || continue
+        [[ "$ref" == "$pr" ]] && continue
+        if mw_manifest_pr_layer_active "$manifest" "$ref"; then
+            return 0
+        fi
+    done
+    for h in $hints; do
+        if mw_manifest_branch_layer_active "$manifest" "$h"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 # Should session path / declared wts count as worktree-dirty for Gate A?
+# Optional related issue/PR nums + branch hints widen attribution (issue≠PR footgun).
 mw_worktree_dirty_for_pr() {
-    local manifest="$1" path="$2" pr="$3"
+    local manifest="$1" path="$2" pr="$3" related="${4:-}" hints="${5:-}"
+    local ref
     if mw_declared_worktree_present_for_pr "$manifest" "$pr"; then
+        return 0
+    fi
+    for ref in $related; do
+        [[ "$ref" =~ ^[0-9]+$ ]] || continue
+        [[ "$ref" == "$pr" ]] && continue
+        if mw_declared_worktree_present_for_pr "$manifest" "$ref"; then
+            return 0
+        fi
+    done
+    if mw_declared_worktree_present_for_hints "$hints"; then
         return 0
     fi
     if ! mw_worktree_present "$path"; then
@@ -189,23 +276,37 @@ mw_worktree_dirty_for_pr() {
     if mw_path_attributable_to_pr "$manifest" "$path" "$pr"; then
         return 0
     fi
+    for ref in $related; do
+        [[ "$ref" =~ ^[0-9]+$ ]] || continue
+        if mw_path_attributable_to_pr "$manifest" "$path" "$ref"; then
+            return 0
+        fi
+    done
+    local base hint_bases
+    base="$(basename "$path")"
+    hint_bases="$(_mw_hint_basenames "$hints")"
+    if [[ -n "$base" && -n "$hint_bases" ]] && printf '%s\n' "$hint_bases" | grep -Fxq "$base"; then
+        return 0
+    fi
     # Fail-closed while soup layer still active: any live session worktree counts.
-    if mw_manifest_pr_layer_active "$manifest" "$pr"; then
+    if mw_manifest_layer_active_for_member "$manifest" "$pr" "$related" "$hints"; then
         return 0
     fi
     # Layer DROPPED/absent + session path not attributable → ignore stale path.
     return 1
 }
 
-# mw_wave_member_clean <manifest_text> <session_path> <pr_number>
-# Exit 0 if clean; 1 if still dirty. Prints reason to stdout: clean|layer|worktree|layer+worktree
+# mw_wave_member_clean <manifest_text> <session_path> <pr_number> [related_nums] [branch_hints]
+# related_nums: space-separated closing-issue / title "(#N)" refs (issue≠PR footgun).
+# branch_hints: space-separated headRef + body driver|feat|… tokens.
+# Exit 0 if clean; 1 if still dirty. Prints: clean|layer|worktree|layer+worktree
 mw_wave_member_clean() {
-    local manifest="$1" path="$2" pr="$3"
+    local manifest="$1" path="$2" pr="$3" related="${4:-}" hints="${5:-}"
     local layer=0 wt=0
-    if mw_manifest_pr_layer_active "$manifest" "$pr"; then
+    if mw_manifest_layer_active_for_member "$manifest" "$pr" "$related" "$hints"; then
         layer=1
     fi
-    if mw_worktree_dirty_for_pr "$manifest" "$path" "$pr"; then
+    if mw_worktree_dirty_for_pr "$manifest" "$path" "$pr" "$related" "$hints"; then
         wt=1
     fi
     if [[ "$layer" -eq 0 && "$wt" -eq 0 ]]; then
@@ -238,13 +339,14 @@ mw_branch_absent() {
     return 0
 }
 
-# mw_member_complete <manifest_text> <session_path> <pr_number> <lifecycle_state> <git_dir> <head_branch>
+# mw_member_complete <manifest_text> <session_path> <pr_number> <lifecycle_state> <git_dir> <head_branch> [related_nums] [branch_hints]
 # Estate "complete" (🧹): merged cleanup done — layer DROPPED/absent, no worktree,
 # branch gone, session archived. Fail closed on any dirty bit or unknown branch.
 # Prints: complete|not_archived|no_branch|layer|worktree|branch|layer+… (reason codes)
 # Exit 0 only when complete.
 mw_member_complete() {
     local manifest="$1" path="$2" pr="$3" lifecycle="${4:-}" git_dir="${5:-}" branch="${6:-}"
+    local related="${7:-}" hints="${8:-}"
     local reasons=()
 
     if [[ "$lifecycle" != "archived" ]]; then
@@ -254,8 +356,13 @@ mw_member_complete() {
         reasons+=("no_branch")
     fi
 
+    # headRef is always a branch hint (exact `- branch:` match when soup kept the PR head name).
+    if [[ -n "$branch" ]]; then
+        hints="${hints:+$hints }$branch"
+    fi
+
     local clean_reason
-    clean_reason="$(mw_wave_member_clean "$manifest" "$path" "$pr")" || true
+    clean_reason="$(mw_wave_member_clean "$manifest" "$path" "$pr" "$related" "$hints")" || true
     if [[ "$clean_reason" != "clean" ]]; then
         reasons+=("$clean_reason")
     fi

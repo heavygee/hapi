@@ -109,7 +109,8 @@ _emit_pr_json() {
         prepr="$7" data_unavail="$8" threads="$9" checks_ok="${10}" \
         checks_pending="${11}" checks_seen="${12}" bot_clean="${13}" \
         bot_major="${14}" merge_state="${15}" merge_lane="${16:-}" \
-        head_ref="${17:-}" blocked_up="${18:-0}"
+        head_ref="${17:-}" blocked_up="${18:-0}" \
+        related_refs="${19:-}" branch_hints="${20:-}"
     local in_queue=true sticky
     [[ "$exists" == "1" && "$merged" == "0" && "$closed" == "0" && "$data_unavail" == "0" ]] || in_queue=false
     b() { [[ "$1" == "1" ]] && echo true || echo false; }
@@ -117,6 +118,7 @@ _emit_pr_json() {
     jq -n \
         --arg emoji "$emoji" --arg action "$action" --arg merge "$merge_state" \
         --arg mergeLane "$merge_lane" --arg headRef "$head_ref" \
+        --arg relatedRefs "$related_refs" --arg branchHints "$branch_hints" \
         --argjson exists "$(b "$exists")" --argjson merged "$(b "$merged")" \
         --argjson closed "$(b "$closed")" --argjson prePr "$(b "$prepr")" \
         --argjson dataUnavailable "$(b "$data_unavail")" \
@@ -129,8 +131,30 @@ _emit_pr_json() {
         --argjson stickyPing "$sticky" \
         '{emoji:$emoji,exists:$exists,inQueue:$inQueue,open:$inQueue,prePr:$prePr,merged:$merged,closed:$closed,dataUnavailable:$dataUnavailable,threads:$threads,checksOk:$checksOk,checksPending:$checksPending,checksSeen:$checksSeen,botClean:$botClean,botMajor:$botMajor,mergeState:$merge,action:$action,blockedUpstream:$blockedUpstream,stickyPing:$stickyPing}
          + (if ($mergeLane|length)>0 then {mergeLane:$mergeLane} else {} end)
-         + (if ($headRef|length)>0 then {headRef:$headRef} else {} end)' \
+         + (if ($headRef|length)>0 then {headRef:$headRef} else {} end)
+         + (if ($relatedRefs|length)>0 then {relatedRefs:$relatedRefs} else {} end)
+         + (if ($branchHints|length)>0 then {branchHints:$branchHints} else {} end)' \
         >"$out"
+}
+
+# Gate A helpers: closing-issue / title "(#N)" refs + soup branch tokens from body.
+# Used on the MERGED early-return path so wave-clear can attribute issue-cited layers.
+_gate_a_related_refs() {
+    local n="$1" title="$2"
+    local closing title_refs
+    closing="$(gh_t pr view "$n" --repo "$REPO" --json closingIssuesReferences \
+        --jq '[.closingIssuesReferences[].number] | map(tostring) | join(" ")' 2>/dev/null || echo "")"
+    title_refs="$(printf '%s' "$title" | grep -oE '\(#[0-9]+\)' | tr -d '(#)' | tr '\n' ' ')"
+    # shellcheck disable=SC2086
+    printf '%s\n' $closing $title_refs | sed '/^$/d' | sort -nu | tr '\n' ' ' | sed 's/[[:space:]]*$//'
+}
+
+_gate_a_branch_hints() {
+    local head_ref="$1" body="$2"
+    local from_body
+    from_body="$(printf '%s' "$body" | grep -oE '(driver|feat|fix|chore|soup)/[A-Za-z0-9._-]+' | sort -u | tr '\n' ' ')"
+    # shellcheck disable=SC2086
+    printf '%s\n' $head_ref $from_body | sed '/^$/d' | sort -u | tr '\n' ' ' | sed 's/[[:space:]]*$//'
 }
 
 # When health is ✅, overlay estate merge-lane policy onto statusAction.
@@ -266,7 +290,7 @@ classify_one() {
     # substitution in an `if` so `set -e` does not kill us on the 404 exit.
     local err_out rc=0
     if err_out="$(gh_t api "repos/${REPO}/pulls/${n}" \
-        --jq '[.state, (.merged|tostring), (.mergeable_state // "unknown"), (.head.ref // ""), (.draft|tostring), ([.labels[].name]|join("|")), ((.body // "")|gsub("[\t\n\r]";" "))] | @tsv' 2>&1)"; then
+        --jq '[.state, (.merged|tostring), (.mergeable_state // "unknown"), (.head.ref // ""), (.draft|tostring), ([.labels[].name]|join("|")), ((.body // "")|gsub("[\t\n\r]";" ")), ((.title // "")|gsub("[\t\n\r]";" "))] | @tsv' 2>&1)"; then
         rc=0
     else
         rc=$?
@@ -290,15 +314,19 @@ classify_one() {
     fi
 
     exists=1
-    local head_ref="" draft_flag="" labels_csv="" pr_body=""
-    IFS=$'\t' read -r pr_state pr_json merge_state head_ref draft_flag labels_csv pr_body <<< "$err_out"
+    local head_ref="" draft_flag="" labels_csv="" pr_body="" pr_title=""
+    IFS=$'\t' read -r pr_state pr_json merge_state head_ref draft_flag labels_csv pr_body pr_title <<< "$err_out"
     [[ "$pr_json" == "true" ]] && merged=1
     [[ "$pr_state" == "closed" && "$merged" -eq 0 ]] && closed=1
     [[ "$merge_state" == "dirty" || "$merge_state" == "behind" ]] && merge_bad=1
 
     if [[ "$merged" -eq 1 ]]; then
         decided="$(pec_decide_emoji 1 1 0 1 0 1 0 1 0 0 0 0)"
-        _emit_pr_json "$out" "${decided%%$'\t'*}" "${decided#*$'\t'}" 1 1 0 0 0 0 1 0 1 1 0 "MERGED" "" "$head_ref"
+        local related_refs branch_hints
+        related_refs="$(_gate_a_related_refs "$n" "$pr_title")"
+        branch_hints="$(_gate_a_branch_hints "$head_ref" "$pr_body")"
+        _emit_pr_json "$out" "${decided%%$'\t'*}" "${decided#*$'\t'}" 1 1 0 0 0 0 1 0 1 1 0 "MERGED" "" "$head_ref" 0 \
+            "$related_refs" "$branch_hints"
         return
     fi
     if [[ "$closed" -eq 1 ]]; then
@@ -390,6 +418,7 @@ export REPO OWNER NAME TIMEOUT TMPDIR WALL_LIMIT MERGE_POLICY_JSON
 # Path-kind helpers (pmp_path_is_*) removed with product_paths lane reject (5d23292bb);
 # do not export -f names that are no longer functions — that aborts the whole batch.
 export -f classify_one gh_t fetch_latest_bot_body _emit_pr_json _apply_merge_lane \
+    _gate_a_related_refs _gate_a_branch_hints \
     pec_decide_emoji pec_gate_draft_blocked pec_labels_csv_has \
     pec_blocked_upstream_action pec_blocked_upstream_dep_from_body \
     pec_default_sticky_ping \
