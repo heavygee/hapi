@@ -8,13 +8,13 @@ import type { WebAppEnv } from '../middleware/auth'
 import { createBoardRoutes, makeBoardId, parseProjectUrl, parseValidatedItemUrl, resolveProjectView } from './todoBoard'
 
 const ENV_KEYS = [
-    'HAPI_TODO_BOARD_HOST',
-    'HAPI_TODO_BOARD_OWNER',
-    'HAPI_TODO_BOARD_NUMBER',
-    'HAPI_TODO_BOARD_STATUS_FIELD',
-    'HAPI_TODO_BOARD_DONE_VALUES',
-    'HAPI_TODO_BOARD_LABEL',
-    'HAPI_TODO_BOARD_ALLOWED_HOSTS'
+    'HAPI_BOARD_HOST',
+    'HAPI_BOARD_OWNER',
+    'HAPI_BOARD_NUMBER',
+    'HAPI_BOARD_STATUS_FIELD',
+    'HAPI_BOARD_DONE_VALUES',
+    'HAPI_BOARD_LABEL',
+    'HAPI_BOARD_ALLOWED_HOSTS'
 ] as const
 
 // A dev machine actually configured to use this feature plausibly has one or
@@ -218,22 +218,22 @@ describe('GET /api/todo-boards', () => {
     })
 
     it('reads the board from env when configured', async () => {
-        process.env.HAPI_TODO_BOARD_OWNER = 'acme'
-        process.env.HAPI_TODO_BOARD_NUMBER = '42'
+        process.env.HAPI_BOARD_OWNER = 'acme'
+        process.env.HAPI_BOARD_NUMBER = '42'
         const app = await createApp(() => ({ data: {} }))
         const response = await app.request('/api/todo-boards')
         expect(await response.json()).toEqual({ boards: [{ id: 'github.com::acme::42', label: 'acme/42' }] })
     })
 
     it('ignores a non-numeric board number and falls back to the default', async () => {
-        process.env.HAPI_TODO_BOARD_NUMBER = 'not-a-number'
+        process.env.HAPI_BOARD_NUMBER = 'not-a-number'
         const app = await createApp(() => ({ data: {} }))
         const response = await app.request('/api/todo-boards')
         expect(await response.json()).toEqual({ boards: [{ id: 'github.com::heavygee::6', label: 'heavygee/6' }] })
     })
 
     it('ignores a fractional board number and falls back to the default', async () => {
-        process.env.HAPI_TODO_BOARD_NUMBER = '1.5'
+        process.env.HAPI_BOARD_NUMBER = '1.5'
         const app = await createApp(() => ({ data: {} }))
         const response = await app.request('/api/todo-boards')
         expect(await response.json()).toEqual({ boards: [{ id: 'github.com::heavygee::6', label: 'heavygee/6' }] })
@@ -283,8 +283,8 @@ describe('POST /api/todo-boards', () => {
         expect(response.status).toBe(400)
     })
 
-    it('allows an explicitly-configured host via HAPI_TODO_BOARD_ALLOWED_HOSTS', async () => {
-        process.env.HAPI_TODO_BOARD_ALLOWED_HOSTS = 'github.com,lhs.ghe.com'
+    it('allows an explicitly-configured host via HAPI_BOARD_ALLOWED_HOSTS', async () => {
+        process.env.HAPI_BOARD_ALLOWED_HOSTS = 'github.com,lhs.ghe.com'
         const app = await createApp(() => ({ data: {} }), () => ({ data: { repositoryOwner: { projectV2: { title: 'Lockhouse TODO' } } } }))
         const response = await app.request('/api/todo-boards', {
             method: 'POST',
@@ -653,8 +653,8 @@ describe('GET /api/todo-boards/:id/items', () => {
         expect(body.items[0]?.isPullRequest).toBe(true)
     })
 
-    it('applies HAPI_TODO_BOARD_DONE_VALUES as a comma-separated override', async () => {
-        process.env.HAPI_TODO_BOARD_DONE_VALUES = 'Done, Archived'
+    it('applies HAPI_BOARD_DONE_VALUES as a comma-separated override', async () => {
+        process.env.HAPI_BOARD_DONE_VALUES = 'Done, Archived'
         const app = await createApp(() => ({ data: { repositoryOwner: { projectV2: { field: { options: [] }, items: { nodes: [] } } } } }))
         const response = await app.request('/api/todo-boards/github.com%3A%3Aheavygee%3A%3A6/items')
         const body = await response.json() as BoardItemsResponse

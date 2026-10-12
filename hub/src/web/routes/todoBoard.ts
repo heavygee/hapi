@@ -88,17 +88,17 @@ function isValidProjectNumber(value: number): boolean {
 }
 
 function readEnvBoardConfig(): StoredTodoBoard {
-    const host = process.env.HAPI_TODO_BOARD_HOST?.trim() || DEFAULT_BOARD.host
-    const ownerLogin = process.env.HAPI_TODO_BOARD_OWNER?.trim() || DEFAULT_BOARD.ownerLogin
-    const numberRaw = process.env.HAPI_TODO_BOARD_NUMBER?.trim()
+    const host = process.env.HAPI_BOARD_HOST?.trim() || DEFAULT_BOARD.host
+    const ownerLogin = process.env.HAPI_BOARD_OWNER?.trim() || DEFAULT_BOARD.ownerLogin
+    const numberRaw = process.env.HAPI_BOARD_NUMBER?.trim()
     const parsedNumber = numberRaw ? Number(numberRaw) : NaN
     const projectNumber = isValidProjectNumber(parsedNumber) ? parsedNumber : DEFAULT_BOARD.projectNumber
-    const statusFieldName = process.env.HAPI_TODO_BOARD_STATUS_FIELD?.trim() || DEFAULT_BOARD.statusFieldName
-    const doneValuesRaw = process.env.HAPI_TODO_BOARD_DONE_VALUES?.trim()
+    const statusFieldName = process.env.HAPI_BOARD_STATUS_FIELD?.trim() || DEFAULT_BOARD.statusFieldName
+    const doneValuesRaw = process.env.HAPI_BOARD_DONE_VALUES?.trim()
     const doneValues = doneValuesRaw
         ? doneValuesRaw.split(',').map(value => value.trim()).filter(Boolean)
         : DEFAULT_BOARD.doneValues
-    const label = process.env.HAPI_TODO_BOARD_LABEL?.trim() || `${ownerLogin}/${projectNumber}`
+    const label = process.env.HAPI_BOARD_LABEL?.trim() || `${ownerLogin}/${projectNumber}`
 
     return {
         id: makeBoardId(host, ownerLogin, projectNumber),
@@ -120,7 +120,7 @@ function readEnvBoardConfig(): StoredTodoBoard {
  * ongoing config source. The moment any board is added (the entire point of
  * this feature), the then-current env-derived default is snapshotted into
  * settings.json as a plain stored board — further changes to
- * HAPI_TODO_BOARD_* env vars afterward have zero effect on it (or on any
+ * HAPI_BOARD_* env vars afterward have zero effect on it (or on any
  * newly-added board, which always gets the hardcoded 'Status'/['Done']
  * defaults, not live env values either). The only way back to env-driven
  * behavior is deleting every stored board down to zero. This matches the
@@ -800,9 +800,9 @@ export function parseProjectUrl(url: string): { host: string; ownerLogin: string
 // GH_ENTERPRISE_TOKEN/GITHUB_ENTERPRISE_TOKEN) for that host. Without an
 // allowlist, an attacker-controlled hostname in the URL would make the hub
 // send its own enterprise token to that host. Operators who actually run a
-// GHE board add it explicitly via HAPI_TODO_BOARD_ALLOWED_HOSTS.
+// GHE board add it explicitly via HAPI_BOARD_ALLOWED_HOSTS.
 function getAllowedBoardHosts(): string[] {
-    const raw = process.env.HAPI_TODO_BOARD_ALLOWED_HOSTS?.trim()
+    const raw = process.env.HAPI_BOARD_ALLOWED_HOSTS?.trim()
     if (!raw) {
         return ['github.com']
     }
@@ -816,7 +816,7 @@ function toSummary(board: StoredTodoBoard): { id: string; label: string } {
 // To-do boards are read with the hub process's own host-wide `gh` auth, not
 // per-namespace credentials. On a hub with more than one JWT namespace, any
 // namespace could otherwise request the configured board (which may name a
-// real, non-public project via HAPI_TODO_BOARD_*) and get its titles and
+// real, non-public project via HAPI_BOARD_*) and get its titles and
 // drafts back through the operator's own authenticated session. Scope the
 // whole feature to the owner namespace, same pattern as hub-settings/usage.
 const OWNER_ONLY_ERROR = 'To-do boards are only available to the hub owner'
@@ -855,7 +855,7 @@ export function createBoardRoutes(
         }
         const allowedHosts = getAllowedBoardHosts()
         if (!allowedHosts.includes(target.host.toLowerCase())) {
-            return c.json({ error: `Host "${target.host}" is not in the allowed board hosts (${allowedHosts.join(', ')}). Set HAPI_TODO_BOARD_ALLOWED_HOSTS to permit it.` }, 400)
+            return c.json({ error: `Host "${target.host}" is not in the allowed board hosts (${allowedHosts.join(', ')}). Set HAPI_BOARD_ALLOWED_HOSTS to permit it.` }, 400)
         }
 
         let label: string
