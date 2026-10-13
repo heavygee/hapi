@@ -2,7 +2,7 @@ import type { Database } from 'bun:sqlite'
 import { prepareCached } from './statementCache'
 import { bumpSessionDeletionEpoch } from './sessionInvalidation'
 import { randomUUID } from 'node:crypto'
-import { mergeExternalRefs, type ExternalRef } from '@hapi/protocol/schemas'
+import { reconcileExternalRefs, type ExternalRef } from '@hapi/protocol/schemas'
 
 import type { StoredSession, VersionedUpdateResult } from './types'
 import { safeJsonParse } from './json'
@@ -144,11 +144,12 @@ function isExternalRefArray(value: unknown): value is ExternalRef[] {
 // name) and carried forward via the same carryForwardIfMissing used by the
 // tiers above — that alone covers the omitted-key sparse-write case. But a
 // sparse write can also include its own stale-but-present externalRefs
-// array — built before an out-of-band `hapi link-issue`/linkIssue write
-// landed — which an undefined-only check would miss. mergeContributionFields
-// below unions both sides via mergeExternalRefs (same helper sessionCache.ts's
-// session-merge path already uses) as a strict superset of that coverage
-// (Codex review, hapi#238).
+// array — built before an out-of-band `hapi link-issue`/linkIssue write (or
+// the fork's own `hapi-meta-daily.sh` tooling, which writes PR-chip fields
+// directly) landed — which an undefined-only check would miss.
+// mergeContributionFields below reconciles both sides via
+// reconcileExternalRefs (Codex review, hapi#238) as a strict superset of
+// that coverage.
 const CONTRIBUTION_FIELDS = ['externalRefs'] as const
 
 function mergeContributionFields(
@@ -158,26 +159,20 @@ function mergeContributionFields(
 ): Record<string, unknown> | null {
     merged = carryForwardIfMissing(prior, next, merged, CONTRIBUTION_FIELDS)
     const priorRefs = isExternalRefArray(prior.externalRefs) ? prior.externalRefs : []
-    if (priorRefs.length === 0) {
-        return merged
-    }
     const nextRefs = isExternalRefArray(next.externalRefs) ? next.externalRefs : []
     // An explicit `next.externalRefs = []` is a deliberate unlink-to-empty,
     // not a sparse/stale write merely missing some refs it didn't know
     // about yet — those two look identical as "an empty-ish array" without
-    // this check, and unioning prior back in here would silently resurrect
-    // an intentional clear (found during a soup absorb by Meta, confirmed
-    // by hand against this exact code, hapi#238). Only a *non-empty* next
-    // array is treated as "possibly partial" and eligible for recovery.
-    if (nextRefs.length === 0) {
-        return merged
-    }
-    const combined = mergeExternalRefs(nextRefs, priorRefs)
-    if (combined.length === nextRefs.length) {
+    // this check, and reconciling prior back in here would silently
+    // resurrect an intentional clear (found during a soup absorb by Meta,
+    // confirmed by hand against this exact code, hapi#238). Only a
+    // *non-empty* next array is treated as "possibly partial/stale" and
+    // eligible for reconciliation.
+    if (priorRefs.length === 0 || nextRefs.length === 0) {
         return merged
     }
     const result = merged ?? { ...next }
-    result.externalRefs = combined
+    result.externalRefs = reconcileExternalRefs(priorRefs, nextRefs)
     return result
 }
 

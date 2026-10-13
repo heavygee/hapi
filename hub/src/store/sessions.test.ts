@@ -1133,6 +1133,60 @@ describe('updateSessionMetadata: protocol resume token preservation', () => {
         expect(metadata?.externalRefs).toEqual([])
     })
 
+    // Codex review (hapi#238, second finding on this path): identity-only
+    // collision handling (plain array-length no-op check) let a stale write
+    // silently roll back a field-level update already applied directly to
+    // the stored ref by out-of-band tooling (hapi-meta-daily.sh PR-chip
+    // status updates), since both arrays had the same length and identity.
+    it('preserves a newer field-level update on a matching ref instead of rolling it back to a stale copy', () => {
+        const store = makeStore()
+        const freshPrRef = { kind: 'github_pr', url: 'https://github.com/acme/repo/pull/9', repo: 'acme/repo', number: 9, linkedAt: 5, status: 'merged', statusCheckedAt: 200 }
+        const session = store.sessions.getOrCreateSession(
+            'preserve-field-update-on-collision',
+            { path: '/tmp/project', host: 'example', externalRefs: [freshPrRef] },
+            null,
+            'default'
+        )
+
+        // Simulates a CLI write built from a cache snapshot taken before
+        // hapi-meta-daily.sh applied the status update directly to storage —
+        // same identity, same linkedAt, but stale status fields.
+        const stalePrRef = { kind: 'github_pr', url: 'https://github.com/acme/repo/pull/9', repo: 'acme/repo', number: 9, linkedAt: 5, status: 'open', statusCheckedAt: 100 }
+        const result = store.sessions.updateSessionMetadata(
+            session.id,
+            { path: '/tmp/project', host: 'example', externalRefs: [stalePrRef] },
+            session.metadataVersion,
+            'default'
+        )
+        expect(result.result).toBe('success')
+
+        const metadata = getMetadata(store, session.id)
+        expect(metadata?.externalRefs).toEqual([freshPrRef])
+    })
+
+    it('still applies a legitimate re-link with a bumped linkedAt over the prior entry', () => {
+        const store = makeStore()
+        const oldRef = { kind: 'github_issue', url: 'https://github.com/acme/repo/issues/1', repo: 'acme/repo', number: 1, linkedAt: 1 }
+        const session = store.sessions.getOrCreateSession(
+            'relink-bumps-linkedat',
+            { path: '/tmp/project', host: 'example', externalRefs: [oldRef] },
+            null,
+            'default'
+        )
+
+        const newRef = { kind: 'github_issue', url: 'https://github.com/acme/repo/issues/1', repo: 'acme/repo', number: 1, linkedAt: 2 }
+        const result = store.sessions.updateSessionMetadata(
+            session.id,
+            { path: '/tmp/project', host: 'example', externalRefs: [newRef] },
+            session.metadataVersion,
+            'default'
+        )
+        expect(result.result).toBe('success')
+
+        const metadata = getMetadata(store, session.id)
+        expect(metadata?.externalRefs).toEqual([newRef])
+    })
+
     // P2 from cold review: the broadcast on a successful update must
     // ship the merged value so other CLIs in the session room update
     // their local cache to the persisted state. This is enforced in the

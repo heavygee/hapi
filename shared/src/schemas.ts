@@ -234,6 +234,50 @@ export function mergeExternalRefs(base: ExternalRef[], incoming: ExternalRef[]):
     return result
 }
 
+function refLinkedAt(ref: ExternalRef): number | undefined {
+    const value = (ref as Record<string, unknown>).linkedAt
+    return typeof value === 'number' ? value : undefined
+}
+
+/**
+ * Field-level reconciliation for a ref identity present on both sides —
+ * distinct from `mergeExternalRefs`' identity-only union, where "prefer
+ * base unconditionally" is intentional (the surviving session's own current
+ * state should win over a soon-to-be-deleted duplicate's). Built instead for
+ * `hub/src/store/sessions.ts`'s sparse-write carry-forward, where `next` can
+ * be built from a stale local cache that doesn't know about a field-level
+ * update (e.g. a `github_pr` chip's `status`/`statusCheckedAt`) already
+ * applied directly to `prior` by the fork's own out-of-band tooling
+ * (`hapi-meta-daily.sh`). Naively preferring either side unconditionally on
+ * every collision either discards that out-of-band update (always prefer
+ * next) or discards a legitimate same-write upsert like `hapi link-issue`
+ * re-linking the same issue with a bumped `linkedAt` (always prefer prior).
+ *
+ * Reconciles per-identity by `linkedAt` when `next`'s entry has one —
+ * `github_issue` always does; `github_pr`'s `.passthrough()` shape often
+ * does too, per its own growing-fields doc comment, though that's not
+ * type-guaranteed. The side with the larger value wins; ties and a missing
+ * signal on `next` default to keeping `prior`'s entry (the already-
+ * persisted, presumed-authoritative state) — matching the failure mode this
+ * was built to close (Codex review, hapi#238, second finding on this path).
+ */
+export function reconcileExternalRefs(prior: ExternalRef[], next: ExternalRef[]): ExternalRef[] {
+    const result = [...prior]
+    for (const nextRef of next) {
+        const idx = result.findIndex(existing => sameExternalRefIdentity(existing, nextRef))
+        if (idx === -1) {
+            result.push(nextRef)
+            continue
+        }
+        const existingAt = refLinkedAt(result[idx]!)
+        const nextAt = refLinkedAt(nextRef)
+        if (nextAt !== undefined && (existingAt === undefined || nextAt > existingAt)) {
+            result[idx] = nextRef
+        }
+    }
+    return result
+}
+
 export const MetadataSchema = z.object({
     path: z.string(),
     host: z.string(),
