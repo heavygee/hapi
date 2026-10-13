@@ -176,8 +176,8 @@ Mechanical (to implement):
 | `hapi-fleet-seal` CLI | **Exists** (`scripts/tooling/hapi-fleet-seal.sh`) |
 | GH release `manifest.json` asset | **Exists** on recent tips |
 | GH "this release is the seal" pointer | **Missing** - optional v1.1 |
-| Hub native `HAPI_UPSTREAM_SEAL_URL` poll + materialize (Layer A) | **Pending** - in-product; companion path dead |
-| Hub process self-apply (Layer B) | **Missing** - follow-on; reuse runner swap primitives |
+| Hub native `HAPI_UPSTREAM_SEAL_URL` poll + materialize (Layer A) | **In progress** - #254; worktree `hub-upstream-seal` (`driver/hub-upstream-seal-url`); companion path dead |
+| Hub process self-apply (Layer B) | **Missing** - follow-on; reuse runner swap primitives; fold ExecStart path gotcha |
 | Estate pets discover via oos hub offer | **Exists** (#247/#251) |
 
 ## Live dogfood (ninja CT, 2026-10-13) — proof ≠ steady state
