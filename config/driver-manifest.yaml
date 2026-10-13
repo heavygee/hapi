@@ -1173,6 +1173,23 @@ layers:
   # Web-only → remat --build-web; hard-reload (no hub restart required).
   - branch: driver/1732-session-list-open-tick
 
+  # tiann/hapi#2015 — opening a session (sidebar click, deep link, programmatic
+  # nav) updated the selection on the right while the session list stayed put, so
+  # on a long or scrolled list the open row was lost until you hunted for it.
+  # Reveals the row with nearest-edge semantics when it is not already fully
+  # visible, never touches scrollTop when it is (no #1169 jump regression), insets
+  # the sticky project header, and yields to a wheel/touch gesture.
+  # Upstream-aimed tip: feat/2015-session-scroll-into-view @ fe8579db8
+  # Soup thin tip on live driver HEAD 349725a02: driver/2015-session-scroll-into-view @ 240c6bbb2
+  #   (SessionList.tsx union: soup keeps its cn() row classes + ProjectGroupHeader
+  #    component, so data-session-group-header lands once on that component's root
+  #    and the tip's shell-level data-session-id is dropped — soup already marks the
+  #    id on the inner node for the #1717 blocked-row scroll, and the hook climbs to
+  #    the `.session-list-item` shell from whichever node carries it.)
+  # Worktree: ~/coding/hapi/worktrees/session-scroll-into-view-2015 (+ soup thin 2015-scroll-into-view-soup)
+  # Web-only → remat --build-web; hard-reload (no hub restart required).
+  - branch: driver/2015-session-scroll-into-view
+
   # DROPPED 2026-10-06: driver/1933-claude-resume-amnesia — squash 94523eb0d is on
   # fork main (heavygee/hapi#204). Soup base is now origin/main, so tip-forward
   # absorbs it from the base; keeping the layer would double-apply / conflict.
