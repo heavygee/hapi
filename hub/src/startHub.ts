@@ -516,11 +516,6 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     console.log('HAPI Hub is ready!')
     // Deliberate fleet push only — no keepalive/startup auto-upgrade sweep.
 
-    // Layer A: optional upstream seal poller (standalone hubs). When
-    // HAPI_UPSTREAM_SEAL_URL / HAPI_UPSTREAM_SEAL_TAG is set, poll remote
-    // fleet-latest manifest, digest-compare, materialize into local
-    // soup-artifacts — existing offer + #251 policy then apply to runners.
-    // Foundry (oos) leaves this unset. No companion process.
     // Layer A: optional upstream seal subscriber (standalone hubs). When
     // HAPI_UPSTREAM_SEAL_URL / HAPI_UPSTREAM_SEAL_TAG is set, poll remote
     // fleet-latest manifest, digest-compare, materialize into local

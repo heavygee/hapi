@@ -729,7 +729,7 @@ describe('NewSession launch preferences', () => {
         mocks.spawnSession.mockResolvedValue({ type: 'success', sessionId: 'session-1' })
         const onSessionCreated = vi.fn()
 
-        render(
+        renderWithQuery(
             <NewSession
                 api={api}
                 machines={[machine]}
