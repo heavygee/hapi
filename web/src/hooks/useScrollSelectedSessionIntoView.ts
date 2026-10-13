@@ -161,9 +161,13 @@ export function useScrollSelectedSessionIntoView(
             step(startedAt)
         }
 
-        // A deliberate scroll gesture outranks the reveal.
-        container.addEventListener('wheel', finish, { passive: true })
-        container.addEventListener('touchmove', finish, { passive: true })
+        // Any deliberate scroll input outranks the reveal: wheel and touch, but
+        // also a scrollbar drag (pointerdown lands on the scroll container) and
+        // the keys that scroll it while a row inside has focus.
+        const takeoverEvents = ['wheel', 'touchmove', 'pointerdown', 'keydown'] as const
+        for (const name of takeoverEvents) {
+            container.addEventListener(name, finish, { passive: true })
+        }
 
         // Watch the list's content, not the scroll port: the port keeps its
         // size while rows arrive. A session created through the spawn flow
@@ -179,8 +183,9 @@ export function useScrollSelectedSessionIntoView(
 
         return () => {
             contentObserver?.disconnect()
-            container.removeEventListener('wheel', finish)
-            container.removeEventListener('touchmove', finish)
+            for (const name of takeoverEvents) {
+                container.removeEventListener(name, finish)
+            }
             finish()
         }
     }, [containerRef, selectedSessionId])

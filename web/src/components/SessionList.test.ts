@@ -24,6 +24,7 @@ import {
     isSidebarEmptySessionStub,
     normalizeSearch,
     prepareSidebarSessions,
+    resolveSelectedSessionPinnedSection,
     resolveSessionGroupDirectory,
     sessionListItemButtonClassName,
     sessionListItemWrapperClassName,
@@ -564,6 +565,49 @@ describe('filterWorkingSessionsOnly', () => {
         ]
         expect(filterWorkingSessionsOnly(sessions, 'selected-quiet').map(s => s.id))
             .toEqual(['thinking', 'selected-quiet'])
+    })
+})
+
+describe('resolveSelectedSessionPinnedSection', () => {
+    const buckets = (overrides: Partial<Record<string, SessionSummary[]>> = {}) => ({
+        working: [], pending: [], active: [], idle: [], jobs: [], ...overrides
+    } as Record<'working' | 'pending' | 'active' | 'idle' | 'jobs', SessionSummary[]>)
+    const s = (id: string) => makeSession({ id, metadata: { path: '/p' } })
+
+    it('returns null without a selection', () => {
+        expect(resolveSelectedSessionPinnedSection(null, {
+            globalPinned: [s('a')], running: buckets({ working: [s('b')] })
+        })).toBeNull()
+    })
+
+    it('returns null when the selection is in no pinned section', () => {
+        expect(resolveSelectedSessionPinnedSection('elsewhere', {
+            globalPinned: [s('a')], running: buckets({ working: [s('b')] })
+        })).toBeNull()
+    })
+
+    it('finds the globally pinned section', () => {
+        expect(resolveSelectedSessionPinnedSection('a', {
+            globalPinned: [s('a')], running: buckets()
+        })).toBe('pinned')
+    })
+
+    it.each([['working'], ['pending']])('finds the running section via %s', (bucket) => {
+        expect(resolveSelectedSessionPinnedSection('b', {
+            globalPinned: [], running: buckets({ [bucket]: [s('b')] })
+        })).toBe('running')
+    })
+
+    it.each([['active'], ['idle']])('finds the active section via %s', (bucket) => {
+        expect(resolveSelectedSessionPinnedSection('c', {
+            globalPinned: [], running: buckets({ [bucket]: [s('c')] })
+        })).toBe('active')
+    })
+
+    it('prefers the section that renders first', () => {
+        expect(resolveSelectedSessionPinnedSection('a', {
+            globalPinned: [s('a')], running: buckets({ working: [s('a')] })
+        })).toBe('pinned')
     })
 })
 
