@@ -15,11 +15,11 @@ targets:
     enabled: true
     note: "Foundry on oos-linux. Local fleet-latest + optional POST /api/fleet/push-upgrade for registered auto machines."
 
-  - id: ninja
+  - id: nc-incus
     type: standalone-layer-a
     enabled: true
-    host: ninjcow-incus
-    note: "Standalone Layer A CT. Polls GH hapi-fleet; migrate off HAPI_UPSTREAM_SEAL_TAG pin."
+    host: nc-incus
+    note: "Standalone personal hub CT. Polls GH hapi-fleet; migrate off HAPI_UPSTREAM_SEAL_TAG pin."
     seal_url: "https://github.com/heavygee/hapi/releases/download/hapi-fleet/manifest.json"
 
   - id: antevorta
