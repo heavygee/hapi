@@ -182,6 +182,8 @@ Manifest format, atomic swap mechanics, DB jiu-jitsu: [`driver-soup.md`](./drive
 
 **Fleet push rule (#247 / #251):** `latest` / soup tip is dogfood. Hub-wide policy stays `alert` (banner, no keepalive apply). **Per-machine `auto`** (Homelab/Teemo) means upgrade when you can: keepalive retries once the live self-upgrade RPC is registered; transient RPC gaps are not sticky errors. Deliberate `push-upgrade` / operator **fleet seal** still the path for alert hosts and for an explicit fleet wave. Do not gate fleet on upstream merge. Ninja is self-contained — not in oos fleet push unless named.
 
+**Fleet seal contract (standalone watchers):** operator seal must retarget `soup-artifacts/fleet-latest` (not dogfood `latest`). Watchers discover via that pointer or GH `manifest.json`; **newness = platform binary sha256 ≠ on-disk** (tag/date/NOTES alone are insufficient — `44ef482d2`). Canon: [`docs/plans/2026-10-13-fleet-seal-contract.md`](../plans/2026-10-13-fleet-seal-contract.md).
+
 **Ship After Fix (fork):** when your branch is already in the manifest and you pushed **`web/` only**, `hapi-driver-rebuild --build-web` is part of done — not "wait for operator."
 
 **Not done (common agent lies):**

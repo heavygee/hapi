@@ -6,8 +6,11 @@
 # embedded web UI) tagged hapi-soup-v<YYYY.MM.DD>-<7-char-tip>.
 #
 # Publish root (durable, on oos): /var/lib/hapi/soup-artifacts/<tag>/
-#   latest -> <tag>     (symlink for fetch-by-tag consumers)
-#   manifest.json       (composed tip, layer count, web/dist hash, protocolVersion)
+#   latest -> <tag>           (dogfood tip — remat thrash OK)
+#   latest-tag.txt
+#   fleet-latest -> <tag>     (operator seal only — see hapi-fleet-seal / contract)
+#   fleet-latest-tag.txt
+#   manifest.json             (composed tip, layer count, web/dist hash, protocolVersion)
 #   <platform-dir>/hapi (or hapi.exe)
 #
 # Also mirrors the primary linux x64 binary into /var/lib/hapi/upgrade-artifacts/
@@ -411,6 +414,116 @@ driver_soup_single_exe_ensure_fresh() {
         echo "ERROR: soup-artifact: tip stamp mismatch after build (have=${stamped:0:12} want=${tip_sha:0:12})" >&2
         return 1
     fi
+    return 0
+}
+
+# Verify tip dir manifest matches on-disk binary digests (seal / watcher invariant).
+# Returns 0 when every binaries[].path exists and sha256 matches.
+driver_soup_fleet_seal_verify_tip() {
+    local tip_dir="${1:?}"
+    local manifest entry path want got n
+    manifest="$tip_dir/manifest.json"
+    if [[ ! -f "$manifest" ]]; then
+        echo "ERROR: fleet-seal: missing manifest.json in $tip_dir" >&2
+        return 1
+    fi
+    n="$(jq '.binaries | length' "$manifest" 2>/dev/null || echo 0)"
+    if [[ "$n" -lt 1 ]]; then
+        echo "ERROR: fleet-seal: manifest has no binaries[]" >&2
+        return 1
+    fi
+    local i=0
+    while [[ "$i" -lt "$n" ]]; do
+        path="$(jq -r --argjson i "$i" '.binaries[$i].path // empty' "$manifest")"
+        want="$(jq -r --argjson i "$i" '.binaries[$i].sha256 // empty' "$manifest")"
+        if [[ -z "$path" || -z "$want" ]]; then
+            echo "ERROR: fleet-seal: binaries[$i] missing path/sha256" >&2
+            return 1
+        fi
+        if [[ ! -f "$tip_dir/$path" ]]; then
+            echo "ERROR: fleet-seal: missing binary $tip_dir/$path" >&2
+            return 1
+        fi
+        got="$(driver_soup_single_exe_sha256_file "$tip_dir/$path")"
+        if [[ "${got,,}" != "${want,,}" ]]; then
+            echo "ERROR: fleet-seal: digest mismatch for $path" >&2
+            echo "       manifest $want" >&2
+            echo "       on-disk  $got" >&2
+            return 1
+        fi
+        i=$((i + 1))
+    done
+    return 0
+}
+
+# Point soup-artifacts/fleet-latest at an already-published tip (operator seal).
+# Does NOT move dogfood `latest`. Digest-verify tip before flipping.
+#
+# Usage: driver_soup_fleet_seal [tag] [--dry-run]
+#   tag omitted → current latest-tag.txt / latest symlink target
+driver_soup_fleet_seal() {
+    local root tag tip_dir dry_run=0
+    root="$(driver_soup_single_exe_artifacts_root)"
+    tag=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dry-run) dry_run=1; shift ;;
+            -h|--help)
+                echo "Usage: driver_soup_fleet_seal [tag] [--dry-run]" >&2
+                return 2
+                ;;
+            *)
+                if [[ -n "$tag" ]]; then
+                    echo "ERROR: fleet-seal: unexpected arg: $1" >&2
+                    return 2
+                fi
+                tag="$1"
+                shift
+                ;;
+        esac
+    done
+
+    if [[ -z "$tag" ]]; then
+        if [[ -f "$root/latest-tag.txt" ]]; then
+            tag="$(tr -d '[:space:]' <"$root/latest-tag.txt")"
+        elif [[ -L "$root/latest" ]]; then
+            tag="$(readlink "$root/latest")"
+        fi
+    fi
+    if [[ -z "$tag" ]]; then
+        echo "ERROR: fleet-seal: no tag (pass hapi-soup-v… or publish a latest tip first)" >&2
+        return 1
+    fi
+    if [[ ! "$tag" =~ ^hapi-soup-v ]]; then
+        echo "ERROR: fleet-seal: tag must start with hapi-soup-v (got: $tag)" >&2
+        return 1
+    fi
+
+    tip_dir="$root/$tag"
+    if [[ ! -d "$tip_dir" ]]; then
+        echo "ERROR: fleet-seal: tip dir missing: $tip_dir" >&2
+        return 1
+    fi
+
+    if ! driver_soup_fleet_seal_verify_tip "$tip_dir"; then
+        return 1
+    fi
+
+    local tip_sha
+    tip_sha="$(jq -r '.composedTipSha // empty' "$tip_dir/manifest.json")"
+    echo "fleet-seal: tag=$tag tip=${tip_sha:0:12} root=$root"
+
+    if [[ "$dry_run" == "1" ]]; then
+        echo "fleet-seal: dry-run OK (would point fleet-latest → $tag)"
+        return 0
+    fi
+
+    # Relative symlink (same as latest) so the artifacts root is relocatable.
+    ln -sfn "$tag" "$root/fleet-latest"
+    printf '%s\n' "$tag" >"$root/fleet-latest-tag.txt"
+    echo "fleet-seal: fleet-latest → $tag"
+    echo "fleet-seal: fleet-latest-tag.txt written"
+    echo "fleet-seal: manifest $tip_dir/manifest.json"
     return 0
 }
 
