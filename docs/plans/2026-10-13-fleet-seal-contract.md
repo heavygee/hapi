@@ -1,30 +1,32 @@
-# Fleet seal contract (standalone hub watcher)
+# Fleet seal contract (hub upstream-seal subscriber)
 
-**Status:** canon for implementers (ninja watcher + any future gift/personal hub).  
-**Owner lane:** fleet / hub-runner-version governance (this session's remit).  
-**Consumer:** `[ninjcow-incus upkeep](/sessions/ba76163e-d993-4b2b-b4ab-c4cdf3c41c7e)` and successors.  
+**Status:** canon for implementers (ninja standalone hub + any future gift/personal hub).  
+**Owner lane:** fleet / hub-runner-version governance.  
+**Consumer:** `[ninjcow-incus upkeep](/sessions/ba76163e-d993-4b2b-b4ab-c4cdf3c41c7e)` and successors - **in-product hub code only**.  
 **Related:** #247 deliberate push, #248 release notes, #251 per-machine auto keepalive, publish fix `44ef482d2` (stale binary).
 
 ## Product requirement (operator)
 
-> I seal for the fleet → something is written to a known place → an **external** HAPI watching that place notices **new bytes** and updates itself.
+> I seal for the fleet → something is written to a known place → a **standalone HAPI hub** watching that place notices **new bytes** and updates itself.
 
-Steady state is **not** agent SSH-and-copy. Estate pets on the oos hub already get offer + `auto` keepalive. Standalone hubs (ninja, gifts) need the same *discover* half against this contract.
+Steady state is **not** agent SSH-and-copy, and **not** a companion bash/node poller beside HAPI. Estate pets on the oos hub already get offer + `auto` keepalive. Standalone hubs (ninja, gifts) need the same *discover* half as a **native hub capability** (`HAPI_UPSTREAM_SEAL_URL` or settings-equivalent), reusing digest-compare + materialize + existing offer/policy.
+
+**Operator correction (2026-10-13):** do not bolt an additional moving part alongside HAPI. Feasibility ack: scoped addition (Layer A), not a redesign of offer/policy - see § Feasibility shape.
 
 ## Two pointers (do not conflate)
 
-| Pointer | Moves when | Watchers |
-|---------|------------|----------|
+| Pointer | Moves when | Consumers |
+|---------|------------|-----------|
 | `latest` | Every successful soup single-exe **publish** (dogfood tip; remat thrash OK) | oos hub offer / estate dogfood only |
-| `fleet-latest` | **Only** on operator **fleet seal** (`fleet seal` / `good enough for fleet` / `seal tip <tag>`) | Standalone hub watchers **must** poll this |
+| `fleet-latest` | **Only** on operator **fleet seal** (`fleet seal` / `good enough for fleet` / `seal tip <tag>`) | Standalone hubs with upstream-seal configured **must** poll this |
 
-If `fleet-latest` is absent, there is **no seal** yet - watchers must not fall back to `latest` for auto-apply (that reintroduces tip thrash and the stale-tag class of lies). Human/agent bootstrap may still copy `latest` once by hand; that is not the contract.
+If `fleet-latest` is absent, there is **no seal** yet - subscribers must not fall back to `latest` for auto-apply (that reintroduces tip thrash and the stale-tag class of lies). Human/agent bootstrap may still copy `latest` once by hand; that is not the contract.
 
 **Tooling:** `hapi-fleet-seal [tag]` (scripts/tooling/hapi-fleet-seal.sh) points `fleet-latest` → tip and writes `fleet-latest-tag.txt` after verifying every `binaries[].sha256` matches on-disk files. Does **not** move dogfood `latest`. Spoken gate still required before agents run it.
 
 ## Poll locations (priority order)
 
-### 1. Estate / tailnet (preferred when the watcher can reach oos)
+### 1. Estate / tailnet (preferred when the subscriber hub can reach oos)
 
 Root (foundry default):
 
@@ -44,7 +46,7 @@ Override: `HAPI_SOUP_ARTIFACTS_ROOT` / `HAPI_SOUP_ARTIFACTS`.
 {artifactsRoot}/fleet-latest/<platform-dir>/hapi[.exe]
 ```
 
-How a remote watcher reaches that tree is transport (HTTP mirror, rclone, signed URL) - **out of band for v1**. Contract surface is the **files**, identical to local disk.
+How a remote hub reaches that tree is transport (HTTP mirror of `manifest.json` + binaries, signed URL) - configure via `HAPI_UPSTREAM_SEAL_URL` pointing at the **manifest** (or a directory URL that resolves to it). Contract surface is the **files**, identical to local disk.
 
 **Dogfood only (not for auto-apply on standalones):**
 
@@ -65,7 +67,7 @@ GitHub Releases on **`heavygee/hapi`** (fork), tags `hapi-soup-v*`.
 
 **Seal tag selection (when seal pointer is mirrored to GH):** prefer a release that is annotated / titled as fleet-sealed, or a dedicated tag pointer release. Until that exists, **do not** treat `releases/latest` or "newest `hapi-soup-v*` by date" as seal - that is dogfood thrash + the stale-bytes failure mode.
 
-Interim for GH-only hosts (documented escape, not the happy path): operator names the sealed tag once; watcher then digests that release's `manifest.json` forever until the next named seal.
+Interim for GH-only hosts (documented escape, not the happy path): operator names the sealed tag once; hub then digests that release's `manifest.json` forever until the next named seal.
 
 ## Manifest format (already live)
 
@@ -96,7 +98,7 @@ Published tip `manifest.json` (`schema: 1`) is the contract body. Example fields
 }
 ```
 
-Watcher **must** parse `schema`, `tag`, and `binaries[]`. Unknown higher `schema` → fail closed (do not apply).
+Subscriber **must** parse `schema`, `tag`, and `binaries[]`. Unknown higher `schema` → fail closed (do not apply).
 
 Platform pick: match running OS/arch to one `binaries[]` entry (`platform` + `arch` + `variant` as needed). Linux x64 pets use `linux-x64-baseline`.
 
@@ -113,17 +115,35 @@ Platform pick: match running OS/arch to one `binaries[]` entry (`platform` + `ar
 
 After download: re-hash bytes; must equal `binaries[].sha256` or abort. Never trust tag, changelog, or "asset name matches."
 
-Kill-criterion (from the week of stale `755936f5…` under rotating tags): a watcher that upgrades when the **tag** changes but the **digest** does not is **non-compliant**.
+Kill-criterion (from the week of stale `755936f5…` under rotating tags): a subscriber that upgrades when the **tag** changes but the **digest** does not is **non-compliant**.
 
-## Apply sequence (standalone hub)
+## Feasibility shape (2026-10-13)
+
+Honest split - do **not** claim "flip one env var and existing machinery Just Works":
+
+| Layer | What | Scope |
+|-------|------|-------|
+| **A - discover** | Hub polls `HAPI_UPSTREAM_SEAL_URL` → digest-compare → materialize tip into **local** `soup-artifacts/` → retarget local pointer → existing `resolveCurrentUpgradeOffer` + #251 policy applies to **this hub's runners** | **Scoped addition.** Offer construction stays "local disk SoT"; remote seal is an *input*. No companion process. No policy-engine redesign. |
+| **B - hub process apply** | Swap the hub's own binary (`process.execPath` / install path) + exit for systemd `Restart=always` / patient drain | **Real gap today.** Runners self-upgrade via RPC; hub process does not. Reuse `applyRunnerSelfUpgrade` primitives inside hub lifecycle - still in-product. Needed when standalone hub UI/API itself must move, not only its runners. |
+
+**What "I am SoT" means today:** offer URLs are relative `/cli/upgrade/cli-artifact?…` served by this hub; policy targets registered machines. Correct subscriber model: **materialize remote seal locally first**, then this hub remains SoT for *its* runners. Do not leave offer URLs pointed at oos while ninja runners download through a proxy forever.
+
+**Kill-criteria / friction:**
+
+1. oos foundry must **not** set `HAPI_UPSTREAM_SEAL_URL` to itself (ouroboros).
+2. Never auto-apply off dogfood `latest` / GH `releases/latest` - only `fleet-latest` / seal pointer.
+3. Shared single-exe path: hub+runner on same binary → ordered apply; avoid rewriting a live hub exec mid-flight.
+4. Hub restart under live sessions = patient drain, not `pkill`.
+
+## Apply sequence (standalone hub - Layer A)
 
 Once digest-new is proven:
 
-1. Fetch tip tree (or at least manifest + this platform binary + NOTES) into local `{HAPI_HOME}/soup-artifacts/<tag>/`.
-2. Point local `latest` → that tip (local hub offer source of truth).
-3. Existing #247/#251 path: local hub offer moves → machine-policy `auto` runner keepalive-applies / push-upgrade. Watcher does **not** need to reinvent self-upgrade RPC if the local hub already does.
+1. Fetch tip tree (or at least manifest + this platform binary + NOTES) into local `{HAPI_HOME}/soup-artifacts/<tag>/` (or local artifacts root).
+2. Point local `latest` (or the hub's offer tip pointer) → that tip so local offer construction picks it up.
+3. Existing #247/#251 path: local hub offer moves → machine-policy `auto` runner keepalive-applies / push-upgrade. Do **not** reinvent self-upgrade RPC.
 
-Watcher ownership ends at "seal bytes live under this hub's `soup-artifacts`." Hub+runner apply stays hub-local.
+Layer A ownership ends at "seal bytes live under this hub's `soup-artifacts`." Runner apply stays hub-local. Layer B (hub PID itself) is the follow-on when required.
 
 ## Operator seal action (human / agent)
 
@@ -144,6 +164,7 @@ Mechanical (to implement):
 - Watching dogfood `latest` for auto-apply on standalones.
 - Tag/date/NOTES as sufficiency for upgrade.
 - Agent SSH copy as the steady-state discover path.
+- **Companion bash/node/cron watcher in a separate repo or alongside the hub process** (operator veto 2026-10-13).
 
 ## Implementation checklist
 
@@ -155,9 +176,10 @@ Mechanical (to implement):
 | `hapi-fleet-seal` CLI | **Exists** (`scripts/tooling/hapi-fleet-seal.sh`) |
 | GH release `manifest.json` asset | **Exists** on recent tips |
 | GH "this release is the seal" pointer | **Missing** - optional v1.1 |
-| Ninja watcher vs this contract | **Pending** consumer (`ba76163e`) |
+| Hub native `HAPI_UPSTREAM_SEAL_URL` poll + materialize (Layer A) | **Pending** - in-product; companion path dead |
+| Hub process self-apply (Layer B) | **Missing** - follow-on; reuse runner swap primitives |
 | Estate pets discover via oos hub offer | **Exists** (#247/#251) |
 
 ## Relay
 
-When this doc lands: ping parity peer + ninjcow-incus with the path. Watcher may stub against `fleet-latest` once Meta/tooling creates the symlink; until then hold.
+Feasibility answered to `[Peer: fork main vs soup parity](/sessions/d2a67a01-07f9-4395-b84c-94d39c24e797)` and stop-ack to `[ninjcow-incus upkeep](/sessions/ba76163e-d993-4b2b-b4ab-c4cdf3c41c7e)` (2026-10-13). Build Layer A in-hub; do not stub a sidecar.
