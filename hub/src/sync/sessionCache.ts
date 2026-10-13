@@ -22,9 +22,12 @@ type RuntimeConfigKey = 'permissionMode' | 'model' | 'modelReasoningEffort' | 'e
 
 /**
  * Metadata merge used when consolidating an old session row into a replacement
- * (resume/reopen). Carry forward display/contribution fields the new row omitted.
- * Explicit keys on `newMetadata` always win — including empty `externalRefs: []`.
- * tiann/hapi#1160 / PR #1161.
+ * (resume/reopen / mergeSessions). Carry forward display/contribution fields the
+ * new row omitted. For externalRefs (hapi#238): union old into new so issue/PR
+ * links on the deleted row are not lost; on identity collision the new row wins.
+ * Explicit `externalRefs: []` does NOT clear via this helper — PUT /external-refs
+ * remains the clear path (driver-soup: socket omit-empty).
+ * tiann/hapi#1160 / PR #1161 + heavygee/hapi#238.
  */
 export function mergeSessionMetadataForSessionMerge(
     oldMetadata: unknown | null,

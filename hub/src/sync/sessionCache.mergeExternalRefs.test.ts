@@ -31,7 +31,7 @@ describe('mergeSessionMetadataForSessionMerge externalRefs', () => {
         expect(merged.name).toBe('PR session')
     })
 
-    it('lets the new row win when it explicitly sets externalRefs', () => {
+    it('unions distinct externalRefs when the new row sets its own (hapi#238)', () => {
         const oldMetadata = {
             path: '/old',
             host: 'old-host',
@@ -52,10 +52,11 @@ describe('mergeSessionMetadataForSessionMerge externalRefs', () => {
 
         const merged = mergeSessionMetadataForSessionMerge(oldMetadata, newMetadata) as Record<string, unknown>
 
-        expect(merged.externalRefs).toEqual(replacement)
+        // New refs stay first; old-only identities are appended (mergeExternalRefs).
+        expect(merged.externalRefs).toEqual([...replacement, prRef])
     })
 
-    it('lets an explicit empty externalRefs array clear the old refs', () => {
+    it('does not treat explicit empty externalRefs as a clear (PUT /external-refs is the clear path)', () => {
         const oldMetadata = {
             path: '/old',
             host: 'old-host',
@@ -69,6 +70,6 @@ describe('mergeSessionMetadataForSessionMerge externalRefs', () => {
 
         const merged = mergeSessionMetadataForSessionMerge(oldMetadata, newMetadata) as Record<string, unknown>
 
-        expect(merged.externalRefs).toEqual([])
+        expect(merged.externalRefs).toEqual([prRef])
     })
 })
