@@ -5,6 +5,7 @@ import {
     deduplicateSessionsByAgentId,
     expandSelectedSessionCollapseOverrides,
     filterActiveSessionsOnly,
+    filterSessionsByMachine,
     filterUnreadSessionsOnly,
     UNKNOWN_MACHINE_ID,
     bucketRunningSessions,
@@ -522,6 +523,42 @@ describe('filterActiveSessionsOnly', () => {
             makeSession({ id: 'c', active: true, metadata: { path: '/p' } })
         ]
         expect(filterActiveSessionsOnly(sessions).map(s => s.id)).toEqual(['a', 'c'])
+    })
+})
+
+describe('filterSessionsByMachine', () => {
+    const sessions = [
+        makeSession({ id: 'here', metadata: { path: '/p', machineId: 'oos' } }),
+        makeSession({ id: 'elsewhere', metadata: { path: '/p', machineId: 'homelab' } }),
+        makeSession({ id: 'nomachine', metadata: { path: '/p' } })
+    ]
+
+    it('returns every session when no machine is selected', () => {
+        expect(filterSessionsByMachine(sessions, null).map(s => s.id))
+            .toEqual(['here', 'elsewhere', 'nomachine'])
+    })
+
+    it('keeps only the chosen machine', () => {
+        expect(filterSessionsByMachine(sessions, 'oos').map(s => s.id)).toEqual(['here'])
+    })
+
+    it('buckets sessions without a machine under the unknown id', () => {
+        expect(filterSessionsByMachine(sessions, UNKNOWN_MACHINE_ID).map(s => s.id))
+            .toEqual(['nomachine'])
+    })
+
+    it('keeps the open session visible even when it is on another machine', () => {
+        expect(filterSessionsByMachine(sessions, 'oos', 'elsewhere').map(s => s.id))
+            .toEqual(['here', 'elsewhere'])
+    })
+
+    it('does not duplicate the open session when it is on the chosen machine', () => {
+        expect(filterSessionsByMachine(sessions, 'oos', 'here').map(s => s.id)).toEqual(['here'])
+    })
+
+    it('preserves input order', () => {
+        expect(filterSessionsByMachine(sessions, 'homelab', 'nomachine').map(s => s.id))
+            .toEqual(['elsewhere', 'nomachine'])
     })
 })
 

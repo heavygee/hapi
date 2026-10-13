@@ -321,6 +321,22 @@ export function filterUnreadSessionsOnly(
     )
 }
 
+// Machine scope lens: show one machine's sessions. Like the active-only and
+// unread-only lenses, it never hides the session the operator currently has
+// open — selecting a session on another machine would otherwise leave the list
+// with no row for it at all.
+export function filterSessionsByMachine(
+    sessions: SessionSummary[],
+    machineId: string | null,
+    selectedSessionId?: string | null
+): SessionSummary[] {
+    if (machineId === null) return sessions
+    return sessions.filter(session =>
+        session.id === selectedSessionId
+        || (session.metadata?.machineId ?? UNKNOWN_MACHINE_ID) === machineId
+    )
+}
+
 // Paginated session previews move one batch at a time in either direction.
 // Counts always stay within the configured preview floor and the group total.
 export function getNextSessionVisibleCount(current: number, step: number, total: number): number {
@@ -1367,12 +1383,8 @@ export function SessionList(props: {
         )
     }, [lastSeenVersion, visibleSessions, selectedSessionId, showUnreadOnly])
     const machineFilteredSessions = useMemo(
-        () => activeMachineFilter === null
-            ? unreadFilteredSessions
-            : unreadFilteredSessions.filter(session =>
-                (session.metadata?.machineId ?? UNKNOWN_MACHINE_ID) === activeMachineFilter
-            ),
-        [unreadFilteredSessions, activeMachineFilter]
+        () => filterSessionsByMachine(unreadFilteredSessions, activeMachineFilter, selectedSessionId),
+        [unreadFilteredSessions, activeMachineFilter, selectedSessionId]
     )
     const globalPinnedSessions = useMemo(() => {
         const pinned = machineFilteredSessions.filter((session) => Boolean(session.globalPinned))

@@ -138,6 +138,38 @@ test.describe('session list scroll into view', () => {
         expect(await scrollTop(page)).toBe(0)
     })
 
+    test('reveals a selected session whose machine is filtered out of the list', async ({ page }) => {
+        // Sessions alternate between machine-a and machine-b; the list is scoped
+        // to machine-a, so session-31 (machine-b) has no row to begin with.
+        await page.goto(`${FIXTURE}?machines&machine=machine-a`)
+        await row(page, 'session-0').waitFor()
+        await expect(row(page, 'session-31')).toHaveCount(0)
+
+        await page.evaluate(() => window.selectSession('session-31'))
+        await page.waitForTimeout(600)
+
+        // Opening a session must not leave the list with no row for it — the
+        // machine scope keeps the open session the way the other lenses do.
+        await expect(row(page, 'session-31')).toHaveCount(1)
+        const offsets = await edgeOffsets(page, 'session-31')
+        expect(offsets.top).toBeGreaterThanOrEqual(-1)
+        expect(offsets.bottom).toBeLessThanOrEqual(1)
+        expect(await isRowTopUnobstructed(page, 'session-31')).toBe(true)
+    })
+
+    test('drops the off-machine row again once another session is selected', async ({ page }) => {
+        await page.goto(`${FIXTURE}?machines&machine=machine-a`)
+        await row(page, 'session-0').waitFor()
+
+        await page.evaluate(() => window.selectSession('session-31'))
+        await page.waitForTimeout(600)
+        await expect(row(page, 'session-31')).toHaveCount(1)
+
+        await page.evaluate(() => window.selectSession('session-2'))
+        await page.waitForTimeout(600)
+        await expect(row(page, 'session-31')).toHaveCount(0)
+    })
+
     test('yields to a wheel gesture made during the reveal', async ({ page }) => {
         await page.goto(`${FIXTURE}?collapsed`)
         await row(page, 'session-0').waitFor()
