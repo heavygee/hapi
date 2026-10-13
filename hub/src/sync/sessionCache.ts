@@ -1,5 +1,5 @@
 import { SESSION_LIFECYCLE_IDLE, SESSION_LIFECYCLE_RUNNING } from '@hapi/protocol'
-import { upsertExternalRef, type ExternalRef } from '@hapi/protocol/schemas'
+import { mergeExternalRefs, upsertExternalRef, type ExternalRef } from '@hapi/protocol/schemas'
 import { AgentStateSchema, MetadataSchema, SessionPatchSchema, TeamStateSchema } from '@hapi/protocol/schemas'
 import type { CodexCollaborationMode, CopilotAgentMode, PermissionMode, Session, SessionPatch } from '@hapi/protocol/types'
 import type { Store } from '../store'
@@ -1581,6 +1581,19 @@ export class SessionCache {
         if (typeof oldObj.preferredCopilotAgentMode === 'string' && typeof newObj.preferredCopilotAgentMode !== 'string') {
             merged.preferredCopilotAgentMode = oldObj.preferredCopilotAgentMode
             changed = true
+        }
+
+        // The old session is deleted after this merge — any externalRefs
+        // (issue/PR links) that only exist there would otherwise be lost for
+        // good (Codex review, hapi#238).
+        const oldRefs = Array.isArray(oldObj.externalRefs) ? oldObj.externalRefs as ExternalRef[] : []
+        const newRefs = Array.isArray(newObj.externalRefs) ? newObj.externalRefs as ExternalRef[] : []
+        if (oldRefs.length > 0) {
+            const combinedRefs = mergeExternalRefs(newRefs, oldRefs)
+            if (combinedRefs.length !== newRefs.length) {
+                merged.externalRefs = combinedRefs
+                changed = true
+            }
         }
 
         return changed ? merged : newMetadata

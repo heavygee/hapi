@@ -162,8 +162,29 @@ export function parseIssueUrl(input: string): { url: string; repo: string; numbe
     return null
 }
 
+function externalRefHost(url: string): string {
+    try {
+        return new URL(url).host.toLowerCase()
+    } catch {
+        return ''
+    }
+}
+
+// Identity is host+kind+repo+number, not just kind+repo+number (Codex
+// review): now that parseIssueUrl accepts any host, the same repo path and
+// issue number can legitimately exist on github.com and a GHE host as two
+// different issues — ignoring the host would make linking the second one
+// silently discard the first (same reasoning externalRefs.ts's
+// findSessionLinkedToIssue already documents for its own host-aware match).
+function sameExternalRefIdentity(a: ExternalRef, b: ExternalRef): boolean {
+    return a.kind === b.kind
+        && a.repo.toLowerCase() === b.repo.toLowerCase()
+        && a.number === b.number
+        && externalRefHost(a.url) === externalRefHost(b.url)
+}
+
 /**
- * Upserts by `kind`+`repo`+`number`, case-insensitively on `repo` (GitHub repo
+ * Upserts by host+kind+repo+number, case-insensitively on `repo` (GitHub repo
  * names aren't case-sensitive — `Owner/Repo#5` and `owner/repo#5` are the same
  * issue). Keeps the first-seen casing rather than normalizing it, since the
  * stored `repo` is shown to the operator verbatim. Shared by the hub's direct
@@ -171,10 +192,29 @@ export function parseIssueUrl(input: string): { url: string; repo: string; numbe
  * (`applyLinkIssue`) so both agree on what counts as a duplicate.
  */
 export function upsertExternalRef(existing: ExternalRef[], ref: ExternalRef): ExternalRef[] {
-    const withoutMatch = existing.filter(
-        candidate => !(candidate.kind === ref.kind && candidate.repo.toLowerCase() === ref.repo.toLowerCase() && candidate.number === ref.number)
-    )
+    const withoutMatch = existing.filter(candidate => !sameExternalRefIdentity(candidate, ref))
     return [...withoutMatch, ref]
+}
+
+/**
+ * Unions two ref arrays by the same host+kind+repo+number identity,
+ * preferring `base`'s entry on a collision — used when merging a resumed
+ * session's metadata into its replacement (hapi#238 Codex review:
+ * mergeSessionMetadata carried over name/summary/worktree/path/host but not
+ * externalRefs, silently dropping issue/PR links — and the fork's own PR
+ * tooling discovers sessions from `github_pr` chips, not titles — whenever
+ * the source session was deleted post-merge). `base` is the surviving/new
+ * session's refs; anything `incoming`-only (the about-to-be-deleted old
+ * session's) is appended.
+ */
+export function mergeExternalRefs(base: ExternalRef[], incoming: ExternalRef[]): ExternalRef[] {
+    let result = base
+    for (const ref of incoming) {
+        if (!result.some(existing => sameExternalRefIdentity(existing, ref))) {
+            result = [...result, ref]
+        }
+    }
+    return result
 }
 
 export const MetadataSchema = z.object({
