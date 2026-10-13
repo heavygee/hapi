@@ -5,6 +5,13 @@
 **Consumer:** `[ninjcow-incus upkeep](/sessions/ba76163e-d993-4b2b-b4ab-c4cdf3c41c7e)` and successors - **in-product hub code only**.  
 **Related:** #247 deliberate push, #248 release notes, #251 per-machine auto keepalive, publish fix `44ef482d2` (stale binary).
 
+
+## Scope: FORK-ONLY (`heavygee/hapi`)
+
+**Not for `tiann/hapi`.** @tiann rejected this class of hub-artifact / auto-upgrade machinery upstream (PR #1108, 2026-08-02) for chicken-egg skew, capability-gap reinstall loops, and maintenance burden — closed door.
+
+Ship Layer A as a **driver soup layer** (`driver/hub-upstream-seal-url` / heavygee/hapi#254). Never as an upstream-bound `feat/` PR against `tiann/hapi`. Companion poller path remains dead.
+
 ## Product requirement (operator)
 
 > I seal for the fleet → something is written to a known place → a **standalone HAPI hub** watching that place notices **new bytes** and updates itself.

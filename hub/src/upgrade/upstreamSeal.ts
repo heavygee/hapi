@@ -1,6 +1,11 @@
 /**
  * Layer A: hub-native upstream fleet-seal discover + materialize.
  *
+ * **FORK-ONLY (`heavygee/hapi` soup).** Not for `tiann/hapi`. @tiann rejected
+ * this class of hub-artifact / auto-upgrade machinery upstream (PR #1108,
+ * 2026-08-02) — chicken-egg skew, capability-gap reinstall loops, maintenance
+ * burden. Closed door; do not structure this as upstream-PR-bound.
+ *
  * Canon: docs/plans/2026-10-13-fleet-seal-contract.md
  *
  * Config: HAPI_UPSTREAM_SEAL_URL (manifest) and/or HAPI_UPSTREAM_SEAL_TAG
