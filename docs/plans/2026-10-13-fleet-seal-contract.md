@@ -1,9 +1,11 @@
 # Fleet seal contract (hub upstream-seal subscriber)
 
 **Status:** canon for implementers (ninja standalone hub + any future gift/personal hub).  
+**Scope: FORK-ONLY (`heavygee/hapi` soup / driver layers). Not for `tiann/hapi`.**  
+@tiann rejected this class of hub-artifact / auto-upgrade machinery upstream (PR #1108, 2026-08-02) for chicken-egg skew, capability-gap reinstall loops, and maintenance burden - **closed door**, not an oversight to revisit. Deliberate-push / seal / Layer A upstream-seal subscriber stay on the fork. Do not frame PRs or modules as "keep clean for a future #1108 follow-up."  
 **Owner lane:** fleet / hub-runner-version governance.  
-**Consumer:** `[ninjcow-incus upkeep](/sessions/ba76163e-d993-4b2b-b4ab-c4cdf3c41c7e)` and successors - **in-product hub code only**.  
-**Related:** #247 deliberate push, #248 release notes, #251 per-machine auto keepalive, publish fix `44ef482d2` (stale binary).
+**Consumer:** `[ninjcow-incus upkeep](/sessions/ba76163e-d993-4b2b-b4ab-c4cdf3c41c7e)` and successors - **in-product hub code only** (fork soup).  
+**Related:** #247 deliberate push, #248 release notes, #251 per-machine auto keepalive, publish fix `44ef482d2` (stale binary); upstream rejection context #1108 / #122 estate rehydrate.
 
 ## Product requirement (operator)
 
