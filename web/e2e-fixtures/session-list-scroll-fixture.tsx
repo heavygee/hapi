@@ -49,6 +49,8 @@ declare global {
         updateSession: (id: string, patch: Partial<SessionSummary>) => void
         /** Stands in for deep links and programmatic navigation. */
         selectSession: (id: string | null) => void
+        /** Stands in for a session arriving after the sessions query refetches. */
+        addSession: (id: string) => void
     }
 }
 
@@ -62,6 +64,14 @@ function Fixture() {
     window.updateSession = (id, patch) => setSessions(previous => previous.map(session =>
         session.id === id ? { ...session, ...patch } : session))
     window.selectSession = setSelectedSessionId
+    window.addSession = (id) => setSessions(previous => previous.some(s => s.id === id)
+        ? previous
+        : [...previous, {
+            ...initialSessions[0],
+            id,
+            updatedAt: 0,
+            metadata: { ...initialSessions[0].metadata, path: '/project-late', name: id },
+        }])
     return <div style={{ width: 360, height: 600, display: 'flex', flexDirection: 'column' }}>
         <SessionList sessions={sessions} selectedSessionId={selectedSessionId}
             onSelect={setSelectedSessionId} onNewSession={() => {}}

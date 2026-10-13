@@ -216,6 +216,29 @@ test.describe('session list scroll into view', () => {
         expect(offsets.bottom).toBeLessThanOrEqual(1)
     })
 
+    test('reveals a row that arrives after the first attempt has expired', async ({ page }) => {
+        // The spawn flow navigates to a new session on the frame after it
+        // invalidates the sessions query, so the row does not exist until the
+        // refetch lands. This is the one case driven by the real ResizeObserver
+        // on the list content rather than by the in-window frame loop.
+        await page.goto(FIXTURE)
+        await row(page, 'session-0').waitFor()
+        const before = await scrollTop(page)
+
+        await page.evaluate(() => window.selectSession('session-late'))
+        await page.waitForTimeout(900) // Longer than one reveal attempt (500ms).
+        await expect(row(page, 'session-late')).toHaveCount(0)
+        expect(await scrollTop(page)).toBe(before)
+
+        await page.evaluate(() => window.addSession('session-late'))
+        await page.waitForTimeout(700)
+
+        await expect(row(page, 'session-late')).toHaveCount(1)
+        const offsets = await edgeOffsets(page, 'session-late')
+        expect(offsets.top).toBeGreaterThanOrEqual(-1)
+        expect(offsets.bottom).toBeLessThanOrEqual(1)
+    })
+
     test('yields to a wheel gesture made during the reveal', async ({ page }) => {
         await page.goto(`${FIXTURE}?collapsed`)
         await row(page, 'session-0').waitFor()
