@@ -50,9 +50,9 @@ async function gotoTodoMode(page: Page): Promise<void> {
         await page.waitForLoadState('domcontentloaded', { timeout: 60_000 })
         await page.goto('/sessions', { waitUntil: 'domcontentloaded', timeout: 60_000 })
     }
-    const modeSwitch = page.getByRole('radiogroup', { name: 'Switch between sessions and to-do view' })
+    const modeSwitch = page.getByRole('radiogroup', { name: 'Switch between sessions and boards view' })
     await expect(modeSwitch).toBeVisible({ timeout: 60_000 })
-    await modeSwitch.getByRole('radio', { name: 'To-Do' }).click()
+    await modeSwitch.getByRole('radio', { name: /^Boards/ }).click()
     await expect(page.getByText('In Progress (')).toBeVisible({ timeout: 30_000 })
 }
 

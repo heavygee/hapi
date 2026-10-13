@@ -374,6 +374,8 @@ On **oos-linux only**, a verified soup promote with web build also publishes sel
 
 **Manual** (first install / one-off): `hapi-soup-publish-single-exe` or `hapi-soup-publish-single-exe --dry-run`.
 
+**Compile freshness (supply-chain):** publish refuses to copy `cli/dist-exe` unless `cli/dist-exe/.composed-tip-sha` equals driver `HEAD`. A tip change with an existing `dist-exe/` directory **rebuilds** (`bun build:single-exe:all`) instead of re-tagging stale bytes. After packaging, publish also fails closed if any platform binary sha256 is unchanged versus the previous `soup-artifacts/latest` while the composed tip changed. Escape hatch (dangerous): `HAPI_SOUP_REUSE_DIST_EXE=1`.
+
 Plan: [`docs/plans/2026-09-04-fleet-vm-swap-strategy.md`](../plans/2026-09-04-fleet-vm-swap-strategy.md) § Stage 0.
 
 Sources: `scripts/tooling/` in repo; installed to `~/.local/bin/`.

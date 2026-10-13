@@ -20,6 +20,11 @@
 #   HAPI_SOUP_GITHUB_REPO       default heavygee/hapi (GitHub Releases mirror)
 #   HAPI_SKIP_SOUP_GITHUB_RELEASE=1  skip gh release create/upload (local publish only)
 #   HAPI_SOUP_GITHUB_RELEASE_REQUIRED=1  fail publish if gh upload fails (default on oos foundry)
+#   HAPI_SOUP_REUSE_DIST_EXE=1  dangerous escape hatch: publish existing dist-exe without tip-stamp rebuild
+#
+# Supply-chain invariant: dist-exe/.composed-tip-sha must equal driver HEAD before
+# publish copies binaries. Rebuild was skipping compile whenever dist-exe/ already
+# existed (oos 2026-10-06..12), re-tagging stale Oct-8 bytes under new tips.
 
 driver_soup_single_exe_artifacts_root() {
     printf '%s\n' "${HAPI_SOUP_ARTIFACTS_ROOT:-/var/lib/hapi/soup-artifacts}"
@@ -323,15 +328,127 @@ driver_soup_single_exe_layer_count() {
     "$parse" "$manifest" 2>/dev/null | jq '.layers | length' 2>/dev/null || printf '%s\n' 0
 }
 
-# Build all platform single-exe binaries in the driver tree.
+driver_soup_single_exe_tip_stamp_path() {
+    local driver="${1:?}"
+    printf '%s\n' "$driver/cli/dist-exe/.composed-tip-sha"
+}
+
+# 0 = needs rebuild, 1 = tip stamp already matches HEAD (safe reuse).
+driver_soup_single_exe_needs_rebuild() {
+    local driver="${1:?}"
+    local tip_sha="${2:?}"
+    local stamp stamped=""
+    stamp="$(driver_soup_single_exe_tip_stamp_path "$driver")"
+    if [[ "${HAPI_SOUP_REUSE_DIST_EXE:-}" == "1" ]]; then
+        return 1
+    fi
+    if [[ ! -d "$driver/cli/dist-exe" ]]; then
+        return 0
+    fi
+    if [[ ! -f "$stamp" ]]; then
+        return 0
+    fi
+    stamped="$(tr -d '[:space:]' <"$stamp" 2>/dev/null || true)"
+    if [[ -z "$stamped" || "$stamped" != "$tip_sha" ]]; then
+        return 0
+    fi
+    return 1
+}
+
+# Build all platform single-exe binaries in the driver tree; stamp tip SHA.
 driver_soup_single_exe_build() {
     local driver="${1:?}"
     local bun="${2:-${BUN:-$HOME/.bun/bin/bun}}"
+    local tip_sha stamp
+    tip_sha="$(git -C "$driver" rev-parse HEAD)"
     echo "soup-artifact: running bun build:single-exe:all in $driver ..."
     if ! (cd "$driver" && "$bun" run build:single-exe:all); then
         echo "ERROR: bun build:single-exe:all failed in $driver" >&2
         return 1
     fi
+    mkdir -p "$driver/cli/dist-exe"
+    stamp="$(driver_soup_single_exe_tip_stamp_path "$driver")"
+    printf '%s\n' "$tip_sha" >"$stamp"
+    echo "soup-artifact: wrote tip stamp ${tip_sha:0:12} → $stamp"
+    return 0
+}
+
+# Rebuild when dist-exe is missing or stamped for a different composed tip.
+driver_soup_single_exe_ensure_fresh() {
+    local driver="${1:?}"
+    local bun="${2:-${BUN:-$HOME/.bun/bin/bun}}"
+    local tip_sha stamp stamped=""
+    tip_sha="$(git -C "$driver" rev-parse HEAD)"
+    stamp="$(driver_soup_single_exe_tip_stamp_path "$driver")"
+
+    if [[ "${HAPI_SOUP_REUSE_DIST_EXE:-}" == "1" ]]; then
+        echo "WARNING: soup-artifact: HAPI_SOUP_REUSE_DIST_EXE=1 — publishing existing dist-exe without rebuild" >&2
+        return 0
+    fi
+
+    if ! driver_soup_single_exe_needs_rebuild "$driver" "$tip_sha"; then
+        echo "soup-artifact: dist-exe tip stamp matches HEAD ${tip_sha:0:12} — reuse"
+        return 0
+    fi
+
+    if [[ -f "$stamp" ]]; then
+        stamped="$(tr -d '[:space:]' <"$stamp" 2>/dev/null || true)"
+    fi
+    if [[ -d "$driver/cli/dist-exe" && -n "$stamped" && "$stamped" != "$tip_sha" ]]; then
+        echo "soup-artifact: dist-exe tip stamp stale (have=${stamped:0:12} want=${tip_sha:0:12}) — rebuilding"
+    elif [[ -d "$driver/cli/dist-exe" ]]; then
+        echo "soup-artifact: dist-exe unstamped — rebuilding for tip ${tip_sha:0:12}"
+    else
+        echo "soup-artifact: dist-exe missing — building for tip ${tip_sha:0:12}"
+    fi
+
+    if ! driver_soup_single_exe_build "$driver" "$bun"; then
+        return 1
+    fi
+
+    stamped="$(tr -d '[:space:]' <"$stamp" 2>/dev/null || true)"
+    if [[ "$stamped" != "$tip_sha" ]]; then
+        echo "ERROR: soup-artifact: tip stamp mismatch after build (have=${stamped:0:12} want=${tip_sha:0:12})" >&2
+        return 1
+    fi
+    return 0
+}
+
+# Refuse to re-tag identical binary bytes under a new composed tip (the 2026-10
+# silent-stale failure mode). Compares against the current latest symlink target
+# before it is flipped.
+driver_soup_single_exe_assert_not_retagging_stale() {
+    local dest="${1:?}"
+    local tip_sha="${2:?}"
+    local root prev_manifest prev_tip prev_bin new_bin name prev_sha new_sha
+    root="$(driver_soup_single_exe_artifacts_root)"
+    prev_manifest="$root/latest/manifest.json"
+    [[ -f "$prev_manifest" ]] || return 0
+    prev_tip="$(jq -r '.composedTipSha // empty' "$prev_manifest" 2>/dev/null || true)"
+    [[ -n "$prev_tip" ]] || return 0
+    if [[ "$prev_tip" == "$tip_sha" ]]; then
+        # Same tip republish (e.g. fixing a bad prior upload) — allow digest churn.
+        return 0
+    fi
+    shopt -s nullglob
+    for prev_bin in "$root/latest"/*/hapi "$root/latest"/*/hapi.exe; do
+        [[ -f "$prev_bin" ]] || continue
+        name="$(basename "$(dirname "$prev_bin")")/$(basename "$prev_bin")"
+        new_bin="$dest/$name"
+        [[ -f "$new_bin" ]] || continue
+        prev_sha="$(driver_soup_single_exe_sha256_file "$prev_bin")"
+        new_sha="$(driver_soup_single_exe_sha256_file "$new_bin")"
+        if [[ "$prev_sha" == "$new_sha" ]]; then
+            echo "ERROR: soup-artifact: binary $name sha256 unchanged across tip change" >&2
+            echo "       prev tip ${prev_tip:0:12} → new tip ${tip_sha:0:12}" >&2
+            echo "       digest $prev_sha" >&2
+            echo "       Refuse to publish: compile did not produce fresh bytes (supply-chain)." >&2
+            echo "       Rebuild: hapi-soup-publish-single-exe --build-only && retry publish." >&2
+            shopt -u nullglob
+            return 1
+        fi
+    done
+    shopt -u nullglob
     return 0
 }
 
@@ -375,15 +492,19 @@ driver_soup_single_exe_publish() {
         return 0
     fi
 
-    if [[ ! -d "$dist_exe" ]]; then
-        echo "soup-artifact: dist-exe missing — building ..."
-        if ! driver_soup_single_exe_build "$driver" "$bun"; then
-            return 1
-        fi
+    # ALWAYS ensure tip-stamped binaries (do not skip compile just because dist-exe exists).
+    if ! driver_soup_single_exe_ensure_fresh "$driver" "$bun"; then
+        return 1
     fi
 
     if [[ ! -d "$dist_exe" ]]; then
-        echo "ERROR: soup-artifact: expected $dist_exe after build" >&2
+        echo "ERROR: soup-artifact: expected $dist_exe after ensure_fresh" >&2
+        return 1
+    fi
+    local stamp_check
+    stamp_check="$(tr -d '[:space:]' <"$(driver_soup_single_exe_tip_stamp_path "$driver")" 2>/dev/null || true)"
+    if [[ "${HAPI_SOUP_REUSE_DIST_EXE:-}" != "1" && "$stamp_check" != "$tip_sha" ]]; then
+        echo "ERROR: soup-artifact: refusing publish — dist-exe tip stamp ($stamp_check) != HEAD ($tip_sha)" >&2
         return 1
     fi
 
@@ -485,6 +606,11 @@ driver_soup_single_exe_publish() {
     fi
     printf '%s\n' "$notes_for_disk" >"$dest/NOTES.md"
     echo "soup-artifact: NOTES.md written ($dest/NOTES.md)"
+
+    if ! driver_soup_single_exe_assert_not_retagging_stale "$dest" "$tip_sha"; then
+        rm -rf "$dest"
+        return 1
+    fi
 
     ln -sfn "$tag" "$root/latest"
     printf '%s\n' "$tag" >"$root/latest-tag.txt"

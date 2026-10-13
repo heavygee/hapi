@@ -99,4 +99,56 @@ printf '%s\n' "$notes" | grep -q 'Automated soup single-exe publish' \
     && { echo "FAIL: notes still use boilerplate opener"; exit 1; }
 echo "OK: release notes include changelog subjects"
 
+# Tip-stamp rebuild gate (the silent-stale publish bug, 2026-10).
+STAMP_DRIVER="$TMP/stamp-driver"
+mkdir -p "$STAMP_DRIVER/cli/dist-exe"
+git -C "$STAMP_DRIVER" init -q
+git -C "$STAMP_DRIVER" config user.email "test@example.com"
+git -C "$STAMP_DRIVER" config user.name "Test"
+echo src >"$STAMP_DRIVER/cli/app.txt"
+git -C "$STAMP_DRIVER" add cli/app.txt
+git -C "$STAMP_DRIVER" commit -qm "soup tip A"
+TIP_A="$(git -C "$STAMP_DRIVER" rev-parse HEAD)"
+# Missing stamp → needs rebuild
+if ! driver_soup_single_exe_needs_rebuild "$STAMP_DRIVER" "$TIP_A"; then
+    echo "FAIL: needs_rebuild should be true when stamp missing"; exit 1
+fi
+echo "OK: needs_rebuild when unstamped"
+# Matching stamp → reuse
+printf '%s\n' "$TIP_A" >"$(driver_soup_single_exe_tip_stamp_path "$STAMP_DRIVER")"
+if driver_soup_single_exe_needs_rebuild "$STAMP_DRIVER" "$TIP_A"; then
+    echo "FAIL: needs_rebuild should be false when stamp matches"; exit 1
+fi
+echo "OK: needs_rebuild false when stamp matches HEAD"
+# Stale stamp → needs rebuild
+echo src2 >"$STAMP_DRIVER/cli/app.txt"
+git -C "$STAMP_DRIVER" add cli/app.txt
+git -C "$STAMP_DRIVER" commit -qm "soup tip B"
+TIP_B="$(git -C "$STAMP_DRIVER" rev-parse HEAD)"
+if ! driver_soup_single_exe_needs_rebuild "$STAMP_DRIVER" "$TIP_B"; then
+    echo "FAIL: needs_rebuild should be true when stamp stale"; exit 1
+fi
+echo "OK: needs_rebuild when stamp stale"
+
+# Stale-retag integrity gate
+ART="$TMP/artifacts"
+mkdir -p "$ART/latest/linux-x64-baseline" "$TMP/new/linux-x64-baseline"
+printf 'stale-bytes' >"$ART/latest/linux-x64-baseline/hapi"
+printf 'stale-bytes' >"$TMP/new/linux-x64-baseline/hapi"
+jq -n --arg tip "$TIP_A" '{composedTipSha: $tip}' >"$ART/latest/manifest.json"
+driver_soup_single_exe_artifacts_root() { printf '%s\n' "$ART"; }
+if driver_soup_single_exe_assert_not_retagging_stale "$TMP/new" "$TIP_B"; then
+    echo "FAIL: assert_not_retagging_stale should reject identical bytes across tip change"
+    exit 1
+fi
+echo "OK: assert_not_retagging_stale rejects identical bytes"
+printf 'fresh-bytes' >"$TMP/new/linux-x64-baseline/hapi"
+driver_soup_single_exe_assert_not_retagging_stale "$TMP/new" "$TIP_B" \
+    || { echo "FAIL: assert should allow digest churn"; exit 1; }
+echo "OK: assert_not_retagging_stale allows fresh bytes"
+# Same tip republish may keep bytes
+driver_soup_single_exe_assert_not_retagging_stale "$TMP/new" "$TIP_A" \
+    || { echo "FAIL: same-tip republish should be allowed"; exit 1; }
+echo "OK: assert allows same-tip republish"
+
 echo "All driver-soup-single-exe-publish tests passed."

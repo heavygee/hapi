@@ -98,5 +98,7 @@ if [[ "$BUILD_ONLY" == "1" ]]; then
     exit 0
 fi
 
+# publish() also calls ensure_fresh (tip-stamp gate). Pre-building here makes the
+# stamp match so publish reuses rather than compiling twice.
 driver_soup_single_exe_build "$DRIVER" "$BUN"
 driver_soup_single_exe_publish "$DRIVER" "$PRIMARY" "$MANIFEST" "$PARSE" "$BUN" 0
