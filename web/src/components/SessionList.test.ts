@@ -22,6 +22,7 @@ import {
     prepareSidebarSessions,
     sessionMatchesQuery,
     sessionMatchesTimeRange,
+    shouldLabelGroupMachine,
     shouldShowPinnedDivider,
     shouldShowSessionInSidebar
 } from './SessionList'
@@ -523,6 +524,31 @@ describe('filterActiveSessionsOnly', () => {
             makeSession({ id: 'c', active: true, metadata: { path: '/p' } })
         ]
         expect(filterActiveSessionsOnly(sessions).map(s => s.id)).toEqual(['a', 'c'])
+    })
+})
+
+describe('shouldLabelGroupMachine', () => {
+    it('never labels when the machine bar is hidden', () => {
+        expect(shouldLabelGroupMachine('machine-a', null, false)).toBe(false)
+        expect(shouldLabelGroupMachine('machine-a', 'machine-b', false)).toBe(false)
+    })
+
+    it('labels every group when no machine is scoped', () => {
+        expect(shouldLabelGroupMachine('machine-a', null, true)).toBe(true)
+    })
+
+    it('does not label groups that are on the scoped machine', () => {
+        expect(shouldLabelGroupMachine('machine-a', 'machine-a', true)).toBe(false)
+    })
+
+    it('labels the open session kept visible from another machine', () => {
+        // Otherwise a same-named directory renders two identical headers.
+        expect(shouldLabelGroupMachine('machine-b', 'machine-a', true)).toBe(true)
+    })
+
+    it('treats a missing machine id as the unknown bucket', () => {
+        expect(shouldLabelGroupMachine(null, UNKNOWN_MACHINE_ID, true)).toBe(false)
+        expect(shouldLabelGroupMachine(null, 'machine-a', true)).toBe(true)
     })
 })
 

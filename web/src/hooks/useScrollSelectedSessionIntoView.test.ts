@@ -76,7 +76,10 @@ function edges(top: number, height: number): DOMRect {
 
 type List = {
     container: HTMLElement
+    content: HTMLElement
     rows: HTMLElement[]
+    /** Attach a row that was not in the list when the selection changed. */
+    addRow: (sessionId: string, index: number) => HTMLElement
     /** Shorter than the full list while a project is still animating open. */
     setScrollHeight: (height: number) => void
     /** `display: none`, as the sidebar is on a narrow screen. */
@@ -96,6 +99,8 @@ function createList(options: {
     hidden?: boolean
     /** Wrap every row in a project group with a sticky header, as `SessionList` does. */
     groupHeaders?: boolean
+    /** Render no rows at first, as a freshly created session's list does. */
+    empty?: boolean
 } = {}): List {
     const container = document.createElement('div')
     let scrollTop = options.scrollTop ?? 0
@@ -112,14 +117,22 @@ function createList(options: {
         ? edges(0, 0)
         : edges(VIEWPORT_TOP, VIEWPORT_HEIGHT)
 
-    const rows = Array.from({ length: ROW_COUNT }, (_, index) => {
+    const content = document.createElement('div')
+    container.append(content)
+
+    const makeRow = (sessionId: string, index: number): HTMLElement => {
         const row = document.createElement('button')
         row.className = 'session-list-item'
-        row.dataset.sessionId = `session-${index}`
+        row.dataset.sessionId = sessionId
         row.getBoundingClientRect = () => edges(
             VIEWPORT_TOP + index * ROW_HEIGHT - scrollTop,
             ROW_HEIGHT
         )
+        return row
+    }
+
+    const rows = options.empty ? [] : Array.from({ length: ROW_COUNT }, (_, index) => {
+        const row = makeRow(`session-${index}`, index)
         const panel = document.createElement('div')
         panel.className = 'collapsible-panel'
         if (!options.collapsedRowIds?.includes(`session-${index}`)) {
@@ -133,9 +146,9 @@ function createList(options: {
             header.setAttribute('data-session-group-header', '')
             header.getBoundingClientRect = () => edges(VIEWPORT_TOP, GROUP_HEADER_HEIGHT)
             group.append(header, panel)
-            container.append(group)
+            content.append(group)
         } else {
-            container.append(panel)
+            content.append(panel)
         }
         return row
     })
@@ -143,7 +156,17 @@ function createList(options: {
     document.body.append(container)
     return {
         container,
+        content,
         rows,
+        addRow: (sessionId, index) => {
+            const row = makeRow(sessionId, index)
+            const panel = document.createElement('div')
+            panel.className = 'collapsible-panel'
+            panel.setAttribute('data-open', 'true')
+            panel.append(row)
+            content.append(panel)
+            return row
+        },
         setScrollHeight: (height) => { scrollHeight = height },
         setHidden: (value) => { hidden = value },
     }
@@ -356,16 +379,53 @@ describe('useScrollSelectedSessionIntoView', () => {
         expect(container.scrollTop).toBe(100)
     })
 
-    it('waits for a hidden list to regain layout before revealing the row', () => {
+    it('waits for a list with no layout before revealing the row', () => {
         const { container, setHidden } = createList({ hidden: true })
         renderScrollIntoView(container, 'session-9')
         expect(container.scrollTop).toBe(0)
-        // Nothing is measurable, so no frames are burned while hidden.
+        // Nothing is measurable, so no frames are burned while it has no box.
         expect(frames.size).toBe(0)
 
         setHidden(false)
         triggerResize()
         expect(container.scrollTop).toBe(100)
+    })
+
+    it('reveals a row that only arrives after the first attempt gave up', () => {
+        // A session created through the spawn flow navigates on the next frame,
+        // but its row does not exist until the sessions query has refetched.
+        const { container, addRow } = createList({ empty: true })
+        renderScrollIntoView(container, 'session-new')
+        flushFrames(Math.ceil(SCROLL_SELECTED_SESSION_SETTLE_MS / FRAME_MS) + 2)
+        expect(frames.size).toBe(0)
+        expect(container.scrollTop).toBe(0)
+
+        addRow('session-new', 9)
+        triggerResize()
+        expect(container.scrollTop).toBe(100)
+    })
+
+    it('does not re-reveal after a user gesture, even when the list keeps changing', () => {
+        const { container, addRow } = createList({ empty: true })
+        renderScrollIntoView(container, 'session-new')
+        container.dispatchEvent(new Event('wheel'))
+
+        addRow('session-new', 9)
+        triggerResize()
+        flushFrames(3)
+        expect(container.scrollTop).toBe(0)
+    })
+
+    it('does not re-reveal a row it has already revealed', () => {
+        const { container } = createList()
+        renderScrollIntoView(container, 'session-9')
+        expect(container.scrollTop).toBe(100)
+        flushFrames(2)
+
+        container.scrollTop = 0
+        triggerResize()
+        flushFrames(3)
+        expect(container.scrollTop).toBe(0)
     })
 
     it('does not re-reveal on a later layout change once the reveal is done', () => {
@@ -380,7 +440,7 @@ describe('useScrollSelectedSessionIntoView', () => {
         expect(container.scrollTop).toBe(0)
     })
 
-    it('stops observing the list on unmount', () => {
+    it('stops observing the list content on unmount', () => {
         const { container } = createList({ hidden: true })
         const { unmount } = renderScrollIntoView(container, 'session-9')
         expect(resizeCallbacks.size).toBe(1)

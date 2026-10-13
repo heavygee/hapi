@@ -337,6 +337,22 @@ export function filterSessionsByMachine(
     )
 }
 
+/**
+ * Whether a group's header has to name its machine. With no machine scope the
+ * bar labels every group; with a scope active only the groups that are *not*
+ * on it need naming — which is exactly the open session kept visible by
+ * `filterSessionsByMachine`, whose directory can collide with a scoped one.
+ */
+export function shouldLabelGroupMachine(
+    groupMachineId: string | null,
+    activeMachineFilter: string | null,
+    showMachineFilterBar: boolean
+): boolean {
+    if (!showMachineFilterBar) return false
+    if (activeMachineFilter === null) return true
+    return (groupMachineId ?? UNKNOWN_MACHINE_ID) !== activeMachineFilter
+}
+
 // Paginated session previews move one batch at a time in either direction.
 // Counts always stay within the configured preview floor and the group total.
 export function getNextSessionVisibleCount(current: number, step: number, total: number): number {
@@ -1612,7 +1628,7 @@ export function SessionList(props: {
     const renderActionOnlyGroupHeader = (group: SessionGroup) => {
         // With multiple machines in the unfiltered view, disambiguate
         // same-named directories by suffixing the machine label.
-        const groupTitle = showMachineFilterBar && activeMachineFilter === null
+        const groupTitle = shouldLabelGroupMachine(group.machineId, activeMachineFilter, showMachineFilterBar)
             ? `${group.displayName} · ${resolveMachineLabel(group.machineId)}`
             : group.displayName
         return (
@@ -1667,7 +1683,7 @@ export function SessionList(props: {
         const canStartInGroupDirectory = group.directory !== 'Other'
         // With multiple machines in the unfiltered view, disambiguate
         // same-named directories by suffixing the machine label.
-        const groupTitle = showMachineFilterBar && activeMachineFilter === null
+        const groupTitle = shouldLabelGroupMachine(group.machineId, activeMachineFilter, showMachineFilterBar)
             ? `${group.displayName} · ${resolveMachineLabel(group.machineId)}`
             : group.displayName
         return (
