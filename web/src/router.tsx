@@ -265,7 +265,6 @@ function SessionsPage() {
     const {
         items: boardItems,
         statusOrder: boardStatusOrder,
-        doneValues: boardDoneValues,
         isLoading: boardItemsLoading,
         isRefetching: boardItemsRefetching,
         error: boardItemsError,
@@ -394,7 +393,6 @@ function SessionsPage() {
                             onRemoveBoard={removeBoard}
                             items={boardItems}
                             statusOrder={boardStatusOrder}
-                            doneValues={boardDoneValues}
                             isLoading={boardsLoading || boardItemsLoading}
                             error={boardsError ?? boardItemsError}
                             selectedItemId={selectedBoardItemId}
@@ -411,6 +409,8 @@ function SessionsPage() {
                                 void refetchBoardItems()
                             }}
                             isRefreshing={boardsRefetching || boardItemsRefetching}
+                            sessions={sessions}
+                            onOpenSession={handleOpenLinkedBoardSession}
                         />
                     ) : (
                     <SessionList

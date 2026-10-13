@@ -25,19 +25,19 @@ function makeItem(overrides: Partial<BoardItem>): BoardItem {
 }
 
 describe('groupItemsByStatus', () => {
-    it('orders open groups by the board status order, done pulled out regardless of column order', () => {
+    it('orders groups by the board status order, verbatim — no done-value reordering', () => {
         const items = [
             makeItem({ id: 'a', status: 'Done' }),
             makeItem({ id: 'b', status: 'Todo' }),
             makeItem({ id: 'c', status: 'In Progress' }),
             makeItem({ id: 'd', status: 'Todo' }),
         ]
-        const { openGroups, doneItems } = groupItemsByStatus(items, ['Todo', 'In Progress', 'Done'], ['Done'])
+        const groups = groupItemsByStatus(items, ['Todo', 'In Progress', 'Done'])
 
-        expect(openGroups.map(g => g.status)).toEqual(['Todo', 'In Progress'])
-        expect(openGroups[0].items.map(i => i.id)).toEqual(['b', 'd'])
-        expect(openGroups[1].items.map(i => i.id)).toEqual(['c'])
-        expect(doneItems.map(i => i.id)).toEqual(['a'])
+        expect(groups.map(g => g.status)).toEqual(['Todo', 'In Progress', 'Done'])
+        expect(groups[0]!.items.map(i => i.id)).toEqual(['b', 'd'])
+        expect(groups[1]!.items.map(i => i.id)).toEqual(['c'])
+        expect(groups[2]!.items.map(i => i.id)).toEqual(['a'])
     })
 
     it('buckets items with no status value into a trailing null-status group', () => {
@@ -45,10 +45,10 @@ describe('groupItemsByStatus', () => {
             makeItem({ id: 'a', status: 'Todo' }),
             makeItem({ id: 'b', status: null }),
         ]
-        const { openGroups } = groupItemsByStatus(items, ['Todo'], ['Done'])
+        const groups = groupItemsByStatus(items, ['Todo'])
 
-        expect(openGroups.map(g => g.status)).toEqual(['Todo', null])
-        expect(openGroups[1].items.map(i => i.id)).toEqual(['b'])
+        expect(groups.map(g => g.status)).toEqual(['Todo', null])
+        expect(groups[1]!.items.map(i => i.id)).toEqual(['b'])
     })
 
     it('keeps a real status column literally named "noStatus" distinct from the missing-status bucket', () => {
@@ -56,11 +56,11 @@ describe('groupItemsByStatus', () => {
             makeItem({ id: 'a', status: 'noStatus' }),
             makeItem({ id: 'b', status: null }),
         ]
-        const { openGroups } = groupItemsByStatus(items, ['noStatus'], ['Done'])
+        const groups = groupItemsByStatus(items, ['noStatus'])
 
-        expect(openGroups).toHaveLength(2)
-        expect(openGroups[0]).toMatchObject({ status: 'noStatus', items: [items[0]] })
-        expect(openGroups[1]).toMatchObject({ status: null, items: [items[1]] })
+        expect(groups).toHaveLength(2)
+        expect(groups[0]).toMatchObject({ status: 'noStatus', items: [items[0]] })
+        expect(groups[1]).toMatchObject({ status: null, items: [items[1]] })
     })
 
     it('appends statuses not present in statusOrder after the known ones', () => {
@@ -68,20 +68,19 @@ describe('groupItemsByStatus', () => {
             makeItem({ id: 'a', status: 'Backlog' }),
             makeItem({ id: 'b', status: 'Todo' }),
         ]
-        const { openGroups } = groupItemsByStatus(items, ['Todo'], ['Done'])
+        const groups = groupItemsByStatus(items, ['Todo'])
 
-        expect(openGroups.map(g => g.status)).toEqual(['Todo', 'Backlog'])
+        expect(groups.map(g => g.status)).toEqual(['Todo', 'Backlog'])
     })
 
-    it('treats multiple configured done values as done', () => {
+    it('keeps every status as its own group regardless of how many items share it', () => {
         const items = [
             makeItem({ id: 'a', status: 'Done' }),
             makeItem({ id: 'b', status: 'Archived' }),
             makeItem({ id: 'c', status: 'Todo' }),
         ]
-        const { openGroups, doneItems } = groupItemsByStatus(items, ['Todo', 'Done', 'Archived'], ['Done', 'Archived'])
+        const groups = groupItemsByStatus(items, ['Todo', 'Done', 'Archived'])
 
-        expect(openGroups.map(g => g.status)).toEqual(['Todo'])
-        expect(doneItems.map(i => i.id).sort()).toEqual(['a', 'b'])
+        expect(groups.map(g => g.status)).toEqual(['Todo', 'Done', 'Archived'])
     })
 })

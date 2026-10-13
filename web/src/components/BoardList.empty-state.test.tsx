@@ -16,13 +16,14 @@ function renderList() {
                 onRemoveBoard={vi.fn()}
                 items={[]}
                 statusOrder={[]}
-                doneValues={['Done']}
                 isLoading={false}
                 error={null}
                 selectedItemId={null}
                 onSelectItem={vi.fn()}
                 onRefresh={vi.fn()}
                 isRefreshing={false}
+                sessions={[]}
+                onOpenSession={vi.fn()}
             />
         </I18nProvider>
     )

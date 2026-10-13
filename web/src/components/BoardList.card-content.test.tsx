@@ -1,8 +1,31 @@
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { BoardItem } from '@/types/api'
+import type { BoardItem, SessionSummary } from '@/types/api'
 import { I18nProvider } from '@/lib/i18n-context'
 import { BoardList } from './BoardList'
+
+function makeSession(overrides: Partial<SessionSummary> & { id: string }): SessionSummary {
+    return {
+        active: false,
+        thinking: false,
+        activeAt: 0,
+        updatedAt: 0,
+        metadata: null,
+        metadataVersion: 0,
+        agentStateVersion: 0,
+        todosUpdatedAt: 0,
+        todoProgress: null,
+        pendingRequestsCount: 0,
+        pendingRequestKinds: [],
+        pendingRequests: [],
+        backgroundTaskCount: 0,
+        futureScheduledMessageCount: 0,
+        nextScheduledAt: null,
+        model: null,
+        effort: null,
+        ...overrides
+    }
+}
 
 afterEach(() => cleanup())
 
@@ -29,7 +52,7 @@ function makeItem(overrides: Partial<BoardItem> = {}): BoardItem {
     }
 }
 
-function renderList(items: BoardItem[], overrides: { onRefresh?: () => void; isRefreshing?: boolean } = {}) {
+function renderList(items: BoardItem[], overrides: { onRefresh?: () => void; isRefreshing?: boolean; sessions?: SessionSummary[]; onOpenSession?: (sessionId: string) => void } = {}) {
     return render(
         <I18nProvider>
             <BoardList
@@ -40,13 +63,14 @@ function renderList(items: BoardItem[], overrides: { onRefresh?: () => void; isR
                 onRemoveBoard={vi.fn()}
                 items={items}
                 statusOrder={['Todo']}
-                doneValues={['Done']}
                 isLoading={false}
                 error={null}
                 selectedItemId={null}
                 onSelectItem={vi.fn()}
                 onRefresh={overrides.onRefresh ?? vi.fn()}
                 isRefreshing={overrides.isRefreshing ?? false}
+                sessions={overrides.sessions ?? []}
+                onOpenSession={overrides.onOpenSession ?? vi.fn()}
             />
         </I18nProvider>
     )
@@ -88,5 +112,37 @@ describe('BoardList card content', () => {
         renderList([makeItem()], { onRefresh })
         screen.getByRole('button', { name: 'Refresh' }).click()
         expect(onRefresh).toHaveBeenCalledTimes(1)
+    })
+})
+
+// Operator feedback (hapi#238): a card with a genuinely linked session showed
+// no indication of that at the list level — only the detail pane knew. The
+// badge must be visible on the collapsed card and clickable straight to the
+// session, as a sibling control (not nested in the card's own select button).
+describe('BoardList session-linked badge', () => {
+    it('shows a session badge on a card whose issue has a linked session', () => {
+        const session = makeSession({
+            id: 'session-99',
+            metadata: { path: '/tmp', externalRefs: [{ kind: 'github_issue', url: 'https://github.com/acme/widgets/issues/1', repo: 'acme/widgets', number: 1, linkedAt: 1 }] }
+        })
+        renderList([makeItem()], { sessions: [session] })
+        expect(screen.getByText('Session')).toBeInTheDocument()
+    })
+
+    it('shows no badge when no session is linked to the item', () => {
+        renderList([makeItem()], { sessions: [] })
+        expect(screen.queryByText('Session')).not.toBeInTheDocument()
+    })
+
+    it('clicking the badge opens the linked session without selecting the card', () => {
+        const session = makeSession({
+            id: 'session-99',
+            metadata: { path: '/tmp', externalRefs: [{ kind: 'github_issue', url: 'https://github.com/acme/widgets/issues/1', repo: 'acme/widgets', number: 1, linkedAt: 1 }] }
+        })
+        const onOpenSession = vi.fn()
+        renderList([makeItem()], { sessions: [session], onOpenSession })
+
+        fireEvent.click(screen.getByText('Session'))
+        expect(onOpenSession).toHaveBeenCalledWith('session-99')
     })
 })
