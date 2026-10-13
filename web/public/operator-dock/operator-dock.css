@@ -586,6 +586,26 @@
   margin: 6px 0;
   cursor: pointer;
 }
+/* #492: Project Sessions type-to-filter — Quest-friendly hit target */
+.opdock-session-filter {
+  width: 100%;
+  box-sizing: border-box;
+  display: block;
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  min-height: 44px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(17, 17, 20, 0.9);
+  color: #f5f5f5;
+  font: 14px/1.4 ui-sans-serif, system-ui, sans-serif;
+  direction: ltr;
+  text-align: left;
+}
+.opdock-session-filter:focus {
+  outline: 2px solid #7c3aed;
+  outline-offset: 0;
+}
 .opdock-session-row {
   display: flex;
   align-items: center;

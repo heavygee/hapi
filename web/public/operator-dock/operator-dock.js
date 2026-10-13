@@ -4675,7 +4675,7 @@
     return entries.slice(0, 16);
   }
   /* BEGIN GENERATED bundled-changelog */
-  var BUNDLED_CHANGELOG_FALLBACK = "## [0.20.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.6...v0.20.0) (2026-10-12)\n\n\n### Features\n\n* **dock:** mic on replies interrupt composer ([#466](https://github.com/Heavygee-Projects/hapi-inline/issues/466)) ([#467](https://github.com/Heavygee-Projects/hapi-inline/issues/467)) ([5f42620](https://github.com/Heavygee-Projects/hapi-inline/commit/5f42620305d961d2787fb69eb267fa816c292ca3))\n\n## [0.19.6](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.5...v0.19.6) (2026-10-12)\n\n\n### Documentation\n\n* hubJwtProvider / getHubJwt must be hub JWT ([#460](https://github.com/Heavygee-Projects/hapi-inline/issues/460)) ([#461](https://github.com/Heavygee-Projects/hapi-inline/issues/461)) ([2e3d17c](https://github.com/Heavygee-Projects/hapi-inline/commit/2e3d17cfe4eabce680203c1ee096a3499f75ab08))\n\n## [0.19.5](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.4...v0.19.5) (2026-10-12)\n\n\n### Bug Fixes\n\n* **compose:** derive browser-hub STT when sttUrl is null ([#453](https://github.com/Heavygee-Projects/hapi-inline/issues/453)) ([7d51a9c](https://github.com/Heavygee-Projects/hapi-inline/commit/7d51a9c2e6a18e180ce7dcbca7a0c4112973422a))\n\n\n### Documentation\n\n* dock-spawned sessions are workers, not nested routers ([#443](https://github.com/Heavygee-Projects/hapi-inline/issues/443)) ([6337c9e](https://github.com/Heavygee-Projects/hapi-inline/commit/6337c9e0a1d54ae67a3ea122b16b007bc5f677b5)), closes [#442](https://github.com/Heavygee-Projects/hapi-inline/issues/442)\n\n## [0.19.4](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.3...v0.19.4) (2026-10-10)\n\n\n### Bug Fixes\n\n* **dock:** freeze host scroll before markup capture ([#439](https://github.com/Heavygee-Projects/hapi-inline/issues/439)) ([1dffa4d](https://github.com/Heavygee-Projects/hapi-inline/commit/1dffa4dd11a4da95990ea8064edd31feac450cb0)), closes [#437](https://github.com/Heavygee-Projects/hapi-inline/issues/437)\n\n## [0.19.3](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.2...v0.19.3) (2026-10-10)\n\n\n### Bug Fixes\n\n* **dock:** align markup capture to visible viewport ([#432](https://github.com/Heavygee-Projects/hapi-inline/issues/432)) ([bf92ad0](https://github.com/Heavygee-Projects/hapi-inline/commit/bf92ad0202b6f6231b237120806e5af5e3f5708f)), closes [#430](https://github.com/Heavygee-Projects/hapi-inline/issues/430)\n\n## [0.19.2](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.1...v0.19.2) (2026-10-10)\n\n\n### Bug Fixes\n\n* **dock:** keep relative /hapi through requestTarget sync ([#421](https://github.com/Heavygee-Projects/hapi-inline/issues/421)) ([200b9bc](https://github.com/Heavygee-Projects/hapi-inline/commit/200b9bcd02e634f57638ab92010813fc8cb6f561))\n\n## [0.19.1](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.0...v0.19.1) (2026-10-10)\n\n\n### Bug Fixes\n\n* **ci:** no-daemon Gradle + empty browser-hub fail-closed ([#425](https://github.com/Heavygee-Projects/hapi-inline/issues/425)) ([#426](https://github.com/Heavygee-Projects/hapi-inline/issues/426)) ([0239196](https://github.com/Heavygee-Projects/hapi-inline/commit/02391963824587609edb5d255b8ac5f893ab8cfc)), closes [#422](https://github.com/Heavygee-Projects/hapi-inline/issues/422)\n\n## [0.19.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.6...v0.19.0) (2026-10-10)\n\n\n### Features\n\n* **android:** Compose browser-hub remote hub URL ([#422](https://github.com/Heavygee-Projects/hapi-inline/issues/422)) ([#423](https://github.com/Heavygee-Projects/hapi-inline/issues/423)) ([93fa328](https://github.com/Heavygee-Projects/hapi-inline/commit/93fa3289008937f4d32e1a8e1493f9cdb9a569c4))\n\n## [0.18.6](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.5...v0.18.6) (2026-10-06)\n\n\n### Bug Fixes\n\n* **dock:** keep live STT under H fan satellites ([e7610d1](https://github.com/Heavygee-Projects/hapi-inline/commit/e7610d1e9dd138957a6064101b496de1560e4303))\n* **dock:** stop repeating Hide and headings in Settings ([#416](https://github.com/Heavygee-Projects/hapi-inline/issues/416)) ([dfefc6a](https://github.com/Heavygee-Projects/hapi-inline/commit/dfefc6a5a610288a608c09aa57c01e55623114a7))\n\n\n### Documentation\n\n* keep changelog and About free of consumer names ([8e944f7](https://github.com/Heavygee-Projects/hapi-inline/commit/8e944f7f91ce21e113b6f11da1c6745db25fe844))\n* restore 0.18.5 functional notes after history rewrite ([3de9659](https://github.com/Heavygee-Projects/hapi-inline/commit/3de9659f947d11f0cdc2f7f9307894eb42301067))\n\n## [0.18.5](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.4...v0.18.5) (2026-10-05)\n\n\n### Bug Fixes\n\n* **compose:** About shows dock version and bundled changelog ([#402](https://github.com/Heavygee-Projects/hapi-inline/issues/402)), closes [#399](https://github.com/Heavygee-Projects/hapi-inline/issues/399)\n* **compose:** accept hub unread 0/1 in session list ([#401](https://github.com/Heavygee-Projects/hapi-inline/issues/401)), closes [#400](https://github.com/Heavygee-Projects/hapi-inline/issues/400)\n* warn once when legacy privilege sunsets to off ([#396](https://github.com/Heavygee-Projects/hapi-inline/issues/396)) ([#397](https://github.com/Heavygee-Projects/hapi-inline/issues/397))\n\n\n### Documentation\n\n* fail-closed deploy requirements for a new consumer ([#384](https://github.com/Heavygee-Projects/hapi-inline/issues/384))\n\n## [0.18.4](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.3...v0.18.4) (2026-09-21)\n\n## [0.18.3](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.2...v0.18.3) (2026-09-21)\n\n## [0.18.2](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.1...v0.18.2) (2026-09-21)\n\n## [0.18.1](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.0...v0.18.1) (2026-09-20)\n\n## [0.18.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.17.0...v0.18.0) (2026-09-20)\n\n## [Unreleased]\n\n## [0.17.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.16.0...v0.17.0) (2026-09-20)\n";
+  var BUNDLED_CHANGELOG_FALLBACK = "## [0.21.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.20.2...v0.21.0) (2026-10-13)\n\n\n### Features\n\n* **dock:** search filter on Project Sessions picker ([#493](https://github.com/Heavygee-Projects/hapi-inline/issues/493)) ([29c1654](https://github.com/Heavygee-Projects/hapi-inline/commit/29c1654d4139f5b25b53e8f25208a13197fcfb4f)), closes [#492](https://github.com/Heavygee-Projects/hapi-inline/issues/492)\n\n## [0.20.2](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.20.1...v0.20.2) (2026-10-12)\n\n\n### Bug Fixes\n\n* **android:** remint Compose hub JWT before exp and on STT 401 ([#489](https://github.com/Heavygee-Projects/hapi-inline/issues/489)) ([24741f0](https://github.com/Heavygee-Projects/hapi-inline/commit/24741f0985946b1e17bcae749b8764f9b75c6190)), closes [#488](https://github.com/Heavygee-Projects/hapi-inline/issues/488)\n\n\n### Documentation\n\n* remat tiers R/B/O and batch flush (--due) ([#485](https://github.com/Heavygee-Projects/hapi-inline/issues/485)) ([48669a4](https://github.com/Heavygee-Projects/hapi-inline/commit/48669a48f5c1ef894377e21316fd8af800722294))\n\n## [0.20.1](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.20.0...v0.20.1) (2026-10-12)\n\n\n### Bug Fixes\n\n* **dock:** route markup through AndroidOperator.requestMarkupCapture ([#474](https://github.com/Heavygee-Projects/hapi-inline/issues/474)) ([2c8e191](https://github.com/Heavygee-Projects/hapi-inline/commit/2c8e19172cf339fe317297cbd6830b1f447f6c60)), closes [#473](https://github.com/Heavygee-Projects/hapi-inline/issues/473)\n\n## [0.20.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.6...v0.20.0) (2026-10-12)\n\n\n### Features\n\n* **dock:** mic on replies interrupt composer ([#466](https://github.com/Heavygee-Projects/hapi-inline/issues/466)) ([#467](https://github.com/Heavygee-Projects/hapi-inline/issues/467)) ([5f42620](https://github.com/Heavygee-Projects/hapi-inline/commit/5f42620305d961d2787fb69eb267fa816c292ca3))\n\n## [0.19.6](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.5...v0.19.6) (2026-10-12)\n\n\n### Documentation\n\n* hubJwtProvider / getHubJwt must be hub JWT ([#460](https://github.com/Heavygee-Projects/hapi-inline/issues/460)) ([#461](https://github.com/Heavygee-Projects/hapi-inline/issues/461)) ([2e3d17c](https://github.com/Heavygee-Projects/hapi-inline/commit/2e3d17cfe4eabce680203c1ee096a3499f75ab08))\n\n## [0.19.5](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.4...v0.19.5) (2026-10-12)\n\n\n### Bug Fixes\n\n* **compose:** derive browser-hub STT when sttUrl is null ([#453](https://github.com/Heavygee-Projects/hapi-inline/issues/453)) ([7d51a9c](https://github.com/Heavygee-Projects/hapi-inline/commit/7d51a9c2e6a18e180ce7dcbca7a0c4112973422a))\n\n\n### Documentation\n\n* dock-spawned sessions are workers, not nested routers ([#443](https://github.com/Heavygee-Projects/hapi-inline/issues/443)) ([6337c9e](https://github.com/Heavygee-Projects/hapi-inline/commit/6337c9e0a1d54ae67a3ea122b16b007bc5f677b5)), closes [#442](https://github.com/Heavygee-Projects/hapi-inline/issues/442)\n\n## [0.19.4](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.3...v0.19.4) (2026-10-10)\n\n\n### Bug Fixes\n\n* **dock:** freeze host scroll before markup capture ([#439](https://github.com/Heavygee-Projects/hapi-inline/issues/439)) ([1dffa4d](https://github.com/Heavygee-Projects/hapi-inline/commit/1dffa4dd11a4da95990ea8064edd31feac450cb0)), closes [#437](https://github.com/Heavygee-Projects/hapi-inline/issues/437)\n\n## [0.19.3](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.2...v0.19.3) (2026-10-10)\n\n\n### Bug Fixes\n\n* **dock:** align markup capture to visible viewport ([#432](https://github.com/Heavygee-Projects/hapi-inline/issues/432)) ([bf92ad0](https://github.com/Heavygee-Projects/hapi-inline/commit/bf92ad0202b6f6231b237120806e5af5e3f5708f)), closes [#430](https://github.com/Heavygee-Projects/hapi-inline/issues/430)\n\n## [0.19.2](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.1...v0.19.2) (2026-10-10)\n\n\n### Bug Fixes\n\n* **dock:** keep relative /hapi through requestTarget sync ([#421](https://github.com/Heavygee-Projects/hapi-inline/issues/421)) ([200b9bc](https://github.com/Heavygee-Projects/hapi-inline/commit/200b9bcd02e634f57638ab92010813fc8cb6f561))\n\n## [0.19.1](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.0...v0.19.1) (2026-10-10)\n\n\n### Bug Fixes\n\n* **ci:** no-daemon Gradle + empty browser-hub fail-closed ([#425](https://github.com/Heavygee-Projects/hapi-inline/issues/425)) ([#426](https://github.com/Heavygee-Projects/hapi-inline/issues/426)) ([0239196](https://github.com/Heavygee-Projects/hapi-inline/commit/02391963824587609edb5d255b8ac5f893ab8cfc)), closes [#422](https://github.com/Heavygee-Projects/hapi-inline/issues/422)\n\n## [0.19.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.6...v0.19.0) (2026-10-10)\n\n\n### Features\n\n* **android:** Compose browser-hub remote hub URL ([#422](https://github.com/Heavygee-Projects/hapi-inline/issues/422)) ([#423](https://github.com/Heavygee-Projects/hapi-inline/issues/423)) ([93fa328](https://github.com/Heavygee-Projects/hapi-inline/commit/93fa3289008937f4d32e1a8e1493f9cdb9a569c4))\n\n## [0.18.6](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.5...v0.18.6) (2026-10-06)\n\n\n### Bug Fixes\n\n* **dock:** keep live STT under H fan satellites ([e7610d1](https://github.com/Heavygee-Projects/hapi-inline/commit/e7610d1e9dd138957a6064101b496de1560e4303))\n* **dock:** stop repeating Hide and headings in Settings ([#416](https://github.com/Heavygee-Projects/hapi-inline/issues/416)) ([dfefc6a](https://github.com/Heavygee-Projects/hapi-inline/commit/dfefc6a5a610288a608c09aa57c01e55623114a7))\n\n\n### Documentation\n\n* keep changelog and About free of consumer names ([8e944f7](https://github.com/Heavygee-Projects/hapi-inline/commit/8e944f7f91ce21e113b6f11da1c6745db25fe844))\n* restore 0.18.5 functional notes after history rewrite ([3de9659](https://github.com/Heavygee-Projects/hapi-inline/commit/3de9659f947d11f0cdc2f7f9307894eb42301067))\n\n## [0.18.5](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.4...v0.18.5) (2026-10-05)\n\n\n### Bug Fixes\n\n* **compose:** About shows dock version and bundled changelog ([#402](https://github.com/Heavygee-Projects/hapi-inline/issues/402)), closes [#399](https://github.com/Heavygee-Projects/hapi-inline/issues/399)\n* **compose:** accept hub unread 0/1 in session list ([#401](https://github.com/Heavygee-Projects/hapi-inline/issues/401)), closes [#400](https://github.com/Heavygee-Projects/hapi-inline/issues/400)\n* warn once when legacy privilege sunsets to off ([#396](https://github.com/Heavygee-Projects/hapi-inline/issues/396)) ([#397](https://github.com/Heavygee-Projects/hapi-inline/issues/397))\n\n\n### Documentation\n\n* fail-closed deploy requirements for a new consumer ([#384](https://github.com/Heavygee-Projects/hapi-inline/issues/384))\n\n## [0.18.4](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.3...v0.18.4) (2026-09-21)\n\n## [0.18.3](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.2...v0.18.3) (2026-09-21)\n\n## [0.18.2](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.1...v0.18.2) (2026-09-21)\n";
   /* END GENERATED bundled-changelog */
   function loadBundledChangelog() {
     if (bundledChangelogPromise) return bundledChangelogPromise;
@@ -4867,6 +4867,19 @@
       list.appendChild($('div', 'opdock-session-meta', 'Could not load bundled release notes.'));
     });
   }
+  /** #492: client-side Project Sessions filter — name/flavor contains, id prefix. */
+  function sessionPickerMatches(s, query) {
+    var q = String(query || '').trim().toLowerCase();
+    if (!q) return true;
+    if (!s) return false;
+    var name = String(s.name || '').toLowerCase();
+    var flavor = String(s.flavor || '').toLowerCase();
+    var id = String(s.id || '').toLowerCase();
+    if (name.indexOf(q) !== -1) return true;
+    if (flavor && flavor.indexOf(q) !== -1) return true;
+    if (id.indexOf(q) === 0) return true;
+    return false;
+  }
   function openSessionPicker() {
     closeToolSheet();
     if (!dock) return;
@@ -4875,6 +4888,14 @@
     toolSheet = $('div', 'opdock-sheet');
     toolSheetStage = 'sessions';
     toolSheet.appendChild($('h3', null, 'Project sessions'));
+    // #492: type-to-filter above the session rows (Quest / long hubs).
+    var filterInp = document.createElement('input');
+    filterInp.type = 'search';
+    filterInp.className = 'opdock-session-filter';
+    filterInp.placeholder = 'Filter sessions…';
+    filterInp.setAttribute('aria-label', 'Filter sessions');
+    filterInp.autocomplete = 'off';
+    toolSheet.appendChild(filterInp);
     var list = $('div');
     list.appendChild($('div', 'opdock-session-meta', 'Loading…'));
     toolSheet.appendChild(list);
@@ -4885,16 +4906,20 @@
     toolSheet.appendChild(actions);
     dock.appendChild(toolSheet);
     refreshVersionTrailUi();
-    listProjectSessions(secret).then(function (sessions) {
+    try { filterInp.focus(); } catch (eFocus) {}
+    var allSessions = null;
+    function renderSessionRows(visible) {
       list.textContent = '';
-      if (!sessions.length) {
-        // #326: only after a successful load — never for 502 / hub auth failures.
-        list.appendChild($('div', 'opdock-session-meta',
-          cfg.projectPath ? 'No sessions for this project.' : 'No sessions on this hub.'));
+      if (!visible.length) {
+        // #326: empty-project copy only on successful zero sessions (not filter misses).
+        var emptyCopy = (allSessions && allSessions.length)
+          ? 'No matching sessions.'
+          : (cfg.projectPath ? 'No sessions for this project.' : 'No sessions on this hub.');
+        list.appendChild($('div', 'opdock-session-meta', emptyCopy));
         return;
       }
       var current = getPinnedSession();
-      sessions.forEach(function (s) {
+      visible.forEach(function (s) {
         var row = $('button', 'opdock-session-row' + (s.id === current ? ' opdock-session-row--on' : ''));
         var unread = $('span', 'opdock-unread-dot');
         if (!s.unread) unread.hidden = true;
@@ -4918,7 +4943,20 @@
         });
         list.appendChild(row);
       });
+    }
+    function applySessionFilter() {
+      if (!allSessions) return;
+      var q = filterInp.value;
+      renderSessionRows(allSessions.filter(function (s) {
+        return sessionPickerMatches(s, q);
+      }));
+    }
+    filterInp.addEventListener('input', applySessionFilter);
+    listProjectSessions(secret).then(function (sessions) {
+      allSessions = sessions;
+      applySessionFilter();
     }).catch(function (err) {
+      allSessions = null;
       list.textContent = '';
       var raw = (err && err.message) ? String(err.message) : '';
       var msg = /Unexpected token/i.test(raw)
@@ -5190,7 +5228,7 @@
 
   window.HapiInline = {
     init: init,
-    _version: '0.20.1', // x-release-please-version
+    _version: '0.21.0', // x-release-please-version
     openCluster: function () { return openCluster(); },
     /** #287 — host Settings can offer the same hide/show the dock sheet does. */
     hideForThisUser: function () { setUserHidden(true); hideDockChrome(); },
