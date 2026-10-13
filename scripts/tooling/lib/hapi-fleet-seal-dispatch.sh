@@ -2,7 +2,7 @@
 # Fleet-seal dispatcher (#258) — per-target-type actions after a spoken seal.
 # FORK-ONLY. Canon: docs/plans/2026-10-13-fleet-seal-contract.md
 #
-# Types (generic registry — not ninja/antevorta hardcoded):
+# Types (generic registry — not host-hardcoded):
 #   estate-hub          — optional push-upgrade fan-out
 #   standalone-layer-a  — GH channel already upserted; verify poll URL
 #   cattle-vm-swap      — plan (default) or apply VM-swap when HAPI_FLEET_CATTLE_APPLY=1

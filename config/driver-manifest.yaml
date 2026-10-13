@@ -1092,14 +1092,14 @@ layers:
 
   # heavygee/hapi#235 / PR #238 — Boards view (cards/chips/relative-time,
   # Projects v2 /views/<n> filter capture). Renamed To-Do → Boards.
-  # Re-tip 2026-10-13b: driver/235-todo-board-view @ 3d6d69159 (= feat/todo-board-view-ui
-  # tip — +scope board-briefing to onSessionCreated + Browse abandon leak fix).
-  # Was b615b6155 (GHE parseIssueUrl / badge / briefing-as-message).
+  # Re-tip 2026-10-13c: driver/235-todo-board-view @ fa8733b2e (= feat/todo-board-view-ui
+  # tip — affordance coherence: SessionLinkedBadge, nav vs mutation buttons, spinners;
+  # +host: link-issue shorthand; exit Boards on /sessions/new). Was 3d6d69159.
   - branch: driver/235-todo-board-view
 
   # heavygee/hapi#247 — deliberate fleet push + restore upgrade-runner; kill
   # keepalive/startup unattended auto-upgrade. Hub default stays alert; per-machine
-  # auto (ninja) applies only on POST /api/fleet/push-upgrade.
+  # auto (standalone personal hub) applies only on POST /api/fleet/push-upgrade.
   # Thin tip on live soup 326799b34: driver/247-deliberate-fleet-push @ f5c3933b6
   # Worktree: ~/coding/hapi/worktrees/deliberate-fleet-push
   # Hub+shared → remat needs hapi-restart-hub (no --build-web for this tip alone).

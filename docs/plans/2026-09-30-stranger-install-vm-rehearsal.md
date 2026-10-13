@@ -23,7 +23,7 @@ Executable deliverable: `scripts/tooling/verify-hapi-install.sh` (+ `.test.sh`),
 
 Janus `MemAvailable` ~17 GiB before create (Phase 0). Destroyed after artefact capture.
 
-**Explicit gap (stated, not implied):** no agent CLI / Claude auth. This proves supervision + hub HTTP, **not** the ninja “sessions cascade on restart” class.
+**Explicit gap (stated, not implied):** no agent CLI / Claude auth. This proves supervision + hub HTTP, **not** the pid-mismatch “sessions cascade on restart” class.
 
 ---
 
@@ -72,7 +72,7 @@ Positive control for the probe: `scripts/tooling/verify-hapi-install.test.sh` �
 3. Watchdog **ConditionPathExists from unit text** (delegated) + journal fire (ours); missing `settings.json` with parent home present is a NOTE on fresh box.  
 4. Sudoers: **`/etc/sudoers.d/hapi-watchdog` primary** — grants runner User= or not; unreadable → inconclusive (not a false red).  
 5. Systemctl wrapper **present by default** (`--no-systemctl-wrapper` / `HAPI_EXPECT_NO_SYSTEMCTL_WRAPPER=1` to opt out).  
-6. `MainPID` ↔ `runner.state.json` pid — **three outcomes**: match → ok; readable mismatch → not ok (ninja class); unreadable/absent/no-pid after bounded retry → **inconclusive** (not FAIL).  
+6. `MainPID` ↔ `runner.state.json` pid — **three outcomes**: match → ok; readable mismatch → not ok (pid-mismatch class); unreadable/absent/no-pid after bounded retry → **inconclusive** (not FAIL).  
 7. Live `/proc/<pid>/oom_score_adj`, not only unit properties.  
 8. Standalone Tier-1 with empty `User=` demands `--watchdog-user` (systemd 252).
 

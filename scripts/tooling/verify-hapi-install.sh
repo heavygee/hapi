@@ -702,7 +702,7 @@ main_pid="${main_pid:-0}"
 
 # Bounded retry: state is written asynchronously after restart. An immediate
 # read can legitimately find no pid — that is inconclusive, not a mismatch.
-# Distinguish "could not observe" from "observed different pid" (ninja class).
+# Distinguish "could not observe" from "observed different pid" (pid-mismatch class).
 STATE_PID=""
 STATE_READ_STATUS=missing
 if [[ "$main_pid" != "0" ]]; then

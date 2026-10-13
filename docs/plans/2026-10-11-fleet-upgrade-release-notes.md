@@ -5,7 +5,7 @@
 
 ## Why
 
-Deliberate push means Doug / Ian / ninja get new binaries without choosing the moment. They need to see **what changed**, not just that the binary moved. There is no in-app changelog surface today.
+Deliberate push means Doug / Ian / standalone personal hubs get new binaries without choosing the moment. They need to see **what changed**, not just that the binary moved. There is no in-app changelog surface today.
 
 ## Design (v1 - dogfood on fork)
 

@@ -13,9 +13,10 @@
 > "keep clean for a future upstream follow-up."
 
 **Status:** canon for the **fork fleet** — estate pets on oos, standalone Layer A
-(ninja and successors), operator-controlled cattle (antevorta, soon `hapi-gc-in`),
+(standalone personal hubs and successors), operator-controlled cattle (antevorta, soon `hapi-gc-in`),
 and public one-liner pet installs.  
 **Owner lane:** fleet / hub-runner-version governance.  
+**Consumer:** `[nc-incus upkeep](/sessions/ba76163e-d993-4b2b-b4ab-c4cdf3c41c7e)` and successors - **in-product hub code only** (fork soup).  
 **Issues:** [#255](https://github.com/heavygee/hapi/issues/255) Layer A ·
 [#256](https://github.com/heavygee/hapi/issues/256) GH `hapi-fleet` ·
 [#257](https://github.com/heavygee/hapi/issues/257) pet-install poles ·
@@ -30,7 +31,9 @@ and public one-liner pet installs.
 Steady state is **not** agent SSH-and-copy, and **not** a companion poller.
 Native hub Layer A + spoken seal dispatch. Anyone installing from this fork
 inherits the arrangement (#257). Target types are **generic** (registry), not
-ninja-and-antevorta hardcoded — `hapi-gc-in` must slot in without redesign.
+host-hardcoded — `hapi-gc-in` must slot in without redesign. Standalone personal
+hubs need the same *discover* half as a **native hub capability**
+(`HAPI_UPSTREAM_SEAL_URL` or settings-equivalent).
 
 ## Three pointers (do not conflate)
 
@@ -79,7 +82,7 @@ schema as GH.
 ### 3. Break-glass named tip
 
 `HAPI_UPSTREAM_SEAL_TAG=hapi-soup-v…` → that release's `manifest.json` only.
-Migrate to channel URL when available (ninja dogfood was TAG-pinned until #256).
+Migrate to channel URL when available (standalone personal hub dogfood was TAG-pinned until #256).
 
 ## Manifest format (already live)
 
@@ -106,7 +109,7 @@ After download: re-hash bytes; must equal `binaries[].sha256` or abort.
 | Class | Examples | Mechanism on spoken seal |
 |-------|----------|--------------------------|
 | `estate-pet` | machines registered on oos hub | local `fleet-latest` + push-upgrade / #251 |
-| `standalone-layer-a` | ninja CT, public pets | GH `hapi-fleet` → Layer A self-discover |
+| `standalone-layer-a` | standalone personal hub CT, public pets | GH `hapi-fleet` → Layer A self-discover |
 | `cattle-vm-swap` | antevorta, soon `hapi-gc-in` | VM-swap pipeline (disk reattach / new root / front door) — **not** binary in-place |
 
 Registry lives in fork tooling (`scripts/tooling/fleet-targets.yaml` +
@@ -118,6 +121,8 @@ Registry lives in fork tooling (`scripts/tooling/fleet-targets.yaml` +
 |-------|------|-------|
 | **A - discover** | Hub polls `HAPI_UPSTREAM_SEAL_URL` → digest-compare → materialize tip into local `soup-artifacts/` → existing offer + #251 | Landed (#255). GH channel (#256) unblocks public/pet claim. |
 | **B - hub process apply** | Swap hub's own binary + patient drain / systemd restart | Follow-on; reuse runner swap primitives. |
+
+**What "I am SoT" means today:** offer URLs are relative `/cli/upgrade/cli-artifact?…` served by this hub; policy targets registered machines. Correct subscriber model: **materialize remote seal locally first**, then this hub remains SoT for *its* runners. Do not leave offer URLs pointed at oos while standalone personal hub runners download through a proxy forever.
 
 **Kill-criteria:**
 
@@ -149,11 +154,11 @@ Mechanical:
 ## Explicit non-goals
 
 - Opening any of this on `tiann/hapi` — FORK-ONLY permanent.
-- Enrolling standalone instances as oos fleet machines (they stay Layer A).
+- Enrolling a standalone personal hub as an oos fleet machine (they stay Layer A).
 - Watching dogfood `latest` for auto-apply on standalones.
 - Tag/date/NOTES as sufficiency for upgrade.
 - Agent SSH copy or companion watcher as steady-state discover.
-- Hardcoding only ninja + antevorta (registry must accept `hapi-gc-in`).
+- Hardcoding only a couple of legacy hostnames (registry must accept `hapi-gc-in`).
 
 ## Implementation checklist
 
@@ -177,13 +182,14 @@ Mechanical:
 3. **"Fleet seal" is a dispatch phrase** — estate / standalone / cattle (#258),
    generic target types including Ian's instances and soon `hapi-gc-in`.
 
-Earlier "ninja-specific, Ian explicitly excluded" framing is **obsolete**. This
+Earlier "one-host-specific, Ian explicitly excluded" framing is **obsolete**. This
 document is fleet-wide.
 
-## Live dogfood (ninja CT, 2026-10-13) — proof ≠ steady state
+## Live dogfood (standalone personal hub CT, 2026-10-13) — proof ≠ steady state
 
+First seal `hapi-soup-v2026.10.13-bc936f2` was consumed on nc-incus.
 First consumption used GH named tag `HAPI_UPSTREAM_SEAL_TAG` (proof). Once
-`hapi-fleet` exists, **migrate ninja off the pin** onto
+`hapi-fleet` exists, **migrate the standalone personal hub off the pin** onto
 `HAPI_UPSTREAM_SEAL_URL=…/hapi-fleet/manifest.json` and clear the TAG env.
 
 | Check | Result |
@@ -195,4 +201,4 @@ First consumption used GH named tag `HAPI_UPSTREAM_SEAL_TAG` (proof). Once
 ## Relay
 
 Orchestration: `[Peer: fork main vs soup parity](/sessions/d2a67a01-07f9-4395-b84c-94d39c24e797)`.  
-Ninja host: `[ninjcow-incus upkeep](/sessions/ba76163e-d993-4b2b-b4ab-c4cdf3c41c7e)`.
+Standalone personal hub host: `[nc-incus upkeep](/sessions/ba76163e-d993-4b2b-b4ab-c4cdf3c41c7e)`. Companion freeze after live dogfood; Layer A owned in-product.

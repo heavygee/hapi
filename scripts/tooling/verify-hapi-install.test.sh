@@ -83,7 +83,7 @@ check "standalone Tier-1 empty User= demands --watchdog-user" \
     'grep -q "could not determine\|Pass --watchdog-user" <<<"$empty_user_out"'
 
 # Three-outcome MainPID / state-read semantics: unreadable or absent must NOT
-# count as fail (false red mutes the ninja-class check). Mismatch must.
+# count as fail (false red mutes the pid-mismatch-class check). Mismatch must.
 SEM_TMP="$(mktemp -d)"
 trap 'rm -rf "$PRE_TMP" "$SEM_TMP"' EXIT
 # Extract helpers by function name (not ^fi$ line range — same trap as #183).
