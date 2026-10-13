@@ -180,6 +180,18 @@ Mechanical (to implement):
 | Hub process self-apply (Layer B) | **Missing** - follow-on; reuse runner swap primitives |
 | Estate pets discover via oos hub offer | **Exists** (#247/#251) |
 
+## Live dogfood (ninja CT, 2026-10-13) — proof ≠ steady state
+
+First seal `hapi-soup-v2026.10.13-bc936f2` was consumed on ninjcow-incus:
+
+| Check | Result |
+|-------|--------|
+| Transport | GH named tag (CT has no SSH to oos); digest `4a17f5ff…` → seal `a03a381e…` → action=new |
+| Materialize → offer → #251 keepalive | **Works** — once tip was local under `soup-artifacts`, hub-artifact auto apply succeeded |
+| ExecStart vs staged bin | **Gotcha** — handoff wrote `/var/lib/hapi/bin/hapi` while systemd still `ExecStart=/opt/hapi/hapi`. Drop-in `40-version-bin.conf` required so next bytes actually run. Fold into Layer B / install profile docs. |
+
+**Policy:** that one-shot companion (`soup-seal-watcher --apply`) was a race past STOP. It is **not** the steady-state discover path. Do not leave a timer/cron "ready for the next seal." Next seal must be Layer A in-hub (or manual one-shot until Layer A ships). Harvest digest-newness logic into hub; retire the sidecar.
+
 ## Relay
 
-Feasibility answered to `[Peer: fork main vs soup parity](/sessions/d2a67a01-07f9-4395-b84c-94d39c24e797)` and stop-ack to `[ninjcow-incus upkeep](/sessions/ba76163e-d993-4b2b-b4ab-c4cdf3c41c7e)` (2026-10-13). Build Layer A in-hub; do not stub a sidecar.
+Feasibility + STOP → `[Peer: fork main vs soup parity](/sessions/d2a67a01-07f9-4395-b84c-94d39c24e797)` + `[ninjcow-incus upkeep](/sessions/ba76163e-d993-4b2b-b4ab-c4cdf3c41c7e)`. Companion freeze after live dogfood; Layer A owned in-product.
