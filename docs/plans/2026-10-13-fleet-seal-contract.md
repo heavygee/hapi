@@ -190,11 +190,23 @@ Mechanical (to implement):
 | Dogfood `latest` / `latest-tag.txt` | **Exists** |
 | Seal `fleet-latest` / `fleet-latest-tag.txt` | **Exists** via `hapi-fleet-seal` |
 | `hapi-fleet-seal` CLI | **Exists** (`scripts/tooling/hapi-fleet-seal.sh`) |
-| GH release `manifest.json` asset | **Exists** on recent tips |
-| GH "this release is the seal" pointer | **Missing** - optional v1.1 |
-| Hub native `HAPI_UPSTREAM_SEAL_URL` poll + materialize (Layer A) | **Landed** - #255; branch `driver/hub-upstream-seal-url`; soup layer in manifest; companion path dead |
+| GH release `manifest.json` asset | **Exists** on recent tips (dated `hapi-soup-v*`) |
+| GH **stable moving seal pointer** (`hapi-fleet` / equivalent channel) | **Missing — blocking** for off-estate / public pets (operator 2026-10-13: GH is primary, not fallback) |
+| Hub native Layer A poll + materialize (#255) | **Kernel landed** on soup tip; public/pet claim blocked on GH fleet pointer |
+| Pet installer wires seal URL + 3-pole policy (default `alert`) | **Missing** — after GH fleet pointer; `install-hapi-pet.sh` today is one-shot only |
+| "Fleet seal" dispatch (estate push / Layer A / cattle VM-swap) | **Missing** — Meta/tooling orchestrator; not hub #255 |
 | Hub process self-apply (Layer B) | **Missing** - follow-on; reuse runner swap primitives; fold ExecStart path gotcha |
 | Estate pets discover via oos hub offer | **Exists** (#247/#251) |
+
+## Scope evolution (operator 2026-10-13) — reshape vs #255
+
+Three changes. **#255 kernel stays.** Surrounding contract expands:
+
+1. **GitHub is the primary poll target** for Layer A (estate `fleet-latest` path is estate-only). Need a durable moving GH channel (e.g. release/tag `hapi-fleet`) retargeted on every spoken seal; dated tips stay immutable. Seal's GH mirror step becomes mandatory, not optional. Never `releases/latest` for auto-apply.
+2. **Public pet install inherits governance** — `install-hapi-pet.sh` / one-liner adopters get the same silent/notify/auto poles against the GH fleet pointer (default `alert`). Product, not operator-owned boxes only. Depends on (1).
+3. **"Fleet seal" becomes a dispatch phrase** — estate push-upgrade; standalone Layer A self-discover; antevorta-class → cattle VM-swap (not binary in-place). Same spoken gate, different pipelines. Outside hub #255.
+
+Ship matrix: keep #255 kernel; open follow-ons for (1) then (2); (3) separate Meta/cattle plan. Do not claim "anyone taking from me" until (1)+(2) land.
 
 ## Live dogfood (ninja CT, 2026-10-13) — proof ≠ steady state
 
