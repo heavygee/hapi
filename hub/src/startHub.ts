@@ -34,6 +34,11 @@ import {
     readPublishedSoupTip,
     soupTipToUpgradeOffer,
 } from './upgrade/soupArtifact'
+import {
+    resolveUpstreamSealConfig,
+    startUpstreamSealSubscriber,
+    type UpstreamSealSubscriber,
+} from './upgrade/upstreamSeal'
 import { readSettings } from './config/settings'
 import { getFleetUpgradePolicy, initFleetUpgradePolicy } from './upgrade/fleetUpgradePolicy'
 import QRCode from 'qrcode'
@@ -129,6 +134,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     let visibilityTracker: VisibilityTracker | null = null
     let notificationHub: NotificationHub | null = null
     let tunnelManager: TunnelManager | null = null
+    let upstreamSealSubscriber: UpstreamSealSubscriber | null = null
 
     let cachedUpgradeOffer: { at: number; offer: ReturnType<typeof resolveUpgradeOffer> } | null = null
     const UPGRADE_OFFER_TTL_MS = 30_000
@@ -510,9 +516,53 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     console.log('HAPI Hub is ready!')
     // Deliberate fleet push only — no keepalive/startup auto-upgrade sweep.
 
+    // Layer A: optional upstream seal poller (standalone hubs). When
+    // HAPI_UPSTREAM_SEAL_URL / HAPI_UPSTREAM_SEAL_TAG is set, poll remote
+    // fleet-latest manifest, digest-compare, materialize into local
+    // soup-artifacts — existing offer + #251 policy then apply to runners.
+    // Foundry (oos) leaves this unset. No companion process.
+    // Layer A: optional upstream seal subscriber (standalone hubs). When
+    // HAPI_UPSTREAM_SEAL_URL / HAPI_UPSTREAM_SEAL_TAG is set, poll remote
+    // fleet-latest manifest, digest-compare, materialize into local
+    // soup-artifacts — existing offer + #251 policy then apply to runners.
+    // Foundry (oos) leaves this unset. No companion process.
+    const upstreamSealConfig = resolveUpstreamSealConfig(process.env, {
+        execPath: process.execPath,
+    })
+    if (upstreamSealConfig) {
+        console.log(
+            `[Hub] upstream seal: ${upstreamSealConfig.manifestUrl} `
+            + `(poll ${Math.round(upstreamSealConfig.pollIntervalMs / 1000)}s)`,
+        )
+        upstreamSealSubscriber = startUpstreamSealSubscriber({
+            config: upstreamSealConfig,
+            invalidateOfferCache: () => {
+                cachedUpgradeOffer = null
+            },
+            onResult: (result) => {
+                if (result.materialized) {
+                    console.log(
+                        `[Hub] upstream seal materialized ${result.tag} `
+                        + `(sha256 ${result.remoteSha256?.slice(0, 12)}…)`,
+                    )
+                } else if (result.action === 'new') {
+                    console.log(`[Hub] upstream seal newer (${result.tag}) but apply skipped`)
+                }
+            },
+            onError: (error) => {
+                console.warn(
+                    '[Hub] upstream seal check failed:',
+                    error instanceof Error ? error.message : error,
+                )
+            },
+        })
+    }
+
 
     return {
         stop: async () => {
+            upstreamSealSubscriber?.stop()
+            upstreamSealSubscriber = null
             await tunnelManager?.stop()
             await happyBot?.stop()
             notificationHub?.stop()
