@@ -91,6 +91,17 @@ describe('parseIssueUrl', () => {
     it('lowercases a shorthand host prefix but preserves repo casing', () => {
         expect(parseIssueUrl('LHS.GHE.com:lockhouse/repo#8')?.url).toBe('https://lhs.ghe.com/lockhouse/repo/issues/8')
     })
+
+    it('accepts a port-qualified host on the shorthand (Codex review)', () => {
+        // Regression: SHORTHAND_HOST_SEGMENT used to exclude ':' entirely,
+        // so a non-default-port GHE host had no way to express itself here
+        // even though the board and full-URL paths both support it.
+        expect(parseIssueUrl('ghe.example.com:8443:acme/repo#7')).toEqual({
+            url: 'https://ghe.example.com:8443/acme/repo/issues/7',
+            repo: 'acme/repo',
+            number: 7
+        })
+    })
 })
 
 describe('upsertExternalRef', () => {

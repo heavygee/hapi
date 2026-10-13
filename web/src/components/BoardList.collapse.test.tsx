@@ -147,6 +147,24 @@ describe('BoardList per-group collapse', () => {
         expect(screen.getByText('Other board card')).toBeInTheDocument()
     })
 
+    it('does not collide when a real status is literally named like the no-status sentinel (Codex review)', () => {
+        // Regression: the no-status bucket's key used to be a bare string
+        // sentinel ('__no_status__'), identical to what a real project
+        // status option named that way would produce — duplicate React
+        // keys, and toggling either group's header collapsed both.
+        renderList([
+            makeItem({ id: 'a', status: '__no_status__', title: 'Named-status card', state: 'OPEN' }),
+            { ...makeItem({ id: 'b', title: 'Truly unassigned card', state: 'OPEN' }), status: null }
+        ], ['__no_status__'])
+
+        expect(screen.getByText('__no_status__ (1)')).toBeInTheDocument()
+        expect(screen.getByText('No status (1)')).toBeInTheDocument()
+
+        fireEvent.click(screen.getByText('__no_status__ (1)'))
+        expect(screen.queryByText('Named-status card')).not.toBeInTheDocument()
+        expect(screen.getByText('Truly unassigned card')).toBeInTheDocument()
+    })
+
     it('a manual expand overrides the state-derived collapsed-by-default and persists', () => {
         const { unmount } = renderList([makeItem({ id: 'a', status: 'Complete', title: 'Closed card', state: 'CLOSED' })], ['Todo', 'Complete'])
         fireEvent.click(screen.getByText('Complete (1)'))

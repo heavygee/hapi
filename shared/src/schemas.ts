@@ -150,10 +150,15 @@ const ISSUE_URL_RE = new RegExp(`^(?:https?:\\/\\/)?([^/]+)\\/(${GH_NAME_SEGMENT
 // Optional `host:` prefix (design-consult review, hapi#238): the shorthand
 // originally had no way to express a GHE host at all, always resolving to
 // github.com regardless — a session guessing at syntax for a GHE item could
-// end up with a confidently-wrong link. `[^:/#]+` for the host segment keeps
-// `:` as an unambiguous separator from both the owner/repo segment (which
-// never contains `:`) and the issue number.
-const SHORTHAND_HOST_SEGMENT = '[^:/#]+'
+// end up with a confidently-wrong link. `[^/#]+` for the host segment allows
+// `:` (a port-qualified GHE host, e.g. `ghe.example:8443:owner/repo#12`,
+// couldn't otherwise be expressed at all — Codex review) while still
+// excluding `/` and `#`; the regex's own greedy-then-backtrack matching
+// against the required `:` before `owner/repo` naturally resolves the
+// ambiguity by finding the *last* colon that still leaves a valid
+// `owner/repo#N` tail, which is always the real host/repo separator since
+// neither a hostname nor `owner/repo` can itself contain a `/`.
+const SHORTHAND_HOST_SEGMENT = '[^/#]+'
 const ISSUE_SHORTHAND_RE = new RegExp(`^(?:(${SHORTHAND_HOST_SEGMENT}):)?(${GH_NAME_SEGMENT}\\/${GH_NAME_SEGMENT})#(\\d+)$`)
 
 export function parseIssueUrl(input: string): { url: string; repo: string; number: number } | null {
