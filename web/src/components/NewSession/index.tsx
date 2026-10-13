@@ -101,6 +101,16 @@ export function NewSession(props: {
     machines: Machine[]
     isLoading?: boolean
     onSuccess: (sessionId: string) => void
+    /**
+     * Fires only for a genuine fresh spawn (the plain create-session success
+     * path) — never for the Codex duplicate-merge redirect, Codex-import
+     * resume, or Pi-import reopen paths, which `onSuccess` also covers.
+     * Those three represent unrelated operator actions reachable from the
+     * same /sessions/new page a board-spawn navigated to; delivering a
+     * board's briefing to whatever session one of them produces would send
+     * the wrong content to the wrong session (Codex review, hapi#238).
+     */
+    onSessionCreated?: (sessionId: string) => void
     onCancel: () => void
     onChooseFolder?: (args: { machineId: string | null; directory: string }) => void
     initialDirectory?: string
@@ -1878,6 +1888,7 @@ export function NewSession(props: {
                 addRecentPath(machineId, trimmedDirectory)
     
                 seedInitialMessageDraft(result.sessionId)
+                props.onSessionCreated?.(result.sessionId)
                 props.onSuccess(result.sessionId)
                 return
             }

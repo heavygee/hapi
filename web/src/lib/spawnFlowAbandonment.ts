@@ -11,9 +11,30 @@ export type SpawnFlowRoute = '/sessions/new' | '/browse'
  * review, two passes — the second covering `/browse` specifically, which
  * has its own copy of the same briefing/transfer in its own search params
  * and no cleanup of its own).
+ *
+ * Crossing to the other leg is only a genuine continuation if the
+ * destination actually carries forward one of the same ids this flow is
+ * tracking — pathname alone isn't enough, since `/browse` is also the
+ * target of the left sidebar's own, entirely unrelated global "Browse"
+ * button, reachable while `/sessions/new` is open and carrying no transfer
+ * ids at all. Treating that as a continuation left the briefing orphaned in
+ * sessionStorage instead of cleaned up (third Codex review pass).
  */
-export function isAbandoningSpawnFlow(fromPathname: SpawnFlowRoute, toPathname: string): boolean {
+export function isAbandoningSpawnFlow(
+    fromPathname: SpawnFlowRoute,
+    toPathname: string,
+    currentIds: { briefingId?: string; shareTransferId?: string },
+    toSearch: { briefingId?: unknown; shareTransferId?: unknown }
+): boolean {
     if (toPathname === fromPathname) return false
     const otherLeg: SpawnFlowRoute = fromPathname === '/sessions/new' ? '/browse' : '/sessions/new'
-    return toPathname !== otherLeg
+    if (toPathname !== otherLeg) return true
+
+    // Nothing this flow is actually tracking — no stash to leak either way,
+    // so the old pathname-only behavior is harmless here.
+    if (!currentIds.briefingId && !currentIds.shareTransferId) return false
+
+    const sameBriefing = currentIds.briefingId !== undefined && toSearch.briefingId === currentIds.briefingId
+    const sameShareTransfer = currentIds.shareTransferId !== undefined && toSearch.shareTransferId === currentIds.shareTransferId
+    return !(sameBriefing || sameShareTransfer)
 }

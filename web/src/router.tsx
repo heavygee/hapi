@@ -1854,7 +1854,8 @@ function NewSessionPage() {
     useEffect(() => {
         return router.subscribe('onBeforeNavigate', (event) => {
             if (spawnedRef.current) return
-            if (!isAbandoningSpawnFlow('/sessions/new', event.toLocation.pathname)) return
+            const toSearch = event.toLocation.search as { briefingId?: unknown; shareTransferId?: unknown }
+            if (!isAbandoningSpawnFlow('/sessions/new', event.toLocation.pathname, { briefingId, shareTransferId }, toSearch)) return
             if (shareTransferId) void deleteShareTransfer(shareTransferId)
             if (briefingId) clearBoardSpawnBriefing(briefingId)
         })
@@ -1877,12 +1878,17 @@ function NewSessionPage() {
         goBack()
     }, [goBack])
 
-
-    const handleSuccess = useCallback((sessionId: string) => {
-        spawnedRef.current = true
-        if (shareTransferId) {
-            setSharePendingTransfer(shareTransferId, sessionId)
-        }
+    // Fires only for a genuine fresh spawn (NewSession's `onSessionCreated`,
+    // its plain-create success path) — NOT the other three success paths
+    // NewSession shares the same /sessions/new route with (Codex duplicate-
+    // merge redirect, Codex-import resume, Pi-import reopen). Those are
+    // unrelated operator actions reachable from the same page a board-spawn
+    // navigated to; delivering the board's briefing to whatever session they
+    // produce would send the wrong content to the wrong session, and the
+    // duplicate-merge redirect target specifically can still be momentarily
+    // inactive, which 400s on the messages route's requireActive guard
+    // (Codex review, hapi#238).
+    const handleBoardSpawnDelivery = useCallback((sessionId: string) => {
         if (briefing?.message && api) {
             // Deliver as a real incoming message — same mechanism
             // spawn_peer/hapi-ping-peer use — instead of seeding the
@@ -1914,6 +1920,13 @@ function NewSessionPage() {
                 })
             })
         }
+    }, [briefing, api, addToast, t])
+
+    const handleSuccess = useCallback((sessionId: string) => {
+        spawnedRef.current = true
+        if (shareTransferId) {
+            setSharePendingTransfer(shareTransferId, sessionId)
+        }
         if (briefingId) {
             clearBoardSpawnBriefing(briefingId)
         }
@@ -1927,7 +1940,7 @@ function NewSessionPage() {
                 params: { sessionId },
             })
         })
-    }, [navigate, queryClient, shareTransferId, briefing, briefingId, api, addToast, t])
+    }, [navigate, queryClient, shareTransferId, briefingId])
 
     const handleChooseFolder = useCallback((args: { machineId: string | null; directory: string }) => {
         // Forward the currently-selected machine so /browse opens scoped to
@@ -1973,6 +1986,7 @@ function NewSessionPage() {
                     isLoading={machinesLoading}
                     onCancel={handleCancel}
                     onSuccess={handleSuccess}
+                    onSessionCreated={handleBoardSpawnDelivery}
                     onChooseFolder={handleChooseFolder}
                     initialDirectory={initialDirectory}
                     initialMachineId={initialMachineId}
@@ -1999,7 +2013,8 @@ function BrowsePage() {
     // just as easily from this leg of the flow (Codex review).
     useEffect(() => {
         return router.subscribe('onBeforeNavigate', (event) => {
-            if (!isAbandoningSpawnFlow('/browse', event.toLocation.pathname)) return
+            const toSearch = event.toLocation.search as { briefingId?: unknown; shareTransferId?: unknown }
+            if (!isAbandoningSpawnFlow('/browse', event.toLocation.pathname, { briefingId, shareTransferId }, toSearch)) return
             if (shareTransferId) void deleteShareTransfer(shareTransferId)
             if (briefingId) clearBoardSpawnBriefing(briefingId)
         })
