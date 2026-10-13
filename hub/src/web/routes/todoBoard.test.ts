@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -210,11 +210,11 @@ describe('owner-only namespace restriction', () => {
 })
 
 describe('GET /api/todo-boards', () => {
-    it('defaults to the dull public demo board, never a real one, when unconfigured', async () => {
+    it('returns an empty list when genuinely unconfigured — no silent demo-board default (hapi#238)', async () => {
         const app = await createApp(() => ({ data: {} }))
         const response = await app.request('/api/todo-boards')
         expect(response.status).toBe(200)
-        expect(await response.json()).toEqual({ boards: [{ id: 'github.com::heavygee::6', label: 'heavygee/6' }] })
+        expect(await response.json()).toEqual({ boards: [] })
     })
 
     it('reads the board from env when configured', async () => {
@@ -293,7 +293,22 @@ describe('POST /api/todo-boards', () => {
         expect(response.status).toBe(200)
     })
 
-    it('adds a board, keeping the default in the list (add, not replace), using the project title as the label', async () => {
+    it('adds a board to a genuinely empty list, using the project title as the label', async () => {
+        const app = await createApp(() => ({ data: {} }), () => ({ data: { repositoryOwner: { projectV2: { title: 'Acme Roadmap' } } } }))
+        const response = await app.request('/api/todo-boards', {
+            method: 'POST',
+            body: JSON.stringify({ url: 'https://github.com/orgs/acme/projects/9' })
+        })
+        expect(response.status).toBe(200)
+        const body = await response.json() as BoardsResponse
+        expect(body.boards).toEqual([
+            { id: 'github.com::acme::9', label: 'Acme Roadmap' }
+        ])
+    })
+
+    it('adds a board, keeping the env-configured one in the list (add, not replace)', async () => {
+        process.env.HAPI_BOARD_OWNER = 'heavygee'
+        process.env.HAPI_BOARD_NUMBER = '6'
         const app = await createApp(() => ({ data: {} }), () => ({ data: { repositoryOwner: { projectV2: { title: 'Acme Roadmap' } } } }))
         const response = await app.request('/api/todo-boards', {
             method: 'POST',
@@ -321,7 +336,6 @@ describe('POST /api/todo-boards', () => {
         expect(response.status).toBe(200)
         const body = await response.json() as BoardsResponse
         expect(body.boards).toEqual([
-            { id: 'github.com::heavygee::6', label: 'heavygee/6' },
             { id: 'github.com::acme::9::view::8', label: 'Acme Roadmap · Sprint board' }
         ])
     })
@@ -365,7 +379,7 @@ describe('POST /api/todo-boards', () => {
         await app.request('/api/todo-boards', { method: 'POST', body: JSON.stringify({ url: 'https://github.com/orgs/acme/projects/9' }) })
         const response = await app.request('/api/todo-boards', { method: 'POST', body: JSON.stringify({ url: 'https://github.com/orgs/acme/projects/9/views/8' }) })
         const body = await response.json() as BoardsResponse
-        expect(body.boards.map(b => b.id)).toEqual(['github.com::heavygee::6', 'github.com::acme::9', 'github.com::acme::9::view::8'])
+        expect(body.boards.map(b => b.id)).toEqual(['github.com::acme::9', 'github.com::acme::9::view::8'])
     })
 
     it('validates via the lightweight title-only query, never the full items query', async () => {
@@ -389,7 +403,7 @@ describe('POST /api/todo-boards', () => {
             body: JSON.stringify({ url: 'https://github.com/orgs/acme/projects/9' })
         })
         const body = await second.json() as BoardsResponse
-        expect(body.boards).toHaveLength(2)
+        expect(body.boards).toHaveLength(1)
     })
 
     it('is idempotent across different casing of the same host/owner (Codex review)', async () => {
@@ -403,12 +417,40 @@ describe('POST /api/todo-boards', () => {
             body: JSON.stringify({ url: 'https://GitHub.com/orgs/Acme/projects/9' })
         })
         const body = await second.json() as BoardsResponse
-        expect(body.boards).toHaveLength(2)
+        expect(body.boards).toHaveLength(1)
     })
 })
 
 describe('DELETE /api/todo-boards/:id', () => {
-    it('removes a board from the list', async () => {
+    it('removes one board, keeping the rest of the list', async () => {
+        const app = await createApp(() => ({ data: {} }), () => ({ data: { repositoryOwner: { projectV2: { title: 'Acme Roadmap' } } } }))
+        await app.request('/api/todo-boards', {
+            method: 'POST',
+            body: JSON.stringify({ url: 'https://github.com/orgs/acme/projects/9' })
+        })
+        await app.request('/api/todo-boards', {
+            method: 'POST',
+            body: JSON.stringify({ url: 'https://github.com/orgs/other/projects/1' })
+        })
+        const response = await app.request('/api/todo-boards/github.com%3A%3Aacme%3A%3A9', { method: 'DELETE' })
+        const body = await response.json() as BoardsResponse
+        expect(body.boards).toEqual([{ id: 'github.com::other::1', label: 'Acme Roadmap' }])
+    })
+
+    it('removing the last board leaves the list genuinely empty when nothing is env-configured (hapi#238)', async () => {
+        const app = await createApp(() => ({ data: {} }), () => ({ data: { repositoryOwner: { projectV2: { title: 'Acme Roadmap' } } } }))
+        await app.request('/api/todo-boards', {
+            method: 'POST',
+            body: JSON.stringify({ url: 'https://github.com/orgs/acme/projects/9' })
+        })
+        const response = await app.request('/api/todo-boards/github.com%3A%3Aacme%3A%3A9', { method: 'DELETE' })
+        const body = await response.json() as BoardsResponse
+        expect(body.boards).toEqual([])
+    })
+
+    it('removing the last board re-seeds the env-configured default instead of leaving it empty, when one is actually set', async () => {
+        process.env.HAPI_BOARD_OWNER = 'heavygee'
+        process.env.HAPI_BOARD_NUMBER = '6'
         const app = await createApp(() => ({ data: {} }), () => ({ data: { repositoryOwner: { projectV2: { title: 'Acme Roadmap' } } } }))
         await app.request('/api/todo-boards', {
             method: 'POST',
@@ -419,18 +461,11 @@ describe('DELETE /api/todo-boards/:id', () => {
         expect(body.boards).toEqual([{ id: 'github.com::heavygee::6', label: 'heavygee/6' }])
     })
 
-    it('safety invariant: removing the last board re-seeds the default instead of leaving an empty list', async () => {
-        const app = await createApp(() => ({ data: {} }))
-        const response = await app.request('/api/todo-boards/github.com%3A%3Aheavygee%3A%3A6', { method: 'DELETE' })
-        const body = await response.json() as BoardsResponse
-        expect(body.boards).toEqual([{ id: 'github.com::heavygee::6', label: 'heavygee/6' }])
-    })
-
     it('is a no-op for an id that does not exist', async () => {
         const app = await createApp(() => ({ data: {} }))
         const response = await app.request('/api/todo-boards/unknown', { method: 'DELETE' })
         const body = await response.json() as BoardsResponse
-        expect(body.boards).toEqual([{ id: 'github.com::heavygee::6', label: 'heavygee/6' }])
+        expect(body.boards).toEqual([])
     })
 })
 
@@ -529,6 +564,16 @@ describe('resolveProjectView', () => {
 })
 
 describe('GET /api/todo-boards/:id/items', () => {
+    // Every test below targets the default heavygee/6 board by id without
+    // adding it via POST first — env-configure it explicitly (hapi#238: an
+    // unconfigured board list is now genuinely empty, not the hardcoded demo
+    // board, so these tests must opt in instead of relying on the old
+    // silent default).
+    beforeEach(() => {
+        process.env.HAPI_BOARD_OWNER = 'heavygee'
+        process.env.HAPI_BOARD_NUMBER = '6'
+    })
+
     it('404s for an unknown board id', async () => {
         const app = await createApp(() => ({ data: {} }))
         const response = await app.request('/api/todo-boards/unknown/items')
@@ -739,6 +784,14 @@ const VALID_ITEM_URL = 'https://github.com/heavygee/hapi-demo-board/issues/1'
 // Shared by every write route via requireBoardAndValidUrl — exercised once
 // here through `close` rather than duplicated across all four routes.
 describe('write-target project membership verification', () => {
+    // Most tests below target DEFAULT_BOARD_ID directly without adding it
+    // via POST first (hapi#238: see the beforeEach doc comment in the
+    // "GET .../items" describe block above for why this is needed now).
+    beforeEach(() => {
+        process.env.HAPI_BOARD_OWNER = 'heavygee'
+        process.env.HAPI_BOARD_NUMBER = '6'
+    })
+
     it('rejects a same-host, well-formed URL that is not actually on this board\'s project', async () => {
         const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, UNUSED_ACTIONS, () => ({
             data: { resource: { projectItems: { nodes: [] } } }
@@ -855,6 +908,11 @@ describe('write-target project membership verification', () => {
 })
 
 describe('POST /api/todo-boards/:id/items/close', () => {
+    beforeEach(() => {
+        process.env.HAPI_BOARD_OWNER = 'heavygee'
+        process.env.HAPI_BOARD_NUMBER = '6'
+    })
+
     it('closes via the close action and reports success', async () => {
         const calls: unknown[] = []
         const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, {
@@ -910,6 +968,11 @@ describe('POST /api/todo-boards/:id/items/close', () => {
 })
 
 describe('POST /api/todo-boards/:id/items/reopen', () => {
+    beforeEach(() => {
+        process.env.HAPI_BOARD_OWNER = 'heavygee'
+        process.env.HAPI_BOARD_NUMBER = '6'
+    })
+
     it('reopens via the reopen action, deriving isPullRequest from the URL (not part of the request body)', async () => {
         const calls: unknown[] = []
         const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, {
@@ -931,6 +994,11 @@ describe('POST /api/todo-boards/:id/items/reopen', () => {
 })
 
 describe('POST /api/todo-boards/:id/items/comment', () => {
+    beforeEach(() => {
+        process.env.HAPI_BOARD_OWNER = 'heavygee'
+        process.env.HAPI_BOARD_NUMBER = '6'
+    })
+
     it('comments via the comment action', async () => {
         const calls: unknown[] = []
         const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, {
@@ -956,6 +1024,11 @@ describe('POST /api/todo-boards/:id/items/comment', () => {
 })
 
 describe('POST /api/todo-boards/:id/items/status', () => {
+    beforeEach(() => {
+        process.env.HAPI_BOARD_OWNER = 'heavygee'
+        process.env.HAPI_BOARD_NUMBER = '6'
+    })
+
     it('sets status via the setStatus action, resolving project number/owner/field from the board', async () => {
         const calls: unknown[] = []
         const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, {
