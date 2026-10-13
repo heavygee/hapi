@@ -1193,9 +1193,15 @@ layers:
   # active-only / unread-only / scratchlist lenses already do — otherwise opening
   # a session on another machine leaves the list with no row to reveal (found by
   # operator dogfood on :3006, 2026-10-13).
-  # Upstream-aimed tip: feat/2015-session-scroll-into-view @ 4457f3e2b
-  # Soup thin tip: driver/2015-session-scroll-into-view @ 580766777 (merged into
-  # driver HEAD f658f9dab)
+  # Cold review (/code-review) + the fork Codex pass on heavygee/hapi#260 added:
+  # retry the reveal when the row arrives late (the spawn flow navigates before
+  # the sessions query refetches), expand hand-collapsed pinned sections around
+  # the selection, treat pointerdown/keydown as scroll takeover, and label the
+  # machine on an off-scope group so it cannot read as a duplicate header.
+  # Upstream-aimed tip: feat/2015-session-scroll-into-view @ 721902a9a
+  # Soup thin tip: driver/2015-session-scroll-into-view @ c8586b8e9 (composed into
+  # driver HEAD 0d09f3ea8). Soup renames globalPinnedSessions -> pinnedSessions and
+  # adds a `jobs` running bucket, so the pinned-section effect is rewired here.
   #   (SessionList.tsx unions: soup keeps its cn() row classes + ProjectGroupHeader
   #    component, so data-session-group-header lands once on that component's root
   #    and the tip's shell-level data-session-id is dropped — soup already marks the

@@ -407,7 +407,7 @@ hapi-driver-rebuild --build-web --verify
 # HAPI_DRIVER_WAIT_BUSY_SECS=600 hapi-driver-rebuild --build-web --verify
 ```
 
-**Soup rebuild owner (policy):** one agent/session owns manifest + rebuild at a time (`hapi-driver-status` flock). When the tip is ready for `:3006` dogfood, the **feature peer** edits **repo** `config/driver-manifest.yaml` (commit on mirror same turn), mirrors to `~/.config` via `hapi-manifest-mirror-to-config.sh` if needed, and runs `hapi-driver-rebuild --build-web --verify` — do not ping operator/orchestrator to add the layer, and do not wait for a separate "approve soup" gate. Meta session (`8c6b5a7d`) is for **manifest-only** cron rebuilds, stack hygiene, and **remat escalation**. Do not run rebuilds in parallel hoping flock saves you.
+**Soup rebuild owner (policy, operator 2026-10-13):** one agent/session owns the remat lease at a time (`hapi-driver-status` flock). **Split lane:** the **feature peer** edits **repo** `config/driver-manifest.yaml` (commit + push `origin/main` same turn; optional `hapi-manifest-mirror-to-config.sh`), then **pings Meta tooling** to compose — peers do **not** run `hapi-driver-rebuild` / `hapi-driver-build-web`. **Meta tooling** owns `hapi-driver-rebuild --build-web --verify`, verify-web-dist, patient hub restart, remat-hold escalation, and stack hygiene. Do not ping the human operator to hand-edit the manifest, and do not wait for a separate "approve soup" gate — prepare the layer and route compose to Meta. Do not run rebuilds in parallel hoping flock saves you. Canon: [`feature-work-lifecycle.md` § Soup promotion](./feature-work-lifecycle.md#soup-promotion-peer-layer--meta-compose--default-not-optional).
 
 ### Remat escalation hold (2026-07-30)
 
@@ -420,7 +420,7 @@ Happy-path remat is CLI-only and mostly deterministic (`hapi-driver-rebuild --bu
 
 | Who | What to do |
 |---|---|
-| Feature peer / other agent | Stop. `hapi-remat-hold status`. Ping Meta (`hapi-ping-peer 8c6b5a7d`). Do **not** retry remat or hand-promote. |
+| Feature peer / other agent | Stop. `hapi-remat-hold status`. Ping Meta tooling. Do **not** retry remat or hand-promote (happy-path compose is Meta's lane too — not only hold recovery). |
 | Meta remat owner (`config/remat-escalate.yaml`) | Token + identity (below). Success auto-clears hold. |
 | Operator (TTY) | `HAPI_OPERATOR_REMAT_HOLD_CLEAR=1 hapi-remat-hold clear` |
 

@@ -350,7 +350,7 @@ ElevenLabs ConvAI today: handoff OK, readback weak, payment, no mode machine. Ta
 
 **Forbidden agent tool-calls** (stack path change — kills sessions): `hapi-use-worktree`, `hapi-use-driver`, `hapi-driver-rebuild --activate`, `hapi-watch-activate-driver` from tool shells.
 
-**Allowed for soup dogfood when already on driver:** see lifecycle § Agent permission matrix — summary: `hapi-driver-rebuild --build-web [--verify]`, `hapi-verify-web-dist`, **`hapi-restart-hub`** (hub/cli). Not `hapi-use-driver`.
+**Soup compose lane:** see lifecycle § Agent permission matrix — **feature peers** retip the layer + edit/push the manifest, then ping **Meta tooling**; **Meta** runs `hapi-driver-rebuild --build-web [--verify]`, `hapi-verify-web-dist`, **`hapi-restart-hub`** (hub/cli). Feature peers do **not** self-serve remat (operator rule 2026-10-13). Not `hapi-use-driver`.
 
 **Raw `sudo systemctl restart hapi-hub`:** forbidden — use `hapi-restart-hub`. Three-layer block + TTY-gated bypass: `.cursor/rules/operator-fork.mdc` § sudo systemctl. Outage pattern: agents running `hapi-use-worktree` from inside their worktree (2026-06-10, 2026-06-11) — don't be the third.
 
@@ -672,7 +672,7 @@ When the operator asks for **new product behavior**, follow [`docs/tooling/new-f
 
 **Orchestrator** completes steps 1-3 (and usually 4-5), then spawns a **feature peer** with the mandatory handoff block in that doc (completed steps vs peer-owned steps).
 
-**Feature peer** implements in **`~/coding/hapi/worktrees/<name>`** (created via `hapi-worktree-create <name> --branch <branch>`) — not in `~/coding/hapi/driver` by hand. For §6 Playwright / visual evidence, use **`hapi-peer-stack up`** (isolated hub on `3100–3199`, registry `~/.hapi-peer/`) so proof does not yank `:3006`. **Always soup-promote** the tip for estate dogfood on `:3006` (heal/union if needed) — peer stack is not a substitute. Pass §6 **and** promote soup **before** asking the operator to browser-test on `:3006`. Upstream PR only after operator dogfood approval (§8). Use **`hapi-pr-create`** to open the PR — it enforces the closes-keyword + leak scan.
+**Feature peer** implements in **`~/coding/hapi/worktrees/<name>`** (created via `hapi-worktree-create <name> --branch <branch>`) — not in `~/coding/hapi/driver` by hand. For §6 Playwright / visual evidence, use **`hapi-peer-stack up`** (isolated hub on `3100–3199`, registry `~/.hapi-peer/`) so proof does not yank `:3006`. **Always soup-promote** the tip for estate dogfood on `:3006` (heal/union if needed) — peer stack is not a substitute: peer retips layer + manifest, then pings **Meta tooling** to compose (peers do not run `hapi-driver-rebuild`). Pass §6 **and** get soup composed **before** asking the operator to browser-test on `:3006`. Upstream PR only after operator dogfood approval (§8). Use **`hapi-pr-create`** to open the PR — it enforces the closes-keyword + leak scan.
 
 **Instruction roots:** agents read **this file** and tooling docs from the **`~/coding/hapi` workspace**, plus `~/coding/AGENTS.local.md`. The **daily driver** (`~/coding/hapi/driver`) is what **`hapi-active` runs** — not where IDE rules come from unless that tree is the opened workspace.
 
