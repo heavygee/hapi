@@ -25,11 +25,16 @@ import { getSettingsFile, readSettingsOrThrow, updateSettings, type StoredTodoBo
  * earlier and caught before it shipped (see hapi#235 discussion). The env
  * default must stay a dull, public, nothing-real demo board
  * (`heavygee/hapi-demo-board`, project 6) so a forgotten env var never
- * surfaces anyone's real data, and the stored list must never go empty
- * (removal re-seeds the default instead) — both are load-bearing safety
- * invariants, not incidental defaults. See `updateBoards` below —
- * every settings.json writer for `todoBoards` must go through it, not
- * reimplement the empty-list fallback inline.
+ * surfaces anyone's real data — that invariant still holds, but a genuinely
+ * empty board list is no longer prevented (operator decision, hapi#238):
+ * it used to be impossible to tell "nothing configured" from "the hardcoded
+ * demo," so a fresh install with no `gh` auth at all would silently load the
+ * demo board and then 502 on its items fetch with a raw `gh api graphql
+ * failed` error. GET /todo-boards now genuinely returns `[]` when nothing is
+ * configured, and the frontend shows a static explainer instead of ever
+ * attempting that fetch. See `loadBoards`/`updateBoards` below — every
+ * settings.json reader/writer for `todoBoards` must go through them, not
+ * reimplement the env-seed-or-empty fallback inline.
  *
  * Known landmine for the next person touching this file: every board added
  * via POST /todo-boards (and the env-configured default) hardcodes
@@ -87,6 +92,27 @@ function isValidProjectNumber(value: number): boolean {
     return Number.isInteger(value) && value > 0 && value <= MAX_GRAPHQL_INT
 }
 
+// Whether the operator has actually set any HAPI_BOARD_* env var — distinct
+// from readEnvBoardConfig() always being able to *produce* a board, since
+// every one of its fields individually falls back to DEFAULT_BOARD's demo
+// values. Without this check there's no way to tell "operator configured a
+// real board via env vars" from "nothing is configured at all, here's the
+// hardcoded demo" — both looked identical to loadBoards()'s caller (operator
+// decision, hapi#238: a genuinely-empty board list is now a real, displayed
+// state — a static explainer, not a silently-loaded demo board that 502s
+// with a raw `gh api graphql failed` wall of text on a machine with no `gh`
+// auth at all).
+function hasAnyBoardEnvConfig(): boolean {
+    return Boolean(
+        process.env.HAPI_BOARD_HOST?.trim() ||
+        process.env.HAPI_BOARD_OWNER?.trim() ||
+        process.env.HAPI_BOARD_NUMBER?.trim() ||
+        process.env.HAPI_BOARD_STATUS_FIELD?.trim() ||
+        process.env.HAPI_BOARD_DONE_VALUES?.trim() ||
+        process.env.HAPI_BOARD_LABEL?.trim()
+    )
+}
+
 function readEnvBoardConfig(): StoredTodoBoard {
     const host = process.env.HAPI_BOARD_HOST?.trim() || DEFAULT_BOARD.host
     const ownerLogin = process.env.HAPI_BOARD_OWNER?.trim() || DEFAULT_BOARD.ownerLogin
@@ -113,8 +139,12 @@ function readEnvBoardConfig(): StoredTodoBoard {
 
 /**
  * Stored list is the source of truth once non-empty; otherwise fall back to
- * the env-configured (or hardcoded-safe) default — never persisted until the
- * operator explicitly adds a board.
+ * the env-configured board if any HAPI_BOARD_* var is actually set, or
+ * genuinely empty otherwise — never persisted until the operator explicitly
+ * adds a board. A truly empty list is a real, intentional state now
+ * (operator decision, hapi#238): the frontend shows a static explainer
+ * instead of ever hitting the items endpoint for a board nobody configured,
+ * which used to always exist as a hardcoded demo default.
  *
  * Deliberate consequence, not a bug: env vars are a one-time *seed*, not an
  * ongoing config source. The moment any board is added (the entire point of
@@ -134,31 +164,32 @@ async function loadBoards(dataDir: string): Promise<StoredTodoBoard[]> {
     if (settings.todoBoards && settings.todoBoards.length > 0) {
         return settings.todoBoards
     }
-    return [readEnvBoardConfig()]
+    return hasAnyBoardEnvConfig() ? [readEnvBoardConfig()] : []
 }
 
 /**
- * Single choke point for every settings.json write to `todoBoards` — the
- * "never empty" safety invariant (see module doc comment) lives here once,
- * not reimplemented per-handler. `mutate` receives the current list
- * (already non-empty, falling back to the env default) and returns the next
- * list; if `mutate` returns the same array reference back (no-op, e.g.
+ * Single choke point for every settings.json write to `todoBoards`.
+ * `mutate` receives the current list (stored, or the env-derived seed if any
+ * HAPI_BOARD_* var is set, or genuinely empty otherwise) and returns the
+ * next list; if `mutate` returns the same array reference back (no-op, e.g.
  * deleting an id that was never there), the write is skipped entirely —
- * mirrors POST's existing idempotent-add behavior, and avoids a no-op
- * DELETE silently pinning the env-derived default into settings.json as a
- * side effect of writing back a list that didn't actually change.
+ * mirrors POST's existing idempotent-add behavior. Removing the last stored
+ * board now genuinely empties the list (operator decision, hapi#238) rather
+ * than re-seeding the hardcoded demo default — falls back to the env seed
+ * only if one is actually configured, same as loadBoards().
  */
 async function updateBoards(
     dataDir: string,
     mutate: (current: StoredTodoBoard[]) => StoredTodoBoard[]
 ): Promise<StoredTodoBoard[]> {
+    const envSeed = hasAnyBoardEnvConfig() ? [readEnvBoardConfig()] : []
     return updateSettings(getSettingsFile(dataDir), (current) => {
-        const existing = current.todoBoards && current.todoBoards.length > 0 ? current.todoBoards : [readEnvBoardConfig()]
+        const existing = current.todoBoards && current.todoBoards.length > 0 ? current.todoBoards : envSeed
         const next = mutate(existing)
         if (next === existing) {
             return { settings: current, result: existing, write: false }
         }
-        const finalBoards = next.length > 0 ? next : [readEnvBoardConfig()]
+        const finalBoards = next.length > 0 ? next : envSeed
         return { settings: { ...current, todoBoards: finalBoards }, result: finalBoards }
     })
 }
@@ -921,11 +952,12 @@ export function createBoardRoutes(
             return c.json({ error: OWNER_ONLY_ERROR }, 403)
         }
         const id = c.req.param('id')
-        // Safety invariant, non-negotiable: never leave the list empty —
-        // enforced inside updateBoards itself, not here. Returning
-        // `existing` unchanged for an id that was never there keeps this a
-        // true no-op (skips the write) rather than silently pinning the
-        // env-derived default into settings.json for nothing.
+        // Removing the last board now genuinely empties the list (hapi#238
+        // — the frontend's explainer handles that state), not re-seeded with
+        // the demo default. Returning `existing` unchanged for an id that
+        // was never there keeps this a true no-op (skips the write) rather
+        // than silently pinning the env-derived seed into settings.json for
+        // nothing.
         const boards = await updateBoards(dataDir, (existing) => {
             const filtered = existing.filter(b => b.id !== id)
             return filtered.length === existing.length ? existing : filtered

@@ -2,12 +2,12 @@ import type { Database } from 'bun:sqlite'
 import { prepareCached } from './statementCache'
 import { bumpSessionDeletionEpoch } from './sessionInvalidation'
 import { randomUUID } from 'node:crypto'
+import { mergeExternalRefs, type ExternalRef } from '@hapi/protocol/schemas'
 
 import type { StoredSession, VersionedUpdateResult } from './types'
 import { safeJsonParse } from './json'
 import { updateVersionedField } from './versionedUpdates'
 import { buildOverseerSessionIdentity, preserveGithubPrStatusCache } from '@hapi/protocol'
-import type { ExternalRef } from '@hapi/protocol'
 import type { Metadata } from '@hapi/protocol/types'
 import { detachSessionEvents, tombstoneDeletedSession } from './events'
 import { detachSessionInboxItems } from './inboxItems'
@@ -52,6 +52,19 @@ function runInTransaction<T>(db: Database, operation: () => T): T {
 //     survive sparse metadata writes (e.g. archive). Without this,
 //     lastModelError (banner / amber dot / ack) vanishes when a write
 //     omits it — the user never dismissed the error.
+//
+//   - externalRefs: issue/PR links written via `hapi link-issue`/the MCP
+//     `link_issue` tool (hub/src/sync/sessionCache.ts linkIssue). Those
+//     writes go through this same updateSessionMetadata/mergeSessionMetadata
+//     path, so a CLI's own routine metadata write — built from a sparse or
+//     stale local cache that predates the link — would otherwise silently
+//     wipe it, the same failure mode PARSE_IDENTITY_FIELDS exists to guard
+//     against (Codex review, hapi#238). Merged, not just carried-forward-if-
+//     missing like the tiers above: a sparse `next.externalRefs` can be a
+//     present-but-incomplete array rather than strictly `undefined`, so
+//     mergeExternalRefs unions both sides instead of only covering the
+//     all-or-nothing case. PR status cache on those refs is then preserved
+//     via preserveExternalRefsStatusCache (soup).
 //
 // `cursorSessionProtocol` is paired with `cursorSessionId`: protocol is
 // tied to a specific chat id, so a write that explicitly sets a new
@@ -141,6 +154,40 @@ function preserveCursorProtocolPair(
     return merged
 }
 
+function isExternalRefArray(value: unknown): value is ExternalRef[] {
+    return Array.isArray(value)
+}
+
+// Named CONTRIBUTION_FIELDS (matching scripts/tooling/verify-
+// externalrefs-preserve.mjs's incident-driven check for this exact field +
+// name) and carried forward via the same carryForwardIfMissing used by the
+// tiers above — that alone covers the omitted-key sparse-write case. But a
+// sparse write can also include its own stale-but-present externalRefs
+// array — built before an out-of-band `hapi link-issue`/linkIssue write
+// landed — which an undefined-only check would miss. mergeContributionFields
+// below unions both sides via mergeExternalRefs (same helper sessionCache.ts's
+// session-merge path already uses) as a strict superset of that coverage
+// (Codex review, hapi#238).
+function mergeContributionFields(
+    prior: Record<string, unknown>,
+    next: Record<string, unknown>,
+    merged: Record<string, unknown> | null
+): Record<string, unknown> | null {
+    merged = carryForwardIfMissing(prior, next, merged, CONTRIBUTION_FIELDS)
+    const priorRefs = isExternalRefArray(prior.externalRefs) ? prior.externalRefs : []
+    if (priorRefs.length === 0) {
+        return merged
+    }
+    const nextRefs = isExternalRefArray(next.externalRefs) ? next.externalRefs : []
+    const combined = mergeExternalRefs(nextRefs, priorRefs)
+    if (combined.length === nextRefs.length) {
+        return merged
+    }
+    const result = merged ?? { ...next }
+    result.externalRefs = combined
+    return result
+}
+
 function preserveExternalRefsStatusCache(
     prior: Record<string, unknown>,
     next: Record<string, unknown>,
@@ -171,7 +218,7 @@ export function mergeSessionMetadata(prior: unknown, next: unknown): unknown {
     merged = carryForwardIfMissing(prior, next, merged, ROUTING_FIELDS)
     merged = carryForwardIfMissing(prior, next, merged, SIMPLE_RESUME_TOKENS)
     merged = carryForwardIfMissing(prior, next, merged, ALERT_STATE_FIELDS)
-    merged = carryForwardIfMissing(prior, next, merged, CONTRIBUTION_FIELDS)
+    merged = mergeContributionFields(prior, next, merged)
     merged = preserveExternalRefsStatusCache(prior, next, merged)
     merged = preserveCursorProtocolPair(prior, next, merged)
     return merged ?? next

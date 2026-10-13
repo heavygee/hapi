@@ -1240,6 +1240,65 @@ describe('updateSessionMetadata: protocol resume token preservation', () => {
         expect(metadata?.cursorSessionProtocol).toBe('stream-json')
     })
 
+    // P1 from Codex review (hapi#238): a sparse CLI metadata write (e.g. from
+    // a null/stale local cache) that omits or doesn't yet know about
+    // externalRefs must not wipe an issue/PR link set via `hapi link-issue`.
+    it('preserves externalRefs when a sparse metadata write omits them entirely', () => {
+        const store = makeStore()
+        const session = store.sessions.getOrCreateSession(
+            'sparse-write-omits-refs',
+            {
+                path: '/tmp/project',
+                host: 'example',
+                externalRefs: [
+                    { kind: 'github_issue', url: 'https://github.com/acme/repo/issues/1', repo: 'acme/repo', number: 1, linkedAt: 1 }
+                ]
+            },
+            null,
+            'default'
+        )
+
+        const result = store.sessions.updateSessionMetadata(
+            session.id,
+            { path: '/tmp/project', host: 'example' },
+            session.metadataVersion,
+            'default'
+        )
+        expect(result.result).toBe('success')
+
+        const metadata = getMetadata(store, session.id)
+        expect(metadata?.externalRefs).toEqual([
+            { kind: 'github_issue', url: 'https://github.com/acme/repo/issues/1', repo: 'acme/repo', number: 1, linkedAt: 1 }
+        ])
+    })
+
+    it('unions externalRefs when a sparse write carries its own stale-but-present array', () => {
+        const store = makeStore()
+        const refOne = { kind: 'github_issue', url: 'https://github.com/acme/repo/issues/1', repo: 'acme/repo', number: 1, linkedAt: 1 }
+        const refTwo = { kind: 'github_issue', url: 'https://github.com/acme/repo/issues/2', repo: 'acme/repo', number: 2, linkedAt: 2 }
+        const session = store.sessions.getOrCreateSession(
+            'sparse-write-stale-refs',
+            { path: '/tmp/project', host: 'example', externalRefs: [refOne, refTwo] },
+            null,
+            'default'
+        )
+
+        // Simulates a CLI write built from a local cache that predates the
+        // second `hapi link-issue` call — its own payload still only has the
+        // first ref, not an omitted key, so a plain undefined-only
+        // carry-forward would miss this and clobber ref #2.
+        const result = store.sessions.updateSessionMetadata(
+            session.id,
+            { path: '/tmp/project', host: 'example', externalRefs: [refOne] },
+            session.metadataVersion,
+            'default'
+        )
+        expect(result.result).toBe('success')
+
+        const metadata = getMetadata(store, session.id)
+        expect(metadata?.externalRefs).toEqual([refOne, refTwo])
+    })
+
     // P2 from cold review: the broadcast on a successful update must
     // ship the merged value so other CLIs in the session room update
     // their local cache to the persisted state. This is enforced in the
