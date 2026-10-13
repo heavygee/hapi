@@ -132,6 +132,8 @@ export default {
   'boards.detail.openSession': 'Открыть сессию',
   'boards.detail.linkIssueFailed': 'Не удалось привязать сессию к issue',
   'boards.detail.linkIssueFailedBody': 'Сессия создана и готова к работе. Чтобы повторить попытку, выполните: hapi link-issue {url}',
+  'boards.detail.spawnMessageFailed': 'Не удалось отправить вводное сообщение',
+  'boards.detail.spawnMessageFailedBody': 'Сессия создана и готова к работе, но не получила пояснения, зачем она была запущена. Отправьте сообщение вручную, чтобы она начала работу.',
   'boards.detail.refresh': 'Обновить',
   'boards.detail.openedBy': 'Создано {login}',
   'boards.detail.assignees': 'Исполнители',

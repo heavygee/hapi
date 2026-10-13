@@ -132,6 +132,8 @@ export default {
   'boards.detail.openSession': 'Open session',
   'boards.detail.linkIssueFailed': 'Could not link the session to the issue',
   'boards.detail.linkIssueFailedBody': 'The session was created and is usable. To retry, run: hapi link-issue {url}',
+  'boards.detail.spawnMessageFailed': 'Could not deliver the briefing message',
+  'boards.detail.spawnMessageFailedBody': 'The session was created and is usable, but has not been told why it was spawned. Send it a message yourself to get it started.',
   'boards.detail.refresh': 'Refresh',
   'boards.detail.openedBy': 'Opened by {login}',
   'boards.detail.assignees': 'Assignees',

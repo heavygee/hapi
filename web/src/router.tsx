@@ -335,7 +335,7 @@ function SessionsPage() {
         // ExternalRefSchema's doc comment in shared/src/schemas.ts).
         const linkIssueUrl = item.url && parseIssueUrl(item.url) ? item.url : undefined
         const briefingId = stashBoardSpawnBriefing({
-            initialMessage: buildBoardItemSpawnMessage(item),
+            message: buildBoardItemSpawnMessage(item),
             linkIssueUrl
         })
         // `/sessions/new` is a sibling route under the same `/sessions`
@@ -1188,6 +1188,23 @@ function NewSessionPage() {
         if (shareTransferId) {
             setSharePendingTransfer(shareTransferId, sessionId)
         }
+        if (briefing?.message && api) {
+            // Deliver as a real incoming message — same mechanism
+            // spawn_peer/hapi-ping-peer use — instead of seeding the
+            // composer draft for the operator to send themselves (operator
+            // feedback, 2026-10-13: a left-unsent draft "defeats the point").
+            // Fire-and-forget: a failed delivery shouldn't block the spawn
+            // flow the operator is already mid-navigation through — the
+            // session still exists and is usable, just without its briefing.
+            api.sendMessage(sessionId, briefing.message).catch(() => {
+                addToast({
+                    title: t('boards.detail.spawnMessageFailed'),
+                    body: t('boards.detail.spawnMessageFailedBody'),
+                    sessionId,
+                    url: ''
+                })
+            })
+        }
         const linkIssueUrl = briefing?.linkIssueUrl
         if (linkIssueUrl && api) {
             // Fire-and-forget: a failed link shouldn't block the spawn flow the
@@ -1270,7 +1287,6 @@ function NewSessionPage() {
                     onChooseFolder={handleChooseFolder}
                     initialDirectory={initialDirectory}
                     initialMachineId={initialMachineId}
-                    initialMessage={briefing?.initialMessage}
                 />
             </div>
         </div>

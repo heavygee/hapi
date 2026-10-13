@@ -38,12 +38,14 @@ function TimestampRow(props: { label: string; iso: string | null; t: (key: strin
 
 // Right-pane detail for a board card click (hapi#235) — same slot session
 // detail occupies today. "Spawn session" reuses the existing new-session
-// flow entirely (NewSession's initialDirectory/initialMachineId/
-// initialMessage props) — resolving a directory and building the briefing
+// flow entirely (NewSession's initialDirectory/initialMachineId props for
+// the folder picker) — resolving a directory and building the briefing
 // message both happen in the parent (router.tsx), this component just
-// triggers it. The parent also passes the item's issue URL through so the
-// new session is auto-linked (metadata.externalRefs) once created, surfacing
-// as an IssueRefChip on the resulting session row/detail.
+// triggers it. The parent delivers the briefing as a real message right
+// after creation (same mechanism spawn_peer uses, not a composer draft) and
+// also passes the item's issue URL through so the new session is
+// auto-linked (metadata.externalRefs), surfacing as an IssueRefChip on the
+// resulting session row/detail.
 //
 // Write actions (close/reopen/comment/status) all require item.url — draft
 // issues (no linked Issue/PR) have nothing for `gh issue`/`gh project

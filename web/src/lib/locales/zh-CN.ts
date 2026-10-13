@@ -132,6 +132,8 @@ export default {
   'boards.detail.openSession': '打开会话',
   'boards.detail.linkIssueFailed': '无法将会话关联到该 issue',
   'boards.detail.linkIssueFailedBody': '会话已创建并可正常使用。如需重试，请运行：hapi link-issue {url}',
+  'boards.detail.spawnMessageFailed': '无法发送任务说明消息',
+  'boards.detail.spawnMessageFailedBody': '会话已创建并可正常使用，但尚未收到启动说明。请手动发送一条消息让它开始工作。',
   'boards.detail.refresh': '刷新',
   'boards.detail.openedBy': '由 {login} 创建',
   'boards.detail.assignees': '指派给',
