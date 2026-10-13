@@ -172,3 +172,14 @@ export function RefreshIcon(props: IconProps) {
         2
     )
 }
+
+// Shared between a board card's "Session" badge and the detail pane's "Open
+// session" action (hapi#238: both must read as the same affordance wherever
+// they appear, not two different-looking buttons for the same action).
+export function SessionLinkedIcon(props: IconProps) {
+    return createIcon(
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />,
+        props,
+        2
+    )
+}

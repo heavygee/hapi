@@ -142,6 +142,7 @@ export default {
   'boards.detail.updated': '更新于',
   'boards.detail.closed': '关闭于',
   'boards.detail.status': '状态',
+  'boards.detail.statusChanging': '正在更改状态…',
   'boards.detail.comment': '评论',
   'boards.detail.commentPlaceholder': '发表评论…',
   'boards.detail.sendComment': '评论',

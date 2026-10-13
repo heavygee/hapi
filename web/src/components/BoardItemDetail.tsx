@@ -3,6 +3,8 @@ import type { BoardItem } from '@/types/api'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { SessionLinkedBadge } from '@/components/SessionLinkedBadge'
+import { Spinner } from '@/components/Spinner'
 import { ExternalLinkIcon, PlusCircleIcon, RefreshIcon } from '@/components/icons'
 import { chipBaseClass, chipIdleClass } from '@/components/filterChipStyles'
 import { getApiErrorMessage } from '@/lib/apiErrorMessage'
@@ -198,6 +200,7 @@ export function BoardItemDetail(props: {
                                     <option key={status} value={status}>{status}</option>
                                 ))}
                             </select>
+                            {props.isSettingStatus ? <Spinner size="sm" label={t('boards.detail.statusChanging')} /> : null}
                         </label>
                     ) : null}
                 </div>
@@ -225,14 +228,32 @@ export function BoardItemDetail(props: {
                             className="w-full resize-none rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] p-2 text-sm text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
                         />
                         <div className="mt-1.5 flex justify-end">
-                            <Button type="button" variant="outline" disabled={props.isCommenting || !commentDraft.trim()} onClick={handleSendComment}>
-                                {props.isCommenting ? t('boards.detail.commenting') : t('boards.detail.sendComment')}
+                            <Button
+                                type="button"
+                                className="gap-2"
+                                aria-busy={props.isCommenting}
+                                disabled={props.isCommenting || !commentDraft.trim()}
+                                onClick={handleSendComment}
+                            >
+                                {props.isCommenting ? (
+                                    <>
+                                        <Spinner size="sm" label={null} className="text-[var(--app-button-text)]" />
+                                        {t('boards.detail.commenting')}
+                                    </>
+                                ) : t('boards.detail.sendComment')}
                             </Button>
                         </div>
                     </div>
                 ) : null}
             </div>
 
+            {/* Navigation (view something, no state change here) stays light —
+                outline buttons, or the shared SessionLinkedBadge for "Open
+                session" so it reads as the same affordance as the card's own
+                badge. Mutating actions (Spawn, Reopen, Close, and the
+                comment-submit/status-select above) get the filled/primary
+                treatment instead, so consequence is visually distinguishable
+                from mere navigation (operator affordance audit, hapi#238). */}
             <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-[var(--app-border)] p-3">
                 {item.url ? (
                     <Button asChild variant="outline">
@@ -243,17 +264,16 @@ export function BoardItemDetail(props: {
                     </Button>
                 ) : null}
                 {linkedSessionId ? (
-                    <Button
-                        type="button"
-                        variant="outline"
+                    <SessionLinkedBadge
+                        size="md"
                         onClick={() => props.onOpenLinkedSession(linkedSessionId)}
-                    >
-                        {t('boards.detail.openSession')}
-                    </Button>
+                        title={t('boards.detail.openSession')}
+                        ariaLabel={t('boards.detail.openSession')}
+                        label={t('boards.detail.openSession')}
+                    />
                 ) : (
                     <Button
                         type="button"
-                        variant="outline"
                         onClick={props.onSpawn}
                     >
                         <PlusCircleIcon className="h-4 w-4" />
@@ -265,12 +285,22 @@ export function BoardItemDetail(props: {
                     issue/PR, which `gh ... reopen` handles fine. */}
                 {canWrite && item.state !== 'MERGED' ? (
                     isClosed ? (
-                        <Button type="button" variant="outline" disabled={props.isReopening} onClick={props.onReopen}>
-                            {props.isReopening ? t('boards.detail.reopening') : t('boards.detail.reopen')}
+                        <Button type="button" className="gap-2" aria-busy={props.isReopening} disabled={props.isReopening} onClick={props.onReopen}>
+                            {props.isReopening ? (
+                                <>
+                                    <Spinner size="sm" label={null} className="text-[var(--app-button-text)]" />
+                                    {t('boards.detail.reopening')}
+                                </>
+                            ) : t('boards.detail.reopen')}
                         </Button>
                     ) : (
-                        <Button type="button" variant="outline" disabled={props.isClosing} onClick={() => setCloseConfirmOpen(true)}>
-                            {props.isClosing ? t('boards.detail.closing') : t('boards.detail.close')}
+                        <Button type="button" className="gap-2" aria-busy={props.isClosing} disabled={props.isClosing} onClick={() => setCloseConfirmOpen(true)}>
+                            {props.isClosing ? (
+                                <>
+                                    <Spinner size="sm" label={null} className="text-[var(--app-button-text)]" />
+                                    {t('boards.detail.closing')}
+                                </>
+                            ) : t('boards.detail.close')}
                         </Button>
                     )
                 ) : null}

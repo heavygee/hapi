@@ -7,6 +7,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Button } from '@/components/ui/button'
 import { LoadingState } from '@/components/LoadingState'
 import { ExternalLinkIcon, RefreshIcon } from '@/components/icons'
+import { SessionLinkedBadge } from '@/components/SessionLinkedBadge'
 import { chipBaseClass, chipIdleClass } from '@/components/filterChipStyles'
 import { getApiErrorMessage } from '@/lib/apiErrorMessage'
 import { formatRelativeTime } from '@/lib/relativeTime'
@@ -65,25 +66,6 @@ function ChevronIcon(props: { className?: string; collapsed?: boolean }) {
             className={`${props.className ?? ''} transition-transform duration-200 ${props.collapsed ? '-rotate-90' : ''}`}
         >
             <polyline points="6 9 12 15 18 9" />
-        </svg>
-    )
-}
-
-function SessionLinkedIcon(props: { className?: string }) {
-    return (
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className={props.className}
-        >
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
         </svg>
     )
 }
@@ -253,16 +235,15 @@ function BoardItemCard(props: {
                     // level) — a sibling control, not nested inside the
                     // card-body button above, same "avoid nested focusable
                     // elements" pattern as the GitHub link icon below it.
-                    <button
-                        type="button"
+                    // Same SessionLinkedBadge the detail pane's "Open session"
+                    // uses, just the compact size (hapi#238 affordance audit).
+                    <SessionLinkedBadge
+                        size="sm"
                         onClick={() => props.onOpenSession(props.linkedSessionId!)}
                         title={t('boards.detail.openSession')}
-                        aria-label={`${t('boards.detail.openSession')}: ${item.title}`}
-                        className="flex h-6 shrink-0 items-center gap-1 rounded-full border border-[var(--app-link)] bg-[var(--app-link)]/10 px-2 text-[10px] font-medium text-[var(--app-link)] transition-colors hover:bg-[var(--app-link)]/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                    >
-                        <SessionLinkedIcon className="h-3 w-3" />
-                        {t('boards.sessionLinked')}
-                    </button>
+                        ariaLabel={`${t('boards.detail.openSession')}: ${item.title}`}
+                        label={t('boards.sessionLinked')}
+                    />
                 ) : null}
                 {item.url ? (
                     <a

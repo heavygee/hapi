@@ -142,6 +142,7 @@ export default {
   'boards.detail.updated': 'Обновлено',
   'boards.detail.closed': 'Закрыто',
   'boards.detail.status': 'Статус',
+  'boards.detail.statusChanging': 'Изменение статуса…',
   'boards.detail.comment': 'Комментарий',
   'boards.detail.commentPlaceholder': 'Оставить комментарий…',
   'boards.detail.sendComment': 'Комментировать',
