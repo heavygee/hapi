@@ -125,6 +125,7 @@ export default {
   'sessions.blocked.jump': '{count} 个已阻塞 — 跳到下一个',
   'sessions.blockedFilter.showingOnly': '仅显示 {count} 个已阻塞',
   'sessions.blockedFilter.hint': '仅显示已阻塞',
+  'sessions.openTick.tooltip': '当前打开的会话 — 在滚动条靠近此标记处点击即可跳转',
   'sessions.markAllRead.button': '全部标为已读（{count}）',
   'sessions.markAllRead.title': '全部标为已读？',
   'sessions.markAllRead.description': '这会将当前设备上的 {count} 个未读会话标记为已读。',
