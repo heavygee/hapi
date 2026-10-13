@@ -401,11 +401,11 @@ function SessionsPage() {
         () => (selectedBoardItemId ? boardItems.find(item => item.id === selectedBoardItemId) ?? null : null),
         [selectedBoardItemId, boardItems]
     )
-    const linkedTodoSession = useMemo(
+    const linkedBoardSession = useMemo(
         () => findSessionLinkedToIssue(sessions, selectedBoardItem?.url ?? null),
         [sessions, selectedBoardItem]
     )
-    const handleOpenLinkedTodoSession = useCallback((sessionId: string) => {
+    const handleOpenLinkedBoardSession = useCallback((sessionId: string) => {
         navigate({
             to: '/sessions/$sessionId',
             params: { sessionId },
@@ -1076,8 +1076,8 @@ function SessionsPage() {
                             statusOrder={boardStatusOrder}
                             onBack={() => setSelectedBoardItemId(null)}
                             onSpawn={() => handleSpawnFromBoardItem(selectedBoardItem)}
-                            linkedSessionId={linkedTodoSession?.id ?? null}
-                            onOpenLinkedSession={handleOpenLinkedTodoSession}
+                            linkedSessionId={linkedBoardSession?.id ?? null}
+                            onOpenLinkedSession={handleOpenLinkedBoardSession}
                             onRefresh={() => { void refetchBoardItems() }}
                             isRefreshing={boardItemsRefetching}
                             onClose={() => closeBoardItem(selectedBoardItem)}
