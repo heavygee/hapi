@@ -13,7 +13,7 @@ localStorage.setItem('hapi-pin-in-progress-sessions', 'true')
 // machines, so the specs that predate the machine filter keep their layout.
 const fixtureParams = new URLSearchParams(location.search)
 const machineIds = fixtureParams.has('machines')
-    ? ['machine-a', 'machine-b']
+    ? ['alpha', 'beta']
     : null
 const machineFilter = fixtureParams.get('machine')
 if (machineFilter) {
@@ -30,7 +30,12 @@ const initialSessions: SessionSummary[] = Array.from({ length: 40 }, (_, index) 
     futureScheduledMessageCount: 0, nextScheduledAt: null, model: null, effort: null,
     pinned: !fixtureParams.has('collapsed'),
     metadata: {
-        path: `/project-${index}`, name: `Session ${index}`, flavor: 'codex',
+        // `?sharedpaths` makes the two machines share directory names, the case
+        // where an off-machine group header could read as a duplicate.
+        path: fixtureParams.has('sharedpaths')
+            ? `/project-${Math.floor(index / 2)}`
+            : `/project-${index}`,
+        name: `Session ${index}`, flavor: 'codex',
         ...(machineIds ? { machineId: machineIds[index % machineIds.length] } : {}),
     },
 }))

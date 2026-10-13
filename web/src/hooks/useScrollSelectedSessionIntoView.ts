@@ -1,10 +1,12 @@
 import { useEffect, type RefObject } from 'react'
 
 /**
- * Backstop for the reveal loop. A collapsed project animates open over 0.25s
- * (`.collapsible-panel` in `index.css`) and only reaches its full scroll range
- * at the end of that animation, so the loop normally exits earlier than this —
- * as soon as the row is in view and the list has stopped growing.
+ * How long one reveal attempt keeps correcting. A collapsed project animates
+ * open over 0.25s (`.collapsible-panel` in `index.css`) and only reaches its
+ * full scroll range at the end of that animation, so an attempt normally exits
+ * earlier than this — as soon as the row is in view and the list has stopped
+ * growing. An attempt that never finds the row does not end the reveal; the
+ * list growing starts a fresh attempt.
  */
 export const SCROLL_SELECTED_SESSION_SETTLE_MS = 500
 
@@ -90,25 +92,31 @@ export function useScrollSelectedSessionIntoView(
         if (!container || !selectedSessionId) return
 
         let frameId: number | null = null
-        // Set by every outcome except "the list has no layout yet", which is the
-        // one case worth waiting for rather than giving up on.
+        // Latched once the row has actually been dealt with — revealed, or seen
+        // to be in view already — or once the operator takes over the scroll.
+        // A run that simply never finds the row does NOT latch: the row may
+        // still be on its way (a freshly created session navigates before its
+        // row exists), and the list growing will start a fresh attempt.
         let isDone = false
         let hasScrolled = false
         let previousScrollHeight = -1
         let startedAt = 0
 
-        const stop = () => {
-            isDone = true
+        const cancelFrame = () => {
             if (frameId !== null) cancelAnimationFrame(frameId)
             frameId = null
+        }
+
+        const finish = () => {
+            isDone = true
+            cancelFrame()
         }
 
         const step = (now: number) => {
             frameId = null
             const viewport = container.getBoundingClientRect()
-            // On a narrow screen the list stays mounted but `display: none`
-            // while the session fills the view, so there is nothing to measure
-            // until the operator comes back to it.
+            // Nothing to measure while the list has no layout (it is still
+            // `display: none`, or mid-mount). Not a failure — wait it out.
             if (viewport.height <= 0) return
 
             // A project animating open grows the list every frame, and clamps
@@ -127,7 +135,7 @@ export function useScrollSelectedSessionIntoView(
                 if (delta === 0 && (!hasScrolled || listHasSettled)) {
                     // In view — and either the list was never moved at all, or
                     // the reveal has landed and nothing is still shifting.
-                    stop()
+                    finish()
                     return
                 }
                 if (delta !== 0) {
@@ -136,7 +144,11 @@ export function useScrollSelectedSessionIntoView(
                 }
             }
             if (now - startedAt >= SCROLL_SELECTED_SESSION_SETTLE_MS) {
-                stop()
+                // Out of time for this attempt. If the row was there and we
+                // moved the list, that is as good as it gets; if it never
+                // showed up, stay unlatched so a later arrival can retry.
+                if (hasScrolled) finish()
+                else cancelFrame()
                 return
             }
             frameId = requestAnimationFrame(step)
@@ -150,24 +162,26 @@ export function useScrollSelectedSessionIntoView(
         }
 
         // A deliberate scroll gesture outranks the reveal.
-        container.addEventListener('wheel', stop, { passive: true })
-        container.addEventListener('touchmove', stop, { passive: true })
+        container.addEventListener('wheel', finish, { passive: true })
+        container.addEventListener('touchmove', finish, { passive: true })
 
-        // Re-arm when the list regains layout: a deep link on a narrow screen
-        // selects the session while the list is hidden, and the row can only be
-        // revealed once the operator navigates back to it.
-        let resizeObserver: ResizeObserver | null = null
-        if (typeof ResizeObserver !== 'undefined') {
-            resizeObserver = new ResizeObserver(start)
-            resizeObserver.observe(container)
+        // Watch the list's content, not the scroll port: the port keeps its
+        // size while rows arrive. A session created through the spawn flow
+        // navigates on the next frame but its row only exists once the sessions
+        // query has refetched, which is routinely later than one attempt.
+        let contentObserver: ResizeObserver | null = null
+        const content = container.firstElementChild
+        if (content && typeof ResizeObserver !== 'undefined') {
+            contentObserver = new ResizeObserver(start)
+            contentObserver.observe(content)
         }
         start()
 
         return () => {
-            resizeObserver?.disconnect()
-            container.removeEventListener('wheel', stop)
-            container.removeEventListener('touchmove', stop)
-            stop()
+            contentObserver?.disconnect()
+            container.removeEventListener('wheel', finish)
+            container.removeEventListener('touchmove', finish)
+            finish()
         }
     }, [containerRef, selectedSessionId])
 }

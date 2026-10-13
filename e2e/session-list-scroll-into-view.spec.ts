@@ -139,9 +139,9 @@ test.describe('session list scroll into view', () => {
     })
 
     test('reveals a selected session whose machine is filtered out of the list', async ({ page }) => {
-        // Sessions alternate between machine-a and machine-b; the list is scoped
-        // to machine-a, so session-31 (machine-b) has no row to begin with.
-        await page.goto(`${FIXTURE}?machines&machine=machine-a`)
+        // Sessions alternate between the alpha and beta machines; the list is scoped
+        // to alpha, so session-31 (beta) has no row to begin with.
+        await page.goto(`${FIXTURE}?machines&machine=alpha`)
         await row(page, 'session-0').waitFor()
         await expect(row(page, 'session-31')).toHaveCount(0)
 
@@ -157,8 +157,25 @@ test.describe('session list scroll into view', () => {
         expect(await isRowTopUnobstructed(page, 'session-31')).toBe(true)
     })
 
+    test('names the machine on an off-machine group so it cannot read as a duplicate', async ({ page }) => {
+        // Even indices are alpha, odd beta; `sharedpaths` pairs them, so
+        // session-30 (alpha) and session-31 (beta) share /project-15.
+        await page.goto(`${FIXTURE}?machines&machine=alpha&sharedpaths`)
+        await row(page, 'session-30').waitFor()
+
+        await page.evaluate(() => window.selectSession('session-31'))
+        await page.waitForTimeout(600)
+        await expect(row(page, 'session-31')).toHaveCount(1)
+
+        const titles = await page.$$eval('[data-session-group-header][title="/project-15"]',
+            headers => headers.map(h => h.textContent?.trim() ?? ''))
+        expect(titles).toHaveLength(2)
+        expect(new Set(titles).size).toBe(2)
+        expect(titles.some(t => t.includes('beta'))).toBe(true)
+    })
+
     test('drops the off-machine row again once another session is selected', async ({ page }) => {
-        await page.goto(`${FIXTURE}?machines&machine=machine-a`)
+        await page.goto(`${FIXTURE}?machines&machine=alpha`)
         await row(page, 'session-0').waitFor()
 
         await page.evaluate(() => window.selectSession('session-31'))
