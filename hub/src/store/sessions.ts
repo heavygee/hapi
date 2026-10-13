@@ -173,19 +173,51 @@ function mergeContributionFields(
     next: Record<string, unknown>,
     merged: Record<string, unknown> | null
 ): Record<string, unknown> | null {
-    merged = carryForwardIfMissing(prior, next, merged, CONTRIBUTION_FIELDS)
-    const priorRefs = isExternalRefArray(prior.externalRefs) ? prior.externalRefs : []
-    if (priorRefs.length === 0) {
-        return merged
+    // Explicit key present (including []) means the writer spoke — do not
+    // treat a missing-key carry-forward. Empty array is an intentional clear
+    // (soup test: "lets an explicit externalRefs write win, including
+    // clearing with []"); non-empty is handled below.
+    if (Object.prototype.hasOwnProperty.call(next, 'externalRefs')) {
+        const nextRefs = isExternalRefArray(next.externalRefs) ? next.externalRefs : []
+        if (nextRefs.length === 0) {
+            return merged
+        }
+        const priorRefs = isExternalRefArray(prior.externalRefs) ? prior.externalRefs : []
+        if (priorRefs.length === 0) {
+            return merged
+        }
+        // Codex P1 (hapi#238): a sparse CLI write can carry a present-but-
+        // incomplete array (stale local cache that predates a link-issue).
+        // Only union when every next ref already existed on prior — i.e. next
+        // looks like a subset/stale snapshot, not an intentional rewrite that
+        // introduces new identities (those win outright, matching soup's
+        // explicit-replace test).
+        const nextIsSubsetOfPrior = nextRefs.every(ref =>
+            priorRefs.some(existing =>
+                existing.kind === ref.kind
+                && existing.repo.toLowerCase() === ref.repo.toLowerCase()
+                && existing.number === ref.number
+                && (() => {
+                    try {
+                        return new URL(existing.url).host.toLowerCase() === new URL(ref.url).host.toLowerCase()
+                    } catch {
+                        return existing.url === ref.url
+                    }
+                })()
+            )
+        )
+        if (!nextIsSubsetOfPrior) {
+            return merged
+        }
+        const combined = mergeExternalRefs(nextRefs, priorRefs)
+        if (combined.length === nextRefs.length) {
+            return merged
+        }
+        const result = merged ?? { ...next }
+        result.externalRefs = combined
+        return result
     }
-    const nextRefs = isExternalRefArray(next.externalRefs) ? next.externalRefs : []
-    const combined = mergeExternalRefs(nextRefs, priorRefs)
-    if (combined.length === nextRefs.length) {
-        return merged
-    }
-    const result = merged ?? { ...next }
-    result.externalRefs = combined
-    return result
+    return carryForwardIfMissing(prior, next, merged, CONTRIBUTION_FIELDS)
 }
 
 function preserveExternalRefsStatusCache(
