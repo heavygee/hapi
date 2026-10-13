@@ -56,6 +56,7 @@ import { getMachinePlatform, presentMachineHealth } from '@/lib/machineHealth'
 import { MachineFilterBar, MachineFilterMenu } from '@/components/MachineFilterBar'
 import { useSessionListMachineFilter } from '@/hooks/useSessionListMachineFilter'
 import { useTransientScrollbar } from '@/hooks/useTransientScrollbar'
+import { useScrollSelectedSessionIntoView } from '@/hooks/useScrollSelectedSessionIntoView'
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
 import { SessionRowSummary } from '@/components/SessionRowSummary'
 import { Spinner } from '@/components/Spinner'
@@ -1065,6 +1066,7 @@ function SessionItem(props: {
                 type="button"
                 {...longPressHandlers}
                 data-session-scroll-anchor
+                data-session-id={s.id}
                 className={`session-list-item group/session-row flex w-full flex-col gap-1 py-2 pl-2.5 pr-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none rounded-lg ${selected ? 'bg-[var(--app-secondary-bg)]' : ''}`}
                 style={{ WebkitTouchCallout: 'none' }}
                 aria-current={selected ? 'page' : undefined}
@@ -1604,6 +1606,7 @@ export function SessionList(props: {
         return (
             <div key={group.key} data-session-scroll-anchor>
                 <div
+                    data-session-group-header
                     className="group/project sticky top-0 z-10 flex items-center gap-2 bg-[var(--app-bg)] py-1.5 pl-2 pr-2 text-left rounded-lg transition-colors hover:bg-[var(--app-secondary-bg)] min-w-0 w-full select-none"
                     title={group.directory}
                 >
@@ -1658,6 +1661,7 @@ export function SessionList(props: {
         return (
             <div key={group.key} data-session-scroll-anchor>
                 <div
+                    data-session-group-header
                     className="group/project sticky top-0 z-10 flex items-center gap-2 bg-[var(--app-bg)] py-1.5 pl-2 pr-2 text-left rounded-lg transition-colors hover:bg-[var(--app-secondary-bg)] cursor-pointer min-w-0 w-full select-none"
                     onClick={() => toggleGroup(group.key, isCollapsed)}
                     title={group.directory}
@@ -1831,6 +1835,7 @@ export function SessionList(props: {
     // bounce to make a wheel pull feel right, so it stays on live updates.
     const scrollContainerRef = useRef<HTMLDivElement>(null)
     useTransientScrollbar(scrollContainerRef, 'left')
+    useScrollSelectedSessionIntoView(scrollContainerRef, selectedSessionId)
     const [pullState, setPullState] = useState<PullToRefreshState>('idle')
     const pullStateRef = useRef<PullToRefreshState>('idle')
     const [isRefreshing, setIsRefreshing] = useState(false)

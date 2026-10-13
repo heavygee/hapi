@@ -25,15 +25,24 @@ if (new URLSearchParams(location.search).has('mixed')) {
 declare global {
     interface Window {
         updateSession: (id: string, patch: Partial<SessionSummary>) => void
+        /** Stands in for deep links and programmatic navigation. */
+        selectSession: (id: string | null) => void
     }
 }
 
+const initialSelectedSessionId = new URLSearchParams(location.search).get('selected')
+
 function Fixture() {
     const [sessions, setSessions] = useState(initialSessions)
+    const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
+        initialSelectedSessionId
+    )
     window.updateSession = (id, patch) => setSessions(previous => previous.map(session =>
         session.id === id ? { ...session, ...patch } : session))
+    window.selectSession = setSelectedSessionId
     return <div style={{ width: 360, height: 600, display: 'flex', flexDirection: 'column' }}>
-        <SessionList sessions={sessions} onSelect={() => {}} onNewSession={() => {}}
+        <SessionList sessions={sessions} selectedSessionId={selectedSessionId}
+            onSelect={setSelectedSessionId} onNewSession={() => {}}
             isLoading={false} renderHeader={false} api={null} />
     </div>
 }
