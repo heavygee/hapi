@@ -152,6 +152,9 @@ driver_soup_single_exe_assert_not_retagging_stale "$TMP/new" "$TIP_A" \
 echo "OK: assert allows same-tip republish"
 
 # Fleet seal pointer (operator seal vs dogfood latest)
+# Skip live GH channel + dispatch in unit tests (exercised via --dry-run + helpers).
+export HAPI_SKIP_FLEET_GITHUB_CHANNEL=1
+export HAPI_SKIP_FLEET_DISPATCH=1
 SEAL_ROOT="$TMP/seal-artifacts"
 SEAL_TAG="hapi-soup-v2099.12.01-abcdef0"
 mkdir -p "$SEAL_ROOT/$SEAL_TAG/linux-x64-baseline"
@@ -188,5 +191,25 @@ if driver_soup_fleet_seal "$SEAL_TAG"; then
     exit 1
 fi
 echo "OK: fleet-seal refuses digest mismatch"
+
+# Restore bytes for channel helper checks
+printf 'seal-bytes-v1' >"$SEAL_ROOT/$SEAL_TAG/linux-x64-baseline/hapi"
+SEAL_SHA="$(driver_soup_single_exe_sha256_file "$SEAL_ROOT/$SEAL_TAG/linux-x64-baseline/hapi")"
+jq -n \
+    --arg tag "$SEAL_TAG" \
+    --arg tip "$TIP_B" \
+    --arg sha "$SEAL_SHA" \
+    '{schema:1, tag:$tag, composedTipSha:$tip, binaries:[{target:"bun-linux-x64-baseline",platform:"linux",arch:"x64",variant:"baseline",path:"linux-x64-baseline/hapi",sha256:$sha,sizeBytes:13}]}' \
+    >"$SEAL_ROOT/$SEAL_TAG/manifest.json"
+
+url="$(driver_soup_fleet_github_manifest_url)"
+[[ "$url" == *"releases/download/hapi-fleet/manifest.json" ]] \
+    || { echo "FAIL: default fleet manifest URL: $url"; exit 1; }
+echo "OK: fleet GH manifest URL defaults to hapi-fleet channel"
+
+unset HAPI_SKIP_FLEET_GITHUB_CHANNEL
+driver_soup_fleet_seal_github_channel "$SEAL_ROOT/$SEAL_TAG" "$SEAL_TAG" --dry-run \
+    || { echo "FAIL: GH channel dry-run should succeed"; exit 1; }
+echo "OK: fleet-seal GH channel dry-run"
 
 echo "All driver-soup-single-exe-publish tests passed."

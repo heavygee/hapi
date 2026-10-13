@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 # hapi-pet-install: one-shot install/upgrade for a standalone ("pet") HAPI instance —
-# a single machine with no orchestrator, no persistent-volume swap, no fleet management
-# (a Chromebook's Linux/Crostini container, a fresh VPS, any hand-set-up Linux box).
+# a single machine with no orchestrator, no persistent-volume swap (a Chromebook's
+# Linux/Crostini container, a fresh VPS, any hand-set-up Linux box).
+#
+# FORK-ONLY fleet product (heavygee/hapi): by default inherits Layer A seal poll
+# against the moving GH channel `hapi-fleet` + fleet-upgrade policy `alert`
+# (silent|alert|auto). Canon: docs/plans/2026-10-13-fleet-seal-contract.md (#257).
+# Foundry/oos must leave HAPI_UPSTREAM_SEAL_URL unset (ouroboros).
 #
 # Safe to re-run: running this again on an already-installed box performs an in-place
 # upgrade (validate new binary -> stop old -> swap -> relaunch), same mechanism proven
@@ -15,6 +20,8 @@
 # Usage:
 #   HAPI_ARTIFACT_URL=<url-or-path-to-hapi-binary> bash install-hapi-pet.sh
 #   curl -fsSL …/install-hapi-pet.sh | bash -s -- --with-systemd
+#   HAPI_FLEET_UPGRADE_POLICY=auto bash install-hapi-pet.sh --with-systemd
+#   HAPI_SKIP_UPSTREAM_SEAL=1 bash install-hapi-pet.sh   # break-glass: no Layer A
 #
 # See docs/plans/2026-09-04-fleet-vm-swap-strategy.md §6 for the full history of what
 # this script encodes and why each step exists — every step here was a real bug found
@@ -26,6 +33,13 @@ set -euo pipefail
 HAPI_HOME="${HAPI_HOME:-$HOME/.hapi}"
 HAPI_WORKSPACE="${HAPI_WORKSPACE:-$HOME/.hapi-workspace}"
 HAPI_ARTIFACT_URL="${HAPI_ARTIFACT_URL:-}"
+HAPI_RELEASES_REPO="${HAPI_RELEASES_REPO:-heavygee/hapi}"
+HAPI_FLEET_GH_CHANNEL_TAG="${HAPI_FLEET_GH_CHANNEL_TAG:-hapi-fleet}"
+# Layer A primary poll (#256/#257). Empty + HAPI_SKIP_UPSTREAM_SEAL=1 disables.
+HAPI_UPSTREAM_SEAL_URL="${HAPI_UPSTREAM_SEAL_URL:-}"
+HAPI_SKIP_UPSTREAM_SEAL="${HAPI_SKIP_UPSTREAM_SEAL:-0}"
+# Hub default policy poles: silent | alert | auto (protocol DEFAULT is alert).
+HAPI_FLEET_UPGRADE_POLICY="${HAPI_FLEET_UPGRADE_POLICY:-alert}"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 NVM_VERSION="v0.39.7"
 NODE_MIN_MAJOR=22
@@ -45,6 +59,10 @@ unset _script_src
 for arg in "$@"; do
     case "$arg" in
         --with-systemd) WITH_SYSTEMD=1 ;;
+        --fleet-policy=*)
+            HAPI_FLEET_UPGRADE_POLICY="${arg#--fleet-policy=}"
+            ;;
+        --skip-upstream-seal) HAPI_SKIP_UPSTREAM_SEAL=1 ;;
         -h|--help)
             cat <<'HELP'
 hapi-pet-install: one-shot install/upgrade for a standalone ("pet") HAPI instance.
@@ -53,9 +71,17 @@ Usage:
   HAPI_ARTIFACT_URL=<url-or-path> bash install-hapi-pet.sh
   curl -fsSL …/install-hapi-pet.sh | bash
   curl -fsSL …/install-hapi-pet.sh | bash -s -- --with-systemd
+  bash install-hapi-pet.sh --with-systemd --fleet-policy=alert
 
---with-systemd  Install user-level systemd units (works via curl|bash; units are
-                embedded — no git checkout required).
+--with-systemd         Install user-level systemd units (works via curl|bash;
+                       units are embedded — no git checkout required).
+--fleet-policy=POLE    silent | alert | auto (default alert). Seeds settings.json
+                       fleetUpgradePolicy when unset.
+--skip-upstream-seal   Do not wire HAPI_UPSTREAM_SEAL_URL (foundry/break-glass).
+
+Default artifact + Layer A poll use the FORK fleet channel
+  https://github.com/heavygee/hapi/releases/download/hapi-fleet/…
+Never use releases/latest for auto-apply (dogfood thrash).
 HELP
             exit 0
             ;;
@@ -64,6 +90,98 @@ done
 
 log()  { printf '==> %s\n' "$1"; }
 fail() { printf 'ERROR: %s\n' "$1" >&2; exit 1; }
+
+case "$HAPI_FLEET_UPGRADE_POLICY" in
+    silent|alert|auto) ;;
+    *) fail "HAPI_FLEET_UPGRADE_POLICY must be silent|alert|auto (got: $HAPI_FLEET_UPGRADE_POLICY)" ;;
+esac
+
+hapi_pet_default_seal_manifest_url() {
+    printf 'https://github.com/%s/releases/download/%s/manifest.json\n' \
+        "$HAPI_RELEASES_REPO" "$HAPI_FLEET_GH_CHANNEL_TAG"
+}
+
+hapi_pet_default_channel_binary_url() {
+    local platform="${1:?}"
+    printf 'https://github.com/%s/releases/download/%s/hapi-%s\n' \
+        "$HAPI_RELEASES_REPO" "$HAPI_FLEET_GH_CHANNEL_TAG" "$platform"
+}
+
+# Seed hub settings fleetUpgradePolicy without clobbering an existing choice.
+# Prefer jq; fall back to python3; last resort write a fresh file only.
+hapi_pet_seed_fleet_upgrade_policy() {
+    local settings="$HAPI_HOME/settings.json"
+    local policy="$HAPI_FLEET_UPGRADE_POLICY"
+    mkdir -p "$HAPI_HOME"
+    if [[ -f "$settings" ]] && grep -q '"fleetUpgradePolicy"' "$settings" 2>/dev/null; then
+        log "Keeping existing fleetUpgradePolicy in $settings"
+        return 0
+    fi
+    local tmp
+    tmp="$(mktemp "$HAPI_HOME/.settings.json.XXXXXX")"
+    if [[ -f "$settings" ]] && command -v jq >/dev/null 2>&1; then
+        jq --arg p "$policy" '.fleetUpgradePolicy = $p' "$settings" >"$tmp" \
+            || { rm -f "$tmp"; fail "cannot seed fleetUpgradePolicy into $settings"; }
+    elif [[ -f "$settings" ]] && command -v python3 >/dev/null 2>&1; then
+        python3 - "$settings" "$policy" "$tmp" <<'PY' || { rm -f "$tmp"; fail "cannot seed fleetUpgradePolicy via python3"; }
+import json, sys
+path, policy, out = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(path, encoding="utf-8") as f:
+    data = json.load(f)
+if not isinstance(data, dict):
+    raise SystemExit("settings.json is not an object")
+if data.get("fleetUpgradePolicy") is not None:
+    raise SystemExit(0)
+data["fleetUpgradePolicy"] = policy
+with open(out, "w", encoding="utf-8") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+PY
+        if [[ ! -s "$tmp" ]]; then
+            rm -f "$tmp"
+            log "Keeping existing fleetUpgradePolicy in $settings"
+            return 0
+        fi
+    elif [[ ! -f "$settings" ]]; then
+        printf '{\n  "fleetUpgradePolicy": "%s"\n}\n' "$policy" >"$tmp" \
+            || { rm -f "$tmp"; fail "cannot write $settings"; }
+    else
+        rm -f "$tmp"
+        log "WARN: jq/python3 missing — cannot merge fleetUpgradePolicy into existing $settings"
+        return 0
+    fi
+    mv -f "$tmp" "$settings"
+    log "Seeded fleetUpgradePolicy=$policy in $settings"
+}
+
+# Wire Layer A into user systemd hub (drop-in) — both embedded and companion paths.
+hapi_pet_install_upstream_seal_dropin() {
+    local unit_dir="$HOME/.config/systemd/user"
+    local seal_url="${HAPI_UPSTREAM_SEAL_URL}"
+    if [[ "${HAPI_SKIP_UPSTREAM_SEAL}" == "1" ]]; then
+        log "Skipping upstream-seal drop-in (HAPI_SKIP_UPSTREAM_SEAL=1)"
+        return 0
+    fi
+    if [[ -z "$seal_url" ]]; then
+        seal_url="$(hapi_pet_default_seal_manifest_url)"
+    fi
+    HAPI_UPSTREAM_SEAL_URL="$seal_url"
+    mkdir -p "$unit_dir/hapi-hub.service.d"
+    local dropin="$unit_dir/hapi-hub.service.d/43-upstream-seal.conf"
+    local tmp
+    tmp="$(mktemp "$unit_dir/hapi-hub.service.d/.43-upstream-seal.conf.XXXXXX")"
+    cat >"$tmp" <<EOF
+[Service]
+# FORK fleet Layer A — poll moving channel (not releases/latest). #256/#257
+Environment=HAPI_UPSTREAM_SEAL_URL=${seal_url}
+EOF
+    chmod 0644 "$tmp"
+    mv -f "$tmp" "$dropin"
+    log "Installed: $dropin (HAPI_UPSTREAM_SEAL_URL=${seal_url})"
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl --user daemon-reload 2>/dev/null || true
+    fi
+}
 
 # Prefer the checkout OAuth helpers when present (curl|bash has none).
 if [[ -n "${SCRIPT_DIR}" && -f "${SCRIPT_DIR}/tooling/lib/hapi-claude-oauth-dropin.sh" ]]; then
@@ -692,13 +810,30 @@ esac
 log "Architecture: $ARCH -> $HAPI_PLATFORM"
 
 # --- 2. Resolve artifact source ---
-# Default: GitHub Releases mirror on heavygee/hapi (soup single-exe publish).
+# Default: FORK fleet channel `hapi-fleet` (sealed tip). Fall back to dogfood
+# releases/latest only when the channel is unreachable (bootstrap / first publish).
 # Override with HAPI_ARTIFACT_URL for a local path or a different mirror.
-HAPI_RELEASES_REPO="${HAPI_RELEASES_REPO:-heavygee/hapi}"
 if [[ -z "$HAPI_ARTIFACT_URL" ]]; then
-    HAPI_ARTIFACT_URL="https://github.com/${HAPI_RELEASES_REPO}/releases/latest/download/hapi-${HAPI_PLATFORM}"
+    _channel_bin="$(hapi_pet_default_channel_binary_url "$HAPI_PLATFORM")"
+    _channel_man="$(hapi_pet_default_seal_manifest_url)"
+    if curl -fsSIL "$_channel_man" >/dev/null 2>&1; then
+        HAPI_ARTIFACT_URL="$_channel_bin"
+        log "Artifact source: fleet channel ${_channel_bin}"
+    else
+        HAPI_ARTIFACT_URL="https://github.com/${HAPI_RELEASES_REPO}/releases/latest/download/hapi-${HAPI_PLATFORM}"
+        log "WARN: fleet channel manifest unreachable — falling back to dogfood latest for bootstrap binary"
+        log "Artifact source: $HAPI_ARTIFACT_URL"
+    fi
+    unset _channel_bin _channel_man
+else
+    log "Artifact source: $HAPI_ARTIFACT_URL"
 fi
-log "Artifact source: $HAPI_ARTIFACT_URL"
+if [[ "${HAPI_SKIP_UPSTREAM_SEAL}" != "1" && -z "${HAPI_UPSTREAM_SEAL_URL}" ]]; then
+    HAPI_UPSTREAM_SEAL_URL="$(hapi_pet_default_seal_manifest_url)"
+fi
+if [[ -n "${HAPI_UPSTREAM_SEAL_URL}" ]]; then
+    log "Layer A seal URL: $HAPI_UPSTREAM_SEAL_URL (policy=${HAPI_FLEET_UPGRADE_POLICY})"
+fi
 
 # --- 3. Fetch + sanity-check the new binary BEFORE touching anything running.
 #     Ordering is deliberate: a bad URL/path or a corrupt download must fail here,
@@ -868,12 +1003,18 @@ if ! grep -q '^export HAPI_HOME=' ~/.bashrc 2>/dev/null; then
     echo "export HAPI_HOME=\"$HAPI_HOME\"" >> ~/.bashrc
 fi
 export HAPI_HOME
+hapi_pet_seed_fleet_upgrade_policy
 
 # --- 7. Launch ---
 # With --with-systemd: systemd owns hub+runner (skip nohup so we do not race :3006).
 # Without: nohup background processes (local-only; --relay still broken as of 2026-09-13).
 if [[ "$WITH_SYSTEMD" -eq 1 ]]; then
     install_user_pet_systemd
+    hapi_pet_install_upstream_seal_dropin
+    # Drop-in landed after units; restart hub once so Layer A env is live.
+    if [[ "${HAPI_SKIP_UPSTREAM_SEAL}" != "1" ]]; then
+        systemctl --user restart hapi-hub.service 2>/dev/null || true
+    fi
     sleep 2
     if ! curl -fsS localhost:3006/health >/dev/null; then
         fail "hub did not come up under systemd — check: systemctl --user status hapi-hub; journalctl --user -u hapi-hub -n 50"
@@ -888,12 +1029,23 @@ else
     # and falls back to a local-only hub with no visible error. Local-only is correct and
     # safe for same-machine use; flag this back to the meta-bot if you need remote reach
     # before that bug is fixed.
-    nohup "$INSTALL_DIR/hapi" hub > "$HAPI_HOME/logs/hub.log" 2>&1 &
+    (
+        if [[ "${HAPI_SKIP_UPSTREAM_SEAL}" != "1" && -n "${HAPI_UPSTREAM_SEAL_URL}" ]]; then
+            export HAPI_UPSTREAM_SEAL_URL
+        else
+            unset HAPI_UPSTREAM_SEAL_URL HAPI_UPSTREAM_SEAL_TAG 2>/dev/null || true
+        fi
+        nohup "$INSTALL_DIR/hapi" hub > "$HAPI_HOME/logs/hub.log" 2>&1 &
+        echo $! > "$HAPI_HOME/hub.pid"
+    )
     sleep 2
     if ! curl -fsS localhost:3006/health >/dev/null; then
         fail "hub did not come up — check $HAPI_HOME/logs/hub.log"
     fi
     log "Hub is up (localhost:3006, local-only for now)."
+    if [[ "${HAPI_SKIP_UPSTREAM_SEAL}" != "1" && -n "${HAPI_UPSTREAM_SEAL_URL}" ]]; then
+        log "Layer A enabled for nohup hub (HAPI_UPSTREAM_SEAL_URL set)."
+    fi
 
     # Runner, restricted to the workspace dir created above — without --workspace-root the
     # runner starts in "legacy mode" with no directory restriction, which defeats the point

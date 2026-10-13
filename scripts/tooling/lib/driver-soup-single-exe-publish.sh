@@ -24,6 +24,9 @@
 #   HAPI_SKIP_SOUP_GITHUB_RELEASE=1  skip gh release create/upload (local publish only)
 #   HAPI_SOUP_GITHUB_RELEASE_REQUIRED=1  fail publish if gh upload fails (default on oos foundry)
 #   HAPI_SOUP_REUSE_DIST_EXE=1  dangerous escape hatch: publish existing dist-exe without tip-stamp rebuild
+#   HAPI_FLEET_GH_CHANNEL_TAG   default hapi-fleet (moving Layer A channel; never 'latest')
+#   HAPI_SKIP_FLEET_GITHUB_CHANNEL=1  skip GH channel upsert on seal (tests / offline)
+#   HAPI_SKIP_FLEET_DISPATCH=1  skip per-target dispatch after seal (#258)
 #
 # Supply-chain invariant: dist-exe/.composed-tip-sha must equal driver HEAD before
 # publish copies binaries. Rebuild was skipping compile whenever dist-exe/ already
@@ -456,8 +459,177 @@ driver_soup_fleet_seal_verify_tip() {
     return 0
 }
 
+# Moving GitHub Releases channel for off-estate Layer A pollers (#256).
+# Dated tips stay immutable; this channel is deleted+recreated on each seal.
+driver_soup_fleet_github_channel_tag() {
+    printf '%s\n' "${HAPI_FLEET_GH_CHANNEL_TAG:-hapi-fleet}"
+}
+
+# Durable poll URL Layer A / pet install should use (primary, not fallback).
+driver_soup_fleet_github_manifest_url() {
+    local repo channel
+    repo="$(driver_soup_single_exe_github_repo)"
+    channel="$(driver_soup_fleet_github_channel_tag)"
+    printf 'https://github.com/%s/releases/download/%s/manifest.json\n' "$repo" "$channel"
+}
+
+# Mirror sealed tip bytes onto the moving GH channel release (mandatory on seal).
+# Kill-criteria: never use releases/latest; digests must match tip; channel ≠ dated tip tag.
+#
+# Upsert (never delete+recreate): GitHub tag deletion is eventually-consistent —
+# delete-then-recreate-same-tag can orphan the new release as a draft so
+# releases/download/<channel>/… 404s (cli/cli#8458). Pattern: force-move the
+# tag ref, create-or-heal a published release with --latest=false, then
+# `gh release upload --clobber` stable asset names.
+#
+# Usage: driver_soup_fleet_seal_github_channel <tip_dir> <sealed_tip_tag> [--dry-run]
+driver_soup_fleet_seal_github_channel() {
+    local tip_dir="${1:?}"
+    local sealed_tag="${2:?}"
+    local dry_run=0
+    shift 2 || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dry-run) dry_run=1; shift ;;
+            *) echo "ERROR: fleet-seal-gh: unexpected arg: $1" >&2; return 2 ;;
+        esac
+    done
+
+    if [[ "${HAPI_SKIP_FLEET_GITHUB_CHANNEL:-}" == "1" ]]; then
+        echo "fleet-seal: skip GitHub channel mirror (HAPI_SKIP_FLEET_GITHUB_CHANNEL=1)"
+        return 0
+    fi
+
+    local channel repo tip_sha staging
+    channel="$(driver_soup_fleet_github_channel_tag)"
+    repo="$(driver_soup_single_exe_github_repo)"
+    tip_sha="$(jq -r '.composedTipSha // empty' "$tip_dir/manifest.json")"
+
+    if [[ "$channel" == "$sealed_tag" ]]; then
+        echo "ERROR: fleet-seal: channel tag must not equal dated tip tag ($channel)" >&2
+        return 1
+    fi
+    if [[ "$channel" == latest ]]; then
+        echo "ERROR: fleet-seal: channel tag must not be 'latest' (dogfood thrash)" >&2
+        return 1
+    fi
+    if [[ -z "$tip_sha" ]]; then
+        echo "ERROR: fleet-seal: manifest missing composedTipSha (needed to point channel tag)" >&2
+        return 1
+    fi
+
+    local -a files=()
+    staging="$(mktemp -d "${TMPDIR:-/tmp}/hapi-fleet-channel.XXXXXX")"
+    if ! driver_soup_single_exe_stage_github_assets "$tip_dir" "$staging" files; then
+        rm -rf "$staging"
+        echo "ERROR: fleet-seal: cannot stage GitHub assets from $tip_dir" >&2
+        return 1
+    fi
+
+    local manifest_url
+    manifest_url="$(driver_soup_fleet_github_manifest_url)"
+    echo "fleet-seal: GitHub channel ${repo}@${channel} ← sealed tip ${sealed_tag}"
+    echo "fleet-seal: Layer A poll URL: ${manifest_url}"
+
+    if [[ "$dry_run" == "1" ]]; then
+        echo "fleet-seal: dry-run OK (would upsert GH release ${channel} with ${#files[@]} asset(s))"
+        rm -rf "$staging"
+        return 0
+    fi
+
+    if ! command -v gh >/dev/null 2>&1; then
+        rm -rf "$staging"
+        echo "ERROR: fleet-seal: gh CLI required to mirror channel ${channel}" >&2
+        return 1
+    fi
+
+    # Resolve a commit the GH API accepts as tag target (fork tip may lag soup tip).
+    local target_sha=""
+    if gh api "repos/${repo}/commits/${tip_sha}" >/dev/null 2>&1; then
+        target_sha="$tip_sha"
+    else
+        echo "WARN: fleet-seal: tip ${tip_sha:0:12} not on ${repo}; channel tag will target default branch tip" >&2
+        target_sha="$(gh api "repos/${repo}/commits/main" --jq .sha 2>/dev/null || true)"
+        if [[ -z "$target_sha" ]]; then
+            rm -rf "$staging"
+            echo "ERROR: fleet-seal: cannot resolve a commit for channel tag ${channel}" >&2
+            return 1
+        fi
+    fi
+
+    # Atomic force-update of the moving tag — no async-delete window.
+    if ! gh api -X PATCH "repos/${repo}/git/refs/tags/${channel}" \
+        -f sha="$target_sha" -F force=true >/dev/null 2>&1; then
+        if ! gh api -X POST "repos/${repo}/git/refs" \
+            -f ref="refs/tags/${channel}" -f sha="$target_sha" >/dev/null; then
+            rm -rf "$staging"
+            echo "ERROR: fleet-seal: failed to create/move git tag ${channel}" >&2
+            return 1
+        fi
+    fi
+
+    local notes notes_file
+    notes="**Fleet seal channel** (\`${channel}\`) — moving pointer for Layer A / pet installs."
+    notes+=$'\n\n'"**Sealed tip:** \`${sealed_tag}\`"
+    notes+=$'\n'"**Composed tip:** \`${tip_sha}\`"
+    notes+=$'\n\n'"Poll: \`${manifest_url}\`"
+    notes+=$'\n'"Digest-only newness — never treat this channel name alone as sufficiency."
+    notes+=$'\n\n'"FORK-ONLY fleet product (\`heavygee/hapi\`) — not upstream-bound."
+
+    notes_file="$(mktemp "${TMPDIR:-/tmp}/hapi-fleet-notes.XXXXXX")"
+    printf '%s\n' "$notes" >"$notes_file"
+
+    local gh_rc=0
+    if gh release view "$channel" --repo "$repo" >/dev/null 2>&1; then
+        # Heal orphaned drafts; keep channel off the repo "Latest" badge.
+        gh release edit "$channel" \
+            --repo "$repo" \
+            --draft=false \
+            --latest=false \
+            --target "$target_sha" \
+            --title "Fleet seal (→ ${sealed_tag})" \
+            --notes-file "$notes_file" || gh_rc=$?
+    else
+        gh release create "$channel" \
+            --repo "$repo" \
+            --title "Fleet seal (→ ${sealed_tag})" \
+            --notes-file "$notes_file" \
+            --latest=false \
+            --target "$target_sha" || gh_rc=$?
+    fi
+
+    if [[ "$gh_rc" -eq 0 ]]; then
+        # Stable asset names; --clobber refreshes bytes on each seal.
+        gh release upload "$channel" \
+            --repo "$repo" \
+            --clobber \
+            "${files[@]}" || gh_rc=$?
+    fi
+
+    rm -f "$notes_file"
+    rm -rf "$staging"
+
+    if [[ "$gh_rc" -ne 0 ]]; then
+        echo "ERROR: fleet-seal: GH channel upsert failed for ${channel}" >&2
+        return 1
+    fi
+
+    # Refuse draft (assets would 404 on public download URLs).
+    local is_draft
+    is_draft="$(gh release view "$channel" --repo "$repo" --json isDraft --jq .isDraft 2>/dev/null || echo true)"
+    if [[ "$is_draft" == "true" ]]; then
+        echo "ERROR: fleet-seal: channel release ${channel} is draft — public poll URL would 404" >&2
+        return 1
+    fi
+
+    echo "fleet-seal: GitHub channel OK → ${manifest_url}"
+    return 0
+}
+
 # Point soup-artifacts/fleet-latest at an already-published tip (operator seal).
 # Does NOT move dogfood `latest`. Digest-verify tip before flipping.
+# Also mirrors sealed tip onto GH moving channel `hapi-fleet` (#256) — mandatory
+# unless HAPI_SKIP_FLEET_GITHUB_CHANNEL=1 (unit tests / offline).
 #
 # Usage: driver_soup_fleet_seal [tag] [--dry-run]
 #   tag omitted → current latest-tag.txt / latest symlink target
@@ -515,6 +687,12 @@ driver_soup_fleet_seal() {
 
     if [[ "$dry_run" == "1" ]]; then
         echo "fleet-seal: dry-run OK (would point fleet-latest → $tag)"
+        driver_soup_fleet_seal_github_channel "$tip_dir" "$tag" --dry-run || return 1
+        local dispatch_script
+        dispatch_script="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/hapi-fleet-seal-dispatch.sh"
+        if [[ -x "$dispatch_script" ]]; then
+            bash "$dispatch_script" "$tag" --dry-run || return 1
+        fi
         return 0
     fi
 
@@ -524,6 +702,26 @@ driver_soup_fleet_seal() {
     echo "fleet-seal: fleet-latest → $tag"
     echo "fleet-seal: fleet-latest-tag.txt written"
     echo "fleet-seal: manifest $tip_dir/manifest.json"
+
+    # Off-estate Layer A / pets: GH channel is primary (not optional mirror).
+    if ! driver_soup_fleet_seal_github_channel "$tip_dir" "$tag"; then
+        echo "ERROR: fleet-seal: local fleet-latest updated but GitHub channel mirror FAILED" >&2
+        echo "       fix gh auth / retry: hapi-fleet-seal $tag" >&2
+        return 1
+    fi
+
+    # Per-target-type dispatch (#258): estate push / Layer A verify / cattle plan.
+    local dispatch_script
+    dispatch_script="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/hapi-fleet-seal-dispatch.sh"
+    if [[ -x "$dispatch_script" ]]; then
+        if ! bash "$dispatch_script" "$tag"; then
+            echo "ERROR: fleet-seal: pointers moved but target dispatch FAILED" >&2
+            echo "       retry: hapi-fleet-seal-dispatch $tag" >&2
+            return 1
+        fi
+    else
+        echo "WARN: fleet-seal: dispatch script missing at $dispatch_script" >&2
+    fi
     return 0
 }
 
