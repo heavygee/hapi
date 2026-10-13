@@ -176,7 +176,7 @@ Mechanical (to implement):
 | `hapi-fleet-seal` CLI | **Exists** (`scripts/tooling/hapi-fleet-seal.sh`) |
 | GH release `manifest.json` asset | **Exists** on recent tips |
 | GH "this release is the seal" pointer | **Missing** - optional v1.1 |
-| Hub native `HAPI_UPSTREAM_SEAL_URL` poll + materialize (Layer A) | **Pending** - in-product; companion path dead |
+| Hub native `HAPI_UPSTREAM_SEAL_URL` poll + materialize (Layer A) | **In progress** - `hub/src/upgrade/upstreamSeal.ts` + startHub subscriber (#255); companion path dead |
 | Hub process self-apply (Layer B) | **Missing** - follow-on; reuse runner swap primitives |
 | Estate pets discover via oos hub offer | **Exists** (#247/#251) |
 

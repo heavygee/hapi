@@ -34,6 +34,10 @@ import {
     readPublishedSoupTip,
     soupTipToUpgradeOffer,
 } from './upgrade/soupArtifact'
+import {
+    startUpstreamSealPoller,
+    type UpstreamSealPoller,
+} from './upgrade/upstreamSeal'
 import { readSettings } from './config/settings'
 import { getFleetUpgradePolicy, initFleetUpgradePolicy } from './upgrade/fleetUpgradePolicy'
 import QRCode from 'qrcode'
@@ -129,6 +133,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     let visibilityTracker: VisibilityTracker | null = null
     let notificationHub: NotificationHub | null = null
     let tunnelManager: TunnelManager | null = null
+    let upstreamSealPoller: UpstreamSealPoller | null = null
 
     let cachedUpgradeOffer: { at: number; offer: ReturnType<typeof resolveUpgradeOffer> } | null = null
     const UPGRADE_OFFER_TTL_MS = 30_000
@@ -510,9 +515,29 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     console.log('HAPI Hub is ready!')
     // Deliberate fleet push only — no keepalive/startup auto-upgrade sweep.
 
+    // Layer A: optional upstream seal poller (standalone hubs). When
+    // HAPI_UPSTREAM_SEAL_URL / HAPI_UPSTREAM_SEAL_TAG is set, poll remote
+    // fleet-latest manifest, digest-compare, materialize into local
+    // soup-artifacts — existing offer + #251 policy then apply to runners.
+    // Foundry (oos) leaves this unset. No companion process.
+    upstreamSealPoller = startUpstreamSealPoller({
+        publicUrl: config.publicUrl,
+        onMaterialized: () => {
+            cachedUpgradeOffer = null
+        },
+        log: (msg, detail) => {
+            if (detail !== undefined) {
+                console.log(msg, detail)
+            } else {
+                console.log(msg)
+            }
+        },
+    })
 
     return {
         stop: async () => {
+            upstreamSealPoller?.stop()
+            upstreamSealPoller = null
             await tunnelManager?.stop()
             await happyBot?.stop()
             notificationHub?.stop()
