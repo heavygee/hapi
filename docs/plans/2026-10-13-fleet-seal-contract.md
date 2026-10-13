@@ -191,7 +191,7 @@ Mechanical (to implement):
 | Seal `fleet-latest` / `fleet-latest-tag.txt` | **Exists** via `hapi-fleet-seal` |
 | `hapi-fleet-seal` CLI | **Exists** (`scripts/tooling/hapi-fleet-seal.sh`) |
 | GH release `manifest.json` asset | **Exists** on recent tips (dated `hapi-soup-v*`) |
-| GH **stable moving seal pointer** (`hapi-fleet` / equivalent channel) | **Missing — blocking** for off-estate / public pets (operator 2026-10-13: GH is primary, not fallback) |
+| GH **stable moving seal pointer** (`hapi-fleet` / equivalent channel) | **Missing — blocking** — [#256](https://github.com/heavygee/hapi/issues/256) (operator 2026-10-13: GH is primary, not fallback) |
 | Hub native Layer A poll + materialize (#255) | **Kernel landed** on soup tip; public/pet claim blocked on GH fleet pointer |
 | Pet installer wires seal URL + 3-pole policy (default `alert`) | **Missing** — after GH fleet pointer; `install-hapi-pet.sh` today is one-shot only |
 | "Fleet seal" dispatch (estate push / Layer A / cattle VM-swap) | **Missing** — Meta/tooling orchestrator; not hub #255 |
