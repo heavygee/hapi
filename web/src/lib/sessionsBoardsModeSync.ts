@@ -1,6 +1,11 @@
 import type { SessionsMode } from '@/components/SessionsModeSwitch'
 
-const SESSION_ROUTE = /^\/sessions\/([^/]+)\/?$/
+// Matches /sessions/:id and every nested descendant (/files, /terminal,
+// /file, ...) — not just the bare detail route (Codex review, hapi#238: the
+// one-segment-only version missed browser history landing on a nested route
+// like /sessions/A/files while Boards mode was active, leaving the stale
+// board item detail rendered over the outlet instead of exiting Boards mode).
+const SESSION_ROUTE = /^\/sessions\/([^/]+)(\/.*)?$/
 
 /**
  * Decides whether an actual router navigation (not a mode-switch click)

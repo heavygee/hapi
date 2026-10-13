@@ -40,6 +40,7 @@ import { isOwnerNamespace } from '@/lib/namespace'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { isTelegramApp } from '@/hooks/useTelegram'
 import { useSidebarResize } from '@/hooks/useSidebarResize'
+import { useSplitViewport } from '@/hooks/useSplitViewport'
 import { useMessages } from '@/hooks/queries/useMessages'
 import { useMachines } from '@/hooks/queries/useMachines'
 import { useMachineLabels } from '@/hooks/useMachineLabels'
@@ -229,6 +230,7 @@ function SessionsPage() {
     }, [baseUrl, error, isLoading, sessions])
     const isSessionsIndex = pathname === '/sessions' || pathname === '/sessions/'
     const sidebar = useSidebarResize()
+    const isSplitViewport = useSplitViewport()
     const [sessionsMode, setSessionsMode] = useState<SessionsMode>('sessions')
     // Every /api/todo-boards route 403s outside the owner namespace — hide
     // the switch itself rather than let a non-owner select it and land on a
@@ -244,10 +246,6 @@ function SessionsPage() {
             setSessionsMode('sessions')
         }
     }, [isOwner, sessionsMode])
-    // Hidden behind the to-do list while not in Sessions mode — marking it
-    // "seen" here would silently clear unread state for messages the user
-    // never actually looked at (hapi#238 Codex review).
-    useSelectedSessionSeen(sessionsMode === 'sessions' ? selectedSessionId : null, selectedSession?.updatedAt)
     const {
         boards,
         isLoading: boardsLoading,
@@ -288,6 +286,24 @@ function SessionsPage() {
     const selectedBoardItem = useMemo(
         () => (selectedBoardItemId ? boardItems.find(item => item.id === selectedBoardItemId) ?? null : null),
         [selectedBoardItemId, boardItems]
+    )
+    // Hidden behind the board list while in Boards mode with an item
+    // selected (mobile *and* desktop, since BoardItemDetail then occupies the
+    // right-pane slot) — marking it "seen" there would silently clear unread
+    // state for messages the user never actually looked at. But Boards mode
+    // with *no* item selected falls through to <Outlet/> in that same slot,
+    // which still renders the previously-routed session chat underneath — on
+    // the desktop split layout that pane stays visible regardless of mode
+    // (only the single-pane mobile layout actually hides it), so seen
+    // tracking must keep running there too, or messages visibly on screen
+    // stay marked unread until the operator switches back to Sessions mode
+    // (hapi#238 Codex review, two rounds: the first review caught over-eager
+    // seen-tracking while the chat was genuinely hidden behind Boards mode;
+    // this one caught the desktop-split case where it's hidden on mobile only).
+    const isBoardChatVisibleInSplitView = sessionsMode === 'boards' && selectedBoardItem === null && isSplitViewport
+    useSelectedSessionSeen(
+        sessionsMode === 'sessions' || isBoardChatVisibleInSplitView ? selectedSessionId : null,
+        selectedSession?.updatedAt
     )
     const linkedBoardSession = useMemo(
         () => findSessionLinkedToIssue(sessions, selectedBoardItem?.url ?? null),

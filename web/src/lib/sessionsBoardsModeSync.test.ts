@@ -27,6 +27,17 @@ describe('shouldExitBoardsModeForNavigation', () => {
         expect(shouldExitBoardsModeForNavigation('/sessions/new', 'boards')).toBe(true)
     })
 
+    it('exits Boards mode for nested session routes too (Codex review)', () => {
+        // Regression: the one-segment-only regex missed /sessions/:id/files,
+        // /terminal, /file — browser history landing on one of these while
+        // Boards mode was active with an item selected left both untouched,
+        // so the stale board item detail kept rendering over the outlet
+        // instead of the requested session surface.
+        expect(shouldExitBoardsModeForNavigation('/sessions/session-1/files', 'boards')).toBe(true)
+        expect(shouldExitBoardsModeForNavigation('/sessions/session-1/terminal', 'boards')).toBe(true)
+        expect(shouldExitBoardsModeForNavigation('/sessions/session-1/file', 'boards')).toBe(true)
+    })
+
     it('does NOT exit To-Do mode for a non-session route', () => {
         expect(shouldExitBoardsModeForNavigation('/browse', 'boards')).toBe(false)
         expect(shouldExitBoardsModeForNavigation('/sessions', 'boards')).toBe(false)

@@ -29,12 +29,12 @@ function makeItem(overrides: Partial<BoardItem> = {}): BoardItem {
     }
 }
 
-function renderList(items: BoardItem[], error: string | null) {
+function renderList(items: BoardItem[], error: string | null, boards = [{ id: 'board-1', label: 'heavygee/6' }]) {
     return render(
         <I18nProvider>
             <BoardList
-                boards={[{ id: 'board-1', label: 'heavygee/6' }]}
-                selectedBoardId="board-1"
+                boards={boards}
+                selectedBoardId={boards[0]?.id ?? null}
                 onSelectBoard={vi.fn()}
                 onAddBoard={vi.fn()}
                 onRemoveBoard={vi.fn()}
@@ -76,5 +76,15 @@ describe('BoardList error states', () => {
     it('renders no error banner when there is no error', () => {
         renderList([makeItem()], null)
         expect(screen.queryByText(/refresh failed/)).not.toBeInTheDocument()
+    })
+
+    // Codex review (hapi#238): a failed /todo-boards fetch also surfaces as
+    // an empty boards array — must show the real error, not be mistaken for
+    // "genuinely nothing configured" and silently read as a successful
+    // empty state.
+    it('shows the board-load error instead of the no-boards explainer when the boards fetch itself fails', () => {
+        renderList([], 'Failed to load boards', [])
+        expect(screen.getByText('Failed to load board: Failed to load boards')).toBeInTheDocument()
+        expect(screen.queryByText('No boards yet')).not.toBeInTheDocument()
     })
 })

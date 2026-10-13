@@ -458,6 +458,15 @@ export function BoardList(props: {
                     <div className="flex justify-center py-6">
                         <LoadingState label={t('boards.loading')} />
                     </div>
+                ) : props.boards.length === 0 && props.error ? (
+                    // A failed /todo-boards fetch (auth, settings-file, network)
+                    // also surfaces as an empty boards array — must not be
+                    // mistaken for "genuinely nothing configured" below, or a
+                    // real failure reads as a successful empty state with no
+                    // error shown at all (Codex review, hapi#238).
+                    <div className="px-1 py-4 text-sm text-red-600">
+                        {t('boards.error', { message: props.error })}
+                    </div>
                 ) : props.boards.length === 0 ? (
                     // Genuinely nothing configured (hapi#238 operator decision)
                     // — a static explainer, no items fetch attempted at all
