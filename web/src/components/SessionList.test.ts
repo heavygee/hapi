@@ -29,6 +29,7 @@ import {
     sessionListItemWrapperClassName,
     sessionMatchesQuery,
     sessionMatchesTimeRange,
+    shouldLabelGroupMachine,
     shouldShowOpenSessionTick,
     shouldShowSessionInSidebar,
     partitionGlobalPinnedSessions,
@@ -566,10 +567,35 @@ describe('filterWorkingSessionsOnly', () => {
     })
 })
 
+describe('shouldLabelGroupMachine', () => {
+    it('never labels when the machine bar is hidden', () => {
+        expect(shouldLabelGroupMachine('machine-a', null, false)).toBe(false)
+        expect(shouldLabelGroupMachine('machine-a', 'machine-b', false)).toBe(false)
+    })
+
+    it('labels every group when no machine is scoped', () => {
+        expect(shouldLabelGroupMachine('machine-a', null, true)).toBe(true)
+    })
+
+    it('does not label groups that are on the scoped machine', () => {
+        expect(shouldLabelGroupMachine('machine-a', 'machine-a', true)).toBe(false)
+    })
+
+    it('labels the open session kept visible from another machine', () => {
+        // Otherwise a same-named directory renders two identical headers.
+        expect(shouldLabelGroupMachine('machine-b', 'machine-a', true)).toBe(true)
+    })
+
+    it('treats a missing machine id as the unknown bucket', () => {
+        expect(shouldLabelGroupMachine(null, UNKNOWN_MACHINE_ID, true)).toBe(false)
+        expect(shouldLabelGroupMachine(null, 'machine-a', true)).toBe(true)
+    })
+})
+
 describe('filterSessionsByMachine', () => {
     const sessions = [
-        makeSession({ id: 'here', metadata: { path: '/p', machineId: 'oos' } }),
-        makeSession({ id: 'elsewhere', metadata: { path: '/p', machineId: 'homelab' } }),
+        makeSession({ id: 'here', metadata: { path: '/p', machineId: 'machine-a' } }),
+        makeSession({ id: 'elsewhere', metadata: { path: '/p', machineId: 'machine-b' } }),
         makeSession({ id: 'nomachine', metadata: { path: '/p' } })
     ]
 
@@ -579,7 +605,7 @@ describe('filterSessionsByMachine', () => {
     })
 
     it('keeps only the chosen machine', () => {
-        expect(filterSessionsByMachine(sessions, 'oos').map(s => s.id)).toEqual(['here'])
+        expect(filterSessionsByMachine(sessions, 'machine-a').map(s => s.id)).toEqual(['here'])
     })
 
     it('buckets sessions without a machine under the unknown id', () => {
@@ -588,16 +614,16 @@ describe('filterSessionsByMachine', () => {
     })
 
     it('keeps the open session visible even when it is on another machine', () => {
-        expect(filterSessionsByMachine(sessions, 'oos', 'elsewhere').map(s => s.id))
+        expect(filterSessionsByMachine(sessions, 'machine-a', 'elsewhere').map(s => s.id))
             .toEqual(['here', 'elsewhere'])
     })
 
     it('does not duplicate the open session when it is on the chosen machine', () => {
-        expect(filterSessionsByMachine(sessions, 'oos', 'here').map(s => s.id)).toEqual(['here'])
+        expect(filterSessionsByMachine(sessions, 'machine-a', 'here').map(s => s.id)).toEqual(['here'])
     })
 
     it('preserves input order', () => {
-        expect(filterSessionsByMachine(sessions, 'homelab', 'nomachine').map(s => s.id))
+        expect(filterSessionsByMachine(sessions, 'machine-b', 'nomachine').map(s => s.id))
             .toEqual(['elsewhere', 'nomachine'])
     })
 })
