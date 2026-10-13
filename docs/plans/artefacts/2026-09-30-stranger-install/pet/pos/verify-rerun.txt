@@ -11,5 +11,5 @@ ok - live runner oom_score_adj=200 (matches unit)
 ok - hub /health ok (http://127.0.0.1:3006)
 
 # Explicit gap: agent CLI / Claude auth NOT tested (pet installer leaves login to the operator).
-# This check proves supervision + hub HTTP, not the ninja "sessions cascade on restart" class.
+# This check proves supervision + hub HTTP, not the pid-mismatch "sessions cascade on restart" class.
 # pass=10 fail=1

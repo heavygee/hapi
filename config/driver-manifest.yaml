@@ -1099,7 +1099,7 @@ layers:
 
   # heavygee/hapi#247 — deliberate fleet push + restore upgrade-runner; kill
   # keepalive/startup unattended auto-upgrade. Hub default stays alert; per-machine
-  # auto (ninja) applies only on POST /api/fleet/push-upgrade.
+  # auto (standalone personal hub) applies only on POST /api/fleet/push-upgrade.
   # Thin tip on live soup 326799b34: driver/247-deliberate-fleet-push @ f5c3933b6
   # Worktree: ~/coding/hapi/worktrees/deliberate-fleet-push
   # Hub+shared → remat needs hapi-restart-hub (no --build-web for this tip alone).
