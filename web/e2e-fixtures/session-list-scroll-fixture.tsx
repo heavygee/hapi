@@ -8,17 +8,34 @@ import type { SessionSummary } from '../src/types/api'
 import '../src/index.css'
 
 localStorage.setItem('hapi-pin-in-progress-sessions', 'true')
+
+// Opt-in machine scope: only `?machines` splits the sessions across two
+// machines, so the specs that predate the machine filter keep their layout.
+const fixtureParams = new URLSearchParams(location.search)
+const machineIds = fixtureParams.has('machines')
+    ? ['machine-a', 'machine-b']
+    : null
+const machineFilter = fixtureParams.get('machine')
+if (machineFilter) {
+    localStorage.setItem('hapi-session-list-machine-filter', machineFilter)
+} else {
+    localStorage.removeItem('hapi-session-list-machine-filter')
+}
+
 const initialSessions: SessionSummary[] = Array.from({ length: 40 }, (_, index) => ({
     id: `session-${index}`, active: false, thinking: false, activeAt: 0,
     updatedAt: 1000 - index, metadataVersion: 0, agentStateVersion: 0,
     todosUpdatedAt: 0, todoProgress: null, pendingRequestsCount: 0,
     pendingRequestKinds: [], pendingRequests: [], backgroundTaskCount: 0,
     futureScheduledMessageCount: 0, nextScheduledAt: null, model: null, effort: null,
-    pinned: !new URLSearchParams(location.search).has('collapsed'),
-    metadata: { path: `/project-${index}`, name: `Session ${index}`, flavor: 'codex' },
+    pinned: !fixtureParams.has('collapsed'),
+    metadata: {
+        path: `/project-${index}`, name: `Session ${index}`, flavor: 'codex',
+        ...(machineIds ? { machineId: machineIds[index % machineIds.length] } : {}),
+    },
 }))
 
-if (new URLSearchParams(location.search).has('mixed')) {
+if (fixtureParams.has('mixed')) {
     initialSessions.push({ ...initialSessions[0], id: 'companion', pinned: false })
 }
 
@@ -30,7 +47,7 @@ declare global {
     }
 }
 
-const initialSelectedSessionId = new URLSearchParams(location.search).get('selected')
+const initialSelectedSessionId = fixtureParams.get('selected')
 
 function Fixture() {
     const [sessions, setSessions] = useState(initialSessions)
