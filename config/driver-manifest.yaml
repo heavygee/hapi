@@ -1164,8 +1164,8 @@ layers:
   # hidden when the row is filtered out or in a collapsed group). Revived PR
   # tiann/hapi#1733 rebased onto current upstream/main + review Major fixed
   # (recompute after the 250ms collapse animation, not on an intermediate frame).
-  # Upstream-aimed tip: feat/session-list-open-tick @ 37e79f05a
-  # Soup thin tip on live driver HEAD a04369fd3: driver/1732-session-list-open-tick @ 947c69b3c
+  # Upstream-aimed tip: feat/session-list-open-tick @ a66afec96
+  # Soup thin tip on live driver HEAD a04369fd3: driver/1732-session-list-open-tick @ 1416f8064
   #   (SessionList.tsx/test.ts + en/zh-CN locale unions vs the filter layers;
   #    soup carries aria-current on an inner node, so the row lookup is
   #    `[aria-current="page"]` + closest('.session-list-item') in both tips.)
