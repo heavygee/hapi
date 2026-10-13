@@ -125,6 +125,7 @@ export default {
   'sessions.blocked.jump': '{count} blocked — go to next',
   'sessions.blockedFilter.showingOnly': 'Showing {count} blocked only',
   'sessions.blockedFilter.hint': 'Show blocked only',
+  'sessions.openTick.tooltip': 'Open session position — drag the scrollbar to this mark to reach it',
   'sessions.markAllRead.button': 'Mark all as read ({count})',
   'sessions.markAllRead.title': 'Mark all as read?',
   'sessions.markAllRead.description': 'This will mark {count} unread sessions as read on this device.',
