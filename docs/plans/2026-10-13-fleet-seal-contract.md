@@ -20,7 +20,7 @@ Steady state is **not** agent SSH-and-copy. Estate pets on the oos hub already g
 
 If `fleet-latest` is absent, there is **no seal** yet - watchers must not fall back to `latest` for auto-apply (that reintroduces tip thrash and the stale-tag class of lies). Human/agent bootstrap may still copy `latest` once by hand; that is not the contract.
 
-**Gap (tooling to implement next):** publish already writes `latest` + `latest-tag.txt`. Seal must **also** point `fleet-latest` → the sealed tip dir and write `fleet-latest-tag.txt` (same shape as `latest-tag.txt`). Until that lands, ninja watcher holds (no improvising a tag poller).
+**Tooling:** `hapi-fleet-seal [tag]` (scripts/tooling/hapi-fleet-seal.sh) points `fleet-latest` → tip and writes `fleet-latest-tag.txt` after verifying every `binaries[].sha256` matches on-disk files. Does **not** move dogfood `latest`. Spoken gate still required before agents run it.
 
 ## Poll locations (priority order)
 
@@ -151,8 +151,8 @@ Mechanical (to implement):
 |------|--------|
 | On-disk tip `manifest.json` + per-binary sha256 | **Exists** |
 | Dogfood `latest` / `latest-tag.txt` | **Exists** |
-| Seal `fleet-latest` / `fleet-latest-tag.txt` | **Missing** - next tooling |
-| `hapi-fleet-seal` CLI | **Missing** |
+| Seal `fleet-latest` / `fleet-latest-tag.txt` | **Exists** via `hapi-fleet-seal` |
+| `hapi-fleet-seal` CLI | **Exists** (`scripts/tooling/hapi-fleet-seal.sh`) |
 | GH release `manifest.json` asset | **Exists** on recent tips |
 | GH "this release is the seal" pointer | **Missing** - optional v1.1 |
 | Ninja watcher vs this contract | **Pending** consumer (`ba76163e`) |

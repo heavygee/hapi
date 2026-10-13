@@ -151,4 +151,42 @@ driver_soup_single_exe_assert_not_retagging_stale "$TMP/new" "$TIP_A" \
     || { echo "FAIL: same-tip republish should be allowed"; exit 1; }
 echo "OK: assert allows same-tip republish"
 
+# Fleet seal pointer (operator seal vs dogfood latest)
+SEAL_ROOT="$TMP/seal-artifacts"
+SEAL_TAG="hapi-soup-v2099.12.01-abcdef0"
+mkdir -p "$SEAL_ROOT/$SEAL_TAG/linux-x64-baseline"
+printf 'seal-bytes-v1' >"$SEAL_ROOT/$SEAL_TAG/linux-x64-baseline/hapi"
+SEAL_SHA="$(driver_soup_single_exe_sha256_file "$SEAL_ROOT/$SEAL_TAG/linux-x64-baseline/hapi")"
+jq -n \
+    --arg tag "$SEAL_TAG" \
+    --arg tip "$TIP_B" \
+    --arg sha "$SEAL_SHA" \
+    '{schema:1, tag:$tag, composedTipSha:$tip, binaries:[{target:"bun-linux-x64-baseline",platform:"linux",arch:"x64",variant:"baseline",path:"linux-x64-baseline/hapi",sha256:$sha,sizeBytes:13}]}' \
+    >"$SEAL_ROOT/$SEAL_TAG/manifest.json"
+ln -sfn "$SEAL_TAG" "$SEAL_ROOT/latest"
+printf '%s\n' "$SEAL_TAG" >"$SEAL_ROOT/latest-tag.txt"
+driver_soup_single_exe_artifacts_root() { printf '%s\n' "$SEAL_ROOT"; }
+
+driver_soup_fleet_seal --dry-run \
+    || { echo "FAIL: dry-run seal should succeed"; exit 1; }
+echo "OK: fleet-seal dry-run"
+
+driver_soup_fleet_seal \
+    || { echo "FAIL: fleet-seal should succeed"; exit 1; }
+[[ "$(readlink "$SEAL_ROOT/fleet-latest")" == "$SEAL_TAG" ]] \
+    || { echo "FAIL: fleet-latest symlink"; exit 1; }
+[[ "$(tr -d '[:space:]' <"$SEAL_ROOT/fleet-latest-tag.txt")" == "$SEAL_TAG" ]] \
+    || { echo "FAIL: fleet-latest-tag.txt"; exit 1; }
+[[ "$(readlink "$SEAL_ROOT/latest")" == "$SEAL_TAG" ]] \
+    || { echo "FAIL: seal must not disturb latest"; exit 1; }
+echo "OK: fleet-seal points fleet-latest without moving latest"
+
+# Digest mismatch refuse
+printf 'tampered' >"$SEAL_ROOT/$SEAL_TAG/linux-x64-baseline/hapi"
+if driver_soup_fleet_seal "$SEAL_TAG"; then
+    echo "FAIL: seal should refuse digest mismatch"
+    exit 1
+fi
+echo "OK: fleet-seal refuses digest mismatch"
+
 echo "All driver-soup-single-exe-publish tests passed."
