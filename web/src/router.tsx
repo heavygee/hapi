@@ -1073,7 +1073,7 @@ function SessionsPage() {
                             onClose={() => closeBoardItem(selectedBoardItem)}
                             onReopen={() => {
                                 reopenBoardItem(selectedBoardItem).catch((err) => addToast({
-                                    title: t('todo.detail.reopenFailed'),
+                                    title: t('boards.detail.reopenFailed'),
                                     body: getApiErrorMessage(err, t('dialog.error.default')),
                                     sessionId: '',
                                     url: ''
@@ -1082,7 +1082,7 @@ function SessionsPage() {
                             onComment={(body) => {
                                 return commentOnBoardItem(selectedBoardItem, body).catch((err) => {
                                     addToast({
-                                        title: t('todo.detail.commentFailed'),
+                                        title: t('boards.detail.commentFailed'),
                                         body: getApiErrorMessage(err, t('dialog.error.default')),
                                         sessionId: '',
                                         url: ''
@@ -1092,7 +1092,7 @@ function SessionsPage() {
                             }}
                             onSetStatus={(status) => {
                                 setBoardItemStatus(selectedBoardItem, status).catch((err) => addToast({
-                                    title: t('todo.detail.statusChangeFailed'),
+                                    title: t('boards.detail.statusChangeFailed'),
                                     body: getApiErrorMessage(err, t('dialog.error.default')),
                                     sessionId: '',
                                     url: ''
@@ -1879,8 +1879,8 @@ function NewSessionPage() {
             // exists and is usable without its issue chip.
             api.linkIssue(sessionId, linkIssueUrl).catch(() => {
                 addToast({
-                    title: t('todo.detail.linkIssueFailed'),
-                    body: t('todo.detail.linkIssueFailedBody', { url: linkIssueUrl }),
+                    title: t('boards.detail.linkIssueFailed'),
+                    body: t('boards.detail.linkIssueFailedBody', { url: linkIssueUrl }),
                     sessionId,
                     url: ''
                 })
