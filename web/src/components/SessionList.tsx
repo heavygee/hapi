@@ -337,6 +337,31 @@ export function filterSessionsByMachine(
     )
 }
 
+/** The pinned sections, in render order, that a selected row can hide inside. */
+export type PinnedSectionKey = 'pinned' | 'running' | 'active'
+
+/**
+ * Which pinned section holds `selectedSessionId`, or `null` when it is not in
+ * one. Directory groups auto-expand around the selected session; the pinned
+ * sections are collapsed by hand and had no equivalent, so a selection inside a
+ * closed one stayed clipped with nothing to reveal.
+ */
+export function resolveSelectedSessionPinnedSection(
+    selectedSessionId: string | null | undefined,
+    sections: {
+        globalPinned: SessionSummary[]
+        running: Record<RunningBucketKey, SessionSummary[]>
+    }
+): PinnedSectionKey | null {
+    if (!selectedSessionId) return null
+    const holds = (sessions: SessionSummary[]) =>
+        sessions.some(session => session.id === selectedSessionId)
+    if (holds(sections.globalPinned)) return 'pinned'
+    if (holds(sections.running.working) || holds(sections.running.pending)) return 'running'
+    if (holds(sections.running.active) || holds(sections.running.idle)) return 'active'
+    return null
+}
+
 /**
  * Whether a group's header has to name its machine. With no machine scope the
  * bar labels every group; with a scope active only the groups that are *not*
@@ -1809,6 +1834,29 @@ export function SessionList(props: {
 
         setCollapseOverrides(prev => expandSelectedSessionCollapseOverrides(prev, group))
     }, [selectedSessionId, groups])
+
+    // Same idea for the pinned sections, which collapse by hand and so can hide
+    // the selected row with nothing left to reveal. Guarded on the
+    // selection/section pair for the same reason as the group effect: a section
+    // the operator just closed must stay closed on live refreshes.
+    const autoExpandedSelectedSectionRef = useRef<string | null>(null)
+    useEffect(() => {
+        const section = resolveSelectedSessionPinnedSection(selectedSessionId, {
+            globalPinned: globalPinnedSessions,
+            running: runningSessions,
+        })
+        if (!section) {
+            autoExpandedSelectedSectionRef.current = null
+            return
+        }
+        const autoExpandKey = `${selectedSessionId}::${section}`
+        if (autoExpandedSelectedSectionRef.current === autoExpandKey) return
+        autoExpandedSelectedSectionRef.current = autoExpandKey
+
+        if (section === 'pinned') setPinnedSectionCollapsed(false)
+        else if (section === 'running') setRunningSectionCollapsed(false)
+        else setActiveSectionCollapsed(false)
+    }, [selectedSessionId, globalPinnedSessions, runningSessions])
 
     // Clean up stale collapse overrides
     useEffect(() => {

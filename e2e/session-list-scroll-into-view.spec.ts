@@ -187,6 +187,35 @@ test.describe('session list scroll into view', () => {
         await expect(row(page, 'session-31')).toHaveCount(0)
     })
 
+    test('expands a hand-collapsed pinned section to reveal its row', async ({ page }) => {
+        // Directory groups auto-expand around the selection; the pinned sections
+        // are collapsed by hand and used to hide the selected row for good.
+        await page.goto(`${FIXTURE}?collapsed`)
+        await row(page, 'session-0').waitFor()
+        await page.evaluate(() => window.updateSession('session-25', { active: true }))
+        await page.waitForTimeout(400)
+
+        const section = page.locator('[title="Active sessions"]')
+        await expect(section).toHaveCount(1)
+        // A collapsed panel clips its rows rather than hiding them, so the
+        // panel's own state is the honest signal — the row keeps a box either way.
+        const sectionOpen = () => row(page, 'session-25')
+            .evaluate(el => el.closest('.collapsible-panel')?.hasAttribute('data-open') ?? null)
+        expect(await sectionOpen()).toBe(true)
+
+        await section.click()
+        await page.waitForTimeout(400)
+        expect(await sectionOpen()).toBe(false)
+
+        await page.evaluate(() => window.selectSession('session-25'))
+        await page.waitForTimeout(700)
+
+        expect(await sectionOpen()).toBe(true)
+        const offsets = await edgeOffsets(page, 'session-25')
+        expect(offsets.top).toBeGreaterThanOrEqual(-1)
+        expect(offsets.bottom).toBeLessThanOrEqual(1)
+    })
+
     test('yields to a wheel gesture made during the reveal', async ({ page }) => {
         await page.goto(`${FIXTURE}?collapsed`)
         await row(page, 'session-0').waitFor()
