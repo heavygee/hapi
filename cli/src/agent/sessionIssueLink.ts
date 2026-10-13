@@ -29,7 +29,7 @@ export type LinkIssueOutcome =
 export async function applyLinkIssue(client: SessionIssueLinkClient, url: string): Promise<LinkIssueOutcome> {
     const target = parseIssueUrl(url)
     if (!target) {
-        return { ok: false, error: 'Could not parse a GitHub issue URL (expected e.g. https://github.com/<owner>/<repo>/issues/<n> or <owner>/<repo>#<n>)' }
+        return { ok: false, error: 'Could not parse a GitHub issue URL (expected e.g. https://github.com/<owner>/<repo>/issues/<n> or [host:]<owner>/<repo>#<n>)' }
     }
 
     const ref: ExternalRef = {

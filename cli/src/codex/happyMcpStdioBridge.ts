@@ -108,7 +108,7 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
     }
 
     const linkIssueInputSchema: z.ZodTypeAny = z.object({
-      url: z.string().describe('GitHub issue URL (https://github.com/<owner>/<repo>/issues/<n>) or the <owner>/<repo>#<n> shorthand'),
+      url: z.string().describe('GitHub issue URL (https://github.com/<owner>/<repo>/issues/<n>) or the [host:]<owner>/<repo>#<n> shorthand'),
     });
 
     if (toolNames.has('link_issue')) {

@@ -11,6 +11,7 @@ ${chalk.bold('hapi link-issue')} - Attach a GitHub issue reference to the curren
 ${chalk.bold('Usage:')}
   hapi link-issue <url>
   hapi link-issue <owner>/<repo>#<number>
+  hapi link-issue <host>:<owner>/<repo>#<number>   (GHE; omit host for github.com)
 
 ${chalk.bold('Notes:')}
   Self-session only — links the issue to whichever session this command runs

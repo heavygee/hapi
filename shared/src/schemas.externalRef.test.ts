@@ -69,12 +69,27 @@ describe('parseIssueUrl', () => {
         })
     })
 
-    it('still defaults the owner/repo#N shorthand to github.com (it has no host of its own)', () => {
+    it('still defaults the owner/repo#N shorthand to github.com when no host prefix is given', () => {
         expect(parseIssueUrl('heavygee/hapi#235')?.url).toBe('https://github.com/heavygee/hapi/issues/235')
     })
 
     it('does not mistake a bare, host-less three-segment path for a GHE URL', () => {
         expect(parseIssueUrl('owner/repo/issues/5')).toBeNull()
+    })
+
+    it('accepts a host: prefix on the shorthand for a GHE issue (design-consult review)', () => {
+        // Regression: before this, the shorthand had no way to express a
+        // GHE host at all and always resolved to github.com, risking a
+        // confidently-wrong link for a GHE board item.
+        expect(parseIssueUrl('lhs.ghe.com:lockhouse/repo#8')).toEqual({
+            url: 'https://lhs.ghe.com/lockhouse/repo/issues/8',
+            repo: 'lockhouse/repo',
+            number: 8
+        })
+    })
+
+    it('lowercases a shorthand host prefix but preserves repo casing', () => {
+        expect(parseIssueUrl('LHS.GHE.com:lockhouse/repo#8')?.url).toBe('https://lhs.ghe.com/lockhouse/repo/issues/8')
     })
 })
 

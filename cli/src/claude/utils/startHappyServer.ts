@@ -238,7 +238,7 @@ function createHapiMcpServer(
     // someone uses it, they're not gonna see it" — no chrome to gate for
     // operators who never link an issue).
     const linkIssueInputSchema: z.ZodTypeAny = z.object({
-        url: z.string().describe('GitHub issue URL (https://github.com/<owner>/<repo>/issues/<n>) or the <owner>/<repo>#<n> shorthand'),
+        url: z.string().describe('GitHub issue URL (https://github.com/<owner>/<repo>/issues/<n>) or the [host:]<owner>/<repo>#<n> shorthand'),
     });
     mcp.registerTool<any, any>('link_issue', {
         description: 'Attach a GitHub issue reference to the current HAPI session (self-session only). Shows as a chip on the session row/detail. Re-linking the same issue refreshes it rather than duplicating.',
