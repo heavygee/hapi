@@ -1105,6 +1105,34 @@ describe('updateSessionMetadata: protocol resume token preservation', () => {
         expect(metadata?.externalRefs).toEqual([refOne, refTwo])
     })
 
+    // Found by Meta during a soup absorb and independently confirmed by hand
+    // against this exact code (not just the test): an explicit
+    // `externalRefs: []` is a deliberate unlink-to-empty, not a sparse/stale
+    // write merely missing some refs it didn't know about yet — those two
+    // looked identical as "an empty-ish array" before this fix, so the
+    // union-recovery logic silently resurrected the cleared ref.
+    it('honors an explicit externalRefs: [] clear instead of resurrecting the prior ref', () => {
+        const store = makeStore()
+        const ref = { kind: 'github_issue', url: 'https://github.com/acme/repo/issues/1', repo: 'acme/repo', number: 1, linkedAt: 1 }
+        const session = store.sessions.getOrCreateSession(
+            'explicit-unlink-to-empty',
+            { path: '/tmp/project', host: 'example', externalRefs: [ref] },
+            null,
+            'default'
+        )
+
+        const result = store.sessions.updateSessionMetadata(
+            session.id,
+            { path: '/tmp/project', host: 'example', externalRefs: [] },
+            session.metadataVersion,
+            'default'
+        )
+        expect(result.result).toBe('success')
+
+        const metadata = getMetadata(store, session.id)
+        expect(metadata?.externalRefs).toEqual([])
+    })
+
     // P2 from cold review: the broadcast on a successful update must
     // ship the merged value so other CLIs in the session room update
     // their local cache to the persisted state. This is enforced in the

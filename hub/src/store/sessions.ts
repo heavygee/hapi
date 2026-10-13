@@ -162,6 +162,16 @@ function mergeContributionFields(
         return merged
     }
     const nextRefs = isExternalRefArray(next.externalRefs) ? next.externalRefs : []
+    // An explicit `next.externalRefs = []` is a deliberate unlink-to-empty,
+    // not a sparse/stale write merely missing some refs it didn't know
+    // about yet — those two look identical as "an empty-ish array" without
+    // this check, and unioning prior back in here would silently resurrect
+    // an intentional clear (found during a soup absorb by Meta, confirmed
+    // by hand against this exact code, hapi#238). Only a *non-empty* next
+    // array is treated as "possibly partial" and eligible for recovery.
+    if (nextRefs.length === 0) {
+        return merged
+    }
     const combined = mergeExternalRefs(nextRefs, priorRefs)
     if (combined.length === nextRefs.length) {
         return merged
