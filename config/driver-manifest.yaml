@@ -1092,9 +1092,10 @@ layers:
 
   # heavygee/hapi#235 / PR #238 — Boards view (cards/chips/relative-time,
   # Projects v2 /views/<n> filter capture). Renamed To-Do → Boards.
-  # Re-tip 2026-10-13c: driver/235-todo-board-view @ fa8733b2e (= feat/todo-board-view-ui
-  # tip — affordance coherence: SessionLinkedBadge, nav vs mutation buttons, spinners;
-  # +host: link-issue shorthand; exit Boards on /sessions/new). Was 3d6d69159.
+  # Re-tip 2026-10-13d: driver/235-todo-board-view @ dc5fbd501 (= feat/todo-board-view-ui
+  # tip — no silent demo board: empty list + boards.noBoardsConfigured.* explainer
+  # instead of auto-fetch default; hasAnyBoardEnvConfig; Codex wave P1 externalRefs
+  # metadata-merge data-loss + 3 P2s). Was fa8733b2e (affordance coherence).
   - branch: driver/235-todo-board-view
 
   # heavygee/hapi#247 — deliberate fleet push + restore upgrade-runner; kill
@@ -1188,13 +1189,20 @@ layers:
   # Reveals the row with nearest-edge semantics when it is not already fully
   # visible, never touches scrollTop when it is (no #1169 jump regression), insets
   # the sticky project header, and yields to a wheel/touch gesture.
-  # Upstream-aimed tip: feat/2015-session-scroll-into-view @ fe8579db8
-  # Soup thin tip on live driver HEAD 349725a02: driver/2015-session-scroll-into-view @ 240c6bbb2
-  #   (SessionList.tsx union: soup keeps its cn() row classes + ProjectGroupHeader
+  # Also makes the machine-scope lens exempt the open session, the way the
+  # active-only / unread-only / scratchlist lenses already do — otherwise opening
+  # a session on another machine leaves the list with no row to reveal (found by
+  # operator dogfood on :3006, 2026-10-13).
+  # Upstream-aimed tip: feat/2015-session-scroll-into-view @ 4457f3e2b
+  # Soup thin tip: driver/2015-session-scroll-into-view @ 580766777 (merged into
+  # driver HEAD f658f9dab)
+  #   (SessionList.tsx unions: soup keeps its cn() row classes + ProjectGroupHeader
   #    component, so data-session-group-header lands once on that component's root
   #    and the tip's shell-level data-session-id is dropped — soup already marks the
   #    id on the inner node for the #1717 blocked-row scroll, and the hook climbs to
-  #    the `.session-list-item` shell from whichever node carries it.)
+  #    the `.session-list-item` shell from whichever node carries it. Soup's
+  #    filterScratchlistSessionsOnly and this layer's filterSessionsByMachine are
+  #    adjacent lenses — both survive the union.)
   # Worktree: ~/coding/hapi/worktrees/session-scroll-into-view-2015 (+ soup thin 2015-scroll-into-view-soup)
   # Web-only → remat --build-web; hard-reload (no hub restart required).
   - branch: driver/2015-session-scroll-into-view
