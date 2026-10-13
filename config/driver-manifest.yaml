@@ -1171,7 +1171,16 @@ layers:
   #    `[aria-current="page"]` + closest('.session-list-item') in both tips.)
   # Worktree: ~/coding/hapi/worktrees/session-list-open-tick-1732 (+ soup thin 1732-open-tick-soup)
   # Web-only → remat --build-web; hard-reload (no hub restart required).
+  # NOTE: absorb e43b73c89 kept superseded click-to-jump tooltip (wrong side vs
+  # upstream #1733 review — track clicks page-scroll). Layer tip 1416f8064 has
+  # drag wording; follow-up thin below takes that side without replaying rr-cache.
   - branch: driver/1732-session-list-open-tick
+
+  # Soup heal for #1732 tooltip: take layer drag wording (en/zh-CN/ru) after
+  # e43b73c89 wrong-side absorb. Tip fc2b7c724 on live soup HEAD 6c70011c4.
+  # Worktree: ~/coding/hapi/worktrees/1732-opentick-drag-tooltip
+  # Web-only → remat --build-web; hard-reload.
+  - branch: driver/1732-opentick-drag-tooltip
 
   # tiann/hapi#2015 — opening a session (sidebar click, deep link, programmatic
   # nav) updated the selection on the right while the session list stayed put, so
