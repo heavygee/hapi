@@ -87,6 +87,7 @@ import { getMachinePlatform, presentMachineHealth } from '@/lib/machineHealth'
 import { MachineFilterBar, MachineFilterMenu } from '@/components/MachineFilterBar'
 import { useSessionListMachineFilter } from '@/hooks/useSessionListMachineFilter'
 import { useTransientScrollbar } from '@/hooks/useTransientScrollbar'
+import { useScrollSelectedSessionIntoView } from '@/hooks/useScrollSelectedSessionIntoView'
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
 import { useFeatures } from '@/hooks/queries/useFeatures'
 import { getPrimaryGithubPrRef } from '@hapi/protocol'
@@ -891,6 +892,7 @@ function ProjectGroupHeader(props: {
         <>
             <div
                 {...longPressHandlers}
+                data-session-group-header
                 tabIndex={0}
                 aria-haspopup="menu"
                 aria-expanded={menuOpen}
@@ -2801,6 +2803,7 @@ export function SessionList(props: {
     // bounce to make a wheel pull feel right, so it stays on live updates.
     const scrollContainerRef = useRef<HTMLDivElement>(null)
     useTransientScrollbar(scrollContainerRef, 'left')
+    useScrollSelectedSessionIntoView(scrollContainerRef, selectedSessionId)
     const [pullState, setPullState] = useState<PullToRefreshState>('idle')
     const pullStateRef = useRef<PullToRefreshState>('idle')
     const [isRefreshing, setIsRefreshing] = useState(false)
