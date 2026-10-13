@@ -334,17 +334,22 @@ describe('useScrollSelectedSessionIntoView', () => {
         expect(container.scrollTop).toBe(100)
     })
 
-    it('stops following when the user scrolls the list themselves', () => {
-        const { container, setScrollHeight } = createList()
-        setScrollHeight(VIEWPORT_HEIGHT + 40)
-        renderScrollIntoView(container, 'session-9')
-        expect(container.scrollTop).toBe(40)
+    it.each([['wheel'], ['touchmove'], ['pointerdown'], ['keydown']])(
+        'stops following when the user takes over the scroll with %s',
+        (eventName) => {
+            // A scrollbar drag lands as pointerdown on the scroll container, and
+            // PageUp/arrows arrive as keydown while a row inside has focus.
+            const { container, setScrollHeight } = createList()
+            setScrollHeight(VIEWPORT_HEIGHT + 40)
+            renderScrollIntoView(container, 'session-9')
+            expect(container.scrollTop).toBe(40)
 
-        container.dispatchEvent(new Event('wheel'))
-        setScrollHeight(ROW_COUNT * ROW_HEIGHT)
-        flushFrames(5)
-        expect(container.scrollTop).toBe(40)
-    })
+            container.dispatchEvent(new Event(eventName))
+            setScrollHeight(ROW_COUNT * ROW_HEIGHT)
+            flushFrames(5)
+            expect(container.scrollTop).toBe(40)
+        }
+    )
 
     it('gives up following after the settle window', () => {
         const { container, setScrollHeight } = createList()
@@ -408,7 +413,7 @@ describe('useScrollSelectedSessionIntoView', () => {
     it('does not re-reveal after a user gesture, even when the list keeps changing', () => {
         const { container, addRow } = createList({ empty: true })
         renderScrollIntoView(container, 'session-new')
-        container.dispatchEvent(new Event('wheel'))
+        container.dispatchEvent(new Event('pointerdown'))
 
         addRow('session-new', 9)
         triggerResize()
