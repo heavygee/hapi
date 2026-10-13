@@ -1364,7 +1364,7 @@ export function createSessionsRoutes(
 
         const target = parseIssueUrl(parsed.data.url)
         if (!target) {
-            return c.json({ error: 'Could not parse a GitHub issue URL (expected e.g. https://github.com/<owner>/<repo>/issues/<n> or <owner>/<repo>#<n>)' }, 400)
+            return c.json({ error: 'Could not parse a GitHub issue URL (expected e.g. https://github.com/<owner>/<repo>/issues/<n> or [host:]<owner>/<repo>#<n>)' }, 400)
         }
 
         try {

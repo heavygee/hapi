@@ -357,7 +357,7 @@ function createHapiMcpServer(
     
     // Always-on issue link (hapi#235/#238) — see feat tip; coexist with soup tools.
     const linkIssueInputSchema: z.ZodTypeAny = z.object({
-        url: z.string().describe('GitHub issue URL (https://github.com/<owner>/<repo>/issues/<n>) or the <owner>/<repo>#<n> shorthand'),
+        url: z.string().describe('GitHub issue URL (https://github.com/<owner>/<repo>/issues/<n>) or the [host:]<owner>/<repo>#<n> shorthand'),
     });
     mcp.registerTool<any, any>('link_issue', {
         description: 'Attach a GitHub issue reference to the current HAPI session (self-session only). Shows as a chip on the session row/detail. Re-linking the same issue refreshes it rather than duplicating.',

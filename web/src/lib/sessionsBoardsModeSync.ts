@@ -23,13 +23,21 @@ const SESSION_ROUTE = /^\/sessions\/([^/]+)\/?$/
  * second case still couldn't distinguish "navigated to session A" from
  * "already showing session A, navigated to session A again").
  *
- * `/sessions/new` is deliberately excluded — composing a new session was
- * never routed through "exit To-Do", and nothing about this fix changes
- * that scope.
+ * `/sessions/new` is NOT excluded (Codex review, hapi#238): it used to be,
+ * on the theory that composing a new session was never routed through
+ * "exit Boards" — true for the board-spawn flow itself, which already
+ * resets both `sessionsMode` and the selected item explicitly before it
+ * ever calls `navigate()` (`handleSpawnFromBoardItem`), so it never relied
+ * on this function for that. But any OTHER way of reaching `/sessions/new`
+ * while Boards mode is active with an item selected — browser Forward/Back
+ * being the obvious one — left both pieces of state untouched, and the
+ * right pane keeps rendering the stale selected item's detail instead of
+ * `<Outlet/>` (hiding the new-session form entirely on mobile, where only
+ * one pane shows at a time). Exiting Boards mode for `/sessions/new` too,
+ * same as any other session-targeting route, fixes that without changing
+ * anything about the board-spawn flow's own already-explicit reset.
  */
 export function shouldExitBoardsModeForNavigation(pathname: string, sessionsMode: SessionsMode): boolean {
     if (sessionsMode !== 'boards') return false
-    const match = SESSION_ROUTE.exec(pathname)
-    if (!match) return false
-    return match[1] !== 'new'
+    return SESSION_ROUTE.test(pathname)
 }

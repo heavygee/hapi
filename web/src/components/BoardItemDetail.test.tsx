@@ -173,3 +173,54 @@ describe('BoardItemDetail', () => {
         expect(screen.getByRole('button', { name: 'Spawn session' })).toBeInTheDocument()
     })
 })
+
+// Operator affordance audit (hapi#238): navigation (view something, no state
+// change) must look visually lighter than mutation (changes something) —
+// previously every footer button used the same `outline` treatment
+// regardless of consequence, and pending mutations showed only a disabled
+// control with a text swap, no actual spinner.
+describe('BoardItemDetail affordance treatment', () => {
+    it('gives "Open in GitHub" (pure navigation) the lighter outline treatment', () => {
+        renderDetail()
+        const link = screen.getByRole('link', { name: /Open in GitHub/ })
+        expect(link.className).toContain('border')
+        expect(link.className).not.toContain('bg-[var(--app-button)]')
+    })
+
+    it('gives "Spawn session" (a mutation — creates a session) the filled/primary treatment', () => {
+        renderDetail({ linkedSessionId: null })
+        const button = screen.getByRole('button', { name: /Spawn session/ })
+        expect(button.className).toContain('bg-[var(--app-button)]')
+    })
+
+    it('shows a visible spinner, not just disabled+text-swap, while closing', () => {
+        renderDetail({ isClosing: true })
+        const button = screen.getByRole('button', { name: /Closing/ })
+        expect(button).toBeDisabled()
+        expect(button.querySelector('svg.animate-spin')).not.toBeNull()
+    })
+
+    it('shows a visible spinner while reopening', () => {
+        renderDetail({ item: makeItem({ state: 'CLOSED' }), isReopening: true })
+        const button = screen.getByRole('button', { name: /Reopening/ })
+        expect(button).toBeDisabled()
+        expect(button.querySelector('svg.animate-spin')).not.toBeNull()
+    })
+
+    it('shows a visible spinner while sending a comment', () => {
+        renderDetail({ isCommenting: true })
+        const button = screen.getByRole('button', { name: /Commenting/ })
+        expect(button).toBeDisabled()
+        expect(button.querySelector('svg.animate-spin')).not.toBeNull()
+    })
+
+    it('shows a visible spinner next to the status select while changing status', () => {
+        renderDetail({ isSettingStatus: true })
+        expect(screen.getByRole('status', { name: 'Changing status…' })).toBeInTheDocument()
+    })
+
+    it('does not show the status spinner when not changing status', () => {
+        renderDetail({ isSettingStatus: false })
+        expect(screen.queryByRole('status', { name: 'Changing status…' })).not.toBeInTheDocument()
+    })
+})

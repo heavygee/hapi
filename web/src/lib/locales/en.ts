@@ -196,6 +196,7 @@ export default {
   'boards.detail.updated': 'Updated',
   'boards.detail.closed': 'Closed',
   'boards.detail.status': 'Status',
+  'boards.detail.statusChanging': 'Changing status…',
   'boards.detail.comment': 'Comment',
   'boards.detail.commentPlaceholder': 'Leave a comment…',
   'boards.detail.sendComment': 'Comment',

@@ -169,10 +169,15 @@ export type ExternalRefs = z.infer<typeof ExternalRefsSchema>
 
 
 /**
- * Accepts both the full GitHub issue URL (any host — GHE boards are a real
+ * Accepts the full GitHub issue URL (any host — GHE boards are a real
  * board-feature use case, e.g. a view-scoped `lhs.ghe.com` board) and the
- * `owner/repo#N` shorthand, which has no host of its own and defaults to
- * github.com (`hapi link-issue <url|owner/repo#N>`, hapi#235/#238).
+ * `owner/repo#N` shorthand, with an optional `host:` prefix for a non-
+ * github.com issue (`owner/repo#N` alone still defaults to github.com) —
+ * `hapi link-issue <url|[host:]owner/repo#N>`, hapi#235/#238. Before the
+ * `host:` prefix existed, shorthand had no way to express a GHE issue at
+ * all and always resolved to github.com regardless, risking a confidently-
+ * wrong link for anyone guessing at syntax for a GHE item (design-consult
+ * review).
  *
  * GHE support was deliberately scoped out of the first cut of this function
  * ("the issue link is for the operator's own quick reference, not a board
@@ -212,7 +217,14 @@ const GH_NAME_SEGMENT = '[A-Za-z0-9_.-]+'
 // Host capture mirrors parseProjectUrl's `[^/]+` (hub/src/web/routes/todoBoard.ts)
 // — loose on purpose, since there's no host-allowlist boundary to enforce here.
 const ISSUE_URL_RE = new RegExp(`^(?:https?:\\/\\/)?([^/]+)\\/(${GH_NAME_SEGMENT}\\/${GH_NAME_SEGMENT})\\/issues\\/(\\d+)\\/?(?:[/?#].*)?$`, 'i')
-const ISSUE_SHORTHAND_RE = new RegExp(`^(${GH_NAME_SEGMENT}\\/${GH_NAME_SEGMENT})#(\\d+)$`)
+// Optional `host:` prefix (design-consult review, hapi#238): the shorthand
+// originally had no way to express a GHE host at all, always resolving to
+// github.com regardless — a session guessing at syntax for a GHE item could
+// end up with a confidently-wrong link. `[^:/#]+` for the host segment keeps
+// `:` as an unambiguous separator from both the owner/repo segment (which
+// never contains `:`) and the issue number.
+const SHORTHAND_HOST_SEGMENT = '[^:/#]+'
+const ISSUE_SHORTHAND_RE = new RegExp(`^(?:(${SHORTHAND_HOST_SEGMENT}):)?(${GH_NAME_SEGMENT}\\/${GH_NAME_SEGMENT})#(\\d+)$`)
 
 export function parseIssueUrl(input: string): { url: string; repo: string; number: number } | null {
     const trimmed = input.trim()
@@ -225,8 +237,8 @@ export function parseIssueUrl(input: string): { url: string; repo: string; numbe
 
     const shorthandMatch = ISSUE_SHORTHAND_RE.exec(trimmed)
     if (shorthandMatch) {
-        const [, repo, numberRaw] = shorthandMatch
-        return finishIssueMatch('github.com', repo!, numberRaw!)
+        const [, host, repo, numberRaw] = shorthandMatch
+        return finishIssueMatch((host ?? 'github.com').toLowerCase(), repo!, numberRaw!)
     }
 
     return null
