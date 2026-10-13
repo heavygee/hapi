@@ -1127,6 +1127,15 @@ layers:
   # Hub+web → remat --build-web + hapi-restart-hub (hub policy path).
   - branch: driver/251-auto-keepalive-apply
 
+  # heavygee/hapi#255 — Layer A upstream seal subscriber (FORK-ONLY soup).
+  # NOT for tiann/hapi — #1108 closed door (chicken-egg / capability-gap /
+  # maintenance). HAPI_UPSTREAM_SEAL_URL|TAG → digest-only → materialize
+  # local soup-artifacts → existing offer/#251. Foundry oos leaves unset.
+  # Worktree: ~/coding/hapi/worktrees/hub-upstream-seal
+  # Tip: driver/hub-upstream-seal-url @ c4f3b5cf3
+  # Hub → remat + hapi-restart-hub (startHub poller). No --activate from agents.
+  - branch: driver/hub-upstream-seal-url
+
   # tiann/hapi#2011 — terminal To agent / Selection to agent: append xterm
   # buffer or selection to composer draft, navigate back to chat.
   # Upstream tip: feat/terminal-to-agent @ c853efbe9

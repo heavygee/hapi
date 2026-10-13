@@ -192,7 +192,7 @@ Mechanical (to implement):
 | `hapi-fleet-seal` CLI | **Exists** (`scripts/tooling/hapi-fleet-seal.sh`) |
 | GH release `manifest.json` asset | **Exists** on recent tips |
 | GH "this release is the seal" pointer | **Missing** - optional v1.1 |
-| Hub native `HAPI_UPSTREAM_SEAL_URL` poll + materialize (Layer A) | **In progress** - #254; worktree `hub-upstream-seal` (`driver/hub-upstream-seal-url`); companion path dead |
+| Hub native `HAPI_UPSTREAM_SEAL_URL` poll + materialize (Layer A) | **Landed** - #255; branch `driver/hub-upstream-seal-url`; soup layer in manifest; companion path dead |
 | Hub process self-apply (Layer B) | **Missing** - follow-on; reuse runner swap primitives; fold ExecStart path gotcha |
 | Estate pets discover via oos hub offer | **Exists** (#247/#251) |
 
