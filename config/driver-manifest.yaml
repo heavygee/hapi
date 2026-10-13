@@ -1091,16 +1091,10 @@ layers:
   # - branch: driver/1724-auto-continue-delta
 
   # heavygee/hapi#235 / PR #238 — Boards view (cards/chips/relative-time,
-  # accent wash, detail pane + spawn, board add/remove, github_issue chip,
   # Projects v2 /views/<n> filter capture). Renamed To-Do → Boards.
-  # Re-tip 2026-10-12: driver/235-todo-board-view @ 8b2695ef1 (= feat/todo-board-view-ui
-  # tip — Boards rename, HAPI_BOARD_*, FUE toggle badge, ExternalRefSchema).
-  # Was 932112059 / 53f7e79b4 / 60061cf5e.
-  # Safe default github.com::heavygee::6 — NOT personal project 4.
-  # Worktree: peer feat/todo-board-view-ui; layer ref driver/235-todo-board-view
-  # MUST match origin/feat/todo-board-view-ui before remat (stale layer = incident).
-  # Hub+web → remat --build-web + hapi-restart-hub.
-  # After remat: re-add boards stored without viewNumber (full /views/N URL).
+  # Re-tip 2026-10-13: driver/235-todo-board-view @ b615b6155 (= feat/todo-board-view-ui
+  # tip — +GHE parseIssueUrl, session-linked card badge/group collapse, spawn briefing
+  # as real message, host-aware external-ref identity). Was stuck at 8b2695ef1.
   - branch: driver/235-todo-board-view
 
   # heavygee/hapi#247 — deliberate fleet push + restore upgrade-runner; kill
