@@ -77,7 +77,7 @@ export default {
   'sessions.search.clear': 'Очистить поиск',
   'sessions.search.noResults': 'Нет сессий, соответствующих фильтрам.',
   'sessions.unreadFilter.toggle': 'Только непрочитанные',
-  'sessions.openTick.tooltip': 'Открытая сессия — кликните по полосе прокрутки рядом с меткой, чтобы перейти к ней',
+  'sessions.openTick.tooltip': 'Положение открытой сессии — перетащите полосу прокрутки к этой метке',
   'sessions.markAllRead.button': 'Отметить все как прочитанные ({count})',
   'sessions.markAllRead.title': 'Отметить все как прочитанные?',
   'sessions.markAllRead.description': 'Будут отмечены как прочитанные {count} непрочитанных сессий на этом устройстве.',
