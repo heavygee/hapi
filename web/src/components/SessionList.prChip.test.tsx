@@ -98,5 +98,11 @@ describe('SessionList PR chip', () => {
 
         fireEvent.click(chip)
         expect(onSelect).not.toHaveBeenCalled()
+
+        // Attention/schedule HoverTooltips use group-focus-visible/session-row;
+        // the named group must sit on the focusable row button, not a wrapper div.
+        const rowButton = screen.getByRole('button', { name: /PR linked session/i })
+        expect(rowButton.className.split(/\s+/)).toContain('group/session-row')
+        expect(rowButton.closest('div')?.className.split(/\s+/)).not.toContain('group/session-row')
     })
 })

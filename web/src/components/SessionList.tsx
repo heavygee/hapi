@@ -1090,13 +1090,13 @@ function SessionItem(props: {
     return (
         <>
             <div
-                className={`group/session-row flex w-full items-start rounded-lg ${selected ? 'bg-[var(--app-secondary-bg)]' : ''}`}
+                className={`flex w-full items-start rounded-lg ${selected ? 'bg-[var(--app-secondary-bg)]' : ''}`}
             >
                 <button
                     type="button"
                     {...longPressHandlers}
                     data-session-scroll-anchor
-                    className="session-list-item flex min-w-0 flex-1 flex-col gap-1 py-2 pl-2.5 pr-1 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none rounded-lg"
+                    className="group/session-row session-list-item flex min-w-0 flex-1 flex-col gap-1 py-2 pl-2.5 pr-1 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none rounded-lg"
                     style={{ WebkitTouchCallout: 'none' }}
                     aria-current={selected ? 'page' : undefined}
                     aria-describedby={describedBy}
