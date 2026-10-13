@@ -13,8 +13,13 @@ const EDGE_TOLERANCE_PX = 1
 
 type Edges = { top: number; bottom: number }
 
-/** Row marker written by `SessionList`; scoped to the list's scroll container. */
-const SESSION_ROW_SELECTOR = '.session-list-item[data-session-id]'
+/**
+ * Row markers written by `SessionList`, scoped to the list's scroll container.
+ * The id can be marked on an inner node of the row, so always measure the
+ * `.session-list-item` shell rather than whatever carried the attribute.
+ */
+const SESSION_ROW_MARKER_SELECTOR = '[data-session-id]'
+const SESSION_ROW_SELECTOR = '.session-list-item'
 
 /** The `position: sticky` project header of the group a row belongs to. */
 const SESSION_GROUP_SELECTOR = '[data-session-scroll-anchor]'
@@ -44,8 +49,10 @@ export function findScrollableSessionRow(
     container: HTMLElement,
     sessionId: string
 ): HTMLElement | null {
-    for (const row of container.querySelectorAll<HTMLElement>(SESSION_ROW_SELECTOR)) {
-        if (row.dataset.sessionId !== sessionId) continue
+    for (const marker of container.querySelectorAll<HTMLElement>(SESSION_ROW_MARKER_SELECTOR)) {
+        if (marker.dataset.sessionId !== sessionId) continue
+        const row = marker.closest<HTMLElement>(SESSION_ROW_SELECTOR)
+        if (!row) continue
         if (row.closest('.collapsible-panel:not([data-open])')) continue
         return row
     }

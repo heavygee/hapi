@@ -196,6 +196,24 @@ describe('findScrollableSessionRow', () => {
         const { container } = createList()
         expect(findScrollableSessionRow(container, 'session-404')).toBeNull()
     })
+
+    it('measures the row shell when the id is marked on an inner node', () => {
+        const { container, rows } = createList()
+        const row = rows[3]
+        row.removeAttribute('data-session-id')
+        const inner = document.createElement('div')
+        inner.dataset.sessionId = 'session-3'
+        row.append(inner)
+        expect(findScrollableSessionRow(container, 'session-3')).toBe(row)
+    })
+
+    it('ignores a session id marked outside any row, such as a composer chip', () => {
+        const { container } = createList()
+        const chip = document.createElement('span')
+        chip.dataset.sessionId = 'session-404'
+        container.append(chip)
+        expect(findScrollableSessionRow(container, 'session-404')).toBeNull()
+    })
 })
 
 describe('resolveSessionGroupHeaderInset', () => {
