@@ -99,19 +99,32 @@ export const ExternalRefSchema = z.discriminatedUnion('kind', [
 export type ExternalRef = z.infer<typeof ExternalRefSchema>
 
 /**
- * Accepts both the full GitHub issue URL and the `owner/repo#N` shorthand
- * (`hapi link-issue <url|owner/repo#N>`, hapi#235/#238). GHE/other hosts
- * aren't supported here — unlike the board feature's `parseProjectUrl`, the
- * issue link is for the operator's own quick reference, not a board read
- * that already had to handle multiple hosts. Lives in `shared/` (not
- * hub-only) so both the hub REST route and the MCP tool's socket-based
- * write path (which never touches that route) validate identically instead
- * of maintaining two copies of the same regex.
+ * Accepts both the full GitHub issue URL (any host — GHE boards are a real
+ * board-feature use case, e.g. a view-scoped `lhs.ghe.com` board) and the
+ * `owner/repo#N` shorthand, which has no host of its own and defaults to
+ * github.com (`hapi link-issue <url|owner/repo#N>`, hapi#235/#238).
+ *
+ * GHE support was deliberately scoped out of the first cut of this function
+ * ("the issue link is for the operator's own quick reference, not a board
+ * read that already had to handle multiple hosts") — wrong once board items
+ * started feeding their own `item.url` through the same auto-link-on-spawn
+ * gate (`router.tsx`'s `handleSpawnFromBoardItem`): every item from a
+ * GHE-hosted board silently failed to parse, so the gate never even
+ * attempted the link call, with no error surfaced anywhere (operator report,
+ * 2026-10-13, Lockhouse board on `lhs.ghe.com`). Unlike the board-add host
+ * allowlist (`getAllowedBoardHosts`), no allowlist is needed here: the
+ * result is only ever stored as display data in `metadata.externalRefs`,
+ * never used to shell out `gh` against the host, so there's no SSRF-class
+ * exposure to gate.
+ *
+ * Lives in `shared/` (not hub-only) so both the hub REST route and the MCP
+ * tool's socket-based write path (which never touches that route) validate
+ * identically instead of maintaining two copies of the same regex.
  */
-function finishIssueMatch(repo: string, numberRaw: string): { url: string; repo: string; number: number } | null {
+function finishIssueMatch(host: string, repo: string, numberRaw: string): { url: string; repo: string; number: number } | null {
     const number = Number(numberRaw)
     if (!Number.isFinite(number) || number <= 0) return null
-    return { url: `https://github.com/${repo}/issues/${number}`, repo, number }
+    return { url: `https://${host}/${repo}/issues/${number}`, repo, number }
 }
 
 // GitHub owner/org and repo names are only ever letters, digits, hyphens,
@@ -126,7 +139,9 @@ function finishIssueMatch(repo: string, numberRaw: string): { url: string; repo:
 // character set rejects that input outright instead of silently mis-parsing
 // it (Codex review).
 const GH_NAME_SEGMENT = '[A-Za-z0-9_.-]+'
-const ISSUE_URL_RE = new RegExp(`^(?:https?:\\/\\/)?github\\.com\\/(${GH_NAME_SEGMENT}\\/${GH_NAME_SEGMENT})\\/issues\\/(\\d+)\\/?(?:[/?#].*)?$`, 'i')
+// Host capture mirrors parseProjectUrl's `[^/]+` (hub/src/web/routes/todoBoard.ts)
+// — loose on purpose, since there's no host-allowlist boundary to enforce here.
+const ISSUE_URL_RE = new RegExp(`^(?:https?:\\/\\/)?([^/]+)\\/(${GH_NAME_SEGMENT}\\/${GH_NAME_SEGMENT})\\/issues\\/(\\d+)\\/?(?:[/?#].*)?$`, 'i')
 const ISSUE_SHORTHAND_RE = new RegExp(`^(${GH_NAME_SEGMENT}\\/${GH_NAME_SEGMENT})#(\\d+)$`)
 
 export function parseIssueUrl(input: string): { url: string; repo: string; number: number } | null {
@@ -134,14 +149,14 @@ export function parseIssueUrl(input: string): { url: string; repo: string; numbe
 
     const urlMatch = ISSUE_URL_RE.exec(trimmed)
     if (urlMatch) {
-        const [, repo, numberRaw] = urlMatch
-        return finishIssueMatch(repo!, numberRaw!)
+        const [, host, repo, numberRaw] = urlMatch
+        return finishIssueMatch(host!.toLowerCase(), repo!, numberRaw!)
     }
 
     const shorthandMatch = ISSUE_SHORTHAND_RE.exec(trimmed)
     if (shorthandMatch) {
         const [, repo, numberRaw] = shorthandMatch
-        return finishIssueMatch(repo!, numberRaw!)
+        return finishIssueMatch('github.com', repo!, numberRaw!)
     }
 
     return null

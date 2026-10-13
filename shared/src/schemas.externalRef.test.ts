@@ -47,6 +47,35 @@ describe('parseIssueUrl', () => {
             number: 1
         })
     })
+
+    it('parses a GHE-hosted issue URL (Codex review: board items can come from a GHE board, not just github.com)', () => {
+        // Regression: this function used to hardcode `github.com` in the URL
+        // regex, so every item from a GHE-hosted board (e.g. a view-scoped
+        // Lockhouse board on lhs.ghe.com) silently failed to parse — the
+        // auto-link-on-spawn gate in router.tsx never even attempted the
+        // link call, with no error surfaced anywhere.
+        expect(parseIssueUrl('https://lhs.ghe.com/lockhouse/repo/issues/203')).toEqual({
+            url: 'https://lhs.ghe.com/lockhouse/repo/issues/203',
+            repo: 'lockhouse/repo',
+            number: 203
+        })
+    })
+
+    it('lowercases a mixed-case GHE host but preserves repo casing', () => {
+        expect(parseIssueUrl('https://LHS.GHE.com/lockhouse/repo/issues/203')).toEqual({
+            url: 'https://lhs.ghe.com/lockhouse/repo/issues/203',
+            repo: 'lockhouse/repo',
+            number: 203
+        })
+    })
+
+    it('still defaults the owner/repo#N shorthand to github.com (it has no host of its own)', () => {
+        expect(parseIssueUrl('heavygee/hapi#235')?.url).toBe('https://github.com/heavygee/hapi/issues/235')
+    })
+
+    it('does not mistake a bare, host-less three-segment path for a GHE URL', () => {
+        expect(parseIssueUrl('owner/repo/issues/5')).toBeNull()
+    })
 })
 
 describe('upsertExternalRef', () => {

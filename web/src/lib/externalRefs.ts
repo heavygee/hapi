@@ -1,9 +1,11 @@
 import type { ExternalRef } from '@hapi/protocol/types'
 import type { SessionSummary } from '@/types/api'
 
-// Host-agnostic — boards aren't github.com-only (GHE hosts too), unlike
-// `@hapi/protocol/schemas`' parseIssueUrl, which is hardcoded to github.com
-// and would silently fail to match every GHE-hosted item.
+// Host-agnostic — boards aren't github.com-only (GHE hosts too). Separate
+// from `@hapi/protocol/schemas`' parseIssueUrl (also host-aware now, but
+// returns a reconstructed `url` rather than the parsed host) because this one
+// needs host/repo/number as discrete fields to compare against an existing
+// ref, not to build a storable URL.
 const ISSUE_URL_PATH = /^\/([^/]+)\/([^/]+)\/issues\/(\d+)\/?$/
 
 function parseHostRepoAndNumber(url: string): { host: string; repo: string; number: number } | null {
