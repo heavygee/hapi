@@ -151,8 +151,6 @@ export default {
   'sessions.group.deleteHint': '请先归档所有会话，才能删除分组',
   'sessions.machineFilter.label': '按机器筛选',
   'sessions.machineFilter.all': '全部',
-<<<<<<< HEAD
-=======
   'sessions.modeSwitch.label': '在会话和看板视图之间切换',
   'sessions.modeSwitch.sessions': '会话',
   'sessions.modeSwitch.boards': '看板',
@@ -211,7 +209,6 @@ export default {
   'boards.detail.reopenFailed': '无法重新打开',
   'boards.detail.commentFailed': '无法发表评论',
   'boards.detail.statusChangeFailed': '无法更改状态',
->>>>>>> driver/235-todo-board-view
   'codexSync.tooltip': '从 Codex 导入会话到 Hapi',
   'codexSync.newSessionAction': '导入 Codex 历史',
   'codexSync.confirm.title': '导入 Codex 会话',

@@ -155,9 +155,7 @@ export default {
   'sessions.modeSwitch.sessions': 'Sessions',
   'sessions.modeSwitch.boards': 'Boards',
   'boards.fueBody': 'Pulls in a GitHub Projects board so you can see and act on it without leaving HAPI. Pick which board via the switcher once you’re in.',
-<<<<<<< HEAD
   'boards.fueTitle': 'Boards',
-=======
   'boards.refresh': 'Refresh',
   'boards.loading': 'Loading board…',
   'boards.error': 'Failed to load board: {message}',
@@ -210,7 +208,6 @@ export default {
   'boards.detail.reopenFailed': 'Could not reopen',
   'boards.detail.commentFailed': 'Could not post the comment',
   'boards.detail.statusChangeFailed': 'Could not change the status',
->>>>>>> driver/235-todo-board-view
   'codexSync.tooltip': 'Import sessions from Codex into Hapi',
   'codexSync.newSessionAction': 'Import Codex history',
   'codexSync.confirm.title': 'Import Codex sessions',

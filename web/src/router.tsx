@@ -438,8 +438,6 @@ function SessionsPage() {
     const onlineMachineIds = useMemo(() => new Set(machines.map(m => m.id)), [machines])
     const handleSpawnFromBoardItem = useCallback((item: BoardItem) => {
         const resolved = resolveBoardItemDirectory(item.repo, sessions, onlineMachineIds)
-<<<<<<< HEAD
-=======
         // Only attempt the auto-link for a real GitHub issue URL — board
         // items can also be pull requests or draft issues, and parseIssueUrl
         // only recognizes `/issues/<n>`. Linking a PR URL always 400s on the
@@ -451,7 +449,6 @@ function SessionsPage() {
             message: buildBoardItemSpawnMessage(item),
             linkIssueUrl
         })
->>>>>>> driver/235-todo-board-view
         // `/sessions/new` is a sibling route under the same `/sessions`
         // parent, so SessionsPage never remounts — without clearing the
         // selected item (and switching back to Sessions mode, so
@@ -466,8 +463,7 @@ function SessionsPage() {
             search: {
                 ...(resolved ? { directory: resolved.directory } : {}),
                 ...(resolved ? { machineId: resolved.machineId } : {}),
-                initialMessage: buildBoardItemSpawnMessage(item),
-                ...(item.url ? { linkIssueUrl: item.url } : {}),
+                briefingId,
             },
             ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
@@ -1830,7 +1826,7 @@ function NewSessionPage() {
     const { machines, isLoading: machinesLoading, error: machinesError } = useMachines(api, true)
     const { t } = useTranslation()
     const { addToast } = useToast()
-    const { directory: initialDirectory, machineId: initialMachineId, shareTransferId, initialMessage, linkIssueUrl, briefingId } = newSessionRoute.useSearch()
+    const { directory: initialDirectory, machineId: initialMachineId, shareTransferId, briefingId } = newSessionRoute.useSearch()
 
     const briefing = useMemo(() => briefingId ? peekBoardSpawnBriefing(briefingId) : null, [briefingId])
 
@@ -1887,8 +1883,6 @@ function NewSessionPage() {
         if (shareTransferId) {
             setSharePendingTransfer(shareTransferId, sessionId)
         }
-<<<<<<< HEAD
-=======
         if (briefing?.message && api) {
             // Deliver as a real incoming message — same mechanism
             // spawn_peer/hapi-ping-peer use — instead of seeding the
@@ -1907,7 +1901,6 @@ function NewSessionPage() {
             })
         }
         const linkIssueUrl = briefing?.linkIssueUrl
->>>>>>> driver/235-todo-board-view
         if (linkIssueUrl && api) {
             // Fire-and-forget: a failed link shouldn't block the spawn flow the
             // operator is already mid-navigation through. The session still
@@ -1921,6 +1914,9 @@ function NewSessionPage() {
                 })
             })
         }
+        if (briefingId) {
+            clearBoardSpawnBriefing(briefingId)
+        }
         void queryClient.invalidateQueries({ queryKey: queryKeys.sessions })
         // Replace current page with /sessions to clear spawn flow from history
         navigate({ to: '/sessions', replace: true })
@@ -1931,7 +1927,7 @@ function NewSessionPage() {
                 params: { sessionId },
             })
         })
-    }, [navigate, queryClient, shareTransferId, linkIssueUrl, api, addToast, t])
+    }, [navigate, queryClient, shareTransferId, briefing, briefingId, api, addToast, t])
 
     const handleChooseFolder = useCallback((args: { machineId: string | null; directory: string }) => {
         // Forward the currently-selected machine so /browse opens scoped to
@@ -1980,10 +1976,6 @@ function NewSessionPage() {
                     onChooseFolder={handleChooseFolder}
                     initialDirectory={initialDirectory}
                     initialMachineId={initialMachineId}
-<<<<<<< HEAD
-                    initialMessage={initialMessage}
-=======
->>>>>>> driver/235-todo-board-view
                 />
             </div>
         </div>

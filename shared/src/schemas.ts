@@ -169,16 +169,6 @@ export type ExternalRefs = z.infer<typeof ExternalRefsSchema>
 
 
 /**
-<<<<<<< HEAD
- * Accepts both the full GitHub issue URL and the `owner/repo#N` shorthand
- * (`hapi link-issue <url|owner/repo#N>`, hapi#235/#238). GHE/other hosts
- * aren't supported here — unlike the to-do board's `parseProjectUrl`, the
- * issue link is for the operator's own quick reference, not a board read
- * that already had to handle multiple hosts. Lives in `shared/` (not
- * hub-only) so both the hub REST route and the MCP tool's socket-based
- * write path (which never touches that route) validate identically instead
- * of maintaining two copies of the same regex.
-=======
  * Accepts both the full GitHub issue URL (any host — GHE boards are a real
  * board-feature use case, e.g. a view-scoped `lhs.ghe.com` board) and the
  * `owner/repo#N` shorthand, which has no host of its own and defaults to
@@ -200,7 +190,6 @@ export type ExternalRefs = z.infer<typeof ExternalRefsSchema>
  * Lives in `shared/` (not hub-only) so both the hub REST route and the MCP
  * tool's socket-based write path (which never touches that route) validate
  * identically instead of maintaining two copies of the same regex.
->>>>>>> driver/235-todo-board-view
  */
 function finishIssueMatch(host: string, repo: string, numberRaw: string): { url: string; repo: string; number: number } | null {
     const number = Number(numberRaw)

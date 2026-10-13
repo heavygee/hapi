@@ -97,8 +97,6 @@ export default {
   'sessions.group.new': 'Новая сессия в этой папке',
   'sessions.machineFilter.label': 'Фильтр сессий по машине',
   'sessions.machineFilter.all': 'Все',
-<<<<<<< HEAD
-=======
   'sessions.modeSwitch.label': 'Переключение между сессиями и досками',
   'sessions.modeSwitch.sessions': 'Сессии',
   'sessions.modeSwitch.boards': 'Доски',
@@ -157,7 +155,6 @@ export default {
   'boards.detail.reopenFailed': 'Не удалось переоткрыть',
   'boards.detail.commentFailed': 'Не удалось опубликовать комментарий',
   'boards.detail.statusChangeFailed': 'Не удалось изменить статус',
->>>>>>> driver/235-todo-board-view
   'codexSync.tooltip': 'Импортировать сессии из Codex в Hapi',
   'codexSync.newSessionAction': 'Импорт истории Codex',
   'codexSync.confirm.title': 'Импорт сессий Codex',
