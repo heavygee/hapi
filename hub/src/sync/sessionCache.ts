@@ -1,5 +1,5 @@
 import { SESSION_LIFECYCLE_IDLE, SESSION_LIFECYCLE_RUNNING } from '@hapi/protocol'
-import { upsertExternalRef, ExternalRefsSchema, type ExternalRef } from '@hapi/protocol/schemas'
+import { mergeExternalRefs, upsertExternalRef, ExternalRefsSchema, type ExternalRef } from '@hapi/protocol/schemas'
 import { AgentStateSchema, MetadataSchema, SessionPatchSchema, TeamStateSchema } from '@hapi/protocol/schemas'
 import type { CodexCollaborationMode, CopilotAgentMode, PermissionMode, Session, SessionPatch } from '@hapi/protocol/types'
 import type { Store } from '../store'
@@ -73,11 +73,21 @@ export function mergeSessionMetadataForSessionMerge(
         merged.preferredPermissionMode = oldObj.preferredPermissionMode
         changed = true
     }
-
-    // Preserve structured PR links when the replacement row never set them.
-    if (Array.isArray(oldObj.externalRefs) && !Object.prototype.hasOwnProperty.call(newObj, 'externalRefs')) {
-        merged.externalRefs = oldObj.externalRefs
+    if (typeof oldObj.preferredCopilotAgentMode === 'string' && typeof newObj.preferredCopilotAgentMode !== 'string') {
+        merged.preferredCopilotAgentMode = oldObj.preferredCopilotAgentMode
         changed = true
+    }
+
+    // hapi#238: union externalRefs so mergeSessions does not drop issue/PR links
+    // that only lived on the deleted old row (Boards tip b615b6155).
+    const oldRefs = Array.isArray(oldObj.externalRefs) ? oldObj.externalRefs as ExternalRef[] : []
+    const newRefs = Array.isArray(newObj.externalRefs) ? newObj.externalRefs as ExternalRef[] : []
+    if (oldRefs.length > 0) {
+        const combinedRefs = mergeExternalRefs(newRefs, oldRefs)
+        if (combinedRefs.length !== newRefs.length) {
+            merged.externalRefs = combinedRefs
+            changed = true
+        }
     }
 
     return changed ? merged : newMetadata

@@ -26,42 +26,46 @@ function makeItem(overrides: Partial<BoardItem>): BoardItem {
 }
 
 describe('buildBoardItemSpawnMessage', () => {
-    it('includes the issue number in the heading when present', () => {
-        expect(buildBoardItemSpawnMessage(makeItem({ title: 'Fix the thing', number: 12 })))
-            .toBe('Fix the thing (#12)')
-    })
-
-    it('omits the number entirely for draft issues with no number', () => {
-        expect(buildBoardItemSpawnMessage(makeItem({ title: 'Untracked idea' })))
-            .toBe('Untracked idea')
-    })
-
-    it('appends the url on its own line when present', () => {
-        expect(buildBoardItemSpawnMessage(makeItem({
-            title: 'Fix the thing',
-            number: 12,
-            url: 'https://github.com/acme/widgets/issues/12'
-        }))).toBe('Fix the thing (#12)\nhttps://github.com/acme/widgets/issues/12')
-    })
-
-    it('appends the body after a blank line when present', () => {
+    it('instructs the agent to investigate, including the url/number/repo, for a linked issue', () => {
         expect(buildBoardItemSpawnMessage(makeItem({
             title: 'Fix the thing',
             number: 12,
             url: 'https://github.com/acme/widgets/issues/12',
-            body: 'Some **markdown** body.'
-        }))).toBe('Fix the thing (#12)\nhttps://github.com/acme/widgets/issues/12\n\nSome **markdown** body.')
+            repo: 'acme/widgets'
+        }))).toBe("You've been spawned from a Boards card — https://github.com/acme/widgets/issues/12 (#12, acme/widgets). Investigate the issue and prepare to discuss/implement with the operator.")
     })
 
-    it('skips a blank/whitespace-only body entirely', () => {
-        expect(buildBoardItemSpawnMessage(makeItem({ title: 'Fix the thing', body: '   \n  ' })))
-            .toBe('Fix the thing')
+    it('says "pull request" instead of "issue" when the item is a PR', () => {
+        expect(buildBoardItemSpawnMessage(makeItem({
+            title: 'Add the thing',
+            number: 13,
+            url: 'https://github.com/acme/widgets/pull/13',
+            repo: 'acme/widgets',
+            isPullRequest: true
+        }))).toBe("You've been spawned from a Boards card — https://github.com/acme/widgets/pull/13 (#13, acme/widgets). Investigate the pull request and prepare to discuss/implement with the operator.")
     })
 
-    it('truncates a very long body to stay well under URL length limits', () => {
-        const longBody = 'x'.repeat(2000)
-        const result = buildBoardItemSpawnMessage(makeItem({ title: 'Fix the thing', body: longBody }))
-        expect(result.length).toBeLessThan(1100)
-        expect(result.endsWith('…')).toBe(true)
+    it('omits the repo from the parenthetical when unknown', () => {
+        expect(buildBoardItemSpawnMessage(makeItem({
+            title: 'Fix the thing',
+            number: 12,
+            url: 'https://github.com/acme/widgets/issues/12'
+        }))).toBe("You've been spawned from a Boards card — https://github.com/acme/widgets/issues/12 (#12). Investigate the issue and prepare to discuss/implement with the operator.")
+    })
+
+    it('falls back to a context-free message for a draft item with no linked issue/PR', () => {
+        expect(buildBoardItemSpawnMessage(makeItem({ title: 'Untracked idea' })))
+            .toBe('You\'ve been spawned from a Boards card: "Untracked idea". It has no linked issue or PR — check the board or ask the operator for context.')
+    })
+
+    it('never includes the raw issue body — the agent fetches it itself', () => {
+        const result = buildBoardItemSpawnMessage(makeItem({
+            title: 'Fix the thing',
+            number: 12,
+            url: 'https://github.com/acme/widgets/issues/12',
+            body: 'Some **markdown** body that should not be pasted in.'
+        }))
+        expect(result).not.toContain('markdown')
+        expect(result).not.toContain('should not be pasted')
     })
 })

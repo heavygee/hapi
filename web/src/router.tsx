@@ -377,7 +377,6 @@ function SessionsPage() {
     const {
         items: boardItems,
         statusOrder: boardStatusOrder,
-        doneValues: boardDoneValues,
         isLoading: boardItemsLoading,
         isRefetching: boardItemsRefetching,
         error: boardItemsError,
@@ -439,6 +438,20 @@ function SessionsPage() {
     const onlineMachineIds = useMemo(() => new Set(machines.map(m => m.id)), [machines])
     const handleSpawnFromBoardItem = useCallback((item: BoardItem) => {
         const resolved = resolveBoardItemDirectory(item.repo, sessions, onlineMachineIds)
+<<<<<<< HEAD
+=======
+        // Only attempt the auto-link for a real GitHub issue URL — board
+        // items can also be pull requests or draft issues, and parseIssueUrl
+        // only recognizes `/issues/<n>`. Linking a PR URL always 400s on the
+        // hub, so skip it rather than spawn with a guaranteed failure toast
+        // (hapi#238 Codex review; PR-kind refs are out of scope for now, see
+        // ExternalRefSchema's doc comment in shared/src/schemas.ts).
+        const linkIssueUrl = item.url && parseIssueUrl(item.url) ? item.url : undefined
+        const briefingId = stashBoardSpawnBriefing({
+            message: buildBoardItemSpawnMessage(item),
+            linkIssueUrl
+        })
+>>>>>>> driver/235-todo-board-view
         // `/sessions/new` is a sibling route under the same `/sessions`
         // parent, so SessionsPage never remounts — without clearing the
         // selected item (and switching back to Sessions mode, so
@@ -917,7 +930,6 @@ function SessionsPage() {
                             onRemoveBoard={removeBoard}
                             items={boardItems}
                             statusOrder={boardStatusOrder}
-                            doneValues={boardDoneValues}
                             isLoading={boardsLoading || boardItemsLoading}
                             error={boardsError ?? boardItemsError}
                             selectedItemId={selectedBoardItemId}
@@ -934,6 +946,8 @@ function SessionsPage() {
                                 void refetchBoardItems()
                             }}
                             isRefreshing={boardsRefetching || boardItemsRefetching}
+                            sessions={sessions}
+                            onOpenSession={handleOpenLinkedBoardSession}
                         />
                     ) : (
                     <SessionList
@@ -1873,6 +1887,27 @@ function NewSessionPage() {
         if (shareTransferId) {
             setSharePendingTransfer(shareTransferId, sessionId)
         }
+<<<<<<< HEAD
+=======
+        if (briefing?.message && api) {
+            // Deliver as a real incoming message — same mechanism
+            // spawn_peer/hapi-ping-peer use — instead of seeding the
+            // composer draft for the operator to send themselves (operator
+            // feedback, 2026-10-13: a left-unsent draft "defeats the point").
+            // Fire-and-forget: a failed delivery shouldn't block the spawn
+            // flow the operator is already mid-navigation through — the
+            // session still exists and is usable, just without its briefing.
+            api.sendMessage(sessionId, briefing.message).catch(() => {
+                addToast({
+                    title: t('boards.detail.spawnMessageFailed'),
+                    body: t('boards.detail.spawnMessageFailedBody'),
+                    sessionId,
+                    url: ''
+                })
+            })
+        }
+        const linkIssueUrl = briefing?.linkIssueUrl
+>>>>>>> driver/235-todo-board-view
         if (linkIssueUrl && api) {
             // Fire-and-forget: a failed link shouldn't block the spawn flow the
             // operator is already mid-navigation through. The session still
@@ -1945,7 +1980,10 @@ function NewSessionPage() {
                     onChooseFolder={handleChooseFolder}
                     initialDirectory={initialDirectory}
                     initialMachineId={initialMachineId}
+<<<<<<< HEAD
                     initialMessage={initialMessage}
+=======
+>>>>>>> driver/235-todo-board-view
                 />
             </div>
         </div>

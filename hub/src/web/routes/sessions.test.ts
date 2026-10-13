@@ -374,6 +374,26 @@ describe('sessions routes', () => {
         expect(calls[0]![1]).toMatchObject({ repo: 'heavygee/hapi', number: 235 })
     })
 
+    it('links a GHE-hosted issue (Codex review: a board item can come from a non-github.com board)', async () => {
+        // Regression: parseIssueUrl used to hardcode github.com, so a board
+        // item from a GHE-hosted board (e.g. a view-scoped Lockhouse board)
+        // would 400 here, and the client-side auto-link gate in router.tsx
+        // never even attempted the call — no error surfaced anywhere.
+        const calls: Array<[string, unknown]> = []
+        const { app } = createApp(createSession(), {
+            linkIssue: async (sessionId, ref) => { calls.push([sessionId, ref]) }
+        })
+
+        const response = await app.request('/api/sessions/session-1/link-issue', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: 'https://lhs.ghe.com/lockhouse/repo/issues/203' })
+        })
+
+        expect(response.status).toBe(200)
+        expect(calls[0]![1]).toMatchObject({ kind: 'github_issue', url: 'https://lhs.ghe.com/lockhouse/repo/issues/203', repo: 'lockhouse/repo', number: 203 })
+    })
+
     it('rejects a missing or unparsable issue url', async () => {
         const { app } = createApp(createSession())
         const missing = await app.request('/api/sessions/session-1/link-issue', {

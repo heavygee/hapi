@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { BoardItem, BoardSummary } from '@/types/api'
+import type { SessionSummary } from '@/types/api'
 import { BoardSwitcherBar, BoardSwitcherMenu, type BoardFilterItem } from '@/components/BoardSwitcher'
 import { AddBoardDialog } from '@/components/AddBoardDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -9,8 +10,83 @@ import { ExternalLinkIcon, RefreshIcon } from '@/components/icons'
 import { chipBaseClass, chipIdleClass } from '@/components/filterChipStyles'
 import { getApiErrorMessage } from '@/lib/apiErrorMessage'
 import { formatRelativeTime } from '@/lib/relativeTime'
+import { findSessionLinkedToIssue } from '@/lib/externalRefs'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
+
+const NO_STATUS_KEY = '__no_status__'
+
+// Manual collapse/expand overrides persist per board + status (hapi#238
+// operator refinement) — collapsing "Complete" on one board must not leak
+// into an unrelated status name on a different board. Only an explicit
+// header click writes here; the state-derived default
+// (isGroupClosedByDefault) is never persisted, so it keeps tracking live
+// item state for any group the operator hasn't manually touched.
+const COLLAPSE_STORAGE_PREFIX = 'hapi.boardGroupCollapsed.v1.'
+
+function collapseStorageKey(boardId: string, statusKey: string): string {
+    return `${COLLAPSE_STORAGE_PREFIX}${boardId}::${statusKey}`
+}
+
+function readCollapseOverride(boardId: string, statusKey: string): boolean | null {
+    if (typeof window === 'undefined') return null
+    try {
+        const raw = window.localStorage.getItem(collapseStorageKey(boardId, statusKey))
+        if (raw === '1') return true
+        if (raw === '0') return false
+        return null
+    } catch {
+        return null
+    }
+}
+
+function writeCollapseOverride(boardId: string, statusKey: string, collapsed: boolean): void {
+    if (typeof window === 'undefined') return
+    try {
+        window.localStorage.setItem(collapseStorageKey(boardId, statusKey), collapsed ? '1' : '0')
+    } catch {
+        // localStorage may be unavailable (private mode, quota) — non-fatal,
+        // worst case the override doesn't survive a reload.
+    }
+}
+
+function ChevronIcon(props: { className?: string; collapsed?: boolean }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={`${props.className ?? ''} transition-transform duration-200 ${props.collapsed ? '-rotate-90' : ''}`}
+        >
+            <polyline points="6 9 12 15 18 9" />
+        </svg>
+    )
+}
+
+function SessionLinkedIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+        >
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        </svg>
+    )
+}
 
 type StatusGroup = {
     // `null` means "no status assigned" — kept distinct from a string so a
@@ -19,7 +95,19 @@ type StatusGroup = {
     // group header).
     status: string | null
     items: BoardItem[]
-    isDone: boolean
+}
+
+// Whether a group should default to collapsed — derived from the items'
+// own `state` (CLOSED/MERGED), not the status column's name. Universal
+// across every board regardless of what its Status field is called (fixes,
+// for free, a board whose "done" column is named something a configured
+// `doneValues` list never anticipated — hapi#238 operator refinement:
+// "done" doesn't need a config/UI at all once it's read from state instead
+// of label-matching). A mixed group (some open, some closed items) defaults
+// to expanded — only a group where every item is already resolved starts
+// folded away.
+function isGroupClosedByDefault(items: BoardItem[]): boolean {
+    return items.length > 0 && items.every(item => item.state === 'CLOSED' || item.state === 'MERGED')
 }
 
 // Index-based, not semantic — status names are read verbatim from whatever
@@ -34,24 +122,16 @@ function statusDotClass(colorIndex: number): string {
 }
 
 // Groups by the board's own status field (verbatim), in board-defined column
-// order, with any "no status" items last among the open groups. Done-value
-// groups are pulled out into a single collapsed/folded section at the bottom
-// regardless of where "Done" sits in the column order (hapi#235 design doc:
-// "Grouping inside Boards mode: board status, not repo").
-export function groupItemsByStatus(items: BoardItem[], statusOrder: string[], doneValues: string[]): {
-    openGroups: StatusGroup[]
-    doneItems: BoardItem[]
-} {
-    const doneSet = new Set(doneValues)
+// order, with any "no status" items trailing the named groups (hapi#235
+// design doc: "Grouping inside Boards mode: board status, not repo").
+// Group membership is purely by status label — which group(s) default to
+// collapsed is a separate, state-derived concern (isGroupClosedByDefault),
+// not baked into this function.
+export function groupItemsByStatus(items: BoardItem[], statusOrder: string[]): StatusGroup[] {
     const byStatus = new Map<string, BoardItem[]>()
     const noStatus: BoardItem[] = []
-    const doneItems: BoardItem[] = []
 
     for (const item of items) {
-        if (item.status && doneSet.has(item.status)) {
-            doneItems.push(item)
-            continue
-        }
         if (!item.status) {
             noStatus.push(item)
             continue
@@ -64,23 +144,22 @@ export function groupItemsByStatus(items: BoardItem[], statusOrder: string[], do
         }
     }
 
-    const orderedStatuses = statusOrder.filter(status => !doneSet.has(status) && byStatus.has(status))
+    const orderedStatuses = statusOrder.filter(status => byStatus.has(status))
     for (const status of byStatus.keys()) {
         if (!orderedStatuses.includes(status)) {
             orderedStatuses.push(status)
         }
     }
 
-    const openGroups: StatusGroup[] = orderedStatuses.map(status => ({
+    const groups: StatusGroup[] = orderedStatuses.map(status => ({
         status,
-        items: byStatus.get(status) ?? [],
-        isDone: false
+        items: byStatus.get(status) ?? []
     }))
     if (noStatus.length > 0) {
-        openGroups.push({ status: null, items: noStatus, isDone: false })
+        groups.push({ status: null, items: noStatus })
     }
 
-    return { openGroups, doneItems }
+    return groups
 }
 
 // Card, not a text row — operator feedback (hapi#235): the board list needs
@@ -89,7 +168,14 @@ export function groupItemsByStatus(items: BoardItem[], statusOrder: string[], do
 // plain <button>, not a GitHub anchor — that moved to the explicit corner
 // icon, see BoardList's own comment below for why they're siblings, not
 // nested).
-function BoardItemCard(props: { item: BoardItem; muted: boolean; selected: boolean; onSelect: () => void }) {
+function BoardItemCard(props: {
+    item: BoardItem
+    muted: boolean
+    selected: boolean
+    onSelect: () => void
+    linkedSessionId: string | null
+    onOpenSession: (sessionId: string) => void
+}) {
     const { t } = useTranslation()
     const { item, muted, selected } = props
     const repoLabel = item.repo ?? t('boards.noRepo')
@@ -159,18 +245,38 @@ function BoardItemCard(props: { item: BoardItem; muted: boolean; selected: boole
                 {updatedLabel ? <div className="mt-2 text-xs text-[var(--app-hint)]">{updatedLabel}</div> : null}
             </button>
 
-            {item.url ? (
-                <a
-                    href={item.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title={t('boards.openInGithub')}
-                    aria-label={`${t('boards.openInGithub')}: ${item.title}`}
-                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                >
-                    <ExternalLinkIcon className="h-3.5 w-3.5" />
-                </a>
-            ) : null}
+            <div className="flex shrink-0 flex-col items-end gap-1">
+                {props.linkedSessionId ? (
+                    // Visible on the card itself, not just in the detail pane
+                    // (operator feedback, hapi#238: a card with a linked
+                    // session showed no indication of that at the list
+                    // level) — a sibling control, not nested inside the
+                    // card-body button above, same "avoid nested focusable
+                    // elements" pattern as the GitHub link icon below it.
+                    <button
+                        type="button"
+                        onClick={() => props.onOpenSession(props.linkedSessionId!)}
+                        title={t('boards.detail.openSession')}
+                        aria-label={`${t('boards.detail.openSession')}: ${item.title}`}
+                        className="flex h-6 shrink-0 items-center gap-1 rounded-full border border-[var(--app-link)] bg-[var(--app-link)]/10 px-2 text-[10px] font-medium text-[var(--app-link)] transition-colors hover:bg-[var(--app-link)]/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                    >
+                        <SessionLinkedIcon className="h-3 w-3" />
+                        {t('boards.sessionLinked')}
+                    </button>
+                ) : null}
+                {item.url ? (
+                    <a
+                        href={item.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={t('boards.openInGithub')}
+                        aria-label={`${t('boards.openInGithub')}: ${item.title}`}
+                        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                    >
+                        <ExternalLinkIcon className="h-3.5 w-3.5" />
+                    </a>
+                ) : null}
+            </div>
         </div>
     )
 }
@@ -183,37 +289,76 @@ export function BoardList(props: {
     onRemoveBoard: (id: string) => Promise<void>
     items: BoardItem[]
     statusOrder: string[]
-    doneValues: string[]
     isLoading: boolean
     error: string | null
     selectedItemId: string | null
     onSelectItem: (item: BoardItem) => void
     onRefresh: () => void
     isRefreshing: boolean
+    sessions: SessionSummary[]
+    onOpenSession: (sessionId: string) => void
 }) {
     const { t } = useTranslation()
-    const [doneExpanded, setDoneExpanded] = useState(false)
+    // In-memory cache of explicit user toggles this session, keyed by
+    // `${boardId}::${statusKey}` — authoritative once set, falling back to
+    // localStorage (readCollapseOverride) for a key not yet touched this
+    // session, and to the state-derived default (isGroupClosedByDefault)
+    // when neither exists. Written on every toggle via writeCollapseOverride
+    // so the choice survives a reload.
+    const [collapsedOverrides, setCollapsedOverrides] = useState<Record<string, boolean>>({})
     const [addDialogOpen, setAddDialogOpen] = useState(false)
     const [removeTarget, setRemoveTarget] = useState<BoardFilterItem | null>(null)
     const [isRemoving, setIsRemoving] = useState(false)
+    const boardId = props.selectedBoardId ?? ''
     const boardFilterItems = useMemo(
         () => props.boards.map(board => ({ id: board.id, label: board.label })),
         [props.boards]
     )
-    const { openGroups, doneItems } = useMemo(
-        () => groupItemsByStatus(props.items, props.statusOrder, props.doneValues),
-        [props.items, props.statusOrder, props.doneValues]
+    const groups = useMemo(
+        () => groupItemsByStatus(props.items, props.statusOrder),
+        [props.items, props.statusOrder]
     )
     // Color index only advances for real statuses — "no status" always gets
     // the same neutral dot rather than consuming a palette slot.
     const groupsWithDot = useMemo(() => {
         let colorIndex = -1
-        return openGroups.map((group) => {
+        return groups.map((group) => {
             const isNoStatus = group.status === null
             if (!isNoStatus) colorIndex += 1
-            return { group, isNoStatus, dotClass: isNoStatus ? 'bg-[var(--app-hint)]' : statusDotClass(colorIndex) }
+            const statusKey = group.status ?? NO_STATUS_KEY
+            const compositeKey = `${boardId}::${statusKey}`
+            const isClosed = isGroupClosedByDefault(group.items)
+            const collapsed = collapsedOverrides[compositeKey]
+                ?? readCollapseOverride(boardId, statusKey)
+                ?? isClosed
+            return {
+                group,
+                key: statusKey,
+                compositeKey,
+                isNoStatus,
+                isClosed,
+                dotClass: isNoStatus ? 'bg-[var(--app-hint)]' : statusDotClass(colorIndex),
+                collapsed
+            }
         })
-    }, [openGroups])
+    }, [groups, collapsedOverrides])
+    // Session lookup is per-item, not per-open-detail (operator feedback,
+    // hapi#238: a card with a genuinely linked session showed no indication
+    // of that at the list level — only the detail pane knew). Memoized on
+    // items/sessions since findSessionLinkedToIssue scans every session's
+    // externalRefs per call.
+    const linkedSessionByItemId = useMemo(() => {
+        const map = new Map<string, string | null>()
+        for (const item of props.items) {
+            map.set(item.id, findSessionLinkedToIssue(props.sessions, item.url)?.id ?? null)
+        }
+        return map
+    }, [props.items, props.sessions])
+    const toggleGroup = (compositeKey: string, statusKey: string, currentlyCollapsed: boolean) => {
+        const next = !currentlyCollapsed
+        writeCollapseOverride(boardId, statusKey, next)
+        setCollapsedOverrides(prev => ({ ...prev, [compositeKey]: next }))
+    }
 
     return (
         <div className="flex min-h-0 w-full flex-1 flex-col">
@@ -304,46 +449,31 @@ export function BoardList(props: {
                                 {t('boards.staleError', { message: props.error })}
                             </div>
                         ) : null}
-                        {groupsWithDot.map(({ group, isNoStatus, dotClass }) => (
-                            <div key={group.status ?? '__no_status__'} className="mb-3">
-                                <div className="flex items-center gap-1.5 px-1 py-1 text-xs font-semibold uppercase tracking-wide text-[var(--app-hint)]">
+                        {groupsWithDot.map(({ group, key, compositeKey, isNoStatus, dotClass, collapsed }) => (
+                            <div key={key} className="mb-3">
+                                <button
+                                    type="button"
+                                    onClick={() => toggleGroup(compositeKey, key, collapsed)}
+                                    aria-expanded={!collapsed}
+                                    className="flex w-full items-center gap-1.5 rounded-lg px-1 py-1 text-left text-xs font-semibold uppercase tracking-wide text-[var(--app-hint)] hover:text-[var(--app-fg)]"
+                                >
+                                    <ChevronIcon className="h-3.5 w-3.5 shrink-0" collapsed={collapsed} />
                                     <span aria-hidden className={cn('h-2 w-2 shrink-0 rounded-full', dotClass)} />
                                     {isNoStatus ? t('boards.noStatus') : group.status} ({group.items.length})
-                                </div>
-                                {group.items.map((item) => (
+                                </button>
+                                {collapsed ? null : group.items.map((item) => (
                                     <BoardItemCard
                                         key={item.id}
                                         item={item}
-                                        muted={false}
+                                        muted={item.state === 'CLOSED' || item.state === 'MERGED'}
                                         selected={props.selectedItemId === item.id}
                                         onSelect={() => props.onSelectItem(item)}
+                                        linkedSessionId={linkedSessionByItemId.get(item.id) ?? null}
+                                        onOpenSession={props.onOpenSession}
                                     />
                                 ))}
                             </div>
                         ))}
-                        {doneItems.length > 0 ? (
-                            <div className="mt-2 border-t border-[var(--app-border)] pt-2">
-                                <button
-                                    type="button"
-                                    onClick={() => setDoneExpanded(value => !value)}
-                                    aria-expanded={doneExpanded}
-                                    className="w-full rounded-lg px-1 py-1 text-left text-xs font-semibold uppercase tracking-wide text-[var(--app-hint)] hover:text-[var(--app-fg)]"
-                                >
-                                    {doneExpanded
-                                        ? t('boards.doneSection.collapse', { n: doneItems.length })
-                                        : t('boards.doneSection.expand', { n: doneItems.length })}
-                                </button>
-                                {doneExpanded ? doneItems.map((item) => (
-                                    <BoardItemCard
-                                        key={item.id}
-                                        item={item}
-                                        muted
-                                        selected={props.selectedItemId === item.id}
-                                        onSelect={() => props.onSelectItem(item)}
-                                    />
-                                )) : null}
-                            </div>
-                        ) : null}
                     </>
                 )}
             </div>

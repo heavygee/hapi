@@ -3,17 +3,19 @@ import { randomId } from '@/lib/randomId'
 const STORAGE_PREFIX = 'hapi:board-spawn-briefing:'
 
 export type BoardSpawnBriefing = {
-    initialMessage: string
+    message: string
     linkIssueUrl?: string
 }
 
 /**
- * The to-do item's briefing (up to 1000 chars of issue body, plus its URL)
- * used to travel as `/sessions/new` search params — browser history, same-
- * origin referrer/access logs, and the URL bar itself then carried private
- * board content (hapi#238 Codex review). Stashed in sessionStorage instead,
- * keyed by an opaque transfer id that's the only thing placed in the URL —
- * same shape as `shareTransferId`, but local-only (no hub round trip needed).
+ * The board item's briefing — the instruction message delivered to the
+ * spawned session (buildBoardItemSpawnMessage) plus the issue URL to
+ * auto-link — used to travel as `/sessions/new` search params — browser
+ * history, same-origin referrer/access logs, and the URL bar itself then
+ * carried private board content (hapi#238 Codex review). Stashed in
+ * sessionStorage instead, keyed by an opaque transfer id that's the only
+ * thing placed in the URL — same shape as `shareTransferId`, but local-only
+ * (no hub round trip needed).
  *
  * Deliberately a peek/clear pair, not a delete-on-read "take": the spawn flow
  * can detour through /browse and back to `/sessions/new` with the same id
@@ -43,10 +45,10 @@ export function peekBoardSpawnBriefing(id: string): BoardSpawnBriefing | null {
         if (!raw) return null
         const parsed = JSON.parse(raw) as unknown
         if (!parsed || typeof parsed !== 'object') return null
-        const { initialMessage, linkIssueUrl } = parsed as Record<string, unknown>
-        if (typeof initialMessage !== 'string') return null
+        const { message, linkIssueUrl } = parsed as Record<string, unknown>
+        if (typeof message !== 'string') return null
         return {
-            initialMessage,
+            message,
             linkIssueUrl: typeof linkIssueUrl === 'string' ? linkIssueUrl : undefined
         }
     } catch {
