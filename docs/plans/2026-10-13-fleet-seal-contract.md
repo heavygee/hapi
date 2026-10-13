@@ -1,8 +1,17 @@
 # Fleet seal contract (hub upstream-seal subscriber)
 
+> ## FORK-ONLY — do not open a `tiann/hapi` PR for any of this
+>
+> Deliberate-push, fleet seal, and Layer A (`HAPI_UPSTREAM_SEAL_URL`) live **only**
+> on `heavygee/hapi` (driver soup / fork tooling). **Not** for upstream.
+>
+> @tiann rejected this class of hub-artifact / auto-upgrade machinery on
+> `tiann/hapi` (PR #1108, 2026-08-02) for chicken-egg skew, capability-gap
+> reinstall loops, and maintenance burden. That is a **closed door**, not an
+> oversight to revisit. Do not frame modules or PRs as "keep clean for a future
+> #1108 follow-up."
+
 **Status:** canon for implementers (ninja standalone hub + any future gift/personal hub).  
-**Scope: FORK-ONLY (`heavygee/hapi` soup / driver layers). Not for `tiann/hapi`.**  
-@tiann rejected this class of hub-artifact / auto-upgrade machinery upstream (PR #1108, 2026-08-02) for chicken-egg skew, capability-gap reinstall loops, and maintenance burden - **closed door**, not an oversight to revisit. Deliberate-push / seal / Layer A upstream-seal subscriber stay on the fork. Do not frame PRs or modules as "keep clean for a future #1108 follow-up."  
 **Owner lane:** fleet / hub-runner-version governance.  
 **Consumer:** `[ninjcow-incus upkeep](/sessions/ba76163e-d993-4b2b-b4ab-c4cdf3c41c7e)` and successors - **in-product hub code only** (fork soup).  
 **Related:** #247 deliberate push, #248 release notes, #251 per-machine auto keepalive, publish fix `44ef482d2` (stale binary); upstream rejection context #1108 / #122 estate rehydrate.
@@ -158,10 +167,15 @@ Mechanical (to implement):
 3. Atomically retarget `fleet-latest` + write `fleet-latest-tag.txt`.
 4. Optionally mirror that tip's assets to GH (same digests).
 5. Estate: optional `POST /api/fleet/push-upgrade` for oos-registered `auto` machines (orthogonal; pets may already keepalive).
-6. Upstream-destined product: open PR if that was part of the seal synonym.
+6. **Unrelated** product commits that happen to sit in the sealed tip and were
+   already destined for `tiann/hapi` on their own merits: open/babysit that
+   upstream PR if the operator's seal phrase also meant that (lifecycle synonym).
+   This does **not** mean seal / deliberate-push / Layer A / hub-artifact
+   auto-upgrade itself goes upstream - those stay fork-only (#1108 closed door).
 
 ## Explicit non-goals
 
+- Opening any of this on `tiann/hapi` (seal machinery, Layer A, deliberate-push / hub-artifact auto-upgrade) - see FORK-ONLY banner; #1108 closed door.
 - Enrolling ninja as an oos fleet machine.
 - Watching dogfood `latest` for auto-apply on standalones.
 - Tag/date/NOTES as sufficiency for upgrade.
