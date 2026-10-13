@@ -1932,12 +1932,17 @@ function NewSessionPage() {
         }
         void queryClient.invalidateQueries({ queryKey: queryKeys.sessions })
         // Replace current page with /sessions to clear spawn flow from history
-        navigate({ to: '/sessions', replace: true })
+        navigate({
+            to: '/sessions',
+            replace: true,
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
+        })
         // Then navigate to new session
         requestAnimationFrame(() => {
             navigate({
                 to: '/sessions/$sessionId',
                 params: { sessionId },
+                ...PRESERVE_SESSION_SIDEBAR_SCROLL,
             })
         })
     }, [navigate, queryClient, shareTransferId, briefingId])
