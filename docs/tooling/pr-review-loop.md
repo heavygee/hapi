@@ -346,9 +346,11 @@ Operator declined the OpenAI API spend (ChatGPT Plus subscription only). So **we
 
 **A cold-review-clean fork PR DOES mean:**
 
-- The ChatGPT Codex Cloud Connector found nothing actionable on this code (or operator accepts/defers what it did find)
-- `test` CI checks pass on the fork
+- The ChatGPT Codex Cloud Connector found nothing actionable on **this tip** (or operator accepts/defers what it did find on a **tip-matched** wave)
+- `test` / `oos-linux/test` CI checks pass on the fork
 - Zero unresolved review threads on the fork PR
+
+**It does NOT mean "ignore Codex forever."** After every tip push, agents must re-check live Codex activity (`hapi-pr-status --repo heavygee/hapi`). The label cannot greenwash tip-ahead-of-Codex or usage-limit stalls — see § Fork Codex debt.
 - The operator has explicitly signed off (label is operator-applied, not bot-auto-applied)
 
 **It DOES NOT mean:**
@@ -376,15 +378,17 @@ If the operator ever moves to an OpenAI API plan, re-enabling `Codex PR Review` 
 
 `chatgpt-codex-connector` reviews **every** open `heavygee/hapi` PR. Unresolved P1/P2 threads with no owning HAPI babysit chip are pure quota waste.
 
-**Rules (2026-10-10):**
+**Rules (2026-10-10; tip-match hardened 2026-10-13):**
 
 1. **Chip within the same turn as `gh pr create` / `hapi-pr-create-fork`.** `hapi link-pr` is not optional garnish.
 2. **Owned debt:** Meta chip `needs_work` / ⚠️ + peer must clear unresolved Codex threads (or apply `cold-review-clean` with a written accept/defer reason) before merge.
-3. **Cold-review stage PRs** (`[cold-review]` title or body "Not for merge") are **temporary**. Close them after the upstream PR opens or the pass finishes — do not leave them open for weeks.
-4. **Inventory:** `hapi-fork-codex-debt.sh` (Meta hourly surfaces the top of this list). `--close-cold-review-corpses` closes abandoned stage PRs.
-5. **Bot-verdict accuracy:** fork clean signal may be a PR-level 👍 — see heavygee/hapi#245 (`hapi-pr-status` must honor it).
+3. **Every tip push re-opens Codex attention.** Do not claim Ready YES / CLEAN from a stale `cold-review-clean` label alone. Wait for a tip-matched `chatgpt-codex-connector` review (`Reviewed commit` = HEAD) or clear the new P1/P2 threads. `hapi-pr-status` FAILS bot dimension when tip is ahead of the latest Reviewed commit, even with the label.
+4. **Usage limits are not a clean pass.** A "You have reached your Codex usage limits" comment without a tip-matched review → not Ready YES; park or wait quota — do not rubber-stamp with the label.
+5. **Cold-review stage PRs** (`[cold-review]` title or body "Not for merge") are **temporary**. Close them after the upstream PR opens or the pass finishes — do not leave them open for weeks.
+6. **Inventory:** `hapi-fork-codex-debt.sh` (Meta hourly surfaces the top of this list). `--close-cold-review-corpses` closes abandoned stage PRs.
+7. **Bot-verdict accuracy:** fork clean signal may be a PR-level 👍 — see heavygee/hapi#245 (`hapi-pr-status` must honor it).
 
-Kill criterion: any open non-draft fork PR with unresolved non-outdated Codex threads and no chip owner for >48h → Meta soup escalates; cold-review corpses get closed.
+Kill criterion: any open non-draft fork PR with unresolved non-outdated Codex threads and no chip owner for >48h → Meta soup escalates; cold-review corpses get closed. Agents that report Ready YES while tip-ahead of Codex or while live P1/P2 threads sit open are process-broken — Meta PR watcher must refuse.
 
 ---
 
