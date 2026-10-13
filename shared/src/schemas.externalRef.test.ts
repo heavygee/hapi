@@ -102,6 +102,17 @@ describe('parseIssueUrl', () => {
             number: 7
         })
     })
+
+    it('rejects a URL delimiter embedded in the shorthand host (Codex review, second pass)', () => {
+        // Regression: widening the host segment to allow ':' (for ports)
+        // also still allowed '?'/'='/'@' — a query delimiter produced a
+        // malformed URL whose path collapses into github.com's query string
+        // (https://github.com?tab=x/owner/repo/issues/12 resolves to a bare
+        // github.com root), and '@' produced a deceptive userinfo-prefixed
+        // URL that actually points at a different host entirely.
+        expect(parseIssueUrl('github.com?tab=x:owner/repo#12')).toBeNull()
+        expect(parseIssueUrl('github.com@evil.example:owner/repo#12')).toBeNull()
+    })
 })
 
 describe('upsertExternalRef', () => {

@@ -55,10 +55,15 @@ export function useBoardItemActions(api: ApiClient | null, boardId: string | nul
     const [commentingUrls, setCommentingUrls] = useState<ReadonlySet<string>>(EMPTY_URLS)
     const [settingStatusUrls, setSettingStatusUrls] = useState<ReadonlySet<string>>(EMPTY_URLS)
 
+    // Invalidates every configured board's items cache, not just the one the
+    // action was invoked on (Codex review, hapi#238): the same issue can be
+    // a member of more than one board — an unfiltered project and one of its
+    // saved views is an explicitly supported combination — and board queries
+    // never poll, so a write from board A would otherwise leave board B
+    // showing stale state (wrong status, wrong view membership) indefinitely.
     const invalidate = useCallback(() => {
-        if (!boardId) return Promise.resolve()
-        return queryClient.invalidateQueries({ queryKey: queryKeys.boardItems(boardId) })
-    }, [queryClient, boardId])
+        return queryClient.invalidateQueries({ queryKey: queryKeys.boardItemsAll })
+    }, [queryClient])
 
     const requireTarget = useCallback((url: string | null) => {
         if (!api || !boardId) throw new Error('API unavailable')

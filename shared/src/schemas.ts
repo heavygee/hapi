@@ -150,15 +150,23 @@ const ISSUE_URL_RE = new RegExp(`^(?:https?:\\/\\/)?([^/]+)\\/(${GH_NAME_SEGMENT
 // Optional `host:` prefix (design-consult review, hapi#238): the shorthand
 // originally had no way to express a GHE host at all, always resolving to
 // github.com regardless — a session guessing at syntax for a GHE item could
-// end up with a confidently-wrong link. `[^/#]+` for the host segment allows
-// `:` (a port-qualified GHE host, e.g. `ghe.example:8443:owner/repo#12`,
-// couldn't otherwise be expressed at all — Codex review) while still
-// excluding `/` and `#`; the regex's own greedy-then-backtrack matching
-// against the required `:` before `owner/repo` naturally resolves the
-// ambiguity by finding the *last* colon that still leaves a valid
-// `owner/repo#N` tail, which is always the real host/repo separator since
-// neither a hostname nor `owner/repo` can itself contain a `/`.
-const SHORTHAND_HOST_SEGMENT = '[^/#]+'
+// end up with a confidently-wrong link.
+//
+// Restricted to actual hostname characters plus an optional `:port` suffix
+// — not a loose "anything but / and #" class (Codex review, second pass):
+// that wider class also accepted `?`/`=` (`github.com?tab=x:owner/repo#12`
+// produced `https://github.com?tab=x/owner/repo/issues/12`, which a browser
+// parses as a bare `https://github.com/` with everything else reduced to a
+// meaningless query string) and `@` (`github.com@evil.example:owner/repo#12`
+// produced `https://github.com@evil.example/...`, where `github.com` is a
+// *userinfo* component and `evil.example` is the actual host a reader could
+// be deceived into trusting) — display-only data or not, a chip whose link
+// doesn't go where its text implies is still a real trust/correctness bug.
+// `[A-Za-z0-9.-]+` matches real hostname characters only; `(?::\d+)?`
+// optionally captures a numeric port, still supporting the port-qualified
+// GHE host case (`ghe.example.com:8443:owner/repo#12`) the first pass of
+// this fix was for, without reopening the delimiter-injection gap.
+const SHORTHAND_HOST_SEGMENT = '[A-Za-z0-9.-]+(?::\\d+)?'
 const ISSUE_SHORTHAND_RE = new RegExp(`^(?:(${SHORTHAND_HOST_SEGMENT}):)?(${GH_NAME_SEGMENT}\\/${GH_NAME_SEGMENT})#(\\d+)$`)
 
 export function parseIssueUrl(input: string): { url: string; repo: string; number: number } | null {
