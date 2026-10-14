@@ -29,7 +29,7 @@ import { BoardItemDetail } from '@/components/BoardItemDetail'
 import { resolveBoardItemDirectory } from '@/lib/resolveBoardItemDirectory'
 import { buildBoardItemSpawnMessage } from '@/lib/boardItemSpawnMessage'
 import { clearBoardSpawnBriefing, peekBoardSpawnBriefing, stashBoardSpawnBriefing } from '@/lib/boardSpawnBriefing'
-import { isBoardItemDetailNavigation, shouldExitBoardsModeForNavigation } from '@/lib/sessionsBoardsModeSync'
+import { isBoardItemDetailNavigation, isHistoryPopNavigation, shouldExitBoardsModeForNavigation } from '@/lib/sessionsBoardsModeSync'
 import { isAbandoningSpawnFlow } from '@/lib/spawnFlowAbandonment'
 import { parseIssueUrl } from '@hapi/protocol/schemas'
 import { findSessionLinkedToIssue } from '@/lib/externalRefs'
@@ -408,7 +408,22 @@ function SessionsPage() {
     // first place, so there's nothing to explicitly clean up either.
     const { boardItem: boardItemIdFromUrl } = useSearch({ from: '/sessions' })
     const selectedBoardItemId = sessionsMode === 'boards' ? (boardItemIdFromUrl ?? null) : null
+    // Tags the onBeforeNavigate subscriber's very next event as "mine" so it
+    // can unconditionally skip the exit-Boards check below, regardless of
+    // push-vs-pop (Codex review, hapi#238): selecting/switching an item is
+    // always a fresh push, but the detail pane's own Back button also routes
+    // through here and must stay exempt without relying on history-index
+    // comparisons at all — it's explicitly this component's own action, not
+    // a browser/device Back and not an external "go to this session" link.
+    const isOwnBoardItemNavigationRef = useRef(false)
+    // Tracks the highest `__TSR_index` seen by the onBeforeNavigate
+    // subscriber below, so it can tell a genuine Back/Forward (replaying an
+    // already-stamped index) from a fresh push (always a new, higher index)
+    // — see isHistoryPopNavigation's doc comment for why that distinction
+    // matters here.
+    const maxHistoryIndexRef = useRef(0)
     const setSelectedBoardItemId = useCallback((id: string | null) => {
+        isOwnBoardItemNavigationRef.current = true
         navigate({
             to: '.',
             search: (prev: Record<string, unknown>) => {
@@ -508,9 +523,32 @@ function SessionsPage() {
     // session-targeting (Codex review, hapi#238, second finding on this
     // path: the first pass only fixed one-segment routes, this one covers
     // the boardItem-search case the router-search fix itself introduced).
+    //
+    // That exemption alone is too broad (Codex review, hapi#238, third
+    // finding): a toast or in-chat session link (ToastContainer,
+    // SessionPathAnchor in markdown-text.tsx) targeting the *same* session
+    // Boards is already overlaying with an item selected is event-shape-
+    // identical to closing that item via Back — same pathname, `boardItem`
+    // only on the origin — but it's a fresh push with a genuinely different
+    // intent ("show me this session") and must still exit Boards mode. Two
+    // extra signals narrow this down to exactly the cases that should stay
+    // exempt: `isOwnBoardItemNavigationRef` tags this component's own
+    // open/switch/close calls unconditionally (set in setSelectedBoardItemId
+    // just before it navigates), and `isHistoryPopNavigation` recognizes a
+    // genuine browser/device Back or Forward by its history index replaying
+    // one already seen, rather than pushing a fresh one — which a toast or
+    // markdown link's plain navigate() call never does.
     useEffect(() => {
         return router.subscribe('onBeforeNavigate', (event) => {
-            if (isBoardItemDetailNavigation(event.pathChanged, event.fromLocation?.search ?? {}, event.toLocation.search)) {
+            const toIndex = event.toLocation.state.__TSR_index
+            const isPop = isHistoryPopNavigation(toIndex, maxHistoryIndexRef.current)
+            maxHistoryIndexRef.current = Math.max(maxHistoryIndexRef.current, toIndex)
+
+            const isOwnBoardItemNavigation = isOwnBoardItemNavigationRef.current
+            isOwnBoardItemNavigationRef.current = false
+            if (isOwnBoardItemNavigation) return
+
+            if (isPop && isBoardItemDetailNavigation(event.pathChanged, event.fromLocation?.search ?? {}, event.toLocation.search)) {
                 return
             }
             if (shouldExitBoardsModeForNavigation(event.toLocation.pathname, sessionsMode)) {
