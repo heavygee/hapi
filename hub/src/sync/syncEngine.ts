@@ -64,6 +64,7 @@ import {
     type RpcUploadFileResponse
 } from './rpcGateway'
 import { SessionCache } from './sessionCache'
+import { hasLiveWork } from './sessionIdle'
 import { ingestNotifySummaryFromMessage } from './workGraphNotifyIngest'
 
 type PiResumeAttempt = NonNullable<NonNullable<Session['metadata']>['piResumeAttempt']>
@@ -1822,7 +1823,17 @@ export class SyncEngine {
                 }
             }
             if (status === 'still_alive' || status === 'unknown') {
-                throw new Error('Session process is still running and could not be stopped')
+                // tiann/hapi#2020: Peer Done / idle workers may still report
+                // still_alive after KillSession+StopSession (ghost keepalive).
+                // Soft stand-down with hub-authored archive so orchestrators
+                // can archive without DELETE. Refuse when the agent has live
+                // work (thinking / background tasks / pending requests) so
+                // archive does not yank a genuinely WORKING peer.
+                const live = this.sessionCache.getSession(sessionId)
+                if (!live || hasLiveWork(live)) {
+                    throw new Error('Session process is still running and could not be stopped')
+                }
+                // Fall through: hub-author archive metadata below.
             }
         } else if (machineId && !runnerSpawned) {
             // Terminal / non-runner sessions: KillSession is the primary stop.

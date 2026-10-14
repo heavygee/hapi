@@ -39,7 +39,7 @@ export function resolveSessionIdleTimeoutMs(
 }
 
 /** Work the hub can see that must never be reconciled away as a zombie. */
-function hasLiveWork(session: Session): boolean {
+export function hasLiveWork(session: Session): boolean {
     if (session.thinking) return true
     if ((session.backgroundTaskCount ?? 0) > 0) return true
     // A permission / input request waiting on the operator is real state the
