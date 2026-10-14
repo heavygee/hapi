@@ -1092,10 +1092,9 @@ layers:
 
   # heavygee/hapi#235 / PR #238 — Boards view (cards/chips/relative-time,
   # Projects v2 /views/<n> filter capture). Renamed To-Do → Boards.
-  # Re-tip 2026-10-13d: driver/235-todo-board-view @ dc5fbd501 (= feat/todo-board-view-ui
-  # tip — no silent demo board: empty list + boards.noBoardsConfigured.* explainer
-  # instead of auto-fetch default; hasAnyBoardEnvConfig; Codex wave P1 externalRefs
-  # metadata-merge data-loss + 3 P2s). Was fa8733b2e (affordance coherence).
+  # Re-tip 2026-10-14: driver/235-todo-board-view @ 513306cdc (= feat/todo-board-view-ui
+  # tip — Codex waves 2–5 + URL_HOST_SEGMENT harden for full-URL issue hosts
+  # (same delimiter injection fix as shorthand). Was dc5fbd501 (no silent demo).
   - branch: driver/235-todo-board-view
 
   # heavygee/hapi#247 — deliberate fleet push + restore upgrade-runner; kill
