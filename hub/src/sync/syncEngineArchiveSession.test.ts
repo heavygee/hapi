@@ -79,9 +79,10 @@ describe('SyncEngine.archiveSession runner reaping (#1910)', () => {
         expect(session?.metadata?.lifecycleState).not.toBe('archived')
     })
 
-    it('archives a non-thinking Peer Done when StopSession still reports still_alive (#2020)', async () => {
+    it('archives a still-connected non-thinking Peer Done when StopSession still reports still_alive (#2020)', async () => {
         // Soft stand-down: KillSession+StopSession could not confirm death, but
-        // the agent is not WORKING — hub-author archive instead of forcing DELETE.
+        // transport is still alive and the agent is not WORKING — hub-author
+        // archive instead of forcing DELETE.
         const sessionId = insertActiveSession('sess-peer-done-alive', 'machine-x')
         setKillSessionMissingTarget()
         ;(engine as unknown as { rpcGateway: { stopRunnerSession: unknown } }).rpcGateway.stopRunnerSession =
@@ -104,6 +105,41 @@ describe('SyncEngine.archiveSession runner reaping (#1910)', () => {
 
         await expect(engine.archiveSession(sessionId)).rejects.toThrow(/still running/)
         expect(cache().getSession(sessionId)?.active).toBe(true)
+    })
+
+    it('refuses still_alive when thinking was cleared by heartbeat expiry (disconnected mid-turn) (#2021 Major)', async () => {
+        // expireInactive flips active=false and thinking=false after missed
+        // keepalives — that is NOT positive idle evidence. Soft stand-down
+        // must refuse so reconnect does not hub-archive a mid-turn worker.
+        const sessionId = insertActiveSession('sess-expired-thinking', 'machine-x')
+        const live = cache().getSession(sessionId)!
+        live.thinking = true
+        live.activeAt = Date.now() - 60_000
+        expect(cache().expireInactive(Date.now())).toContain(sessionId)
+        expect(live.active).toBe(false)
+        expect(live.thinking).toBe(false)
+
+        setKillSessionMissingTarget()
+        ;(engine as unknown as { rpcGateway: { stopRunnerSession: unknown } }).rpcGateway.stopRunnerSession =
+            async () => 'still_alive'
+
+        await expect(engine.archiveSession(sessionId)).rejects.toThrow(/still running/)
+        expect(cache().getSession(sessionId)?.metadata?.lifecycleState).not.toBe('archived')
+    })
+
+    it('archives keepalive-idle lifecycle even when active flipped false (#2020)', async () => {
+        const sessionId = insertActiveSession('sess-idle-lifecycle', 'machine-x')
+        const live = cache().getSession(sessionId)!
+        live.active = false
+        live.thinking = false
+        live.metadata = { ...live.metadata!, lifecycleState: 'idle' }
+
+        setKillSessionMissingTarget()
+        ;(engine as unknown as { rpcGateway: { stopRunnerSession: unknown } }).rpcGateway.stopRunnerSession =
+            async () => 'still_alive'
+
+        await engine.archiveSession(sessionId)
+        expect(cache().getSession(sessionId)?.metadata?.lifecycleState).toBe('archived')
     })
 
     it('always calls stopRunnerSession after a successful KillSession', async () => {

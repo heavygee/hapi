@@ -64,7 +64,7 @@ import {
     type RpcUploadFileResponse
 } from './rpcGateway'
 import { SessionCache } from './sessionCache'
-import { hasLiveWork } from './sessionIdle'
+import { canSoftStandDownUnconfirmedStop } from './sessionIdle'
 import { ingestNotifySummaryFromMessage } from './workGraphNotifyIngest'
 
 type PiResumeAttempt = NonNullable<NonNullable<Session['metadata']>['piResumeAttempt']>
@@ -1825,12 +1825,12 @@ export class SyncEngine {
             if (status === 'still_alive' || status === 'unknown') {
                 // tiann/hapi#2020: Peer Done / idle workers may still report
                 // still_alive after KillSession+StopSession (ghost keepalive).
-                // Soft stand-down with hub-authored archive so orchestrators
-                // can archive without DELETE. Refuse when the agent has live
-                // work (thinking / background tasks / pending requests) so
-                // archive does not yank a genuinely WORKING peer.
+                // Soft stand-down only with positive idle evidence (keepalive-
+                // idle lifecycle, or still-connected + no live work) — not
+                // merely cleared thinking after expireInactive, which can
+                // hide a disconnected mid-turn worker (bot Major on #2021).
                 const live = this.sessionCache.getSession(sessionId)
-                if (!live || hasLiveWork(live)) {
+                if (!live || !canSoftStandDownUnconfirmedStop(live)) {
                     throw new Error('Session process is still running and could not be stopped')
                 }
                 // Fall through: hub-author archive metadata below.
