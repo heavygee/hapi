@@ -34,6 +34,21 @@ describe('isAbandoningSpawnFlow', () => {
         expect(isAbandoningSpawnFlow('/sessions/new', '/browse', { briefingId: 'b1' }, { briefingId: 'b2' })).toBe(true)
     })
 
+    it('is true staying on the same pathname when the destination carries no tracked ids forward — the sidebar\'s own unrelated New Session button (Codex review, fourth pass)', () => {
+        // Regression: an unconditional toPathname === fromPathname early
+        // return treated the sidebar's "New Session" button (navigates to a
+        // bare /sessions/new with no search params) as "staying in the
+        // flow" whenever a board-spawn compose with a briefingId was already
+        // open at that same pathname — orphaning the briefing instead of
+        // cleaning it up, the exact same failure mode already fixed for the
+        // cross-leg case but missed here.
+        expect(isAbandoningSpawnFlow('/sessions/new', '/sessions/new', { briefingId: 'b1' }, {})).toBe(true)
+    })
+
+    it('is false staying on the same pathname when the destination carries the same briefingId forward (an in-flow search update)', () => {
+        expect(isAbandoningSpawnFlow('/sessions/new', '/sessions/new', { briefingId: 'b1' }, { briefingId: 'b1' })).toBe(false)
+    })
+
     it('is true for any other destination, including browser-history-driven navigation', () => {
         expect(isAbandoningSpawnFlow('/sessions/new', '/sessions', {}, {})).toBe(true)
         expect(isAbandoningSpawnFlow('/sessions/new', '/sessions/some-id', {}, {})).toBe(true)

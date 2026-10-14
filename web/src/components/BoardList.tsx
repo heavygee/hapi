@@ -16,7 +16,20 @@ import { findSessionLinkedToIssue } from '@/lib/externalRefs'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
 
+// The null-status bucket's key is deliberately left unprefixed while every
+// *named* status gets a `status:` prefix (statusKeyForName below) — a real
+// project status option could itself be literally named `__no_status__`,
+// and a bare string sentinel can't tell that apart from the genuine null
+// bucket. Prefixing only the named side means a collision would require a
+// named key to equal the unprefixed sentinel, which the "status:" prefix
+// makes structurally impossible regardless of what any status is actually
+// named (Codex review, hapi#238: this used to collide — duplicate React
+// keys and a shared persisted collapse override between the two groups).
 const NO_STATUS_KEY = '__no_status__'
+
+function statusKeyForName(status: string): string {
+    return `status:${status}`
+}
 
 // Manual collapse/expand overrides persist per board + status (hapi#238
 // operator refinement) — collapsing "Complete" on one board must not leak
@@ -24,7 +37,7 @@ const NO_STATUS_KEY = '__no_status__'
 // header click writes here; the state-derived default
 // (isGroupClosedByDefault) is never persisted, so it keeps tracking live
 // item state for any group the operator hasn't manually touched.
-const COLLAPSE_STORAGE_PREFIX = 'hapi.boardGroupCollapsed.v1.'
+const COLLAPSE_STORAGE_PREFIX = 'hapi.boardGroupCollapsed.v2.'
 
 function collapseStorageKey(boardId: string, statusKey: string): string {
     return `${COLLAPSE_STORAGE_PREFIX}${boardId}::${statusKey}`
@@ -353,7 +366,7 @@ export function BoardList(props: {
         return groups.map((group) => {
             const isNoStatus = group.status === null
             if (!isNoStatus) colorIndex += 1
-            const statusKey = group.status ?? NO_STATUS_KEY
+            const statusKey = group.status === null ? NO_STATUS_KEY : statusKeyForName(group.status)
             const compositeKey = `${boardId}::${statusKey}`
             const isClosed = isGroupClosedByDefault(group.items)
             const collapsed = collapsedOverrides[compositeKey]

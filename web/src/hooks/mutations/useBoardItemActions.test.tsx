@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import type { ApiClient } from '@/api/client'
 import { useBoardItemActions } from './useBoardItemActions'
+import { queryKeys } from '@/lib/query-keys'
 
 function wrapper(queryClient: QueryClient) {
     return ({ children }: { children: ReactNode }) => (
@@ -23,6 +24,23 @@ describe('useBoardItemActions', () => {
 
         expect(closeBoardItem).toHaveBeenCalledWith('board-1', 'https://github.com/a/b/issues/1')
         expect(invalidateSpy).toHaveBeenCalled()
+    })
+
+    it('invalidates every board\'s items cache, not just the acting board (Codex review)', async () => {
+        // Regression: the same issue can be a member of more than one
+        // configured board (an unfiltered project and one of its saved
+        // views is an explicitly supported combination) — invalidating only
+        // the acting board left any other board showing stale state, with no
+        // polling to ever self-correct.
+        const queryClient = new QueryClient()
+        const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+        const closeBoardItem = vi.fn().mockResolvedValue(undefined)
+        const api = { closeBoardItem } as unknown as ApiClient
+
+        const { result } = renderHook(() => useBoardItemActions(api, 'board-1'), { wrapper: wrapper(queryClient) })
+        await result.current.closeItem({ url: 'https://github.com/a/b/issues/1' })
+
+        expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.boardItemsAll })
     })
 
     it('tracks closingUrls across the call, scoped to the acting item', async () => {

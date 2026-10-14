@@ -214,17 +214,30 @@ function finishIssueMatch(host: string, repo: string, numberRaw: string): { url:
 // character set rejects that input outright instead of silently mis-parsing
 // it (Codex review).
 const GH_NAME_SEGMENT = '[A-Za-z0-9_.-]+'
-// Host capture mirrors parseProjectUrl's `[^/]+` (hub/src/web/routes/todoBoard.ts)
-// — loose on purpose, since there's no host-allowlist boundary to enforce here.
-const ISSUE_URL_RE = new RegExp(`^(?:https?:\\/\\/)?([^/]+)\\/(${GH_NAME_SEGMENT}\\/${GH_NAME_SEGMENT})\\/issues\\/(\\d+)\\/?(?:[/?#].*)?$`, 'i')
+// Shared by both the full-URL and shorthand matchers below (Codex review,
+// third pass on this file: hardening only the shorthand's host capture and
+// leaving the full-URL one on the old loose `[^/]+` class left the exact
+// same delimiter-injection gap open on the other input form). Restricted to
+// actual hostname characters plus an optional `:port` suffix — not a loose
+// "anything but a path/fragment delimiter" class: that wider class also
+// accepted `?`/`=` (`https://github.com?tab=x/owner/repo/issues/12` /
+// `github.com?tab=x:owner/repo#12` both produce a URL a browser resolves to
+// a bare `https://github.com/` with everything else reduced to a
+// meaningless query string) and `@` (`.../github.com@evil.example/...`,
+// where `github.com` is a *userinfo* component and `evil.example` is the
+// actual host a reader could be deceived into trusting) — display-only data
+// or not, a chip whose link doesn't go where its text implies is still a
+// real trust/correctness bug. `[A-Za-z0-9.-]+` matches real hostname
+// characters only; `(?::\d+)?` optionally captures a numeric port, still
+// supporting a port-qualified GHE host without reopening the
+// delimiter-injection gap.
+const URL_HOST_SEGMENT = '[A-Za-z0-9.-]+(?::\\d+)?'
+const ISSUE_URL_RE = new RegExp(`^(?:https?:\\/\\/)?(${URL_HOST_SEGMENT})\\/(${GH_NAME_SEGMENT}\\/${GH_NAME_SEGMENT})\\/issues\\/(\\d+)\\/?(?:[/?#].*)?$`, 'i')
 // Optional `host:` prefix (design-consult review, hapi#238): the shorthand
 // originally had no way to express a GHE host at all, always resolving to
 // github.com regardless — a session guessing at syntax for a GHE item could
-// end up with a confidently-wrong link. `[^:/#]+` for the host segment keeps
-// `:` as an unambiguous separator from both the owner/repo segment (which
-// never contains `:`) and the issue number.
-const SHORTHAND_HOST_SEGMENT = '[^:/#]+'
-const ISSUE_SHORTHAND_RE = new RegExp(`^(?:(${SHORTHAND_HOST_SEGMENT}):)?(${GH_NAME_SEGMENT}\\/${GH_NAME_SEGMENT})#(\\d+)$`)
+// end up with a confidently-wrong link.
+const ISSUE_SHORTHAND_RE = new RegExp(`^(?:(${URL_HOST_SEGMENT}):)?(${GH_NAME_SEGMENT}\\/${GH_NAME_SEGMENT})#(\\d+)$`)
 
 export function parseIssueUrl(input: string): { url: string; repo: string; number: number } | null {
     const trimmed = input.trim()
@@ -294,6 +307,50 @@ export function mergeExternalRefs(base: ExternalRef[], incoming: ExternalRef[]):
     for (const ref of incoming) {
         if (!result.some(existing => sameExternalRefIdentity(existing, ref))) {
             result = [...result, ref]
+        }
+    }
+    return result
+}
+
+function refLinkedAt(ref: ExternalRef): number | undefined {
+    const value = (ref as Record<string, unknown>).linkedAt
+    return typeof value === 'number' ? value : undefined
+}
+
+/**
+ * Field-level reconciliation for a ref identity present on both sides —
+ * distinct from `mergeExternalRefs`' identity-only union, where "prefer
+ * base unconditionally" is intentional (the surviving session's own current
+ * state should win over a soon-to-be-deleted duplicate's). Built instead for
+ * `hub/src/store/sessions.ts`'s sparse-write carry-forward, where `next` can
+ * be built from a stale local cache that doesn't know about a field-level
+ * update (e.g. a `github_pr` chip's `status`/`statusCheckedAt`) already
+ * applied directly to `prior` by the fork's own out-of-band tooling
+ * (`hapi-meta-daily.sh`). Naively preferring either side unconditionally on
+ * every collision either discards that out-of-band update (always prefer
+ * next) or discards a legitimate same-write upsert like `hapi link-issue`
+ * re-linking the same issue with a bumped `linkedAt` (always prefer prior).
+ *
+ * Reconciles per-identity by `linkedAt` when `next`'s entry has one —
+ * `github_issue` always does; `github_pr`'s `.passthrough()` shape often
+ * does too, per its own growing-fields doc comment, though that's not
+ * type-guaranteed. The side with the larger value wins; ties and a missing
+ * signal on `next` default to keeping `prior`'s entry (the already-
+ * persisted, presumed-authoritative state) — matching the failure mode this
+ * was built to close (Codex review, hapi#238, second finding on this path).
+ */
+export function reconcileExternalRefs(prior: ExternalRef[], next: ExternalRef[]): ExternalRef[] {
+    const result = [...prior]
+    for (const nextRef of next) {
+        const idx = result.findIndex(existing => sameExternalRefIdentity(existing, nextRef))
+        if (idx === -1) {
+            result.push(nextRef)
+            continue
+        }
+        const existingAt = refLinkedAt(result[idx]!)
+        const nextAt = refLinkedAt(nextRef)
+        if (nextAt !== undefined && (existingAt === undefined || nextAt > existingAt)) {
+            result[idx] = nextRef
         }
     }
     return result

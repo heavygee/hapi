@@ -22,15 +22,29 @@ function parseHostRepoAndNumber(url: string): { host: string; repo: string; numb
 }
 
 /**
- * Most recently linked GitHub issue ref, if any. Every known writer
- * (`sessionCache.linkIssue`, `applyLinkIssue`) appends via `upsertExternalRef`,
- * so array order already reflects link order — the last matching entry is the
- * most recent, with no `linkedAt` tie-break needed.
+ * Most recently linked GitHub issue ref, if any. Picked by `linkedAt`, not
+ * array position (Codex review, hapi#238): every *live* writer
+ * (`sessionCache.linkIssue`, `applyLinkIssue`) appends via
+ * `upsertExternalRef`, so array order matches link order for them — but
+ * `mergeExternalRefs` (duplicate-session/resume merges) appends
+ * incoming-only refs onto the end regardless of their actual `linkedAt`, so
+ * an older ref contributed by the merged-away session could land after a
+ * newer one already on the surviving session. `linkedAt` is a required
+ * field on every `github_issue` ref (unlike `github_pr`'s passthrough
+ * shape), so comparing it directly is reliable here. `>=` (not `>`)
+ * preserves the prior "last one wins" tie-break for equal timestamps.
  */
 export function getLinkedGithubIssue(metadata: { externalRefs?: ExternalRef[] } | null | undefined): ExternalRef | null {
     const refs = metadata?.externalRefs
     if (!refs || refs.length === 0) return null
-    return refs.findLast((ref): ref is ExternalRef & { kind: 'github_issue' } => ref.kind === 'github_issue') ?? null
+    let mostRecent: (ExternalRef & { kind: 'github_issue' }) | null = null
+    for (const ref of refs) {
+        if (ref.kind !== 'github_issue') continue
+        if (!mostRecent || ref.linkedAt >= mostRecent.linkedAt) {
+            mostRecent = ref
+        }
+    }
+    return mostRecent
 }
 
 /**

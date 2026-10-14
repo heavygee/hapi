@@ -12,13 +12,20 @@ export type SpawnFlowRoute = '/sessions/new' | '/browse'
  * has its own copy of the same briefing/transfer in its own search params
  * and no cleanup of its own).
  *
- * Crossing to the other leg is only a genuine continuation if the
- * destination actually carries forward one of the same ids this flow is
- * tracking — pathname alone isn't enough, since `/browse` is also the
- * target of the left sidebar's own, entirely unrelated global "Browse"
- * button, reachable while `/sessions/new` is open and carrying no transfer
- * ids at all. Treating that as a continuation left the briefing orphaned in
- * sessionStorage instead of cleaned up (third Codex review pass).
+ * Staying on the SAME pathname or crossing to the other leg is only a
+ * genuine continuation if the destination actually carries forward one of
+ * the same ids this flow is tracking — pathname alone isn't enough. Two
+ * concrete ways that showed up in practice: `/browse` is also the target of
+ * the left sidebar's own, entirely unrelated global "Browse" button,
+ * reachable while `/sessions/new` is open and carrying no transfer ids at
+ * all (third Codex review pass); and the sidebar's "New Session" button
+ * navigates to a bare `/sessions/new` with no search params — the SAME
+ * pathname as an already-open board-spawn compose, which an unconditional
+ * `toPathname === fromPathname` early return used to treat as "staying put"
+ * regardless of whether the new destination actually carried the tracked
+ * ids forward (fourth Codex review pass). Both cases orphaned the briefing
+ * in sessionStorage instead of cleaning it up, resurrectable via browser
+ * Back.
  */
 export function isAbandoningSpawnFlow(
     fromPathname: SpawnFlowRoute,
@@ -26,9 +33,8 @@ export function isAbandoningSpawnFlow(
     currentIds: { briefingId?: string; shareTransferId?: string },
     toSearch: { briefingId?: unknown; shareTransferId?: unknown }
 ): boolean {
-    if (toPathname === fromPathname) return false
     const otherLeg: SpawnFlowRoute = fromPathname === '/sessions/new' ? '/browse' : '/sessions/new'
-    if (toPathname !== otherLeg) return true
+    if (toPathname !== fromPathname && toPathname !== otherLeg) return true
 
     // Nothing this flow is actually tracking — no stash to leak either way,
     // so the old pathname-only behavior is harmless here.

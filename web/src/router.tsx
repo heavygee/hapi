@@ -947,15 +947,23 @@ function SessionsPage() {
                             selectedItemId={selectedBoardItemId}
                             onSelectItem={(item) => setSelectedBoardItemId(item.id)}
                             onRefresh={() => {
-                                // The items query is disabled (and its own
-                                // refetch a no-op) whenever no board is
-                                // loaded — which is exactly the state an
-                                // initial /todo-boards failure leaves this
-                                // in, so the boards list itself must also be
-                                // refetched or this button does nothing in
-                                // that failure mode (Codex review).
+                                // The boards list must also be refetched, not
+                                // just items — otherwise this button does
+                                // nothing when an initial /todo-boards
+                                // failure left no board loaded (Codex
+                                // review). But `enabled: false` only gates
+                                // *automatic* fetching, not a manually called
+                                // `refetch()` — TanStack Query still runs the
+                                // queryFn on a disabled query's refetch(),
+                                // which throws "API unavailable" with no
+                                // board id, replacing a valid empty-boards
+                                // state with a false failure (Codex review,
+                                // second pass). Only refetch items when a
+                                // board actually exists to refetch.
                                 void refetchBoards()
-                                void refetchBoardItems()
+                                if (effectiveBoardId) {
+                                    void refetchBoardItems()
+                                }
                             }}
                             isRefreshing={boardsRefetching || boardItemsRefetching}
                             sessions={sessions}

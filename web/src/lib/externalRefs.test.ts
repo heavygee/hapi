@@ -38,10 +38,27 @@ describe('getLinkedGithubIssue', () => {
         expect(getLinkedGithubIssue({ externalRefs: [ref] })).toEqual(ref)
     })
 
-    it('returns the last-appended issue ref — real writers always append in link order', () => {
+    it('returns the ref with the highest linkedAt when refs are already in link order', () => {
         const older = { kind: 'github_issue' as const, url: 'https://github.com/heavygee/hapi/issues/235', repo: 'heavygee/hapi', number: 235, linkedAt: 1 }
         const newer = { kind: 'github_issue' as const, url: 'https://github.com/heavygee/hapi/issues/236', repo: 'heavygee/hapi', number: 236, linkedAt: 2 }
         expect(getLinkedGithubIssue({ externalRefs: [older, newer] })).toEqual(newer)
+    })
+
+    it('returns the ref with the highest linkedAt even when array order is reversed (Codex review)', () => {
+        // Regression: mergeExternalRefs (duplicate-session/resume merges)
+        // appends incoming-only refs after base's, regardless of their real
+        // linkedAt — a plain "last in the array" heuristic would pick the
+        // older ref here, switching the session's displayed issue chip to a
+        // stale link after a merge.
+        const older = { kind: 'github_issue' as const, url: 'https://github.com/heavygee/hapi/issues/235', repo: 'heavygee/hapi', number: 235, linkedAt: 1 }
+        const newer = { kind: 'github_issue' as const, url: 'https://github.com/heavygee/hapi/issues/236', repo: 'heavygee/hapi', number: 236, linkedAt: 2 }
+        expect(getLinkedGithubIssue({ externalRefs: [newer, older] })).toEqual(newer)
+    })
+
+    it('breaks a linkedAt tie by picking the later array entry, matching prior behavior', () => {
+        const first = { kind: 'github_issue' as const, url: 'https://github.com/heavygee/hapi/issues/235', repo: 'heavygee/hapi', number: 235, linkedAt: 1 }
+        const second = { kind: 'github_issue' as const, url: 'https://github.com/heavygee/hapi/issues/236', repo: 'heavygee/hapi', number: 236, linkedAt: 1 }
+        expect(getLinkedGithubIssue({ externalRefs: [first, second] })).toEqual(second)
     })
 })
 

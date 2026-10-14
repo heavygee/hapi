@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mergeExternalRefs, parseIssueUrl, upsertExternalRef, type ExternalRef } from './schemas'
+import { mergeExternalRefs, parseIssueUrl, reconcileExternalRefs, upsertExternalRef, type ExternalRef } from './schemas'
 
 describe('parseIssueUrl', () => {
     it('parses a full https URL', () => {
@@ -23,6 +23,23 @@ describe('parseIssueUrl', () => {
         // with a stray fragment before /issues/ produced a malformed repo
         // like "owner/repo#frag" instead of failing to match.
         expect(parseIssueUrl('https://github.com/owner/repo#frag/issues/5')).toBeNull()
+    })
+
+    it('accepts a port-qualified host on a full URL', () => {
+        expect(parseIssueUrl('https://ghe.example.com:8443/acme/repo/issues/7')).toEqual({
+            url: 'https://ghe.example.com:8443/acme/repo/issues/7',
+            repo: 'acme/repo',
+            number: 7
+        })
+    })
+
+    it('rejects a URL delimiter embedded in a full URL\'s host (Codex review, third pass)', () => {
+        // Regression: only the shorthand's host capture (SHORTHAND_HOST_SEGMENT,
+        // now URL_HOST_SEGMENT) was hardened against '?'/'='/'@' — the direct
+        // full-URL matcher still used the loose `[^/]+` class, so the exact
+        // same delimiter-injection gap was still open on this input form.
+        expect(parseIssueUrl('https://github.com@evil.example/owner/repo/issues/12')).toBeNull()
+        expect(parseIssueUrl('https://github.com?tab=x/owner/repo/issues/12')).toBeNull()
     })
 
     it('rejects garbage input', () => {
@@ -90,6 +107,28 @@ describe('parseIssueUrl', () => {
 
     it('lowercases a shorthand host prefix but preserves repo casing', () => {
         expect(parseIssueUrl('LHS.GHE.com:lockhouse/repo#8')?.url).toBe('https://lhs.ghe.com/lockhouse/repo/issues/8')
+    })
+
+    it('accepts a port-qualified host on the shorthand (Codex review)', () => {
+        // Regression: SHORTHAND_HOST_SEGMENT used to exclude ':' entirely,
+        // so a non-default-port GHE host had no way to express itself here
+        // even though the board and full-URL paths both support it.
+        expect(parseIssueUrl('ghe.example.com:8443:acme/repo#7')).toEqual({
+            url: 'https://ghe.example.com:8443/acme/repo/issues/7',
+            repo: 'acme/repo',
+            number: 7
+        })
+    })
+
+    it('rejects a URL delimiter embedded in the shorthand host (Codex review, second pass)', () => {
+        // Regression: widening the host segment to allow ':' (for ports)
+        // also still allowed '?'/'='/'@' — a query delimiter produced a
+        // malformed URL whose path collapses into github.com's query string
+        // (https://github.com?tab=x/owner/repo/issues/12 resolves to a bare
+        // github.com root), and '@' produced a deceptive userinfo-prefixed
+        // URL that actually points at a different host entirely.
+        expect(parseIssueUrl('github.com?tab=x:owner/repo#12')).toBeNull()
+        expect(parseIssueUrl('github.com@evil.example:owner/repo#12')).toBeNull()
     })
 })
 
@@ -169,5 +208,41 @@ describe('mergeExternalRefs', () => {
         const prRef: ExternalRef = { kind: 'github_pr', url: 'https://github.com/heavygee/hapi/pull/100', repo: 'heavygee/hapi', number: 100 }
         const result = mergeExternalRefs([], [prRef])
         expect(result).toEqual([prRef])
+    })
+})
+
+describe('reconcileExternalRefs', () => {
+    function makeRef(overrides: Partial<ExternalRef> = {}): ExternalRef {
+        return { kind: 'github_issue', url: 'https://github.com/heavygee/hapi/issues/235', repo: 'heavygee/hapi', number: 235, linkedAt: 1, ...overrides }
+    }
+
+    it('keeps everything from prior plus anything next-only', () => {
+        const prior = [makeRef({ number: 1 })]
+        const next = [makeRef({ number: 2 })]
+        const result = reconcileExternalRefs(prior, next)
+        expect(result.map(r => r.number).sort()).toEqual([1, 2])
+    })
+
+    it("prefers next's entry on a collision when next has a newer linkedAt (a legitimate re-link)", () => {
+        const prior = [makeRef({ linkedAt: 1 })]
+        const next = [makeRef({ linkedAt: 2 })]
+        expect(reconcileExternalRefs(prior, next)).toEqual([makeRef({ linkedAt: 2 })])
+    })
+
+    it("prefers prior's entry on a collision when next has an older or equal linkedAt (a stale write)", () => {
+        // Regression (Codex review, hapi#238, second finding on this path):
+        // out-of-band tooling (hapi-meta-daily.sh) can update a PR chip's
+        // extra fields directly in storage; a routine CLI metadata write
+        // built before that update landed must not roll it back just
+        // because array length/identity alone looked unchanged.
+        const freshPrRef: ExternalRef = { kind: 'github_pr', url: 'https://github.com/heavygee/hapi/pull/9', repo: 'heavygee/hapi', number: 9, linkedAt: 5, status: 'merged' } as ExternalRef
+        const stalePrRef: ExternalRef = { kind: 'github_pr', url: 'https://github.com/heavygee/hapi/pull/9', repo: 'heavygee/hapi', number: 9, linkedAt: 5, status: 'open' } as ExternalRef
+        expect(reconcileExternalRefs([freshPrRef], [stalePrRef])).toEqual([freshPrRef])
+    })
+
+    it('defaults to prior when neither side has a comparable linkedAt', () => {
+        const priorRef = { kind: 'github_pr', url: 'https://github.com/heavygee/hapi/pull/9', repo: 'heavygee/hapi', number: 9 } as ExternalRef
+        const nextRef = { kind: 'github_pr', url: 'https://github.com/heavygee/hapi/pull/9', repo: 'heavygee/hapi', number: 9, status: 'merged' } as ExternalRef
+        expect(reconcileExternalRefs([priorRef], [nextRef])).toEqual([priorRef])
     })
 })

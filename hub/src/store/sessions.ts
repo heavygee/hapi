@@ -2,7 +2,7 @@ import type { Database } from 'bun:sqlite'
 import { prepareCached } from './statementCache'
 import { bumpSessionDeletionEpoch } from './sessionInvalidation'
 import { randomUUID } from 'node:crypto'
-import { mergeExternalRefs, type ExternalRef } from '@hapi/protocol/schemas'
+import { reconcileExternalRefs, type ExternalRef } from '@hapi/protocol/schemas'
 
 import type { StoredSession, VersionedUpdateResult } from './types'
 import { safeJsonParse } from './json'
@@ -62,9 +62,9 @@ function runInTransaction<T>(db: Database, operation: () => T): T {
 //     against (Codex review, hapi#238). Merged, not just carried-forward-if-
 //     missing like the tiers above: a sparse `next.externalRefs` can be a
 //     present-but-incomplete array rather than strictly `undefined`, so
-//     mergeExternalRefs unions both sides instead of only covering the
-//     all-or-nothing case. PR status cache on those refs is then preserved
-//     via preserveExternalRefsStatusCache (soup).
+//     reconcileExternalRefs unions both sides instead of only covering the
+//     all-or-nothing case (explicit [] still clears). PR status cache on
+//     those refs is then preserved via preserveExternalRefsStatusCache (soup).
 //
 // `cursorSessionProtocol` is paired with `cursorSessionId`: protocol is
 // tied to a specific chat id, so a write that explicitly sets a new
@@ -162,62 +162,35 @@ function isExternalRefArray(value: unknown): value is ExternalRef[] {
 // externalrefs-preserve.mjs's incident-driven check for this exact field +
 // name) and carried forward via the same carryForwardIfMissing used by the
 // tiers above — that alone covers the omitted-key sparse-write case. But a
-// sparse write can also include its own stale-but-present externalRefs
-// array — built before an out-of-band `hapi link-issue`/linkIssue write
-// landed — which an undefined-only check would miss. mergeContributionFields
-// below unions both sides via mergeExternalRefs (same helper sessionCache.ts's
-// session-merge path already uses) as a strict superset of that coverage
-// (Codex review, hapi#238).
+// array — built before an out-of-band `hapi link-issue`/linkIssue write (or
+// the fork's own `hapi-meta-daily.sh` tooling, which writes PR-chip fields
+// directly) landed — which an undefined-only check would miss.
+// mergeContributionFields below reconciles both sides via
+// reconcileExternalRefs (Codex review, hapi#238) as a strict superset of
+// that coverage. Explicit `[]` clears win (do not resurrect prior refs).
+// Soup then preserves PR status cache on the reconciled set.
 function mergeContributionFields(
     prior: Record<string, unknown>,
     next: Record<string, unknown>,
     merged: Record<string, unknown> | null
 ): Record<string, unknown> | null {
-    // Explicit key present (including []) means the writer spoke — do not
-    // treat a missing-key carry-forward. Empty array is an intentional clear
-    // (soup test: "lets an explicit externalRefs write win, including
-    // clearing with []"); non-empty is handled below.
-    if (Object.prototype.hasOwnProperty.call(next, 'externalRefs')) {
-        const nextRefs = isExternalRefArray(next.externalRefs) ? next.externalRefs : []
-        if (nextRefs.length === 0) {
-            return merged
-        }
-        const priorRefs = isExternalRefArray(prior.externalRefs) ? prior.externalRefs : []
-        if (priorRefs.length === 0) {
-            return merged
-        }
-        // Codex P1 (hapi#238): a sparse CLI write can carry a present-but-
-        // incomplete array (stale local cache that predates a link-issue).
-        // Only union when every next ref already existed on prior — i.e. next
-        // looks like a subset/stale snapshot, not an intentional rewrite that
-        // introduces new identities (those win outright, matching soup's
-        // explicit-replace test).
-        const nextIsSubsetOfPrior = nextRefs.every(ref =>
-            priorRefs.some(existing =>
-                existing.kind === ref.kind
-                && existing.repo.toLowerCase() === ref.repo.toLowerCase()
-                && existing.number === ref.number
-                && (() => {
-                    try {
-                        return new URL(existing.url).host.toLowerCase() === new URL(ref.url).host.toLowerCase()
-                    } catch {
-                        return existing.url === ref.url
-                    }
-                })()
-            )
-        )
-        if (!nextIsSubsetOfPrior) {
-            return merged
-        }
-        const combined = mergeExternalRefs(nextRefs, priorRefs)
-        if (combined.length === nextRefs.length) {
-            return merged
-        }
-        const result = merged ?? { ...next }
-        result.externalRefs = combined
-        return result
+    merged = carryForwardIfMissing(prior, next, merged, CONTRIBUTION_FIELDS)
+    const priorRefs = isExternalRefArray(prior.externalRefs) ? prior.externalRefs : []
+    const nextRefs = isExternalRefArray(next.externalRefs) ? next.externalRefs : []
+    // An explicit `next.externalRefs = []` is a deliberate unlink-to-empty,
+    // not a sparse/stale write merely missing some refs it didn't know
+    // about yet — those two look identical as "an empty-ish array" without
+    // this check, and reconciling prior back in here would silently
+    // resurrect an intentional clear (found during a soup absorb by Meta,
+    // confirmed by hand against this exact code, hapi#238). Only a
+    // *non-empty* next array is treated as "possibly partial/stale" and
+    // eligible for reconciliation.
+    if (priorRefs.length === 0 || nextRefs.length === 0) {
+        return merged
     }
-    return carryForwardIfMissing(prior, next, merged, CONTRIBUTION_FIELDS)
+    const result = merged ?? { ...next }
+    result.externalRefs = reconcileExternalRefs(priorRefs, nextRefs)
+    return result
 }
 
 function preserveExternalRefsStatusCache(
@@ -239,6 +212,7 @@ function preserveExternalRefsStatusCache(
         incoming
     )
     return base
+}
 }
 
 export function mergeSessionMetadata(prior: unknown, next: unknown): unknown {
