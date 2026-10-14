@@ -358,6 +358,12 @@
   box-shadow: 0 0 0 2px #16181f;
 }
 .opdock-replies-unread[hidden] { display: none !important; }
+/* #498: Open in HAPI — icon only; aria-label carries the name (never a UUID). */
+.opdock-replies-open-hapi {
+  background: none; border: none; color: #a78bfa; font-size: 15px; line-height: 1;
+  cursor: pointer; padding: 2px 4px; flex-shrink: 0;
+}
+.opdock-replies-open-hapi:hover { color: #c4b5fd; }
 .opdock-replies-close { background: none; border: none; color: #9ca3af; font-size: 15px; cursor: pointer; }
 .opdock-replies-body { padding: 10px 12px; overflow-y: auto; font-size: 13px; line-height: 1.4; flex: 1; min-height: 0; }
 .opdock-replies-compose {
@@ -439,6 +445,7 @@
   color: #f5f5f5;
 }
 .opdock-replies--min .opdock-replies-title { flex: none; font-size: 18px; line-height: 1; }
+.opdock-replies--min .opdock-replies-open-hapi { display: none; }
 .opdock-replies--min .opdock-replies-close { display: none; }
 .opdock-replies--min .opdock-replies-unread {
   position: absolute;
