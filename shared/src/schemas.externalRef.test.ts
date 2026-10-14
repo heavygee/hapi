@@ -25,6 +25,23 @@ describe('parseIssueUrl', () => {
         expect(parseIssueUrl('https://github.com/owner/repo#frag/issues/5')).toBeNull()
     })
 
+    it('accepts a port-qualified host on a full URL', () => {
+        expect(parseIssueUrl('https://ghe.example.com:8443/acme/repo/issues/7')).toEqual({
+            url: 'https://ghe.example.com:8443/acme/repo/issues/7',
+            repo: 'acme/repo',
+            number: 7
+        })
+    })
+
+    it('rejects a URL delimiter embedded in a full URL\'s host (Codex review, third pass)', () => {
+        // Regression: only the shorthand's host capture (SHORTHAND_HOST_SEGMENT,
+        // now URL_HOST_SEGMENT) was hardened against '?'/'='/'@' — the direct
+        // full-URL matcher still used the loose `[^/]+` class, so the exact
+        // same delimiter-injection gap was still open on this input form.
+        expect(parseIssueUrl('https://github.com@evil.example/owner/repo/issues/12')).toBeNull()
+        expect(parseIssueUrl('https://github.com?tab=x/owner/repo/issues/12')).toBeNull()
+    })
+
     it('rejects garbage input', () => {
         expect(parseIssueUrl('not an issue url')).toBeNull()
         expect(parseIssueUrl('heavygee/hapi#0')).toBeNull()

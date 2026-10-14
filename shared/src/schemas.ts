@@ -144,30 +144,30 @@ function finishIssueMatch(host: string, repo: string, numberRaw: string): { url:
 // character set rejects that input outright instead of silently mis-parsing
 // it (Codex review).
 const GH_NAME_SEGMENT = '[A-Za-z0-9_.-]+'
-// Host capture mirrors parseProjectUrl's `[^/]+` (hub/src/web/routes/todoBoard.ts)
-// — loose on purpose, since there's no host-allowlist boundary to enforce here.
-const ISSUE_URL_RE = new RegExp(`^(?:https?:\\/\\/)?([^/]+)\\/(${GH_NAME_SEGMENT}\\/${GH_NAME_SEGMENT})\\/issues\\/(\\d+)\\/?(?:[/?#].*)?$`, 'i')
+// Shared by both the full-URL and shorthand matchers below (Codex review,
+// third pass on this file: hardening only the shorthand's host capture and
+// leaving the full-URL one on the old loose `[^/]+` class left the exact
+// same delimiter-injection gap open on the other input form). Restricted to
+// actual hostname characters plus an optional `:port` suffix — not a loose
+// "anything but a path/fragment delimiter" class: that wider class also
+// accepted `?`/`=` (`https://github.com?tab=x/owner/repo/issues/12` /
+// `github.com?tab=x:owner/repo#12` both produce a URL a browser resolves to
+// a bare `https://github.com/` with everything else reduced to a
+// meaningless query string) and `@` (`.../github.com@evil.example/...`,
+// where `github.com` is a *userinfo* component and `evil.example` is the
+// actual host a reader could be deceived into trusting) — display-only data
+// or not, a chip whose link doesn't go where its text implies is still a
+// real trust/correctness bug. `[A-Za-z0-9.-]+` matches real hostname
+// characters only; `(?::\d+)?` optionally captures a numeric port, still
+// supporting a port-qualified GHE host without reopening the
+// delimiter-injection gap.
+const URL_HOST_SEGMENT = '[A-Za-z0-9.-]+(?::\\d+)?'
+const ISSUE_URL_RE = new RegExp(`^(?:https?:\\/\\/)?(${URL_HOST_SEGMENT})\\/(${GH_NAME_SEGMENT}\\/${GH_NAME_SEGMENT})\\/issues\\/(\\d+)\\/?(?:[/?#].*)?$`, 'i')
 // Optional `host:` prefix (design-consult review, hapi#238): the shorthand
 // originally had no way to express a GHE host at all, always resolving to
 // github.com regardless — a session guessing at syntax for a GHE item could
 // end up with a confidently-wrong link.
-//
-// Restricted to actual hostname characters plus an optional `:port` suffix
-// — not a loose "anything but / and #" class (Codex review, second pass):
-// that wider class also accepted `?`/`=` (`github.com?tab=x:owner/repo#12`
-// produced `https://github.com?tab=x/owner/repo/issues/12`, which a browser
-// parses as a bare `https://github.com/` with everything else reduced to a
-// meaningless query string) and `@` (`github.com@evil.example:owner/repo#12`
-// produced `https://github.com@evil.example/...`, where `github.com` is a
-// *userinfo* component and `evil.example` is the actual host a reader could
-// be deceived into trusting) — display-only data or not, a chip whose link
-// doesn't go where its text implies is still a real trust/correctness bug.
-// `[A-Za-z0-9.-]+` matches real hostname characters only; `(?::\d+)?`
-// optionally captures a numeric port, still supporting the port-qualified
-// GHE host case (`ghe.example.com:8443:owner/repo#12`) the first pass of
-// this fix was for, without reopening the delimiter-injection gap.
-const SHORTHAND_HOST_SEGMENT = '[A-Za-z0-9.-]+(?::\\d+)?'
-const ISSUE_SHORTHAND_RE = new RegExp(`^(?:(${SHORTHAND_HOST_SEGMENT}):)?(${GH_NAME_SEGMENT}\\/${GH_NAME_SEGMENT})#(\\d+)$`)
+const ISSUE_SHORTHAND_RE = new RegExp(`^(?:(${URL_HOST_SEGMENT}):)?(${GH_NAME_SEGMENT}\\/${GH_NAME_SEGMENT})#(\\d+)$`)
 
 export function parseIssueUrl(input: string): { url: string; repo: string; number: number } | null {
     const trimmed = input.trim()
