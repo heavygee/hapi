@@ -46,3 +46,35 @@ export function shouldExitBoardsModeForNavigation(pathname: string, sessionsMode
     if (sessionsMode !== 'boards') return false
     return SESSION_ROUTE.test(pathname)
 }
+
+/**
+ * Whether a navigation is purely a `boardItem` search-param transition —
+ * selecting/closing/switching a board item's detail view while Boards mode
+ * overlays an existing session route — and so must be exempted from
+ * `shouldExitBoardsModeForNavigation` above (Codex review, hapi#238: once
+ * `boardItem` became real router search state, selecting an item while
+ * Boards was layered over `/sessions/:id` called `navigate({ to: '.' })`,
+ * whose destination pathname is unchanged — exactly what
+ * `shouldExitBoardsModeForNavigation` treats as session-targeting, so it
+ * immediately kicked back out to Sessions mode the instant an item was
+ * selected).
+ *
+ * `pathChanged` must be false — a *genuine* navigation to the same pathname
+ * (the toast/sidebar-re-target case the function above exists for) must
+ * still exit Boards mode, and critically that case has `boardItem` absent
+ * from search on *both* sides, so checking "does either side have
+ * `boardItem` set" alone correctly leaves it unexempted. Checking either
+ * side (not just one) is what makes this symmetric across every direction
+ * the transition can run: selecting an item for the first time only sets it
+ * on `to`; the detail pane's own Back button or genuine browser/device Back
+ * popping through that same history entry only has it on `from`; switching
+ * directly between two items' details has it on both.
+ */
+export function isBoardItemDetailNavigation(
+    pathChanged: boolean,
+    fromSearch: { boardItem?: unknown },
+    toSearch: { boardItem?: unknown }
+): boolean {
+    if (pathChanged) return false
+    return typeof fromSearch.boardItem === 'string' || typeof toSearch.boardItem === 'string'
+}
