@@ -27,7 +27,7 @@ import { BoardItemDetail } from '@/components/BoardItemDetail'
 import { resolveBoardItemDirectory } from '@/lib/resolveBoardItemDirectory'
 import { buildBoardItemSpawnMessage } from '@/lib/boardItemSpawnMessage'
 import { clearBoardSpawnBriefing, peekBoardSpawnBriefing, stashBoardSpawnBriefing } from '@/lib/boardSpawnBriefing'
-import { shouldExitBoardsModeForNavigation } from '@/lib/sessionsBoardsModeSync'
+import { isBoardItemDetailNavigation, shouldExitBoardsModeForNavigation } from '@/lib/sessionsBoardsModeSync'
 import { isAbandoningSpawnFlow } from '@/lib/spawnFlowAbandonment'
 import { parseIssueUrl } from '@hapi/protocol/schemas'
 import { findSessionLinkedToIssue } from '@/lib/externalRefs'
@@ -378,8 +378,19 @@ function SessionsPage() {
     // navigation already in flight either carries no boardItem search param
     // forward at all (dropping it for free) or, for a genuine browser
     // back/forward, lands on exactly the history entry that didn't have it.
+    // isBoardItemDetailNavigation exempts the remaining case: selecting,
+    // switching, or closing (via the detail pane's own Back button, or
+    // genuine browser/device Back) a board item's detail view while Boards
+    // overlays an existing session route calls navigate() to a pathname
+    // that's unchanged — exactly what this hook otherwise treats as
+    // session-targeting (Codex review, hapi#238, second finding on this
+    // path: the first pass only fixed one-segment routes, this one covers
+    // the boardItem-search case the router-search fix itself introduced).
     useEffect(() => {
         return router.subscribe('onBeforeNavigate', (event) => {
+            if (isBoardItemDetailNavigation(event.pathChanged, event.fromLocation?.search ?? {}, event.toLocation.search)) {
+                return
+            }
             if (shouldExitBoardsModeForNavigation(event.toLocation.pathname, sessionsMode)) {
                 setSessionsMode('sessions')
             }

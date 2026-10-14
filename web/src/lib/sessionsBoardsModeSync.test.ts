@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { shouldExitBoardsModeForNavigation } from './sessionsBoardsModeSync'
+import { isBoardItemDetailNavigation, shouldExitBoardsModeForNavigation } from './sessionsBoardsModeSync'
 
 describe('shouldExitBoardsModeForNavigation', () => {
     it('exits To-Do mode on navigation to a session route, even the one already shown by the URL', () => {
@@ -45,5 +45,40 @@ describe('shouldExitBoardsModeForNavigation', () => {
 
     it('does nothing while already in Sessions mode', () => {
         expect(shouldExitBoardsModeForNavigation('/sessions/session-1', 'sessions')).toBe(false)
+    })
+})
+
+describe('isBoardItemDetailNavigation', () => {
+    it('is true when selecting a board item for the first time (boardItem only on the destination)', () => {
+        // Regression (Codex review, hapi#238): once boardItem became real
+        // router search state, selecting an item while Boards overlays an
+        // existing /sessions/:id route called navigate({ to: '.' }), whose
+        // destination pathname is unchanged — exactly what
+        // shouldExitBoardsModeForNavigation treats as session-targeting,
+        // kicking straight back to Sessions mode the instant an item was
+        // selected.
+        expect(isBoardItemDetailNavigation(false, {}, { boardItem: 'item-1' })).toBe(true)
+    })
+
+    it('is true when closing a board item (boardItem only on the origin) — the detail pane\'s own Back button or genuine browser/device Back', () => {
+        expect(isBoardItemDetailNavigation(false, { boardItem: 'item-1' }, {})).toBe(true)
+    })
+
+    it('is true when switching directly between two items\' details', () => {
+        expect(isBoardItemDetailNavigation(false, { boardItem: 'item-1' }, { boardItem: 'item-2' })).toBe(true)
+    })
+
+    it('is false for a toast/sidebar re-target to the same session with no board item involved on either side', () => {
+        // This is shouldExitBoardsModeForNavigation's own established case —
+        // a toast click re-targeting the session the URL already points to
+        // must still exit Boards mode and surface it, even though the
+        // pathname is unchanged, since neither side of this transition has
+        // anything to do with a board item at all.
+        expect(isBoardItemDetailNavigation(false, {}, {})).toBe(false)
+    })
+
+    it('is false whenever the pathname actually changes, even if boardItem is involved', () => {
+        expect(isBoardItemDetailNavigation(true, { boardItem: 'item-1' }, {})).toBe(false)
+        expect(isBoardItemDetailNavigation(true, {}, { boardItem: 'item-1' })).toBe(false)
     })
 })
