@@ -53,14 +53,13 @@ export function hasLiveWork(session: Session): boolean {
  * Positive evidence that archive may soft stand-down past an unconfirmed
  * StopSession (`still_alive` / `unknown`) — tiann/hapi#2020.
  *
- * Absence of `thinking` alone is NOT enough: `expireInactive` clears thinking
- * when keepalives die, even if the OS process is mid-turn. Requiring either
- * keepalive-idle lifecycle or a still-connected (`active`) row keeps
- * disconnected mid-turn workers on the refuse path until stop is confirmed.
+ * Only a still-connected row (`active`) with no hub-visible work is fresh
+ * enough. `expireInactive` clears thinking without clearing a stale
+ * `lifecycleState=idle`, and cache restore initializes thinking=false - so
+ * idle lifecycle alone is unknown after transport loss (#2021 Major).
  */
 export function canSoftStandDownUnconfirmedStop(session: Session): boolean {
     if (hasLiveWork(session)) return false
-    if (session.metadata?.lifecycleState === SESSION_LIFECYCLE_IDLE) return true
     return session.active === true
 }
 

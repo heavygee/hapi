@@ -2970,16 +2970,13 @@ export class SyncEngine {
                 }
             }
             if (status === 'still_alive' || status === 'unknown') {
-                // tiann/hapi#2020: Peer Done / idle workers may still report
+                // tiann/hapi#2020: Peer Done workers may still report
                 // still_alive after KillSession+StopSession (ghost keepalive).
-                // Soft stand-down with hub-authored archive so orchestrators
-                // can archive without DELETE. Refuse when the agent has live
-                // work (thinking / background tasks / pending requests) so
-                // archive does not yank a genuinely WORKING peer.
+                // Soft stand-down only while still connected with no live work
+                // - never trust cleared thinking or stale lifecycle=idle after
+                // transport expiry (#2021 Majors). Soup maps refuse to
+                // SessionArchiveUncontrollableError (409 session_uncontrollable).
                 const live = this.sessionCache.getSession(sessionId)
-                // #2021: require positive idle evidence (keepalive-idle or
-                // still-connected + !hasLiveWork) — refuse expireInactive-cleared
-                // thinking as Peer Done.
                 if (!live || !canSoftStandDownUnconfirmedStop(live)) {
                     throw new SessionArchiveUncontrollableError(sessionId)
                 }
