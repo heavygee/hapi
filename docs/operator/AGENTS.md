@@ -13,6 +13,7 @@ Prefer progressive loading: **[feature-work-lifecycle.md](../tooling/feature-wor
 | When | Do | Detail |
 |------|----|--------|
 | Any local feature / soup / peer work | Read lifecycle first | [`feature-work-lifecycle.md`](../tooling/feature-work-lifecycle.md) (sole workflow) |
+| New product behavior / fix in `cli/` `hub/` `web/` `shared/` | **Issue first** — search, else file (`tiann/hapi` if upstream-destined), **then** worktree, **then** code | Fail-closed: [`.cursor/rules/hapi-product-code-guard.mdc`](../../.cursor/rules/hapi-product-code-guard.mdc); intake [§4](../tooling/new-feature-intake.md#4--issue-first-then-worktree). Mic/voice/mocks do not waive. |
 | Ready to open an upstream PR? | **Stop** unless `:3006` dogfood already passed (or operator waived in chat) | Soup-promote → operator click-test → **then** `hapi-pr-create`. Never `gh pr create` → `tiann/hapi` first. Premature open → convert to **draft** and remat. |
 | Push Homelab/Teemo / “fleet upgrade”? | **Only after operator speaks a fleet-seal phrase** — never agent-proposed | Phrases: `fleet seal` / `good enough for fleet` / `seal tip <tag>`. Same signal ⇒ open upstream PR if destined upstream. Remat/tip ≠ seal. Lifecycle [§ Ship / done](../tooling/feature-work-lifecycle.md#ship--done-semantics). Standalone personal hubs not in oos fleet unless named. |
 | Standalone personal hub auto-update from seal? | Poll **seal contract**, not dogfood `latest` | Canon [`2026-10-13-fleet-seal-contract.md`](../plans/2026-10-13-fleet-seal-contract.md): `fleet-latest` + `manifest.json`; **digest ≠ on-disk** only (never tag/date alone). |
@@ -671,6 +672,8 @@ Vitest; `*.test.ts` next to source; hub + cli tests; no web tests currently.
 When the operator asks for **new product behavior**, follow [`docs/tooling/new-feature-intake.md`](../tooling/new-feature-intake.md) end-to-end.
 
 **Orchestrator** completes steps 1-3 (and usually 4-5), then spawns a **feature peer** with the mandatory handoff block in that doc (completed steps vs peer-owned steps).
+
+**Issue before code (non-negotiable):** search / file a tracker (`tiann/hapi` for upstream-destined work) **before** product commits, soup tip-forward, or "implement this mock." See high-signal index row + [`.cursor/rules/hapi-product-code-guard.mdc`](../../.cursor/rules/hapi-product-code-guard.mdc). Do not invent a spike exception that skips the issue and then soup-promotes.
 
 **Feature peer** implements in **`~/coding/hapi/worktrees/<name>`** (created via `hapi-worktree-create <name> --branch <branch>`) — not in `~/coding/hapi/driver` by hand. For §6 Playwright / visual evidence, use **`hapi-peer-stack up`** (isolated hub on `3100–3199`, registry `~/.hapi-peer/`) so proof does not yank `:3006`. **Always soup-promote** the tip for estate dogfood on `:3006` (heal/union if needed) — peer stack is not a substitute: peer retips layer + manifest, then pings **Meta tooling** to compose (peers do not run `hapi-driver-rebuild`). Pass §6 **and** get soup composed **before** asking the operator to browser-test on `:3006`. Upstream PR only after operator dogfood approval (§8). Use **`hapi-pr-create`** to open the PR — it enforces the closes-keyword + leak scan.
 

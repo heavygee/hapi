@@ -43,7 +43,7 @@ Copy and fill this block (do not spawn a peer with only "implement X"):
 - [ ] 1 Code search — DONE: <paths or "none found">
 - [ ] 2 Upstream search — DONE: <issue/PR links or "no match">
 - [ ] 3 Playback — DONE: operator confirmed on <date>
-- [ ] 4 Issue — <issue URL> OR spike-only (no issue yet)
+- [ ] 4 Issue — <issue URL on tiann/hapi or heavygee/hapi> (**required before product commits**; spike-without-issue = no commits / no soup)
 - [ ] 5 Proof path — **peer stack** (Playwright) **+ soup promote** (default dogfood) | clean only if parity review — `localdocs/peer-stack.env` when peer stack
 
 ## Your assignment (feature peer)
@@ -145,14 +145,16 @@ Before any implementation, send the operator a short **playback**:
 
 Wait for confirmation or correction.
 
-### 4 — Issue vs worktree-first
+### 4 — Issue first (then worktree)
 
-Operator chooses:
+**Hard gate:** a tracking issue exists **before** any product-code commit, soup layer tip, or "implement the mock" turn. This is not optional until dogfood.
 
 | Choice | Action |
 |--------|--------|
-| **Open issue** | Create issue on `tiann/hapi` (use `gh api` + jq for bodies with backticks — see github-cli-safety skill) |
-| **Spike first** | `hapi-worktree-create <name> --branch feat/...` from `upstream/main`; issue optional until dogfood passes |
+| **Open issue (default)** | Create issue on `tiann/hapi` for upstream-destined work (use `gh api` + jq for bodies with backticks — see github-cli-safety skill). Fork-private → `heavygee/hapi`. Link the session (`link_issue`). |
+| **Spike only** | Throwaway exploration **without** product commits and **without** soup promote. If the spike graduates to real work, **file the issue before the first product commit**. |
+
+Do **not** treat operator mic / voice / interrupt as a waive. Incident 2026-10-14: affordance work reached a soup tip before [tiann/hapi#2019](https://github.com/tiann/hapi/issues/2019) existed — that sequencing is forbidden.
 
 Upstream PR branches stay **`upstream/main...HEAD`** for review. Soup manifest merge order is **local only** — see [driver-soup.md](./driver-soup.md).
 
