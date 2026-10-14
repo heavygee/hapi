@@ -1212,14 +1212,15 @@ layers:
   # Web-only → remat --build-web; hard-reload (no hub restart required).
   - branch: driver/2015-session-scroll-into-view
 
-  # tiann/hapi#2020 — first-class archive_peer / hapi archive-peer soft stand-down.
+  # tiann/hapi#2020 - first-class archive_peer / hapi archive-peer soft stand-down.
   # CLI+MCP twin of ping_peer; hub allows Peer Done (non-thinking) archive when
   # StopSession still reports still_alive/unknown, refuses WORKING (hasLiveWork).
-  # Upstream-aimed tip: feat/archive-peer-2020 @ 49d43e818
-  #   (c9e8177c3 + fix: canSoftStandDownUnconfirmedStop — refuse expireInactive-
-  #    cleared thinking as idle; require keepalive-idle or still-connected)
+  # Upstream-aimed tip: feat/archive-peer-2020 @ de758a55b
+  #   (c9e8177c3 + 49d43e818 expireInactive thinking guard + de758a55b refuse
+  #    stale lifecycle=idle after transport expiry; soft stand-down = active
+  #    && !hasLiveWork only)
   # Worktree: ~/coding/hapi/worktrees/archive-peer-2020
-  # Hub+cli → remat (no --build-web required) + hapi-restart-hub; Cursor MCP
+  # Hub+cli -> remat (no --build-web required) + hapi-restart-hub; Cursor MCP
   # sessions may need resume before archive_peer appears in the tool list.
   # Tip-unique verify: `archive_peer` in cli startHappyServer toolNames +
   # canSoftStandDownUnconfirmedStop in hub syncEngine.archiveSession.
