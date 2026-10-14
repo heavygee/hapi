@@ -1334,9 +1334,13 @@ export const BoardItemCommentRequestSchema = z.object({
 })
 export type BoardItemCommentRequest = z.infer<typeof BoardItemCommentRequestSchema>
 
+// `status: null` clears the field (`gh project item-edit --clear`) — a
+// project can legitimately move a card back to the unassigned/no-status
+// bucket, and the picker previously had no way to express that once an item
+// already had a status (Codex review, hapi#238).
 export const BoardItemStatusRequestSchema = z.object({
     url: z.string().min(1),
-    status: z.string().min(1)
+    status: z.string().min(1).nullable()
 })
 export type BoardItemStatusRequest = z.infer<typeof BoardItemStatusRequestSchema>
 

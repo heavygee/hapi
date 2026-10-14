@@ -184,4 +184,28 @@ describe('SessionRowSummary background status', () => {
         renderSummary(true)
         expect(screen.queryByTestId('issue-ref-chip')).not.toBeInTheDocument()
     })
+
+    it('suppresses the issue chip when showIssueChip is false, even with a linked issue (Codex review)', () => {
+        // Regression: the composer's @-mention tooltip is pointer-events-none
+        // (display-only), but a real <a> stays keyboard-focusable even
+        // inside one, landing an unreachable-by-mouse link in the tab order
+        // inside a transient role="tooltip" container.
+        const session = makeSummary({
+            metadata: {
+                path: '/demo/status',
+                name: 'Background demo',
+                flavor: 'claude',
+                externalRefs: [
+                    { kind: 'github_issue', url: 'https://github.com/heavygee/hapi/issues/235', repo: 'heavygee/hapi', number: 235, linkedAt: 1 },
+                ],
+            },
+        })
+        render(
+            <I18nProvider>
+                <SessionRowSummary session={session} showIssueChip={false} />
+            </I18nProvider>
+        )
+
+        expect(screen.queryByTestId('issue-ref-chip')).not.toBeInTheDocument()
+    })
 })

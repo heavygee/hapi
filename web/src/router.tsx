@@ -464,12 +464,22 @@ function SessionsPage() {
         [sessions, selectedBoardItem]
     )
     const handleOpenLinkedBoardSession = useCallback((sessionId: string) => {
+        // Explicit, not left to the onBeforeNavigate subscriber's
+        // isBoardItemDetailNavigation exemption (Codex review, hapi#238):
+        // if the linked session IS the one Boards is already overlaying,
+        // this navigate() call is same-pathname with boardItem only on the
+        // origin — structurally identical to closing the item detail via
+        // Back, which that exemption deliberately keeps in Boards mode. But
+        // "Open session" is a genuinely different, explicit action that must
+        // always surface the chat, so it sets sessionsMode itself rather
+        // than relying on navigation-shape inference to get it right.
+        setSessionsMode('sessions')
         navigate({
             to: '/sessions/$sessionId',
             params: { sessionId },
             ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
-    }, [navigate])
+    }, [navigate, setSessionsMode])
     // Item detail reuses the session-detail right-pane slot, so it needs the
     // same mobile show/hide signal `isSessionsIndex` drives for sessions —
     // but it's local state, not a route, so it has to opt in explicitly here
