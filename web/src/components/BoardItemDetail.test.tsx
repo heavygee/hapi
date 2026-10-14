@@ -232,8 +232,21 @@ describe('BoardItemDetail assignee picker', () => {
             ]
         })
         fireEvent.click(screen.getByLabelText('Add assignee'))
-        expect(screen.getByText('Hubot')).toBeInTheDocument()
-        expect(screen.getByText('octocat')).toBeInTheDocument()
+        expect(screen.getByText('Hubot (@hubot)')).toBeInTheDocument()
+        expect(screen.getByText('@octocat')).toBeInTheDocument()
+    })
+
+    it('includes the login alongside the name, so two users sharing a display name stay distinguishable (Codex review)', () => {
+        renderDetail({
+            item: makeItem({ assignees: [] }),
+            assignableUsers: [
+                { login: 'alex-hub', avatarUrl: 'https://example.com/a.png', name: 'Alex' },
+                { login: 'alex-corp', avatarUrl: 'https://example.com/b.png', name: 'Alex' }
+            ]
+        })
+        fireEvent.click(screen.getByLabelText('Add assignee'))
+        expect(screen.getByText('Alex (@alex-hub)')).toBeInTheDocument()
+        expect(screen.getByText('Alex (@alex-corp)')).toBeInTheDocument()
     })
 
     it('adds an unassigned user from the picker list, calling onSetAssignees with the addition', () => {
@@ -242,7 +255,7 @@ describe('BoardItemDetail assignee picker', () => {
             assignableUsers: [{ login: 'octocat', avatarUrl: 'https://example.com/a.png', name: null }]
         })
         fireEvent.click(screen.getByLabelText('Add assignee'))
-        fireEvent.click(screen.getByText('octocat'))
+        fireEvent.click(screen.getByText('@octocat'))
         expect(onSetAssignees).toHaveBeenCalledWith(['octocat'], [])
     })
 
@@ -253,9 +266,9 @@ describe('BoardItemDetail assignee picker', () => {
         })
         fireEvent.click(screen.getByLabelText('Add assignee'))
         // The already-assigned chip's remove button is named "Remove octocat"
-        // — the picker row's own button (no aria-label) is named "octocat"
-        // from its content, distinguishing the two "octocat" buttons.
-        fireEvent.click(screen.getByRole('button', { name: 'octocat' }))
+        // — the picker row's own button (no aria-label) is named "@octocat"
+        // from its content, distinguishing the two buttons.
+        fireEvent.click(screen.getByRole('button', { name: '@octocat' }))
         expect(onSetAssignees).toHaveBeenCalledWith([], ['octocat'])
     })
 
@@ -283,7 +296,7 @@ describe('BoardItemDetail assignee picker', () => {
             assignableUsers: [{ login: 'octocat', avatarUrl: 'https://example.com/a.png', name: null }]
         })
         fireEvent.click(screen.getByLabelText('Add assignee'))
-        expect(screen.getByText('octocat').closest('button')).toBeDisabled()
+        expect(screen.getByText('@octocat').closest('button')).toBeDisabled()
     })
 
     it('debounces the search box before notifying the parent — a 50-row page with no pagination needed a way to reach users past it (Codex review)', () => {

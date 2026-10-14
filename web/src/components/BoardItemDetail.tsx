@@ -132,7 +132,12 @@ function AssigneePicker(props: {
                                             className="flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-xs text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] disabled:opacity-50"
                                         >
                                             <img src={user.avatarUrl} alt="" className="h-4 w-4 shrink-0 rounded-full" />
-                                            <span className="min-w-0 flex-1 truncate">{user.name ?? user.login}</span>
+                                            {/* Always includes the login, not just the display name (Codex
+                                                review, hapi#238): two assignable users can share the same
+                                                non-null name, making name-only rows indistinguishable. */}
+                                            <span className="min-w-0 flex-1 truncate">
+                                                {user.name ? `${user.name} (@${user.login})` : `@${user.login}`}
+                                            </span>
                                             {isAssigned ? <CheckIcon className="h-3.5 w-3.5 shrink-0 text-[var(--app-link)]" /> : null}
                                         </button>
                                     </li>

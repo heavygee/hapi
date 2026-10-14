@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isBoardItemDetailNavigation, shouldExitBoardsModeForNavigation } from './sessionsBoardsModeSync'
+import { isBoardItemDetailNavigation, isHistoryPopNavigation, shouldExitBoardsModeForNavigation } from './sessionsBoardsModeSync'
 
 describe('shouldExitBoardsModeForNavigation', () => {
     it('exits To-Do mode on navigation to a session route, even the one already shown by the URL', () => {
@@ -80,5 +80,25 @@ describe('isBoardItemDetailNavigation', () => {
     it('is false whenever the pathname actually changes, even if boardItem is involved', () => {
         expect(isBoardItemDetailNavigation(true, { boardItem: 'item-1' }, {})).toBe(false)
         expect(isBoardItemDetailNavigation(true, {}, { boardItem: 'item-1' })).toBe(false)
+    })
+})
+
+describe('isHistoryPopNavigation', () => {
+    it('is true for a genuine Back — landing on a lower index than any seen so far', () => {
+        expect(isHistoryPopNavigation(0, 1)).toBe(true)
+    })
+
+    it('is true for a genuine Forward — re-landing on an index already seen (even if it equals the current max)', () => {
+        expect(isHistoryPopNavigation(1, 1)).toBe(true)
+    })
+
+    it('is false for a fresh push — a brand-new index higher than any seen so far', () => {
+        // Regression (Codex review, hapi#238): a toast or in-chat session
+        // link targeting the same session Boards is already overlaying with
+        // an item selected is event-shape-identical, via plain location
+        // diffing, to closing that item via Back — only the history index
+        // tells them apart. A fresh navigate() call always stamps a new,
+        // higher index, never one already seen.
+        expect(isHistoryPopNavigation(2, 1)).toBe(false)
     })
 })

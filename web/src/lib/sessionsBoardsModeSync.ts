@@ -69,6 +69,18 @@ export function shouldExitBoardsModeForNavigation(pathname: string, sessionsMode
  * on `to`; the detail pane's own Back button or genuine browser/device Back
  * popping through that same history entry only has it on `from`; switching
  * directly between two items' details has it on both.
+ *
+ * IMPORTANT (Codex review, hapi#238, third finding on this path): this
+ * predicate alone is NOT enough to decide the exemption — it must only be
+ * consulted for navigations that `isHistoryPopNavigation` identifies as
+ * replaying existing browser history (device/browser Back or Forward). A
+ * toast or in-chat session link that happens to target the *same* session
+ * Boards is already overlaying with an item selected is event-shape-identical
+ * to closing that item via Back (same pathname, `boardItem` only on the
+ * origin) — but it's a *fresh* `navigate()` push, not a history replay, and
+ * must still exit Boards mode to surface that session's chat. Pure
+ * before/after location-diffing can't tell these two apart; only the
+ * underlying history action (push vs. pop) can. See `isHistoryPopNavigation`.
  */
 export function isBoardItemDetailNavigation(
     pathChanged: boolean,
@@ -77,4 +89,31 @@ export function isBoardItemDetailNavigation(
 ): boolean {
     if (pathChanged) return false
     return typeof fromSearch.boardItem === 'string' || typeof toSearch.boardItem === 'string'
+}
+
+/**
+ * Whether a navigation is replaying an already-existing browser history entry
+ * (device/browser Back or Forward) rather than pushing a brand-new one (a
+ * fresh `navigate()` call from app code — selecting a board item, a toast
+ * click, an in-chat session link, ...).
+ *
+ * TanStack Router stamps every history entry with a monotonically increasing
+ * `__TSR_index` at push time; Back/Forward can only ever land on an index
+ * that was already stamped by some earlier push, while a brand-new push
+ * always gets a fresh index one higher than any seen so far (`REPLACE`
+ * keeps the current index, which also counts as "already seen"). Comparing
+ * the destination's index against the highest index observed so far is
+ * therefore a reliable push-vs-pop signal that plain before/after location
+ * diffing (`isBoardItemDetailNavigation` above) cannot provide on its own —
+ * two structurally identical transitions (same pathname, `boardItem` only on
+ * the origin) can be either a genuine Back-through-history or an unrelated
+ * fresh push to a route that happens to look the same, and only the index
+ * relationship distinguishes them (Codex review, hapi#238).
+ *
+ * Callers must track `maxIndexSeen` across navigations themselves (it is not
+ * global router state) and update it to `Math.max(maxIndexSeen, toIndex)`
+ * after each call, regardless of the result.
+ */
+export function isHistoryPopNavigation(toIndex: number, maxIndexSeen: number): boolean {
+    return toIndex <= maxIndexSeen
 }
