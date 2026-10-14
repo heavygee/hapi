@@ -160,15 +160,10 @@ function isExternalRefArray(value: unknown): value is ExternalRef[] {
 
 // Named CONTRIBUTION_FIELDS (matching scripts/tooling/verify-
 // externalrefs-preserve.mjs's incident-driven check for this exact field +
-// name) and carried forward via the same carryForwardIfMissing used by the
-// tiers above — that alone covers the omitted-key sparse-write case. But a
-// array — built before an out-of-band `hapi link-issue`/linkIssue write (or
-// the fork's own `hapi-meta-daily.sh` tooling, which writes PR-chip fields
-// directly) landed — which an undefined-only check would miss.
-// mergeContributionFields below reconciles both sides via
-// reconcileExternalRefs (Codex review, hapi#238) as a strict superset of
-// that coverage. Explicit `[]` clears win (do not resurrect prior refs).
-// Soup then preserves PR status cache on the reconciled set.
+// name). Omitted-key sparse writes use carryForwardIfMissing; present-but-
+// incomplete arrays use reconcileExternalRefs (Codex review, hapi#238).
+// Explicit `[]` clears win (do not resurrect prior refs). Soup then
+// preserves PR status cache on the reconciled set.
 function mergeContributionFields(
     prior: Record<string, unknown>,
     next: Record<string, unknown>,
@@ -212,7 +207,6 @@ function preserveExternalRefsStatusCache(
         incoming
     )
     return base
-}
 }
 
 export function mergeSessionMetadata(prior: unknown, next: unknown): unknown {
