@@ -1684,7 +1684,8 @@ describe('sessions routes', () => {
             const response = await app.request('/api/sessions/session-1/archive', { method: 'POST' })
             expect(response.status).toBe(409)
             expect(await response.json()).toEqual({
-                error: 'Session process is still running and could not be stopped'
+                error: 'Session process is still running and could not be stopped',
+                code: 'session_uncontrollable'
             })
         })
 

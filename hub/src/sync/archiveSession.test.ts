@@ -127,6 +127,8 @@ describe('archiveSession (#1911 runner reaping / #1203 successor)', () => {
         const { engine } = createEngine()
         try {
             const session = seedActiveSession(engine, 'still-alive', { machineId: 'machine-1' })
+            // #2020: soft stand-down only for Peer Done; WORKING must still refuse.
+            engine.getSessionByNamespace(session.id, 'default')!.thinking = true
             const rpc = gateway(engine)
             rpc.killSession = async (sessionId) => {
                 throw missingKill(sessionId)
@@ -214,6 +216,8 @@ describe('archiveSession (#1911 runner reaping / #1203 successor)', () => {
         const { engine } = createEngine()
         try {
             const session = seedActiveSession(engine, 'both-missing-live', { machineId: 'machine-1' })
+            // #2020: soft stand-down only for Peer Done; WORKING must still refuse.
+            engine.getSessionByNamespace(session.id, 'default')!.thinking = true
             const rpc = gateway(engine)
             rpc.killSession = async (sessionId) => {
                 throw missingKill(sessionId)
@@ -236,6 +240,7 @@ describe('archiveSession (#1911 runner reaping / #1203 successor)', () => {
         const { engine } = createEngine()
         try {
             const session = seedActiveSession(engine, 'both-missing-dead', { machineId: 'machine-1' })
+            engine.getSessionByNamespace(session.id, 'default')!.thinking = true
             engine.handleSessionEnd({ sid: session.id, time: Date.now() })
             const rpc = gateway(engine)
             rpc.killSession = async (sessionId) => {
