@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import type { BoardItem } from '@/types/api'
+import * as Popover from '@radix-ui/react-popover'
+import type { BoardAssignableUser, BoardItem } from '@/types/api'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { SessionLinkedBadge } from '@/components/SessionLinkedBadge'
 import { Spinner } from '@/components/Spinner'
-import { ExternalLinkIcon, PlusCircleIcon, RefreshIcon } from '@/components/icons'
+import { CheckIcon, CloseIcon, ExternalLinkIcon, PlusCircleIcon, PlusIcon, RefreshIcon } from '@/components/icons'
 import { chipBaseClass, chipIdleClass } from '@/components/filterChipStyles'
 import { getApiErrorMessage } from '@/lib/apiErrorMessage'
 import { formatAbsoluteDateTime, formatRelativeTime } from '@/lib/relativeTime'
@@ -35,6 +36,85 @@ function TimestampRow(props: { label: string; iso: string | null; t: (key: strin
             <span>{props.label}:</span>
             <span title={formatAbsoluteDateTime(ms) ?? undefined}>{relative}</span>
         </div>
+    )
+}
+
+// Click-to-toggle checklist, not a multi-select-then-confirm form (design-
+// consult review, hapi#238) — matches GitHub's own assignee picker and
+// avoids tracking a separate draft-vs-committed selection state. Each row
+// fires a single add-or-remove call immediately; `isPending` disables the
+// whole list during that one in-flight request rather than per-row, since a
+// second toggle before the first settles would race against it anyway.
+// Assignable users are fetched on open (`onOpenChange`), not eagerly on
+// every render — one GraphQL call per visible card would be wasteful for
+// data nobody may ever open the picker to see.
+function AssigneePicker(props: {
+    currentLogins: ReadonlySet<string>
+    users: BoardAssignableUser[]
+    isLoadingUsers: boolean
+    usersError: string | null
+    isPending: boolean
+    onOpenChange: (open: boolean) => void
+    onToggle: (login: string, currentlyAssigned: boolean) => void
+    t: (key: string, params?: Record<string, string | number>) => string
+}) {
+    const [open, setOpen] = useState(false)
+    return (
+        <Popover.Root
+            open={open}
+            onOpenChange={(next) => {
+                setOpen(next)
+                props.onOpenChange(next)
+            }}
+        >
+            <Popover.Trigger asChild>
+                <button
+                    type="button"
+                    aria-label={props.t('boards.detail.addAssignee')}
+                    title={props.t('boards.detail.addAssignee')}
+                    className="flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-[var(--app-border)] text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]"
+                >
+                    <PlusIcon className="h-3 w-3" />
+                </button>
+            </Popover.Trigger>
+            <Popover.Portal>
+                <Popover.Content
+                    side="bottom"
+                    align="start"
+                    sideOffset={6}
+                    collisionPadding={8}
+                    className="z-50 max-h-64 w-56 overflow-y-auto rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] p-1 shadow-lg"
+                >
+                    {props.isLoadingUsers ? (
+                        <div className="flex justify-center p-2"><Spinner size="sm" /></div>
+                    ) : props.usersError ? (
+                        <div className="p-2 text-xs text-red-600">{props.usersError}</div>
+                    ) : props.users.length === 0 ? (
+                        <div className="p-2 text-xs text-[var(--app-hint)]">{props.t('boards.detail.noAssignableUsers')}</div>
+                    ) : (
+                        <ul>
+                            {props.users.map(user => {
+                                const isAssigned = props.currentLogins.has(user.login)
+                                return (
+                                    <li key={user.login}>
+                                        <button
+                                            type="button"
+                                            disabled={props.isPending}
+                                            onClick={() => props.onToggle(user.login, isAssigned)}
+                                            className="flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-xs text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] disabled:opacity-50"
+                                        >
+                                            <img src={user.avatarUrl} alt="" className="h-4 w-4 shrink-0 rounded-full" />
+                                            <span className="min-w-0 flex-1 truncate">{user.name ?? user.login}</span>
+                                            {isAssigned ? <CheckIcon className="h-3.5 w-3.5 shrink-0 text-[var(--app-link)]" /> : null}
+                                        </button>
+                                    </li>
+                                )
+                            })}
+                        </ul>
+                    )}
+                </Popover.Content>
+            </Popover.Portal>
+        </Popover.Root>
     )
 }
 
@@ -69,10 +149,16 @@ export function BoardItemDetail(props: {
     onReopen: () => void
     onComment: (body: string) => Promise<void>
     onSetStatus: (status: string) => void
+    assignableUsers: BoardAssignableUser[]
+    isLoadingAssignableUsers: boolean
+    assignableUsersError: string | null
+    onAssigneePickerOpenChange: (open: boolean) => void
+    onSetAssignees: (addLogins: string[], removeLogins: string[]) => void
     isClosing: boolean
     isReopening: boolean
     isCommenting: boolean
     isSettingStatus: boolean
+    isSettingAssignees: boolean
 }) {
     const { t } = useTranslation()
     const { item, linkedSessionId } = props
@@ -144,15 +230,49 @@ export function BoardItemDetail(props: {
                             {t('boards.detail.openedBy', { login: item.author.login })}
                         </span>
                     ) : null}
-                    {item.assignees.length > 0 ? (
+                    {item.assignees.length > 0 || canWrite ? (
                         <span className="inline-flex flex-wrap items-center gap-1.5">
                             {t('boards.detail.assignees')}:
                             {item.assignees.map(assignee => (
-                                <span key={assignee.login} className="inline-flex items-center gap-1">
+                                <span
+                                    key={assignee.login}
+                                    className="inline-flex items-center gap-1 rounded-full border border-[var(--app-border)] py-0.5 pl-1 pr-1.5"
+                                >
                                     <img src={assignee.avatarUrl} alt="" className="h-4 w-4 rounded-full" />
                                     {assignee.login}
+                                    {canWrite ? (
+                                        <button
+                                            type="button"
+                                            disabled={props.isSettingAssignees}
+                                            onClick={() => props.onSetAssignees([], [assignee.login])}
+                                            aria-label={t('boards.detail.removeAssignee', { login: assignee.login })}
+                                            title={t('boards.detail.removeAssignee', { login: assignee.login })}
+                                            className="text-[var(--app-hint)] hover:text-[var(--app-fg)] disabled:opacity-50"
+                                        >
+                                            <CloseIcon className="h-3 w-3" />
+                                        </button>
+                                    ) : null}
                                 </span>
                             ))}
+                            {canWrite ? (
+                                <AssigneePicker
+                                    currentLogins={new Set(item.assignees.map(a => a.login))}
+                                    users={props.assignableUsers}
+                                    isLoadingUsers={props.isLoadingAssignableUsers}
+                                    usersError={props.assignableUsersError}
+                                    isPending={props.isSettingAssignees}
+                                    onOpenChange={props.onAssigneePickerOpenChange}
+                                    onToggle={(login, currentlyAssigned) => {
+                                        if (currentlyAssigned) {
+                                            props.onSetAssignees([], [login])
+                                        } else {
+                                            props.onSetAssignees([login], [])
+                                        }
+                                    }}
+                                    t={t}
+                                />
+                            ) : null}
+                            {props.isSettingAssignees ? <Spinner size="sm" label={t('boards.detail.changingAssignees')} /> : null}
                         </span>
                     ) : null}
                     {item.labels.map(label => (

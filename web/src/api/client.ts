@@ -23,6 +23,7 @@ import type {
     SlashCommandsResponse,
     SkillsResponse,
     SpawnResponse,
+    AssignableUsersResponse,
     BoardItemsResponse,
     BoardsResponse,
     VisibilityPayload,
@@ -807,6 +808,19 @@ export class ApiClient {
         await this.request(`/api/todo-boards/${encodeURIComponent(boardId)}/items/status`, {
             method: 'POST',
             body: JSON.stringify({ url, status })
+        })
+    }
+
+    async getBoardItemAssignableUsers(boardId: string, url: string): Promise<AssignableUsersResponse> {
+        return await this.request<AssignableUsersResponse>(
+            `/api/todo-boards/${encodeURIComponent(boardId)}/items/assignable-users?url=${encodeURIComponent(url)}`
+        )
+    }
+
+    async setBoardItemAssignees(boardId: string, url: string, addLogins: string[], removeLogins: string[]): Promise<void> {
+        await this.request(`/api/todo-boards/${encodeURIComponent(boardId)}/items/assignees`, {
+            method: 'POST',
+            body: JSON.stringify({ url, addLogins, removeLogins })
         })
     }
 

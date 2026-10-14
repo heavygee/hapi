@@ -3,10 +3,13 @@ import { promisify } from 'node:util'
 import { Hono } from 'hono'
 import {
     AddBoardRequestSchema,
+    BoardItemAssigneesRequestSchema,
     BoardItemCloseRequestSchema,
     BoardItemCommentRequestSchema,
     BoardItemReopenRequestSchema,
     BoardItemStatusRequestSchema,
+    type AssignableUsersResponse,
+    type BoardAssignableUser,
     type BoardItem,
     type BoardItemsResponse,
     type BoardsResponse
@@ -450,6 +453,50 @@ function isMemberOfProject(response: GhResourceProjectMembershipResponse, ownerL
     )
 }
 
+// Verified by hand against the real GitHub API (`gh api graphql`): returns
+// exactly the fields the existing read-only assignee display already uses
+// (login + avatarUrl), plus name for a friendlier picker label — assignees
+// are scoped to the item's own repo, not the board's project owner (a
+// project can span multiple repos on its host), hence a dedicated query
+// keyed by owner+repo rather than reusing the project-level queries above.
+const ASSIGNABLE_USERS_QUERY = `
+query($owner: String!, $repo: String!) {
+  repository(owner: $owner, name: $repo) {
+    assignableUsers(first: 50) {
+      nodes { login avatarUrl name }
+    }
+  }
+}`
+
+type GhAssignableUsersResponse = {
+    data?: {
+        repository?: {
+            assignableUsers?: {
+                nodes?: Array<{ login: string; avatarUrl: string; name?: string | null } | null>
+            } | null
+        } | null
+    }
+    errors?: Array<{ message: string }>
+}
+
+type AssignableUsersTarget = { host: string; owner: string; repo: string }
+
+async function runGhGraphqlAssignableUsers(target: AssignableUsersTarget): Promise<GhAssignableUsersResponse> {
+    const stdout = await execGhGraphql(target.host, ASSIGNABLE_USERS_QUERY, { owner: target.owner, repo: target.repo })
+    try {
+        return JSON.parse(stdout) as GhAssignableUsersResponse
+    } catch {
+        throw new Error('gh api graphql returned non-JSON output')
+    }
+}
+
+function toAssignableUsers(response: GhAssignableUsersResponse): BoardAssignableUser[] {
+    const nodes = response.data?.repository?.assignableUsers?.nodes ?? []
+    return nodes
+        .filter((node): node is { login: string; avatarUrl: string; name?: string | null } => node !== null)
+        .map(node => ({ login: node.login, avatarUrl: node.avatarUrl, name: node.name ?? null }))
+}
+
 const execFileAsync = promisify(execFile)
 
 type ProjectQueryTarget = {
@@ -539,6 +586,7 @@ export type BoardItemActions = {
     reopen: (target: BoardItemActionTarget, comment?: string) => Promise<void>
     comment: (target: BoardItemActionTarget, body: string) => Promise<void>
     setStatus: (target: BoardItemStatusTarget) => Promise<void>
+    setAssignees: (target: BoardItemActionTarget, addLogins: string[], removeLogins: string[]) => Promise<void>
 }
 
 export const defaultBoardItemActions: BoardItemActions = {
@@ -570,6 +618,18 @@ export const defaultBoardItemActions: BoardItemActions = {
             '--value', target.status
         ]
         await execGh(args, target.host)
+    },
+    // Confirmed by hand (`gh issue/pr edit --help`, gh 2.98.0): both flags
+    // support comma-separated multiple logins and can be combined in a
+    // single invocation. Routed through the same `requireBoardAndValidUrl`
+    // gate the other write actions use — assignee changes get the same
+    // project-membership/view-filter verification, not a quieter exception
+    // (design-consult review, hapi#238).
+    setAssignees: async (target, addLogins, removeLogins) => {
+        const args = [target.isPullRequest ? 'pr' : 'issue', 'edit', target.url]
+        if (addLogins.length > 0) args.push('--add-assignee', addLogins.join(','))
+        if (removeLogins.length > 0) args.push('--remove-assignee', removeLogins.join(','))
+        await execGh(args, target.host)
     }
 }
 
@@ -578,7 +638,7 @@ export const defaultBoardItemActions: BoardItemActions = {
 // pass an arbitrary URL and have the hub shell out `gh issue close
 // <attacker-controlled-url>` against it, the same SSRF-class exposure the
 // board-add host allowlist closed for reads (hapi#238).
-export type ValidatedItemUrl = { url: string; isPullRequest: boolean }
+export type ValidatedItemUrl = { url: string; isPullRequest: boolean; owner: string; repo: string }
 
 // Confirmed by hand: `gh issue/pr close|reopen|comment <url>` dials the URL's
 // own embedded host for the network request regardless of GH_HOST or any
@@ -620,7 +680,9 @@ export function parseValidatedItemUrl(url: string, board: Pick<StoredTodoBoard, 
     const [, owner, repo, kind, number] = match
     return {
         url: `https://${parsed.host}/${owner}/${repo}/${kind}/${number}`,
-        isPullRequest: kind === 'pull'
+        isPullRequest: kind === 'pull',
+        owner: owner!,
+        repo: repo!
     }
 }
 
@@ -858,7 +920,8 @@ export function createBoardRoutes(
     runGraphqlTitle: (target: ProjectLookupTarget) => GhProjectTitleResponse | Promise<GhProjectTitleResponse> = runGhGraphqlTitle,
     runGraphqlView: (target: ProjectViewLookupTarget) => GhProjectViewResponse | Promise<GhProjectViewResponse> = runGhGraphqlView,
     actions: BoardItemActions = defaultBoardItemActions,
-    runGraphqlMembership: (target: ProjectMembershipTarget) => GhResourceProjectMembershipResponse | Promise<GhResourceProjectMembershipResponse> = runGhGraphqlProjectMembership
+    runGraphqlMembership: (target: ProjectMembershipTarget) => GhResourceProjectMembershipResponse | Promise<GhResourceProjectMembershipResponse> = runGhGraphqlProjectMembership,
+    runGraphqlAssignableUsers: (target: AssignableUsersTarget) => GhAssignableUsersResponse | Promise<GhAssignableUsersResponse> = runGhGraphqlAssignableUsers
 ): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
@@ -1029,7 +1092,7 @@ export function createBoardRoutes(
         boardId: string,
         url: string
     ): Promise<
-        | { ok: true; board: StoredTodoBoard; url: string; isPullRequest: boolean }
+        | { ok: true; board: StoredTodoBoard; url: string; isPullRequest: boolean; owner: string; repo: string }
         | { ok: false; error: string; status: 400 | 404 | 502 }
     > {
         const boards = await loadBoards(dataDir)
@@ -1097,7 +1160,7 @@ export function createBoardRoutes(
                 return { ok: false, error: 'Item is not visible in this board\'s view', status: 400 }
             }
         }
-        return { ok: true, board, url: validated.url, isPullRequest: validated.isPullRequest }
+        return { ok: true, board, url: validated.url, isPullRequest: validated.isPullRequest, owner: validated.owner, repo: validated.repo }
     }
 
     app.post('/todo-boards/:id/items/close', async (c) => {
@@ -1188,6 +1251,65 @@ export function createBoardRoutes(
             return c.json({ ok: true })
         } catch (error) {
             return c.json({ error: error instanceof Error ? error.message : 'Failed to update status' }, 502)
+        }
+    })
+
+    // Populates the assignee picker (design-consult review, hapi#238) —
+    // routed through the same requireBoardAndValidUrl gate as every write
+    // action below, not just the writes, so a caller can't use this as a
+    // side-channel to enumerate assignable users on a repo outside the
+    // board's project/view either.
+    app.get('/todo-boards/:id/items/assignable-users', async (c) => {
+        if (c.get('namespace') !== 'default') {
+            return c.json({ error: OWNER_ONLY_ERROR }, 403)
+        }
+        const url = c.req.query('url')
+        if (!url) {
+            return c.json({ error: 'Missing url query parameter' }, 400)
+        }
+        const resolved = await requireBoardAndValidUrl(c.req.param('id'), url)
+        if (!resolved.ok) {
+            return c.json({ error: resolved.error }, resolved.status)
+        }
+        try {
+            const response = await runGraphqlAssignableUsers({ host: resolved.board.host, owner: resolved.owner, repo: resolved.repo })
+            if (response.errors?.length) {
+                return c.json({ error: response.errors.map(e => e.message).join('; ') }, 502)
+            }
+            const body: AssignableUsersResponse = { users: toAssignableUsers(response) }
+            return c.json(body)
+        } catch (error) {
+            return c.json({ error: error instanceof Error ? error.message : 'Failed to fetch assignable users' }, 502)
+        }
+    })
+
+    app.post('/todo-boards/:id/items/assignees', async (c) => {
+        if (c.get('namespace') !== 'default') {
+            return c.json({ error: OWNER_ONLY_ERROR }, 403)
+        }
+        const json = await c.req.json().catch(() => null)
+        const parsed = BoardItemAssigneesRequestSchema.safeParse(json)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body — expected { url: string, addLogins?: string[], removeLogins?: string[] }' }, 400)
+        }
+        const addLogins = parsed.data.addLogins ?? []
+        const removeLogins = parsed.data.removeLogins ?? []
+        if (addLogins.length === 0 && removeLogins.length === 0) {
+            return c.json({ error: 'Must specify at least one of addLogins or removeLogins' }, 400)
+        }
+        const resolved = await requireBoardAndValidUrl(c.req.param('id'), parsed.data.url)
+        if (!resolved.ok) {
+            return c.json({ error: resolved.error }, resolved.status)
+        }
+        try {
+            await actions.setAssignees(
+                { host: resolved.board.host, url: resolved.url, isPullRequest: resolved.isPullRequest },
+                addLogins,
+                removeLogins
+            )
+            return c.json({ ok: true })
+        } catch (error) {
+            return c.json({ error: error instanceof Error ? error.message : 'Failed to update assignees' }, 502)
         }
     })
 
