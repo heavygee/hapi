@@ -1823,12 +1823,11 @@ export class SyncEngine {
                 }
             }
             if (status === 'still_alive' || status === 'unknown') {
-                // tiann/hapi#2020: Peer Done / idle workers may still report
+                // tiann/hapi#2020: Peer Done workers may still report
                 // still_alive after KillSession+StopSession (ghost keepalive).
-                // Soft stand-down only with positive idle evidence (keepalive-
-                // idle lifecycle, or still-connected + no live work) — not
-                // merely cleared thinking after expireInactive, which can
-                // hide a disconnected mid-turn worker (bot Major on #2021).
+                // Soft stand-down only while still connected with no live work
+                // - never trust cleared thinking or stale lifecycle=idle after
+                // transport expiry (#2021 Majors).
                 const live = this.sessionCache.getSession(sessionId)
                 if (!live || !canSoftStandDownUnconfirmedStop(live)) {
                     throw new Error('Session process is still running and could not be stopped')

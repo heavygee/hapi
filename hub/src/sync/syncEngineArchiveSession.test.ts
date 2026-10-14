@@ -127,12 +127,30 @@ describe('SyncEngine.archiveSession runner reaping (#1910)', () => {
         expect(cache().getSession(sessionId)?.metadata?.lifecycleState).not.toBe('archived')
     })
 
-    it('archives keepalive-idle lifecycle even when active flipped false (#2020)', async () => {
-        const sessionId = insertActiveSession('sess-idle-lifecycle', 'machine-x')
+    it('refuses still_alive when lifecycle is idle but transport already expired (#2021 Major)', async () => {
+        // Stale lifecycleState=idle after disconnect is not fresh idle evidence:
+        // the OS process may have started local work while the hub still shows
+        // idle + thinking=false (expireInactive / cache restore).
+        const sessionId = insertActiveSession('sess-idle-lifecycle-stale', 'machine-x')
         const live = cache().getSession(sessionId)!
         live.active = false
         live.thinking = false
         live.metadata = { ...live.metadata!, lifecycleState: 'idle' }
+
+        setKillSessionMissingTarget()
+        ;(engine as unknown as { rpcGateway: { stopRunnerSession: unknown } }).rpcGateway.stopRunnerSession =
+            async () => 'still_alive'
+
+        await expect(engine.archiveSession(sessionId)).rejects.toThrow(/still running/)
+        expect(cache().getSession(sessionId)?.metadata?.lifecycleState).toBe('idle')
+    })
+
+    it('archives still-connected keepalive-idle Peer Done when StopSession is still_alive (#2020)', async () => {
+        const sessionId = insertActiveSession('sess-idle-lifecycle-connected', 'machine-x')
+        const live = cache().getSession(sessionId)!
+        live.thinking = false
+        live.metadata = { ...live.metadata!, lifecycleState: 'idle' }
+        expect(live.active).toBe(true)
 
         setKillSessionMissingTarget()
         ;(engine as unknown as { rpcGateway: { stopRunnerSession: unknown } }).rpcGateway.stopRunnerSession =
