@@ -84,7 +84,7 @@ import {
     type RpcUploadFileResponse
 } from './rpcGateway'
 import { SessionCache } from './sessionCache'
-import { hasLiveWork } from './sessionIdle'
+import { canSoftStandDownUnconfirmedStop } from './sessionIdle'
 import { OverseerEventRecorder, toSessionSnapshot } from './overseerEventRecorder'
 import { createOverseerLlmFallbackClient } from './overseerLlmFallback'
 import { loadOverseerLlmFallbackConfig, redactOverseerLlmBaseUrlForLog } from './overseerLlmFallbackConfig'
@@ -2977,7 +2977,10 @@ export class SyncEngine {
                 // work (thinking / background tasks / pending requests) so
                 // archive does not yank a genuinely WORKING peer.
                 const live = this.sessionCache.getSession(sessionId)
-                if (!live || hasLiveWork(live)) {
+                // #2021: require positive idle evidence (keepalive-idle or
+                // still-connected + !hasLiveWork) — refuse expireInactive-cleared
+                // thinking as Peer Done.
+                if (!live || !canSoftStandDownUnconfirmedStop(live)) {
                     throw new SessionArchiveUncontrollableError(sessionId)
                 }
                 // Fall through: hub-author archive metadata below.
