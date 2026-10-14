@@ -245,4 +245,25 @@ describe('reconcileExternalRefs', () => {
         const nextRef = { kind: 'github_pr', url: 'https://github.com/heavygee/hapi/pull/9', repo: 'heavygee/hapi', number: 9, status: 'merged' } as ExternalRef
         expect(reconcileExternalRefs([priorRef], [nextRef])).toEqual([priorRef])
     })
+
+    it("prefers next's entry on a tied linkedAt when next has a newer statusCheckedAt — a legitimate status refresh", () => {
+        // Regression (Codex review, hapi#238, third finding on this path):
+        // hapi-meta-daily.sh's md_refs_apply_status refreshes status/
+        // statusCheckedAt on every check WITHOUT bumping linkedAt — comparing
+        // linkedAt alone made every such refresh look like a tie, which
+        // previously defaulted to keeping prior. That was the right call
+        // when PRIOR held the fresher out-of-band update (see the preceding
+        // test), but wrong here: this is the refresh ARRIVING as `next`
+        // through the normal write path, and discarding it left the cached
+        // chip status stuck on stale data forever.
+        const staleRef = { kind: 'github_pr', url: 'https://github.com/heavygee/hapi/pull/9', repo: 'heavygee/hapi', number: 9, linkedAt: 5, status: 'open', statusCheckedAt: 100 } as ExternalRef
+        const freshRef = { kind: 'github_pr', url: 'https://github.com/heavygee/hapi/pull/9', repo: 'heavygee/hapi', number: 9, linkedAt: 5, status: 'merged', statusCheckedAt: 200 } as ExternalRef
+        expect(reconcileExternalRefs([staleRef], [freshRef])).toEqual([freshRef])
+    })
+
+    it('still prefers a higher linkedAt over a higher statusCheckedAt — linkedAt is the primary clock', () => {
+        const priorRef = { kind: 'github_issue', url: 'https://github.com/heavygee/hapi/issues/9', repo: 'heavygee/hapi', number: 9, linkedAt: 10, statusCheckedAt: 500 } as ExternalRef
+        const nextRef = { kind: 'github_issue', url: 'https://github.com/heavygee/hapi/issues/9', repo: 'heavygee/hapi', number: 9, linkedAt: 5, statusCheckedAt: 999 } as ExternalRef
+        expect(reconcileExternalRefs([priorRef], [nextRef])).toEqual([priorRef])
+    })
 })

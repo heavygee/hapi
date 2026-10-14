@@ -1164,6 +1164,36 @@ describe('updateSessionMetadata: protocol resume token preservation', () => {
         expect(metadata?.externalRefs).toEqual([freshPrRef])
     })
 
+    // Codex review (hapi#238, third finding on this path): hapi-meta-daily.sh's
+    // own status-refresh writes bump statusCheckedAt without touching
+    // linkedAt — comparing linkedAt alone made every such refresh a tie,
+    // which defaulted to keeping prior (correct for the test above, where
+    // PRIOR held the fresher out-of-band update) but wrong here, where the
+    // refresh is itself the incoming `next` write and got discarded,
+    // leaving the cached chip status stuck forever.
+    it('accepts a status refresh arriving as the write itself, even though linkedAt is unchanged', () => {
+        const store = makeStore()
+        const stalePrRef = { kind: 'github_pr', url: 'https://github.com/acme/repo/pull/9', repo: 'acme/repo', number: 9, linkedAt: 5, status: 'open', statusCheckedAt: 100 }
+        const session = store.sessions.getOrCreateSession(
+            'accept-status-refresh-same-linkedat',
+            { path: '/tmp/project', host: 'example', externalRefs: [stalePrRef] },
+            null,
+            'default'
+        )
+
+        const freshPrRef = { kind: 'github_pr', url: 'https://github.com/acme/repo/pull/9', repo: 'acme/repo', number: 9, linkedAt: 5, status: 'merged', statusCheckedAt: 200 }
+        const result = store.sessions.updateSessionMetadata(
+            session.id,
+            { path: '/tmp/project', host: 'example', externalRefs: [freshPrRef] },
+            session.metadataVersion,
+            'default'
+        )
+        expect(result.result).toBe('success')
+
+        const metadata = getMetadata(store, session.id)
+        expect(metadata?.externalRefs).toEqual([freshPrRef])
+    })
+
     it('still applies a legitimate re-link with a bumped linkedAt over the prior entry', () => {
         const store = makeStore()
         const oldRef = { kind: 'github_issue', url: 'https://github.com/acme/repo/issues/1', repo: 'acme/repo', number: 1, linkedAt: 1 }
