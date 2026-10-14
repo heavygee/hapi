@@ -240,8 +240,10 @@ describe('archiveSession (#1911 runner reaping / #1203 successor)', () => {
         const { engine } = createEngine()
         try {
             const session = seedActiveSession(engine, 'both-missing-dead', { machineId: 'machine-1' })
-            engine.getSessionByNamespace(session.id, 'default')!.thinking = true
             engine.handleSessionEnd({ sid: session.id, time: Date.now() })
+            // #2020: stamp WORKING after end so soft stand-down does not archive
+            // an unconfirmed StopSession miss (thinking cleared by handleSessionEnd).
+            engine.getSessionByNamespace(session.id, 'default')!.thinking = true
             const rpc = gateway(engine)
             rpc.killSession = async (sessionId) => {
                 throw missingKill(sessionId)
