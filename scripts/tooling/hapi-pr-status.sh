@@ -201,26 +201,43 @@ HEAD_SHA=$(gh pr view "$PR" --repo "$REPO" --json headRefOid --jq '.headRefOid' 
 # (false CLEAN when an older page ended Findings:None, or false FINDINGS when
 # an older page still had [Major]). --slurp + jq `add` merges pages first.
 if [[ "$OWNER" == "heavygee" ]]; then
-    # Fork: prefer formal Codex reviews (### 💡 Codex Review + Reviewed commit);
-    # fall back to issue-comments (usage-limit notices, older shapes).
-    LATEST_REVIEW=$(gh api "repos/${REPO}/pulls/${PR}/reviews" --paginate --slurp 2>/dev/null \
-        | jq '[add[]
-            | select((.user.login == "chatgpt-codex-connector[bot]"
-                or .user.login == "chatgpt-codex-connector")
-                and ((.body // "") | test("Codex Review|Reviewed commit")))]
-            | sort_by(.submitted_at) | reverse | .[0] // null' \
-        2>/dev/null || echo "null")
-    LATEST_COMMENT=$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate --slurp 2>/dev/null \
-        | jq '[add[]
-            | select(.user.login == "chatgpt-codex-connector[bot]"
-                or .user.login == "chatgpt-codex-connector")]
-            | sort_by(.created_at) | reverse | .[0] // null' \
-        2>/dev/null || echo "null")
-    CLEAN_REGEX="Codex Review:.*Didn.t find any|Codex Review:.*No.*issues|Didn.t find any major|No reportable (code )?issues found|No findings"
+    # Fork Codex posts TWO shapes:
+    #   - findings waves → formal PR reviews (### 💡 Codex Review + Reviewed commit)
+    #   - zero-findings → often a plain issue comment ("Didn't find any major issues"
+    #     + Reviewed commit) with NO review object — must merge both timelines by time
+    #     or tip-match falsely sticks on an older findings review (#238 2026-10-14).
     BOT_DESC="chatgpt-codex-connector[bot]"
+    CLEAN_REGEX="Codex Review:.*Didn.t find any|Codex Review:.*No.*issues|Didn.t find any major|No reportable (code )?issues found|No findings"
+    # Temp files — PR review payloads are too large for jq --argjson argv limits.
+    REVIEWS_TMP=$(mktemp)
+    COMMENTS_TMP=$(mktemp)
+    # shellcheck disable=SC2064
+    trap 'rm -f "$REVIEWS_TMP" "$COMMENTS_TMP"' RETURN
+    gh api "repos/${REPO}/pulls/${PR}/reviews" --paginate --slurp >"$REVIEWS_TMP" 2>/dev/null || echo '[]' >"$REVIEWS_TMP"
+    gh api "repos/${REPO}/issues/${PR}/comments" --paginate --slurp >"$COMMENTS_TMP" 2>/dev/null || echo '[]' >"$COMMENTS_TMP"
+    LATEST_EVENT=$(jq -n --slurpfile reviews "$REVIEWS_TMP" --slurpfile comments "$COMMENTS_TMP" '
+        def is_codex: (.user.login == "chatgpt-codex-connector[bot]"
+            or .user.login == "chatgpt-codex-connector");
+        def has_reviewed_commit: ((.body // "") | test("Reviewed commit"));
+        def pages: if type == "array" and length > 0 and (.[0]|type) == "array" then add else . end;
+        ($reviews[0] | pages // []) as $r
+        | ($comments[0] | pages // []) as $c
+        | ([ $r[]? | select(is_codex and has_reviewed_commit)
+             | {kind:"review", at:.submitted_at, body:(.body // "")} ]
+           + [ $c[]? | select(is_codex and has_reviewed_commit)
+             | {kind:"comment", at:.created_at, body:(.body // "")} ])
+        | sort_by(.at) | reverse | .[0] // null
+        ' 2>/dev/null || echo "null")
+    LATEST_ANY_COMMENT=$(jq -n --slurpfile comments "$COMMENTS_TMP" '
+        def pages: if type == "array" and length > 0 and (.[0]|type) == "array" then add else . end;
+        ($comments[0] | pages // [])
+        | [.[]? | select(.user.login == "chatgpt-codex-connector[bot]"
+            or .user.login == "chatgpt-codex-connector")]
+        | sort_by(.created_at) | reverse | .[0] // null
+        ' 2>/dev/null || echo "null")
     USAGE_LIMIT=false
-    if [[ "$LATEST_COMMENT" != "null" && -n "$LATEST_COMMENT" ]]; then
-        CMT_BODY=$(echo "$LATEST_COMMENT" | jq -r '.body // empty')
+    if [[ "$LATEST_ANY_COMMENT" != "null" && -n "$LATEST_ANY_COMMENT" ]]; then
+        CMT_BODY=$(echo "$LATEST_ANY_COMMENT" | jq -r '.body // empty')
         if printf '%s' "$CMT_BODY" | grep -qiE 'usage limits for code reviews|Codex usage limits'; then
             USAGE_LIMIT=true
         fi
@@ -228,25 +245,20 @@ if [[ "$OWNER" == "heavygee" ]]; then
     REVIEWED_SHA=""
     SUBMITTED=""
     BODY=""
-    if [[ "$LATEST_REVIEW" != "null" && -n "$LATEST_REVIEW" ]]; then
-        SUBMITTED=$(echo "$LATEST_REVIEW" | jq -r '.submitted_at')
-        BODY=$(echo "$LATEST_REVIEW" | jq -r '.body // empty')
+    KIND=""
+    if [[ "$LATEST_EVENT" != "null" && -n "$LATEST_EVENT" ]]; then
+        KIND=$(echo "$LATEST_EVENT" | jq -r '.kind')
+        SUBMITTED=$(echo "$LATEST_EVENT" | jq -r '.at')
+        BODY=$(echo "$LATEST_EVENT" | jq -r '.body // empty')
         REVIEWED_SHA=$(printf '%s' "$BODY" | grep -oE 'Reviewed commit:\*\* `[0-9a-f]{7,40}`|Reviewed commit: `[0-9a-f]{7,40}`' \
             | head -1 | grep -oE '[0-9a-f]{7,40}' | head -1)
-        echo "     Source: ${BOT_DESC} review"
+        echo "     Source: ${BOT_DESC} ${KIND}"
         echo "     Last run: ${SUBMITTED}"
         [[ -n "$REVIEWED_SHA" ]] && echo "     Reviewed commit: ${REVIEWED_SHA}"
         echo "$BODY" | head -c 300 | sed 's/^/     /'
         echo ""
-    elif [[ "$LATEST_COMMENT" != "null" && -n "$LATEST_COMMENT" ]]; then
-        SUBMITTED=$(echo "$LATEST_COMMENT" | jq -r '.created_at')
-        BODY=$(echo "$LATEST_COMMENT" | jq -r '.body // empty')
-        echo "     Source: ${BOT_DESC} comment"
-        echo "     Last run: ${SUBMITTED}"
-        echo "$BODY" | head -c 300 | sed 's/^/     /'
-        echo ""
     else
-        echo "     ? No ${BOT_DESC} review/comment found"
+        echo "     ? No ${BOT_DESC} review/comment with Reviewed commit found"
         BODY=""
     fi
 
@@ -259,8 +271,7 @@ if [[ "$OWNER" == "heavygee" ]]; then
             TIP_AHEAD=true
         fi
         echo "     Tip HEAD: ${HEAD_SHA:0:12}  tip-matched=$TIP_MATCHED tip-ahead=$TIP_AHEAD"
-    elif [[ -n "$HEAD_SHA" && -z "$REVIEWED_SHA" && "$LATEST_REVIEW" != "null" ]]; then
-        # Review present but no parsed SHA — treat as unknown match
+    elif [[ -n "$HEAD_SHA" && -z "$REVIEWED_SHA" && -n "$BODY" ]]; then
         echo "     Tip HEAD: ${HEAD_SHA:0:12}  (could not parse Reviewed commit from body)"
     fi
 
@@ -278,18 +289,19 @@ if [[ "$OWNER" == "heavygee" ]]; then
         BOT_OK=false
         PASS=1
     elif [[ -z "$BODY" ]]; then
-        if [[ "$HAS_CLEAN_LABEL" == "true" ]]; then
-            echo "     ✓ cold-review-clean label present (operator override; no bot body)"
-            echo "     → PASS"
+        # Never treat parse failure / missing Reviewed-commit events as clean via label.
+        echo "     → UNKNOWN (no Reviewed-commit Codex event; cold-review-clean does not invent tip-match)"
+        BOT_OK=false
+        PASS=1
+    elif printf '%s' "$BODY" | sed 's/\\n/ /g' | tr '\n' ' ' | grep -qE "$CLEAN_REGEX"; then
+        if $TIP_MATCHED; then
+            echo "     → PASS (tip-matched clean body)"
         else
-            echo "     → UNKNOWN"
+            echo "     → FAIL (clean body but not tip-matched — unexpected)"
             BOT_OK=false
             PASS=1
         fi
-    elif printf '%s' "$BODY" | sed 's/\\n/ /g' | tr '\n' ' ' | grep -qE "$CLEAN_REGEX"; then
-        echo "     → PASS (tip-matched clean body)"
-    elif [[ "$HAS_CLEAN_LABEL" == "true" ]] && { $TIP_MATCHED || [[ -z "$REVIEWED_SHA" ]]; }; then
-        # Override only when this wave is tip-matched (or unparseable SHA on current review).
+    elif [[ "$HAS_CLEAN_LABEL" == "true" ]] && $TIP_MATCHED; then
         echo "     ✓ cold-review-clean label present (operator override on tip-matched/accepted wave)"
         echo "     → PASS"
     else
