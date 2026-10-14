@@ -507,6 +507,36 @@ describe('providerCredentials', () => {
             })
         })
 
+        it('does not let an invalid env value break status for every other provider', async () => {
+            dir = makeTempDir()
+            writeFileSync(join(dir, 'settings.json'), JSON.stringify({
+                providerCredentials: { OPENAI_API_KEY: 'sk-live-openai' }
+            }))
+            process.env.ELEVENLABS_MAX_DURATION_SECONDS = 'not-a-number'
+            await applyProviderCredentialsFromSettings(dir)
+
+            // The hot path (actually issuing a voice token) must still fail loudly.
+            expect(() => getConfiguredElevenLabsMaxDurationSeconds()).toThrow(/must be an integer between/)
+
+            // But viewing/updating credentials status is shared by every provider and
+            // must not 500 just because ElevenLabs' duration env var is misconfigured.
+            const status = await getTranscriptionCredentialStatus(dir)
+            expect(status.elevenLabsMaxDurationSeconds).toEqual({
+                value: 1800,
+                source: 'env',
+                editable: false,
+            })
+            expect(status.openai).toEqual({
+                configured: true,
+                source: 'settings',
+                hint: '••••enai',
+                editable: true,
+            })
+
+            const updated = await updateTranscriptionCredentials(dir, { groq: 'gsk-live-groq' })
+            expect(updated.groq.configured).toBe(true)
+        })
+
         it('ignores a stale out-of-range value already on disk rather than crashing', async () => {
             dir = makeTempDir()
             writeFileSync(join(dir, 'settings.json'), JSON.stringify({ elevenLabsMaxDurationSeconds: 9999 }))

@@ -123,10 +123,18 @@ export function getConfiguredElevenLabsMaxDurationSeconds(): number {
 
 function buildMaxDurationStatus(maxDurationSeconds: number | undefined): MaxDurationStatus {
     if (isMaxDurationEnvLocked()) {
-        return {
-            value: resolveVoiceMaxDurationSeconds(process.env.ELEVENLABS_MAX_DURATION_SECONDS),
-            source: 'env',
-            editable: false,
+        // A misconfigured env value still throws where it must (token issuance,
+        // via getConfiguredElevenLabsMaxDurationSeconds) so voice stays broken
+        // loudly until fixed. Here it must not take down the status/update
+        // endpoints shared by every other provider's credentials.
+        try {
+            return {
+                value: resolveVoiceMaxDurationSeconds(process.env.ELEVENLABS_MAX_DURATION_SECONDS),
+                source: 'env',
+                editable: false,
+            }
+        } catch {
+            return { value: VOICE_MAX_DURATION_DEFAULT_SECONDS, source: 'env', editable: false }
         }
     }
     if (maxDurationSeconds !== undefined) {

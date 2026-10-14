@@ -981,7 +981,7 @@ describe('transcription credentials onboarding', () => {
         const headers = { ...(await authHeaders()), 'content-type': 'application/json' }
 
         const defaultGet = await app.request('/api/voice/transcription/credentials', { headers })
-        expect((await defaultGet.json() as { elevenLabsMaxDurationSeconds: { value: number; source: string } }).elevenLabsMaxDurationSeconds)
+        expect((await defaultGet.json() as { elevenLabsMaxDurationSeconds: { value: number; source: string; editable: boolean } }).elevenLabsMaxDurationSeconds)
             .toEqual({ value: 1800, source: 'none', editable: true })
 
         const put = await app.request('/api/voice/transcription/credentials', {
@@ -990,7 +990,7 @@ describe('transcription credentials onboarding', () => {
             body: JSON.stringify({ elevenLabsMaxDurationSeconds: 3600 }),
         })
         expect(put.status).toBe(200)
-        expect((await put.json() as { elevenLabsMaxDurationSeconds: { value: number; source: string } }).elevenLabsMaxDurationSeconds)
+        expect((await put.json() as { elevenLabsMaxDurationSeconds: { value: number; source: string; editable: boolean } }).elevenLabsMaxDurationSeconds)
             .toEqual({ value: 3600, source: 'settings', editable: true })
 
         // Same process, no restart: the next token request's agent-creation payload
