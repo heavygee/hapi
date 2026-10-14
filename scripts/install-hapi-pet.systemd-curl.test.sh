@@ -16,6 +16,7 @@ out="$(cat "$SCRIPT" | bash -s -- --help 2>"$err")" || fail "piped --help exited
 rg -qi 'unbound variable|BASH_SOURCE' "$err" && fail "piped --help printed unbound BASH_SOURCE: $(cat "$err")"
 [[ "$out" == *"--with-systemd"* ]] || fail "piped --help missing --with-systemd docs"
 [[ "$out" == *"--fleet-policy"* ]] || fail "piped --help missing --fleet-policy docs"
+[[ "$out" == *"default auto"* ]] || fail "piped --help should document default auto policy"
 [[ "$out" == *"hapi-fleet"* ]] || fail "piped --help missing hapi-fleet channel docs"
 pass "piped --help (no unbound BASH_SOURCE)"
 
