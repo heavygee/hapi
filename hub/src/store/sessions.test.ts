@@ -502,32 +502,35 @@ describe('updateSessionMetadata: protocol resume token preservation', () => {
         store.close()
     })
 
-    it('lets an explicit externalRefs write win, including clearing with []', () => {
+    it('appends a new externalRef identity and clears only via explicit []', () => {
+        // Boards tip reconcileExternalRefs keeps prior identities on a
+        // non-empty write (sparse/stale-safe); unlink is explicit [].
         const store = makeStore()
+        const prior = {
+            kind: 'github_pr' as const,
+            repo: 'tiann/hapi',
+            number: 1160,
+            url: 'https://github.com/tiann/hapi/pull/1160',
+            role: 'primary' as const
+        }
         const session = store.sessions.getOrCreateSession(
             'external-refs-explicit',
             {
                 path: '/tmp/project',
                 host: 'example',
                 flavor: 'cursor',
-                externalRefs: [{
-                    kind: 'github_pr',
-                    repo: 'tiann/hapi',
-                    number: 1160,
-                    url: 'https://github.com/tiann/hapi/pull/1160',
-                    role: 'primary'
-                }]
+                externalRefs: [prior]
             },
             null,
             'default'
         )
 
-        const replacement = [{
-            kind: 'github_pr',
+        const added = [{
+            kind: 'github_pr' as const,
             repo: 'owner/other',
             number: 42,
             url: 'https://github.com/owner/other/pull/42',
-            role: 'secondary'
+            role: 'secondary' as const
         }]
         let version = session.metadataVersion
         let result = store.sessions.updateSessionMetadata(
@@ -536,14 +539,14 @@ describe('updateSessionMetadata: protocol resume token preservation', () => {
                 path: '/tmp/project',
                 host: 'example',
                 flavor: 'cursor',
-                externalRefs: replacement
+                externalRefs: added
             },
             version,
             'default'
         )
         expect(result.result).toBe('success')
         if (result.result === 'success') version = result.version
-        expect(getMetadata(store, session.id)?.externalRefs).toEqual(replacement)
+        expect(getMetadata(store, session.id)?.externalRefs).toEqual([prior, ...added])
 
         result = store.sessions.updateSessionMetadata(
             session.id,
