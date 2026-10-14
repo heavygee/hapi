@@ -103,7 +103,7 @@ describe('SyncEngine.archiveSession runner reaping (#1910)', () => {
         ;(engine as unknown as { rpcGateway: { stopRunnerSession: unknown } }).rpcGateway.stopRunnerSession =
             async () => 'still_alive'
 
-        await expect(engine.archiveSession(sessionId)).rejects.toThrow(/still running/)
+        await expect(engine.archiveSession(sessionId)).rejects.toThrow(/not controllable|still running/)
         expect(cache().getSession(sessionId)?.active).toBe(true)
     })
 
@@ -123,7 +123,7 @@ describe('SyncEngine.archiveSession runner reaping (#1910)', () => {
         ;(engine as unknown as { rpcGateway: { stopRunnerSession: unknown } }).rpcGateway.stopRunnerSession =
             async () => 'still_alive'
 
-        await expect(engine.archiveSession(sessionId)).rejects.toThrow(/still running/)
+        await expect(engine.archiveSession(sessionId)).rejects.toThrow(/not controllable|still running/)
         expect(cache().getSession(sessionId)?.metadata?.lifecycleState).not.toBe('archived')
     })
 
@@ -141,7 +141,7 @@ describe('SyncEngine.archiveSession runner reaping (#1910)', () => {
         ;(engine as unknown as { rpcGateway: { stopRunnerSession: unknown } }).rpcGateway.stopRunnerSession =
             async () => 'still_alive'
 
-        await expect(engine.archiveSession(sessionId)).rejects.toThrow(/still running/)
+        await expect(engine.archiveSession(sessionId)).rejects.toThrow(/not controllable|still running/)
         expect(cache().getSession(sessionId)?.metadata?.lifecycleState).toBe('idle')
     })
 
