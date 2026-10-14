@@ -4,8 +4,11 @@
 # Linux/Crostini container, a fresh VPS, any hand-set-up Linux box).
 #
 # FORK-ONLY fleet product (heavygee/hapi): by default inherits Layer A seal poll
-# against the moving GH channel `hapi-fleet` + fleet-upgrade policy `alert`
-# (silent|alert|auto). Canon: docs/plans/2026-10-13-fleet-seal-contract.md (#257).
+# against the moving GH channel `hapi-fleet` + fleet-upgrade policy `auto`
+# (silent|alert|auto). Taking the fork fleet one-liner is the choice — auto apply
+# is the unopinionated default; alert/silent are explicit opt-outs via
+# --fleet-policy= / HAPI_FLEET_UPGRADE_POLICY. Canon:
+# docs/plans/2026-10-13-fleet-seal-contract.md (#257).
 # Foundry/oos must leave HAPI_UPSTREAM_SEAL_URL unset (ouroboros).
 #
 # Safe to re-run: running this again on an already-installed box performs an in-place
@@ -20,7 +23,7 @@
 # Usage:
 #   HAPI_ARTIFACT_URL=<url-or-path-to-hapi-binary> bash install-hapi-pet.sh
 #   curl -fsSL …/install-hapi-pet.sh | bash -s -- --with-systemd
-#   HAPI_FLEET_UPGRADE_POLICY=auto bash install-hapi-pet.sh --with-systemd
+#   HAPI_FLEET_UPGRADE_POLICY=alert bash install-hapi-pet.sh --with-systemd  # opt out of auto
 #   HAPI_SKIP_UPSTREAM_SEAL=1 bash install-hapi-pet.sh   # break-glass: no Layer A
 #
 # See docs/plans/2026-09-04-fleet-vm-swap-strategy.md §6 for the full history of what
@@ -38,8 +41,10 @@ HAPI_FLEET_GH_CHANNEL_TAG="${HAPI_FLEET_GH_CHANNEL_TAG:-hapi-fleet}"
 # Layer A primary poll (#256/#257). Empty + HAPI_SKIP_UPSTREAM_SEAL=1 disables.
 HAPI_UPSTREAM_SEAL_URL="${HAPI_UPSTREAM_SEAL_URL:-}"
 HAPI_SKIP_UPSTREAM_SEAL="${HAPI_SKIP_UPSTREAM_SEAL:-0}"
-# Hub default policy poles: silent | alert | auto (protocol DEFAULT is alert).
-HAPI_FLEET_UPGRADE_POLICY="${HAPI_FLEET_UPGRADE_POLICY:-alert}"
+# Pet-install default poles: silent | alert | auto.
+# Fork fleet one-liner default is auto (operator policy 2026-10-14) — not the
+# protocol-wide DEFAULT_FLEET_UPGRADE_POLICY (still alert for hubs that never seed).
+HAPI_FLEET_UPGRADE_POLICY="${HAPI_FLEET_UPGRADE_POLICY:-auto}"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 NVM_VERSION="v0.39.7"
 NODE_MIN_MAJOR=22
@@ -75,8 +80,8 @@ Usage:
 
 --with-systemd         Install user-level systemd units (works via curl|bash;
                        units are embedded — no git checkout required).
---fleet-policy=POLE    silent | alert | auto (default alert). Seeds settings.json
-                       fleetUpgradePolicy when unset.
+--fleet-policy=POLE    silent | alert | auto (default auto). Seeds settings.json
+                       fleetUpgradePolicy when unset. alert/silent are opt-outs.
 --skip-upstream-seal   Do not wire HAPI_UPSTREAM_SEAL_URL (foundry/break-glass).
 
 Default artifact + Layer A poll use the FORK fleet channel

@@ -12,7 +12,7 @@ One command installs:
 
 It does **not** log Claude Code into your Anthropic account — that's a separate step you do by hand, on purpose.
 
-**It also joins you to the fleet by default** — see "Staying on the fleet" below before you install, if you want a say in how that works for you.
+**It also joins you to the fleet by default, with automatic upgrades on** — see "Staying on the fleet" below before you install if you want something other than that.
 
 ## Install
 
@@ -79,16 +79,17 @@ version shows up — this is a **pull**, not a push: nothing reaches onto your m
 uninvited, your install just checks a public URL and decides what to do based on your
 own setting.
 
-Three settings, pick one at install time:
+Three settings, pick one at install time — running the plain install command with no
+flag means **`auto`**:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/heavygee/hapi/main/scripts/install-hapi-pet.sh | bash -s -- --fleet-policy=alert   # default: tells you, you decide
-curl -fsSL https://raw.githubusercontent.com/heavygee/hapi/main/scripts/install-hapi-pet.sh | bash -s -- --fleet-policy=auto    # updates itself automatically
+curl -fsSL https://raw.githubusercontent.com/heavygee/hapi/main/scripts/install-hapi-pet.sh | bash -s -- --fleet-policy=auto    # default: updates itself automatically
+curl -fsSL https://raw.githubusercontent.com/heavygee/hapi/main/scripts/install-hapi-pet.sh | bash -s -- --fleet-policy=alert   # tells you, you decide
 curl -fsSL https://raw.githubusercontent.com/heavygee/hapi/main/scripts/install-hapi-pet.sh | bash -s -- --fleet-policy=silent  # never checks, fully manual
 ```
 
-- **`alert`** (default) — your instance notices a new version is available and flags it; you still choose when to actually upgrade (re-running the install command).
-- **`auto`** — your instance applies new versions as they're published, no action from you.
+- **`auto`** (default) — your instance applies new versions as they're published, no action from you.
+- **`alert`** — your instance notices a new version is available and flags it instead; you choose when to actually upgrade (re-running the install command).
 - **`silent`** — opts out of this entirely; you're back to the plain manual re-run-the-install-command model described above, with nothing checking anything on your behalf.
 
 You can change your mind later by re-running the install command with a different

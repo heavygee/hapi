@@ -169,7 +169,7 @@ Mechanical:
 | Seal `fleet-latest` / `fleet-latest-tag.txt` | **Exists** via `hapi-fleet-seal` |
 | GH channel `hapi-fleet` upsert on every seal | **Exists** (`hapi-fleet-seal` + upsert; live channel bootstrapped) |
 | Hub native Layer A poll + materialize | **#255** kernel on soup tip |
-| Pet installer wires seal URL + 3-pole policy (default `alert`) | **Exists** (`install-hapi-pet.sh` #257) |
+| Pet installer wires seal URL + 3-pole policy (default `auto`) | **Exists** (`install-hapi-pet.sh` #257; opt-out `--fleet-policy=alert|silent`) |
 | Fleet-seal dispatcher (estate / Layer A / cattle) | **Exists** (`fleet-targets.yaml` + `hapi-fleet-seal-dispatch` #258) |
 | Hub process self-apply (Layer B) | **Missing** - follow-on |
 | Estate pets via oos hub offer | **Exists** (#247/#251) |
@@ -178,7 +178,9 @@ Mechanical:
 
 1. **GitHub is the primary poll target** for Layer A — durable moving channel
    `hapi-fleet`; dated tips immutable; seal GH mirror mandatory.
-2. **Public pet install inherits governance** — default URL + `alert` policy (#257).
+2. **Public pet install inherits governance** — default URL + `auto` policy (#257;
+   taking the fork fleet one-liner *is* the choice; `alert`/`silent` are explicit
+   opt-outs).
 3. **"Fleet seal" is a dispatch phrase** — estate / standalone / cattle (#258),
    generic target types including Ian's instances and soon `hapi-gc-in`.
 
