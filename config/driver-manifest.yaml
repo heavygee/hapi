@@ -1092,9 +1092,9 @@ layers:
 
   # heavygee/hapi#235 / PR #238 — Boards view (cards/chips/relative-time,
   # Projects v2 /views/<n> filter capture). Renamed To-Do → Boards.
-  # Re-tip 2026-10-14: driver/235-todo-board-view @ b9cf4a8dc (= feat tip —
-  # board-item selection in router search params for device Back). Was
-  # 5049c6682 (statusCheckedAt tiebreaker) / eaec8c111 (assignee picker).
+  # Re-tip 2026-10-14: driver/235-todo-board-view @ 849a2eba5 (= feat tip —
+  # isBoardItemDetailNavigation: board card click must not exit Boards when
+  # overlaying /sessions/:id; plus CLI externalRefs:[] omit). Was b9cf4a8dc.
   - branch: driver/235-todo-board-view
 
   # heavygee/hapi#247 — deliberate fleet push + restore upgrade-runner; kill
