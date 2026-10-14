@@ -1092,9 +1092,9 @@ layers:
 
   # heavygee/hapi#235 / PR #238 — Boards view (cards/chips/relative-time,
   # Projects v2 /views/<n> filter capture). Renamed To-Do → Boards.
-  # Re-tip 2026-10-14: driver/235-todo-board-view @ 7f565cac6 (= feat tip —
-  # Open-session exits Boards; clearable status; mention-tooltip no issue chip.
-  # Was 849a2eba5 (isBoardItemDetailNavigation + CLI externalRefs omit).
+  # Re-tip 2026-10-14: driver/235-todo-board-view @ 6e5ee7bc4 (= feat tip —
+  # isHistoryPopNavigation push-vs-pop; assignee picker name+login). Was
+  # 7f565cac6 (Open-session / clearable status / mention tooltip).
   - branch: driver/235-todo-board-view
 
   # heavygee/hapi#247 — deliberate fleet push + restore upgrade-runner; kill
