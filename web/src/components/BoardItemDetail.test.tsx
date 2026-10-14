@@ -97,6 +97,21 @@ describe('BoardItemDetail', () => {
         expect(onSetStatus).toHaveBeenCalledTimes(1)
     })
 
+    it('offers the no-status option even for an item that already has a status, and clears via it (Codex review)', () => {
+        // Regression: the no-status option used to only render for an
+        // already-unassigned item, so a project's own "move back to
+        // unassigned" transition (gh project item-edit --clear) could never
+        // be performed from HAPI once a status was set.
+        const { onSetStatus } = renderDetail()
+        const select = screen.getByLabelText(/Status/) as HTMLSelectElement
+        expect(select.value).toBe('In Progress')
+        expect(within(select).getByRole('option', { name: 'No status' })).toBeInTheDocument()
+
+        fireEvent.change(select, { target: { value: '' } })
+        expect(onSetStatus).toHaveBeenCalledWith(null)
+        expect(onSetStatus).toHaveBeenCalledTimes(1)
+    })
+
     it('requires confirmation before closing, then calls onClose', async () => {
         const { onClose } = renderDetail()
         fireEvent.click(screen.getByRole('button', { name: 'Close' }))

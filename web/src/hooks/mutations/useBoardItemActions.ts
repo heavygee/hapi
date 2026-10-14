@@ -43,7 +43,7 @@ export function useBoardItemActions(api: ApiClient | null, boardId: string | nul
     closeItem: (item: Pick<BoardItem, 'url'>) => Promise<void>
     reopenItem: (item: Pick<BoardItem, 'url'>) => Promise<void>
     commentOnItem: (item: Pick<BoardItem, 'url'>, body: string) => Promise<void>
-    setItemStatus: (item: Pick<BoardItem, 'url'>, status: string) => Promise<void>
+    setItemStatus: (item: Pick<BoardItem, 'url'>, status: string | null) => Promise<void>
     setItemAssignees: (item: Pick<BoardItem, 'url'>, addLogins: string[], removeLogins: string[]) => Promise<void>
     closingUrls: ReadonlySet<string>
     reopeningUrls: ReadonlySet<string>
@@ -107,7 +107,7 @@ export function useBoardItemActions(api: ApiClient | null, boardId: string | nul
         }
     }, [requireTarget, invalidate])
 
-    const setItemStatus = useCallback(async (item: Pick<BoardItem, 'url'>, status: string) => {
+    const setItemStatus = useCallback(async (item: Pick<BoardItem, 'url'>, status: string | null) => {
         const { api: client, boardId: id, url } = requireTarget(item.url)
         setSettingStatusUrls(current => addUrl(current, url))
         try {

@@ -594,7 +594,7 @@ async function execGh(args: string[], host: string): Promise<string> {
 }
 
 export type BoardItemActionTarget = { host: string; url: string; isPullRequest: boolean }
-export type BoardItemStatusTarget = { host: string; ownerLogin: string; projectNumber: number; url: string; fieldName: string; status: string }
+export type BoardItemStatusTarget = { host: string; ownerLogin: string; projectNumber: number; url: string; fieldName: string; status: string | null }
 
 export type BoardItemActions = {
     close: (target: BoardItemActionTarget, comment?: string) => Promise<void>
@@ -623,15 +623,24 @@ export const defaultBoardItemActions: BoardItemActions = {
     // name), not the ID-based `--id/--field-id/--project-id` form: `gh
     // project item-edit` resolves all of those from names on its own
     // (confirmed by hand), so there's no need to thread through GraphQL node
-    // IDs for status-change at all.
+    // IDs for status-change at all. `status: null` uses `--clear` instead of
+    // `--value` — confirmed by hand (and live against the real demo board,
+    // clear then restore) that `--clear` works with this same name-based
+    // targeting, not just the ID-based form (Codex review, hapi#238: a card
+    // could never be moved back to the unassigned/no-status bucket from
+    // HAPI before this).
     setStatus: async (target) => {
         const args = [
             'project', 'item-edit', String(target.projectNumber),
             '--owner', target.ownerLogin,
             '--url', target.url,
             '--field', target.fieldName,
-            '--value', target.status
         ]
+        if (target.status === null) {
+            args.push('--clear')
+        } else {
+            args.push('--value', target.status)
+        }
         await execGh(args, target.host)
     },
     // Confirmed by hand (`gh issue/pr edit --help`, gh 2.98.0): both flags
@@ -1248,7 +1257,7 @@ export function createBoardRoutes(
         const json = await c.req.json().catch(() => null)
         const parsed = BoardItemStatusRequestSchema.safeParse(json)
         if (!parsed.success) {
-            return c.json({ error: 'Invalid body — expected { url: string, status: string }' }, 400)
+            return c.json({ error: 'Invalid body — expected { url: string, status: string | null }' }, 400)
         }
         const resolved = await requireBoardAndValidUrl(c.req.param('id'), parsed.data.url)
         if (!resolved.ok) {

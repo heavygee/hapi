@@ -1071,6 +1071,27 @@ describe('POST /api/todo-boards/:id/items/status', () => {
         })
         expect(response.status).toBe(400)
     })
+
+    it('clears status via status: null, resolving to the setStatus action with status null (Codex review)', async () => {
+        const calls: unknown[] = []
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, {
+            ...UNUSED_ACTIONS,
+            setStatus: async (target) => { calls.push(target) }
+        })
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/status`, {
+            method: 'POST',
+            body: JSON.stringify({ url: VALID_ITEM_URL, status: null })
+        })
+        expect(response.status).toBe(200)
+        expect(calls).toEqual([{
+            host: 'github.com',
+            ownerLogin: 'heavygee',
+            projectNumber: 6,
+            url: VALID_ITEM_URL,
+            fieldName: 'Status',
+            status: null
+        }])
+    })
 })
 
 describe('GET /api/todo-boards/:id/items/assignable-users', () => {

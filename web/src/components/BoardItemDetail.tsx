@@ -177,7 +177,7 @@ export function BoardItemDetail(props: {
     onClose: () => Promise<void>
     onReopen: () => void
     onComment: (body: string) => Promise<void>
-    onSetStatus: (status: string) => void
+    onSetStatus: (status: string | null) => void
     assignableUsers: BoardAssignableUser[]
     isLoadingAssignableUsers: boolean
     assignableUsersError: string | null
@@ -340,13 +340,18 @@ export function BoardItemDetail(props: {
                                 disabled={props.isSettingStatus}
                                 onChange={(event) => {
                                     const next = event.target.value
-                                    if (next && next !== item.status) {
-                                        props.onSetStatus(next)
-                                    }
+                                    if (next === (item.status ?? '')) return
+                                    // A project can legitimately move a card back to the
+                                    // unassigned/no-status bucket (`gh project item-edit
+                                    // --clear`) — the no-status option used to only appear
+                                    // for an already-unassigned item, so that transition
+                                    // could never be performed from HAPI once a status was
+                                    // set (Codex review, hapi#238).
+                                    props.onSetStatus(next || null)
                                 }}
                                 className="rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-2 py-1 text-xs text-[var(--app-fg)]"
                             >
-                                {item.status === null ? <option value="">{t('boards.noStatus')}</option> : null}
+                                <option value="">{t('boards.noStatus')}</option>
                                 {props.statusOrder.map(status => (
                                     <option key={status} value={status}>{status}</option>
                                 ))}

@@ -804,7 +804,7 @@ export class ApiClient {
         })
     }
 
-    async setBoardItemStatus(boardId: string, url: string, status: string): Promise<void> {
+    async setBoardItemStatus(boardId: string, url: string, status: string | null): Promise<void> {
         await this.request(`/api/todo-boards/${encodeURIComponent(boardId)}/items/status`, {
             method: 'POST',
             body: JSON.stringify({ url, status })
