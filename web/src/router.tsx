@@ -394,10 +394,32 @@ function SessionsPage() {
         settingStatusUrls: settingBoardItemStatusUrls,
         settingAssigneesUrls: settingBoardItemAssigneesUrls,
     } = useBoardItemActions(api, effectiveBoardId)
-    const [selectedBoardItemId, setSelectedBoardItemId] = useState<string | null>(null)
-    useEffect(() => {
-        setSelectedBoardItemId(null)
-    }, [sessionsMode, effectiveBoardId])
+    // `boardItem` is real router search-param state, not plain component
+    // state (operator decision, Codex review, hapi#238) — selecting a board
+    // item pushes a genuine, poppable history entry, so device/browser Back
+    // returns to the board list instead of leaving Boards mode or the app
+    // entirely. Masked to null outside Boards mode or against a board that
+    // doesn't currently have that item (same self-correcting pattern
+    // `selectedBoardItem` below already uses) rather than explicitly
+    // resetting the URL on every mode/board switch — a stale `boardItem`
+    // left over from a previous mode/board is simply never looked at again,
+    // and any *real* navigation elsewhere (spawn, toast click, browser
+    // back/forward) naturally lands on a URL that never included it in the
+    // first place, so there's nothing to explicitly clean up either.
+    const { boardItem: boardItemIdFromUrl } = useSearch({ from: '/sessions' })
+    const selectedBoardItemId = sessionsMode === 'boards' ? (boardItemIdFromUrl ?? null) : null
+    const setSelectedBoardItemId = useCallback((id: string | null) => {
+        navigate({
+            to: '.',
+            search: (prev: Record<string, unknown>) => {
+                if (!id) {
+                    const { boardItem: _unused, ...rest } = prev
+                    return rest
+                }
+                return { ...prev, boardItem: id }
+            },
+        })
+    }, [navigate])
     const selectedBoardItem = useMemo(
         () => (selectedBoardItemId ? boardItems.find(item => item.id === selectedBoardItemId) ?? null : null),
         [selectedBoardItemId, boardItems]
@@ -462,12 +484,16 @@ function SessionsPage() {
     const hasRightPaneContent = sessionsMode === 'boards' ? selectedBoardItem !== null : !isSessionsIndex
     // See shouldExitBoardsModeForNavigation's doc comment for why this reacts
     // to the navigation event itself rather than comparing selected-session
-    // ids before/after.
+    // ids before/after. Flipping sessionsMode alone is enough here —
+    // selectedBoardItemId is derived as null outside Boards mode regardless
+    // of whatever boardItem value is still sitting in the URL, and the
+    // navigation already in flight either carries no boardItem search param
+    // forward at all (dropping it for free) or, for a genuine browser
+    // back/forward, lands on exactly the history entry that didn't have it.
     useEffect(() => {
         return router.subscribe('onBeforeNavigate', (event) => {
             if (shouldExitBoardsModeForNavigation(event.toLocation.pathname, sessionsMode)) {
                 setSessionsMode('sessions')
-                setSelectedBoardItemId(null)
             }
         })
     }, [router, sessionsMode])
@@ -486,13 +512,14 @@ function SessionsPage() {
             linkIssueUrl
         })
         // `/sessions/new` is a sibling route under the same `/sessions`
-        // parent, so SessionsPage never remounts — without clearing the
-        // selected item (and switching back to Sessions mode, so
-        // `hasRightPaneContent` stops gating on `selectedBoardItem`), the
-        // right pane would keep rendering the stale BoardItemDetail instead
-        // of <Outlet/> picking up the new-session form; the URL would change
-        // but the screen wouldn't.
-        setSelectedBoardItemId(null)
+        // parent, so SessionsPage never remounts — without switching back to
+        // Sessions mode, `hasRightPaneContent` would keep gating on
+        // `selectedBoardItem` and the right pane would keep rendering the
+        // stale BoardItemDetail instead of <Outlet/> picking up the
+        // new-session form; the URL would change but the screen wouldn't.
+        // The navigate() call below already omits `boardItem` from its own
+        // search object, so the item selection is dropped for free — no
+        // separate clear needed.
         setSessionsMode('sessions')
         navigate({
             to: '/sessions/new',
@@ -503,7 +530,7 @@ function SessionsPage() {
             },
             ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
-    }, [navigate, sessions, setSelectedBoardItemId, setSessionsMode, onlineMachineIds])
+    }, [navigate, sessions, onlineMachineIds, setSessionsMode])
     const handleNewSessionInDirectory = useCallback((args: { machineId: string | null; directory: string }) => {
         navigate({
             to: '/sessions/new',
@@ -2136,6 +2163,16 @@ const indexRoute = createRoute({
 const sessionsRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: '/sessions',
+    // `boardItem` lives on this parent route (not a leaf route) so it
+    // survives regardless of which `/sessions/*` child is actually matched —
+    // Boards mode renders over whatever route was active before it was
+    // toggled on, not a route of its own (operator decision: represent
+    // board-item selection in router history, not component state, so
+    // browser/device Back returns to the board list instead of leaving
+    // Boards mode or the app entirely — Codex review, hapi#238).
+    validateSearch: (search: Record<string, unknown>): { boardItem?: string } => {
+        return typeof search.boardItem === 'string' ? { boardItem: search.boardItem } : {}
+    },
     component: SessionsPage,
 })
 
