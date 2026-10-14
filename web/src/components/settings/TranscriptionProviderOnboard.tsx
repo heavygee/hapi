@@ -363,7 +363,12 @@ export function TranscriptionProviderOnboard(props: {
                             className="w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] px-2 py-1.5 text-sm text-[var(--app-fg)]"
                         />
                     </label>
-                    <p className="text-xs text-[var(--app-hint)]">{t('settings.voice.credentials.maxDuration.hint')}</p>
+                    <p className="text-xs text-[var(--app-hint)]">
+                        {t('settings.voice.credentials.maxDuration.hint', {
+                            min: String(VOICE_MAX_DURATION_MIN_SECONDS),
+                            max: String(VOICE_MAX_DURATION_MAX_SECONDS),
+                        })}
+                    </p>
                     {!maxDurationEditable ? (
                         <p className="text-xs text-[var(--app-hint)]">{t('settings.voice.credentials.envLocked')}</p>
                     ) : null}
