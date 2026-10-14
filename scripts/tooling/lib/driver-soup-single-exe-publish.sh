@@ -600,6 +600,14 @@ driver_soup_fleet_seal_github_channel() {
 
     if [[ "$gh_rc" -eq 0 ]]; then
         # Stable asset names; --clobber refreshes bytes on each seal.
+        # Prefer deleting manifest.json first — GH CDN can keep stale bytes for
+        # the same download URL after a bare --clobber (oos 2026-10-14 seal).
+        local mid
+        mid="$(gh api "repos/${repo}/releases/tags/${channel}" \
+            --jq '.assets[]|select(.name=="manifest.json").id' 2>/dev/null || true)"
+        if [[ -n "$mid" ]]; then
+            gh api -X DELETE "repos/${repo}/releases/assets/${mid}" >/dev/null 2>&1 || true
+        fi
         gh release upload "$channel" \
             --repo "$repo" \
             --clobber \
@@ -607,9 +615,11 @@ driver_soup_fleet_seal_github_channel() {
     fi
 
     rm -f "$notes_file"
-    rm -rf "$staging"
+    # Keep staging until public CDN verify succeeds (need manifest path).
+    local staging_manifest="$staging/manifest.json"
 
     if [[ "$gh_rc" -ne 0 ]]; then
+        rm -rf "$staging"
         echo "ERROR: fleet-seal: GH channel upsert failed for ${channel}" >&2
         return 1
     fi
@@ -618,11 +628,41 @@ driver_soup_fleet_seal_github_channel() {
     local is_draft
     is_draft="$(gh release view "$channel" --repo "$repo" --json isDraft --jq .isDraft 2>/dev/null || echo true)"
     if [[ "$is_draft" == "true" ]]; then
+        rm -rf "$staging"
         echo "ERROR: fleet-seal: channel release ${channel} is draft — public poll URL would 404" >&2
         return 1
     fi
 
-    echo "fleet-seal: GitHub channel OK → ${manifest_url}"
+    # Public download URL must eventually serve the sealed tip (Layer A poll path).
+    # API asset view can be fresh while releases/download/… CDN is stale.
+    local want_tag public_tag i healed=0
+    want_tag="$(jq -r '.tag // empty' "$staging_manifest")"
+    for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+        public_tag="$(curl -fsSL "$manifest_url" 2>/dev/null | jq -r '.tag // empty' || true)"
+        if [[ -n "$want_tag" && "$public_tag" == "$want_tag" ]]; then
+            healed=1
+            break
+        fi
+        if [[ "$i" -eq 3 || "$i" -eq 7 ]]; then
+            # Re-delete+upload manifest to bust CDN mid-wait.
+            mid="$(gh api "repos/${repo}/releases/tags/${channel}" \
+                --jq '.assets[]|select(.name=="manifest.json").id' 2>/dev/null || true)"
+            if [[ -n "$mid" ]]; then
+                gh api -X DELETE "repos/${repo}/releases/assets/${mid}" >/dev/null 2>&1 || true
+            fi
+            gh release upload "$channel" --repo "$repo" --clobber "$staging_manifest" >/dev/null 2>&1 || true
+            echo "fleet-seal: CDN still stale (got ${public_tag:-empty}); re-uploaded manifest (try $i)"
+        fi
+        sleep 5
+    done
+    rm -rf "$staging"
+    if [[ "$healed" != "1" ]]; then
+        echo "ERROR: fleet-seal: public $manifest_url still not tag=$want_tag after CDN wait" >&2
+        echo "       API may be fresh; Layer A pollers use the public URL — fix CDN / retry upload" >&2
+        return 1
+    fi
+
+    echo "fleet-seal: GitHub channel OK → ${manifest_url} (public tag=${public_tag})"
     return 0
 }
 
