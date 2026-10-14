@@ -312,9 +312,30 @@ export function mergeExternalRefs(base: ExternalRef[], incoming: ExternalRef[]):
     return result
 }
 
-function refLinkedAt(ref: ExternalRef): number | undefined {
-    const value = (ref as Record<string, unknown>).linkedAt
-    return typeof value === 'number' ? value : undefined
+// Ordered, not combined into one number: `linkedAt` is the primary clock (an
+// actual re-link always bumps it and must win regardless of any other
+// field), `statusCheckedAt` is a secondary tiebreaker for the common case
+// where neither side's `linkedAt` changed at all. `hapi-meta-daily.sh`'s
+// `md_refs_apply_status` (the fork's own out-of-band PR-chip tooling)
+// refreshes `status`/`statusCheckedAt` on every check WITHOUT touching
+// `linkedAt` — comparing `linkedAt` alone made every such refresh a "tie",
+// which this file's own earlier fix defaulted to resolving in favor of
+// `prior` (safe for the scenario it was built for: a stale `next` write
+// shouldn't roll back a fresher out-of-band update already applied to
+// `prior`) but wrong the other way around — a genuinely newer `next` update
+// arriving through the normal write path, with `linkedAt` unchanged because
+// it's a status-only refresh, got discarded too (Codex review, hapi#238,
+// third finding on this path).
+function refFreshnessKey(ref: ExternalRef): readonly [number, number] {
+    const record = ref as Record<string, unknown>
+    const linkedAt = typeof record.linkedAt === 'number' ? record.linkedAt : -Infinity
+    const statusCheckedAt = typeof record.statusCheckedAt === 'number' ? record.statusCheckedAt : -Infinity
+    return [linkedAt, statusCheckedAt]
+}
+
+function isFresher(candidate: readonly [number, number], current: readonly [number, number]): boolean {
+    if (candidate[0] !== current[0]) return candidate[0] > current[0]
+    return candidate[1] > current[1]
 }
 
 /**
@@ -331,13 +352,10 @@ function refLinkedAt(ref: ExternalRef): number | undefined {
  * next) or discards a legitimate same-write upsert like `hapi link-issue`
  * re-linking the same issue with a bumped `linkedAt` (always prefer prior).
  *
- * Reconciles per-identity by `linkedAt` when `next`'s entry has one —
- * `github_issue` always does; `github_pr`'s `.passthrough()` shape often
- * does too, per its own growing-fields doc comment, though that's not
- * type-guaranteed. The side with the larger value wins; ties and a missing
- * signal on `next` default to keeping `prior`'s entry (the already-
- * persisted, presumed-authoritative state) — matching the failure mode this
- * was built to close (Codex review, hapi#238, second finding on this path).
+ * Reconciles per-identity by `refFreshnessKey` (`linkedAt` then
+ * `statusCheckedAt`) — the side with the fresher key wins; a genuine tie
+ * (neither signal differs, or neither side has either field at all) keeps
+ * `prior`'s entry, the already-persisted, presumed-authoritative state.
  */
 export function reconcileExternalRefs(prior: ExternalRef[], next: ExternalRef[]): ExternalRef[] {
     const result = [...prior]
@@ -347,9 +365,7 @@ export function reconcileExternalRefs(prior: ExternalRef[], next: ExternalRef[])
             result.push(nextRef)
             continue
         }
-        const existingAt = refLinkedAt(result[idx]!)
-        const nextAt = refLinkedAt(nextRef)
-        if (nextAt !== undefined && (existingAt === undefined || nextAt > existingAt)) {
+        if (isFresher(refFreshnessKey(nextRef), refFreshnessKey(result[idx]!))) {
             result[idx] = nextRef
         }
     }
