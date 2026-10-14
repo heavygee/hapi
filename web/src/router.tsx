@@ -297,14 +297,16 @@ function SessionsPage() {
     // without this, a picker left open on item A would keep this true while
     // viewing item B, firing a fetch for B nobody asked to see yet.
     const [assigneePickerOpen, setAssigneePickerOpen] = useState(false)
+    const [assignableUsersSearch, setAssignableUsersSearch] = useState('')
     useEffect(() => {
         setAssigneePickerOpen(false)
+        setAssignableUsersSearch('')
     }, [selectedBoardItemId])
     const {
         users: boardItemAssignableUsers,
         isLoading: boardItemAssignableUsersLoading,
         error: boardItemAssignableUsersError,
-    } = useBoardAssignableUsers(api, effectiveBoardId, selectedBoardItem?.url ?? null, assigneePickerOpen)
+    } = useBoardAssignableUsers(api, effectiveBoardId, selectedBoardItem?.url ?? null, assigneePickerOpen, assignableUsersSearch)
     // Hidden behind the board list while in Boards mode with an item
     // selected (mobile *and* desktop, since BoardItemDetail then occupies the
     // right-pane slot) — marking it "seen" there would silently clear unread
@@ -566,6 +568,7 @@ function SessionsPage() {
                             isLoadingAssignableUsers={boardItemAssignableUsersLoading}
                             assignableUsersError={boardItemAssignableUsersError}
                             onAssigneePickerOpenChange={setAssigneePickerOpen}
+                            onAssignableUsersSearchChange={setAssignableUsersSearch}
                             onSetAssignees={(addLogins, removeLogins) => {
                                 setBoardItemAssignees(selectedBoardItem, addLogins, removeLogins).catch((err) => addToast({
                                     title: t('boards.detail.assigneesChangeFailed'),

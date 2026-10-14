@@ -140,6 +140,7 @@ export default {
   'boards.detail.openedBy': 'Opened by {login}',
   'boards.detail.assignees': 'Assignees',
   'boards.detail.addAssignee': 'Add assignee',
+  'boards.detail.searchAssignees': 'Search people…',
   'boards.detail.removeAssignee': 'Remove {login}',
   'boards.detail.noAssignableUsers': 'No assignable users found for this repo',
   'boards.detail.milestone': 'Milestone',

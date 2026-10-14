@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { BoardItem } from '@/types/api'
 import { I18nProvider } from '@/lib/i18n-context'
@@ -47,6 +47,7 @@ function renderDetail(overrides: Partial<Parameters<typeof BoardItemDetail>[0]> 
         isLoadingAssignableUsers: false,
         assignableUsersError: null,
         onAssigneePickerOpenChange: vi.fn(),
+        onAssignableUsersSearchChange: vi.fn(),
         onSetAssignees: vi.fn(),
         isClosing: false,
         isReopening: false,
@@ -268,6 +269,36 @@ describe('BoardItemDetail assignee picker', () => {
         })
         fireEvent.click(screen.getByLabelText('Add assignee'))
         expect(screen.getByText('octocat').closest('button')).toBeDisabled()
+    })
+
+    it('debounces the search box before notifying the parent — a 50-row page with no pagination needed a way to reach users past it (Codex review)', () => {
+        vi.useFakeTimers()
+        try {
+            const { onAssignableUsersSearchChange } = renderDetail()
+            fireEvent.click(screen.getByLabelText('Add assignee'))
+
+            fireEvent.change(screen.getByLabelText('Search people…'), { target: { value: 'ali' } })
+            expect(onAssignableUsersSearchChange).not.toHaveBeenCalled()
+
+            act(() => {
+                vi.advanceTimersByTime(300)
+            })
+            expect(onAssignableUsersSearchChange).toHaveBeenCalledWith('ali')
+        } finally {
+            vi.useRealTimers()
+        }
+    })
+
+    it('clears the search box when the picker closes, so reopening starts fresh', () => {
+        renderDetail()
+        fireEvent.click(screen.getByLabelText('Add assignee'))
+        const input = screen.getByLabelText('Search people…') as HTMLInputElement
+        fireEvent.change(input, { target: { value: 'ali' } })
+        expect(input.value).toBe('ali')
+
+        fireEvent.click(screen.getByLabelText('Add assignee'))
+        fireEvent.click(screen.getByLabelText('Add assignee'))
+        expect((screen.getByLabelText('Search people…') as HTMLInputElement).value).toBe('')
     })
 })
 

@@ -1107,6 +1107,32 @@ describe('GET /api/todo-boards/:id/items/assignable-users', () => {
         expect(calls).toEqual([{ host: 'github.com', owner: 'heavygee', repo: 'hapi-demo-board' }])
     })
 
+    it('forwards a trimmed search term as the GraphQL query filter (Codex review: a page with no pagination needed server-side search)', async () => {
+        const calls: unknown[] = []
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, undefined, undefined, (target) => {
+            calls.push(target)
+            return { data: { repository: { assignableUsers: { nodes: [] } } } }
+        })
+        const response = await app.request(
+            `/api/todo-boards/${DEFAULT_BOARD_ID}/items/assignable-users?url=${encodeURIComponent(VALID_ITEM_URL)}&search=${encodeURIComponent('  alice  ')}`
+        )
+        expect(response.status).toBe(200)
+        expect(calls).toEqual([{ host: 'github.com', owner: 'heavygee', repo: 'hapi-demo-board', query: 'alice' }])
+    })
+
+    it('omits the query filter entirely for a blank/whitespace-only search term', async () => {
+        const calls: unknown[] = []
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, undefined, undefined, (target) => {
+            calls.push(target)
+            return { data: { repository: { assignableUsers: { nodes: [] } } } }
+        })
+        const response = await app.request(
+            `/api/todo-boards/${DEFAULT_BOARD_ID}/items/assignable-users?url=${encodeURIComponent(VALID_ITEM_URL)}&search=${encodeURIComponent('   ')}`
+        )
+        expect(response.status).toBe(200)
+        expect(calls).toEqual([{ host: 'github.com', owner: 'heavygee', repo: 'hapi-demo-board', query: undefined }])
+    })
+
     it('rejects a missing url query parameter', async () => {
         const app = await createApp(() => ({ data: {} }))
         const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/assignable-users`)

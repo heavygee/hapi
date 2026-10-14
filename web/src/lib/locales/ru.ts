@@ -140,6 +140,7 @@ export default {
   'boards.detail.openedBy': 'Создано {login}',
   'boards.detail.assignees': 'Исполнители',
   'boards.detail.addAssignee': 'Добавить исполнителя',
+  'boards.detail.searchAssignees': 'Поиск людей…',
   'boards.detail.removeAssignee': 'Удалить {login}',
   'boards.detail.noAssignableUsers': 'Нет доступных для назначения пользователей в этом репозитории',
   'boards.detail.milestone': 'Веха',

@@ -140,6 +140,7 @@ export default {
   'boards.detail.openedBy': '由 {login} 创建',
   'boards.detail.assignees': '指派给',
   'boards.detail.addAssignee': '添加指派人',
+  'boards.detail.searchAssignees': '搜索用户…',
   'boards.detail.removeAssignee': '移除 {login}',
   'boards.detail.noAssignableUsers': '未找到该仓库的可指派用户',
   'boards.detail.milestone': '里程碑',

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import * as Popover from '@radix-ui/react-popover'
 import type { BoardAssignableUser, BoardItem } from '@/types/api'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
@@ -39,6 +39,12 @@ function TimestampRow(props: { label: string; iso: string | null; t: (key: strin
     )
 }
 
+// Debounce (not a per-keystroke fetch) matching the input to the hub's
+// GraphQL `query` filter, which only applies server-side when the caller
+// actually passes a non-empty search term — so typing just narrows the same
+// 50-row page rather than firing a request per character.
+const ASSIGNABLE_USERS_SEARCH_DEBOUNCE_MS = 300
+
 // Click-to-toggle checklist, not a multi-select-then-confirm form (design-
 // consult review, hapi#238) — matches GitHub's own assignee picker and
 // avoids tracking a separate draft-vs-committed selection state. Each row
@@ -47,7 +53,11 @@ function TimestampRow(props: { label: string; iso: string | null; t: (key: strin
 // second toggle before the first settles would race against it anyway.
 // Assignable users are fetched on open (`onOpenChange`), not eagerly on
 // every render — one GraphQL call per visible card would be wasteful for
-// data nobody may ever open the picker to see.
+// data nobody may ever open the picker to see. A search box (Codex review:
+// a 50-row page with no pagination or search left every assignable user
+// past the first page permanently unreachable from this picker) forwards
+// the hub's own server-side `assignableUsers(query:)` filter instead of
+// paginating client-side.
 function AssigneePicker(props: {
     currentLogins: ReadonlySet<string>
     users: BoardAssignableUser[]
@@ -55,16 +65,25 @@ function AssigneePicker(props: {
     usersError: string | null
     isPending: boolean
     onOpenChange: (open: boolean) => void
+    onSearchChange: (search: string) => void
     onToggle: (login: string, currentlyAssigned: boolean) => void
     t: (key: string, params?: Record<string, string | number>) => string
 }) {
     const [open, setOpen] = useState(false)
+    const [searchInput, setSearchInput] = useState('')
+
+    useEffect(() => {
+        const timer = setTimeout(() => props.onSearchChange(searchInput), ASSIGNABLE_USERS_SEARCH_DEBOUNCE_MS)
+        return () => clearTimeout(timer)
+    }, [searchInput]) // eslint-disable-line react-hooks/exhaustive-deps
+
     return (
         <Popover.Root
             open={open}
             onOpenChange={(next) => {
                 setOpen(next)
                 props.onOpenChange(next)
+                if (!next) setSearchInput('')
             }}
         >
             <Popover.Trigger asChild>
@@ -83,8 +102,17 @@ function AssigneePicker(props: {
                     align="start"
                     sideOffset={6}
                     collisionPadding={8}
-                    className="z-50 max-h-64 w-56 overflow-y-auto rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] p-1 shadow-lg"
+                    className="z-50 flex max-h-64 w-56 flex-col rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] p-1 shadow-lg"
                 >
+                    <input
+                        type="text"
+                        value={searchInput}
+                        onChange={(event) => setSearchInput(event.target.value)}
+                        placeholder={props.t('boards.detail.searchAssignees')}
+                        aria-label={props.t('boards.detail.searchAssignees')}
+                        className="mb-1 shrink-0 rounded-sm border border-[var(--app-border)] bg-[var(--app-bg)] px-1.5 py-1 text-xs text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                    />
+                    <div className="min-h-0 flex-1 overflow-y-auto">
                     {props.isLoadingUsers ? (
                         <div className="flex justify-center p-2"><Spinner size="sm" /></div>
                     ) : props.usersError ? (
@@ -112,6 +140,7 @@ function AssigneePicker(props: {
                             })}
                         </ul>
                     )}
+                    </div>
                 </Popover.Content>
             </Popover.Portal>
         </Popover.Root>
@@ -153,6 +182,7 @@ export function BoardItemDetail(props: {
     isLoadingAssignableUsers: boolean
     assignableUsersError: string | null
     onAssigneePickerOpenChange: (open: boolean) => void
+    onAssignableUsersSearchChange: (search: string) => void
     onSetAssignees: (addLogins: string[], removeLogins: string[]) => void
     isClosing: boolean
     isReopening: boolean
@@ -262,6 +292,7 @@ export function BoardItemDetail(props: {
                                     usersError={props.assignableUsersError}
                                     isPending={props.isSettingAssignees}
                                     onOpenChange={props.onAssigneePickerOpenChange}
+                                    onSearchChange={props.onAssignableUsersSearchChange}
                                     onToggle={(login, currentlyAssigned) => {
                                         if (currentlyAssigned) {
                                             props.onSetAssignees([], [login])

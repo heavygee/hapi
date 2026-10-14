@@ -811,9 +811,11 @@ export class ApiClient {
         })
     }
 
-    async getBoardItemAssignableUsers(boardId: string, url: string): Promise<AssignableUsersResponse> {
+    async getBoardItemAssignableUsers(boardId: string, url: string, search?: string): Promise<AssignableUsersResponse> {
+        const query = new URLSearchParams({ url })
+        if (search) query.set('search', search)
         return await this.request<AssignableUsersResponse>(
-            `/api/todo-boards/${encodeURIComponent(boardId)}/items/assignable-users?url=${encodeURIComponent(url)}`
+            `/api/todo-boards/${encodeURIComponent(boardId)}/items/assignable-users?${query.toString()}`
         )
     }
 

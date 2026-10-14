@@ -459,10 +459,25 @@ function isMemberOfProject(response: GhResourceProjectMembershipResponse, ownerL
 // are scoped to the item's own repo, not the board's project owner (a
 // project can span multiple repos on its host), hence a dedicated query
 // keyed by owner+repo rather than reusing the project-level queries above.
+// `assignableUsers(query:)` filters server-side on login/name (confirmed by
+// hand against the real API) — a repo with more than one page of assignable
+// users has no way to reach anyone past the first `first: 50` otherwise, and
+// the picker has no client-side pagination (Codex review). Passed through
+// untouched when the caller doesn't supply a search term (execGhGraphql
+// omits undefined variables entirely, so an empty query still returns the
+// unfiltered list).
+//
+// Named `$assigneeSearch`, not `$query` — same collision PROJECT_QUERY's
+// `$itemsFilter` was already named around: `gh api graphql` reads
+// `-f query=<document>` to mean the GraphQL document itself, so a second
+// `-f query=<value>` for a same-named GraphQL *variable* collides at the gh
+// CLI layer ("unexpected override existing field under \"query\""), not the
+// GraphQL server. Caught by hand running this exact query live before
+// landing it (Codex review).
 const ASSIGNABLE_USERS_QUERY = `
-query($owner: String!, $repo: String!) {
+query($owner: String!, $repo: String!, $assigneeSearch: String) {
   repository(owner: $owner, name: $repo) {
-    assignableUsers(first: 50) {
+    assignableUsers(first: 50, query: $assigneeSearch) {
       nodes { login avatarUrl name }
     }
   }
@@ -479,10 +494,10 @@ type GhAssignableUsersResponse = {
     errors?: Array<{ message: string }>
 }
 
-type AssignableUsersTarget = { host: string; owner: string; repo: string }
+type AssignableUsersTarget = { host: string; owner: string; repo: string; query?: string }
 
 async function runGhGraphqlAssignableUsers(target: AssignableUsersTarget): Promise<GhAssignableUsersResponse> {
-    const stdout = await execGhGraphql(target.host, ASSIGNABLE_USERS_QUERY, { owner: target.owner, repo: target.repo })
+    const stdout = await execGhGraphql(target.host, ASSIGNABLE_USERS_QUERY, { owner: target.owner, repo: target.repo, assigneeSearch: target.query })
     try {
         return JSON.parse(stdout) as GhAssignableUsersResponse
     } catch {
@@ -1272,7 +1287,13 @@ export function createBoardRoutes(
             return c.json({ error: resolved.error }, resolved.status)
         }
         try {
-            const response = await runGraphqlAssignableUsers({ host: resolved.board.host, owner: resolved.owner, repo: resolved.repo })
+            const search = c.req.query('search')
+            const response = await runGraphqlAssignableUsers({
+                host: resolved.board.host,
+                owner: resolved.owner,
+                repo: resolved.repo,
+                query: search && search.trim() ? search.trim() : undefined
+            })
             if (response.errors?.length) {
                 return c.json({ error: response.errors.map(e => e.message).join('; ') }, 502)
             }

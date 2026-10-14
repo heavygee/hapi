@@ -14,19 +14,20 @@ export function useBoardAssignableUsers(
     api: ApiClient | null,
     boardId: string | null,
     itemUrl: string | null,
-    enabled: boolean
+    enabled: boolean,
+    search = ''
 ): {
     users: BoardAssignableUser[]
     isLoading: boolean
     error: string | null
 } {
     const query = useQuery({
-        queryKey: queryKeys.boardAssignableUsers(boardId ?? '', itemUrl ?? ''),
+        queryKey: queryKeys.boardAssignableUsers(boardId ?? '', itemUrl ?? '', search),
         queryFn: async () => {
             if (!api || !boardId || !itemUrl) {
                 throw new Error('API unavailable')
             }
-            return await api.getBoardItemAssignableUsers(boardId, itemUrl)
+            return await api.getBoardItemAssignableUsers(boardId, itemUrl, search || undefined)
         },
         enabled: Boolean(api && boardId && itemUrl && enabled),
     })
