@@ -21,8 +21,8 @@ function removeUrl(current: ReadonlySet<string>, url: string): ReadonlySet<strin
 const EMPTY_URLS: ReadonlySet<string> = new Set()
 
 /**
- * Close/reopen/comment/status-change for a to-do item — the first
- * write-capable piece of the to-do view (hapi#238). Every action
+ * Close/reopen/comment/status-change/assignee-change for a to-do item — the
+ * first write-capable piece of the to-do view (hapi#238). Every action
  * auto-invalidates the board's items query on success (operator requirement:
  * acting from HAPI reflects immediately, no manual refresh needed after a
  * write specifically) and throws on failure, same contract as
@@ -44,16 +44,19 @@ export function useBoardItemActions(api: ApiClient | null, boardId: string | nul
     reopenItem: (item: Pick<BoardItem, 'url'>) => Promise<void>
     commentOnItem: (item: Pick<BoardItem, 'url'>, body: string) => Promise<void>
     setItemStatus: (item: Pick<BoardItem, 'url'>, status: string) => Promise<void>
+    setItemAssignees: (item: Pick<BoardItem, 'url'>, addLogins: string[], removeLogins: string[]) => Promise<void>
     closingUrls: ReadonlySet<string>
     reopeningUrls: ReadonlySet<string>
     commentingUrls: ReadonlySet<string>
     settingStatusUrls: ReadonlySet<string>
+    settingAssigneesUrls: ReadonlySet<string>
 } {
     const queryClient = useQueryClient()
     const [closingUrls, setClosingUrls] = useState<ReadonlySet<string>>(EMPTY_URLS)
     const [reopeningUrls, setReopeningUrls] = useState<ReadonlySet<string>>(EMPTY_URLS)
     const [commentingUrls, setCommentingUrls] = useState<ReadonlySet<string>>(EMPTY_URLS)
     const [settingStatusUrls, setSettingStatusUrls] = useState<ReadonlySet<string>>(EMPTY_URLS)
+    const [settingAssigneesUrls, setSettingAssigneesUrls] = useState<ReadonlySet<string>>(EMPTY_URLS)
 
     // Invalidates every configured board's items cache, not just the one the
     // action was invoked on (Codex review, hapi#238): the same issue can be
@@ -115,8 +118,19 @@ export function useBoardItemActions(api: ApiClient | null, boardId: string | nul
         }
     }, [requireTarget, invalidate])
 
+    const setItemAssignees = useCallback(async (item: Pick<BoardItem, 'url'>, addLogins: string[], removeLogins: string[]) => {
+        const { api: client, boardId: id, url } = requireTarget(item.url)
+        setSettingAssigneesUrls(current => addUrl(current, url))
+        try {
+            await client.setBoardItemAssignees(id, url, addLogins, removeLogins)
+            await invalidate()
+        } finally {
+            setSettingAssigneesUrls(current => removeUrl(current, url))
+        }
+    }, [requireTarget, invalidate])
+
     return {
-        closeItem, reopenItem, commentOnItem, setItemStatus,
-        closingUrls, reopeningUrls, commentingUrls, settingStatusUrls
+        closeItem, reopenItem, commentOnItem, setItemStatus, setItemAssignees,
+        closingUrls, reopeningUrls, commentingUrls, settingStatusUrls, settingAssigneesUrls
     }
 }

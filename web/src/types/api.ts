@@ -58,6 +58,8 @@ export type {
     SessionsResponse,
     SessionContentSearchResponse,
     SpawnResponse,
+    AssignableUsersResponse,
+    BoardAssignableUser,
     BoardItem,
     BoardItemsResponse,
     BoardSummary,

@@ -13,6 +13,7 @@ export const queryKeys = {
     // of its saved views), so a write started from board A must not leave
     // board B's cache silently stale, with no polling to ever self-correct.
     boardItemsAll: ['board-items'] as const,
+    boardAssignableUsers: (boardId: string, url: string, search: string) => ['board-assignable-users', boardId, url, search] as const,
     sqliteStorage: ['sqlite-storage'] as const,
     hubSettings: ['hub-settings'] as const,
     usageSummary: (range: string, timeZone: string) => ['usage-summary', range, timeZone] as const,

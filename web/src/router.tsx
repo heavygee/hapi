@@ -48,6 +48,7 @@ import { useMachines } from '@/hooks/queries/useMachines'
 import { useMachineLabels } from '@/hooks/useMachineLabels'
 import { useBoards } from '@/hooks/queries/useBoards'
 import { useBoardItems } from '@/hooks/queries/useBoardItems'
+import { useBoardAssignableUsers } from '@/hooks/queries/useBoardAssignableUsers'
 import { useBoardSelection } from '@/hooks/useBoardSelection'
 import { useBoardActions } from '@/hooks/mutations/useBoardActions'
 import { useBoardItemActions } from '@/hooks/mutations/useBoardItemActions'
@@ -386,10 +387,12 @@ function SessionsPage() {
         reopenItem: reopenBoardItem,
         commentOnItem: commentOnBoardItem,
         setItemStatus: setBoardItemStatus,
+        setItemAssignees: setBoardItemAssignees,
         closingUrls: closingBoardItemUrls,
         reopeningUrls: reopeningBoardItemUrls,
         commentingUrls: commentingOnBoardItemUrls,
         settingStatusUrls: settingBoardItemStatusUrls,
+        settingAssigneesUrls: settingBoardItemAssigneesUrls,
     } = useBoardItemActions(api, effectiveBoardId)
     const [selectedBoardItemId, setSelectedBoardItemId] = useState<string | null>(null)
     useEffect(() => {
@@ -399,6 +402,23 @@ function SessionsPage() {
         () => (selectedBoardItemId ? boardItems.find(item => item.id === selectedBoardItemId) ?? null : null),
         [selectedBoardItemId, boardItems]
     )
+    // Gates the assignable-users fetch (design-consult review, hapi#238) —
+    // only runs while the picker popover is actually open, not eagerly on
+    // every render. Reset on item switch since BoardItemDetail remounts
+    // (key={selectedBoardItem.id}) with its own popover starting closed —
+    // without this, a picker left open on item A would keep this true while
+    // viewing item B, firing a fetch for B nobody asked to see yet.
+    const [assigneePickerOpen, setAssigneePickerOpen] = useState(false)
+    const [assignableUsersSearch, setAssignableUsersSearch] = useState('')
+    useEffect(() => {
+        setAssigneePickerOpen(false)
+        setAssignableUsersSearch('')
+    }, [selectedBoardItemId])
+    const {
+        users: boardItemAssignableUsers,
+        isLoading: boardItemAssignableUsersLoading,
+        error: boardItemAssignableUsersError,
+    } = useBoardAssignableUsers(api, effectiveBoardId, selectedBoardItem?.url ?? null, assigneePickerOpen, assignableUsersSearch)
     // Hidden behind the board list while in Boards mode with an item
     // selected (mobile *and* desktop, since BoardItemDetail then occupies the
     // right-pane slot) — marking it "seen" there would silently clear unread
@@ -1132,10 +1152,24 @@ function SessionsPage() {
                                     url: ''
                                 }))
                             }}
+                            assignableUsers={boardItemAssignableUsers}
+                            isLoadingAssignableUsers={boardItemAssignableUsersLoading}
+                            assignableUsersError={boardItemAssignableUsersError}
+                            onAssigneePickerOpenChange={setAssigneePickerOpen}
+                            onAssignableUsersSearchChange={setAssignableUsersSearch}
+                            onSetAssignees={(addLogins, removeLogins) => {
+                                setBoardItemAssignees(selectedBoardItem, addLogins, removeLogins).catch((err) => addToast({
+                                    title: t('boards.detail.assigneesChangeFailed'),
+                                    body: getApiErrorMessage(err, t('dialog.error.default')),
+                                    sessionId: '',
+                                    url: ''
+                                }))
+                            }}
                             isClosing={selectedBoardItem.url !== null && closingBoardItemUrls.has(selectedBoardItem.url)}
                             isReopening={selectedBoardItem.url !== null && reopeningBoardItemUrls.has(selectedBoardItem.url)}
                             isCommenting={selectedBoardItem.url !== null && commentingOnBoardItemUrls.has(selectedBoardItem.url)}
                             isSettingStatus={selectedBoardItem.url !== null && settingBoardItemStatusUrls.has(selectedBoardItem.url)}
+                            isSettingAssignees={selectedBoardItem.url !== null && settingBoardItemAssigneesUrls.has(selectedBoardItem.url)}
                         />
                     ) : (
                         <Outlet />

@@ -55,7 +55,8 @@ const UNUSED_ACTIONS: Parameters<typeof createBoardRoutes>[4] = {
     close: async () => { throw new Error('close action not mocked for this test') },
     reopen: async () => { throw new Error('reopen action not mocked for this test') },
     comment: async () => { throw new Error('comment action not mocked for this test') },
-    setStatus: async () => { throw new Error('setStatus action not mocked for this test') }
+    setStatus: async () => { throw new Error('setStatus action not mocked for this test') },
+    setAssignees: async () => { throw new Error('setAssignees action not mocked for this test') }
 }
 
 // Matches whichever board is asking — the safe default for tests that
@@ -74,7 +75,8 @@ async function createApp(
     namespace = 'default',
     runGraphqlView?: Parameters<typeof createBoardRoutes>[3],
     actions?: Parameters<typeof createBoardRoutes>[4],
-    runGraphqlMembership?: Parameters<typeof createBoardRoutes>[5]
+    runGraphqlMembership?: Parameters<typeof createBoardRoutes>[5],
+    runGraphqlAssignableUsers?: Parameters<typeof createBoardRoutes>[6]
 ) {
     const dataDir = await mkdtemp(join(tmpdir(), 'hapi-todo-board-'))
     directories.push(dataDir)
@@ -92,7 +94,8 @@ async function createApp(
         runGraphqlTitle ?? (() => ({ data: { repositoryOwner: {} } })),
         runGraphqlView ?? (() => ({ data: { repositoryOwner: {} } })),
         actions ?? UNUSED_ACTIONS,
-        runGraphqlMembership ?? ALWAYS_MEMBER
+        runGraphqlMembership ?? ALWAYS_MEMBER,
+        runGraphqlAssignableUsers ?? (() => ({ data: { repository: { assignableUsers: { nodes: [] } } } }))
     ))
     return app
 }
@@ -475,14 +478,18 @@ describe('parseValidatedItemUrl', () => {
     it('accepts a well-formed issue URL on the board\'s own host', () => {
         expect(parseValidatedItemUrl('https://github.com/acme/widgets/issues/12', board)).toEqual({
             url: 'https://github.com/acme/widgets/issues/12',
-            isPullRequest: false
+            isPullRequest: false,
+            owner: 'acme',
+            repo: 'widgets'
         })
     })
 
     it('accepts a well-formed pull-request URL', () => {
         expect(parseValidatedItemUrl('https://github.com/acme/widgets/pull/9', board)).toEqual({
             url: 'https://github.com/acme/widgets/pull/9',
-            isPullRequest: true
+            isPullRequest: true,
+            owner: 'acme',
+            repo: 'widgets'
         })
     })
 
@@ -503,7 +510,9 @@ describe('parseValidatedItemUrl', () => {
     it('matches host case-insensitively, normalizing the host in the rebuilt URL', () => {
         expect(parseValidatedItemUrl('https://GitHub.com/acme/widgets/issues/12', board)).toEqual({
             url: 'https://github.com/acme/widgets/issues/12',
-            isPullRequest: false
+            isPullRequest: false,
+            owner: 'acme',
+            repo: 'widgets'
         })
     })
 
@@ -512,7 +521,9 @@ describe('parseValidatedItemUrl', () => {
         // string handed to `gh` — it's rebuilt from validated path parts.
         expect(parseValidatedItemUrl('https://github.com/acme/widgets/issues/12/?foo=bar#x', board)).toEqual({
             url: 'https://github.com/acme/widgets/issues/12',
-            isPullRequest: false
+            isPullRequest: false,
+            owner: 'acme',
+            repo: 'widgets'
         })
     })
 
@@ -529,7 +540,9 @@ describe('parseValidatedItemUrl', () => {
         const portedBoard = { host: 'ghe.example:8443' }
         expect(parseValidatedItemUrl('https://ghe.example:8443/acme/widgets/issues/12', portedBoard)).toEqual({
             url: 'https://ghe.example:8443/acme/widgets/issues/12',
-            isPullRequest: false
+            isPullRequest: false,
+            owner: 'acme',
+            repo: 'widgets'
         })
         // Same hostname, different (or default/missing) port must still be rejected.
         expect(parseValidatedItemUrl('https://ghe.example/acme/widgets/issues/12', portedBoard)).toBeNull()
@@ -1057,5 +1070,184 @@ describe('POST /api/todo-boards/:id/items/status', () => {
             body: JSON.stringify({ url: VALID_ITEM_URL })
         })
         expect(response.status).toBe(400)
+    })
+})
+
+describe('GET /api/todo-boards/:id/items/assignable-users', () => {
+    beforeEach(() => {
+        process.env.HAPI_BOARD_OWNER = 'heavygee'
+        process.env.HAPI_BOARD_NUMBER = '6'
+    })
+
+    it('fetches assignable users scoped to the item\'s own repo, not the board\'s project owner', async () => {
+        const calls: unknown[] = []
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, undefined, undefined, (target) => {
+            calls.push(target)
+            return {
+                data: {
+                    repository: {
+                        assignableUsers: {
+                            nodes: [
+                                { login: 'alice', avatarUrl: 'https://example.com/alice.png', name: 'Alice A' },
+                                { login: 'bob', avatarUrl: 'https://example.com/bob.png', name: null }
+                            ]
+                        }
+                    }
+                }
+            }
+        })
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/assignable-users?url=${encodeURIComponent(VALID_ITEM_URL)}`)
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({
+            users: [
+                { login: 'alice', avatarUrl: 'https://example.com/alice.png', name: 'Alice A' },
+                { login: 'bob', avatarUrl: 'https://example.com/bob.png', name: null }
+            ]
+        })
+        expect(calls).toEqual([{ host: 'github.com', owner: 'heavygee', repo: 'hapi-demo-board' }])
+    })
+
+    it('forwards a trimmed search term as the GraphQL query filter (Codex review: a page with no pagination needed server-side search)', async () => {
+        const calls: unknown[] = []
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, undefined, undefined, (target) => {
+            calls.push(target)
+            return { data: { repository: { assignableUsers: { nodes: [] } } } }
+        })
+        const response = await app.request(
+            `/api/todo-boards/${DEFAULT_BOARD_ID}/items/assignable-users?url=${encodeURIComponent(VALID_ITEM_URL)}&search=${encodeURIComponent('  alice  ')}`
+        )
+        expect(response.status).toBe(200)
+        expect(calls).toEqual([{ host: 'github.com', owner: 'heavygee', repo: 'hapi-demo-board', query: 'alice' }])
+    })
+
+    it('omits the query filter entirely for a blank/whitespace-only search term', async () => {
+        const calls: unknown[] = []
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, undefined, undefined, (target) => {
+            calls.push(target)
+            return { data: { repository: { assignableUsers: { nodes: [] } } } }
+        })
+        const response = await app.request(
+            `/api/todo-boards/${DEFAULT_BOARD_ID}/items/assignable-users?url=${encodeURIComponent(VALID_ITEM_URL)}&search=${encodeURIComponent('   ')}`
+        )
+        expect(response.status).toBe(200)
+        expect(calls).toEqual([{ host: 'github.com', owner: 'heavygee', repo: 'hapi-demo-board', query: undefined }])
+    })
+
+    it('rejects a missing url query parameter', async () => {
+        const app = await createApp(() => ({ data: {} }))
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/assignable-users`)
+        expect(response.status).toBe(400)
+    })
+
+    it('404s for an unknown board', async () => {
+        const app = await createApp(() => ({ data: {} }))
+        const response = await app.request(`/api/todo-boards/unknown/items/assignable-users?url=${encodeURIComponent(VALID_ITEM_URL)}`)
+        expect(response.status).toBe(404)
+    })
+
+    it('403s for a non-default namespace', async () => {
+        const app = await createApp(() => ({ data: {} }), undefined, 'some-other-namespace')
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/assignable-users?url=${encodeURIComponent(VALID_ITEM_URL)}`)
+        expect(response.status).toBe(403)
+    })
+
+    it('rejects an item URL that is not a member of this board\'s project — same gate as every write action', async () => {
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, undefined, () => ({
+            data: { resource: { projectItems: { nodes: [] } } }
+        }))
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/assignable-users?url=${encodeURIComponent(VALID_ITEM_URL)}`)
+        expect(response.status).toBe(400)
+    })
+
+    it('surfaces a GraphQL-level error as a 502', async () => {
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, undefined, undefined, () => ({
+            errors: [{ message: 'boom' }]
+        }))
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/assignable-users?url=${encodeURIComponent(VALID_ITEM_URL)}`)
+        expect(response.status).toBe(502)
+    })
+})
+
+describe('POST /api/todo-boards/:id/items/assignees', () => {
+    beforeEach(() => {
+        process.env.HAPI_BOARD_OWNER = 'heavygee'
+        process.env.HAPI_BOARD_NUMBER = '6'
+    })
+
+    it('adds and removes assignees in a single call via the setAssignees action', async () => {
+        const calls: unknown[] = []
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, {
+            ...UNUSED_ACTIONS,
+            setAssignees: async (target, addLogins, removeLogins) => { calls.push([target, addLogins, removeLogins]) }
+        })
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/assignees`, {
+            method: 'POST',
+            body: JSON.stringify({ url: VALID_ITEM_URL, addLogins: ['alice'], removeLogins: ['bob'] })
+        })
+        expect(response.status).toBe(200)
+        expect(calls).toEqual([[
+            { host: 'github.com', url: VALID_ITEM_URL, isPullRequest: false },
+            ['alice'],
+            ['bob']
+        ]])
+    })
+
+    it('rejects a request with neither addLogins nor removeLogins', async () => {
+        const app = await createApp(() => ({ data: {} }))
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/assignees`, {
+            method: 'POST',
+            body: JSON.stringify({ url: VALID_ITEM_URL })
+        })
+        expect(response.status).toBe(400)
+    })
+
+    it('rejects a request with both arrays empty', async () => {
+        const app = await createApp(() => ({ data: {} }))
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/assignees`, {
+            method: 'POST',
+            body: JSON.stringify({ url: VALID_ITEM_URL, addLogins: [], removeLogins: [] })
+        })
+        expect(response.status).toBe(400)
+    })
+
+    it('404s for an unknown board', async () => {
+        const app = await createApp(() => ({ data: {} }))
+        const response = await app.request('/api/todo-boards/unknown/items/assignees', {
+            method: 'POST',
+            body: JSON.stringify({ url: VALID_ITEM_URL, addLogins: ['alice'] })
+        })
+        expect(response.status).toBe(404)
+    })
+
+    it('403s for a non-default namespace', async () => {
+        const app = await createApp(() => ({ data: {} }), undefined, 'some-other-namespace')
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/assignees`, {
+            method: 'POST',
+            body: JSON.stringify({ url: VALID_ITEM_URL, addLogins: ['alice'] })
+        })
+        expect(response.status).toBe(403)
+    })
+
+    it('rejects an item URL that is not a member of this board\'s project — same gate as every write action', async () => {
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, UNUSED_ACTIONS, () => ({
+            data: { resource: { projectItems: { nodes: [] } } }
+        }))
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/assignees`, {
+            method: 'POST',
+            body: JSON.stringify({ url: VALID_ITEM_URL, addLogins: ['alice'] })
+        })
+        expect(response.status).toBe(400)
+    })
+
+    it('surfaces a failed gh invocation as a 502, not a silently-swallowed success', async () => {
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, {
+            ...UNUSED_ACTIONS,
+            setAssignees: async () => { throw new Error('gh issue edit failed') }
+        })
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/assignees`, {
+            method: 'POST',
+            body: JSON.stringify({ url: VALID_ITEM_URL, addLogins: ['alice'] })
+        })
+        expect(response.status).toBe(502)
     })
 })

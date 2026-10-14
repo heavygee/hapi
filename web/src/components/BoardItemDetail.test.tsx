@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { BoardItem } from '@/types/api'
 import { I18nProvider } from '@/lib/i18n-context'
@@ -43,10 +43,17 @@ function renderDetail(overrides: Partial<Parameters<typeof BoardItemDetail>[0]> 
         onReopen: vi.fn(),
         onComment: vi.fn(),
         onSetStatus: vi.fn(),
+        assignableUsers: [],
+        isLoadingAssignableUsers: false,
+        assignableUsersError: null,
+        onAssigneePickerOpenChange: vi.fn(),
+        onAssignableUsersSearchChange: vi.fn(),
+        onSetAssignees: vi.fn(),
         isClosing: false,
         isReopening: false,
         isCommenting: false,
         isSettingStatus: false,
+        isSettingAssignees: false,
         ...overrides
     }
     render(
@@ -171,6 +178,127 @@ describe('BoardItemDetail', () => {
         renderDetail({ linkedSessionId: null })
         expect(screen.queryByRole('button', { name: 'Open session' })).not.toBeInTheDocument()
         expect(screen.getByRole('button', { name: 'Spawn session' })).toBeInTheDocument()
+    })
+})
+
+// Click-to-toggle assignee picker (design-consult review, hapi#238) — mirrors
+// the existing status dropdown's "editable, not read-only" treatment.
+describe('BoardItemDetail assignee picker', () => {
+    it('shows the add-assignee control for a writable item even with zero assignees', () => {
+        renderDetail({ item: makeItem({ assignees: [] }) })
+        expect(screen.getByLabelText('Add assignee')).toBeInTheDocument()
+    })
+
+    it('hides the add-assignee control for a draft issue (no url)', () => {
+        renderDetail({ item: makeItem({ url: null, assignees: [] }) })
+        expect(screen.queryByLabelText('Add assignee')).not.toBeInTheDocument()
+    })
+
+    it('removes an assignee via its chip button, calling onSetAssignees with the removal', () => {
+        const { onSetAssignees } = renderDetail({
+            item: makeItem({ assignees: [{ login: 'hubot', avatarUrl: 'https://example.com/b.png' }] })
+        })
+        fireEvent.click(screen.getByLabelText('Remove hubot'))
+        expect(onSetAssignees).toHaveBeenCalledWith([], ['hubot'])
+    })
+
+    it('notifies the parent when the picker opens, so it can fetch assignable users on demand', () => {
+        const { onAssigneePickerOpenChange } = renderDetail()
+        fireEvent.click(screen.getByLabelText('Add assignee'))
+        expect(onAssigneePickerOpenChange).toHaveBeenCalledWith(true)
+    })
+
+    it('lists fetched assignable users, marking already-assigned ones', () => {
+        renderDetail({
+            item: makeItem({ assignees: [{ login: 'hubot', avatarUrl: 'https://example.com/b.png' }] }),
+            assignableUsers: [
+                { login: 'hubot', avatarUrl: 'https://example.com/b.png', name: 'Hubot' },
+                { login: 'octocat', avatarUrl: 'https://example.com/a.png', name: null }
+            ]
+        })
+        fireEvent.click(screen.getByLabelText('Add assignee'))
+        expect(screen.getByText('Hubot')).toBeInTheDocument()
+        expect(screen.getByText('octocat')).toBeInTheDocument()
+    })
+
+    it('adds an unassigned user from the picker list, calling onSetAssignees with the addition', () => {
+        const { onSetAssignees } = renderDetail({
+            item: makeItem({ assignees: [] }),
+            assignableUsers: [{ login: 'octocat', avatarUrl: 'https://example.com/a.png', name: null }]
+        })
+        fireEvent.click(screen.getByLabelText('Add assignee'))
+        fireEvent.click(screen.getByText('octocat'))
+        expect(onSetAssignees).toHaveBeenCalledWith(['octocat'], [])
+    })
+
+    it('removes an already-assigned user clicked from the picker list', () => {
+        const { onSetAssignees } = renderDetail({
+            item: makeItem({ assignees: [{ login: 'octocat', avatarUrl: 'https://example.com/a.png' }] }),
+            assignableUsers: [{ login: 'octocat', avatarUrl: 'https://example.com/a.png', name: null }]
+        })
+        fireEvent.click(screen.getByLabelText('Add assignee'))
+        // The already-assigned chip's remove button is named "Remove octocat"
+        // — the picker row's own button (no aria-label) is named "octocat"
+        // from its content, distinguishing the two "octocat" buttons.
+        fireEvent.click(screen.getByRole('button', { name: 'octocat' }))
+        expect(onSetAssignees).toHaveBeenCalledWith([], ['octocat'])
+    })
+
+    it('shows a loading state in the picker while assignable users are being fetched', () => {
+        renderDetail({ isLoadingAssignableUsers: true })
+        fireEvent.click(screen.getByLabelText('Add assignee'))
+        expect(screen.getByRole('status')).toBeInTheDocument()
+    })
+
+    it('shows an error state in the picker when the assignable-users fetch fails', () => {
+        renderDetail({ assignableUsersError: 'Failed to load assignable users' })
+        fireEvent.click(screen.getByLabelText('Add assignee'))
+        expect(screen.getByText('Failed to load assignable users')).toBeInTheDocument()
+    })
+
+    it('shows an empty state when the repo has no assignable users', () => {
+        renderDetail({ assignableUsers: [] })
+        fireEvent.click(screen.getByLabelText('Add assignee'))
+        expect(screen.getByText('No assignable users found for this repo')).toBeInTheDocument()
+    })
+
+    it('disables picker rows while an assignee change is in flight', () => {
+        renderDetail({
+            isSettingAssignees: true,
+            assignableUsers: [{ login: 'octocat', avatarUrl: 'https://example.com/a.png', name: null }]
+        })
+        fireEvent.click(screen.getByLabelText('Add assignee'))
+        expect(screen.getByText('octocat').closest('button')).toBeDisabled()
+    })
+
+    it('debounces the search box before notifying the parent — a 50-row page with no pagination needed a way to reach users past it (Codex review)', () => {
+        vi.useFakeTimers()
+        try {
+            const { onAssignableUsersSearchChange } = renderDetail()
+            fireEvent.click(screen.getByLabelText('Add assignee'))
+
+            fireEvent.change(screen.getByLabelText('Search people…'), { target: { value: 'ali' } })
+            expect(onAssignableUsersSearchChange).not.toHaveBeenCalled()
+
+            act(() => {
+                vi.advanceTimersByTime(300)
+            })
+            expect(onAssignableUsersSearchChange).toHaveBeenCalledWith('ali')
+        } finally {
+            vi.useRealTimers()
+        }
+    })
+
+    it('clears the search box when the picker closes, so reopening starts fresh', () => {
+        renderDetail()
+        fireEvent.click(screen.getByLabelText('Add assignee'))
+        const input = screen.getByLabelText('Search people…') as HTMLInputElement
+        fireEvent.change(input, { target: { value: 'ali' } })
+        expect(input.value).toBe('ali')
+
+        fireEvent.click(screen.getByLabelText('Add assignee'))
+        fireEvent.click(screen.getByLabelText('Add assignee'))
+        expect((screen.getByLabelText('Search people…') as HTMLInputElement).value).toBe('')
     })
 })
 

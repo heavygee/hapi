@@ -140,4 +140,34 @@ describe('useBoardItemActions', () => {
 
         expect(setBoardItemStatus).toHaveBeenCalledWith('board-1', 'https://github.com/a/b/issues/1', 'Done')
     })
+
+    it('sets assignees via the API and invalidates every board\'s items cache', async () => {
+        const queryClient = new QueryClient()
+        const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+        const setBoardItemAssignees = vi.fn().mockResolvedValue(undefined)
+        const api = { setBoardItemAssignees } as unknown as ApiClient
+
+        const { result } = renderHook(() => useBoardItemActions(api, 'board-1'), { wrapper: wrapper(queryClient) })
+        await result.current.setItemAssignees({ url: 'https://github.com/a/b/issues/1' }, ['alice'], ['bob'])
+
+        expect(setBoardItemAssignees).toHaveBeenCalledWith('board-1', 'https://github.com/a/b/issues/1', ['alice'], ['bob'])
+        expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.boardItemsAll })
+    })
+
+    it('tracks settingAssigneesUrls across the call, scoped to the acting item', async () => {
+        const queryClient = new QueryClient()
+        let resolveSet: () => void = () => {}
+        const setBoardItemAssignees = vi.fn(() => new Promise<void>((resolve) => { resolveSet = resolve }))
+        const api = { setBoardItemAssignees } as unknown as ApiClient
+
+        const { result } = renderHook(() => useBoardItemActions(api, 'board-1'), { wrapper: wrapper(queryClient) })
+        expect(result.current.settingAssigneesUrls.size).toBe(0)
+
+        const promise = result.current.setItemAssignees({ url: 'https://github.com/a/b/issues/1' }, ['alice'], [])
+        await waitFor(() => expect(result.current.settingAssigneesUrls.has('https://github.com/a/b/issues/1')).toBe(true))
+
+        resolveSet()
+        await promise
+        await waitFor(() => expect(result.current.settingAssigneesUrls.size).toBe(0))
+    })
 })

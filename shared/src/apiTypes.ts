@@ -1340,6 +1340,23 @@ export const BoardItemStatusRequestSchema = z.object({
 })
 export type BoardItemStatusRequest = z.infer<typeof BoardItemStatusRequestSchema>
 
+// At least one of addLogins/removeLogins must be non-empty — enforced by the
+// hub route, not the schema, since "both empty" is a no-op worth a clear
+// error rather than a confusing 200 that changed nothing.
+export const BoardItemAssigneesRequestSchema = z.object({
+    url: z.string().min(1),
+    addLogins: z.array(z.string().min(1)).optional(),
+    removeLogins: z.array(z.string().min(1)).optional()
+})
+export type BoardItemAssigneesRequest = z.infer<typeof BoardItemAssigneesRequestSchema>
+
+/** `name` is extra context for the assignee picker (not shown in the existing read-only assignee display, which only ever renders avatar + login). */
+export type BoardAssignableUser = BoardItemActor & { name: string | null }
+
+export type AssignableUsersResponse = {
+    users: BoardAssignableUser[]
+}
+
 export const LinkIssueRequestSchema = z.object({
     url: z.string().min(1)
 })
