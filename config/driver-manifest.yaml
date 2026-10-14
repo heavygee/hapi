@@ -1212,6 +1212,17 @@ layers:
   # Web-only → remat --build-web; hard-reload (no hub restart required).
   - branch: driver/2015-session-scroll-into-view
 
+  # tiann/hapi#2020 — first-class archive_peer / hapi archive-peer soft stand-down.
+  # CLI+MCP twin of ping_peer; hub allows Peer Done (non-thinking) archive when
+  # StopSession still reports still_alive/unknown, refuses WORKING (hasLiveWork).
+  # Upstream-aimed tip: feat/archive-peer-2020 @ c9e8177c3
+  # Worktree: ~/coding/hapi/worktrees/archive-peer-2020
+  # Hub+cli → remat (no --build-web required) + hapi-restart-hub; Cursor MCP
+  # sessions may need resume before archive_peer appears in the tool list.
+  # Tip-unique verify: `archive_peer` in cli startHappyServer toolNames +
+  # hasLiveWork soft stand-down path in hub syncEngine.archiveSession.
+  - branch: feat/archive-peer-2020
+
   # DROPPED 2026-10-06: driver/1933-claude-resume-amnesia — squash 94523eb0d is on
   # fork main (heavygee/hapi#204). Soup base is now origin/main, so tip-forward
   # absorbs it from the base; keeping the layer would double-apply / conflict.
