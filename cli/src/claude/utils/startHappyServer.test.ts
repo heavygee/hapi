@@ -126,6 +126,7 @@ describe('startHappyServer skill_lookup', () => {
             'ping_peer',
             'session_job',
             'spawn_peer',
+            'archive_peer',
         ].sort())
         expect(tools.tools.map((tool) => tool.name)).not.toContain('display_links')
     })
@@ -250,6 +251,7 @@ describe('startHappyServer skill_lookup', () => {
             'ping_peer',
             'inspect_peer',
             'spawn_peer',
+            'archive_peer',
             'session_job',
         ])
         expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
@@ -265,6 +267,7 @@ describe('startHappyServer skill_lookup', () => {
             'set_voice_mode',
             'link_issue',
             'spawn_peer',
+            'archive_peer',
         ].sort())
     })
 
@@ -440,6 +443,7 @@ describe('toClaudeAllowedHapiMcpTools', () => {
             'ping_peer',
             'inspect_peer',
             'spawn_peer',
+            'archive_peer',
             'session_job',
             'skill_lookup'
         ])).toEqual([
@@ -454,6 +458,7 @@ describe('toClaudeAllowedHapiMcpTools', () => {
         ])
         expect(toClaudeAllowedHapiMcpTools(['display_video'])).not.toContain('mcp__hapi__display_video')
         expect(toClaudeAllowedHapiMcpTools(['display_media'])).not.toContain('mcp__hapi__display_media')
+        expect(toClaudeAllowedHapiMcpTools(['archive_peer'])).not.toContain('mcp__hapi__archive_peer')
     })
 })
 

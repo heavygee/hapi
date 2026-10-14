@@ -84,6 +84,7 @@ import {
     type RpcUploadFileResponse
 } from './rpcGateway'
 import { SessionCache } from './sessionCache'
+import { hasLiveWork } from './sessionIdle'
 import { OverseerEventRecorder, toSessionSnapshot } from './overseerEventRecorder'
 import { createOverseerLlmFallbackClient } from './overseerLlmFallback'
 import { loadOverseerLlmFallbackConfig, redactOverseerLlmBaseUrlForLog } from './overseerLlmFallbackConfig'
@@ -2969,7 +2970,17 @@ export class SyncEngine {
                 }
             }
             if (status === 'still_alive' || status === 'unknown') {
-                throw new SessionArchiveUncontrollableError(sessionId)
+                // tiann/hapi#2020: Peer Done / idle workers may still report
+                // still_alive after KillSession+StopSession (ghost keepalive).
+                // Soft stand-down with hub-authored archive so orchestrators
+                // can archive without DELETE. Refuse when the agent has live
+                // work (thinking / background tasks / pending requests) so
+                // archive does not yank a genuinely WORKING peer.
+                const live = this.sessionCache.getSession(sessionId)
+                if (!live || hasLiveWork(live)) {
+                    throw new SessionArchiveUncontrollableError(sessionId)
+                }
+                // Fall through: hub-author archive metadata below.
             }
         } else if (machineId && !runnerSpawned) {
             // Terminal / non-runner sessions: KillSession is the primary stop.

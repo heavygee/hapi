@@ -17,9 +17,9 @@ export const HAPI_SESSION_ID_ENV = 'HAPI_SESSION_ID';
  *
  * Prefer the MCP `display_image` tool when available; Cursor sessions also get `display_links`.
  * `HAPI_SESSION_ID` is the deterministic fallback for hub REST and shell tooling.
- * To discover / read / message another session, prefer MCP `list_peers` /
- * `inspect_peer` / `ping_peer` (or `hapi ping-peer --list` / `inspect-peer` /
- * `ping-peer`). To spawn a new peer with work, prefer MCP `spawn_peer` or
+ * To discover / read / message / archive another session, prefer MCP `list_peers` /
+ * `inspect_peer` / `ping_peer` / `archive_peer` (or `hapi ping-peer --list` /
+ * `inspect-peer` / `archive-peer` / `ping-peer`). To spawn a new peer with work, prefer MCP `spawn_peer` or
  * `hapi spawn-peer` - do not reinvent JWT+curl or stuff `message` into machine spawn.
  *
  * For lazy Codex sessions the id must only be exported after the hub row is

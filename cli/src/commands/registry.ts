@@ -22,6 +22,7 @@ import { linkPrCommand } from './linkPr'
 import { hubCommand } from './hub'
 import { pingPeerCommand } from './pingPeer'
 import { inspectPeerCommand } from './inspectPeer'
+import { archivePeerCommand } from './archivePeer'
 import { helpCommand } from './help'
 import { jobCommand } from './job'
 import { spawnPeerCommand } from './spawnPeer'
@@ -73,6 +74,7 @@ const COMMANDS: CommandDefinition[] = [
     linkPrCommand,
     pingPeerCommand,
     inspectPeerCommand,
+    archivePeerCommand,
     jobCommand,
     spawnPeerCommand,
     displayLinksCommand,

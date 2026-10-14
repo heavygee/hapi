@@ -24,6 +24,7 @@ import { buildDisplayLinksPayload, parseDisplayLinksInput } from "@hapi/protocol
 import { resolveSkill } from "@/modules/common/skills";
 import { SESSION_NAME_MAX_LENGTH, toSessionSummaryMetadata } from '@hapi/protocol'
 import {
+    ARCHIVE_PEER_TOOL_DESCRIPTION,
     INSPECT_PEER_TOOL_DESCRIPTION,
     PING_PEER_TOOL_DESCRIPTION,
     SESSION_ID_PREFIX_PARAM_DESCRIPTION,
@@ -33,6 +34,7 @@ import { CREATABLE_AGENT_FLAVORS } from '@hapi/protocol/modes'
 import { PermissionModeSchema } from '@hapi/protocol/schemas'
 import { applySessionDisplayRename, normalizeSessionDisplayTitle } from "@/agent/sessionDisplayRename";
 import { applySessionVoiceMode } from "@/agent/sessionVoiceMode";
+import { ArchivePeerError, archivePeer } from "@/modules/archivePeer/archivePeer";
 import { PingPeerError, formatInspectPeerReport, formatPeerSessionsList, inspectPeer, listPeerSessions, peerListFetchLimit, pingPeer, searchPeerSessions } from "@/modules/pingPeer/pingPeer";
 import {
     SearchContentError,
@@ -114,13 +116,14 @@ const CLAUDE_MANUAL_APPROVAL_HAPI_TOOLS = new Set([
     'display_video',
     'ping_peer',
     'inspect_peer',
-    'spawn_peer'
+    'spawn_peer',
+    'archive_peer'
 ]);
 
 /**
  * Map HAPI MCP tool names to Claude `--allowedTools` entries.
  * Keeps `display_media` / `display_video` (arbitrary local-path readers), `ping_peer`,
- * `inspect_peer`, and `spawn_peer` off the auto-allow list so they still prompt.
+ * `inspect_peer`, `spawn_peer`, and `archive_peer` off the auto-allow list so they still prompt.
  * `list_peers` stays allowed (discovery shortlist only).
  * `search_peers` stays allowed (keyword inventory; no resume/inject).
  * `search_content` stays allowed (transcript search; read-only hub REST).
@@ -198,6 +201,11 @@ function createHapiMcpServer(
         sessionIdPrefix: z.string().trim().min(1).describe(SESSION_ID_PREFIX_PARAM_DESCRIPTION),
         message: z.string().min(1).describe('Message text to deliver to the target session'),
     });
+
+    const archivePeerInputSchema: z.ZodTypeAny = z.object({
+        sessionIdPrefix: z.string().trim().min(1).describe(SESSION_ID_PREFIX_PARAM_DESCRIPTION),
+    });
+
 
     const spawnPeerInputSchema: z.ZodTypeAny = z.object({
         directory: z.string().trim().min(1)
@@ -559,7 +567,47 @@ mcp.registerTool<any, any>('display_image', {
         }
     });
 
-    mcp.registerTool<any, any>('spawn_peer', {
+    
+    mcp.registerTool<any, any>('archive_peer', {
+        description: ARCHIVE_PEER_TOOL_DESCRIPTION,
+        title: 'Archive Peer Session',
+        inputSchema: archivePeerInputSchema,
+    }, async (args: { sessionIdPrefix: string }) => {
+        logger.debug('[hapiMCP] archive_peer:', args.sessionIdPrefix);
+        try {
+            const result = await archivePeer({
+                sessionIdPrefix: args.sessionIdPrefix,
+            });
+            const verb = result.alreadyArchived ? 'Already archived' : 'Archived';
+            return {
+                content: [
+                    {
+                        type: 'text' as const,
+                        text: `${verb} ${result.sessionId} (${result.name})`,
+                    },
+                ],
+                isError: false,
+            };
+        } catch (error) {
+            const message = error instanceof ArchivePeerError
+                ? error.message
+                : error instanceof Error
+                    ? error.message
+                    : String(error);
+            logger.debug('[hapiMCP] archive_peer failed:', message);
+            return {
+                content: [
+                    {
+                        type: 'text' as const,
+                        text: `Failed to archive peer: ${message}`,
+                    },
+                ],
+                isError: true,
+            };
+        }
+    });
+
+mcp.registerTool<any, any>('spawn_peer', {
         description: SPAWN_PEER_TOOL_DESCRIPTION,
         title: 'Spawn Peer Session',
         inputSchema: spawnPeerInputSchema,
@@ -950,7 +998,7 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
     if (enableDisplayLinks) {
         toolNames.push('display_links');
     }
-    toolNames.push('list_peers', 'search_peers', 'search_content', 'ping_peer', 'inspect_peer', 'spawn_peer', SESSION_JOB_TOOL_NAME);
+    toolNames.push('list_peers', 'search_peers', 'search_content', 'ping_peer', 'inspect_peer', 'spawn_peer', 'archive_peer', SESSION_JOB_TOOL_NAME);
     if (options.skillLookup) {
         toolNames.push('skill_lookup');
     }

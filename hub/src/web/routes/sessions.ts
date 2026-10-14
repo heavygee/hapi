@@ -769,6 +769,7 @@ export function createSessionsRoutes(
 
         try {
             await engine.archiveSession(sessionResult.sessionId)
+            return c.json({ ok: true })
         } catch (error) {
             if (error instanceof SessionArchiveUncontrollableError) {
                 return c.json({
@@ -776,9 +777,14 @@ export function createSessionsRoutes(
                     code: 'session_uncontrollable'
                 }, 409)
             }
+            const message = error instanceof Error ? error.message : String(error)
+            // #1910 / #2020: WORKING peers still refuse stop confirmation —
+            // surface as 409 so archive_peer / CLI map cleanly (not opaque 500).
+            if (message.includes('still running and could not be stopped')) {
+                return c.json({ error: message, code: 'session_uncontrollable' }, 409)
+            }
             throw error
         }
-        return c.json({ ok: true })
     })
 
     app.post('/sessions/:id/model-error/acknowledge', async (c) => {

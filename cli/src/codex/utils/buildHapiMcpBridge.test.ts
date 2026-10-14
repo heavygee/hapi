@@ -18,7 +18,7 @@ vi.mock('@/claude/utils/startHappyServer', () => ({
             || (options.enableDisplayLinks !== false && options.skillLookup?.flavor === 'cursor')
         const names = ['change_title', 'display_image', 'display_video', 'display_media']
         if (cursorLinks) names.push('display_links')
-        names.push('list_peers', 'search_peers', 'search_content', 'ping_peer', 'inspect_peer', 'spawn_peer', 'session_job')
+        names.push('list_peers', 'search_peers', 'search_content', 'ping_peer', 'inspect_peer', 'spawn_peer', 'archive_peer', 'session_job')
         if (options.skillLookup) names.push('skill_lookup')
         return {
             url: 'http://127.0.0.1:43006/',
@@ -81,7 +81,7 @@ describe('buildHapiMcpBridge skill lookup config', () => {
             '--url',
             'http://127.0.0.1:43006/',
             '--tools',
-            'change_title,display_image,display_video,display_media,list_peers,search_peers,search_content,ping_peer,inspect_peer,spawn_peer,session_job,skill_lookup',
+            'change_title,display_image,display_video,display_media,list_peers,search_peers,search_content,ping_peer,inspect_peer,spawn_peer,archive_peer,session_job,skill_lookup',
             '--hapi-session-id',
             'hub-session-1',
         ])
@@ -107,7 +107,7 @@ describe('buildHapiMcpBridge skill lookup config', () => {
             '--url',
             'http://127.0.0.1:43006/',
             '--tools',
-            'change_title,display_image,display_video,display_media,list_peers,search_peers,search_content,ping_peer,inspect_peer,spawn_peer,session_job',
+            'change_title,display_image,display_video,display_media,list_peers,search_peers,search_content,ping_peer,inspect_peer,spawn_peer,archive_peer,session_job',
             '--hapi-session-id',
             'hub-session-1',
         ])

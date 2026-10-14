@@ -57,8 +57,8 @@ const AUTO_APPROVE_EXACT_TOOL_NAMES = new Set([
     'mcp__hapi__session_job',
     'session-attached job'
 ]);
-// ping_peer / inspect_peer / spawn_peer intentionally omitted from always-approve:
-// they can resume+inject into another session, read peer histories, or create a
+// ping_peer / inspect_peer / spawn_peer / archive_peer intentionally omitted from always-approve:
+// they can resume+inject into another session, read peer histories, create a
 // new session with an injected remit, so permission modes must still gate them.
 // Treat them as write-like in read-only so ACP titles such as "Ping Peer Session"
 // / "Inspect Peer Session" / "Spawn Peer Session" also require approval.
@@ -71,6 +71,8 @@ const SENSITIVE_TOOL_NAME_HINTS = [
     'inspect peer',
     'spawn_peer',
     'spawn peer',
+    'archive_peer',
+    'archive peer',
 ];
 const AUTO_APPROVE_WRITE_TOOL_HINTS = [
     'write',
