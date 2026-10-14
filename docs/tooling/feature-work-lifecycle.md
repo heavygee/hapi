@@ -51,10 +51,8 @@ flowchart TD
     ORCH --> S01["Step 1: code search in repo"]
     S01 --> S02["Step 2: upstream search tiann hapi"]
     S02 --> S03["Step 3: playback, operator confirms"]
-    S03 --> S04{"Step 4: issue or spike?"}
-    S04 -->|issue| ISSUE["gh issue on tiann hapi"]
-    S04 -->|spike| WT["Step 5: hapi-worktree-create"]
-    ISSUE --> WT
+    S03 --> S04["Step 4: tracking issue REQUIRED<br/>tiann/hapi or heavygee/hapi"]
+    S04 --> WT["Step 5: hapi-worktree-create"]
     WT --> TOPO{"Step 5: proof + dogfood path"}
     TOPO -->|always| PEER["Peer stack ports 3100-3199<br/>isolated Playwright / PNG-MP4"]
     TOPO -->|always| SOUP["Soup layer on port 3006<br/>DEFAULT dogfood — promote always"]
@@ -65,12 +63,14 @@ flowchart TD
     IMPL --> GATES["Step 6: typecheck, test, cold review, Playwright"]
     GATES -->|fail| IMPL
     GATES -->|pass| INLINE["Step 6.4: inline proof in HAPI chat<br/>display_image or display_video"]
-    INLINE --> PROMOTE["Peer promotes soup layer<br/>manifest + rebuild — do not wait for permission"]
+    INLINE --> PROMOTE["Peer promotes soup layer<br/>manifest + Meta compose"]
     PROMOTE --> DOG["Step 7: operator dogfood on :3006"]
     DOG -->|no| IMPL
     DOG -->|yes| PR["Step 8: gh pr create vs upstream main"]
     PR --> DROP["After upstream merge: peer drops layer + cleans wt/branch<br/>meta rematerializes once wave done"]
 ```
+
+**Issue-first (2026-10-14):** Step 4 is mandatory before product commits / soup tip-forward. Throwaway spikes without an issue must not commit product code or enter the manifest. Operator mic / voice does not waive this. Hardening: `.cursor/rules/hapi-product-code-guard.mdc`, intake §4.
 
 **Policy (2026-07-30):** Soup is where we dogfood. **Never** skip soup promotion because "peer stack was enough" or "upstream tip does not need soup." Peer stack proves isolated UI without yanking `:3006`; soup gets the same tip (heal/union if merge conflicts) so `:3006` stays the tastiest stack. Operator approval is for **click-testing / PR**, not for whether to add the layer.
 
