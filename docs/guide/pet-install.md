@@ -12,6 +12,8 @@ One command installs:
 
 It does **not** log Claude Code into your Anthropic account — that's a separate step you do by hand, on purpose.
 
+**It also joins you to the fleet by default** — see "Staying on the fleet" below before you install, if you want a say in how that works for you.
+
 ## Install
 
 ```bash
@@ -68,6 +70,30 @@ instead — it regenerates the token and relaunches hub + runner.
 
 Run the exact same install command again. Nothing you've done is lost — it swaps the
 HAPI binary in place and restarts.
+
+## Staying on the fleet
+
+By default, this install points your instance at a public, read-only channel the
+maintainer publishes new versions to. You choose how your install reacts when a new
+version shows up — this is a **pull**, not a push: nothing reaches onto your machine
+uninvited, your install just checks a public URL and decides what to do based on your
+own setting.
+
+Three settings, pick one at install time:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/heavygee/hapi/main/scripts/install-hapi-pet.sh | bash -s -- --fleet-policy=alert   # default: tells you, you decide
+curl -fsSL https://raw.githubusercontent.com/heavygee/hapi/main/scripts/install-hapi-pet.sh | bash -s -- --fleet-policy=auto    # updates itself automatically
+curl -fsSL https://raw.githubusercontent.com/heavygee/hapi/main/scripts/install-hapi-pet.sh | bash -s -- --fleet-policy=silent  # never checks, fully manual
+```
+
+- **`alert`** (default) — your instance notices a new version is available and flags it; you still choose when to actually upgrade (re-running the install command).
+- **`auto`** — your instance applies new versions as they're published, no action from you.
+- **`silent`** — opts out of this entirely; you're back to the plain manual re-run-the-install-command model described above, with nothing checking anything on your behalf.
+
+You can change your mind later by re-running the install command with a different
+`--fleet-policy=` flag. If you'd rather not wire this up at all on first install (e.g.
+you're on a network that can't reach GitHub), add `--skip-upstream-seal`.
 
 ## If something's wrong
 
