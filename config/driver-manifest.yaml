@@ -819,12 +819,12 @@ layers:
   # Tip: f0803e996
   - branch: fix/claude-mcp-spawn-model-effort
 
-  # heavygee/hapi#120 / Heavygee-Projects/hapi-inline#497+#498 — vendor hapi-inline operator dock (fork-local, not tiann).
-  # Tip: ffd2d22dd (driver/hapi-inline-revendor-0220) — pin v0.22.0 replies title refresh + Open in HAPI (#500/#499).
-  # Replaces driver/hapi-inline-revendor-0210 / operator-dock v0.21.0. Keeps #492/#474/#466/#419.
-  # Worktree: ~/coding/hapi/worktrees/hapi-inline-revendor-0220
+  # heavygee/hapi#120 / Heavygee-Projects/hapi-inline#508 — vendor hapi-inline operator dock (fork-local, not tiann).
+  # Tip: a5510bbad (driver/hapi-inline-revendor-0221) — pin v0.22.1 Open in HAPI location.assign CodeQL harden (#508/#509).
+  # Replaces driver/hapi-inline-revendor-0220 / operator-dock v0.22.0. Keeps #497/#498/#492/#474/#466/#419.
+  # Worktree: ~/coding/hapi/worktrees/hapi-inline-revendor-0221
   # Hub+web → remat needs --build-web + hapi-restart-hub (embedded web assets).
-  - branch: driver/hapi-inline-revendor-0220
+  - branch: driver/hapi-inline-revendor-0221
 
   # heavygee/hapi#121 — operator-hold chip pulse (🛑 needs_operator / babysit.hold).
   # Soup UI on awareness ancestry (schema enum + SessionPrChip FueDot). Classifier
@@ -1211,6 +1211,17 @@ layers:
   # Worktree: ~/coding/hapi/worktrees/session-scroll-into-view-2015 (+ soup thin 2015-scroll-into-view-soup)
   # Web-only → remat --build-web; hard-reload (no hub restart required).
   - branch: driver/2015-session-scroll-into-view
+
+  # tiann/hapi#2020 — first-class archive_peer / hapi archive-peer soft stand-down.
+  # CLI+MCP twin of ping_peer; hub allows Peer Done (non-thinking) archive when
+  # StopSession still reports still_alive/unknown, refuses WORKING (hasLiveWork).
+  # Upstream-aimed tip: feat/archive-peer-2020 @ c9e8177c3
+  # Worktree: ~/coding/hapi/worktrees/archive-peer-2020
+  # Hub+cli → remat (no --build-web required) + hapi-restart-hub; Cursor MCP
+  # sessions may need resume before archive_peer appears in the tool list.
+  # Tip-unique verify: `archive_peer` in cli startHappyServer toolNames +
+  # hasLiveWork soft stand-down path in hub syncEngine.archiveSession.
+  - branch: feat/archive-peer-2020
 
   # DROPPED 2026-10-06: driver/1933-claude-resume-amnesia — squash 94523eb0d is on
   # fork main (heavygee/hapi#204). Soup base is now origin/main, so tip-forward

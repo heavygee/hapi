@@ -353,6 +353,8 @@ ElevenLabs ConvAI today: handoff OK, readback weak, payment, no mode machine. Ta
 
 **Soup compose lane:** see lifecycle § Agent permission matrix — **feature peers** retip the layer + edit/push the manifest, then ping **Meta tooling**; **Meta** runs `hapi-driver-rebuild --build-web [--verify]`, `hapi-verify-web-dist`, **`hapi-restart-hub`** (hub/cli). Feature peers do **not** self-serve remat (operator rule 2026-10-13). Not `hapi-use-driver`.
 
+**Default destination (operator 2026-10-14):** product work → soup via upstreamable tip + manifest (not fork-main merge). Fork `main` merge is only for non-upstream tooling. Canon: lifecycle § Soup promotion.
+
 **Raw `sudo systemctl restart hapi-hub`:** forbidden — use `hapi-restart-hub`. Three-layer block + TTY-gated bypass: `.cursor/rules/operator-fork.mdc` § sudo systemctl. Outage pattern: agents running `hapi-use-worktree` from inside their worktree (2026-06-10, 2026-06-11) — don't be the third.
 
 ---

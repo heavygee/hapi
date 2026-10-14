@@ -514,6 +514,15 @@ Peers **must** assess tier before capture ([`peer-stack.md` § Evidence modality
 
 ## Soup promotion (peer layer + Meta compose — default, not optional)
 
+**Default destination (operator 2026-10-14):** unless told otherwise, **everything product-shaped goes to soup**. Soup is the daily driver; the only real fork is *how* the tip arrives:
+
+| Default | Path | When |
+|---------|------|------|
+| **Upstreamable → soup** | Thin tip on `driver/<feature>` / `feat/…` → manifest layer → Meta remat → `:3006`. Open `tiann/hapi` PR after dogfood. | **Almost everything.** Expect upstream as the default shape so the tip is soup-ready without a fork-main merge. |
+| **Fork-only tooling → fork merge** | Land on `heavygee/hapi` `main` (docs/operator, scripts/tooling, plans, CLAUDE.md, …) | **Only** stuff that will **not** go upstream. That is the rare path. |
+
+Do **not** frame product dogfood as "merge to local fork first." Fork `main` is not the soup on-ramp for Boards / web / hub / cli product - the manifest layer is. (Voice confirm with Meta PR watcher / tooling Meta, 2026-10-14.)
+
 **Default feature flow:** peer stack proof on `:3100+` **and** soup layer on `:3006`. Soup is not optional — but **compose is Meta tooling's lane**, not the feature peer's (operator rule 2026-10-13). Peer does not wait for the human to "please put this in soup"; peer prepares the layer and pings Meta. Operator dogfood is the click-test on the promoted stack.
 
 **Why split:** remat holds a single-writer lease, patient hub drains, and wrong-side absorbs need a kitchen cook. Feature peers self-serving four remats in one afternoon is how stale `switch.lock` and false "peer owns rebuild" memories get baked. Docs used to say peer-owned compose — that text was wrong relative to the operator rule; this section is the correction.
