@@ -1092,9 +1092,9 @@ layers:
 
   # heavygee/hapi#235 / PR #238 — Boards view (cards/chips/relative-time,
   # Projects v2 /views/<n> filter capture). Renamed To-Do → Boards.
-  # Re-tip 2026-10-14 (assignee picker): driver/235-todo-board-view @ eaec8c111
-  # (= feat/todo-board-view-ui — assign/unassign + assignableUsers search;
-  # $assigneeSearch gh-CLI collision fix). Was 513306cdc (URL_HOST_SEGMENT).
+  # Re-tip 2026-10-14: driver/235-todo-board-view @ 5049c6682 (= feat tip —
+  # statusCheckedAt tiebreaker in reconcileExternalRefs; keeps assignee picker
+  # eaec8c111). Was eaec8c111 (assignee search / assign-unassign).
   - branch: driver/235-todo-board-view
 
   # heavygee/hapi#247 — deliberate fleet push + restore upgrade-runner; kill
