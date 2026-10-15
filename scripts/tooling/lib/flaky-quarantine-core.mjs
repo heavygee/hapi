@@ -166,7 +166,11 @@ export function validateEntries(entries, { today, issueStates } = {}) {
             continue;
         }
 
-        if (expires && daysBetween(expires, now) >= 0 && now.getTime() > expires.getTime()) {
+        // `expires` parses as UTC midnight of that calendar date (parseDate
+        // above) — an entry must stay valid through the WHOLE of that date,
+        // not just its first instant, or "expires 2026-10-29" silently means
+        // "expires 2026-10-28T23:59:59.999Z" to anyone reading the date.
+        if (expires && now.getTime() >= expires.getTime() + 86_400_000) {
             expired.push(e);
             continue;
         }

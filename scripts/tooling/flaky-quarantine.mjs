@@ -19,17 +19,26 @@
  *
  * Usage:
  *   flaky-quarantine.mjs validate [--registry PATH] [--ceiling N] [--skip-issue-check]
- *   flaky-quarantine.mjs check --results PATH.json [--registry PATH] [--ceiling N] [--skip-issue-check]
+ *   flaky-quarantine.mjs check --results PATH.json --package PREFIX [--registry PATH] [--skip-issue-check]
  *   flaky-quarantine.mjs from-vitest-json PATH.json           # adapter: vitest --reporter=json -> normalized results
  *   flaky-quarantine.mjs from-xcodebuild-log PATH.log          # adapter: xcodebuild test stdout  -> normalized results
  *
  * `check` reads normalized results from --results, or from stdin if omitted.
+ * `--package PREFIX` (e.g. "cli") restricts BOTH which registry entries are
+ * validated (schema/issue-open) AND which are eligible to excuse a failure to
+ * ids starting with "PREFIX:". Without it, a schema problem or a closed issue
+ * on an entry for a package this invocation never touched (e.g. an `ios:`
+ * entry during a cli-only run) would fail the gate for a reason that has
+ * nothing to do with what actually ran — exactly the cross-package coupling
+ * this flag exists to prevent. The CEILING is deliberately NOT scoped by
+ * package (see `validate`, always whole-registry) — it is meant to be felt
+ * everywhere once the registry as a whole gets too big, by design.
  * Exit codes:
- *   check:    0 = gate passes. 1 = blocking failure(s), OR registry invalid
- *             (schema error / over ceiling) — either way, the gate must stop.
+ *   check:    0 = gate passes. 1 = blocking failure(s), OR a --package-scoped
+ *             registry entry is invalid — either way, the gate must stop.
  *   validate: 0 = registry OK. 2 = schema error or over ceiling (distinct
  *             code so a dedicated lint step can tell "registry itself is
- *             broken" apart from "a test failed").
+ *             broken" apart from "a test failed"). Always whole-registry.
  */
 import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -93,7 +102,7 @@ function runValidate() {
     }
     const ok = result.errors.length === 0 && !ceilingExceeded;
     console.log(ok ? 'flaky-quarantine: validate OK' : 'flaky-quarantine: validate FAILED');
-    process.exit(ok ? 0 : (result.errors.length > 0 ? 2 : 2));
+    process.exit(ok ? 0 : 2);
 }
 
 function runCheck() {
@@ -101,7 +110,13 @@ function runCheck() {
     const raw = resultsPath ? readFileSync(resultsPath, 'utf8') : readFileSync(0, 'utf8');
     const results = JSON.parse(raw);
 
-    const entries = loadEntries();
+    const pkg = flag('package', null);
+    let entries = loadEntries();
+    if (pkg) {
+        entries = entries.filter((e) => e.id === pkg || e.id.startsWith(`${pkg}:`));
+    } else {
+        console.error('flaky-quarantine: WARNING — check running with no --package filter; every registry entry (all packages) participates in this gate\'s pass/fail, including unrelated ones. Pass --package to scope this.');
+    }
     const issueStates = fetchIssueStates(entries);
     const { valid, errors, expired } = validateEntries(entries, { issueStates });
     printValidation({ valid, errors, expired });

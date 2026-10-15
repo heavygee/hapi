@@ -29,6 +29,16 @@ jobs:
             # is fork-only data, see docs/tooling/flaky-quarantine.md).
             # Upstream/other forks: unchanged plain `bun run test`.
             - name: Run tests
+              env:
+                  # flaky-quarantine.mjs validate/check shell out to `gh issue
+                  # view` to confirm a quarantine entry's issue is still open
+                  # (requirement: a closed-issue entry must fail loudly, not
+                  # sit there forever). Without this, every gh call returns
+                  # UNKNOWN on a fresh runner and the gate fails for the wrong
+                  # reason — matches the GH_TOKEN/GITHUB_TOKEN pattern already
+                  # used by codex-mention-response.yml / issue-auto-response.yml.
+                  GH_TOKEN: ${{ github.token }}
+                  GITHUB_TOKEN: ${{ github.token }}
               run: |
                   if [[ "${{ github.repository_owner }}" == "heavygee" ]]; then
                       bash scripts/tooling/flaky-quarantine-gate.sh "$PWD"
