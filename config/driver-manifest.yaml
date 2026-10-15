@@ -1239,6 +1239,13 @@ layers:
   # Web-only → remat --build-web; hard-reload (no hub restart).
   - branch: driver/search-clear-touch
 
+  # heavygee/hapi#270 follow-on — skew-banner release NOTES were amber-on-amber
+  # (taupe/tan, unreadable). Amber stays as attention border only; surfaces and
+  # copy are zinc; NOTES dump is a dark mono block. Tip @ e5c1b959e.
+  # Worktree: ~/coding/hapi/worktrees/skew-notes-contrast
+  # Web-only → remat --build-web; hard-reload (no hub restart).
+  - branch: driver/270-skew-notes-contrast
+
   # DROPPED 2026-10-06: driver/1933-claude-resume-amnesia — squash 94523eb0d is on
   # fork main (heavygee/hapi#204). Soup base is now origin/main, so tip-forward
   # absorbs it from the base; keeping the layer would double-apply / conflict.
