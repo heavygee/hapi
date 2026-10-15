@@ -1231,7 +1231,7 @@ layers:
   # (when shown) is a sibling chip on the same row, never packed beside clear.
   # Also stops rendering an embedded calendar when showDateFilter is false
   # (session list uses the unified filter menu for date).
-  # Soup thin tip on live driver HEAD c4a63dff2: driver/search-clear-touch @ 9b7366042
+  # Soup thin tip on live driver HEAD c4a63dff2: driver/search-clear-touch @ 07b742246 (re-thin after collapsed w-full overlap with BlockedJumpPill)
   # Tip-unique verify marker: session-list-search-clear-endcap in web/dist
   # Worktree: ~/coding/hapi/worktrees/search-clear-touch-soup
   # Web-only → remat --build-web; hard-reload (no hub restart).
