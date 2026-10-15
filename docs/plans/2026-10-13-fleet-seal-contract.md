@@ -75,11 +75,37 @@ add an upgrade timeout.
 If neither local `fleet-latest` nor GH `hapi-fleet` exists, there is **no seal**.
 Never fall back to dogfood `latest` / `releases/latest`.
 
-**Tooling:** `hapi-fleet-seal [tag]` verifies digests, points local `fleet-latest`,
-**and** upserts GH release `hapi-fleet` with that tip's assets (#256). Spoken gate
-required. Does **not** move dogfood `latest`. Estate deliberate push (alert hosts) /
-cattle VM-swap are the #258 dispatcher, not this script alone. Layer A / `auto`
-hosts **pull** the new pointer on their own.
+### Invariant: fleet is never ahead of dogfood
+
+**Ordering that preserves it: publish, then seal the same tip.**
+
+1. `hapi-soup-publish-single-exe` (or remat publish) moves dogfood `latest` → tip T.
+2. Spoken `hapi-fleet-seal T` moves `fleet-latest` + GH `hapi-fleet` → tip T.
+
+Sealing a tip dogfood has never pointed at makes Ninja the canary instead of this
+box. If you must seal ahead of dogfood for a milestone, write the exception down
+with date and reason — an undocumented inversion is how the invariant dies.
+
+After every seal, report both: `fleet-latest = X, dogfood latest = Y`.
+
+### The public URL is part of the seal, not a consequence
+
+Followers poll `https://github.com/…/releases/download/hapi-fleet/manifest.json`,
+not oos disk. A seal that flips local `fleet-latest` while the public CDN is
+stale or 404 is a **failed seal** — it reports success-shaped local state while
+followers see "nothing new" or a fetch error, with no alarm.
+
+`hapi-fleet-seal` must: upsert GH channel assets, then **fetch the public URL**,
+require HTTP 200, and compare **tag + every binary sha256** to the sealed tip.
+Mismatch / non-200 → fail loudly; do not move local `fleet-latest` until public
+verify passes. A check that cannot go red is not a check.
+
+**Tooling:** `hapi-fleet-seal [tag]` verifies local tip digests, upserts GH
+`hapi-fleet`, verifies the **public** manifest (tag+digests), **then** points
+local `fleet-latest` (#256). Spoken gate required. Does **not** move dogfood
+`latest`. Estate deliberate push (alert hosts) / cattle VM-swap are the #258
+dispatcher, not this script alone. Layer A / `auto` hosts **pull** the new
+pointer on their own.
 
 ## Poll locations
 
@@ -173,12 +199,15 @@ Spoken only: `fleet seal` | `good enough for fleet` | `seal tip <tag>`.
 
 Mechanical:
 
-1. Resolve tip (default: current dogfood `latest`, or named `<tag>`).
+1. Resolve tip (default: current dogfood `latest`, or named `<tag>`). Prefer a tip
+   dogfood `latest` already points at (publish first if sealing current soup HEAD).
 2. Verify tip digests on disk.
-3. Atomically retarget local `fleet-latest` + `fleet-latest-tag.txt`.
-4. **Mandatory:** upsert GH `hapi-fleet` with same digests (#256).
-5. **Dispatch (#258):** estate deliberate push (alert) / Layer A (passive **pull**) / cattle VM-swap per registry.
-6. Unrelated product commits already destined for `tiann/hapi` on their own merits
+3. **Mandatory:** upsert GH `hapi-fleet` with same digests (#256).
+4. **Mandatory:** fetch public channel URL; require HTTP 200; compare tag + digests
+   to sealed tip. Fail closed if CDN stale/404 (public URL is part of the seal).
+5. Only then retarget local `fleet-latest` + `fleet-latest-tag.txt`.
+6. **Dispatch (#258):** estate deliberate push (alert) / Layer A (passive **pull**) / cattle VM-swap per registry.
+7. Unrelated product commits already destined for `tiann/hapi` on their own merits
    may still get an upstream PR — that does **not** mean seal machinery goes upstream.
 
 ## Explicit non-goals
