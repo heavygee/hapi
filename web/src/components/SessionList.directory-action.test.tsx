@@ -315,8 +315,14 @@ describe('SessionList time filter', () => {
         expect(clearButton.className).toMatch(/session-list-search-clear-endcap/)
         expect(clearButton.className).toMatch(/min-h-\[48px\]/)
         expect(clearButton.className).toMatch(/min-w-\[48px\]/)
-        // Must not pack a calendar icon beside clear on the session list.
-        expect(screen.queryByRole('button', { name: 'Filter sessions by last activity' })).toBeNull()
+        // Expanded search hides the filter menu — calendar must still be a
+        // sibling chip beside the field, never packed into the clear end-cap.
+        const dateButton = screen.getByRole('button', { name: 'Filter sessions by last activity' })
+        expect(dateButton.className).toMatch(/min-h-\[48px\]/)
+        expect(clearButton.parentElement?.contains(dateButton)).toBe(false)
+        const searchRow = screen.getByTestId('session-list-search')
+        expect(searchRow.contains(dateButton)).toBe(true)
+        expect(searchRow.contains(clearButton)).toBe(true)
     })
 
     it('returns focus to the date filter row after clearing the date range', () => {
