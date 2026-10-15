@@ -4,9 +4,9 @@
  */
 import { afterEach, describe, expect, it } from 'bun:test'
 import { createHash } from 'node:crypto'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, symlinkSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, symlinkSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import {
     assertUpstreamSealUrlSafe,
     decideUpstreamSealNewness,
@@ -14,6 +14,7 @@ import {
     resolveBinaryDownloadUrl,
     resolveUpstreamSealConfig,
     runUpstreamSealTick,
+    materializeUpstreamSeal,
     type UpstreamSealConfig,
 } from './upstreamSeal'
 import type { SoupManifest } from './soupArtifact'
@@ -242,6 +243,71 @@ describe('runUpstreamSealTick', () => {
             'hapi-soup-v2026.10.13-ticktest',
         )
     })
+
+    
+    it('materializes all manifest platforms into the tip', async () => {
+        root = mkdtempSync(join(tmpdir(), 'upstream-seal-all-'))
+        const linuxBytes = Buffer.from('linux-seal-bytes')
+        const winBytes = Buffer.from('windows-seal-bytes-xx')
+        const linuxSha = createHash('sha256').update(linuxBytes).digest('hex')
+        const winSha = createHash('sha256').update(winBytes).digest('hex')
+        const m: SoupManifest = {
+            schema: 1,
+            tag: 'hapi-soup-v2026.10.15-allplat',
+            composedTipSha: 'all',
+            binaries: [
+                {
+                    target: 'bun-linux-x64-baseline',
+                    platform: 'linux',
+                    arch: 'x64',
+                    variant: 'baseline',
+                    path: 'linux-x64-baseline/hapi',
+                    sha256: linuxSha,
+                    sizeBytes: linuxBytes.length,
+                },
+                {
+                    target: 'bun-windows-x64',
+                    platform: 'windows',
+                    arch: 'x64',
+                    path: 'windows-x64/hapi.exe',
+                    sha256: winSha,
+                    sizeBytes: winBytes.length,
+                },
+            ],
+        }
+        const origFetch = globalThis.fetch
+        globalThis.fetch = (async (input: RequestInfo | URL) => {
+            const url = String(input)
+            if (url.endsWith('/NOTES.md')) {
+                return new Response('notes', { status: 200 })
+            }
+            if (url.includes('windows-x64') || url.endsWith('hapi-windows-x64.exe')) {
+                return new Response(winBytes, { status: 200 })
+            }
+            if (url.includes('linux-x64-baseline') || url.endsWith('hapi-linux-x64-baseline')) {
+                return new Response(linuxBytes, { status: 200 })
+            }
+            return new Response('missing', { status: 404 })
+        }) as typeof fetch
+        try {
+            const result = await materializeUpstreamSeal({
+                manifestUrl: 'https://github.com/heavygee/hapi/releases/download/hapi-fleet/manifest.json',
+                manifest: m,
+                binary: m.binaries[0]!,
+                artifactsRoot: root,
+            })
+            expect(result.materializedPaths.sort()).toEqual([
+                'linux-x64-baseline/hapi',
+                'windows-x64/hapi.exe',
+            ])
+            expect(existsSync(join(root, 'fleet-latest', 'linux-x64-baseline', 'hapi'))).toBe(true)
+            expect(existsSync(join(root, 'fleet-latest', 'windows-x64', 'hapi.exe'))).toBe(true)
+            expect(result.onDiskSha256).toBe(linuxSha)
+        } finally {
+            globalThis.fetch = origFetch
+        }
+    })
+
 
     it('holds materialize when apply=false', async () => {
         root = mkdtempSync(join(tmpdir(), 'upstream-seal-hold-'))

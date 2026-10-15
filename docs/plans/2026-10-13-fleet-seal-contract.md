@@ -211,3 +211,16 @@ First seal `hapi-soup-v2026.10.13-bc936f2` was consumed on ninjcow-incus:
 ## Relay
 
 Feasibility + STOP → `[Peer: fork main vs soup parity](/sessions/d2a67a01-07f9-4395-b84c-94d39c24e797)` + `[ninjcow-incus upkeep](/sessions/ba76163e-d993-4b2b-b4ab-c4cdf3c41c7e)`. Companion freeze after live dogfood; Layer A owned in-product.
+Orchestration: `[Peer: fork main vs soup parity](/sessions/d2a67a01-07f9-4395-b84c-94d39c24e797)`.  
+Standalone personal hub host: `[nc-incus upkeep](/sessions/ba76163e-d993-4b2b-b4ab-c4cdf3c41c7e)`. Companion freeze after live dogfood; Layer A owned in-product.
+
+## Materialize all platforms (2026-10-15)
+
+Layer A `materializeUpstreamSeal` **must stage every `manifest.binaries[]` entry**
+(linux / darwin / windows), not only the hub host platform. Digest-newness still
+compares the hub platform sha; the tip on disk is the full fleet artifact set so
+Windows (and other) runners can pull upgrades from a standalone Layer A hub
+without a second SoT.
+
+Kill-criterion: after materialize, `fleet-latest/<every binaries[].path>` exists
+and matches manifest sha256.
