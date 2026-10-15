@@ -1819,10 +1819,12 @@ export class SyncEngine {
             return { type: 'error', message: 'Machine is offline', code: 'machine_offline' }
         }
 
-        // #270: soup patient-drain signal on ALL fleet upgrades (push / auto /
-        // Layer A → self-upgrade). Defer while any session on this machine is
-        // mid-turn (`thinking` = WORKING). Idle sessions do not block - same
-        // as drain's "idle still interruptible" property; make that explicit.
+        // #270: soup patient-drain signal on ALL fleet upgrades — deliberate
+        // push (POST /fleet/push-upgrade), keepalive pull-apply (per-machine
+        // auto), and Layer A seal pull → self-upgrade. Defer while any session
+        // on this machine is mid-turn (`thinking` = WORKING). Idle sessions do
+        // not block: the supervised restart terminates them. Under pull that is
+        // the box's own choice to take the seal (see fleet-seal-contract).
         const workingSessionIds = this.listWorkingSessionIdsOnMachine(machineId, namespace)
         if (workingSessionIds.length > 0) {
             const sample = workingSessionIds.slice(0, 3).join(', ')
@@ -2215,7 +2217,8 @@ export class SyncEngine {
     /**
      * Mid-turn sessions on a machine (#270 idle-gate / soup WORKING signal).
      * Same definition as patient drain / `hapi-sessions-health` WORKING:
-     * `session.thinking === true`. Idle/active-but-not-thinking does **not** block.
+     * `session.thinking === true`. Idle/active-but-not-thinking does **not**
+     * block — those sessions are terminated by the supervised runner restart.
      */
     listWorkingSessionIdsOnMachine(machineId: string, namespace: string): string[] {
         const target = machineId.trim()

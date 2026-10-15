@@ -1,11 +1,13 @@
 /**
  * Fleet-upgrade policy: hub default + optional per-machine overrides.
  *
- * Hub default (Settings) is silent/alert/auto for banner UX and as the
- * fallback when a machine has no override. Hub-wide `auto` does **not**
- * keepalive-apply (deliberate push only — #247 tip thrash). Per-machine
- * `auto` means "apply when you can": keepalive / machine-updated retry once
- * the live self-upgrade RPC is registered, plus deliberate push.
+ * Steady-state apply is a **pull** (box watches seal / local offer) — see
+ * docs/plans/2026-10-13-fleet-seal-contract.md. Hub default (Settings) is
+ * silent/alert/auto for banner UX and as the fallback when a machine has no
+ * override. Hub-wide `auto` does **not** keepalive-apply (deliberate
+ * POST /fleet/push-upgrade only — #247 tip thrash). Per-machine `auto` means
+ * "pull-apply when you can": keepalive / machine-updated retry once the live
+ * self-upgrade RPC is registered; deliberate push remains available too.
  */
 import {
     DEFAULT_FLEET_UPGRADE_POLICY,
