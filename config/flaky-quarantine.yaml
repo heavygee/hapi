@@ -1,0 +1,96 @@
+# Flaky-test quarantine registry — tracked, not ignored.
+#
+# FORK-ONLY DATA: these entries are fork-specific CI observations and issue
+# links (heavygee/hapi). The mechanism that reads this file
+# (scripts/tooling/flaky-quarantine.mjs + lib/flaky-quarantine-core.mjs) is
+# generic — any repo with CI would want it — and is a candidate for an
+# eventual standalone/upstream extraction. Keep the split: this file carries
+# the fork's observations, not the other way around.
+#
+# WHY THIS EXISTS (2026-10-15): operator-directed after two unrelated pieces
+# of work were held hostage by red lights nobody could fix locally — PR #222
+# (iOS app-build failed 3 different ways on a diff that never touches the
+# failing screens, heavygee/hapi#273) and the #270 idle-gate remat (tripped
+# by agentCliGuard.test.ts under full-suite timing, heavygee/hapi#274). Each
+# time, an agent escalated to the operator for a judgement call on a test it
+# didn't write. "Red doesn't really mean red" is the disease this fixes.
+#
+# Evidence bar — do not add an entry without ONE of:
+#   - "isolation passes, full-suite fails" (both runs actually observed, not
+#     asserted — log what you saw in the linked issue)
+#   - ">=2 failures with DIFFERENT assertions/signatures on the same
+#     unchanged commit" (same bug retried is not flake; this is a regression)
+# "Failed once" is never sufficient evidence.
+#
+# Checked by: scripts/tooling/flaky-quarantine.mjs (validate|check), called
+# from both CI (.github/workflows/test.yml, ios.yml) and the local remat gate
+# (hapi-driver-rebuild.sh) via scripts/tooling/flaky-quarantine-gate.sh — ONE
+# script, so the two gates cannot drift onto different lists.
+#
+# Fields (all required unless noted):
+#   id             - stable test identifier.
+#                      vitest: "<package>:<ancestorTitles-space-joined> <title>"
+#                              e.g. produced verbatim by vitest's own
+#                              --reporter=json `fullName` field — see
+#                              `flaky-quarantine.mjs from-vitest-json`.
+#                      XCTest: "ios:<TestClass>/<testMethod>"
+#   owner          - person/agent handle responsible for eventually fixing or
+#                    removing this entry. No anonymous entries.
+#   issue          - heavygee/hapi issue number tracking the root cause. MUST
+#                    be OPEN (validated against the live GitHub issue state,
+#                    not just present) — a quarantined test whose issue is
+#                    closed is either fixed or abandoned, and both deserve to
+#                    fail loudly again, not sit here forever.
+#   signature      - a stable substring of the known failure text. A failure
+#                    under this id whose message does NOT contain this
+#                    substring is treated as a NEW failure and BLOCKS — this
+#                    is what stops quarantine from hiding a real regression
+#                    that happens to land in the same test.
+#   added          - ISO date quarantined.
+#   expires        - ISO date. Default policy is +14 days from `added`. Past
+#                    this date the entry excuses nothing — it is not a grace
+#                    period, the entry simply drops out of the active set and
+#                    the test goes back to blocking until fixed, deleted, or
+#                    deliberately renewed.
+#   renewal_count  - (optional, default 0) each +1 permits 14 more days
+#                    beyond the default (enforced by the validator: expires
+#                    may not be more than 14 + 14*renewal_count days after
+#                    added). You cannot push the date out without bumping
+#                    this — the renewal itself is a diff.
+#   renewal_reason - required whenever renewal_count > 0. A concrete reason
+#                    ("renewed: still intermittent under CI load, see #274"),
+#                    not a bare date bump. Older renewal reasons live in git
+#                    log on this file, not here — this field is the latest.
+#
+# Ceiling: scripts/tooling/flaky-quarantine.mjs defaults to 8 active entries.
+# Past that, the gate fails regardless of test outcomes until the registry is
+# cleaned up — the count is a forcing function, not a decoration.
+
+quarantine:
+  - id: "cli:agentCliGuard prunes crash-stale registering/<deadPid> so list-models is not pinned"
+    owner: "heavygee"
+    issue: 274
+    signature: "expected true to be false"
+    added: "2026-10-15"
+    expires: "2026-10-29"
+
+  - id: "ios:ToolTranscriptPresentationTests/testPlanPublicationUpdatesRecyclingAndInspectorPreserveTheDocumentAndAnchor"
+    owner: "heavygee"
+    issue: 273
+    signature: "XCTAssertNil failed"
+    added: "2026-10-15"
+    expires: "2026-10-29"
+
+  - id: "ios:HomeFilterPresentationTests/testFilteringResetsScrollButLiveUpdatesAndChatReturnPreserveIt"
+    owner: "heavygee"
+    issue: 273
+    signature: "XCTUnwrap failed: expected non-nil value of type \"UICollectionView\""
+    added: "2026-10-15"
+    expires: "2026-10-29"
+
+  - id: "ios:TranscriptTypographyTests/testShrinkingTextClampsAnOffsetBeyondTheNewRowHeight"
+    owner: "heavygee"
+    issue: 273
+    signature: "XCTAssertEqualWithAccuracy failed"
+    added: "2026-10-15"
+    expires: "2026-10-29"

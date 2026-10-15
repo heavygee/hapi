@@ -554,7 +554,10 @@ if [[ "$VERIFY" -eq 1 ]]; then
         fi
     fi
     echo "Running tests..."
-    if ! (cd "$DRIVER" && "$BUN" run test); then
+    # Quarantine-aware for cli (config/flaky-quarantine.yaml); hub/web/shared/
+    # relay unchanged. Same script CI uses (.github/workflows/test.yml) — one
+    # list, both gates. See docs/tooling/flaky-quarantine.md.
+    if ! bash "$PRIMARY/scripts/tooling/flaky-quarantine-gate.sh" "$DRIVER"; then
         remat_rollback_live_tip "tests failed"
         exit 1
     fi
