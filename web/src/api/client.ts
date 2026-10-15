@@ -83,6 +83,8 @@ import type { FleetUpgradePolicy, HubUpgradeOffer } from '@hapi/protocol/upgrade
 export type UpgradeInfoResponse = {
     offer: HubUpgradeOffer
     policy: FleetUpgradePolicy
+    /** Soup tip platforms the hub can serve (Node tokens: win32, not windows). */
+    availablePlatforms?: Array<{ platform: string; arch: string }>
 }
 
 export type RetryIndeterminateMessageResponse =

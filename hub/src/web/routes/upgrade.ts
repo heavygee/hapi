@@ -1,10 +1,14 @@
 import { existsSync } from 'node:fs'
 import { Hono } from 'hono'
 import { z } from 'zod'
-import { FLEET_UPGRADE_POLICIES } from '@hapi/protocol/upgradeChannel'
+import { FLEET_UPGRADE_POLICIES, type HubUpgradeOffer } from '@hapi/protocol/upgradeChannel'
 import type { WebAppEnv } from '../middleware/auth'
 import { ensureCliArtifact, findArtifactMetaBySha256 } from '../../upgrade/cliArtifact'
 import { defaultHubPackageRoot, resolveUpgradeOffer } from '../../upgrade/resolveUpgradeOffer'
+import {
+    listSoupAvailablePlatforms,
+    resolveOfferPlatformArch,
+} from '../../upgrade/offerPlatform'
 import {
     ensureSoupCliArtifact,
     preferPublishedSoupTip,
@@ -25,6 +29,49 @@ import type { SyncEngine } from '../../sync/syncEngine'
 
 const bearerSchema = z.string().regex(/^Bearer\s+(.+)$/i)
 
+function offerPlatformArchFromRequest(c: {
+    req: {
+        query: (key: string) => string | undefined
+        header: (key: string) => string | undefined
+    }
+}): { platform: string; arch: string } {
+    return resolveOfferPlatformArch({
+        queryPlatform: c.req.query('platform'),
+        queryArch: c.req.query('arch'),
+        headerPlatform: c.req.header('x-hapi-platform'),
+        headerArch: c.req.header('x-hapi-arch'),
+    })
+}
+
+function resolveOfferFallback(platform: string, arch: string): HubUpgradeOffer {
+    let fallback = resolveUpgradeOffer({
+        hubPackageRoot: defaultHubPackageRoot(),
+        execPath: process.execPath,
+    })
+    if (fallback.channel === 'hub-artifact' && preferPublishedSoupTip()) {
+        const tip = readPublishedSoupTip()
+        if (tip) {
+            const soupOffer = soupTipToUpgradeOffer(tip, platform, arch, fallback)
+            if (soupOffer) {
+                return soupOffer
+            }
+        }
+    }
+    if (platform !== process.platform || arch !== process.arch) {
+        return { ...fallback, artifact: undefined }
+    }
+    return fallback
+}
+
+function upgradeOfferResponse(offer: HubUpgradeOffer) {
+    const tip = preferPublishedSoupTip() ? readPublishedSoupTip() : null
+    return {
+        offer,
+        policy: getFleetUpgradePolicy(),
+        ...(tip ? { availablePlatforms: listSoupAvailablePlatforms(tip) } : {}),
+    }
+}
+
 /**
  * Web (JWT) routes: upgrade offer for the UI.
  */
@@ -32,33 +79,11 @@ export function createUpgradeRoutes(getSyncEngine: () => SyncEngine | null): Hon
     const app = new Hono<WebAppEnv>()
 
     app.get('/upgrade/offer', (c) => {
+        const { platform, arch } = offerPlatformArchFromRequest(c)
         const engine = getSyncEngine()
-        const offer = engine?.getHubUpgradeOffer()
-        if (!offer) {
-            // Fallback for early boot / tests without a SyncEngine — still
-            // resolves a channel/version without forcing a fingerprint walk
-            // when the engine cache is available.
-            let fallback = resolveUpgradeOffer({
-                hubPackageRoot: defaultHubPackageRoot(),
-                execPath: process.execPath,
-            })
-            if (fallback.channel === 'hub-artifact' && preferPublishedSoupTip()) {
-                const tip = readPublishedSoupTip()
-                if (tip) {
-                    const soupOffer = soupTipToUpgradeOffer(
-                        tip,
-                        process.platform,
-                        process.arch,
-                        fallback,
-                    )
-                    if (soupOffer) {
-                        fallback = soupOffer
-                    }
-                }
-            }
-            return c.json({ offer: fallback, policy: getFleetUpgradePolicy() })
-        }
-        return c.json({ offer, policy: getFleetUpgradePolicy() })
+        const offer = engine?.getHubUpgradeOffer(platform, arch)
+            ?? resolveOfferFallback(platform, arch)
+        return c.json(upgradeOfferResponse(offer))
     })
 
     const policyBody = z.object({ policy: z.enum(FLEET_UPGRADE_POLICIES as unknown as [string, ...string[]]) })
@@ -185,11 +210,16 @@ export function createUpgradeCliRoutes(): Hono<CliEnv> {
         return
     })
 
+    /** CLI-token offer — same platform selection as JWT GET /api/upgrade/offer (#284). */
+    app.get('/upgrade/offer', (c) => {
+        const { platform, arch } = offerPlatformArchFromRequest(c)
+        return c.json(upgradeOfferResponse(resolveOfferFallback(platform, arch)))
+    })
+
     app.get('/upgrade/cli-artifact', async (c) => {
         const config = getConfiguration()
         const version = c.req.query('version')
-        const platform = c.req.query('platform') || process.platform
-        const arch = c.req.query('arch') || process.arch
+        const { platform, arch } = offerPlatformArchFromRequest(c)
 
         const baseOffer = resolveUpgradeOffer({
             hubPackageRoot: defaultHubPackageRoot(),

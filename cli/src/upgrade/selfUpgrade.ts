@@ -50,6 +50,24 @@ export function shouldApplyUpgradeOffer(
         if (!offer.artifact?.url || !offer.artifact.sha256) {
             return { apply: false, reason: 'unsupported' }
         }
+        // Fail closed on wrong-OS bytes (hub GET /upgrade/offer used to always
+        // return the hub platform — win32 runners must not install linux PE).
+        const artifactPlatform = offer.artifact.platform
+        if (
+            typeof artifactPlatform === 'string'
+            && artifactPlatform.length > 0
+            && artifactPlatform !== process.platform
+        ) {
+            return { apply: false, reason: 'unsupported' }
+        }
+        const artifactArch = offer.artifact.arch
+        if (
+            typeof artifactArch === 'string'
+            && artifactArch.length > 0
+            && artifactArch !== process.arch
+        ) {
+            return { apply: false, reason: 'unsupported' }
+        }
     }
     if (offer.channel === 'npm' && !offer.npmPackage) {
         return { apply: false, reason: 'unsupported' }
