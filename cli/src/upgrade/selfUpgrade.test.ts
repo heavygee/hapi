@@ -164,6 +164,24 @@ describe('shouldApplyUpgradeOffer', () => {
         })
     })
 
+    it('skips hub-artifact when artifact platform mismatches local OS (#284)', () => {
+        const wrongPlatform = process.platform === 'win32' ? 'linux' : 'win32'
+        expect(shouldApplyUpgradeOffer(baseOffer({
+            channel: 'hub-artifact',
+            targetVersion: '0.30.7',
+            artifact: {
+                url: '/cli/upgrade/cli-artifact',
+                sha256: 'abc',
+                platform: wrongPlatform,
+                arch: process.arch,
+                sizeBytes: 10,
+            },
+        }), '0.20.0')).toEqual({
+            apply: false,
+            reason: 'unsupported',
+        })
+    })
+
     it('skips when local version and capabilities already match target', () => {
         expect(shouldApplyUpgradeOffer(
             baseOffer({
@@ -203,8 +221,8 @@ describe('shouldApplyUpgradeOffer', () => {
                 artifact: {
                     url: '/api/upgrade/cli-artifact',
                     sha256: 'abc',
-                    platform: 'linux',
-                    arch: 'x64',
+                    platform: process.platform,
+                    arch: process.arch,
                     sizeBytes: 10,
                 },
             }),
@@ -233,8 +251,8 @@ describe('shouldApplyUpgradeOffer', () => {
             artifact: {
                 url: '/api/upgrade/cli-artifact',
                 sha256: 'abc',
-                platform: 'linux',
-                arch: 'x64',
+                platform: process.platform,
+                arch: process.arch,
                 sizeBytes: 10,
             },
         }), '0.18.4')).toEqual({
@@ -253,8 +271,8 @@ describe('shouldApplyUpgradeOffer', () => {
                 artifact: {
                     url: '/api/upgrade/cli-artifact',
                     sha256: 'abc',
-                    platform: 'linux',
-                    arch: 'x64',
+                    platform: process.platform,
+                    arch: process.arch,
                     sizeBytes: 10,
                 },
             }),
@@ -277,8 +295,8 @@ describe('shouldApplyUpgradeOffer', () => {
                 artifact: {
                     url: '/api/upgrade/cli-artifact',
                     sha256: 'abc',
-                    platform: 'linux',
-                    arch: 'x64',
+                    platform: process.platform,
+                    arch: process.arch,
                     sizeBytes: 10,
                 },
             }),
@@ -301,8 +319,8 @@ describe('shouldApplyUpgradeOffer', () => {
             artifact: {
                 url: '/api/upgrade/cli-artifact',
                 sha256: 'abc',
-                platform: 'linux',
-                arch: 'x64',
+                platform: process.platform,
+                arch: process.arch,
                 sizeBytes: 10,
             },
         })
@@ -335,8 +353,8 @@ describe('shouldApplyUpgradeOffer', () => {
             artifact: {
                 url: '/api/upgrade/cli-artifact',
                 sha256: '',
-                platform: 'linux',
-                arch: 'x64',
+                platform: process.platform,
+                arch: process.arch,
                 sizeBytes: 0,
             },
         }), '0.18.4')).toEqual({

@@ -75,6 +75,26 @@ export function machineCanAutoUpgrade(machine: Machine): boolean {
     return (machine.metadata?.capabilities ?? []).includes(MACHINE_CAPABILITIES.RunnerSelfUpgrade)
 }
 
+/**
+ * Tip inventory from GET /api/upgrade/offer `availablePlatforms`.
+ * When the hub reports platforms, Upgrade must not claim it can pull a missing OS.
+ * Empty/unknown inventory → do not block (legacy hubs / non-soup channels).
+ */
+export function machineHasTipArtifact(
+    machine: Machine,
+    availablePlatforms?: ReadonlyArray<{ platform: string; arch: string }> | null,
+): boolean {
+    if (!availablePlatforms || availablePlatforms.length === 0) {
+        return true
+    }
+    const platform = machine.metadata?.platform
+    if (!platform) {
+        return false
+    }
+    const arch = machine.metadata?.arch ?? 'x64'
+    return availablePlatforms.some((entry) => entry.platform === platform && entry.arch === arch)
+}
+
 export function listSkewedMachines(machines: Machine[], offer: HubUpgradeOffer | null): Machine[] {
     if (!offer) {
         return []
@@ -182,6 +202,7 @@ export function RunnerVersionSkewBanner({
     const { haptic } = usePlatform()
     const policy = info?.policy ?? DEFAULT_FLEET_UPGRADE_POLICY
     const offer = info?.offer ?? null
+    const availablePlatforms = info?.availablePlatforms ?? null
     const skewed = listBannerSkewMachines(machines, offer, policy)
     const bannerScope = runnerSkewBannerScope(baseUrl, getTokenNamespace(token))
     const [minimized, setMinimized] = useState(() => isRunnerSkewMinimized(bannerScope))
@@ -429,17 +450,21 @@ export function RunnerVersionSkewBanner({
                     const supervisedRestart = machine.metadata?.supervisedRestart === true
                     const supportsSelfUpgrade = (machine.metadata?.capabilities ?? [])
                         .includes(MACHINE_CAPABILITIES.RunnerSelfUpgrade)
+                    const tipHasArtifact = machineHasTipArtifact(machine, availablePlatforms)
                     const busy = busyId === machine.id
                     // Upgrade owns package+handoff relaunch. Restart is stop-only and is
                     // only safe when an external supervisor (HAPI_RUNNER_SUPERVISED=1) will relaunch.
                     // Legacy runners without RunnerSelfUpgrade cannot receive the RPC.
-                    const canUpgrade = !handoffDisabled && supportsSelfUpgrade
+                    // Tip inventory: do not enable Upgrade when soup tip lacks this OS (#284).
+                    const canUpgrade = !handoffDisabled && supportsSelfUpgrade && tipHasArtifact
                     const canRestart = supervisedRestart && newerOnDisk
                     const upgradeDisabledTitle = handoffDisabled
                         ? t('runner.skew.banner.upgradeNeedsHandoff')
                         : !supportsSelfUpgrade
                             ? t('runner.skew.banner.upgradeNeedsManual')
-                            : undefined
+                            : !tipHasArtifact
+                                ? t('runner.skew.banner.upgradeNeedsPlatform')
+                                : undefined
                     const restartDisabledTitle = !supervisedRestart
                         ? t('runner.skew.banner.restartNeedsSupervisor')
                         : !newerOnDisk
@@ -460,9 +485,11 @@ export function RunnerVersionSkewBanner({
                                             ? t('runner.skew.banner.handoffDisabledHint')
                                             : !supportsSelfUpgrade
                                                 ? t('runner.skew.banner.legacyRunnerHint')
-                                                : newerOnDisk
-                                                    ? t('runner.skew.banner.binaryUpdatedHint')
-                                                    : t('runner.skew.banner.upgradeCliFirst')}
+                                                : !tipHasArtifact
+                                                    ? t('runner.skew.banner.platformMissingHint')
+                                                    : newerOnDisk
+                                                        ? t('runner.skew.banner.binaryUpdatedHint')
+                                                        : t('runner.skew.banner.upgradeCliFirst')}
                                     </span>
                                 </div>
                                 <div className="flex shrink-0 gap-1">
