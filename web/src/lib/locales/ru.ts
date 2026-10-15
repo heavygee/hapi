@@ -84,6 +84,7 @@ export default {
   'sessions.markAllRead.confirm': 'Подтвердить',
   'sessions.markAllRead.confirming': 'Отмечаем как прочитанные…',
   'sessions.timeFilter.label': 'Фильтр сессий по последней активности',
+  'sessions.timeFilter.chip': 'Дата',
   'sessions.timeFilter.pickStart': 'Выбрать дату начала',
   'sessions.timeFilter.pickEnd': 'Выбрать дату окончания',
   'sessions.timeFilter.clear': 'Очистить',

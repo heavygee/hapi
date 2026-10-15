@@ -132,6 +132,7 @@ export default {
   'sessions.markAllRead.confirm': '确定',
   'sessions.markAllRead.confirming': '标记中…',
   'sessions.timeFilter.label': '按最后活动时间筛选会话',
+  'sessions.timeFilter.chip': '日期',
   'sessions.timeFilter.pickStart': '选择开始日期',
   'sessions.timeFilter.pickEnd': '选择结束日期',
   'sessions.timeFilter.clear': '清除',
