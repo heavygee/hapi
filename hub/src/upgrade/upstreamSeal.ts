@@ -323,9 +323,10 @@ async function downloadToFile(url: string, destPath: string): Promise<void> {
 export async function materializeUpstreamSeal(options: {
     manifestUrl: string
     manifest: SoupManifest
+    /** Hub-platform binary used for digest-newness / return sha; all manifest binaries are staged. */
     binary: SoupBinaryEntry
     artifactsRoot: string
-}): Promise<{ tipDir: string; onDiskSha256: string }> {
+}): Promise<{ tipDir: string; onDiskSha256: string; materializedPaths: string[] }> {
     const tag = options.manifest.tag
     const tipDir = join(options.artifactsRoot, tag)
     mkdirSync(tipDir, { recursive: true })
@@ -345,21 +346,54 @@ export async function materializeUpstreamSeal(options: {
         // optional
     }
 
-    const destBinary = join(tipDir, options.binary.path)
-    const downloadUrl = resolveBinaryDownloadUrl(options.manifestUrl, options.binary)
-    await downloadToFile(downloadUrl, destBinary)
-    try {
-        chmodSync(destBinary, 0o755)
-    } catch {
-        // best-effort
+    // Fleet hubs serve every registered runner OS. Stage *all* manifest binaries
+    // (linux/darwin/windows) so push-upgrade / keepalive never 404 a peer platform.
+    const binaries = options.manifest.binaries ?? []
+    if (binaries.length === 0) {
+        throw new Error('upstream seal manifest.binaries empty — refuse materialize')
     }
-
-    const got = await sha256File(destBinary)
-    if (got.toLowerCase() !== options.binary.sha256.toLowerCase()) {
-        rmSync(destBinary, { force: true })
-        throw new Error(
-            `digest mismatch after download: got ${got} want ${options.binary.sha256} (refuse apply)`,
-        )
+    const materializedPaths: string[] = []
+    let hubSha: string | null = null
+    for (const entry of binaries) {
+        if (!entry?.path || !entry?.sha256) {
+            throw new Error('upstream seal binary entry missing path/sha256')
+        }
+        const destBinary = join(tipDir, entry.path)
+        const downloadUrl = resolveBinaryDownloadUrl(options.manifestUrl, entry)
+        await downloadToFile(downloadUrl, destBinary)
+        try {
+            chmodSync(destBinary, 0o755)
+        } catch {
+            // best-effort (windows .exe ok)
+        }
+        const got = await sha256File(destBinary)
+        if (got.toLowerCase() !== entry.sha256.toLowerCase()) {
+            rmSync(destBinary, { force: true })
+            throw new Error(
+                `digest mismatch after download (${entry.path}): got ${got} want ${entry.sha256} (refuse apply)`,
+            )
+        }
+        materializedPaths.push(entry.path)
+        if (entry.path === options.binary.path) {
+            hubSha = got
+        }
+    }
+    if (!hubSha) {
+        // Hub platform may be absent from a partial manifest — still stage peers, but
+        // digest-newness requires the hub binary; fall back to re-download of options.binary.
+        const destBinary = join(tipDir, options.binary.path)
+        const downloadUrl = resolveBinaryDownloadUrl(options.manifestUrl, options.binary)
+        await downloadToFile(downloadUrl, destBinary)
+        hubSha = await sha256File(destBinary)
+        if (hubSha.toLowerCase() !== options.binary.sha256.toLowerCase()) {
+            rmSync(destBinary, { force: true })
+            throw new Error(
+                `digest mismatch after download: got ${hubSha} want ${options.binary.sha256} (refuse apply)`,
+            )
+        }
+        if (!materializedPaths.includes(options.binary.path)) {
+            materializedPaths.push(options.binary.path)
+        }
     }
 
     for (const name of ['latest', 'fleet-latest']) {
@@ -374,7 +408,7 @@ export async function materializeUpstreamSeal(options: {
     writeFileSync(join(options.artifactsRoot, 'latest-tag.txt'), `${tag}\n`)
     writeFileSync(join(options.artifactsRoot, 'fleet-latest-tag.txt'), `${tag}\n`)
 
-    return { tipDir, onDiskSha256: got }
+    return { tipDir, onDiskSha256: hubSha, materializedPaths }
 }
 
 export function readLocalPlatformSha256(
