@@ -228,12 +228,20 @@ if [[ "$OWNER" == "heavygee" ]]; then
              | {kind:"comment", at:.created_at, body:(.body // "")} ])
         | sort_by(.at) | reverse | .[0] // null
         ' 2>/dev/null || echo "null")
-    LATEST_ANY_COMMENT=$(jq -n --slurpfile comments "$COMMENTS_TMP" '
+    # Quota notices can arrive as either a plain issue comment OR a formal
+    # review body — claude-codex-fallback-review.yml's own trigger handles
+    # both for exactly this reason, but this detection only checked comments.
+    # Merge both timelines by time (same pattern as LATEST_EVENT above) so a
+    # quota notice posted as a review isn't invisible here.
+    LATEST_ANY_COMMENT=$(jq -n --slurpfile reviews "$REVIEWS_TMP" --slurpfile comments "$COMMENTS_TMP" '
         def pages: if type == "array" and length > 0 and (.[0]|type) == "array" then add else . end;
-        ($comments[0] | pages // [])
-        | [.[]? | select(.user.login == "chatgpt-codex-connector[bot]"
-            or .user.login == "chatgpt-codex-connector")]
-        | sort_by(.created_at) | reverse | .[0] // null
+        def is_codex: (.user.login == "chatgpt-codex-connector[bot]"
+            or .user.login == "chatgpt-codex-connector");
+        ($reviews[0] | pages // []) as $r
+        | ($comments[0] | pages // []) as $c
+        | ([ $r[]? | select(is_codex) | {at:.submitted_at, body:(.body // "")} ]
+           + [ $c[]? | select(is_codex) | {at:.created_at, body:(.body // "")} ])
+        | sort_by(.at) | reverse | .[0] // null
         ' 2>/dev/null || echo "null")
     USAGE_LIMIT=false
     if [[ "$LATEST_ANY_COMMENT" != "null" && -n "$LATEST_ANY_COMMENT" ]]; then
@@ -293,20 +301,29 @@ if [[ "$OWNER" == "heavygee" ]]; then
             ' 2>/dev/null || true)
     fi
 
-    if $TIP_AHEAD; then
-        echo "     ✗ Tip moved past latest Codex Reviewed commit (${REVIEWED_SHA:0:12})"
-        if $USAGE_LIMIT; then
-            echo "     ~ also: latest Codex comment is a usage-limit notice"
-        fi
-        echo "     → FAIL (wait for tip-matched Codex wave or @codex review — cold-review-clean does not skip tip-ahead)"
-        BOT_OK=false
-        PASS=1
-    elif $USAGE_LIMIT && ! $TIP_MATCHED && [[ "$FALLBACK_STATE" == "COMMENTED" ]]; then
+    # Fallback checks come FIRST, ahead of TIP_AHEAD: the realistic path to
+    # needing the fallback at all is push -> Codex's prior review on the OLD
+    # tip goes stale (TIP_AHEAD=true relative to that old review) -> Codex
+    # hits quota on the NEW tip and posts a notice instead of reviewing it
+    # (USAGE_LIMIT=true) -> the fallback reviews the new tip instead. Both
+    # conditions are true simultaneously in that (common, not edge-case) path
+    # — putting TIP_AHEAD first meant it always won, so a clean fallback
+    # review could never actually satisfy this dimension (cold review,
+    # 2026-10-15, second wave).
+    if $USAGE_LIMIT && ! $TIP_MATCHED && [[ "$FALLBACK_STATE" == "COMMENTED" ]]; then
         echo "     ~ Codex usage-limited, but a tip-matched Claude Fallback Review exists (COMMENTED, no blocking findings)"
         echo "     → PASS (Codex quota fallback — docs/tooling/claude-codex-fallback-review.md)"
     elif $USAGE_LIMIT && ! $TIP_MATCHED && [[ "$FALLBACK_STATE" == "CHANGES_REQUESTED" ]]; then
         echo "     ✗ Codex usage-limited; tip-matched Claude Fallback Review requested changes"
         echo "     → FAIL (address the fallback review's findings)"
+        BOT_OK=false
+        PASS=1
+    elif $TIP_AHEAD; then
+        echo "     ✗ Tip moved past latest Codex Reviewed commit (${REVIEWED_SHA:0:12})"
+        if $USAGE_LIMIT; then
+            echo "     ~ also: latest Codex comment is a usage-limit notice"
+        fi
+        echo "     → FAIL (wait for tip-matched Codex wave or @codex review — cold-review-clean does not skip tip-ahead)"
         BOT_OK=false
         PASS=1
     elif $USAGE_LIMIT && ! $TIP_MATCHED; then

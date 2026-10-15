@@ -31,8 +31,10 @@ name: Claude PR review (Codex quota fallback)
 # through is not. So: the TRUSTED base branch stays at the workspace root
 # (default checkout ref, which for issue_comment/pull_request_review is the
 # default branch, never the PR); the untrusted PR head is checked out into
-# ./pr-head/ instead, and Claude is told to review ONLY by diffing/reading
-# inside that subdirectory (gh pr diff is API-based and safe regardless).
+# ./pr-head/ instead (passed to Claude via --add-dir, matching Anthropic's own
+# documented pull_request_target-class pattern exactly), and Claude is told
+# to diff the PINNED local checkout there rather than gh pr diff (which shows
+# the live, possibly-moved PR state).
 #
 # Off by default until the CLAUDE_REVIEW_ENABLED repo variable is 'true' AND
 # the CLAUDE_CODE_OAUTH_TOKEN repo secret is set — same safe-rollout pattern
@@ -109,7 +111,18 @@ jobs:
                   # auto-concatenated) on this gh/endpoint combination — the same
                   # "pages" merge idiom hapi-pr-status.sh already uses, reused here
                   # rather than re-deriving it (cold review, 2026-10-15).
-                  REVIEWS_JSON=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" --paginate --slurp 2>/dev/null || echo '[]')
+                  #
+                  # A genuinely failed lookup must NOT fall through to run=true:
+                  # `|| echo '[]'` would otherwise turn a transient API error into
+                  # "nothing found yet", launching a duplicate review on repeated
+                  # quota events (cold review, 2026-10-15, second wave) — distinct
+                  # from the earlier resolve-PR fail-soft above, which correctly
+                  # degrades to SKIP, not to "assume clear to proceed".
+                  if ! REVIEWS_JSON=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" --paginate --slurp 2>/dev/null); then
+                      echo "run=false" >>"$GITHUB_OUTPUT"
+                      echo "Could not fetch existing reviews for PR #$PR_NUMBER (transient API error?) — skipping rather than risking a duplicate."
+                      exit 0
+                  fi
                   ALREADY=$(printf '%s' "$REVIEWS_JSON" | jq --arg sha "${HEAD_SHA:0:12}" '
                       def pages: if type == "array" and length > 0 and (.[0]|type) == "array" then add else . end;
                       (. | pages // [])
@@ -174,6 +187,20 @@ jobs:
                   # write files to tempdir: FileNotFound" — same fix as
                   # lockhouse/arthur's claude-review.yml.
                   XDG_CACHE_HOME: ${{ runner.temp }}/bun-cache
+                  # claude-code-action only enables subprocess credential
+                  # scrubbing (CLAUDE_CODE_OAUTH_TOKEN / GITHUB_TOKEN stripped
+                  # from env before Claude's own Bash tool calls spawn) by
+                  # default when allowed_non_write_users is set — this
+                  # workflow doesn't use that input, but the action's own
+                  # action.yml honors this var unconditionally if set here
+                  # (action.yml: `env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB ||
+                  # (allowed_non_write_users && '1') || ''`). Reviewing
+                  # adversarial external PR content with write-capable
+                  # Bash(gh pr *) tools means a prompt injection could
+                  # otherwise exfiltrate either credential via something like
+                  # `gh pr comment ... --body "$CLAUDE_CODE_OAUTH_TOKEN"`
+                  # (cold review, 2026-10-15, second wave).
+                  CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
               with:
                   claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
                   github_token: ${{ github.token }}
@@ -204,11 +231,19 @@ jobs:
 
                       SECURITY: the workspace root is the TRUSTED base branch,
                       not this PR. The PR's actual (untrusted) changes are
-                      checked out at ./pr-head — review the diff there, e.g.
-                      `gh pr diff ${{ steps.gate.outputs.pr_number }}` (safe,
-                      API-based) plus reading files under ./pr-head/ as needed.
-                      Do not execute, source, or `cd` into running anything
-                      from ./pr-head/scripts/ or similar — read it, don't run it.
+                      checked out at ./pr-head, PINNED to this exact reviewed
+                      commit. Do NOT use `gh pr diff` for the diff itself — it
+                      shows the PR's CURRENT live state, which may have moved
+                      past the commit this review is pinned to and recorded
+                      above. Instead compute the diff from the pinned local
+                      checkout: `git -C pr-head diff
+                      $(git -C pr-head merge-base HEAD origin/main) HEAD` (or
+                      `origin/master` if that's the default branch), then read
+                      files under ./pr-head/ as needed. `gh pr view`/`gh pr
+                      comment`/`gh pr review` (metadata/posting, not diffing)
+                      are fine via the API as normal. Do not execute, source,
+                      or `cd` into running anything from ./pr-head/scripts/ or
+                      similar — read it, don't run it.
 
                       Review this pull request for heavygee/hapi, a fork of
                       tiann/hapi (terminal coding-agent session manager).
@@ -222,8 +257,18 @@ jobs:
                       Read AGENTS.md and docs/operator/AGENTS.md (at the
                       workspace root — trusted) when present for project
                       conventions. Post inline comments on specific lines.
-                      Submit a formal pull request review (COMMENT or
-                      REQUEST_CHANGES) with a summary. Do not APPROVE or merge.
+
+                      Submit a formal pull request review with a summary.
+                      REQUEST_CHANGES is MANDATORY if you found ANY blocking
+                      issue — a real bug, a security problem, a missing test
+                      for materially changed behavior — even one. Use COMMENT
+                      ONLY when you found nothing blocking; do not put a real
+                      finding only in the summary text while leaving the
+                      review state as COMMENT — downstream automation
+                      (hapi-pr-status.sh) treats COMMENT as "no blocking
+                      findings" by construction, so the review STATE itself,
+                      not just the prose, must be accurate. Do not APPROVE or
+                      merge under any circumstances.
                   # Narrower than lockhouse/arthur's allowedTools (cold review,
                   # 2026-10-15): arthur reviews internal/trusted PRs; this
                   # workflow exists specifically to review EXTERNAL fork PRs
@@ -237,7 +282,8 @@ jobs:
                   # list exists to shrink that surface, not eliminate it.
                   claude_args: |
                       --max-turns 80
-                      --allowedTools "Read,Glob,Grep,LS,mcp__github_inline_comment__create_inline_comment,mcp__github_comment__update_claude_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*)"
+                      --add-dir pr-head
+                      --allowedTools "Read,Glob,Grep,LS,mcp__github_inline_comment__create_inline_comment,mcp__github_comment__update_claude_comment,Bash(git -C pr-head*),Bash(gh pr comment:*),Bash(gh pr view:*),Bash(gh pr review:*)"
 
             # Says plainly which of the three outcomes happened: checkout
             # failure, review failure, or a real completed review — collapsing
@@ -245,30 +291,64 @@ jobs:
             # "did not run" vs "found nothing" confusion this workflow exists
             # to avoid (cold review, 2026-10-15: checkout failing was
             # originally NOT advisory, contradicting that same goal).
+            #
+            # A successful action outcome only proves the Claude Code process
+            # exited 0 — in agent mode nothing enforces that it actually
+            # called `gh pr review`. Query for the tip-matched marker itself
+            # as the real postcondition for "completed" (cold review,
+            # 2026-10-15, second wave), same query shape as the gate step.
+            - name: Verify a formal review was actually posted
+              id: verify
+              if: always() && steps.gate.outputs.run == 'true' && steps.checkout_base.outcome == 'success' && steps.checkout_head.outcome == 'success'
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  REPO: ${{ github.repository }}
+                  PR_NUMBER: ${{ steps.gate.outputs.pr_number }}
+                  HEAD_SHA: ${{ steps.gate.outputs.head_sha }}
+              run: |
+                  set -uo pipefail
+                  POSTED=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" --paginate --slurp 2>/dev/null \
+                      | jq --arg sha "${HEAD_SHA:0:12}" '
+                          def pages: if type == "array" and length > 0 and (.[0]|type) == "array" then add else . end;
+                          (. | pages // [])
+                          | [.[] | select(.user.login == "github-actions[bot]"
+                              and ((.body // "") | test("Claude Fallback Review"; "i"))
+                              and ((.body // "") | contains($sha)))] | length
+                          ' 2>/dev/null || echo 0)
+                  echo "posted=${POSTED:-0}" >>"$GITHUB_OUTPUT"
+
             - name: Report whether the review actually ran
               if: always() && steps.gate.outputs.run == 'true'
+              env:
+                  CHECKOUT_BASE_OUTCOME: ${{ steps.checkout_base.outcome }}
+                  CHECKOUT_HEAD_OUTCOME: ${{ steps.checkout_head.outcome }}
+                  CLAUDE_REVIEW_OUTCOME: ${{ steps.claude_review.outcome }}
+                  POSTED_COUNT: ${{ steps.verify.outputs.posted }}
               run: |
-                  if [[ '${{ steps.checkout_base.outcome }}' != 'success' || '${{ steps.checkout_head.outcome }}' != 'success' ]]; then
+                  if [[ "$CHECKOUT_BASE_OUTCOME" != 'success' || "$CHECKOUT_HEAD_OUTCOME" != 'success' ]]; then
                       {
                           echo "### :warning: The Claude fallback review did NOT run (checkout failed)"
                           echo
-                          echo "base checkout: \`${{ steps.checkout_base.outcome }}\`, PR-head checkout:"
-                          echo "\`${{ steps.checkout_head.outcome }}\`. Advisory only — does not block merges,"
+                          echo "base checkout: \`$CHECKOUT_BASE_OUTCOME\`, PR-head checkout:"
+                          echo "\`$CHECKOUT_HEAD_OUTCOME\`. Advisory only — does not block merges,"
                           echo "but **nothing here says the diff is fine**."
                       } >>"$GITHUB_STEP_SUMMARY"
-                      echo "::warning title=Claude fallback review did not run::Checkout failed (base=${{ steps.checkout_base.outcome }}, head=${{ steps.checkout_head.outcome }}) — Codex quota-exhausted AND the fallback also failed before it could review anything."
-                  elif [[ '${{ steps.claude_review.outcome }}' == 'success' ]]; then
-                      echo "Claude fallback review completed." >>"$GITHUB_STEP_SUMMARY"
+                      echo "::warning title=Claude fallback review did not run::Checkout failed (base=$CHECKOUT_BASE_OUTCOME, head=$CHECKOUT_HEAD_OUTCOME) — Codex quota-exhausted AND the fallback also failed before it could review anything."
+                  elif [[ "${POSTED_COUNT:-0}" -gt 0 ]]; then
+                      echo "Claude fallback review completed (verified: a tip-matched review was posted)." >>"$GITHUB_STEP_SUMMARY"
                   else
                       {
-                          echo "### :warning: The Claude fallback review did NOT run"
+                          echo "### :warning: The Claude fallback review did NOT produce a posted review"
                           echo
-                          echo "Outcome: \`${{ steps.claude_review.outcome }}\`. This job is advisory and"
-                          echo "does not block merges. **Nothing here says the diff is fine** — Codex is"
-                          echo "out of quota AND this fallback also failed to produce a review."
+                          echo "Action outcome: \`$CLAUDE_REVIEW_OUTCOME\`, but no tip-matched"
+                          echo "\"Claude Fallback Review\" was found on the PR — a successful process exit"
+                          echo "does not by itself prove \`gh pr review\` was actually called. This job is"
+                          echo "advisory and does not block merges. **Nothing here says the diff is fine**"
+                          echo "— Codex is out of quota AND this fallback also failed to produce a review."
                           echo
-                          echo "Most likely CLAUDE_CODE_OAUTH_TOKEN has lapsed (tied to a Claude Code"
-                          echo "account; re-run \`claude setup-token\` and update the repo secret)."
+                          echo "If the action outcome above was also non-success, most likely"
+                          echo "CLAUDE_CODE_OAUTH_TOKEN has lapsed (tied to a Claude Code account;"
+                          echo "re-run \`claude setup-token\` and update the repo secret)."
                       } >>"$GITHUB_STEP_SUMMARY"
-                      echo "::warning title=Claude fallback review did not run::Advisory check failed (${{ steps.claude_review.outcome }}) — Codex quota-exhausted AND the fallback also failed; this PR has no automated review right now."
+                      echo "::warning title=Claude fallback review did not run::No tip-matched review found (action outcome: $CLAUDE_REVIEW_OUTCOME) — Codex quota-exhausted AND the fallback also failed to produce a verified review; this PR has no automated review right now."
                   fi
