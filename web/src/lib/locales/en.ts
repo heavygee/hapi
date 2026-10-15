@@ -132,6 +132,7 @@ export default {
   'sessions.markAllRead.confirm': 'Confirm',
   'sessions.markAllRead.confirming': 'Marking as read…',
   'sessions.timeFilter.label': 'Filter sessions by last activity',
+  'sessions.timeFilter.chip': 'Date',
   'sessions.timeFilter.pickStart': 'Select start date',
   'sessions.timeFilter.pickEnd': 'Select end date',
   'sessions.timeFilter.clear': 'Clear',

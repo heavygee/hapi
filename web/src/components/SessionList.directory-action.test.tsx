@@ -199,7 +199,8 @@ describe('SessionList time filter', () => {
         const searchButton = screen.getByRole('button', { name: SEARCH_LABEL })
         const filterButton = screen.getByRole('button', { name: 'Filter sessions' })
         const searchControl = searchButton.parentElement
-        expect(searchControl?.parentElement).toHaveClass('relative', 'gap-1')
+        expect(searchControl?.parentElement).toHaveClass('flex-nowrap', 'gap-1.5')
+        // Session list keeps date in the unified filter menu (showDateFilter=false).
         expect(screen.queryByRole('button', { name: 'Filter sessions by last activity' })).toBeNull()
         expect(screen.queryByPlaceholderText(SEARCH_PLACEHOLDER)).toBeNull()
 
@@ -284,6 +285,38 @@ describe('SessionList time filter', () => {
         fireEvent.click(within(calendar).getByRole('button', { name: `${new Date(2026, 6, 18).toLocaleDateString()}, has session activity` }))
 
         expect(filterButton).toHaveAttribute('aria-expanded', 'true')
+    })
+
+    it('gives expanded search a 48px clear end-cap (tiann/hapi#2019)', () => {
+        const session = makeSession({
+            id: 'session-1',
+            updatedAt: Date.now(),
+            metadata: { path: '/work/hapi', name: 'Session' }
+        })
+
+        renderWithProviders(
+            <SessionList
+                sessions={[session]}
+                selectedSessionId={null}
+                onSelect={vi.fn()}
+                onNewSession={vi.fn()}
+                onRefresh={vi.fn()}
+                isLoading={false}
+                renderHeader={false}
+                api={null}
+            />
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: SEARCH_LABEL }))
+        const input = screen.getByPlaceholderText(SEARCH_PLACEHOLDER)
+        fireEvent.change(input, { target: { value: 'DJ' } })
+
+        const clearButton = screen.getByRole('button', { name: 'Clear search' })
+        expect(clearButton.className).toMatch(/session-list-search-clear-endcap/)
+        expect(clearButton.className).toMatch(/min-h-\[48px\]/)
+        expect(clearButton.className).toMatch(/min-w-\[48px\]/)
+        // Must not pack a calendar icon beside clear on the session list.
+        expect(screen.queryByRole('button', { name: 'Filter sessions by last activity' })).toBeNull()
     })
 
     it('returns focus to the date filter row after clearing the date range', () => {
