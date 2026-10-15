@@ -1405,8 +1405,7 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         this.session.queue.pushIsolated(
             '/auto-review',
             {
-                permissionMode: mode,
-                model: this.session.model
+                permissionMode: mode
             },
             undefined,
             { internal: true }
