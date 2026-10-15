@@ -154,6 +154,12 @@ jobs:
               uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 — same pin as lockhouse/arthur
               with:
                   fetch-depth: 0
+                  # Default true leaves the job's write-capable GITHUB_TOKEN in
+                  # git config (http.extraheader) ON DISK — readable via `git
+                  # config --get` regardless of CLAUDE_CODE_SUBPROCESS_ENV_SCRUB
+                  # (which only scrubs env vars, not git config). Claude never
+                  # needs to push here; nothing in this workflow commits.
+                  persist-credentials: false
 
             # UNTRUSTED PR head — isolated in a subdirectory, never at the root,
             # so an attacker's modified guard/hook script is never what gets
@@ -169,6 +175,10 @@ jobs:
                   ref: ${{ steps.gate.outputs.head_sha }}
                   path: pr-head
                   fetch-depth: 0
+                  # Same reasoning as the base checkout above — this is the
+                  # UNTRUSTED checkout; definitely don't leave a write-capable
+                  # credential sitting in its on-disk git config.
+                  persist-credentials: false
 
             # ADVISORY, NOT A GATE (matches lockhouse/arthur's claude-review.yml,
             # 2026-09-24 incident: an org secret lapsing there turned a reviewer
@@ -307,15 +317,54 @@ jobs:
                   HEAD_SHA: ${{ steps.gate.outputs.head_sha }}
               run: |
                   set -uo pipefail
-                  POSTED=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" --paginate --slurp 2>/dev/null \
-                      | jq --arg sha "${HEAD_SHA:0:12}" '
+                  REVIEWS_JSON=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" --paginate --slurp 2>/dev/null || echo '[]')
+                  POSTED=$(printf '%s' "$REVIEWS_JSON" | jq --arg sha "${HEAD_SHA:0:12}" '
+                      def pages: if type == "array" and length > 0 and (.[0]|type) == "array" then add else . end;
+                      (. | pages // [])
+                      | [.[] | select(.user.login == "github-actions[bot]"
+                          and ((.body // "") | test("Claude Fallback Review"; "i"))
+                          and ((.body // "") | contains($sha)))] | length
+                      ' 2>/dev/null || echo 0)
+                  echo "posted=${POSTED:-0}" >>"$GITHUB_OUTPUT"
+
+                  # This workflow's own "never APPROVE" rule means the normal way
+                  # a reviewer clears their own prior CHANGES_REQUESTED (approving
+                  # it away) is permanently unavailable to this bot — a COMMENT
+                  # review does NOT supersede an earlier actionable review from
+                  # the same identity (GitHub docs: Comment "neither approves nor
+                  # requests changes"). Without this, a REQUEST_CHANGES run
+                  # followed by a later clean run would leave the PR permanently
+                  # blocked on a stale decision only a human or explicit API
+                  # dismissal can clear (cold review, 2026-10-15, third wave).
+                  # Only act when THIS run's own review is clean — never dismiss
+                  # on a failed/unverified run.
+                  if [[ "${POSTED:-0}" -gt 0 ]]; then
+                      THIS_STATE=$(printf '%s' "$REVIEWS_JSON" | jq -r --arg sha "${HEAD_SHA:0:12}" '
                           def pages: if type == "array" and length > 0 and (.[0]|type) == "array" then add else . end;
                           (. | pages // [])
                           | [.[] | select(.user.login == "github-actions[bot]"
                               and ((.body // "") | test("Claude Fallback Review"; "i"))
-                              and ((.body // "") | contains($sha)))] | length
-                          ' 2>/dev/null || echo 0)
-                  echo "posted=${POSTED:-0}" >>"$GITHUB_OUTPUT"
+                              and ((.body // "") | contains($sha)))]
+                          | sort_by(.submitted_at) | reverse | .[0].state // empty
+                          ' 2>/dev/null)
+                      if [[ "$THIS_STATE" == "COMMENTED" ]]; then
+                          STALE_IDS=$(printf '%s' "$REVIEWS_JSON" | jq -r --arg sha "${HEAD_SHA:0:12}" '
+                              def pages: if type == "array" and length > 0 and (.[0]|type) == "array" then add else . end;
+                              (. | pages // [])
+                              | [.[] | select(.user.login == "github-actions[bot]"
+                                  and ((.body // "") | test("Claude Fallback Review"; "i"))
+                                  and (((.body // "") | contains($sha)) | not)
+                                  and .state == "CHANGES_REQUESTED")]
+                              | .[].id
+                              ' 2>/dev/null)
+                          for id in $STALE_IDS; do
+                              echo "Dismissing stale Claude Fallback Review $id (superseded by clean review on $HEAD_SHA)"
+                              gh api -X PUT "repos/$REPO/pulls/$PR_NUMBER/reviews/$id/dismissals" \
+                                  -f "message=Superseded by a clean Claude Fallback Review on ${HEAD_SHA:0:12} — prior findings addressed." \
+                                  -f "event=DISMISS" >/dev/null 2>&1 || echo "::warning::Failed to dismiss stale review $id — may need manual dismissal."
+                          done
+                      fi
+                  fi
 
             - name: Report whether the review actually ran
               if: always() && steps.gate.outputs.run == 'true'
