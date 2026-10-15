@@ -72,6 +72,8 @@ flowchart TD
 
 **Issue-first (2026-10-14):** Step 4 is mandatory before product commits / soup tip-forward. Throwaway spikes without an issue must not commit product code or enter the manifest. Operator mic / voice does not waive this. Hardening: `.cursor/rules/hapi-product-code-guard.mdc`, intake §4.
 
+**Mock letter ≠ layout sentence (2026-10-15 / #2019 exit):** when the operator picks among lettered layout mocks (A–D…), confirm the letter against a one-line layout sentence before implementing — see [intake §4](./new-feature-intake.md#4--issue-first-then-worktree).
+
 **Policy (2026-07-30):** Soup is where we dogfood. **Never** skip soup promotion because "peer stack was enough" or "upstream tip does not need soup." Peer stack proves isolated UI without yanking `:3006`; soup gets the same tip (heal/union if merge conflicts) so `:3006` stays the tastiest stack. Operator approval is for **click-testing / PR**, not for whether to add the layer.
 
 Intake step numbers (handoff template, playback, gates): [`new-feature-intake.md`](./new-feature-intake.md) — **workflow lives here only**.
