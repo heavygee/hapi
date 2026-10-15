@@ -128,22 +128,50 @@ else
 fi
 
 # 7. LANE POLICY — upstream merges need explicit, per-PR, single-use operator authorisation
+#
+# The operator may run hapi-laneb-authorise on whichever box they're sitting at
+# (oos-linux or homelab) while the merge itself usually runs from an agent on
+# oos-linux. Check local first (cheap, no network dependency), then fall back to
+# SSH-ing configured peer hosts. Fails closed: any lookup error just means "not
+# found there" — it never counts as a grant.
+TOKDIR="${HAPI_LANEB_DIR:-$HOME/.config/hapi/laneb}"
+LANEB_REMOTE_HOSTS="${HAPI_LANEB_REMOTE_HOSTS:-homelab}"
+
+# Sets LANEB_GRANT_CONTENT and LANEB_GRANT_HOST ("" = local) on success; returns 1 if not found anywhere.
+_laneb_find_grant() {
+    local pr="$1"
+    if [ -f "$TOKDIR/$pr.auth" ]; then
+        LANEB_GRANT_CONTENT="$(cat "$TOKDIR/$pr.auth")"
+        LANEB_GRANT_HOST=""
+        return 0
+    fi
+    local h content
+    for h in $LANEB_REMOTE_HOSTS; do
+        content="$(ssh -o ConnectTimeout=5 -o BatchMode=yes "$h" "cat '$TOKDIR/$pr.auth' 2>/dev/null" 2>/dev/null || true)"
+        if [ -n "$content" ]; then
+            LANEB_GRANT_CONTENT="$content"
+            LANEB_GRANT_HOST="$h"
+            return 0
+        fi
+    done
+    return 1
+}
+
 if [ "$REPO" = "$UPSTREAM_REPO" ]; then
-    TOKDIR="${HAPI_LANEB_DIR:-$HOME/.config/hapi/laneb}"
-    TOK="$TOKDIR/$PR.auth"
-    if [ ! -f "$TOK" ]; then
+    if ! _laneb_find_grant "$PR"; then
         fail "LANE B: no operator authorisation for $UPSTREAM_REPO#$PR (agents are prepare-only)"
-        echo "         operator grants with: hapi-laneb-authorise $PR $HEAD" >&2
+        echo "         operator grants with: hapi-laneb-authorise $PR $HEAD   (on oos-linux or homelab)" >&2
     else
-        TOKSHA=$(awk -F= '/^head=/{print $2}' "$TOK")
-        TOKEXP=$(awk -F= '/^expires=/{print $2}' "$TOK")
+        TOKSHA=$(awk -F= '/^head=/{print $2}' <<<"$LANEB_GRANT_CONTENT")
+        TOKEXP=$(awk -F= '/^expires=/{print $2}' <<<"$LANEB_GRANT_CONTENT")
         NOW=$(date -u +%s)
+        WHERE="${LANEB_GRANT_HOST:-local}"
         if [ "$TOKSHA" != "$HEAD" ]; then
-            fail "LANE B: authorisation was for ${TOKSHA:0:9}, head is now ${HEAD:0:9} — re-authorise after a push"
+            fail "LANE B: authorisation on $WHERE was for ${TOKSHA:0:9}, head is now ${HEAD:0:9} — re-authorise after a push"
         elif [ -n "$TOKEXP" ] && [ "$NOW" -gt "$TOKEXP" ]; then
-            fail "LANE B: authorisation expired"
+            fail "LANE B: authorisation on $WHERE expired"
         else
-            pass "LANE B authorisation valid for ${HEAD:0:9}"
+            pass "LANE B authorisation valid for ${HEAD:0:9} (granted on $WHERE)"
         fi
     fi
 else
@@ -158,9 +186,13 @@ if [ "$FAIL" -ne 0 ]; then
 fi
 echo "  RESULT: PASS" >&2
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
-# single-use: consume the lane B token so one grant cannot merge twice
-if [ "$REPO" = "$UPSTREAM_REPO" ] && [ -f "${HAPI_LANEB_DIR:-$HOME/.config/hapi/laneb}/$PR.auth" ]; then
-    mv "${HAPI_LANEB_DIR:-$HOME/.config/hapi/laneb}/$PR.auth" \
-       "${HAPI_LANEB_DIR:-$HOME/.config/hapi/laneb}/$PR.auth.used" 2>/dev/null || true
+# single-use: consume the lane B token so one grant cannot merge twice — wherever it was granted
+if [ "$REPO" = "$UPSTREAM_REPO" ]; then
+    if [ -n "${LANEB_GRANT_HOST:-}" ]; then
+        ssh -o ConnectTimeout=5 -o BatchMode=yes "$LANEB_GRANT_HOST" \
+            "mv '$TOKDIR/$PR.auth' '$TOKDIR/$PR.auth.used' 2>/dev/null" 2>/dev/null || true
+    elif [ -f "$TOKDIR/$PR.auth" ]; then
+        mv "$TOKDIR/$PR.auth" "$TOKDIR/$PR.auth.used" 2>/dev/null || true
+    fi
 fi
 exit 0
