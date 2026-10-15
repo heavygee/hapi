@@ -464,6 +464,29 @@ describe('shouldUseSupervisedUpgradeExit', () => {
     })
 })
 
+
+describe('applyRunnerSelfUpgrade platform guard', () => {
+    it('rejects hub-artifact when artifact platform mismatches local', async () => {
+        const result = await applyRunnerSelfUpgrade({
+            offer: baseOffer({
+                channel: 'hub-artifact',
+                targetVersion: 'hapi-soup-v1',
+                artifact: {
+                    url: '/cli/upgrade/cli-artifact?sha256=abc',
+                    sha256: 'abc',
+                    platform: 'win32',
+                    arch: 'x64',
+                },
+            }),
+            downloadBaseUrl: 'http://hub',
+            authToken: 'token',
+            localVersion: '0.1.0',
+        })
+        expect(result.status).toBe('unsupported')
+        expect(result.message).toContain('Artifact platform')
+    })
+})
+
 describe('applyRunnerSelfUpgrade concurrency gate', () => {
     afterEach(() => {
         __resetRunnerSelfUpgradeGateForTests()

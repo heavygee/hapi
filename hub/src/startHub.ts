@@ -34,6 +34,8 @@ import {
     readPublishedSoupTip,
     soupTipToUpgradeOffer,
 } from './upgrade/soupArtifact'
+import { PlatformUpgradeOfferCache } from './upgrade/platformUpgradeOfferCache'
+import { parseUpgradeOfferQuery } from './upgrade/upgradeOfferPlatform'
 import { readSettings } from './config/settings'
 import { getFleetUpgradePolicy, initFleetUpgradePolicy } from './upgrade/fleetUpgradePolicy'
 import QRCode from 'qrcode'
@@ -130,12 +132,14 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     let notificationHub: NotificationHub | null = null
     let tunnelManager: TunnelManager | null = null
 
-    let cachedUpgradeOffer: { at: number; offer: ReturnType<typeof resolveUpgradeOffer> } | null = null
     const UPGRADE_OFFER_TTL_MS = 30_000
-    const resolveCurrentUpgradeOffer = () => {
+    const cachedUpgradeOffers = new PlatformUpgradeOfferCache<ReturnType<typeof resolveUpgradeOffer>>(UPGRADE_OFFER_TTL_MS)
+    const resolveCurrentUpgradeOffer = (platform?: string, arch?: string) => {
+        const { platform: plat, arch: cpuArch } = parseUpgradeOfferQuery(platform, arch)
         const now = Date.now()
-        if (cachedUpgradeOffer && now - cachedUpgradeOffer.at < UPGRADE_OFFER_TTL_MS) {
-            return cachedUpgradeOffer.offer
+        const cached = cachedUpgradeOffers.get(plat, cpuArch, now)
+        if (cached) {
+            return cached
         }
         const offer = resolveUpgradeOffer({
             hubPackageRoot: defaultHubPackageRoot(),
@@ -147,14 +151,14 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         if (offer.channel === 'hub-artifact' && preferPublishedSoupTip()) {
             const tip = readPublishedSoupTip()
             if (tip) {
-                const soupOffer = soupTipToUpgradeOffer(tip, process.platform, process.arch, offer)
+                const soupOffer = soupTipToUpgradeOffer(tip, plat, cpuArch, offer)
                 if (soupOffer) {
-                    cachedUpgradeOffer = { at: now, offer: soupOffer }
+                    cachedUpgradeOffers.set(plat, cpuArch, soupOffer, now)
                     return soupOffer
                 }
                 console.warn(
                     `[fleet-upgrade] soup tip ${tip.tag} present but no binary for `
-                    + `${process.platform}/${process.arch}; falling back to source fingerprint`,
+                    + `${plat}/${cpuArch}; falling back to source fingerprint`,
                 )
             }
         }
@@ -171,11 +175,17 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
                 }
             }
         }
-        cachedUpgradeOffer = { at: now, offer }
+        cachedUpgradeOffers.set(plat, cpuArch, offer, now)
         return offer
     }
-    const rememberUpgradeOffer = (offer: ReturnType<typeof resolveUpgradeOffer>): void => {
-        cachedUpgradeOffer = { at: Date.now(), offer }
+    const rememberUpgradeOffer = (
+        offer: ReturnType<typeof resolveUpgradeOffer>,
+        cachePlatform?: string,
+        cacheArch?: string,
+    ): void => {
+        const plat = cachePlatform ?? offer.artifact?.platform ?? process.platform
+        const cpuArch = cacheArch ?? offer.artifact?.arch ?? process.arch
+        cachedUpgradeOffers.set(plat, cpuArch, offer)
     }
     setConfiguredUpgradeTargetVersion(options.cliVersion)
     // Load configuration (async - loads from env/file with persistence)
@@ -272,7 +282,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     })
 
     syncEngine = new SyncEngine(store, socketServer.io, socketServer.rpcRegistry, sseManager, {
-        getUpgradeOffer: () => resolveCurrentUpgradeOffer(),
+        getUpgradeOffer: (platform?: string, arch?: string) => resolveCurrentUpgradeOffer(platform, arch),
         getFleetUpgradePolicy: () => getFleetUpgradePolicy(),
         prepareArtifactOffer: async (offer, platform, arch) => {
             const tip = preferPublishedSoupTip()
@@ -307,7 +317,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
                     sizeBytes: meta.sizeBytes,
                 },
             }
-            rememberUpgradeOffer(prepared)
+            rememberUpgradeOffer(prepared, platform, arch)
             return prepared
         },
     })

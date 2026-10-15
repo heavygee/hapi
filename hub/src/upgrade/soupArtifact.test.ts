@@ -130,4 +130,70 @@ describe('ensureSoupCliArtifact', () => {
             rmSync(dataDir, { recursive: true, force: true })
         }
     })
+
+describe('soupTipToUpgradeOffer win32 on linux hub fixture', () => {
+    it('returns distinct windows-x64 artifact sha from linux default', () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-soup-mixed-'))
+        try {
+            const tag = 'hapi-soup-v2026.10.15-mixed'
+            const tipDir = join(root, tag)
+            const linuxDir = join(tipDir, 'linux-x64-baseline')
+            const winDir = join(tipDir, 'windows-x64-baseline')
+            mkdirSync(linuxDir, { recursive: true })
+            mkdirSync(winDir, { recursive: true })
+            const linuxBytes = 'linux-binary'
+            const winBytes = 'windows-binary'
+            writeFileSync(join(linuxDir, 'hapi'), linuxBytes)
+            writeFileSync(join(winDir, 'hapi.exe'), winBytes)
+            const linuxSha = createHash('sha256').update(linuxBytes).digest('hex')
+            const winSha = createHash('sha256').update(winBytes).digest('hex')
+            writeFileSync(join(tipDir, 'manifest.json'), `${JSON.stringify({
+                schema: 1,
+                tag,
+                composedTipSha: 'abc123',
+                binaries: [
+                    {
+                        target: 'bun-linux-x64-baseline',
+                        platform: 'linux',
+                        arch: 'x64',
+                        variant: 'baseline',
+                        path: 'linux-x64-baseline/hapi',
+                        sha256: linuxSha,
+                        sizeBytes: Buffer.byteLength(linuxBytes),
+                    },
+                    {
+                        target: 'bun-windows-x64-baseline',
+                        platform: 'windows',
+                        arch: 'x64',
+                        variant: 'baseline',
+                        path: 'windows-x64-baseline/hapi.exe',
+                        sha256: winSha,
+                        sizeBytes: Buffer.byteLength(winBytes),
+                    },
+                ],
+            }, null, 2)}\n`)
+            symlinkSync(tag, join(root, 'latest'))
+
+            const tip = readPublishedSoupTip(root)
+            expect(tip?.tag).toBe(tag)
+
+            const linuxOffer = soupTipToUpgradeOffer(tip!, 'linux', 'x64', {
+                channel: 'hub-artifact',
+                targetVersion: '0.30.0',
+                targetCapabilities: [],
+            })
+            const winOffer = soupTipToUpgradeOffer(tip!, 'win32', 'x64', {
+                channel: 'hub-artifact',
+                targetVersion: '0.30.0',
+                targetCapabilities: [],
+            })
+            expect(linuxOffer?.artifact?.sha256).toBe(linuxSha)
+            expect(winOffer?.artifact?.sha256).toBe(winSha)
+            expect(linuxOffer?.artifact?.sha256).not.toBe(winOffer?.artifact?.sha256)
+        } finally {
+            rmSync(root, { recursive: true, force: true })
+        }
+    })
+})
+
 })

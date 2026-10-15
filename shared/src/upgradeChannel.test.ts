@@ -4,6 +4,7 @@ import {
     machineTrailsUpgradeOffer,
     compareHapiVersions,
     inferMachineArch,
+    artifactPlatformMatchesLocal,
     type HubUpgradeOffer,
 } from './upgradeChannel'
 
@@ -230,5 +231,13 @@ describe('machineTrailsUpgradeOffer', () => {
             ['runner-self-upgrade'],
             'hapi-soup-v2026.09.24-c699518',
         )).toBe(false)
+    })
+})
+
+describe('artifactPlatformMatchesLocal', () => {
+    it('treats win32 and windows as equivalent', () => {
+        expect(artifactPlatformMatchesLocal('windows', 'win32')).toBe(true)
+        expect(artifactPlatformMatchesLocal('win32', 'windows')).toBe(true)
+        expect(artifactPlatformMatchesLocal('linux', 'win32')).toBe(false)
     })
 })

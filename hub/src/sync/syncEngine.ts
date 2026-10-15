@@ -233,7 +233,7 @@ function extractClaudeUserMessageTextFromAgentOutput(content: unknown): string |
 
 export type SyncEngineOptions = {
     /** Resolve the current hub upgrade offer (channel + version + optional artifact). */
-    getUpgradeOffer?: () => HubUpgradeOffer
+    getUpgradeOffer?: (platform?: string, arch?: string) => HubUpgradeOffer
     /** Ensure hub-artifact bytes exist; returns offer with sha256 filled. */
     prepareArtifactOffer?: (offer: HubUpgradeOffer, platform: string, arch: string) => Promise<HubUpgradeOffer>
     /** Operator policy: only `auto` lets the hub auto-fire fleet upgrades. */
@@ -286,7 +286,7 @@ export class SyncEngine {
             | { type: 'error'; message: string; code: 'machine_not_found' | 'machine_offline' | 'upgrade_unavailable' | 'upgrade_deferred' | 'upgrade_failed' }
         >
     >()
-    private readonly getUpgradeOffer: (() => HubUpgradeOffer) | null
+    private readonly getUpgradeOffer: ((platform?: string, arch?: string) => HubUpgradeOffer) | null
     private readonly prepareArtifactOffer: SyncEngineOptions['prepareArtifactOffer']
     private readonly getFleetUpgradePolicy: () => FleetUpgradePolicy
     /**
@@ -1919,8 +1919,8 @@ export class SyncEngine {
         }
     }
 
-    getHubUpgradeOffer(): HubUpgradeOffer | null {
-        return this.getUpgradeOffer?.() ?? null
+    getHubUpgradeOffer(platform?: string, arch?: string): HubUpgradeOffer | null {
+        return this.getUpgradeOffer?.(platform, arch) ?? null
     }
 
     private expireInactive(): void {

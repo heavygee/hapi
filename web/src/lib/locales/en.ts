@@ -472,6 +472,7 @@ export default {
   'runner.skew.banner.upgradeCliFirst': '(behind hub — Upgrade pulls matching CLI)',
   'runner.skew.banner.handoffDisabledHint': '(rebuild-only — Upgrade disabled; Restart needs HAPI_RUNNER_SUPERVISED=1)',
   'runner.skew.banner.upgradeNeedsHandoff': 'This machine opted out of version handoff (soup/rebuild-only hub host). Rematerialize soup or clear HAPI_DISABLE_VERSION_HANDOFF. For Restart under systemd/pm2, also set HAPI_RUNNER_SUPERVISED=1. Ordinary fleet runners must not set the handoff opt-out.',
+  'runner.skew.banner.noPlatformBinary': 'This hub tip has no CLI binary for that machine platform. Publish a matching soup binary or upgrade manually on the host.',
   'runner.skew.banner.upgradeNeedsManual': 'This machine\'s runner is too old to self-upgrade from the hub. Install a newer HAPI CLI on that machine, then restart the runner.',
   'runner.skew.banner.legacyRunnerHint': '(legacy runner — Upgrade disabled; update CLI on the machine)',
   'runner.skew.banner.handoffHint': 'Fleet upgrade: hub detects npm vs source install and upgrades remote runners accordingly (npm registry or hub-built artifact). Upgrade never SSHs; the runner on each machine installs on itself. Set HAPI_UPGRADE_CHANNEL=off to disable.',

@@ -134,6 +134,25 @@ export type MachineTrailsOptions = {
  * Legacy runners omitted `metadata.arch`. Estate fleet is x64-only today; infer
  * so hub-artifact upgrades can proceed before remotes reconnect with fixed CLI.
  */
+export function normalizeFleetPlatform(platform: string): string {
+    const normalized = platform.trim().toLowerCase()
+    if (normalized === "windows") {
+        return "win32"
+    }
+    return normalized
+}
+
+/** True when a hub-artifact offer targets this machine OS (win32 ≈ windows). */
+export function artifactPlatformMatchesLocal(
+    artifactPlatform: string | null | undefined,
+    localPlatform: string,
+): boolean {
+    if (!artifactPlatform) {
+        return true
+    }
+    return normalizeFleetPlatform(artifactPlatform) === normalizeFleetPlatform(localPlatform)
+}
+
 export function inferMachineArch(platform: string | null | undefined): string | undefined {
     if (!platform) {
         return undefined

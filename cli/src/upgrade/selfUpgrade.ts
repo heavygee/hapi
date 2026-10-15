@@ -10,7 +10,7 @@ import type {
     HubUpgradeOffer,
     RunnerSelfUpgradeResponse,
 } from '@hapi/protocol/upgradeChannel'
-import { compareHapiVersions } from '@hapi/protocol/upgradeChannel'
+import { artifactPlatformMatchesLocal, compareHapiVersions } from '@hapi/protocol/upgradeChannel'
 import { CURRENT_MACHINE_CAPABILITIES } from '@hapi/protocol/runnerCapabilities'
 import packageJson from '../../package.json'
 import { logger } from '@/ui/logger'
@@ -804,6 +804,18 @@ async function applyRunnerSelfUpgradeUnlocked(options: {
         CURRENT_MACHINE_CAPABILITIES,
         localGeneration,
     )
+    if (
+        options.offer.channel === 'hub-artifact'
+        && options.offer.artifact?.platform
+        && !artifactPlatformMatchesLocal(options.offer.artifact.platform, process.platform)
+    ) {
+        return stayAlive({
+            status: 'unsupported',
+            message: `Artifact platform ${options.offer.artifact.platform} does not match local ${process.platform}`,
+            channel: options.offer.channel,
+        })
+    }
+
     if (!decision.apply) {
         return stayAlive({
             status: decision.reason === 'already-current' ? 'already-current' : 'unsupported',

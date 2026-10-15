@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { cliBinaryUpdatedOnDisk, MACHINE_CAPABILITIES } from '@hapi/protocol/runnerCapabilities'
 import {
     DEFAULT_FLEET_UPGRADE_POLICY,
+    artifactPlatformMatchesLocal,
     machineTrailsUpgradeOffer,
     type FleetUpgradePolicy,
     type HubUpgradeOffer,
@@ -52,6 +53,21 @@ export function machineDisplayHost(machine: Machine): string {
 }
 
 /** True when the hub can auto-RPC self-upgrade for this machine. */
+export function hubArtifactUnavailableForMachine(
+    machine: Machine,
+    offer: HubUpgradeOffer | null,
+): boolean {
+    if (!offer || offer.channel !== 'hub-artifact') {
+        return false
+    }
+    const machinePlatform = machine.metadata?.platform
+    const artifactPlatform = offer.artifact?.platform
+    if (!machinePlatform || !artifactPlatform) {
+        return false
+    }
+    return !artifactPlatformMatchesLocal(artifactPlatform, machinePlatform)
+}
+
 export function machineCanAutoUpgrade(machine: Machine): boolean {
     if (machine.metadata?.versionHandoffDisabled === true) {
         return false
@@ -387,13 +403,16 @@ export function RunnerVersionSkewBanner({
                     // Upgrade owns package+handoff relaunch. Restart is stop-only and is
                     // only safe when an external supervisor (HAPI_RUNNER_SUPERVISED=1) will relaunch.
                     // Legacy runners without RunnerSelfUpgrade cannot receive the RPC.
-                    const canUpgrade = !handoffDisabled && supportsSelfUpgrade
+                    const platformBinaryMissing = hubArtifactUnavailableForMachine(machine, offer)
+                    const canUpgrade = !handoffDisabled && supportsSelfUpgrade && !platformBinaryMissing
                     const canRestart = supervisedRestart && newerOnDisk
-                    const upgradeDisabledTitle = handoffDisabled
-                        ? t('runner.skew.banner.upgradeNeedsHandoff')
-                        : !supportsSelfUpgrade
-                            ? t('runner.skew.banner.upgradeNeedsManual')
-                            : undefined
+                    const upgradeDisabledTitle = platformBinaryMissing
+                        ? t('runner.skew.banner.noPlatformBinary')
+                        : handoffDisabled
+                            ? t('runner.skew.banner.upgradeNeedsHandoff')
+                            : !supportsSelfUpgrade
+                                ? t('runner.skew.banner.upgradeNeedsManual')
+                                : undefined
                     const restartDisabledTitle = !supervisedRestart
                         ? t('runner.skew.banner.restartNeedsSupervisor')
                         : !newerOnDisk

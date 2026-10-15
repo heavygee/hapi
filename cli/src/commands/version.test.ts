@@ -9,8 +9,10 @@ describe('fetchHubTargetGeneration', () => {
                 expect(init?.method).toBe('POST')
                 return new Response(JSON.stringify({ token: 'jwt' }), { status: 200 })
             }
-            if (url.endsWith('/api/upgrade/offer')) {
+            if (url.includes('/api/upgrade/offer')) {
                 expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer jwt')
+                expect(url).toContain('platform=')
+                expect(url).toContain('arch=')
                 return new Response(JSON.stringify({
                     offer: { targetGeneration: 'abc123' },
                 }), { status: 200 })

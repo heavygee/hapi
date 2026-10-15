@@ -46,7 +46,10 @@ export async function fetchHubTargetGeneration(deps: {
         if (typeof authBody.token !== 'string' || authBody.token.length === 0) {
             return null
         }
-        const offerRes = await fetchImpl(`${apiUrl}/api/upgrade/offer`, {
+        const offerUrl = new URL(`${apiUrl}/api/upgrade/offer`)
+        offerUrl.searchParams.set('platform', process.platform)
+        offerUrl.searchParams.set('arch', process.arch)
+        const offerRes = await fetchImpl(offerUrl, {
             headers: { Authorization: `Bearer ${authBody.token}` },
             signal: AbortSignal.timeout(timeoutMs),
         })

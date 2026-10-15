@@ -5,6 +5,8 @@ import { join } from 'node:path'
 import { Hono } from 'hono'
 import type { WebAppEnv } from '../middleware/auth'
 import { createUpgradeRoutes } from './upgrade'
+import type { HubUpgradeOffer } from '@hapi/protocol/upgradeChannel'
+import type { SyncEngine } from '../../sync/syncEngine'
 import {
     initFleetUpgradePolicy,
     resetFleetUpgradePolicyForTests,
@@ -77,4 +79,46 @@ describe('upgrade routes', () => {
         })
         expect(res.status).toBe(400)
     })
+
+    it('GET /upgrade/offer passes platform and arch query to SyncEngine', async () => {
+        const linuxOffer: HubUpgradeOffer = {
+            channel: 'hub-artifact',
+            targetVersion: 'hapi-soup-v1',
+            targetCapabilities: [],
+            artifact: { url: '/a', sha256: 'linuxsha', platform: 'linux', arch: 'x64' },
+        }
+        const winOffer: HubUpgradeOffer = {
+            channel: 'hub-artifact',
+            targetVersion: 'hapi-soup-v1',
+            targetCapabilities: [],
+            artifact: { url: '/b', sha256: 'winsha', platform: 'win32', arch: 'x64' },
+        }
+        const calls: Array<{ platform?: string; arch?: string }> = []
+        const engine = {
+            getHubUpgradeOffer(platform?: string, arch?: string) {
+                calls.push({ platform, arch })
+                if (platform === 'win32' || platform === 'windows') {
+                    return winOffer
+                }
+                return linuxOffer
+            },
+        } as Pick<SyncEngine, 'getHubUpgradeOffer'>
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            c.set('userId', 1)
+            await next()
+        })
+        app.route('/api', createUpgradeRoutes(() => engine as SyncEngine))
+
+        const linuxRes = await app.request('/api/upgrade/offer')
+        const linuxBody = await linuxRes.json() as { offer: HubUpgradeOffer }
+        expect(linuxBody.offer.artifact?.sha256).toBe('linuxsha')
+
+        const winRes = await app.request('/api/upgrade/offer?platform=win32&arch=x64')
+        const winBody = await winRes.json() as { offer: HubUpgradeOffer }
+        expect(winBody.offer.artifact?.sha256).toBe('winsha')
+        expect(calls.some((c) => c.platform === 'win32' && c.arch === 'x64')).toBe(true)
+    })
+
 })

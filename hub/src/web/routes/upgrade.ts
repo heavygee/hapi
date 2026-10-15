@@ -16,6 +16,7 @@ import { getConfiguration } from '../../configuration'
 import { constantTimeEquals } from '../../utils/crypto'
 import { parseAccessToken } from '../../utils/accessToken'
 import type { SyncEngine } from '../../sync/syncEngine'
+import { parseUpgradeOfferQuery } from '../../upgrade/upgradeOfferPlatform'
 
 const bearerSchema = z.string().regex(/^Bearer\s+(.+)$/i)
 
@@ -26,8 +27,12 @@ export function createUpgradeRoutes(getSyncEngine: () => SyncEngine | null): Hon
     const app = new Hono<WebAppEnv>()
 
     app.get('/upgrade/offer', (c) => {
+        const { platform, arch } = parseUpgradeOfferQuery(
+            c.req.query('platform'),
+            c.req.query('arch'),
+        )
         const engine = getSyncEngine()
-        const offer = engine?.getHubUpgradeOffer()
+        const offer = engine?.getHubUpgradeOffer(platform, arch)
         if (!offer) {
             // Fallback for early boot / tests without a SyncEngine — still
             // resolves a channel/version without forcing a fingerprint walk
@@ -41,8 +46,8 @@ export function createUpgradeRoutes(getSyncEngine: () => SyncEngine | null): Hon
                 if (tip) {
                     const soupOffer = soupTipToUpgradeOffer(
                         tip,
-                        process.platform,
-                        process.arch,
+                        platform,
+                        arch,
                         fallback,
                     )
                     if (soupOffer) {
