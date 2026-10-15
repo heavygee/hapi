@@ -41,11 +41,19 @@
 #                    not just present) — a quarantined test whose issue is
 #                    closed is either fixed or abandoned, and both deserve to
 #                    fail loudly again, not sit here forever.
-#   signature      - a stable substring of the known failure text. A failure
-#                    under this id whose message does NOT contain this
-#                    substring is treated as a NEW failure and BLOCKS — this
-#                    is what stops quarantine from hiding a real regression
-#                    that happens to land in the same test.
+#   signature      - one or more " && "-joined required substrings of the
+#                    known failure text — ALL must be present in the message
+#                    for a match. A failure under this id that doesn't match
+#                    is treated as a NEW failure and BLOCKS — this is what
+#                    stops quarantine from hiding a real regression that
+#                    happens to land in the same test. Prefer combining the
+#                    assertion text with its stack-trace call site (e.g.
+#                    "expected true to be false && myTest.ts:42:") — either
+#                    alone can over-match (generic assertion text can hit a
+#                    different assertion in the same test; a bare call site
+#                    can match a different kind of failure thrown from the
+#                    same line). See the cli: entry below for the real case
+#                    that forced this (cold review, 2026-10-15).
 #   added          - ISO date quarantined.
 #   expires        - ISO date. Default policy is +14 days from `added`. Past
 #                    this date the entry excuses nothing — it is not a grace
@@ -70,15 +78,22 @@ quarantine:
   - id: "cli:agentCliGuard prunes crash-stale registering/<deadPid> so list-models is not pinned"
     owner: "heavygee"
     issue: 274
-    # "expected true to be false" alone is too generic: this test has a SECOND
-    # assertion two lines below (existsSync(dir)).toBe(false)) that fails with
-    # byte-identical text if it breaks for a real, different reason. Anchoring
-    # on the stack-frame line number is what actually discriminates "the known
-    # flake at line 309" from "a new bug at line 310" (cold review, 2026-10-15).
+    # Two cold-review rounds landed here (2026-10-15):
+    # Round 1: "expected true to be false" alone is too generic — this test
+    # has a SECOND assertion two lines below (existsSync(dir)).toBe(false))
+    # that fails with byte-identical text for a real, different reason.
+    # Round 2: the stack-frame line ALONE is also not enough — if
+    # isAgentAcpTransportActive() itself started throwing instead of
+    # returning the wrong boolean, the thrown error's stack would still
+    # name this same line, and a location-only signature would wrongly
+    # excuse a completely different failure mode.
+    # `signature` supports " && "-joined required substrings — ALL must be
+    # present. Combining the assertion text with its call site closes both
+    # gaps: neither alone can satisfy this quarantine's excuse condition.
     # Line-number signatures are brittle to lines being inserted above 309 in
-    # this file — if that ever happens, this stops matching and BLOCKS (fails
+    # this file — if that happens, this stops matching and BLOCKS (fails
     # closed), which forces someone to look rather than silently re-matching.
-    signature: "agentCliGuard.test.ts:309:"
+    signature: "expected true to be false && agentCliGuard.test.ts:309:"
     added: "2026-10-15"
     expires: "2026-10-29"
 

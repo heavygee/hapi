@@ -12,6 +12,18 @@ CLI="$HERE/flaky-quarantine.mjs"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
+# Computed relative to the actual run, not hardcoded — a fixed "currently
+# active" date pair goes stale the moment the wall clock passes it, silently
+# flipping these fixtures' meaning (control A would start blocking instead of
+# excusing; the ceiling fixture's entries would stop counting as active) and
+# permanently reddening the tooling-tests CI job that runs this file on every
+# relevant PR (cold review, 2026-10-15). Control C's PAST dates are
+# deliberately literal — "already expired" needs to stay true forever, not
+# just today.
+TODAY="$(date -u +%Y-%m-%d)"
+FUTURE="$(date -u -d '+10 days' +%Y-%m-%d)"
+RENEWAL_TOO_FAR="$(date -u -d '+47 days' +%Y-%m-%d)"
+
 fail=0
 check_exit() {
     local desc="$1" expected="$2" actual="$3"
@@ -24,9 +36,16 @@ check_exit() {
 }
 
 registry() {
+    # __TODAY__/__FUTURE__/__RENEWAL_TOO_FAR__ placeholders let call sites
+    # stay single-quoted (no accidental bash interpolation of the literal
+    # YAML) while still resolving to the actual run's dates.
+    local content="$1"
+    content="${content//__TODAY__/$TODAY}"
+    content="${content//__FUTURE__/$FUTURE}"
+    content="${content//__RENEWAL_TOO_FAR__/$RENEWAL_TOO_FAR}"
     cat >"$TMP/registry.yaml" <<EOF
 quarantine:
-$1
+$content
 EOF
 }
 
@@ -54,8 +73,8 @@ registry '  - id: "cli:suite does the thing"
     owner: "alice"
     issue: 1
     signature: "expected true to be false"
-    added: "2026-10-15"
-    expires: "2026-10-29"'
+    added: "__TODAY__"
+    expires: "__FUTURE__"'
 results '[{"id":"cli:suite does the thing","failed":true,"message":"AssertionError: expected true to be false"}]'
 rc=$(run_check)
 check_exit "A: matching signature excuses the failure" 0 "$rc"
@@ -86,8 +105,8 @@ registry '  - id: "cli:unrelated test"
     owner: "alice"
     issue: 1
     signature: "x"
-    added: "2026-10-15"
-    expires: "2026-10-29"'
+    added: "__TODAY__"
+    expires: "__FUTURE__"'
 results '[{"id":"cli:something else entirely","failed":true,"message":"boom"}]'
 rc=$(run_check)
 check_exit "sanity: unquarantined failure blocks" 1 "$rc"
@@ -101,8 +120,8 @@ check_exit "sanity: passing test is always fine" 0 "$rc"
 registry '  - id: "cli:no owner"
     issue: 1
     signature: "x"
-    added: "2026-10-15"
-    expires: "2026-10-29"'
+    added: "__TODAY__"
+    expires: "__FUTURE__"'
 results '[{"id":"cli:no owner","failed":true,"message":"x"}]'
 rc=$(run_check)
 check_exit "schema: missing owner is a registry error (fails closed)" 1 "$rc"
@@ -114,8 +133,8 @@ registry '  - id: "cli:pushed too far"
     owner: "alice"
     issue: 1
     signature: "x"
-    added: "2026-10-15"
-    expires: "2026-12-01"
+    added: "__TODAY__"
+    expires: "__RENEWAL_TOO_FAR__"
     renewal_count: 1
     renewal_reason: "still flaky"'
 results '[]'
@@ -128,33 +147,79 @@ registry '  - id: "cli:no reason"
     owner: "alice"
     issue: 1
     signature: "x"
-    added: "2026-10-15"
-    expires: "2026-10-29"
+    added: "__TODAY__"
+    expires: "__FUTURE__"
     renewal_count: 1'
 results '[]'
 rc=$(run_check)
 check_exit "schema: renewal without a reason is rejected" 1 "$rc"
 grep -q "renewal_count > 0 requires a renewal_reason" "$TMP/out.log" || { echo "FAIL: missing-renewal-reason error not found"; fail=1; }
 
+# --- Regression (cold review, 2026-10-15): a partially-numeric issue must be
+# rejected, not silently truncated to its numeric prefix. Before the fix,
+# Number.parseInt("27O", 10) === 27 — a typo'd issue number would silently
+# point at a different, unrelated open issue.
+registry '  - id: "cli:bad issue number"
+    owner: "alice"
+    issue: 27O
+    signature: "x"
+    added: "__TODAY__"
+    expires: "__FUTURE__"'
+results '[]'
+rc=$(run_check)
+check_exit "schema: a partially-numeric issue (27O) is rejected, not truncated to 27" 1 "$rc"
+grep -q "issue must be a positive GitHub issue number" "$TMP/out.log" || { echo "FAIL: bad-issue error not found"; fail=1; }
+
+# --- Regression (cold review, 2026-10-15): a day-overflow date (2026-02-30,
+# which JS Date silently normalizes to 2026-03-02) must be rejected, not
+# silently shifted — a mistyped expiry should not quietly extend or shorten
+# the quarantine window.
+registry '  - id: "cli:bad date"
+    owner: "alice"
+    issue: 1
+    signature: "x"
+    added: "__TODAY__"
+    expires: "2026-02-30"'
+results '[]'
+rc=$(run_check)
+check_exit "schema: a day-overflow date (2026-02-30) is rejected" 1 "$rc"
+grep -q "not a valid calendar date" "$TMP/out.log" || { echo "FAIL: day-overflow error not found"; fail=1; }
+
+# --- Regression (cold review, 2026-10-15): an entry must be recognized even
+# when `id` is not the FIRST field on the list item. Before the fix, only a
+# literal `- id:` line started a new entry, so an item like `- owner: ...`
+# followed by `  id: ...` silently never created an entry at all — the
+# fields were dropped on the floor rather than raising a "missing id" error.
+registry '  - owner: "alice"
+    id: "cli:id not first"
+    issue: 1
+    signature: "x"
+    added: "__TODAY__"
+    expires: "__FUTURE__"'
+results '[{"id":"cli:id not first","failed":true,"message":"x"}]'
+rc=$(run_check)
+check_exit "schema: an entry is parsed even when id is not the first field" 0 "$rc"
+grep -q "EXCUSED: cli:id not first" "$TMP/out.log" || { echo "FAIL: reordered-field entry was not recognized"; fail=1; }
+
 # --- Ceiling: too many active entries blocks regardless of test outcome ----
 registry '  - id: "cli:a"
     owner: "alice"
     issue: 1
     signature: "x"
-    added: "2026-10-15"
-    expires: "2026-10-29"
+    added: "__TODAY__"
+    expires: "__FUTURE__"
   - id: "cli:b"
     owner: "alice"
     issue: 1
     signature: "x"
-    added: "2026-10-15"
-    expires: "2026-10-29"
+    added: "__TODAY__"
+    expires: "__FUTURE__"
   - id: "cli:c"
     owner: "alice"
     issue: 1
     signature: "x"
-    added: "2026-10-15"
-    expires: "2026-10-29"'
+    added: "__TODAY__"
+    expires: "__FUTURE__"'
 results '[]'
 rc=$(run_check 2)
 check_exit "ceiling: 3 active entries over ceiling=2 blocks with no test failures" 1 "$rc"
@@ -170,13 +235,13 @@ registry '  - id: "cli:unaffected cli test"
     owner: "alice"
     issue: 1
     signature: "x"
-    added: "2026-10-15"
-    expires: "2026-10-29"
+    added: "__TODAY__"
+    expires: "__FUTURE__"
   - id: "ios:some broken entry"
     issue: 1
     signature: "x"
-    added: "2026-10-15"
-    expires: "2026-10-29"'
+    added: "__TODAY__"
+    expires: "__FUTURE__"'
 results '[{"id":"cli:unaffected cli test","failed":false,"message":""}]'
 rc=$(run_check_pkg cli)
 check_exit "cross-package: --package cli ignores a broken ios: entry" 0 "$rc"
@@ -188,6 +253,32 @@ vrc=$?
 set -e
 check_exit "cross-package: unscoped validate still catches the broken ios: entry" 2 "$vrc"
 grep -q "INVALID \[owner\] ios:some broken entry" "$TMP/out.log" || { echo "FAIL: validate did not report the broken ios entry"; fail=1; }
+
+# --- Regression (cold review, 2026-10-15): a runner-level crash (import
+# error, zero tests discovered) exits non-zero while producing NO per-test
+# assertion results at all. Before --runner-exit-code existed, that normalized
+# to an empty results list and the gate reported a clean pass despite the
+# runner itself having failed.
+registry '  - id: "cli:irrelevant"
+    owner: "alice"
+    issue: 1
+    signature: "x"
+    added: "__TODAY__"
+    expires: "__FUTURE__"'
+results '[]'
+set +e
+bun "$CLI" check --results "$TMP/results.json" --registry "$TMP/registry.yaml" --skip-issue-check --package cli --runner-exit-code 1 >"$TMP/out.log" 2>&1
+rc=$?
+set -e
+check_exit "runner-exit-code: nonzero exit with zero attributable failures still blocks" 1 "$rc"
+grep -q "produced no attributable per-test failure" "$TMP/out.log" || { echo "FAIL: runner-exit-code mismatch message not found"; fail=1; }
+
+# Sanity: runner-exit-code 0 (or omitted) with empty results is a clean pass.
+set +e
+bun "$CLI" check --results "$TMP/results.json" --registry "$TMP/registry.yaml" --skip-issue-check --package cli --runner-exit-code 0 >"$TMP/out.log" 2>&1
+rc=$?
+set -e
+check_exit "runner-exit-code: zero exit with empty results passes normally" 0 "$rc"
 
 if [[ "$fail" -eq 0 ]]; then
     echo "ALL OK: flaky-quarantine negative controls"
