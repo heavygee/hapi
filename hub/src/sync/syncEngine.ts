@@ -1571,11 +1571,6 @@ export class SyncEngine {
         if (getEffectiveFleetUpgradePolicy(machineId) !== 'auto') {
             return
         }
-        const offer = this.getUpgradeOffer()
-        if (offer.channel === 'off') {
-            return
-        }
-        this.clearFleetUpgradeCooldownIfTargetMoved(offer)
         const machine = this.machineCache.getMachine(machineId)
         if (!machine?.active || !machine.metadata) {
             return
@@ -1583,6 +1578,24 @@ export class SyncEngine {
         if (machine.metadata.versionHandoffDisabled === true) {
             return
         }
+        // Platform-aware offer (#284): do not trail-check win32 machines against
+        // the hub-OS linux artifact (keepalive used to hammer upgrade_unavailable).
+        const platform = machine.metadata.platform
+        const arch = machine.metadata.arch ?? inferMachineArch(platform)
+        const offer = this.getUpgradeOffer(platform ?? undefined, arch ?? undefined)
+        if (offer.channel === 'off') {
+            return
+        }
+        // Soup tip with no bytes for this platform — do not keepalive-nudge.
+        // Live-tree fingerprint offers omit artifact until prepare compiles.
+        if (
+            offer.channel === 'hub-artifact'
+            && !offer.artifact?.sha256
+            && (Boolean(offer.soupTag) || offer.targetVersion.startsWith('hapi-soup-v'))
+        ) {
+            return
+        }
+        this.clearFleetUpgradeCooldownIfTargetMoved(offer)
         if (!machineTrailsUpgradeOffer(
             offer,
             machine.metadata.happyCliVersion,
@@ -1906,7 +1919,11 @@ export class SyncEngine {
                 }
             }
             // Soup tip with no binary for this platform — do not compile/serve hub-OS bytes.
-            if (!offer.artifact?.sha256) {
+            // Fingerprint offers intentionally omit artifact until prepare builds one.
+            if (
+                !offer.artifact?.sha256
+                && (Boolean(offer.soupTag) || offer.targetVersion.startsWith('hapi-soup-v'))
+            ) {
                 return {
                     type: 'error',
                     message:
