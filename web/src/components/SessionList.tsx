@@ -1271,6 +1271,7 @@ export function SessionListSearch(props: {
     const inputRef = useRef<HTMLInputElement>(null)
     const collapsedButtonRef = useRef<HTMLButtonElement>(null)
     const dateButtonRef = useRef<HTMLButtonElement>(null)
+    const searchRootRef = useRef<HTMLDivElement>(null)
     const hasDateRange = Boolean(props.customStart && props.customEnd)
     const showDateFilter = props.showDateFilter !== false
 
@@ -1307,7 +1308,7 @@ export function SessionListSearch(props: {
     // session list keeps date in the filter menu while collapsed.
     // tiann/hapi#2019 / Quest: both calendar and clear are min 48x48.
     const renderDateFilter = (variant: 'standalone' | 'embedded') => (
-        <div className={cn('relative shrink-0', variant === 'embedded' && 'flex items-stretch')}>
+        <div className={cn('shrink-0', variant === 'embedded' && 'flex items-stretch')}>
             <button
                 ref={dateButtonRef}
                 type="button"
@@ -1385,6 +1386,8 @@ export function SessionListSearch(props: {
                             returnDateFocus()
                         }}
                         align={variant === 'standalone' ? 'left' : 'right'}
+                        // Float + clamp to the search group (not the 48px button).
+                        anchorRef={searchRootRef}
                     />
                 </>
             ) : null}
@@ -1522,12 +1525,13 @@ export function SessionListSearch(props: {
         // grows for an existing query, which is stable before the hold begins.
         const showsChip = hasTextQuery
         return (
-            // shrink-0 + no w-full: collapsed search must not steal the header row
-            // from BlockedJumpPill / filter / + (operator screenshot 2026-10-15).
+            // min-w-0 (no shrink-0 / no w-full): group yields to toolbar neighbors;
+            // calendar/clear stay shrink-0; query truncates. (#2019 HAPI Bot)
             <div
+                ref={searchRootRef}
                 data-testid="session-list-search"
                 data-expanded="false"
-                className="flex min-w-0 shrink-0 flex-nowrap items-center gap-1.5"
+                className="relative flex min-w-0 flex-nowrap items-center gap-1.5"
             >
                 <div className={cn(
                     'relative flex min-w-0 items-center rounded-full transition-colors',
@@ -1582,6 +1586,7 @@ export function SessionListSearch(props: {
 
     return (
         <div
+            ref={searchRootRef}
             data-testid="session-list-search"
             data-expanded="true"
             className="relative min-w-0 flex-1"
