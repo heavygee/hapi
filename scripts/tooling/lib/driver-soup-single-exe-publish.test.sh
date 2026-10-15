@@ -212,4 +212,61 @@ driver_soup_fleet_seal_github_channel "$SEAL_ROOT/$SEAL_TAG" "$SEAL_TAG" --dry-r
     || { echo "FAIL: GH channel dry-run should succeed"; exit 1; }
 echo "OK: fleet-seal GH channel dry-run"
 
+# --- Public URL is part of the seal (tag + digests) ---
+PUB_DIR="$TMP/pub-manifest"
+mkdir -p "$PUB_DIR"
+# Matching public object → green
+jq -n \
+    --arg tag "$SEAL_TAG" \
+    --arg tip "$TIP_B" \
+    --arg sha "$SEAL_SHA" \
+    '{schema:1, tag:$tag, composedTipSha:$tip, binaries:[{target:"bun-linux-x64-baseline",platform:"linux",arch:"x64",variant:"baseline",path:"linux-x64-baseline/hapi",sha256:$sha,sizeBytes:13}]}' \
+    >"$PUB_DIR/manifest.json"
+# Serve via local HTTP so curl gets a real status code (file:// is unreliable).
+PUB_PORT=18765
+python3 -m http.server "$PUB_PORT" --directory "$PUB_DIR" >/dev/null 2>&1 &
+PUB_PID=$!
+cleanup_pub() { kill "$PUB_PID" 2>/dev/null || true; }
+trap cleanup_pub EXIT
+sleep 0.3
+export HAPI_FLEET_PUBLIC_MANIFEST_URL="http://127.0.0.1:${PUB_PORT}/manifest.json"
+driver_soup_fleet_seal_verify_public "$SEAL_ROOT/$SEAL_TAG" "$SEAL_TAG" \
+    || { echo "FAIL: public verify should pass on matching object"; exit 1; }
+echo "OK: public verify passes on matching tag+digest"
+
+# Deliberately broken public object (wrong tag) → must go RED
+jq -n \
+    --arg tip "$TIP_B" \
+    --arg sha "$SEAL_SHA" \
+    '{schema:1, tag:"hapi-soup-v2099.01.01-stale000", composedTipSha:$tip, binaries:[{target:"bun-linux-x64-baseline",platform:"linux",arch:"x64",variant:"baseline",path:"linux-x64-baseline/hapi",sha256:$sha,sizeBytes:13}]}' \
+    >"$PUB_DIR/manifest.json"
+if driver_soup_fleet_seal_verify_public "$SEAL_ROOT/$SEAL_TAG" "$SEAL_TAG"; then
+    echo "FAIL: public verify must fail on wrong public tag"
+    exit 1
+fi
+echo "OK: public verify goes RED on wrong public tag"
+
+# Deliberately broken digest (same tag, tampered sha) → must go RED
+jq -n \
+    --arg tag "$SEAL_TAG" \
+    --arg tip "$TIP_B" \
+    '{schema:1, tag:$tag, composedTipSha:$tip, binaries:[{target:"bun-linux-x64-baseline",platform:"linux",arch:"x64",variant:"baseline",path:"linux-x64-baseline/hapi",sha256:"deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",sizeBytes:13}]}' \
+    >"$PUB_DIR/manifest.json"
+if driver_soup_fleet_seal_verify_public "$SEAL_ROOT/$SEAL_TAG" "$SEAL_TAG"; then
+    echo "FAIL: public verify must fail on wrong public digest"
+    exit 1
+fi
+echo "OK: public verify goes RED on wrong public digest"
+
+# Non-200 → must go RED
+export HAPI_FLEET_PUBLIC_MANIFEST_URL="http://127.0.0.1:${PUB_PORT}/does-not-exist.json"
+if driver_soup_fleet_seal_verify_public "$SEAL_ROOT/$SEAL_TAG" "$SEAL_TAG"; then
+    echo "FAIL: public verify must fail on HTTP non-200"
+    exit 1
+fi
+echo "OK: public verify goes RED on HTTP non-200"
+cleanup_pub
+trap - EXIT
+unset HAPI_FLEET_PUBLIC_MANIFEST_URL
+
 echo "All driver-soup-single-exe-publish tests passed."

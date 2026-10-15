@@ -25,6 +25,7 @@
 #   HAPI_SOUP_GITHUB_RELEASE_REQUIRED=1  fail publish if gh upload fails (default on oos foundry)
 #   HAPI_SOUP_REUSE_DIST_EXE=1  dangerous escape hatch: publish existing dist-exe without tip-stamp rebuild
 #   HAPI_FLEET_GH_CHANNEL_TAG   default hapi-fleet (moving Layer A channel; never 'latest')
+#   HAPI_FLEET_PUBLIC_MANIFEST_URL  override public poll URL (tests / deliberate red)
 #   HAPI_SKIP_FLEET_GITHUB_CHANNEL=1  skip GH channel upsert on seal (tests / offline)
 #   HAPI_SKIP_FLEET_DISPATCH=1  skip per-target dispatch after seal (#258)
 #
@@ -466,11 +467,95 @@ driver_soup_fleet_github_channel_tag() {
 }
 
 # Durable poll URL Layer A / pet install should use (primary, not fallback).
+# Override: HAPI_FLEET_PUBLIC_MANIFEST_URL (unit tests / deliberate red proof).
 driver_soup_fleet_github_manifest_url() {
+    if [[ -n "${HAPI_FLEET_PUBLIC_MANIFEST_URL:-}" ]]; then
+        printf '%s\n' "$HAPI_FLEET_PUBLIC_MANIFEST_URL"
+        return 0
+    fi
     local repo channel
     repo="$(driver_soup_single_exe_github_repo)"
     channel="$(driver_soup_fleet_github_channel_tag)"
     printf 'https://github.com/%s/releases/download/%s/manifest.json\n' "$repo" "$channel"
+}
+
+# Public URL is PART OF the seal (followers poll it), not a consequence.
+# Fetch public manifest; require HTTP 200; compare tag + every binary sha256
+# against the sealed tip dir. Fail loudly on mismatch / non-200 / empty body.
+#
+# Usage: driver_soup_fleet_seal_verify_public <tip_dir> <want_tag>
+driver_soup_fleet_seal_verify_public() {
+    local tip_dir="${1:?}"
+    local want_tag="${2:?}"
+    local url tmp code public_tag path want_sha got_sha n i
+    local tip_manifest="$tip_dir/manifest.json"
+
+    if [[ ! -f "$tip_manifest" ]]; then
+        echo "ERROR: fleet-seal: missing tip manifest $tip_manifest" >&2
+        return 1
+    fi
+
+    url="$(driver_soup_fleet_github_manifest_url)"
+    tmp="$(mktemp "${TMPDIR:-/tmp}/hapi-fleet-pub.XXXXXX")"
+    code="$(curl -sL -o "$tmp" -w '%{http_code}' --max-time 60 "$url" 2>/dev/null || echo 000)"
+    if [[ "$code" != "200" ]]; then
+        echo "ERROR: fleet-seal: public manifest HTTP ${code} from ${url}" >&2
+        rm -f "$tmp"
+        return 1
+    fi
+    if [[ ! -s "$tmp" ]]; then
+        echo "ERROR: fleet-seal: public manifest empty from ${url}" >&2
+        rm -f "$tmp"
+        return 1
+    fi
+
+    public_tag="$(jq -r '.tag // empty' "$tmp" 2>/dev/null || true)"
+    if [[ -z "$public_tag" ]]; then
+        echo "ERROR: fleet-seal: public manifest missing .tag (${url})" >&2
+        rm -f "$tmp"
+        return 1
+    fi
+    if [[ "$public_tag" != "$want_tag" ]]; then
+        echo "ERROR: fleet-seal: public tag mismatch want=${want_tag} got=${public_tag} (${url})" >&2
+        rm -f "$tmp"
+        return 1
+    fi
+
+    n="$(jq '.binaries | length' "$tip_manifest" 2>/dev/null || echo 0)"
+    if [[ "$n" -lt 1 ]]; then
+        echo "ERROR: fleet-seal: sealed tip has no binaries[]" >&2
+        rm -f "$tmp"
+        return 1
+    fi
+    i=0
+    while [[ "$i" -lt "$n" ]]; do
+        path="$(jq -r --argjson i "$i" '.binaries[$i].path // empty' "$tip_manifest")"
+        want_sha="$(jq -r --argjson i "$i" '.binaries[$i].sha256 // empty' "$tip_manifest")"
+        if [[ -z "$path" || -z "$want_sha" ]]; then
+            echo "ERROR: fleet-seal: sealed binaries[$i] missing path/sha256" >&2
+            rm -f "$tmp"
+            return 1
+        fi
+        got_sha="$(jq -r --arg path "$path" \
+            '.binaries[]? | select(.path == $path) | .sha256 // empty' "$tmp" 2>/dev/null | head -n1)"
+        if [[ -z "$got_sha" ]]; then
+            echo "ERROR: fleet-seal: public manifest missing path ${path}" >&2
+            rm -f "$tmp"
+            return 1
+        fi
+        if [[ "${got_sha,,}" != "${want_sha,,}" ]]; then
+            echo "ERROR: fleet-seal: public digest mismatch for ${path}" >&2
+            echo "       sealed  ${want_sha}" >&2
+            echo "       public  ${got_sha}" >&2
+            rm -f "$tmp"
+            return 1
+        fi
+        i=$((i + 1))
+    done
+
+    rm -f "$tmp"
+    echo "fleet-seal: public OK → ${url} (tag=${want_tag}; digests match)"
+    return 0
 }
 
 # Mirror sealed tip bytes onto the moving GH channel release (mandatory on seal).
@@ -633,36 +718,34 @@ driver_soup_fleet_seal_github_channel() {
         return 1
     fi
 
-    # Public download URL must eventually serve the sealed tip (Layer A poll path).
-    # API asset view can be fresh while releases/download/… CDN is stale.
-    local want_tag public_tag i healed=0
-    want_tag="$(jq -r '.tag // empty' "$staging_manifest")"
+    # Public download URL must serve the sealed tip (tag + digests). Followers
+    # poll this URL — API-fresh / CDN-stale is a seal failure, not a warning.
+    local i healed=0
     for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
-        public_tag="$(curl -fsSL "$manifest_url" 2>/dev/null | jq -r '.tag // empty' || true)"
-        if [[ -n "$want_tag" && "$public_tag" == "$want_tag" ]]; then
+        if driver_soup_fleet_seal_verify_public "$tip_dir" "$sealed_tag"; then
             healed=1
             break
         fi
         if [[ "$i" -eq 3 || "$i" -eq 7 ]]; then
-            # Re-delete+upload manifest to bust CDN mid-wait.
+            # Re-delete+upload manifest to bust CDN mid-wait (oos 2026-10-14/15).
             mid="$(gh api "repos/${repo}/releases/tags/${channel}" \
                 --jq '.assets[]|select(.name=="manifest.json").id' 2>/dev/null || true)"
             if [[ -n "$mid" ]]; then
                 gh api -X DELETE "repos/${repo}/releases/assets/${mid}" >/dev/null 2>&1 || true
             fi
             gh release upload "$channel" --repo "$repo" --clobber "$staging_manifest" >/dev/null 2>&1 || true
-            echo "fleet-seal: CDN still stale (got ${public_tag:-empty}); re-uploaded manifest (try $i)"
+            echo "fleet-seal: public verify still failing; re-uploaded manifest (try $i)"
         fi
         sleep 5
     done
     rm -rf "$staging"
     if [[ "$healed" != "1" ]]; then
-        echo "ERROR: fleet-seal: public $manifest_url still not tag=$want_tag after CDN wait" >&2
+        echo "ERROR: fleet-seal: public ${manifest_url} failed tag+digest verify after CDN wait" >&2
         echo "       API may be fresh; Layer A pollers use the public URL — fix CDN / retry upload" >&2
         return 1
     fi
 
-    echo "fleet-seal: GitHub channel OK → ${manifest_url} (public tag=${public_tag})"
+    echo "fleet-seal: GitHub channel OK (public URL is part of the seal)"
     return 0
 }
 
@@ -726,7 +809,7 @@ driver_soup_fleet_seal() {
     echo "fleet-seal: tag=$tag tip=${tip_sha:0:12} root=$root"
 
     if [[ "$dry_run" == "1" ]]; then
-        echo "fleet-seal: dry-run OK (would point fleet-latest → $tag)"
+        echo "fleet-seal: dry-run OK (would point fleet-latest → $tag after public verify)"
         driver_soup_fleet_seal_github_channel "$tip_dir" "$tag" --dry-run || return 1
         local dispatch_script
         dispatch_script="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/hapi-fleet-seal-dispatch.sh"
@@ -736,19 +819,28 @@ driver_soup_fleet_seal() {
         return 0
     fi
 
+    # Ordering: GH channel + public tag/digest verify FIRST, then local
+    # fleet-latest. Followers poll the public URL — never flip local while
+    # public is stale/404 (2026-10-15 seal: local OK, CDN broken).
+    # Invariant: publish moves dogfood latest first; seal the same tip so
+    # fleet never leads dogfood.
+    if [[ "${HAPI_SKIP_FLEET_GITHUB_CHANNEL:-}" != "1" ]]; then
+        if ! driver_soup_fleet_seal_github_channel "$tip_dir" "$tag"; then
+            echo "ERROR: fleet-seal: GitHub channel / public URL verify FAILED" >&2
+            echo "       local fleet-latest NOT moved — fix CDN / retry: hapi-fleet-seal $tag" >&2
+            return 1
+        fi
+    else
+        echo "fleet-seal: skip GitHub channel (HAPI_SKIP_FLEET_GITHUB_CHANNEL=1)"
+    fi
+
     # Relative symlink (same as latest) so the artifacts root is relocatable.
     ln -sfn "$tag" "$root/fleet-latest"
     printf '%s\n' "$tag" >"$root/fleet-latest-tag.txt"
     echo "fleet-seal: fleet-latest → $tag"
     echo "fleet-seal: fleet-latest-tag.txt written"
     echo "fleet-seal: manifest $tip_dir/manifest.json"
-
-    # Off-estate Layer A / pets: GH channel is primary (not optional mirror).
-    if ! driver_soup_fleet_seal_github_channel "$tip_dir" "$tag"; then
-        echo "ERROR: fleet-seal: local fleet-latest updated but GitHub channel mirror FAILED" >&2
-        echo "       fix gh auth / retry: hapi-fleet-seal $tag" >&2
-        return 1
-    fi
+    echo "fleet-seal: dogfood latest=$(readlink "$root/latest" 2>/dev/null || echo '?') fleet-latest=$tag"
 
     # Per-target-type dispatch (#258): estate push / Layer A verify / cattle plan.
     local dispatch_script
