@@ -92,6 +92,27 @@ function wrapList(
 }
 
 describe('SessionList blocked chrome (#1717)', () => {
+    it('keeps collapsed search with a query from overlapping the blocked jump pill (#2019)', () => {
+        const SEARCH_LABEL = 'Search sessions (title, path, Agent, machine name, ID, and more)'
+        const SEARCH_PLACEHOLDER = 'Search title/path/Agent/machine/ID…'
+        renderList([blocked('stuck-one'), makeSession({ id: 'fine-one', metadata: { path: '/home/ubuntu', name: 'DJ session', flavor: 'claude' } })])
+
+        expect(screen.getByTestId('blocked-jump-pill')).toBeTruthy()
+
+        fireEvent.click(screen.getByRole('button', { name: SEARCH_LABEL }))
+        const input = screen.getByPlaceholderText(SEARCH_PLACEHOLDER)
+        fireEvent.change(input, { target: { value: 'DJ' } })
+        fireEvent.blur(input)
+
+        const search = screen.getByTestId('session-list-search')
+        expect(search).toHaveAttribute('data-expanded', 'false')
+        // Regression: w-full on collapsed search ate the header row and sat on the pill.
+        expect(search.className.split(/\s+/)).not.toContain('w-full')
+        expect(search.className.split(/\s+/)).toContain('shrink-0')
+        expect(screen.getByTestId('blocked-jump-pill')).toBeTruthy()
+        expect(screen.getByRole('button', { name: 'Clear search' })).toBeTruthy()
+    })
+
     it('floats blocked sessions into their own section with a rail and a chip', () => {
         renderList([blocked('stuck-one'), makeSession({ id: 'fine-one' })])
 

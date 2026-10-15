@@ -1493,7 +1493,13 @@ export function SessionListSearch(props: {
         // grows for an existing query, which is stable before the hold begins.
         const showsChip = hasTextQuery
         return (
-            <div className="flex w-full min-w-0 flex-nowrap items-center gap-1.5">
+            // shrink-0 + no w-full: collapsed search must not steal the header row
+            // from BlockedJumpPill / filter / + (operator screenshot 2026-10-15).
+            <div
+                data-testid="session-list-search"
+                data-expanded="false"
+                className="flex min-w-0 shrink-0 flex-nowrap items-center gap-1.5"
+            >
                 <div className={cn(
                     'relative flex min-w-0 items-center rounded-full transition-colors',
                     showsChip
@@ -1547,7 +1553,9 @@ export function SessionListSearch(props: {
 
     return (
         <div
-            className="flex w-full min-w-0 flex-nowrap items-center gap-1.5"
+            data-testid="session-list-search"
+            data-expanded="true"
+            className="flex min-w-0 flex-1 flex-nowrap items-center gap-1.5"
             onBlur={(event) => {
                 // Losing focus while a hold's transcript is still being applied
                 // must not collapse the field out from under it.
