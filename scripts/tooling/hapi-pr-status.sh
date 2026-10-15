@@ -19,10 +19,12 @@
 #     Clean signal: review body matches /No findings|…|No Blocker, Major, Minor, or Nit findings/
 #     (HAPI Bot's clean Findings line — do not treat Questions "- None." as clean; #1108).
 #   - heavygee/hapi (fork, cloud-Codex auto-review): bot is `chatgpt-codex-connector`
-#     posting ISSUE COMMENTS (not reviews) via the ChatGPT subscription-side App.
-#     Clean signal: latest comment body matches /Codex Review:.*Didn.t find any/.
-#   - Either surface: the `cold-review-clean` label on the PR forces a PASS regardless
-#     of bot state — operator's explicit "I've addressed or accepted findings" override.
+#     posting formal REVIEWS (`### 💡 Codex Review`) and/or ISSUE COMMENTS via the
+#     ChatGPT subscription-side App. Clean signal: tip-matched review with no-findings
+#     body / 👍, OR operator `cold-review-clean` **only after a tip-matched wave**.
+#   - `cold-review-clean` does NOT skip unresolved threads, and does NOT excuse a tip
+#     that has moved past the latest Codex "Reviewed commit" (agents must wait for /
+#     clear the next wave). Usage-limit comments are not a clean verdict.
 
 set -euo pipefail
 
@@ -186,57 +188,154 @@ fi
 
 # ── 3. Latest bot verdict ───────────────────────────────────────────────────
 # Surface-aware: upstream uses formal reviews by github-actions[bot]; fork uses
-# issue-comments by chatgpt-codex-connector. Operator label `cold-review-clean`
-# forces PASS on either surface (manual override after addressing/accepting findings).
+# chatgpt-codex-connector reviews (+ issue comments). Operator label
+# `cold-review-clean` may override FINDINGS on a tip-matched wave only — never
+# unresolved threads (section 2) and never a tip that has moved past Codex.
 echo ""
 echo "  3. Latest bot verdict"
 
-if [[ "$HAS_CLEAN_LABEL" == "true" ]]; then
-    echo "     ✓ cold-review-clean label present (operator override)"
-    echo "     → PASS"
-else
-    # Determine surface from owner
-    # IMPORTANT: never `gh api --paginate --jq '…|.[0]'` — --jq runs per page and
-    # concatenates JSON values, so jq streaming can mix tip + prior-page tip
-    # (false CLEAN when an older page ended Findings:None, or false FINDINGS when
-    # an older page still had [Major]). --slurp + jq `add` merges pages first.
-    if [[ "$OWNER" == "heavygee" ]]; then
-        # Fork: cloud-Codex posts as issue-comments by chatgpt-codex-connector[bot]
-        LATEST_BOT=$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate --slurp 2>/dev/null \
-            | jq '[add[]
-                | select(.user.login == "chatgpt-codex-connector[bot]"
-                    or .user.login == "chatgpt-codex-connector")]
-                | sort_by(.created_at) | reverse | .[0] // null' \
-            2>/dev/null || echo "null")
-        CLEAN_REGEX="Codex Review:.*Didn.t find any|Codex Review:.*No.*issues|Didn.t find any major"
-        BOT_DESC="chatgpt-codex-connector[bot] comment"
-        TIMESTAMP_FIELD=".created_at"
+HEAD_SHA=$(gh pr view "$PR" --repo "$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null || true)
+
+# IMPORTANT: never `gh api --paginate --jq '…|.[0]'` — --jq runs per page and
+# concatenates JSON values, so jq streaming can mix tip + prior-page tip
+# (false CLEAN when an older page ended Findings:None, or false FINDINGS when
+# an older page still had [Major]). --slurp + jq `add` merges pages first.
+if [[ "$OWNER" == "heavygee" ]]; then
+    # Fork Codex posts TWO shapes:
+    #   - findings waves → formal PR reviews (### 💡 Codex Review + Reviewed commit)
+    #   - zero-findings → often a plain issue comment ("Didn't find any major issues"
+    #     + Reviewed commit) with NO review object — must merge both timelines by time
+    #     or tip-match falsely sticks on an older findings review (#238 2026-10-14).
+    BOT_DESC="chatgpt-codex-connector[bot]"
+    CLEAN_REGEX="Codex Review:.*Didn.t find any|Codex Review:.*No.*issues|Didn.t find any major|No reportable (code )?issues found|No findings"
+    # Temp files — PR review payloads are too large for jq --argjson argv limits.
+    REVIEWS_TMP=$(mktemp)
+    COMMENTS_TMP=$(mktemp)
+    # shellcheck disable=SC2064
+    trap 'rm -f "$REVIEWS_TMP" "$COMMENTS_TMP"' RETURN
+    gh api "repos/${REPO}/pulls/${PR}/reviews" --paginate --slurp >"$REVIEWS_TMP" 2>/dev/null || echo '[]' >"$REVIEWS_TMP"
+    gh api "repos/${REPO}/issues/${PR}/comments" --paginate --slurp >"$COMMENTS_TMP" 2>/dev/null || echo '[]' >"$COMMENTS_TMP"
+    LATEST_EVENT=$(jq -n --slurpfile reviews "$REVIEWS_TMP" --slurpfile comments "$COMMENTS_TMP" '
+        def is_codex: (.user.login == "chatgpt-codex-connector[bot]"
+            or .user.login == "chatgpt-codex-connector");
+        def has_reviewed_commit: ((.body // "") | test("Reviewed commit"));
+        def pages: if type == "array" and length > 0 and (.[0]|type) == "array" then add else . end;
+        ($reviews[0] | pages // []) as $r
+        | ($comments[0] | pages // []) as $c
+        | ([ $r[]? | select(is_codex and has_reviewed_commit)
+             | {kind:"review", at:.submitted_at, body:(.body // "")} ]
+           + [ $c[]? | select(is_codex and has_reviewed_commit)
+             | {kind:"comment", at:.created_at, body:(.body // "")} ])
+        | sort_by(.at) | reverse | .[0] // null
+        ' 2>/dev/null || echo "null")
+    LATEST_ANY_COMMENT=$(jq -n --slurpfile comments "$COMMENTS_TMP" '
+        def pages: if type == "array" and length > 0 and (.[0]|type) == "array" then add else . end;
+        ($comments[0] | pages // [])
+        | [.[]? | select(.user.login == "chatgpt-codex-connector[bot]"
+            or .user.login == "chatgpt-codex-connector")]
+        | sort_by(.created_at) | reverse | .[0] // null
+        ' 2>/dev/null || echo "null")
+    USAGE_LIMIT=false
+    if [[ "$LATEST_ANY_COMMENT" != "null" && -n "$LATEST_ANY_COMMENT" ]]; then
+        CMT_BODY=$(echo "$LATEST_ANY_COMMENT" | jq -r '.body // empty')
+        if printf '%s' "$CMT_BODY" | grep -qiE 'usage limits for code reviews|Codex usage limits'; then
+            USAGE_LIMIT=true
+        fi
+    fi
+    REVIEWED_SHA=""
+    SUBMITTED=""
+    BODY=""
+    KIND=""
+    if [[ "$LATEST_EVENT" != "null" && -n "$LATEST_EVENT" ]]; then
+        KIND=$(echo "$LATEST_EVENT" | jq -r '.kind')
+        SUBMITTED=$(echo "$LATEST_EVENT" | jq -r '.at')
+        BODY=$(echo "$LATEST_EVENT" | jq -r '.body // empty')
+        REVIEWED_SHA=$(printf '%s' "$BODY" | grep -oE 'Reviewed commit:\*\* `[0-9a-f]{7,40}`|Reviewed commit: `[0-9a-f]{7,40}`' \
+            | head -1 | grep -oE '[0-9a-f]{7,40}' | head -1)
+        echo "     Source: ${BOT_DESC} ${KIND}"
+        echo "     Last run: ${SUBMITTED}"
+        [[ -n "$REVIEWED_SHA" ]] && echo "     Reviewed commit: ${REVIEWED_SHA}"
+        echo "$BODY" | head -c 300 | sed 's/^/     /'
+        echo ""
     else
-        # Upstream: openai/codex-action GHA posts formal reviews as github-actions[bot]
-        LATEST_BOT=$(gh api "repos/${REPO}/pulls/${PR}/reviews" --paginate --slurp 2>/dev/null \
-            | jq '[add[]
-                | select(.user.login == "github-actions[bot]")]
-                | sort_by(.submitted_at) | reverse | .[0] // null' \
-            2>/dev/null || echo "null")
-        # Do NOT match bare "- None." — Codex puts that under **Questions** even
-        # when Findings still has Majors (#1108). Include HAPI Bot's clean line
-        # ("No Blocker, Major, Minor, or Nit findings…") which lacks "No findings".
-        # Allow blank line(s) between **Findings** and "- None." (HAPI Bot often
-        # emits that shape; a strict \\n- None false-positived #1274 as dirty).
-        # "No reportable code issues found" (#1163 Codex v2 Code section) — not
-        # contiguous with older "No reportable issues found".
-        CLEAN_REGEX="No findings|No high-confidence|No issues found|No reportable (code )?issues found|No additional actionable|No actionable|No Blocker, Major, Minor, or Nit findings|No Blocker[[:space:]].*findings|\*\*Findings\*\*[[:space:]]*- None"
-        BOT_DESC="github-actions[bot] review"
-        TIMESTAMP_FIELD=".submitted_at"
+        echo "     ? No ${BOT_DESC} review/comment with Reviewed commit found"
+        BODY=""
     fi
 
-    if [[ "$LATEST_BOT" == "null" || -z "$LATEST_BOT" ]]; then
+    TIP_MATCHED=false
+    TIP_AHEAD=false
+    if [[ -n "$HEAD_SHA" && -n "$REVIEWED_SHA" ]]; then
+        if [[ "$HEAD_SHA" == "$REVIEWED_SHA"* || "$REVIEWED_SHA" == "$HEAD_SHA"* ]]; then
+            TIP_MATCHED=true
+        else
+            TIP_AHEAD=true
+        fi
+        echo "     Tip HEAD: ${HEAD_SHA:0:12}  tip-matched=$TIP_MATCHED tip-ahead=$TIP_AHEAD"
+    elif [[ -n "$HEAD_SHA" && -z "$REVIEWED_SHA" && -n "$BODY" ]]; then
+        echo "     Tip HEAD: ${HEAD_SHA:0:12}  (could not parse Reviewed commit from body)"
+    fi
+
+    if $TIP_AHEAD; then
+        echo "     ✗ Tip moved past latest Codex Reviewed commit (${REVIEWED_SHA:0:12})"
+        if $USAGE_LIMIT; then
+            echo "     ~ also: latest Codex comment is a usage-limit notice"
+        fi
+        echo "     → FAIL (wait for tip-matched Codex wave or @codex review — cold-review-clean does not skip tip-ahead)"
+        BOT_OK=false
+        PASS=1
+    elif $USAGE_LIMIT && ! $TIP_MATCHED; then
+        echo "     ✗ Codex usage-limited (latest comment) and no tip-matched review"
+        echo "     → FAIL (wait for quota / tip-matched Codex wave — cold-review-clean does not skip this)"
+        BOT_OK=false
+        PASS=1
+    elif [[ -z "$BODY" ]]; then
+        # Never treat parse failure / missing Reviewed-commit events as clean via label.
+        echo "     → UNKNOWN (no Reviewed-commit Codex event; cold-review-clean does not invent tip-match)"
+        BOT_OK=false
+        PASS=1
+    elif printf '%s' "$BODY" | sed 's/\\n/ /g' | tr '\n' ' ' | grep -qE "$CLEAN_REGEX"; then
+        if $TIP_MATCHED; then
+            echo "     → PASS (tip-matched clean body)"
+        else
+            echo "     → FAIL (clean body but not tip-matched — unexpected)"
+            BOT_OK=false
+            PASS=1
+        fi
+    elif [[ "$HAS_CLEAN_LABEL" == "true" ]] && $TIP_MATCHED; then
+        echo "     ✓ cold-review-clean label present (operator override on tip-matched/accepted wave)"
+        echo "     → PASS"
+    else
+        echo "     → FINDINGS PRESENT (clear threads + tip-matched clean, or apply cold-review-clean after addressing)"
+        BOT_OK=false
+        PASS=1
+    fi
+else
+    # Upstream: openai/codex-action GHA posts formal reviews as github-actions[bot]
+    LATEST_BOT=$(gh api "repos/${REPO}/pulls/${PR}/reviews" --paginate --slurp 2>/dev/null \
+        | jq '[add[]
+            | select(.user.login == "github-actions[bot]")]
+            | sort_by(.submitted_at) | reverse | .[0] // null' \
+        2>/dev/null || echo "null")
+    # Do NOT match bare "- None." — Codex puts that under **Questions** even
+    # when Findings still has Majors (#1108). Include HAPI Bot's clean line
+    # ("No Blocker, Major, Minor, or Nit findings…") which lacks "No findings".
+    # Allow blank line(s) between **Findings** and "- None." (HAPI Bot often
+    # emits that shape; a strict \\n- None false-positived #1274 as dirty).
+    # "No reportable code issues found" (#1163 Codex v2 Code section) — not
+    # contiguous with older "No reportable issues found".
+    CLEAN_REGEX="No findings|No high-confidence|No issues found|No reportable (code )?issues found|No additional actionable|No actionable|No Blocker, Major, Minor, or Nit findings|No Blocker[[:space:]].*findings|\*\*Findings\*\*[[:space:]]*- None"
+    BOT_DESC="github-actions[bot] review"
+
+    if [[ "$HAS_CLEAN_LABEL" == "true" ]]; then
+        echo "     ✓ cold-review-clean label present (operator override)"
+        echo "     → PASS"
+    elif [[ "$LATEST_BOT" == "null" || -z "$LATEST_BOT" ]]; then
         echo "     ? No ${BOT_DESC} found"
         echo "     → UNKNOWN"
         BOT_OK=false
         PASS=1
     else
-        SUBMITTED=$(echo "$LATEST_BOT" | jq -r "${TIMESTAMP_FIELD}")
+        SUBMITTED=$(echo "$LATEST_BOT" | jq -r '.submitted_at')
         BODY=$(echo "$LATEST_BOT" | jq -r '.body // empty')
         SNIPPET=$(echo "$LATEST_BOT" | jq -r '.body[0:300]')
         echo "     Source: ${BOT_DESC}"

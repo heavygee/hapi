@@ -3,7 +3,7 @@ name: Soup redeploy verification
 # Fork-local CI: proves the fork's own deployment tooling actually redeploys,
 # not just that the application code is correct (that's test.yml's job).
 #
-# Why this exists: the 2026-09-30 antevorta/ninja hardening pass found that
+# Why this exists: the 2026-09-30 antevorta/standalone-personal-hub hardening pass found that
 # scripts/tooling/install-hapi-systemd-units.sh had been broken for *any*
 # arguments, on *every* profile, for an unknown period — nothing caught it
 # because nothing ran it. The 29 existing scripts/**/*.test.sh regression

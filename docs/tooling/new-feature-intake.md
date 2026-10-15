@@ -43,7 +43,7 @@ Copy and fill this block (do not spawn a peer with only "implement X"):
 - [ ] 1 Code search — DONE: <paths or "none found">
 - [ ] 2 Upstream search — DONE: <issue/PR links or "no match">
 - [ ] 3 Playback — DONE: operator confirmed on <date>
-- [ ] 4 Issue — <issue URL> OR spike-only (no issue yet)
+- [ ] 4 Issue — <issue URL on tiann/hapi or heavygee/hapi> (**required before product commits**; spike-without-issue = no commits / no soup)
 - [ ] 5 Proof path — **peer stack** (Playwright) **+ soup promote** (default dogfood) | clean only if parity review — `localdocs/peer-stack.env` when peer stack
 
 ## Your assignment (feature peer)
@@ -106,7 +106,7 @@ Confusion is common: **`hapi-active` → `~/coding/hapi/driver` is the running h
 |------|---------|
 | Upstream PR | `~/coding/hapi/worktrees/<name>`, branch from `upstream/main` |
 | Mirror / docs | `~/coding/hapi` (primary checkout) |
-| Soup on `:3006` | Manifest merge only — `hapi-driver-rebuild`, never hand-edit driver |
+| Soup on `:3006` | Peer retips layer + manifest; Meta runs `hapi-driver-rebuild` — never hand-edit driver |
 | Try feature in browser | Peer stack for §6 proof; **always** soup-promote for `:3006` dogfood — [lifecycle](./feature-work-lifecycle.md) |
 
 **Peer agents** spawned from an orchestrator inherit **files on disk** in the workspace (`~/coding/hapi`), not the orchestrator's chat memory. They only know completed intake steps if the handoff block above says so.
@@ -145,14 +145,16 @@ Before any implementation, send the operator a short **playback**:
 
 Wait for confirmation or correction.
 
-### 4 — Issue vs worktree-first
+### 4 — Issue first (then worktree)
 
-Operator chooses:
+**Hard gate:** a tracking issue exists **before** any product-code commit, soup layer tip, or "implement the mock" turn. This is not optional until dogfood.
 
 | Choice | Action |
 |--------|--------|
-| **Open issue** | Create issue on `tiann/hapi` (use `gh api` + jq for bodies with backticks — see github-cli-safety skill) |
-| **Spike first** | `hapi-worktree-create <name> --branch feat/...` from `upstream/main`; issue optional until dogfood passes |
+| **Open issue (default)** | Create issue on `tiann/hapi` for upstream-destined work (use `gh api` + jq for bodies with backticks — see github-cli-safety skill). Fork-private → `heavygee/hapi`. Link the session (`link_issue`). |
+| **Spike only** | Throwaway exploration **without** product commits and **without** soup promote. If the spike graduates to real work, **file the issue before the first product commit**. |
+
+Do **not** treat operator mic / voice / interrupt as a waive. Incident 2026-10-14: affordance work reached a soup tip before [tiann/hapi#2019](https://github.com/tiann/hapi/issues/2019) existed — that sequencing is forbidden.
 
 Upstream PR branches stay **`upstream/main...HEAD`** for review. Soup manifest merge order is **local only** — see [driver-soup.md](./driver-soup.md).
 
@@ -286,7 +288,7 @@ Only after (1)-(4): send operator **links**, **what to click**, **declared tier 
 
 Operator validates in browser. Iterate in the worktree; re-run gates after each round. **Do not** open upstream PR until explicit approval. Inline Playwright proof ([§6.4d](#4d--inline-in-hapi-chat-mandatory-for-4b4c-operator-reads-sessions-in-the-web-app)) satisfies **ready for operator** handoff — it does **not** substitute for operator click-test on `:3006` or unilateral PR open unless the operator says otherwise in chat.
 
-**Soup promotion on `:3006` (default — peer-owned):** the **feature peer** edits **repo** `config/driver-manifest.yaml`, commits on mirror same turn, optionally mirrors to ~/.config via `scripts/tooling/hapi-manifest-mirror-to-config.sh`, then `hapi-driver-rebuild --build-web --verify`, `hapi-verify-web-dist`, and `hapi-restart-hub` if hub/cli/shared changed. See [feature-work-lifecycle.md § Soup promotion](./feature-work-lifecycle.md#soup-promotion-peer-owned--default-not-optional). **Do not** ask the operator to add manifest layers or grant permission to soup-promote.
+**Soup promotion on `:3006` (default — peer layer + Meta compose):** product tips go to soup by default (operator 2026-10-14) — expect an **upstreamable** thin tip + manifest layer, not a fork-main merge. Fork `main` merge is only for non-upstream tooling. The **feature peer** edits **repo** `config/driver-manifest.yaml`, commits + pushes `origin/main` same turn, optionally mirrors to ~/.config via `scripts/tooling/hapi-manifest-mirror-to-config.sh`, then **pings Meta tooling** to run `hapi-driver-rebuild --build-web --verify` (and `hapi-restart-hub` if hub/cli/shared changed). Feature peers do **not** self-serve remat (operator rule 2026-10-13). See [feature-work-lifecycle.md § Soup promotion](./feature-work-lifecycle.md#soup-promotion-peer-layer--meta-compose--default-not-optional). **Do not** ask the human operator to hand-edit the manifest — prepare the layer and route compose to Meta.
 
 ### 8 — Upstream PR (after approval)
 

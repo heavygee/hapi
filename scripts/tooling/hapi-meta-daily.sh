@@ -856,7 +856,9 @@ main() {
 
     vlog "classifying ${#pr_list[@]} PR(s): ${pr_list[*]}"
     declare -A PR_EMOJI PR_ACTION PR_PREPR PR_HEADREF PR_EXISTS
+    declare -A PR_RELATED PR_HINTS
     declare -A PR_BY_REPO_EMOJI PR_BY_REPO_ACTION PR_BY_REPO_PREPR PR_BY_REPO_HEADREF PR_BY_REPO_EXISTS
+    declare -A PR_BY_REPO_RELATED PR_BY_REPO_HINTS
     declare -A PR_BY_REPO_BLOCKED PR_BY_REPO_STICKY
     declare -A SESS_PR_EMOJI SESS_PR_ACTION SESS_PR_STICKY
     # Per (chip.repo, number), not one tiann batch keyed by number. Dual chips
@@ -905,6 +907,8 @@ main() {
             PR_BY_REPO_ACTION["$pair_key"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].action // ""')"
             PR_BY_REPO_PREPR["$pair_key"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].prePr // false')"
             PR_BY_REPO_HEADREF["$pair_key"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].headRef // ""')"
+            PR_BY_REPO_RELATED["$pair_key"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].relatedRefs // ""')"
+            PR_BY_REPO_HINTS["$pair_key"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '.[$p].branchHints // ""')"
             PR_BY_REPO_EXISTS["$pair_key"]="$(printf '%s' "$batch_json" | jq -r --arg p "$p" '
                 if (.[$p] | has("exists")) then (.[$p].exists | tostring) else "true" end
             ')"
@@ -916,6 +920,8 @@ main() {
             PR_ACTION["$p"]="${PR_BY_REPO_ACTION[$pair_key]}"
             PR_PREPR["$p"]="${PR_BY_REPO_PREPR[$pair_key]}"
             PR_HEADREF["$p"]="${PR_BY_REPO_HEADREF[$pair_key]}"
+            PR_RELATED["$p"]="${PR_BY_REPO_RELATED[$pair_key]}"
+            PR_HINTS["$p"]="${PR_BY_REPO_HINTS[$pair_key]}"
             PR_EXISTS["$p"]="${PR_BY_REPO_EXISTS[$pair_key]}"
         done
     done
@@ -992,7 +998,9 @@ main() {
                     "$p" \
                     "${SESS_LIFECYCLE[$sid8]:-}" \
                     "$HAPI_PRIMARY" \
-                    "${PR_BY_REPO_HEADREF[$pair_sess]:-${PR_HEADREF[$p]:-}}")"; then
+                    "${PR_BY_REPO_HEADREF[$pair_sess]:-${PR_HEADREF[$p]:-}}" \
+                    "${PR_BY_REPO_RELATED[$pair_sess]:-${PR_RELATED[$p]:-}}" \
+                    "${PR_BY_REPO_HINTS[$pair_sess]:-${PR_HINTS[$p]:-}}")"; then
                     emoji_sess="🧹"
                     action_sess="fully cleaned — babysit ended"
                 else
@@ -1002,7 +1010,9 @@ main() {
                     if gate_a_reason="$(mw_wave_member_clean \
                         "$manifest_text_early" \
                         "${SESS_PATH[$sid8]:-}" \
-                        "$p")"; then
+                        "$p" \
+                        "${PR_BY_REPO_RELATED[$pair_sess]:-${PR_RELATED[$p]:-}}" \
+                        "${PR_BY_REPO_HINTS[$pair_sess]:-${PR_HINTS[$p]:-}}")"; then
                         action_sess="Gate A clean — exit reflection (or skip:) then ack + idle; archive pending (Meta archives from outside; do not rematerialize / self-archive mid-turn)"
                         # Latch 🧹: a Meta/peer resume must not demote complete → merged
                         # solely because lifecycle is no longer archived (2026-08-11 e4d152f3).
@@ -1383,7 +1393,10 @@ main() {
             fi
             [[ "$emoji_wp" == "🔧" ]] || continue
             local reason_w clean_json=false
-            if reason_w="$(mw_wave_member_clean "$manifest_text" "${SESS_PATH[$sid8]:-}" "$p")"; then
+            local related_w hints_w
+            related_w="${PR_BY_REPO_RELATED[$crepo_w#$p]:-${PR_RELATED[$p]:-}}"
+            hints_w="${PR_BY_REPO_HINTS[$crepo_w#$p]:-${PR_HINTS[$p]:-}}"
+            if reason_w="$(mw_wave_member_clean "$manifest_text" "${SESS_PATH[$sid8]:-}" "$p" "$related_w" "$hints_w")"; then
                 clean_json=true
             else
                 Q_WAVE+=("#$p [$sid8] still dirty ($reason_w)")
@@ -1675,6 +1688,25 @@ _print_queue() {
     _print_section "🧹  COMPLETE — babysit ended:" "${Q_COMPLETE[@]:-}"
     _print_section "🌊 WAVE CLEAR (gate A — owned only; orphans never block):" "${Q_WAVE[@]:-}"
     _print_section "❓ ORPHANS (anomaly — do not block wave-clear):" "${Q_ORPHAN[@]:-}"
+    # Fork Codex debt (chatgpt-codex-connector) — unpaid reviews are waste.
+    # Soft-fail if the inventory script is missing or gh flakes.
+    local _debt_bin
+    _debt_bin="$(pec_resolve_tool "$SCRIPT_DIR" "$HAPI_PRIMARY" "${HAPI_META_CODEX_DEBT_BIN:-}" hapi-fork-codex-debt.sh 2>/dev/null || true)"
+    if [[ -n "${_debt_bin:-}" && -x "$_debt_bin" ]]; then
+        local _debt_json
+        if _debt_json="$("$_debt_bin" --json --min-threads 1 2>/dev/null)"; then
+            local -a Q_CODEX_DEBT=()
+            while IFS= read -r line; do
+                [[ -n "$line" ]] && Q_CODEX_DEBT+=("$line")
+            done < <(printf '%s' "$_debt_json" | jq -r '
+                .prs[:12][]
+                | "#\(.number)  codex=\(.codexUnresolved)  \(.title[0:56])  \(.url)"
+              ' 2>/dev/null)
+            local _tot
+            _tot="$(printf '%s' "$_debt_json" | jq -r '"\(.totals.withCodexDebt) PRs / \(.totals.codexThreads) threads"' 2>/dev/null || echo '?')"
+            _print_section "🤖 FORK CODEX DEBT (heavygee/hapi — top 12; total ${_tot}):" "${Q_CODEX_DEBT[@]:-}"
+        fi
+    fi
     _print_section "😴 INACTIVE (policy wanted a ping; session asleep):" "${Q_INACTIVE[@]:-}"
     _print_section "📨 NEW GITHUB COMMS since last run:" "${Q_NOTIF[@]:-}"
     _print_section "✅ RENAMED this run:" "${Q_RENAMED[@]:-}"

@@ -1,0 +1,12 @@
+[Unit]
+Description=Poll heavygee/hapi for local CI (while GitHub Actions dispatch is dead)
+Documentation=file:///home/heavygee/coding/hapi/docs/tooling/local-ci.md
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+Persistent=true
+Unit=hapi-local-ci.service
+
+[Install]
+WantedBy=timers.target

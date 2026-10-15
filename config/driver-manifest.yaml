@@ -128,12 +128,11 @@ layers:
   - branch: feat/mermaid-parse-failure-feedback
 
   # Codex budget gauge (tiann/hapi#1901 — thin re-thin of #847).
-  # Ring + popover: context %, 5h/weekly windows, credits covering/blocked.
-  # Driven by token_count / account rate-limits → metadata.codexUsage + SSE.
-  # Budget-only (no New Session resume surface; adopt #1088 for listing).
-  # Umbrella: tiann/hapi#846. Authorship lineage: Ethan Wang + heavygee re-thin.
-  # Re-enabled 2026-09-22 after #847 closed as superseded by #1901.
-  - branch: feat/codex-budget-gauge
+  # DROPPED 2026-10-12 (operator): feat/codex-budget-gauge — remat tip-forward
+  # conflict poison; not worth soup babysit. Upstream tip still OPEN as tiann/hapi#1901
+  # if wanted later; do not resurrect without operator ask.
+  # Was: Ring + popover Codex budget gauge (metadata.codexUsage + SSE); umbrella #846 / #1901.
+  # - branch: feat/codex-budget-gauge
 
   # Bridge: FCM sendModelError for wrist push on model errors (#878).
   # MUST be thin tip on upstream (or post-#803 base) — was on companion-fcm tip —
@@ -795,14 +794,24 @@ layers:
   # Was: tip 17d091007. Worktree mention-sidebar-husks.
 
   # tiann/hapi#1509 — spawn-peer remit thin tip (Gap A/B + sticky NewSession seed).
-  # Core remit + --machine already on soup tip after compose-on-fork; this delta is
-  # the remaining unique tip (16 files). Parent UUID stamp is NOT here — that is
-  # feat/peer-rename-proof-identity / upstream #1922 (still out of soup).
-  # Was: feat/spawn-peer-remit (fat). Tip: driver/spawn-peer-remit-delta @ b30bed331
   # HOLD 2026-10-06: tip regresses soup bridge/overlay/settings on absorb.
-  # 2026-10-08: promote in flight — land whole upstream #1922 tip on fork main
-  # (feat/land-1922-peer-stamp-fork), then DROP this delta (no re-thin).
+  # Superseded by driver/1931-spawn-machine-delta + driver/1922-parent-stamp-delta.
   # - branch: driver/spawn-peer-remit-delta
+
+  # tiann/hapi#1931 — thin MCP/CLI spawn_peer --machine (incident 2026-10-10).
+  # Already ancestor of live soup tip d09a28042 (tip-forward skips). Keep for
+  # full-recipe remats. Thin delta @ 0286b1d70. Never set HAPI_DRIVER_MANIFEST
+  # to a stale /tmp copy.
+  - branch: driver/1931-spawn-machine-delta
+
+  # tiann/hapi#1922 remainder — Parent UUID stamps + peerSpawnDefaults polish
+  # on soup tip after #1931 --machine (do NOT use fat driver/1922-peer-rename-proof
+  # @ 2290c737f / 45f ABSORB_FAT — tip-forward conflicted). Thin tip 3c/27f.
+  # Worktree: ~/coding/hapi/worktrees/1922-parent-stamp-delta
+  # Tip: 56fb7cda7 — complete NewSession port + hubSettings test seed; keep soup initialMessage.
+  # Hub+web → remat --build-web + restart. 5c/31f (under fat gate).
+  # Upstream PR stays https://github.com/tiann/hapi/pull/1922 — no second PR.
+  - branch: driver/1922-parent-stamp-delta
 
   # Soup heal: remat 47ce90965 dropped Claude Happy MCP spawn_peer model/effort
   # (Codex bridge kept them). Restore schema + handler forwarding for Claude sessions.
@@ -810,12 +819,12 @@ layers:
   # Tip: f0803e996
   - branch: fix/claude-mcp-spawn-model-effort
 
-  # heavygee/hapi#120 / #416 — vendor hapi-inline operator dock (fork-local, not tiann).
-  # Tip: 0a6d930f5 (driver/hapi-inline-revendor-0186) — pin v0.18.6 Settings UX (#416) + live STT under fan
-  # Replaces driver/hapi-inline-revendor-0185 / operator-dock v0.15.5 layer. Privilege:execute via adaa71b82 / #189.
-  # Worktree: ~/coding/hapi/worktrees/hapi-inline-revendor-0186
+  # heavygee/hapi#120 / Heavygee-Projects/hapi-inline#514 — vendor hapi-inline operator dock (fork-local, not tiann).
+  # Tip: f75998631 (driver/hapi-inline-revendor-0222) — pin v0.22.2 CodeQL xss-through-dom barrier (#514/#518).
+  # Replaces driver/hapi-inline-revendor-0221 / operator-dock v0.22.1. Keeps #508/#497/#498/#492.
+  # Worktree: ~/coding/hapi/worktrees/hapi-inline-revendor-0222
   # Hub+web → remat needs --build-web + hapi-restart-hub (embedded web assets).
-  - branch: driver/hapi-inline-revendor-0186
+  - branch: driver/hapi-inline-revendor-0222
 
   # heavygee/hapi#121 — operator-hold chip pulse (🛑 needs_operator / babysit.hold).
   # Soup UI on awareness ancestry (schema enum + SessionPrChip FueDot). Classifier
@@ -889,10 +898,10 @@ layers:
   # Tip: 498430d3c
   - branch: driver/overseer-brain-active
 
-  # tiann/hapi#1686 — local TUI: queue hub follow-ups until process exit (no implicit doSwitch).
-  # Worktree: ~/coding/hapi/worktrees/local-followup-abort @ fix/local-followup-queue
-  # Tip: f2f12bdf5 (origin/fix/local-followup-queue). CLI-only; BaseLocalLauncher untouched by other soup layers.
-  - branch: fix/local-followup-queue
+  # DROPPED 2026-10-12: fix/local-followup-queue — space relief (volumes).
+  # tiann/hapi#1686 CLOSED 2026-09-14 pending verification (not claimed fixed); no upstream PR.
+  # Tip was f2f12bdf5 @ ~/coding/hapi/worktrees/local-followup-abort — never dogfood-greenlit.
+  # - branch: fix/local-followup-queue
 
   # tiann/hapi#1705 — archiveSession false-archive when session socket id is stale but runner child lives.
   # PR: tiann/hapi#1706 fix/archive-verify-runner-before-marking-gone
@@ -934,17 +943,18 @@ layers:
   # Tip: fa9a3dbaa
   - branch: fix/cursor-unexpected-stop-blocked-footer
 
-  # tiann/hapi#1554 / PR #1598 — FTS5 session message content search (dogfood)
-  # Worktree: ~/coding/hapi/worktrees/session-content-search-soup @ driver/session-content-search
-  # Tip: ba7b3f96d — SCHEMA v29→v30 union (PR claimed v25–v28); re-thin after dogfood bump
-  # Absorbed: soup HEAD 418179d4b (merge + Meta fix 1de2e14dc). Live DB user_version=30.
-  - branch: driver/session-content-search
+  # DROPPED 2026-10-12: tiann/hapi#1554 / PR #1598 FTS5 session content search (dogfood).
+  # Tip ba7b3f96d absorbed into soup (418179d4b + later tips); wt cleaned for /work space relief.
+  # Upstream #1598 still OPEN — feature lives on soup tip ancestry until merge/remat.
+  # Was: - branch: driver/session-content-search
 
-  # tiann/hapi#1710 — search_peers MCP/CLI: keyword find beyond list_peers recency.
-  # Hub GET /api/sessions/search + MCP search_peers + hapi search-peers.
-  # Worktree: ~/coding/hapi/worktrees/search-peers @ feat/search-peers
-  # Tip: f7a290740 (rebased onto upstream/main)
-  - branch: feat/search-peers
+  # tiann/hapi#1710 / PR #2010 — search_peers review fixes (summary.text match +
+  # fetch-limit pad). Densify already in tip ancestry; this layer is the hub fix tip.
+  # Upstream thin: feat/search-peers @ 273c7b85d. Soup: driver/search-peers
+  # (CLI hasMore overflow only — hub summary.text/limit pad already on tip).
+  # Worktree: ~/coding/hapi/worktrees/search-peers-soup
+  # Tip: bee618daf — re-thin after dogfood bump if tip-forward SKIP.
+  - branch: driver/search-peers
 
   # tiann/hapi#1756 — in-session (open chat) FTS search + jump. Reuses #1554 indexer;
   # web-only tip (header SessionInChatSearch → ?messageId=&messageQuery=).
@@ -1015,6 +1025,21 @@ layers:
   # held thin deltas did.
   - branch: driver/1996-consolidate-blocked-filter
 
+  # tiann/hapi#2002 — Active + Working lenses in the combined session list filter menu.
+  # Active = connected/non-archived (filterActiveSessionsOnly); Working = thinking or
+  # backgroundTaskCount (In-progress working bucket). Ephemeral AND-compose like unread/blocked.
+  # Worktree: ~/coding/hapi/worktrees/session-filter-active-working
+  # Tip: da58d04b6 — 3 commits / 9 files on live driver tip (cf595c7e8).
+  # Remat order: after driver/1996-consolidate-blocked-filter (extends that menu).
+  # Needs --build-web. Remat owner: this peer (feature promote).
+  - branch: driver/2002-session-filter-active-working
+
+  # DROPPED 2026-10-12: driver/large-empty-dictate MERGED upstream as tiann/hapi#2007
+  # (eca9e9933 — feat Enlarge button for dictation/submit; closes #2006). Gate A wave
+  # w-241-2007 — rematerialize once sync absorbs upstream tip.
+  # Was: driver/large-empty-dictate @ a0bb74078
+  # - branch: driver/large-empty-dictate
+
   # DROPPED 2026-10-08: driver/claude-model-catalog (+ delta) — operator call via Overseer.
   # Upstream tiann/hapi#1605 CLOSED unmerged (2026-10-02); absent from soup tip; unmissed.
   # No re-thin / no quiet return. Want it later → fresh PR off upstream/main.
@@ -1058,6 +1083,161 @@ layers:
   # Tip: c11c027c7 — 71 focused CLI tests green.
   # CLI-only → remat needs hapi-restart-hub (no --build-web for this tip alone).
   - branch: driver/cursor-resource-exhausted-blocked
+
+  # DROPPED 2026-10-12: driver/1724-auto-continue-delta MERGED fork as heavygee/hapi#241
+  # (fix restore auto-Continue after Cursor post-tool interrupt). Gate A wave
+  # w-241-2007 — tip-forward from fork main after remat; no re-thin.
+  # Was: driver/1724-auto-continue-delta @ b5dd9ff77
+  # - branch: driver/1724-auto-continue-delta
+
+  # heavygee/hapi#235 / PR #238 — Boards view (cards/chips/relative-time,
+  # Projects v2 /views/<n> filter capture). Renamed To-Do → Boards.
+  # Re-tip 2026-10-14: driver/235-todo-board-view @ 6e5ee7bc4 (= feat tip —
+  # isHistoryPopNavigation push-vs-pop; assignee picker name+login). Was
+  # 7f565cac6 (Open-session / clearable status / mention tooltip).
+  - branch: driver/235-todo-board-view
+
+  # heavygee/hapi#247 — deliberate fleet push + restore upgrade-runner; kill
+  # keepalive/startup unattended auto-upgrade. Hub default stays alert; per-machine
+  # auto (standalone personal hub) applies only on POST /api/fleet/push-upgrade.
+  # Thin tip on live soup 326799b34: driver/247-deliberate-fleet-push @ f5c3933b6
+  # Worktree: ~/coding/hapi/worktrees/deliberate-fleet-push
+  # Hub+shared → remat needs hapi-restart-hub (no --build-web for this tip alone).
+  # ABSORBED 2026-10-11 tip 96071c14b / soup hapi-soup-v2026.10.11-96071c1 — keep until next remat drops ancestor layers.
+  - branch: driver/247-deliberate-fleet-push
+
+  # heavygee/hapi#248 — skew-banner "what's new" from soup NOTES.md on HubUpgradeOffer.
+  # Re-tip 2026-10-12: driver/248-upgrade-release-notes @ c49eb83ca on live soup
+  # 00908a486 — explanatory body also banner-level w-full (same dead-column bug as NOTES).
+  # Worktree: ~/coding/hapi/worktrees/deliberate-fleet-push
+  # Hub+web → remat --build-web + hapi-restart-hub.
+  - branch: driver/248-upgrade-release-notes
+
+  # heavygee/hapi#250 — bind Tailwind dark: to data-theme (dark|oled), not OS
+  # prefers-color-scheme. Fixes Light appearance + dark OS (Quest) light-on-light
+  # on skew-banner NOTES/body. Thin tip on soup 58302d79b: @ 05f26ce10.
+  # Worktree: ~/coding/hapi/worktrees/skew-dark-variant (+ soup thin 250-dark-variant-soup)
+  # Web-only → remat --build-web; hard-reload (no hub restart required for CSS).
+  - branch: driver/250-dark-variant-data-theme
+
+  # heavygee/hapi#251 — per-machine auto keepalive-apply + soft RPC gaps.
+  # Effective machine policy auto retries upgrade on alive once live RPC
+  # re-registers; hub-wide alert stays push-only. Banner: no sticky red 503
+  # for upgrade_unavailable. Tip @ this commit on soup tip at mint.
+  # Hub+web → remat --build-web + hapi-restart-hub (hub policy path).
+  - branch: driver/251-auto-keepalive-apply
+
+  # heavygee/hapi#255 — Layer A upstream seal subscriber (FORK-ONLY soup).
+  # NOT for tiann/hapi — #1108 closed door (chicken-egg / capability-gap /
+  # maintenance). HAPI_UPSTREAM_SEAL_URL|TAG → digest-only → materialize
+  # local soup-artifacts → existing offer/#251. Foundry oos leaves unset.
+  # Worktree: ~/coding/hapi/worktrees/hub-upstream-seal
+  # Tip: driver/hub-upstream-seal-url @ c4f3b5cf3
+  # Hub → remat + hapi-restart-hub (startHub poller). No --activate from agents.
+  - branch: driver/hub-upstream-seal-url
+
+  # tiann/hapi#2011 — terminal To agent / Selection to agent: append xterm
+  # buffer or selection to composer draft, navigate back to chat.
+  # Upstream tip: feat/terminal-to-agent @ c853efbe9
+  # Soup thin tip on live driver HEAD: driver/2011-terminal-to-agent @ e89bcf2bd
+  # Worktree: ~/coding/hapi/worktrees/terminal-to-agent (+ soup thin 2011-terminal-to-agent-soup)
+  # Web-only → remat --build-web; hard-reload (no hub restart required).
+  - branch: driver/2011-terminal-to-agent
+
+  # DROPPED 2026-10-15: driver/elevenlabs-max-duration — MERGED upstream as
+  # tiann/hapi#2017 (squash 7b00df458). Base tip-forward absorbs it from
+  # upstream/main; keeping the layer would double-apply / conflict.
+  # - branch: driver/elevenlabs-max-duration
+
+  # tiann/hapi#1732 — long session lists give no clue where the session you are
+  # reading sits. Adds a small visual-only tick on the left scrollbar gutter at
+  # the open session's position in the scroll extent (hover tooltip explains it;
+  # hidden when the row is filtered out or in a collapsed group). Revived PR
+  # tiann/hapi#1733 rebased onto current upstream/main + review Major fixed
+  # (recompute after the 250ms collapse animation, not on an intermediate frame).
+  # Upstream-aimed tip: feat/session-list-open-tick @ a66afec96
+  # Soup thin tip on live driver HEAD a04369fd3: driver/1732-session-list-open-tick @ 1416f8064
+  #   (SessionList.tsx/test.ts + en/zh-CN locale unions vs the filter layers;
+  #    soup carries aria-current on an inner node, so the row lookup is
+  #    `[aria-current="page"]` + closest('.session-list-item') in both tips.)
+  # Worktree: ~/coding/hapi/worktrees/session-list-open-tick-1732 (+ soup thin 1732-open-tick-soup)
+  # Web-only → remat --build-web; hard-reload (no hub restart required).
+  # NOTE: absorb e43b73c89 kept superseded click-to-jump tooltip (wrong side vs
+  # upstream #1733 review — track clicks page-scroll). Layer tip 1416f8064 has
+  # drag wording; follow-up thin below takes that side without replaying rr-cache.
+  - branch: driver/1732-session-list-open-tick
+
+  # Soup heal for #1732 tooltip: take layer drag wording (en/zh-CN/ru) after
+  # e43b73c89 wrong-side absorb. Tip fc2b7c724 on live soup HEAD 6c70011c4.
+  # Worktree: ~/coding/hapi/worktrees/1732-opentick-drag-tooltip
+  # Web-only → remat --build-web; hard-reload.
+  - branch: driver/1732-opentick-drag-tooltip
+
+  # tiann/hapi#2015 — opening a session (sidebar click, deep link, programmatic
+  # nav) updated the selection on the right while the session list stayed put, so
+  # on a long or scrolled list the open row was lost until you hunted for it.
+  # Reveals the row with nearest-edge semantics when it is not already fully
+  # visible, never touches scrollTop when it is (no #1169 jump regression), insets
+  # the sticky project header, and yields to a wheel/touch gesture.
+  # Also makes the machine-scope lens exempt the open session, the way the
+  # active-only / unread-only / scratchlist lenses already do — otherwise opening
+  # a session on another machine leaves the list with no row to reveal (found by
+  # operator dogfood on :3006, 2026-10-13).
+  # Cold review (/code-review) + the fork Codex pass on heavygee/hapi#260 added:
+  # retry the reveal when the row arrives late (the spawn flow navigates before
+  # the sessions query refetches), expand hand-collapsed pinned sections around
+  # the selection, treat pointerdown/keydown as scroll takeover, and label the
+  # machine on an off-scope group so it cannot read as a duplicate header.
+  # Upstream-aimed tip: feat/2015-session-scroll-into-view @ 721902a9a
+  # Soup thin tip: driver/2015-session-scroll-into-view @ c8586b8e9 (composed into
+  # driver HEAD 0d09f3ea8). Soup renames globalPinnedSessions -> pinnedSessions and
+  # adds a `jobs` running bucket, so the pinned-section effect is rewired here.
+  #   (SessionList.tsx unions: soup keeps its cn() row classes + ProjectGroupHeader
+  #    component, so data-session-group-header lands once on that component's root
+  #    and the tip's shell-level data-session-id is dropped — soup already marks the
+  #    id on the inner node for the #1717 blocked-row scroll, and the hook climbs to
+  #    the `.session-list-item` shell from whichever node carries it. Soup's
+  #    filterScratchlistSessionsOnly and this layer's filterSessionsByMachine are
+  #    adjacent lenses — both survive the union.)
+  # Worktree: ~/coding/hapi/worktrees/session-scroll-into-view-2015 (+ soup thin 2015-scroll-into-view-soup)
+  # Web-only → remat --build-web; hard-reload (no hub restart required).
+  - branch: driver/2015-session-scroll-into-view
+
+  # tiann/hapi#2020 - first-class archive_peer / hapi archive-peer soft stand-down.
+  # CLI+MCP twin of ping_peer; hub allows Peer Done (non-thinking) archive when
+  # StopSession still reports still_alive/unknown, refuses WORKING (hasLiveWork).
+  # Upstream-aimed tip: feat/archive-peer-2020 @ de758a55b
+  #   (c9e8177c3 + 49d43e818 expireInactive thinking guard + de758a55b refuse
+  #    stale lifecycle=idle after transport expiry; soft stand-down = active
+  #    && !hasLiveWork only)
+  # Worktree: ~/coding/hapi/worktrees/archive-peer-2020
+  # Hub+cli -> remat (no --build-web required) + hapi-restart-hub; Cursor MCP
+  # sessions may need resume before archive_peer appears in the tool list.
+  # Tip-unique verify: `archive_peer` in cli startHappyServer toolNames +
+  # canSoftStandDownUnconfirmedStop in hub syncEngine.archiveSession.
+  - branch: feat/archive-peer-2020
+
+  # heavygee/hapi#270 — idle-gate on ALL fleet runner upgrades (deliberate push /
+  # keepalive pull-apply / Layer A seal pull). Defer with upgrade_deferred while
+  # any session on that machineId has thinking===true (same WORKING as soup
+  # patient drain). Mid-turn defers; idle sessions are terminated by the restart.
+  # Sits alongside #84. Tip @ 9389ec033. Worktree:
+  # ~/coding/hapi/worktrees/fleet-upgrade-idle-gate
+  # Hub-only → remat + hapi-restart-hub (no --build-web). Agents must not --activate.
+  - branch: driver/270-fleet-upgrade-idle-gate
+
+  # tiann/hapi#2019 — session search clear hit target too small for touch /
+  # Quest pointer. Layout A: expanded search embeds a 48x48 calendar inside the
+  # field, immediately left of the furthest-right 48x48 clear end-cap. Session
+  # list keeps showDateFilter=false (collapsed date stays in the filter menu).
+  # Collapsed search stays shrink-0 (no w-full) so it does not steal the
+  # BlockedJumpPill row.
+  # Soup thin tip: driver/search-clear-touch @ 496951fd1
+  # Tip-unique verify marker: session-list-search-clear-endcap +
+  # session-list-search-date-embedded in web/dist
+  # Worktree: ~/coding/hapi/worktrees/search-clear-touch-soup
+  # Web-only → remat --build-web; hard-reload (no hub restart).
+  - branch: driver/search-clear-touch
 
   # DROPPED 2026-10-06: driver/1933-claude-resume-amnesia — squash 94523eb0d is on
   # fork main (heavygee/hapi#204). Soup base is now origin/main, so tip-forward

@@ -1,0 +1,44 @@
+# FORK-ONLY fleet seal target registry (#258).
+# Spoken "fleet seal" dispatches per `type` — add rows; do not hardcode names in scripts.
+# Canon: docs/plans/2026-10-13-fleet-seal-contract.md
+#
+# Types:
+#   estate-hub          — oos foundry: local fleet-latest already pointed; optional push-upgrade
+#   standalone-layer-a  — off-estate / public pets: GH hapi-fleet channel (passive poll)
+#   cattle-vm-swap      — operator-controlled shards: VM-swap pipeline (NOT binary in-place)
+
+schema: 1
+
+targets:
+  - id: oos-estate
+    type: estate-hub
+    enabled: true
+    note: "Foundry on oos-linux. Local fleet-latest + optional POST /api/fleet/push-upgrade for registered auto machines."
+
+  - id: nc-incus
+    type: standalone-layer-a
+    enabled: true
+    host: nc-incus
+    note: "Standalone personal hub CT. Polls GH hapi-fleet; migrate off HAPI_UPSTREAM_SEAL_TAG pin."
+    seal_url: "https://github.com/heavygee/hapi/releases/download/hapi-fleet/manifest.json"
+
+  - id: antevorta
+    type: standalone-layer-a
+    enabled: true
+    host: antevorta-in-linux
+    front_door: "https://hapi-antevorta.forest-adder.ts.net"
+    note: >
+      Operator-controlled (Doug). Routine HAPI version upgrades via binary-swap/Layer A,
+      same mechanism as nc-incus — proven, already built. Full cattle VM-swap is a
+      SEPARATE, occasional capability for OS-level resets (security patches, kernel,
+      base-image drift, disaster recovery) — not the path for routine version bumps.
+      That pipeline has never been built as a real product (rehearsed on disposable
+      VMs only; drain-under-load and hostname-steal blackout both still unsolved there).
+      Reclassified 2026-10-15 — do not revert without re-reading why.
+
+  - id: hapi-gc-in
+    type: cattle-vm-swap
+    enabled: true
+    status: pending
+    host: hapi-gc-in
+    note: "Imminent third operator-controlled instance — same cattle class as antevorta. Slot via this row; no redesign."

@@ -51,10 +51,8 @@ flowchart TD
     ORCH --> S01["Step 1: code search in repo"]
     S01 --> S02["Step 2: upstream search tiann hapi"]
     S02 --> S03["Step 3: playback, operator confirms"]
-    S03 --> S04{"Step 4: issue or spike?"}
-    S04 -->|issue| ISSUE["gh issue on tiann hapi"]
-    S04 -->|spike| WT["Step 5: hapi-worktree-create"]
-    ISSUE --> WT
+    S03 --> S04["Step 4: tracking issue REQUIRED<br/>tiann/hapi or heavygee/hapi"]
+    S04 --> WT["Step 5: hapi-worktree-create"]
     WT --> TOPO{"Step 5: proof + dogfood path"}
     TOPO -->|always| PEER["Peer stack ports 3100-3199<br/>isolated Playwright / PNG-MP4"]
     TOPO -->|always| SOUP["Soup layer on port 3006<br/>DEFAULT dogfood — promote always"]
@@ -65,12 +63,14 @@ flowchart TD
     IMPL --> GATES["Step 6: typecheck, test, cold review, Playwright"]
     GATES -->|fail| IMPL
     GATES -->|pass| INLINE["Step 6.4: inline proof in HAPI chat<br/>display_image or display_video"]
-    INLINE --> PROMOTE["Peer promotes soup layer<br/>manifest + rebuild — do not wait for permission"]
+    INLINE --> PROMOTE["Peer promotes soup layer<br/>manifest + Meta compose"]
     PROMOTE --> DOG["Step 7: operator dogfood on :3006"]
     DOG -->|no| IMPL
     DOG -->|yes| PR["Step 8: gh pr create vs upstream main"]
     PR --> DROP["After upstream merge: peer drops layer + cleans wt/branch<br/>meta rematerializes once wave done"]
 ```
+
+**Issue-first (2026-10-14):** Step 4 is mandatory before product commits / soup tip-forward. Throwaway spikes without an issue must not commit product code or enter the manifest. Operator mic / voice does not waive this. Hardening: `.cursor/rules/hapi-product-code-guard.mdc`, intake §4.
 
 **Policy (2026-07-30):** Soup is where we dogfood. **Never** skip soup promotion because "peer stack was enough" or "upstream tip does not need soup." Peer stack proves isolated UI without yanking `:3006`; soup gets the same tip (heal/union if merge conflicts) so `:3006` stays the tastiest stack. Operator approval is for **click-testing / PR**, not for whether to add the layer.
 
@@ -100,7 +100,7 @@ flowchart TD
     PRECHECK -->|exit 0| MEM{"build_web_preflight OK?<br/>MemAvailable + swap pressure"}
     MEM -->|no| MEMFIX["Drain agents or swapoff-swapon<br/>see recovery briefing"]
     MEMFIX --> PRECHECK
-    MEM -->|yes| REBUILD["hapi-driver-rebuild build-web verify<br/>from coding hapi mirror"]
+    MEM -->|yes| REBUILD["Meta tooling: hapi-driver-rebuild build-web verify<br/>from coding hapi mirror"]
     REBUILD -->|fail| FIX["Fix on soup branches<br/>never hand-edit driver tree"]
     FIX --> REBUILD
     REBUILD -->|pass| VITE["Atomic vite swap to web dist"]
@@ -129,8 +129,8 @@ HAPI is **one monorepo** (`hub/`, `cli/`, `web/`, `shared/`). Hub and runner mus
 
 | Action | Moves `hapi-active`? | Restarts hub+runner? | Who |
 |--------|----------------------|----------------------|-----|
-| **`hapi-restart-hub`** | No | Yes (patient) | **Agent** — hub/cli/shared changed, already on driver soup |
-| **`hapi-driver-rebuild --build-web`** | No | No | **Agent** — manifest merge + atomic `web/dist` |
+| **`hapi-restart-hub`** | No | Yes (patient) | **Meta tooling** (after compose) — hub/cli/shared changed, already on driver soup |
+| **`hapi-driver-rebuild --build-web`** | No | No | **Meta tooling / operator** — compose only (not feature peers) |
 | **`hapi-use-driver`** | Yes → driver | Yes (prompt) | **Operator** — stack path swing only |
 | **`hapi-use-worktree`** | Yes → target | Yes (prompt) | **Operator** — PR worktree on `:3006`, etc. |
 
@@ -150,7 +150,9 @@ Watch-activate: operator external shell only — [`watch-activate-driver.md`](./
 | **`hapi-restart-hub`** | after hub/cli/shared rebuild | Live processes loaded new code |
 | Operator proof | feature-specific | Works on `:3006` |
 
-**Agent command sequence (already on driver soup):**
+**Split ownership (operator 2026-10-13):** feature peer owns the **layer tip + manifest edit**; **Meta tooling** owns **compose** (`hapi-driver-rebuild`). Peers do not self-serve remat — they ping Meta (see § Soup promotion).
+
+**Meta tooling compose sequence (already on driver soup):**
 
 ```bash
 hapi-driver-status --quiet
@@ -161,7 +163,7 @@ sqlite3 "$(hapi_systemd_hub_db_path 2>/dev/null || echo ~/.hapi/hapi.db)" 'PRAGM
 # hard-reload browser
 ```
 
-**Web-only:** rebuild/build-web + verify-web-dist + hard-reload — no hub restart.
+**Web-only:** Meta remat `--build-web` + verify-web-dist + hard-reload — no hub restart.
 
 Manifest format, atomic swap mechanics, DB jiu-jitsu: [`driver-soup.md`](./driver-soup.md) only.
 
@@ -172,14 +174,19 @@ Manifest format, atomic swap mechanics, DB jiu-jitsu: [`driver-soup.md`](./drive
 | Stage | Meaning |
 |-------|---------|
 | **Ready for operator** | Peer gates passed; links + inline proof delivered |
-| **Operator approved** | Explicit OK to open upstream PR |
-| **Shipped upstream** | PR merged on `tiann/hapi` |
+| **Operator dogfood OK / fleet seal** | **Operator-spoken only** (not agent-proposed). Phrases: `fleet seal`, `good enough for fleet`, `seal tip <soupTag>`. Means: retarget sealed `fleet-latest` / GH `hapi-fleet` so subscribers **pull** new digests; #258 may still deliberate-**push** alert estate hosts. **And** open the upstream PR if that code is destined upstream. Fork-only tooling gets the fleet half only. Dogfood remat / tip thrash ≠ seal. Agents must ask if unclear; never invent seal. |
+| **Operator approved** | Legacy alias for the upstream-PR half of fleet seal (explicit OK to open upstream PR). Prefer the fleet-seal phrases above when both apply. |
+| **Shipped upstream** | PR merged on `tiann/hapi` — **not** the fleet gate (upstream is slow; do not wait on merge to push fleet) |
 | **Post-merge cleanup done** | Session notified; peer dropped soup layer(s); worktree + branch gone (or audit-clean) |
 | **Soup rematerialized** | After **all** merged peers in the wave finished cleanup — one `hapi-sync-fork-main` + one `hapi-driver-rebuild --build-web --verify` |
 | **Done on soup (web-only)** | Manifest layer + rebuild/build-web + **`hapi-verify-web-dist` OK** + operator hard-reload |
 | **Done on soup (hub/cli)** | Rebuild `--verify` + verify-web-dist (if web touched) + **`hapi-restart-hub`** + operator proof on `:3006` |
 
-**Ship After Fix (fork):** when your branch is already in the manifest and you pushed **`web/` only**, `hapi-driver-rebuild --build-web` is part of done — not "wait for operator."
+**Fleet upgrade rule (#247 / #251 / #270):** `latest` / soup tip is dogfood. Steady state is a **pull** - the box watches the sealed pointer / local offer and decides to take it. Hub-wide policy stays `alert` (banner, no keepalive apply). **Per-machine `auto`** means pull-apply when you can: keepalive retries once the live self-upgrade RPC is registered; transient RPC gaps are not sticky errors. Deliberate `POST /fleet/push-upgrade` is the genuine **push** path (alert hosts / explicit waves) - do not call watcher/keepalive paths "push." Idle-gate: mid-turn (`thinking`) defers; idle sessions are terminated by the restart. Do not gate fleet on upstream merge. Standalone personal hubs are self-contained Layer A pullers - not in oos deliberate push unless named.
+
+**Fleet seal contract (standalone watchers):** operator seal must retarget `soup-artifacts/fleet-latest` (not dogfood `latest`). Watchers **pull** via that pointer or GH `manifest.json`; **newness = platform binary sha256 ≠ on-disk** (tag/date/NOTES alone are insufficient — `44ef482d2`). Canon: [`docs/plans/2026-10-13-fleet-seal-contract.md`](../plans/2026-10-13-fleet-seal-contract.md).
+
+**Ship After Fix (fork):** when your branch is already in the manifest and you pushed **`web/` only**, retip the layer + ping **Meta tooling** to `hapi-driver-rebuild --build-web` — not "wait for the human operator," and not a peer self-serve remat.
 
 **Not done (common agent lies):**
 
@@ -379,11 +386,12 @@ Peer stack and soup are **both** required for normal feature work. They solve di
 ### 2. Soup — daily driver on `:3006` (**always promote**)
 
 - **When:** tip is ready for operator dogfood (after or in parallel with peer-stack proof). **Default. Not optional.**
-- **Agent-owned:** edit **repo** `config/driver-manifest.yaml` (commit on mirror same turn; optional `hapi-manifest-mirror-to-config.sh`), then `hapi-driver-rebuild --build-web [--verify]`, `hapi-verify-web-dist`, **`hapi-restart-hub`** if hub/cli/shared changed
-- **Conflicts:** trial-merge first; write `scripts/tooling/soup-heals/*.patch` or a `driver/<feature>` union tip — **do not** leave the feature out of soup
-- **Agent-forbidden:** `hapi-use-driver`, `hapi-use-worktree`, `hapi-driver-rebuild --activate`, raw `sudo systemctl restart hapi-hub`
-- **Web-only layer:** atomic `web/dist` swap + hard-reload — no hub restart
-- **Hub/cli layer:** rebuild `--verify` + `hapi-restart-hub` + confirm `user_version`
+- **Feature peer owns:** thin `driver/<feature>` (or feat) tip pushed to origin; edit **repo** `config/driver-manifest.yaml` (commit + `git push origin main` on mirror same turn; optional `hapi-manifest-mirror-to-config.sh`); ping **Meta tooling** to compose
+- **Meta tooling owns:** `hapi-driver-rebuild --build-web [--verify]`, `hapi-verify-web-dist`, **`hapi-restart-hub`** if hub/cli/shared changed (single-writer lease — one kitchen, one cook)
+- **Conflicts / remat-hold:** Meta owns escalation; peer re-thins or supplies union tip when Meta asks — **do not** leave the feature out of soup
+- **Feature-peer-forbidden:** `hapi-driver-rebuild`, `hapi-driver-build-web`, `hapi-use-driver`, `hapi-use-worktree`, `hapi-driver-rebuild --activate`, raw `sudo systemctl restart hapi-hub`
+- **Web-only layer:** Meta atomic `web/dist` swap + hard-reload — no hub restart
+- **Hub/cli layer:** Meta remat `--verify` + `hapi-restart-hub` + confirm `user_version`
 - **Done on soup:** operator can use feature on `:3006` + verify-web-dist exit 0 — **not** verify stamp alone
 
 ### 3. Clean — upstream/main only (rare)
@@ -429,7 +437,7 @@ Peers **must** assess tier before capture ([`peer-stack.md` § Evidence modality
 1. **Implement** in worktree; conventional commits on feature branch
 2. **Push** feature branch to `heavygee/hapi` (or fork remote)
 3. **Peer gates** (§6) — peer-stack proof when UI needs isolated Playwright
-4. **Soup promotion** — manifest layer + `hapi-driver-rebuild --build-web [--verify]` so `:3006` carries the tip (**not optional** for estate dogfood; peer stack is not a substitute)
+4. **Soup promotion** — peer retips layer + manifest; Meta runs `hapi-driver-rebuild --build-web [--verify]` so `:3006` carries the tip (**not optional** for estate dogfood; peer stack is not a substitute)
 5. **Operator dogfood** (§7) — explicit approval on `:3006`
 6. **Upstream PR** (§8) — only after dogfood approval — `hapi-pr-create` → `tiann/hapi` `main`, `Fixes #NNN`, cold review, post-push monitor. Then **attach** to this HAPI session (`hapi link-pr …` / MCP `link_pr` / Link PR dialog). Title = workstream only (no `PR #N:` — chip shows identity + health after Meta classify).
 
@@ -463,26 +471,33 @@ Peers **must** assess tier before capture ([`peer-stack.md` § Evidence modality
 
 ## Agent permission matrix (short)
 
-**Allowed**
+**Feature peers — allowed**
 
 - Edit product code in `~/coding/hapi/worktrees/<name>/`
-- **Repo** `config/driver-manifest.yaml` — add/update your feature layer when the tip is ready for `:3006` dogfood (commit on mirror same turn; optional `hapi-manifest-mirror-to-config.sh` for ~/.config)
+- **Repo** `config/driver-manifest.yaml` — add/update your feature layer when the tip is ready for `:3006` dogfood (commit + push `origin/main` same turn; optional `hapi-manifest-mirror-to-config.sh` for ~/.config)
 - `hapi-peer-stack up|down|status|doctor`
-- `hapi-driver-status --quiet` → **`hapi-driver-rebuild --build-web [--verify]`** (manifest merge **and** atomic `web/dist` — the supported soup promotion path)
+- `hapi-driver-status --quiet` (read-only: idle / busy / remat-hold)
+- `hapi-verify-web-dist` after Meta compose (direct-verify your tip markers)
+- Ping **Meta tooling** to compose (include tip SHA + `--build-web` need)
+
+**Feature peers — forbidden**
+
+- **`hapi-driver-rebuild`** / **`hapi-driver-build-web`** (compose is Meta/operator — operator rule 2026-10-13; docs previously said peer-owned and that was wrong)
+- Hand-edit `~/coding/hapi/driver/` (no `git merge` / cherry-pick / commit in driver — manifest + Meta remat only)
+- `hapi-use-worktree`, `hapi-use-driver`, `hapi-driver-rebuild --activate`
+- Raw `sudo systemctl restart/stop` on hub/runner units
+- `nohup bun run src/index.ts` from worktree on `:3006` / shared hub DB
+- Declare done at verify stamp without tip-unique markers in live `web/dist` + operator `:3006` proof
+- Treat `hapi-driver-status` or manifest push alone as web shipped
+- `HAPI_BUILD_MAX_SWAP_USED_PCT` / `HAPI_BUILD_MIN_AVAIL_MEM_KIB` overrides on driver web builds (report blocked)
+
+**Meta tooling — allowed (compose lane)**
+
+- `hapi-driver-status --quiet` → **`hapi-driver-rebuild --build-web [--verify]`**
 - `hapi-driver-build-web`, `hapi-verify-web-dist`
 - **`hapi-restart-hub`** when hub/cli changed and already on driver soup
 - `hapi-driver-rollback-web` (web emergency)
-
-**Forbidden**
-
-- Hand-edit `~/coding/hapi/driver/` (no `git merge` / cherry-pick / commit in driver — manifest + rebuild only)
-- **`hapi-driver-rebuild` without `--build-web`** (manifest-only merge — stale `web/dist`; agent guard refuses)
-- `hapi-use-worktree`, `hapi-use-driver`, `hapi-driver-rebuild --activate`
-- Raw `sudo systemctl restart/stop` on hub/runner units (use `hapi-restart-hub` / `hapi-use-worktree` — they resolve `hapi-hub-oos` vs `hapi-hub`)
-- `nohup bun run src/index.ts` from worktree on `:3006` / shared hub DB
-- Declare done at verify stamp without `hapi-verify-web-dist` + operator `:3006` proof
-- Treat `hapi-driver-status` or manifest merge complete as web shipped
-- `HAPI_BUILD_MAX_SWAP_USED_PCT` / `HAPI_BUILD_MIN_AVAIL_MEM_KIB` overrides on driver web builds (report blocked)
+- Remat-hold ownership / clear when escalation is Meta's
 
 ---
 
@@ -492,48 +507,69 @@ Peers **must** assess tier before capture ([`peer-stack.md` § Evidence modality
 2. **Peer** gets explicit handoff (completed vs owned steps).
 3. **Worktree** appears under `~/coding/hapi/worktrees/<name>`.
 4. **Default proof** is peer stack — you see PNG/MP4 **inline in HAPI chat** without yanking `:3006`.
-5. **Always soup-promote** the same tip (heal/union if needed) → `hapi-driver-rebuild --build-web --verify` → verify-web-dist → restart if needed → operator hard-reloads and click-tests on `:3006`.
+5. **Always soup-promote** the same tip: peer retips layer + manifest → pings Meta → Meta `hapi-driver-rebuild --build-web --verify` → verify-web-dist → restart if needed → operator hard-reloads and click-tests on `:3006`.
 6. **After operator dogfood approval:** upstream PR; soup layer stays until merged upstream or dropped from manifest.
 
 ---
 
-## Soup promotion (peer-owned — default, not optional)
+## Soup promotion (peer layer + Meta compose — default, not optional)
 
-**Default feature flow:** peer stack proof on `:3100+` **and** soup layer on `:3006`. Peer promotes without waiting for "please put this in soup." Operator dogfood is the click-test on the promoted stack.
+**Default destination (operator 2026-10-14):** unless told otherwise, **everything product-shaped goes to soup**. Soup is the daily driver; the only real fork is *how* the tip arrives:
 
-**Peer sequence (from mirror `~/coding/hapi`):**
+| Default | Path | When |
+|---------|------|------|
+| **Upstreamable → soup** | Thin tip on `driver/<feature>` / `feat/…` → manifest layer → Meta remat → `:3006`. Open `tiann/hapi` PR after dogfood. | **Almost everything.** Expect upstream as the default shape so the tip is soup-ready without a fork-main merge. |
+| **Fork-only tooling → fork merge** | Land on `heavygee/hapi` `main` (docs/operator, scripts/tooling, plans, CLAUDE.md, …) | **Only** stuff that will **not** go upstream. That is the rare path. |
+
+Do **not** frame product dogfood as "merge to local fork first." Fork `main` is not the soup on-ramp for Boards / web / hub / cli product - the manifest layer is. (Voice confirm with Meta PR watcher / tooling Meta, 2026-10-14.)
+
+**Default feature flow:** peer stack proof on `:3100+` **and** soup layer on `:3006`. Soup is not optional — but **compose is Meta tooling's lane**, not the feature peer's (operator rule 2026-10-13). Peer does not wait for the human to "please put this in soup"; peer prepares the layer and pings Meta. Operator dogfood is the click-test on the promoted stack.
+
+**Why split:** remat holds a single-writer lease, patient hub drains, and wrong-side absorbs need a kitchen cook. Feature peers self-serving four remats in one afternoon is how stale `switch.lock` and false "peer owns rebuild" memories get baked. Docs used to say peer-owned compose — that text was wrong relative to the operator rule; this section is the correction.
+
+**Feature peer sequence (from mirror `~/coding/hapi`):**
 
 ```bash
-# 1. Edit config/driver-manifest.yaml — add branch: feat/your-feature (commit on mirror; optional hapi-manifest-mirror-to-config.sh)
-#    (or driver/<name> union tip when thin upstream tip conflicts with soup)
-#    Commit config/driver-manifest.yaml on mirror the same turn (mess-maker rule).
-# 2. One rebuild owner at a time (hapi-driver-status --quiet; exit 75 = wait; exit 76 = remat hold → Meta)
+# 1. Push thin layer tip (driver/<feature> or feat/…) to origin
+# 2. Edit config/driver-manifest.yaml — branch: … @ <tip> (commit + git push origin main;
+#    optional hapi-manifest-mirror-to-config.sh). Mess-maker commits same turn.
+# 3. Ping Meta tooling: tip SHA, layer branch, --build-web need, tip-unique verify marker
+# 4. After Meta reports compose: hapi-verify-web-dist + tip-unique marker in live bundle
+# 5. Operator hard-reloads :3006 and exercises the feature
+```
+
+**Meta tooling sequence:**
+
+```bash
+hapi-driver-status --quiet   # exit 75 = wait; exit 76 = remat hold (own escalation)
 hapi-driver-rebuild --build-web --verify
 hapi-verify-web-dist
-# 3. Hub/cli/shared touched? (not web-only)
+# Hub/cli/shared touched? (not web-only)
 hapi-restart-hub
-# 4. Operator hard-reloads :3006 and exercises the feature
+# Ping peer with tip-unique marker proof (not ancestry / SessionLinked false positives)
 ```
 
 **What "do it RIGHT" means (guards, not disempowerment):**
 
 | Wrong | Right |
 |-------|-------|
-| Skip soup because peer stack passed | Promote + rebuild so `:3006` has the tip |
+| Skip soup because peer stack passed | Peer retips + Meta compose so `:3006` has the tip |
+| Feature peer runs `hapi-driver-rebuild` | Peer pings Meta; Meta holds the lease |
 | `hapi-driver-rebuild` (no `--build-web`) | `hapi-driver-rebuild --build-web --verify` |
-| `git merge` inside `~/coding/hapi/driver` | Edit manifest; let rebuild merge layers |
-| `cp worktrees/*/web/dist` into driver | Atomic swap via rebuild/build-web |
-| `hapi-use-driver` / `hapi-use-worktree` | Already on driver soup — use `hapi-restart-hub` |
-| Declare done at verify stamp alone | `hapi-verify-web-dist` exit 0 + operator `:3006` proof |
+| `git merge` inside `~/coding/hapi/driver` | Edit manifest; Meta remat merges layers |
+| `cp worktrees/*/web/dist` into driver | Atomic swap via Meta rebuild/build-web |
+| `hapi-use-driver` / `hapi-use-worktree` | Already on driver soup — Meta uses `hapi-restart-hub` |
+| Declare done at verify stamp alone | Tip-unique marker in live dist + operator `:3006` proof |
 | Leave layer out on merge conflict | `soup-heals/*.patch` or `driver/<feature>` union tip |
 
-**Operator role:** click-test on `:3006` and approve upstream PR — **not** hand-edit the manifest for every feature, and **not** a gate that withholds soup promotion.
+**Operator role:** click-test on `:3006` and approve upstream PR — **not** hand-edit the manifest for every feature, and **not** a gate that withholds soup promotion. Compose routing is to **Meta tooling**, not to the human for every tip-forward.
 
 **Friction mode — kill criteria**
 
 - Peer stops at "tests pass" with no inline PNG/MP4 → reject handoff (§6.4d).
+- Peer self-serves remat after this doc change → wrong lane; ping Meta instead.
 - Peer stops at verify stamp with verify-web-dist failing → dist still stale (2026-06-22 class bug).
-- Peer runs `hapi-use-driver` without operator TTY → session massacre; use `hapi-restart-hub` instead when already on driver.
+- Peer runs `hapi-use-driver` without operator TTY → session massacre; Meta uses `hapi-restart-hub` when already on driver.
 - Vite fails at ~5s → `free -h`: if swap high **and** `MemAvailable` low, run recovery; sticky swap alone (high swap, ≥4 GiB available) should not block rebuild after 2026-06-19 preflight fix.
 
 ---

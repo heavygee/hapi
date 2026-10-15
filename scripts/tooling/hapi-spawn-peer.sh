@@ -19,13 +19,16 @@
 #   --machine ID|hostname       (default: this host's settings.machineId)
 #   --yolo / --no-yolo          (default yolo on)
 #
-# Prefer product CLI when available: `hapi spawn-peer --model … --effort …`
-# (soup via ~/.local/bin/hapi). This wrapper exists for remit fail-closed until
-# upstream #1511 merges; keep model/effort parity with hub + product CLI.
+# Same-host model/effort: product CLI `hapi spawn-peer --model … --effort …`
+# also works (soup via ~/.local/bin/hapi). This wrapper remains the fail-closed
+# remit path and the ONLY supported --machine surface until tiann/hapi#1931
+# wires machine into product CLI + MCP (module already accepts machineId).
 #
 # Machine-to-machine: pass --machine oos-linux (or UUID) so spawn hits that
 # runner. --dir must exist on the TARGET host. When --machine != local, the
 # local [[ -d ]] check is skipped (target path is the contract).
+# Do NOT tell agents to prefer product CLI for cross-host — it rejects --machine
+# with "unexpected flag" and they invent SSH.
 set -euo pipefail
 
 err() { echo "hapi-spawn-peer: $*" >&2; }

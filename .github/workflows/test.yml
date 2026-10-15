@@ -4,9 +4,14 @@ on:
     push:
     pull_request:
 
+# heavygee/hapi: prefer oos-linux self-hosted (`hapi` label) so we do not burn
+# GitHub-hosted minutes. Upstream / other forks keep ubuntu-latest.
+# Runner: actions.runner.heavygee-hapi.oos-linux-hapi-ci.service
+# See docs/tooling/local-ci.md and server-setup runbook github-self-hosted-runners.md.
+
 jobs:
     test:
-        runs-on: ubuntu-latest
+        runs-on: ${{ github.repository_owner == 'heavygee' && fromJSON('["self-hosted","Linux","X64","hapi"]') || 'ubuntu-latest' }}
         steps:
             - uses: actions/checkout@v4
             - name: Test PR review automation
@@ -20,19 +25,25 @@ jobs:
             - run: docker pull mcr.microsoft.com/powershell:latest
             - run: bun run test:e2e -- terminal-wrap-fidelity.spec.ts composer-copy.spec.ts session-list-scroll.spec.ts cold-initial-tail.spec.ts scrollbar-auto-hide.spec.ts
             - run: bun run test
+            # Fork has no windows-latest budget; cover the same file on Linux.
+            - name: Codex MCP proxy unit (Linux stand-in for windows-codex-mcp)
+              if: github.repository_owner == 'heavygee'
+              run: bun run --cwd cli test -- src/codex/utils/codexMcpProxy.test.ts
 
     # Serial runner-integration suite: starts real detached runner/session
     # process trees against an isolated temp hub, so it runs in its own job
     # (never in the parallel unit-test path). See cli/vitest.integration.config.ts.
     integration:
-        runs-on: ubuntu-latest
+        runs-on: ${{ github.repository_owner == 'heavygee' && fromJSON('["self-hosted","Linux","X64","hapi"]') || 'ubuntu-latest' }}
         steps:
             - uses: actions/checkout@v4
             - uses: oven-sh/setup-bun@v2
             - run: bun install --frozen-lockfile
             - run: bun run test:cli:integration
 
+    # Hosted Windows minutes — skip on the heavygee fork (covered above on Linux).
     windows-codex-mcp:
+        if: github.repository_owner != 'heavygee'
         runs-on: windows-latest
         steps:
             - uses: actions/checkout@v4

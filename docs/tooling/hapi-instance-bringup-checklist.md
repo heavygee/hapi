@@ -1,6 +1,6 @@
 # HAPI instance bring-up checklist
 
-**Why this exists:** ninja (2026-09-22) got reported "healthy" and "done" multiple times —
+**Why this exists:** a standalone personal hub (2026-09-22) got reported "healthy" and "done" multiple times —
 hub/runner connected, `/health` green, Tailscale serve verified — while zero agent CLIs
 were installed and the Cursor credential sync nobody ever actually ran. Every check that
 ran was real; the set of checks was incomplete. This is the fix: a single checklist that
@@ -9,7 +9,7 @@ exactly what's been done and what hasn't, and so "healthy" stops silently meanin
 "the parts I happened to check are healthy."
 
 **Use this for:** any persistent, systemd-managed HAPI instance — antevorta, `in-svc-01`,
-ninja, and whatever comes next. Not for the standalone pet-install path (`scripts/install-hapi-pet.sh` +
+standalone personal hubs, and whatever comes next. Not for the standalone pet-install path (`scripts/install-hapi-pet.sh` +
 `docs/guide/pet-install.md` — that's a different, self-contained flow with its own checks).
 
 **How to use it:** copy the checklist below into your working notes (or the plan/handoff
@@ -76,7 +76,7 @@ and saw the expected output, not because a prior phase "should have" made it tru
       from a different machine) — confirming serve locally is not the same as confirming
       the tailnet actually routes to it
 
-## Phase 5 — Agent CLI (the step that got missed on ninja — do not skip this section)
+## Phase 5 — Agent CLI (the step that got missed on a standalone personal hub — do not skip this section)
 
 **"Hub healthy" and "runner connected" prove HAPI's own plumbing works. They prove
 nothing about whether an agent can actually run a session. Do this whole section before
@@ -127,12 +127,12 @@ calling the instance done.**
 **On the systemctl wrapper (`install-systemctl-wrapper.sh`, installed by Tier-1 by
 default):** it looks invasive — a system-wide interceptor for every `sudo systemctl`
 call — and it is reasonable to want it opt-in. Concrete evidence against that, from
-ninja's own hardening (2026-09-30): the wrapper blocked a plain `sudo systemctl restart
+a standalone personal hub's own hardening (2026-09-30): the wrapper blocked a plain `sudo systemctl restart
 hapi-hub.service` from a non-interactive SSH session, and **also blocked
 `HAPI_OPERATOR_SYSTEMCTL_OVERRIDE=1`** from that same non-tty shell, citing the
 2026-06-13 incident this exact gap caused (an agent's env-var-only override stopped the
 hub, cascade-killing the runner via `Requires=` and taking active sessions with it). Had
-the wrapper been opt-in, ninja would have installed with no guard at all, and that
+the wrapper been opt-in, that standalone personal hub would have installed with no guard at all, and that
 protection simply would not have existed there — the config alone (Tier-1's other
 drop-ins) does not provide it. The correct route past a real tty gate is `ssh -tt` (a
 genuine controlling terminal), not the file-level bypass the wrapper also documents for
@@ -144,13 +144,13 @@ actual emergencies.
 
 | Symptom | Real cause | Where this bit us |
 |---|---|---|
-| IP looks free (ARP/ping) but traffic to the gateway times out | Router has a MAC-reservation anti-spoofing policy; a device that's just powered off still holds its reservation | ninja, twice (`.60` then `.62`, both already bound to other devices) |
-| Tailscale join fails on flag validation | OAuth-client-issued auth keys need `--advertise-tags=tag:...`; personal keys don't | ninja |
-| `tailscale serve` says "not enabled on your tailnet" | Tailnet-level admin toggle, not a device setting | ninja |
-| VM won't boot after OS install | UEFI/SeaBIOS mismatch between the VM's firmware config and what the installer wrote | ninja (fixed by matching `in-svc-01`'s known fixup) |
-| Hub/runner report healthy but agent sessions fail | Nobody actually installed/authenticated an agent CLI — health checks don't cover this | ninja |
+| IP looks free (ARP/ping) but traffic to the gateway times out | Router has a MAC-reservation anti-spoofing policy; a device that's just powered off still holds its reservation | standalone personal hub, twice (`.60` then `.62`, both already bound to other devices) |
+| Tailscale join fails on flag validation | OAuth-client-issued auth keys need `--advertise-tags=tag:...`; personal keys don't | standalone personal hub |
+| `tailscale serve` says "not enabled on your tailnet" | Tailnet-level admin toggle, not a device setting | standalone personal hub |
+| VM won't boot after OS install | UEFI/SeaBIOS mismatch between the VM's firmware config and what the installer wrote | standalone personal hub (fixed by matching `in-svc-01`'s known fixup) |
+| Hub/runner report healthy but agent sessions fail | Nobody actually installed/authenticated an agent CLI — health checks don't cover this | standalone personal hub |
 | `install-hapi-pet.sh`'s `--relay` silently falls back to local-only | `tunwg` binary version mismatch on `-log_level` flag; hub swallows the failure | tracked as [#148](https://github.com/heavygee/hapi/issues/148) |
-| Runner unit sits `inactive` after a "successful"-looking restart, and nothing brings it back if it later dies for real | `Restart=on-failure` never fires on a clean exit(0) — and HAPI's own runner self-deduplicates on a matching CLI mtime (`cli/src/runner/run.ts`, `controlClient.ts`), exiting 0 rather than double-running when it detects an already-live instance. The OLD process keeps serving underneath, still in the unit's cgroup but no longer tracked as its `MainPID`, so systemd has nothing to react to if that survivor dies later. Compounds badly if Tier-1 was never installed: no OOM protection on the hub (`OOMScoreAdjust=0` instead of `-1000`) *and* no watchdog timer to notice the runner going dark — either alone is survivable, together they're how a box dies silently overnight | ninja (2026-09-30) — confirmed via `runner.state.json` (`lastHeartbeat` on a PID from 4 days earlier), `systemctl show` (`Restart=on-failure`, `NRestarts=0`, unit `inactive`), and `systemctl list-timers 'hapi-*'` (zero timers, no Tier-1) |
+| Runner unit sits `inactive` after a "successful"-looking restart, and nothing brings it back if it later dies for real | `Restart=on-failure` never fires on a clean exit(0) — and HAPI's own runner self-deduplicates on a matching CLI mtime (`cli/src/runner/run.ts`, `controlClient.ts`), exiting 0 rather than double-running when it detects an already-live instance. The OLD process keeps serving underneath, still in the unit's cgroup but no longer tracked as its `MainPID`, so systemd has nothing to react to if that survivor dies later. Compounds badly if Tier-1 was never installed: no OOM protection on the hub (`OOMScoreAdjust=0` instead of `-1000`) *and* no watchdog timer to notice the runner going dark — either alone is survivable, together they're how a box dies silently overnight | standalone personal hub (2026-09-30) — confirmed via `runner.state.json` (`lastHeartbeat` on a PID from 4 days earlier), `systemctl show` (`Restart=on-failure`, `NRestarts=0`, unit `inactive`), and `systemctl list-timers 'hapi-*'` (zero timers, no Tier-1) |
 
 ## Related
 

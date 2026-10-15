@@ -10,11 +10,17 @@ SCRIPT="$ROOT/scripts/install-hapi-pet.sh"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 pass() { echo "OK: $*"; }
 
-# 1) Piped invocation must not trip `set -u` on BASH_SOURCE[0]
+# 1) Piped/stdin invocation must not trip `set -u` on BASH_SOURCE[0].
+# Use stdin redirect (not `cat | bash`) — under `set -o pipefail`, cat can get
+# SIGPIPE (exit 141) when bash closes early after --help even though help
+# itself succeeded.
 err="$(mktemp)"
-out="$(cat "$SCRIPT" | bash -s -- --help 2>"$err")" || fail "piped --help exited non-zero"
+out="$(bash -s -- --help <"$SCRIPT" 2>"$err")" || fail "piped --help exited non-zero"
 rg -qi 'unbound variable|BASH_SOURCE' "$err" && fail "piped --help printed unbound BASH_SOURCE: $(cat "$err")"
 [[ "$out" == *"--with-systemd"* ]] || fail "piped --help missing --with-systemd docs"
+[[ "$out" == *"--fleet-policy"* ]] || fail "piped --help missing --fleet-policy docs"
+[[ "$out" == *"default auto"* ]] || fail "piped --help should document default auto policy"
+[[ "$out" == *"hapi-fleet"* ]] || fail "piped --help missing hapi-fleet channel docs"
 pass "piped --help (no unbound BASH_SOURCE)"
 
 # 2) File invocation still resolves SCRIPT_DIR to the scripts/ directory
