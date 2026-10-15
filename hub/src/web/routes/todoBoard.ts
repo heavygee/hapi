@@ -223,7 +223,15 @@ const ITEM_FIELDS = `
   fieldValueByName(name: $statusField) {
     ... on ProjectV2ItemFieldSingleSelectValue { name }
   }
-  fieldValues(first: 20) {
+  // 100, not 20 (Codex review, hapi#238): every built-in field (Assignees,
+  // Labels, Milestone, Repository, Reviewers, Linked Pull Requests, ...)
+  // occupies a slot in this connection alongside custom ones, even though
+  // only single-select/text/number/date fields are actually selected below
+  // — an item with 20+ total fields silently dropped its later custom
+  // fields from the detail pane with no indication anything was missing.
+  // Matches items(first: 100) above; true pagination would need a
+  // per-item follow-up query and isn't worth it at this scale.
+  fieldValues(first: 100) {
     nodes {
       __typename
       ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2FieldCommon { name } } }

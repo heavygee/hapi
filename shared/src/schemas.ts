@@ -62,12 +62,33 @@ export type WorktreeMetadata = z.infer<typeof WorktreeMetadataSchema>
  * CLI / MCP `link_issue`), always-on — no opt-in toggle, since nobody sees
  * this chrome unless they actually link something.
  */
+// `url` is re-validated against the same canonical issue-URL shape
+// `parseIssueUrl` requires (host/owner/repo/issues/N, matching this ref's own
+// `repo`/`number`) rather than accepted as any string (Codex review, hapi#238):
+// `hapi link-issue`/MCP `link_issue` always go through `parseIssueUrl` first,
+// so every ref produced by this PR's own write paths already satisfies this —
+// but the *generic* CLI `update-metadata` socket path can set
+// `metadata.externalRefs` directly, bypassing that validation entirely. Without
+// this, a crafted `url` like `https://github.com@evil.example/...` (a userinfo
+// component, not the host) renders in `IssueRefChip` as a trustworthy-looking
+// `#N` link to an attacker-controlled host, or `repo`/`number` could point
+// readers at the wrong issue entirely.
+function isValidGithubIssueRef(ref: { url: string; repo: string; number: number }): boolean {
+    const parsed = parseIssueUrl(ref.url)
+    return parsed !== null
+        && parsed.repo.toLowerCase() === ref.repo.toLowerCase()
+        && parsed.number === ref.number
+}
+
 export const GithubIssueExternalRefSchema = z.object({
     kind: z.literal('github_issue'),
     url: z.string(),
     repo: z.string(),
     number: z.number(),
     linkedAt: z.number()
+}).refine(isValidGithubIssueRef, {
+    message: 'url must be a canonical GitHub issue URL matching repo/number',
+    path: ['url']
 })
 
 /**

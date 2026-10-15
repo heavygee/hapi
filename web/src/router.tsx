@@ -308,8 +308,14 @@ function SessionsPage() {
     // subscriber below, so it can tell a genuine Back/Forward (replaying an
     // already-stamped index) from a fresh push (always a new, higher index)
     // — see isHistoryPopNavigation's doc comment for why that distinction
-    // matters here.
-    const maxHistoryIndexRef = useRef(0)
+    // matters here. Seeded from the router's *current* location at mount
+    // (Codex review, hapi#238), not a hardcoded 0: a page loaded or reloaded
+    // mid-session already has a real, possibly nonzero index, and a
+    // subsequent genuine Back landing below that index must still be
+    // recognized as a pop — a 0 baseline would misread any such Back as a
+    // fresh push (0 is never "<=" a nonzero destination index) and exit
+    // Boards mode instead of returning to the board list.
+    const maxHistoryIndexRef = useRef(router.state.location.state.__TSR_index)
     const setSelectedBoardItemId = useCallback((id: string | null) => {
         isOwnBoardItemNavigationRef.current = true
         navigate({

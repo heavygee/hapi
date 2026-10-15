@@ -77,3 +77,48 @@ describe('MetadataSchema externalRefs github_pr chip (Codex review, hapi#238)', 
         expect(result.success).toBe(false);
     });
 });
+
+describe('MetadataSchema externalRefs github_issue url validation (Codex review, hapi#238)', () => {
+    // Regression: GithubIssueExternalRefSchema.url accepted any string.
+    // `hapi link-issue`/MCP `link_issue` always build this ref via
+    // parseIssueUrl, so every ref from this PR's own write paths already
+    // satisfies the tightened check below — but the generic CLI
+    // update-metadata socket path can set metadata.externalRefs directly,
+    // bypassing that validation entirely. Without it, a crafted url like
+    // `https://github.com@evil.example/...` (a userinfo component, not the
+    // host) renders in IssueRefChip as a trustworthy-looking #N link to an
+    // attacker-controlled host.
+    const base = { path: '/tmp', host: 'test' };
+
+    it('accepts a canonical github_issue ref matching repo/number', () => {
+        const result = MetadataSchema.safeParse({
+            ...base,
+            externalRefs: [{ kind: 'github_issue', url: 'https://github.com/heavygee/hapi/issues/235', repo: 'heavygee/hapi', number: 235, linkedAt: 1 }]
+        });
+        expect(result.success).toBe(true);
+    });
+
+    it('rejects a userinfo-deceptive url pointing at a different host than it displays', () => {
+        const result = MetadataSchema.safeParse({
+            ...base,
+            externalRefs: [{ kind: 'github_issue', url: 'https://github.com@evil.example/heavygee/hapi/issues/235', repo: 'heavygee/hapi', number: 235, linkedAt: 1 }]
+        });
+        expect(result.success).toBe(false);
+    });
+
+    it('rejects a url whose embedded repo/number disagrees with the ref\'s own fields', () => {
+        const result = MetadataSchema.safeParse({
+            ...base,
+            externalRefs: [{ kind: 'github_issue', url: 'https://github.com/heavygee/hapi/issues/999', repo: 'heavygee/hapi', number: 235, linkedAt: 1 }]
+        });
+        expect(result.success).toBe(false);
+    });
+
+    it('rejects a non-issue-shaped url entirely', () => {
+        const result = MetadataSchema.safeParse({
+            ...base,
+            externalRefs: [{ kind: 'github_issue', url: 'not a url at all', repo: 'heavygee/hapi', number: 235, linkedAt: 1 }]
+        });
+        expect(result.success).toBe(false);
+    });
+});
