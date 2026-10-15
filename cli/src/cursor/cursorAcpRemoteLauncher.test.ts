@@ -2201,7 +2201,7 @@ describe('cursorAcpRemoteLauncher', () => {
         await runPromise;
     });
 
-    it('queues Auto-review slash when mode flips during Auto relaunch', async () => {
+    it('keeps Auto after applying Auto-review queued during relaunch', async () => {
         const queue = new MessageQueue2<EnhancedMode>((mode) => mode.permissionMode);
         const client = {
             rpcHandlerManager: { registerHandler: vi.fn() },
@@ -2251,13 +2251,12 @@ describe('cursorAcpRemoteLauncher', () => {
         await vi.waitFor(() => {
             expect(
                 harness.prompts.some((prompt) => JSON.stringify(prompt).includes('/auto-review'))
-                || (queue as unknown as { queue: Array<{ message: string }> }).queue
-                    ?.some((item) => item.message === '/auto-review')
             ).toBe(true);
         });
 
         queue.close();
         await runPromise;
+        expect(session.model).toBe('auto');
     });
 
     it('prompts a queued Auto-mode batch on the relaunched backend', async () => {
