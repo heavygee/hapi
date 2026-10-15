@@ -315,14 +315,18 @@ describe('SessionList time filter', () => {
         expect(clearButton.className).toMatch(/session-list-search-clear-endcap/)
         expect(clearButton.className).toMatch(/min-h-\[48px\]/)
         expect(clearButton.className).toMatch(/min-w-\[48px\]/)
-        // Expanded search hides the filter menu — calendar must still be a
-        // sibling chip beside the field, never packed into the clear end-cap.
-        const dateButton = screen.getByRole('button', { name: 'Filter sessions by last activity' })
+        // Layout A: calendar embedded inside the field, immediately left of
+        // the clear end-cap (clear stays furthest right).
+        const dateButton = screen.getByTestId('session-list-search-date-embedded')
+        expect(dateButton).toHaveAttribute('aria-label', 'Filter sessions by last activity')
         expect(dateButton.className).toMatch(/min-h-\[48px\]/)
-        expect(clearButton.parentElement?.contains(dateButton)).toBe(false)
-        const searchRow = screen.getByTestId('session-list-search')
-        expect(searchRow.contains(dateButton)).toBe(true)
-        expect(searchRow.contains(clearButton)).toBe(true)
+        expect(dateButton.className).toMatch(/min-w-\[48px\]/)
+        expect(clearButton.parentElement?.contains(dateButton)).toBe(true)
+        const fieldChildren = Array.from(clearButton.parentElement?.children ?? [])
+        const dateIndex = fieldChildren.findIndex((node) => node === dateButton.parentElement || node.contains(dateButton))
+        const clearIndex = fieldChildren.indexOf(clearButton)
+        expect(dateIndex).toBeGreaterThanOrEqual(0)
+        expect(clearIndex).toBeGreaterThan(dateIndex)
     })
 
     it('returns focus to the date filter row after clearing the date range', () => {
