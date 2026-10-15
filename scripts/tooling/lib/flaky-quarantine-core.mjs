@@ -83,11 +83,17 @@ function strictInt(s) {
     return STRICT_INT_RE.test(s) ? Number.parseInt(s, 10) : NaN;
 }
 
+/**
+ * For issue/renewal_count: returns the parsed integer, or an { invalid }
+ * marker (NOT a silent default) when the scalar is present but not entirely
+ * digits — "renewal_count: 1oops" must be a schema error, not silently
+ * treated as "renewal_count absent" (which would default to 0 and pass).
+ */
 function coerceField(key, rawVal) {
     const val = stripQuotes(rawVal.trim());
     if (key === 'issue' || key === 'renewal_count') {
         const n = strictInt(val);
-        return Number.isNaN(n) ? null : n;
+        return Number.isNaN(n) ? { invalid: val } : n;
     }
     return val;
 }
@@ -96,10 +102,11 @@ export function parseQuarantineYaml(text) {
     const entries = [];
     let current = null;
     // A `-`-prefixed line ALWAYS starts a new list item, regardless of which
-    // field happens to come first — starting only on `- id:` meant an entry
-    // with `id` misspelled, omitted, or merely reordered after another field
-    // silently vanished (never validated as missing, never quarantined).
-    const startRe = new RegExp(`^\\s*-\\s+(${FIELD_NAMES.join('|')}):\\s*(.*)$`);
+    // field (or even an unknown/misspelled one) comes first — matching only
+    // known field names here would let `- iid: "cli:test"` (typo'd `id`)
+    // start no entry at all, silently discarding every field that follows it
+    // instead of surfacing a "missing id" schema error.
+    const startRe = /^\s*-\s+([\w-]+):\s*(.*)$/;
     const continuationRe = new RegExp(`^\\s+(${FIELD_NAMES.join('|')}):\\s*(.*)$`);
     for (const raw of text.split('\n')) {
         const line = raw.replace(/\s+$/, '');
@@ -108,7 +115,9 @@ export function parseQuarantineYaml(text) {
         if (start) {
             if (current) entries.push(current);
             current = { id: null, owner: null, issue: null, signature: null, added: null, expires: null, renewal_count: 0, renewal_reason: null };
-            current[start[1]] = coerceField(start[1], start[2]);
+            if (FIELD_NAMES.includes(start[1])) {
+                current[start[1]] = coerceField(start[1], start[2]);
+            }
             continue;
         }
         if (!current) continue;
@@ -162,9 +171,24 @@ export function validateEntries(entries, { today, issueStates } = {}) {
         }
         if (!e.signature) {
             localErrors.push({ id: e.id, field: 'signature', message: 'signature is required — "failed once" with no captured failure text is not sufficient evidence' });
+        } else if (typeof e.signature === 'string' && e.signature.split(' && ').some((part) => part.trim() === '')) {
+            // "known text && " or " && " alone produces an empty clause after
+            // split+trim, and `message.includes('')` is true for EVERY
+            // message — an empty clause silently excuses anything.
+            localErrors.push({ id: e.id, field: 'signature', message: `signature has an empty " && "-joined clause: ${JSON.stringify(e.signature)}` });
         }
         const added = parseDate(e.added, 'added', localErrors, e.id);
         const expires = parseDate(e.expires, 'expires', localErrors, e.id);
+        if (added && added.getTime() > now.getTime()) {
+            localErrors.push({ id: e.id, field: 'added', message: `added (${e.added}) is in the future — a typo'd year would otherwise excuse failures for decades while still satisfying the expiry window` });
+        }
+        // A present-but-malformed renewal_count ("1oops") must not silently
+        // fall back to the same default (0) as a genuinely absent field —
+        // that would let a typo quietly skip renewal enforcement instead of
+        // failing the schema check.
+        if (e.renewal_count !== null && typeof e.renewal_count === 'object') {
+            localErrors.push({ id: e.id, field: 'renewal_count', message: `renewal_count must be a whole number, got ${JSON.stringify(e.renewal_count.invalid)}` });
+        }
         const renewalCount = Number.isInteger(e.renewal_count) ? e.renewal_count : 0;
         if (renewalCount > 0 && !e.renewal_reason) {
             localErrors.push({ id: e.id, field: 'renewal_reason', message: 'renewal_count > 0 requires a renewal_reason — renewal is a deliberate act with a reason attached, not a bumped date' });
@@ -224,12 +248,32 @@ export function validateEntries(entries, { today, issueStates } = {}) {
  */
 function matchesSignature(message, signature) {
     if (typeof message !== 'string') return false;
-    return signature.split(' && ').every((part) => message.includes(part.trim()));
+    const clauses = signature.split(' && ').map((p) => p.trim());
+    // Defense in depth: validateEntries already rejects an empty clause at
+    // schema time (an empty clause would otherwise match any message), but
+    // this function has no other guarantee its caller went through that
+    // check first — never let a blank clause silently pass.
+    return clauses.every((part) => part.length > 0 && message.includes(part));
+}
+
+/**
+ * A quarantined test can legitimately fail with MORE THAN ONE message in one
+ * run — multiple `expect.soft()` failures, or a known assertion plus an
+ * unrelated hook failure. Requiring EVERY attached message to match is what
+ * stops a second, different regression from riding along: joining all
+ * messages into one string and matching the signature anywhere in that
+ * blob would let one real match excuse an unrelated failure sitting right
+ * next to it (cold review, 2026-10-15 — cli/src/agent/permissionJson.test.ts
+ * already uses soft assertions, so this is a real, not hypothetical, shape).
+ */
+function matchesAllMessages(messages, signature) {
+    const list = messages.length > 0 ? messages : [''];
+    return list.every((m) => matchesSignature(m, signature));
 }
 
 /**
  * The actual gate decision. `results` is runner-agnostic:
- *   [{ id: string, failed: boolean, message: string }]
+ *   [{ id: string, failed: boolean, messages: string[] }]
  * `validEntries` must already be schema-valid and non-expired (the output of
  * validateEntries().valid) — this function does not re-check lifecycle.
  *
@@ -239,7 +283,10 @@ function matchesSignature(message, signature) {
  * non-zero while producing NO per-test assertion results at all. Without
  * this check, `results` would be empty, the loop above would find nothing to
  * block on, and the gate would report a clean pass despite the runner itself
- * having failed (cold review, 2026-10-15).
+ * having failed (cold review, 2026-10-15). Adapters should ALSO represent a
+ * suite-level/collection failure as its own failed result with no matching
+ * registry id (so it blocks as "not quarantined") rather than relying on
+ * this as the only backstop — see from-vitest-json's suite-failure handling.
  */
 export function evaluate({ validEntries, errors = [], expired = [], results, ceiling = DEFAULT_CEILING, runnerExitCode = 0 }) {
     const byId = new Map(validEntries.map((e) => [e.id, e]));
@@ -248,18 +295,19 @@ export function evaluate({ validEntries, errors = [], expired = [], results, cei
 
     for (const r of results) {
         if (!r.failed) continue;
+        const messages = r.messages ?? [];
         const entry = byId.get(r.id);
         if (!entry) {
-            blocking.push({ id: r.id, reason: 'not quarantined', message: r.message });
+            blocking.push({ id: r.id, reason: 'not quarantined', messages });
             continue;
         }
-        if (matchesSignature(r.message, entry.signature)) {
+        if (matchesAllMessages(messages, entry.signature)) {
             excused.push({ id: r.id, issue: entry.issue, owner: entry.owner });
         } else {
             blocking.push({
                 id: r.id,
                 reason: 'quarantined signature mismatch — treated as a new failure',
-                message: r.message,
+                messages,
                 expectedSignature: entry.signature,
             });
         }
