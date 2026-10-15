@@ -65,6 +65,191 @@ describe('SyncEngine fleet upgrade', () => {
         }
     })
 
+    it('upgradeMachineRunner defers when a session on the machine is thinking (#270)', async () => {
+        const offer: HubUpgradeOffer = {
+            channel: 'npm',
+            targetVersion: '0.24.0',
+            targetCapabilities: ['cursor-chat-store-status'],
+            npmPackage: '@twsxtd/hapi',
+        }
+        const store = new Store(':memory:')
+        const registry = new RpcRegistry()
+        const engine = new SyncEngine(
+            store,
+            {} as never,
+            registry,
+            { broadcast() {} } as never,
+            { getUpgradeOffer: () => offer },
+        )
+
+        try {
+            const runnerSelfUpgrade = mock(async () => ({
+                status: 'started',
+                message: 'ok',
+                channel: 'npm',
+            }))
+            ;(engine as any).rpcGateway.runnerSelfUpgrade = runnerSelfUpgrade
+
+            engine.getOrCreateMachine(
+                'busy',
+                {
+                    host: 'proxmox',
+                    platform: 'linux',
+                    happyCliVersion: '0.20.0',
+                    capabilities: ['runner-self-upgrade'],
+                },
+                null,
+                'default',
+            )
+            registerLiveSelfUpgrade(registry, 'busy')
+            engine.handleMachineAlive({ machineId: 'busy', time: Date.now() })
+
+            const session = engine.getOrCreateSession(
+                'working-on-busy',
+                {
+                    path: '/tmp/proj',
+                    host: 'proxmox',
+                    flavor: 'cursor',
+                    machineId: 'busy',
+                },
+                null,
+                'default',
+            )
+            const live = (engine as any).sessionCache.getSession(session.id)
+            live.thinking = true
+
+            const result = await engine.upgradeMachineRunner('busy', 'default')
+            expect(result.type).toBe('error')
+            if (result.type === 'error') {
+                expect(result.code).toBe('upgrade_deferred')
+                expect(result.message).toContain('WORKING')
+            }
+            expect(runnerSelfUpgrade).not.toHaveBeenCalled()
+        } finally {
+            engine.stop()
+        }
+    })
+
+    it('upgradeMachineRunner applies when sessions on the machine are idle (not thinking)', async () => {
+        const offer: HubUpgradeOffer = {
+            channel: 'npm',
+            targetVersion: '0.24.0',
+            targetCapabilities: ['cursor-chat-store-status'],
+            npmPackage: '@twsxtd/hapi',
+        }
+        const store = new Store(':memory:')
+        const registry = new RpcRegistry()
+        const engine = new SyncEngine(
+            store,
+            {} as never,
+            registry,
+            { broadcast() {} } as never,
+            { getUpgradeOffer: () => offer },
+        )
+
+        try {
+            const runnerSelfUpgrade = mock(async () => ({
+                status: 'started',
+                message: 'ok',
+                channel: 'npm',
+            }))
+            ;(engine as any).rpcGateway.runnerSelfUpgrade = runnerSelfUpgrade
+
+            engine.getOrCreateMachine(
+                'quiet',
+                {
+                    host: 'proxmox',
+                    platform: 'linux',
+                    happyCliVersion: '0.20.0',
+                    capabilities: ['runner-self-upgrade'],
+                },
+                null,
+                'default',
+            )
+            registerLiveSelfUpgrade(registry, 'quiet')
+            engine.handleMachineAlive({ machineId: 'quiet', time: Date.now() })
+
+            engine.getOrCreateSession(
+                'idle-on-quiet',
+                {
+                    path: '/tmp/proj',
+                    host: 'proxmox',
+                    flavor: 'cursor',
+                    machineId: 'quiet',
+                },
+                null,
+                'default',
+            )
+            // thinking defaults false - idle must not block (#270 explicit)
+
+            const result = await engine.upgradeMachineRunner('quiet', 'default')
+            expect(result.type).toBe('success')
+            expect(runnerSelfUpgrade).toHaveBeenCalledWith('quiet', offer)
+        } finally {
+            engine.stop()
+        }
+    })
+
+    it('upgradeMachineRunner ignores thinking sessions on a different machine', async () => {
+        const offer: HubUpgradeOffer = {
+            channel: 'npm',
+            targetVersion: '0.24.0',
+            targetCapabilities: ['cursor-chat-store-status'],
+            npmPackage: '@twsxtd/hapi',
+        }
+        const store = new Store(':memory:')
+        const registry = new RpcRegistry()
+        const engine = new SyncEngine(
+            store,
+            {} as never,
+            registry,
+            { broadcast() {} } as never,
+            { getUpgradeOffer: () => offer },
+        )
+
+        try {
+            const runnerSelfUpgrade = mock(async () => ({
+                status: 'started',
+                message: 'ok',
+                channel: 'npm',
+            }))
+            ;(engine as any).rpcGateway.runnerSelfUpgrade = runnerSelfUpgrade
+
+            engine.getOrCreateMachine(
+                'target',
+                {
+                    host: 'proxmox',
+                    platform: 'linux',
+                    happyCliVersion: '0.20.0',
+                    capabilities: ['runner-self-upgrade'],
+                },
+                null,
+                'default',
+            )
+            registerLiveSelfUpgrade(registry, 'target')
+            engine.handleMachineAlive({ machineId: 'target', time: Date.now() })
+
+            const other = engine.getOrCreateSession(
+                'working-elsewhere',
+                {
+                    path: '/tmp/proj',
+                    host: 'other',
+                    flavor: 'cursor',
+                    machineId: 'other-box',
+                },
+                null,
+                'default',
+            )
+            ;(engine as any).sessionCache.getSession(other.id).thinking = true
+
+            const result = await engine.upgradeMachineRunner('target', 'default')
+            expect(result.type).toBe('success')
+            expect(runnerSelfUpgrade).toHaveBeenCalled()
+        } finally {
+            engine.stop()
+        }
+    })
+
     it('coalesces concurrent upgradeMachineRunner calls into one prepare/RPC', async () => {
         let prepareCalls = 0
         let releaseRpc!: () => void

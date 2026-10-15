@@ -1819,6 +1819,23 @@ export class SyncEngine {
             return { type: 'error', message: 'Machine is offline', code: 'machine_offline' }
         }
 
+        // #270: soup patient-drain signal on ALL fleet upgrades (push / auto /
+        // Layer A → self-upgrade). Defer while any session on this machine is
+        // mid-turn (`thinking` = WORKING). Idle sessions do not block - same
+        // as drain's "idle still interruptible" property; make that explicit.
+        const workingSessionIds = this.listWorkingSessionIdsOnMachine(machineId, namespace)
+        if (workingSessionIds.length > 0) {
+            const sample = workingSessionIds.slice(0, 3).join(', ')
+            const more = workingSessionIds.length > 3 ? ` (+${workingSessionIds.length - 3} more)` : ''
+            return {
+                type: 'error',
+                message:
+                    `Upgrade deferred: ${workingSessionIds.length} WORKING session(s) on this machine `
+                    + `(thinking=true; e.g. ${sample}${more}). Same idle-gate as soup patient drain.`,
+                code: 'upgrade_deferred',
+            }
+        }
+
         let offer = this.getUpgradeOffer()
         if (offer.channel === 'off') {
             return { type: 'error', message: 'Fleet upgrade disabled (HAPI_UPGRADE_CHANNEL=off)', code: 'upgrade_unavailable' }
@@ -2193,6 +2210,27 @@ export class SyncEngine {
                 : ''
             return currentId === target
         }).length
+    }
+
+    /**
+     * Mid-turn sessions on a machine (#270 idle-gate / soup WORKING signal).
+     * Same definition as patient drain / `hapi-sessions-health` WORKING:
+     * `session.thinking === true`. Idle/active-but-not-thinking does **not** block.
+     */
+    listWorkingSessionIdsOnMachine(machineId: string, namespace: string): string[] {
+        const target = machineId.trim()
+        if (!target) {
+            return []
+        }
+        return this.sessionCache.getSessionsByNamespace(namespace)
+            .filter((session) => {
+                if (!session.thinking) {
+                    return false
+                }
+                const mid = session.metadata?.machineId
+                return typeof mid === 'string' && mid.trim() === target
+            })
+            .map((session) => session.id)
     }
 
     async sendMessage(
