@@ -1237,6 +1237,15 @@ layers:
   # Web-only → remat --build-web; hard-reload (no hub restart).
   - branch: driver/270-skew-notes-contrast
 
+  # heavygee/hapi#284 — platform/arch-aware GET /api/upgrade/offer (+ /cli/upgrade/offer)
+  # so Linux fleet hubs return windows-x64 tip sha for win32 runners (not
+  # linux-x64-baseline). Cache keyed by platform; keepalive trail-check is
+  # platform-aware; runners reject cross-OS artifacts; banner gates Upgrade on
+  # availablePlatforms. Tip @ 16540195e (PR #285 merged into parent tip branch).
+  # Worktree: ~/coding/hapi/worktrees/platform-aware-offer
+  # Hub+cli+web → remat --build-web + hapi-restart-hub; then seal to gift.
+  - branch: driver/284-platform-aware-offer
+
   # DROPPED 2026-10-06: driver/1933-claude-resume-amnesia — squash 94523eb0d is on
   # fork main (heavygee/hapi#204). Soup base is now origin/main, so tip-forward
   # absorbs it from the base; keeping the layer would double-apply / conflict.
