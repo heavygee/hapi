@@ -1303,14 +1303,17 @@ export function SessionListSearch(props: {
 
     // Sibling chip beside the search field (same row) — never packed inside the
     // clear end-cap cluster. tiann/hapi#2019 / Quest pointer hit targets.
-    const dateChip = showDateFilter ? (
+    // Session list passes showDateFilter=false so collapsed chrome stays lean
+    // (date lives in the filter menu). When search expands that menu is hidden,
+    // so we still surface the chip — otherwise the calendar vanishes entirely.
+    const dateChip = (showDateFilter || props.expanded) ? (
         <div className="relative shrink-0">
             <button
                 ref={dateButtonRef}
                 type="button"
                 onClick={() => setDatePickerOpen(open => !open)}
                 className={cn(
-                    'relative flex min-h-[40px] items-center gap-2 rounded-full border px-3 py-2 text-sm transition-colors',
+                    'relative flex min-h-[48px] min-w-[48px] items-center gap-2 rounded-full border px-3 py-2 text-sm transition-colors',
                     'hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
                     hasDateRange
                         ? 'border-[var(--app-link)] text-[var(--app-link)]'
@@ -1328,6 +1331,9 @@ export function SessionListSearch(props: {
                         ? formatTimeFilterChipLabel(props.customStart, props.customEnd)
                         : t('sessions.timeFilter.chip')}
                 </span>
+                {hasDateRange ? (
+                    <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-[var(--app-link)]" aria-hidden="true" />
+                ) : null}
             </button>
             {datePickerOpen ? (
                 <>
