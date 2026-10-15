@@ -1226,18 +1226,9 @@ layers:
   # Hub-only → remat + hapi-restart-hub (no --build-web). Agents must not --activate.
   - branch: driver/270-fleet-upgrade-idle-gate
 
-  # tiann/hapi#2019 — session search clear hit target too small for touch /
-  # Quest pointer. Layout A: expanded search embeds a 48x48 calendar inside the
-  # field, immediately left of the furthest-right 48x48 clear end-cap. Session
-  # list keeps showDateFilter=false (collapsed date stays in the filter menu).
-  # Collapsed search is min-w-0 (no w-full / no shrink-0) so a long query can
-  # yield toolbar space; calendar floats via search-group anchorRef clamp.
-  # Soup thin tip: driver/search-clear-touch @ 848314827
-  # Tip-unique verify marker: session-list-search-clear-endcap +
-  # session-list-search-date-embedded in web/dist
-  # Worktree: ~/coding/hapi/worktrees/search-clear-touch-soup
-  # Web-only → remat --build-web; hard-reload (no hub restart).
-  - branch: driver/search-clear-touch
+  # DROPPED 2026-10-15: driver/search-clear-touch — MERGED tiann/hapi#2034
+  # (squash 317e39a0b). Fixes #2019 layout A clear end-cap + embedded calendar.
+  # - branch: driver/search-clear-touch
 
   # heavygee/hapi#270 follow-on — skew-banner release NOTES were amber-on-amber
   # (taupe/tan, unreadable). Amber stays as attention border only; surfaces and
