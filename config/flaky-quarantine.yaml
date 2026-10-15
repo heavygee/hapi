@@ -70,14 +70,31 @@ quarantine:
   - id: "cli:agentCliGuard prunes crash-stale registering/<deadPid> so list-models is not pinned"
     owner: "heavygee"
     issue: 274
-    signature: "expected true to be false"
+    # "expected true to be false" alone is too generic: this test has a SECOND
+    # assertion two lines below (existsSync(dir)).toBe(false)) that fails with
+    # byte-identical text if it breaks for a real, different reason. Anchoring
+    # on the stack-frame line number is what actually discriminates "the known
+    # flake at line 309" from "a new bug at line 310" (cold review, 2026-10-15).
+    # Line-number signatures are brittle to lines being inserted above 309 in
+    # this file — if that ever happens, this stops matching and BLOCKS (fails
+    # closed), which forces someone to look rather than silently re-matching.
+    signature: "agentCliGuard.test.ts:309:"
     added: "2026-10-15"
     expires: "2026-10-29"
 
+  # NOT WIRED YET (see docs/tooling/flaky-quarantine.md — the ios adapter is
+  # built and proven against real logs, but has no macOS runner to verify the
+  # live ios.yml integration). Known limitation carried over from the cold
+  # review that caught the cli entry's generic-signature problem above: these
+  # three ios signatures are the most specific substring captured from the
+  # real failing run WITHOUT including per-run-variable text (memory
+  # addresses, measured pixel values). They have NOT been checked against the
+  # iOS test source for a sibling assertion in the same method that could
+  # produce the same generic text — do that check before wiring these live.
   - id: "ios:ToolTranscriptPresentationTests/testPlanPublicationUpdatesRecyclingAndInspectorPreserveTheDocumentAndAnchor"
     owner: "heavygee"
     issue: 273
-    signature: "XCTAssertNil failed"
+    signature: "XCTAssertNil failed: \"<UICollectionViewCell"
     added: "2026-10-15"
     expires: "2026-10-29"
 

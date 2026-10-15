@@ -27,6 +27,19 @@ run_plain web
 run_plain shared
 run_plain relay
 
+# Whole-registry health (ceiling + schema + issue-open-ness) is its OWN gate,
+# run once, clearly attributed — NOT folded into the package-scoped `check`
+# below. Without this split, an unrelated package's entry going bad (e.g. an
+# `ios:` issue getting closed) would fail THIS cli-only run for a reason that
+# has nothing to do with cli, which is exactly the cross-package coupling the
+# --package flag on `check` exists to avoid. The ceiling itself is
+# deliberately whole-registry (not per-package) — see flaky-quarantine.mjs.
+echo "Validating quarantine registry (whole-file: ceiling + schema + issue-open)..."
+if ! bun "$HERE/flaky-quarantine.mjs" validate --registry "$REPO_ROOT/config/flaky-quarantine.yaml"; then
+    echo "ERROR: config/flaky-quarantine.yaml itself is invalid or over ceiling — fix the registry before any gate can trust it." >&2
+    exit 1
+fi
+
 echo "Running cli tests (quarantine-aware)..."
 CLI_JSON="$(mktemp -t flaky-quarantine-cli-XXXXXX.json)"
 cleanup() { rm -f "$CLI_JSON" "${NORMALIZED:-}"; }
@@ -43,4 +56,4 @@ fi
 
 NORMALIZED="$(mktemp -t flaky-quarantine-results-XXXXXX.json)"
 bun "$HERE/flaky-quarantine.mjs" from-vitest-json "$CLI_JSON" --package cli >"$NORMALIZED"
-bun "$HERE/flaky-quarantine.mjs" check --results "$NORMALIZED" --registry "$REPO_ROOT/config/flaky-quarantine.yaml"
+bun "$HERE/flaky-quarantine.mjs" check --results "$NORMALIZED" --package cli --registry "$REPO_ROOT/config/flaky-quarantine.yaml"

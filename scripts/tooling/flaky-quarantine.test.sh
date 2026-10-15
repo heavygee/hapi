@@ -41,6 +41,14 @@ run_check() {
     set -e
 }
 
+run_check_pkg() {
+    local pkg="$1"
+    set +e
+    bun "$CLI" check --results "$TMP/results.json" --registry "$TMP/registry.yaml" --skip-issue-check --package "$pkg" >"$TMP/out.log" 2>&1
+    echo $?
+    set -e
+}
+
 # --- Control A: matching signature does not block ---------------------------
 registry '  - id: "cli:suite does the thing"
     owner: "alice"
@@ -151,6 +159,35 @@ results '[]'
 rc=$(run_check 2)
 check_exit "ceiling: 3 active entries over ceiling=2 blocks with no test failures" 1 "$rc"
 grep -q "CEILING EXCEEDED" "$TMP/out.log" || { echo "FAIL: ceiling message not found"; fail=1; }
+
+# --- Regression (cold review, 2026-10-15): an unrelated package's broken
+# entry must NOT fail a --package-scoped check. Before the fix, `check` with
+# no package filter validated the WHOLE registry, so a schema error on an
+# `ios:` entry (here: missing owner) would fail a cli-only gate run even
+# though every cli test passed. --package cli must ignore it entirely; an
+# unscoped `validate` must still catch it (whole-registry health is its job).
+registry '  - id: "cli:unaffected cli test"
+    owner: "alice"
+    issue: 1
+    signature: "x"
+    added: "2026-10-15"
+    expires: "2026-10-29"
+  - id: "ios:some broken entry"
+    issue: 1
+    signature: "x"
+    added: "2026-10-15"
+    expires: "2026-10-29"'
+results '[{"id":"cli:unaffected cli test","failed":false,"message":""}]'
+rc=$(run_check_pkg cli)
+check_exit "cross-package: --package cli ignores a broken ios: entry" 0 "$rc"
+grep -q "INVALID" "$TMP/out.log" && { echo "FAIL: --package cli should not even report the ios entry's error"; fail=1; }
+
+set +e
+bun "$CLI" validate --registry "$TMP/registry.yaml" --skip-issue-check >"$TMP/out.log" 2>&1
+vrc=$?
+set -e
+check_exit "cross-package: unscoped validate still catches the broken ios: entry" 2 "$vrc"
+grep -q "INVALID \[owner\] ios:some broken entry" "$TMP/out.log" || { echo "FAIL: validate did not report the broken ios entry"; fail=1; }
 
 if [[ "$fail" -eq 0 ]]; then
     echo "ALL OK: flaky-quarantine negative controls"
