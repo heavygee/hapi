@@ -1230,9 +1230,9 @@ layers:
   # Quest pointer. Layout A: expanded search embeds a 48x48 calendar inside the
   # field, immediately left of the furthest-right 48x48 clear end-cap. Session
   # list keeps showDateFilter=false (collapsed date stays in the filter menu).
-  # Collapsed search stays shrink-0 (no w-full) so it does not steal the
-  # BlockedJumpPill row.
-  # Soup thin tip: driver/search-clear-touch @ 496951fd1
+  # Collapsed search is min-w-0 (no w-full / no shrink-0) so a long query can
+  # yield toolbar space; calendar floats via search-group anchorRef clamp.
+  # Soup thin tip: driver/search-clear-touch @ 848314827
   # Tip-unique verify marker: session-list-search-clear-endcap +
   # session-list-search-date-embedded in web/dist
   # Worktree: ~/coding/hapi/worktrees/search-clear-touch-soup
