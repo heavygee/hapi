@@ -23,12 +23,18 @@ targets:
     seal_url: "https://github.com/heavygee/hapi/releases/download/hapi-fleet/manifest.json"
 
   - id: antevorta
-    type: cattle-vm-swap
+    type: standalone-layer-a
     enabled: true
     host: antevorta-in-linux
     front_door: "https://hapi-antevorta.forest-adder.ts.net"
-    note: "Operator-controlled cattle shard (Doug). VM-swap rehearsal path — never binary in-place seal apply."
-    # Apply requires explicit HAPI_FLEET_CATTLE_APPLY=1 (spoken seal alone plans only).
+    note: >
+      Operator-controlled (Doug). Routine HAPI version upgrades via binary-swap/Layer A,
+      same mechanism as nc-incus — proven, already built. Full cattle VM-swap is a
+      SEPARATE, occasional capability for OS-level resets (security patches, kernel,
+      base-image drift, disaster recovery) — not the path for routine version bumps.
+      That pipeline has never been built as a real product (rehearsed on disposable
+      VMs only; drain-under-load and hostname-steal blackout both still unsolved there).
+      Reclassified 2026-10-15 — do not revert without re-reading why.
 
   - id: hapi-gc-in
     type: cattle-vm-swap

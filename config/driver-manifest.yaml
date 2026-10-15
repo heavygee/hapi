@@ -1226,6 +1226,15 @@ layers:
   # canSoftStandDownUnconfirmedStop in hub syncEngine.archiveSession.
   - branch: feat/archive-peer-2020
 
+  # heavygee/hapi#270 — idle-gate on ALL fleet runner upgrades (deliberate push /
+  # keepalive pull-apply / Layer A seal pull). Defer with upgrade_deferred while
+  # any session on that machineId has thinking===true (same WORKING as soup
+  # patient drain). Mid-turn defers; idle sessions are terminated by the restart.
+  # Sits alongside #84. Tip @ 9389ec033. Worktree:
+  # ~/coding/hapi/worktrees/fleet-upgrade-idle-gate
+  # Hub-only → remat + hapi-restart-hub (no --build-web). Agents must not --activate.
+  - branch: driver/270-fleet-upgrade-idle-gate
+
   # DROPPED 2026-10-06: driver/1933-claude-resume-amnesia — squash 94523eb0d is on
   # fork main (heavygee/hapi#204). Soup base is now origin/main, so tip-forward
   # absorbs it from the base; keeping the layer would double-apply / conflict.
