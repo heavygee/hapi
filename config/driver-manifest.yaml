@@ -1226,12 +1226,12 @@ layers:
   # canSoftStandDownUnconfirmedStop in hub syncEngine.archiveSession.
   - branch: feat/archive-peer-2020
 
-  # heavygee/hapi#270 — idle-gate on ALL fleet runner upgrades (push / policy=auto /
-  # Layer A → self-upgrade). Defer with upgrade_deferred while any session on that
-  # machineId has thinking===true (same WORKING signal as soup patient drain /
-  # hapi-sessions-health). Idle sessions do not block. Sits alongside #84 (hub
-  # restart drain), does not supersede it. Tip @ ff10ba1cf on live soup tip
-  # 83af3f7f9. Worktree: ~/coding/hapi/worktrees/fleet-upgrade-idle-gate
+  # heavygee/hapi#270 — idle-gate on ALL fleet runner upgrades (deliberate push /
+  # keepalive pull-apply / Layer A seal pull). Defer with upgrade_deferred while
+  # any session on that machineId has thinking===true (same WORKING as soup
+  # patient drain). Mid-turn defers; idle sessions are terminated by the restart.
+  # Sits alongside #84. Tip SHA retipped with this commit's tip. Worktree:
+  # ~/coding/hapi/worktrees/fleet-upgrade-idle-gate
   # Hub-only → remat + hapi-restart-hub (no --build-web). Agents must not --activate.
   - branch: driver/270-fleet-upgrade-idle-gate
 

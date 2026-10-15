@@ -21,7 +21,8 @@ and public one-liner pet installs.
 [#256](https://github.com/heavygee/hapi/issues/256) GH `hapi-fleet` ·
 [#257](https://github.com/heavygee/hapi/issues/257) pet-install poles ·
 [#258](https://github.com/heavygee/hapi/issues/258) seal dispatcher.  
-**Related:** #247 #248 #251 · #1108 / #122 context.
+**Related:** #247 #248 #251 · [#270](https://github.com/heavygee/hapi/issues/270) idle-gate ·
+#1108 / #122 context.
 
 ## Product requirement (operator)
 
@@ -34,6 +35,34 @@ inherits the arrangement (#257). Target types are **generic** (registry), not
 host-hardcoded — `hapi-gc-in` must slot in without redesign. Standalone personal
 hubs need the same *discover* half as a **native hub capability**
 (`HAPI_UPSTREAM_SEAL_URL` or settings-equivalent).
+
+## Pull vs push (consent sits on the box)
+
+Steady-state fleet upgrades are a **pull**, not a push. The box (hub Layer A
+watcher, or keepalive against a local offer that already trailed a seal) watches
+the sealed `fleet-latest` / GH `hapi-fleet` pointer and **decides to take it**.
+Nothing reaches into a foreign machine and upgrades it unsolicited.
+
+| Path | Who decides | Call it |
+|------|-------------|---------|
+| Layer A seal poll → materialize → #251 apply | Subscriber hub / machine | **pull** |
+| Per-machine `auto` keepalive apply when local offer trails | That machine's hub | **pull** |
+| `POST /api/fleet/push-upgrade` | Operator (or #258 dispatcher kicking **alert** hosts after a spoken seal) | **push** (deliberate only) |
+
+Do **not** call the watcher / keepalive path "push-upgrade." That name is reserved
+for the deliberate operator/API path. Words shape consent: "push" implied a
+remote yank model this fleet does not have.
+
+## Idle-gate on apply (#270)
+
+Shared WORKING signal with soup patient drain: `session.thinking === true`.
+
+**Mid-turn sessions defer the upgrade; idle sessions are terminated by the
+restart.** Defer returns `upgrade_deferred` (no RPC). Idle / active-but-not-thinking
+does not block. Under pull, terminating idle sessions is the machine's own choice
+to take the seal - not a foundry yank of someone else's mid-turn work. Mid-turn
+is still deferred. Sticky `thinking` is a probe bug to fix (#84), not a reason to
+add an upgrade timeout.
 
 ## Three pointers (do not conflate)
 
@@ -48,8 +77,9 @@ Never fall back to dogfood `latest` / `releases/latest`.
 
 **Tooling:** `hapi-fleet-seal [tag]` verifies digests, points local `fleet-latest`,
 **and** upserts GH release `hapi-fleet` with that tip's assets (#256). Spoken gate
-required. Does **not** move dogfood `latest`. Estate push / cattle VM-swap are the
-#258 dispatcher, not this script alone.
+required. Does **not** move dogfood `latest`. Estate deliberate push (alert hosts) /
+cattle VM-swap are the #258 dispatcher, not this script alone. Layer A / `auto`
+hosts **pull** the new pointer on their own.
 
 ## Poll locations
 
@@ -108,8 +138,8 @@ After download: re-hash bytes; must equal `binaries[].sha256` or abort.
 
 | Class | Examples | Mechanism on spoken seal |
 |-------|----------|--------------------------|
-| `estate-pet` | machines registered on oos hub | local `fleet-latest` + push-upgrade / #251 |
-| `standalone-layer-a` | standalone personal hub CT, public pets | GH `hapi-fleet` → Layer A self-discover |
+| `estate-pet` | machines registered on oos hub | local `fleet-latest` → offer trail → **#251 keepalive pull**; deliberate `POST /fleet/push-upgrade` only for alert hosts / explicit waves |
+| `standalone-layer-a` | standalone personal hub CT, public pets | GH `hapi-fleet` → Layer A **self-discover pull** |
 | `cattle-vm-swap` | antevorta, soon `hapi-gc-in` | VM-swap pipeline (disk reattach / new root / front door) — **not** binary in-place |
 
 Registry lives in fork tooling (`scripts/tooling/fleet-targets.yaml` +
@@ -147,7 +177,7 @@ Mechanical:
 2. Verify tip digests on disk.
 3. Atomically retarget local `fleet-latest` + `fleet-latest-tag.txt`.
 4. **Mandatory:** upsert GH `hapi-fleet` with same digests (#256).
-5. **Dispatch (#258):** estate push / Layer A (passive poll) / cattle VM-swap per registry.
+5. **Dispatch (#258):** estate deliberate push (alert) / Layer A (passive **pull**) / cattle VM-swap per registry.
 6. Unrelated product commits already destined for `tiann/hapi` on their own merits
    may still get an upstream PR — that does **not** mean seal machinery goes upstream.
 
