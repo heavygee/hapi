@@ -18,10 +18,20 @@
  * independent of whether today's tests pass.
  *
  * Usage:
- *   flaky-quarantine.mjs validate [--registry PATH] [--ceiling N] [--skip-issue-check]
- *   flaky-quarantine.mjs check --results PATH.json --package PREFIX [--registry PATH] [--skip-issue-check]
+ *   flaky-quarantine.mjs validate [--registry PATH] [--ceiling N] [--repo OWNER/NAME] [--skip-issue-check]
+ *   flaky-quarantine.mjs check --results PATH.json --package PREFIX [--runner-exit-code N] [--registry PATH] [--repo OWNER/NAME] [--skip-issue-check]
  *   flaky-quarantine.mjs from-vitest-json PATH.json           # adapter: vitest --reporter=json -> normalized results
  *   flaky-quarantine.mjs from-xcodebuild-log PATH.log          # adapter: xcodebuild test stdout  -> normalized results
+ *
+ * `--repo` (default: parsed from the `origin` git remote, falling back to
+ * heavygee/hapi) is where issue-open-ness is checked — this tool has no
+ * heavygee/hapi-specific logic, so a reused copy elsewhere must not silently
+ * keep checking THIS repo's issue numbers.
+ * `--runner-exit-code N` (check only) tells the gate decision that the test
+ * runner itself exited N. If N is non-zero and --results contains no failed
+ * entries at all, that is a runner-level crash (import error, zero tests
+ * discovered) with nothing to attribute to a specific test — it BLOCKS
+ * unconditionally rather than silently passing because nothing matched.
  *
  * `check` reads normalized results from --results, or from stdin if omitted.
  * `--package PREFIX` (e.g. "cli") restricts BOTH which registry entries are
@@ -61,6 +71,28 @@ const registryPath = flag('registry', join(REPO_ROOT, 'config/flaky-quarantine.y
 const ceiling = Number.parseInt(flag('ceiling', String(DEFAULT_CEILING)), 10);
 const skipIssueCheck = has('skip-issue-check');
 
+/**
+ * Default repo for the issue-open check. Hardcoding heavygee/hapi would make
+ * this generic tool silently check the WRONG repo's issue numbers if reused
+ * elsewhere (as the module header says it's designed for) or if this repo is
+ * ever transferred — derive from the origin remote, falling back to the
+ * fork's own slug only when that fails (e.g. no git context at all).
+ */
+function detectRepo() {
+    // `gh repo view`'s default resolution is NOT reliable here: this repo
+    // carries multiple remotes (origin=heavygee/hapi, upstream=tiann/hapi,
+    // plus contributor forks), and `gh repo view` has been observed to
+    // resolve to upstream rather than origin in this exact mirror. Parse
+    // `origin` explicitly instead of trusting gh's own default.
+    const r = spawnSync('git', ['-C', REPO_ROOT, 'remote', 'get-url', 'origin'], { encoding: 'utf8' });
+    if (r.status === 0) {
+        const m = r.stdout.trim().match(/[/:]([^/:]+\/[^/.]+?)(\.git)?$/);
+        if (m) return m[1];
+    }
+    return 'heavygee/hapi';
+}
+const repo = flag('repo', null) ?? detectRepo();
+
 function loadEntries() {
     if (!existsSync(registryPath)) return [];
     return parseQuarantineYaml(readFileSync(registryPath, 'utf8'));
@@ -71,7 +103,7 @@ function fetchIssueStates(entries) {
     const nums = [...new Set(entries.map((e) => e.issue).filter((n) => Number.isInteger(n)))];
     const states = {};
     for (const n of nums) {
-        const r = spawnSync('gh', ['issue', 'view', String(n), '--repo', 'heavygee/hapi', '--json', 'state', '--jq', '.state'], { encoding: 'utf8' });
+        const r = spawnSync('gh', ['issue', 'view', String(n), '--repo', repo, '--json', 'state', '--jq', '.state'], { encoding: 'utf8' });
         states[n] = r.status === 0 ? r.stdout.trim() : 'UNKNOWN';
     }
     return states;
@@ -121,7 +153,8 @@ function runCheck() {
     const { valid, errors, expired } = validateEntries(entries, { issueStates });
     printValidation({ valid, errors, expired });
 
-    const verdict = evaluate({ validEntries: valid, errors, expired, results, ceiling });
+    const runnerExitCode = Number.parseInt(flag('runner-exit-code', '0'), 10);
+    const verdict = evaluate({ validEntries: valid, errors, expired, results, ceiling, runnerExitCode });
 
     console.log(`flaky-quarantine: ${verdict.excused.length} failure(s) excused, ${verdict.blocking.length} blocking, ${verdict.activeCount}/${verdict.ceiling} active`);
     for (const x of verdict.excused) {
