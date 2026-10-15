@@ -275,6 +275,24 @@ if [[ "$OWNER" == "heavygee" ]]; then
         echo "     Tip HEAD: ${HEAD_SHA:0:12}  (could not parse Reviewed commit from body)"
     fi
 
+    # Codex quota fallback (.github/workflows/claude-codex-fallback-review.yml):
+    # a github-actions[bot] review containing "Claude Fallback Review" + the
+    # tip-matched HEAD_SHA is this dimension's alternate verdict when Codex
+    # itself is quota-exhausted — the whole point of that workflow is to not
+    # sit on quota, so this script (the thing agents actually check) must be
+    # able to see its result, not just the formal GitHub review UI.
+    FALLBACK_STATE=""
+    if $USAGE_LIMIT && ! $TIP_MATCHED && [[ -n "$HEAD_SHA" ]]; then
+        FALLBACK_STATE=$(jq -n --slurpfile reviews "$REVIEWS_TMP" --arg sha "${HEAD_SHA:0:12}" '
+            def pages: if type == "array" and length > 0 and (.[0]|type) == "array" then add else . end;
+            ($reviews[0] | pages // [])
+            | [.[]? | select(.user.login == "github-actions[bot]"
+                and ((.body // "") | test("Claude Fallback Review"; "i"))
+                and ((.body // "") | contains($sha)))]
+            | sort_by(.submitted_at) | reverse | .[0].state // empty
+            ' 2>/dev/null || true)
+    fi
+
     if $TIP_AHEAD; then
         echo "     ✗ Tip moved past latest Codex Reviewed commit (${REVIEWED_SHA:0:12})"
         if $USAGE_LIMIT; then
@@ -283,9 +301,17 @@ if [[ "$OWNER" == "heavygee" ]]; then
         echo "     → FAIL (wait for tip-matched Codex wave or @codex review — cold-review-clean does not skip tip-ahead)"
         BOT_OK=false
         PASS=1
+    elif $USAGE_LIMIT && ! $TIP_MATCHED && [[ "$FALLBACK_STATE" == "COMMENTED" ]]; then
+        echo "     ~ Codex usage-limited, but a tip-matched Claude Fallback Review exists (COMMENTED, no blocking findings)"
+        echo "     → PASS (Codex quota fallback — docs/tooling/claude-codex-fallback-review.md)"
+    elif $USAGE_LIMIT && ! $TIP_MATCHED && [[ "$FALLBACK_STATE" == "CHANGES_REQUESTED" ]]; then
+        echo "     ✗ Codex usage-limited; tip-matched Claude Fallback Review requested changes"
+        echo "     → FAIL (address the fallback review's findings)"
+        BOT_OK=false
+        PASS=1
     elif $USAGE_LIMIT && ! $TIP_MATCHED; then
         echo "     ✗ Codex usage-limited (latest comment) and no tip-matched review"
-        echo "     → FAIL (wait for quota / tip-matched Codex wave — cold-review-clean does not skip this)"
+        echo "     → FAIL (wait for quota / tip-matched Codex wave, or a Claude Fallback Review once CLAUDE_REVIEW_ENABLED is on — cold-review-clean does not skip this)"
         BOT_OK=false
         PASS=1
     elif [[ -z "$BODY" ]]; then

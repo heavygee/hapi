@@ -61,7 +61,11 @@ oos-linux where Claude Code is already logged in:
 ```bash
 claude setup-token
 # completes a browser OAuth flow, prints a token
-gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo heavygee/hapi --body "<paste-token>"
+gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo heavygee/hapi
+# paste the token at the prompt, then Ctrl-D — NOT --body "<token>" (cold
+# review, 2026-10-15: --body makes the credential a literal shell-history
+# entry and process argument visible to anyone on this shared host; gh reads
+# from stdin when --body is omitted)
 ```
 
 `heavygee` is a personal GitHub **User** account, not an Org — secrets here

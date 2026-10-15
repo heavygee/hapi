@@ -9,12 +9,30 @@ name: Claude PR review (Codex quota fallback)
 # Code subscription is sitting right here on the same self-hosted runner.
 #
 # Triggers ONLY on the connector's OWN comment/review — the job condition
-# checks the AUTHENTICATED bot login, which a human or external PR author
-# cannot spoof by just typing the usage-limit phrase into a comment — AND
-# only when that body matches the exact usage-limit phrasing
+# checks the AUTHENTICATED bot login + user.type == 'Bot', which a human or
+# external PR author cannot spoof by just typing the usage-limit phrase into
+# a comment — AND only when that body matches the exact usage-limit phrasing
 # hapi-pr-status.sh already matches. Does not run on every PR; does not
-# replace Codex when Codex is working. See
-# docs/tooling/claude-codex-fallback-review.md.
+# replace Codex when Codex is working. hapi-pr-status.sh recognizes a
+# tip-matched, COMMENTED (no blocking findings) fallback review as this
+# dimension's alternate PASS. See docs/tooling/claude-codex-fallback-review.md.
+#
+# SECURITY (cold review, 2026-10-15, citing Anthropic's own claude-code-action
+# guidance on pull_request_target-class triggers): this reviews EXTERNAL,
+# UNTRUSTED fork PRs. The repo's own .claude/settings.json runs
+# ./scripts/tooling/hapi-claude-pretooluse-guard.sh (PreToolUse, on every
+# Bash/Edit/Write/MultiEdit/NotebookEdit call Claude makes) and
+# ./scripts/tooling/hapi-tooling-commit-guard.sh (PostToolUse/Stop) via
+# RELATIVE path. If the untrusted PR head were checked out at the workspace
+# root, an attacker's PR modifying those scripts would get them EXECUTED with
+# this job's pull-requests:write credentials on the very first tool call —
+# even with settings.json itself restored from the trusted base branch,
+# because the hook COMMAND is trusted but the relative path it resolves
+# through is not. So: the TRUSTED base branch stays at the workspace root
+# (default checkout ref, which for issue_comment/pull_request_review is the
+# default branch, never the PR); the untrusted PR head is checked out into
+# ./pr-head/ instead, and Claude is told to review ONLY by diffing/reading
+# inside that subdirectory (gh pr diff is API-based and safe regardless).
 #
 # Off by default until the CLAUDE_REVIEW_ENABLED repo variable is 'true' AND
 # the CLAUDE_CODE_OAUTH_TOKEN repo secret is set — same safe-rollout pattern
@@ -87,11 +105,18 @@ jobs:
                   # Don't re-review a tip Claude already covered — the usage-limit
                   # comment can repeat on later pushes/retries before Codex quota
                   # resets, and this job's own review would otherwise pile up.
-                  ALREADY=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" --paginate 2>/dev/null \
-                      | jq --arg sha "${HEAD_SHA:0:12}" \
-                          '[.[] | select(.user.login == "github-actions[bot]"
-                              and ((.body // "") | test("Claude Fallback Review"; "i"))
-                              and ((.body // "") | contains($sha)))] | length' 2>/dev/null || echo 0)
+                  # --paginate without --slurp emits ONE JSON ARRAY PER PAGE (not
+                  # auto-concatenated) on this gh/endpoint combination — the same
+                  # "pages" merge idiom hapi-pr-status.sh already uses, reused here
+                  # rather than re-deriving it (cold review, 2026-10-15).
+                  REVIEWS_JSON=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" --paginate --slurp 2>/dev/null || echo '[]')
+                  ALREADY=$(printf '%s' "$REVIEWS_JSON" | jq --arg sha "${HEAD_SHA:0:12}" '
+                      def pages: if type == "array" and length > 0 and (.[0]|type) == "array" then add else . end;
+                      (. | pages // [])
+                      | [.[] | select(.user.login == "github-actions[bot]"
+                          and ((.body // "") | test("Claude Fallback Review"; "i"))
+                          and ((.body // "") | contains($sha)))] | length
+                      ' 2>/dev/null || echo 0)
                   if [[ "${ALREADY:-0}" -gt 0 ]]; then
                       echo "run=false" >>"$GITHUB_OUTPUT"
                       echo "Claude already reviewed tip $HEAD_SHA on PR #$PR_NUMBER — skipping duplicate."
@@ -105,10 +130,31 @@ jobs:
                   } >>"$GITHUB_OUTPUT"
                   echo "Codex usage-limit detected on PR #$PR_NUMBER at tip ${HEAD_SHA:0:12} — running Claude fallback review."
 
-            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 — same pin as lockhouse/arthur
+            # TRUSTED base at the workspace root — this is what .claude/settings.json's
+            # hook relative-paths resolve against. Default ref (no `ref:` override):
+            # for issue_comment/pull_request_review this is the default branch, never
+            # the PR. See the file-header security note.
+            - name: Checkout base (trusted) at workspace root
+              id: checkout_base
               if: steps.gate.outputs.run == 'true'
+              continue-on-error: true
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 — same pin as lockhouse/arthur
               with:
-                  ref: refs/pull/${{ steps.gate.outputs.pr_number }}/head
+                  fetch-depth: 0
+
+            # UNTRUSTED PR head — isolated in a subdirectory, never at the root,
+            # so an attacker's modified guard/hook script is never what gets
+            # executed when Claude's tool calls trigger this repo's own hooks.
+            # Pinned to the exact SHA the gate resolved (not a floating
+            # refs/pull/N/head, which could move between gate and checkout).
+            - name: Checkout untrusted PR head into ./pr-head (isolated from hooks)
+              id: checkout_head
+              if: steps.gate.outputs.run == 'true' && steps.checkout_base.outcome == 'success'
+              continue-on-error: true
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  ref: ${{ steps.gate.outputs.head_sha }}
+                  path: pr-head
                   fetch-depth: 0
 
             # ADVISORY, NOT A GATE (matches lockhouse/arthur's claude-review.yml,
@@ -119,7 +165,7 @@ jobs:
             # "did it actually run" report step below instead.
             - name: Claude fallback review
               id: claude_review
-              if: steps.gate.outputs.run == 'true'
+              if: steps.gate.outputs.run == 'true' && steps.checkout_base.outcome == 'success' && steps.checkout_head.outcome == 'success'
               continue-on-error: true
               uses: anthropics/claude-code-action@653c70eb8a3e02371eabde8cc38849ae54ce6a19 # v1 — same pin as lockhouse/arthur
               env:
@@ -131,7 +177,20 @@ jobs:
               with:
                   claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
                   github_token: ${{ github.token }}
-                  track_progress: true
+                  # track_progress forces the action's "tag mode", which rejects
+                  # bot actors by default (checkHumanActor) — every legitimate
+                  # trigger here IS a bot (chatgpt-codex-connector), so that
+                  # check would reject every real run, silently, under
+                  # continue-on-error. Disabled; also the progress-tracking
+                  # issue comment it would post is itself flagged by
+                  # hapi-pr-merge-gate.sh as an unanswered non-author comment
+                  # that blocks merge (cold review, 2026-10-15 — two separate
+                  # bugs, one fix).
+                  track_progress: false
+                  # Defense in depth alongside track_progress:false, in case a
+                  # future action version engages an actor check through a
+                  # different path.
+                  allowed_bots: "chatgpt-codex-connector"
                   prompt: |
                       REPO: ${{ github.repository }}
                       PR NUMBER: ${{ steps.gate.outputs.pr_number }}
@@ -143,6 +202,14 @@ jobs:
                       tip:
                       Claude Fallback Review — reviewed commit: ${{ steps.gate.outputs.head_sha }}
 
+                      SECURITY: the workspace root is the TRUSTED base branch,
+                      not this PR. The PR's actual (untrusted) changes are
+                      checked out at ./pr-head — review the diff there, e.g.
+                      `gh pr diff ${{ steps.gate.outputs.pr_number }}` (safe,
+                      API-based) plus reading files under ./pr-head/ as needed.
+                      Do not execute, source, or `cd` into running anything
+                      from ./pr-head/scripts/ or similar — read it, don't run it.
+
                       Review this pull request for heavygee/hapi, a fork of
                       tiann/hapi (terminal coding-agent session manager).
 
@@ -152,9 +219,10 @@ jobs:
                       3. Tests — meaningful coverage for changed behavior
                       4. Scope — minimal diff; flag unrelated churn
 
-                      Read AGENTS.md and docs/operator/AGENTS.md when present for
-                      project conventions. Post inline comments on specific
-                      lines. Submit a formal pull request review (COMMENT or
+                      Read AGENTS.md and docs/operator/AGENTS.md (at the
+                      workspace root — trusted) when present for project
+                      conventions. Post inline comments on specific lines.
+                      Submit a formal pull request review (COMMENT or
                       REQUEST_CHANGES) with a summary. Do not APPROVE or merge.
                   # Narrower than lockhouse/arthur's allowedTools (cold review,
                   # 2026-10-15): arthur reviews internal/trusted PRs; this
@@ -171,13 +239,25 @@ jobs:
                       --max-turns 80
                       --allowedTools "Read,Glob,Grep,LS,mcp__github_inline_comment__create_inline_comment,mcp__github_comment__update_claude_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*)"
 
-            # Says plainly which of the two happened: "did not run" and "found
-            # nothing" are different facts, and continue-on-error above means
-            # the job's own colour can no longer tell them apart.
+            # Says plainly which of the three outcomes happened: checkout
+            # failure, review failure, or a real completed review — collapsing
+            # any of these into the same red/green signal is the exact
+            # "did not run" vs "found nothing" confusion this workflow exists
+            # to avoid (cold review, 2026-10-15: checkout failing was
+            # originally NOT advisory, contradicting that same goal).
             - name: Report whether the review actually ran
               if: always() && steps.gate.outputs.run == 'true'
               run: |
-                  if [[ '${{ steps.claude_review.outcome }}' == 'success' ]]; then
+                  if [[ '${{ steps.checkout_base.outcome }}' != 'success' || '${{ steps.checkout_head.outcome }}' != 'success' ]]; then
+                      {
+                          echo "### :warning: The Claude fallback review did NOT run (checkout failed)"
+                          echo
+                          echo "base checkout: \`${{ steps.checkout_base.outcome }}\`, PR-head checkout:"
+                          echo "\`${{ steps.checkout_head.outcome }}\`. Advisory only — does not block merges,"
+                          echo "but **nothing here says the diff is fine**."
+                      } >>"$GITHUB_STEP_SUMMARY"
+                      echo "::warning title=Claude fallback review did not run::Checkout failed (base=${{ steps.checkout_base.outcome }}, head=${{ steps.checkout_head.outcome }}) — Codex quota-exhausted AND the fallback also failed before it could review anything."
+                  elif [[ '${{ steps.claude_review.outcome }}' == 'success' ]]; then
                       echo "Claude fallback review completed." >>"$GITHUB_STEP_SUMMARY"
                   else
                       {
