@@ -75,13 +75,13 @@ registry '  - id: "cli:suite does the thing"
     signature: "expected true to be false"
     added: "__TODAY__"
     expires: "__FUTURE__"'
-results '[{"id":"cli:suite does the thing","failed":true,"message":"AssertionError: expected true to be false"}]'
+results '[{"id":"cli:suite does the thing","failed":true,"messages":["AssertionError: expected true to be false"]}]'
 rc=$(run_check)
 check_exit "A: matching signature excuses the failure" 0 "$rc"
 grep -q "EXCUSED: cli:suite does the thing" "$TMP/out.log" || { echo "FAIL: A missing EXCUSED line"; fail=1; }
 
 # --- Control B: id matches, signature does not -> blocks ---------------------
-results '[{"id":"cli:suite does the thing","failed":true,"message":"AssertionError: expected 1 to be 2"}]'
+results '[{"id":"cli:suite does the thing","failed":true,"messages":["AssertionError: expected 1 to be 2"]}]'
 rc=$(run_check)
 check_exit "B: signature mismatch blocks (new/real failure)" 1 "$rc"
 grep -q "BLOCKING: cli:suite does the thing" "$TMP/out.log" || { echo "FAIL: B missing BLOCKING line"; fail=1; }
@@ -94,7 +94,7 @@ registry '  - id: "cli:suite does the thing"
     signature: "expected true to be false"
     added: "2020-01-01"
     expires: "2020-01-15"'
-results '[{"id":"cli:suite does the thing","failed":true,"message":"AssertionError: expected true to be false"}]'
+results '[{"id":"cli:suite does the thing","failed":true,"messages":["AssertionError: expected true to be false"]}]'
 rc=$(run_check)
 check_exit "C: expired entry blocks despite matching signature" 1 "$rc"
 grep -q "EXPIRED (no longer excuses anything): cli:suite does the thing" "$TMP/out.log" || { echo "FAIL: C missing EXPIRED line"; fail=1; }
@@ -107,12 +107,12 @@ registry '  - id: "cli:unrelated test"
     signature: "x"
     added: "__TODAY__"
     expires: "__FUTURE__"'
-results '[{"id":"cli:something else entirely","failed":true,"message":"boom"}]'
+results '[{"id":"cli:something else entirely","failed":true,"messages":["boom"]}]'
 rc=$(run_check)
 check_exit "sanity: unquarantined failure blocks" 1 "$rc"
 
 # --- Sanity: passing tests never block regardless of registry ---------------
-results '[{"id":"cli:something else entirely","failed":false,"message":""}]'
+results '[{"id":"cli:something else entirely","failed":false,"messages":[""]}]'
 rc=$(run_check)
 check_exit "sanity: passing test is always fine" 0 "$rc"
 
@@ -122,7 +122,7 @@ registry '  - id: "cli:no owner"
     signature: "x"
     added: "__TODAY__"
     expires: "__FUTURE__"'
-results '[{"id":"cli:no owner","failed":true,"message":"x"}]'
+results '[{"id":"cli:no owner","failed":true,"messages":["x"]}]'
 rc=$(run_check)
 check_exit "schema: missing owner is a registry error (fails closed)" 1 "$rc"
 grep -q "INVALID \[owner\]" "$TMP/out.log" || { echo "FAIL: missing-owner error not reported"; fail=1; }
@@ -196,10 +196,88 @@ registry '  - owner: "alice"
     signature: "x"
     added: "__TODAY__"
     expires: "__FUTURE__"'
-results '[{"id":"cli:id not first","failed":true,"message":"x"}]'
+results '[{"id":"cli:id not first","failed":true,"messages":["x"]}]'
 rc=$(run_check)
 check_exit "schema: an entry is parsed even when id is not the first field" 0 "$rc"
 grep -q "EXCUSED: cli:id not first" "$TMP/out.log" || { echo "FAIL: reordered-field entry was not recognized"; fail=1; }
+
+# --- Regression (round 2 cold review, 2026-10-15): an item whose FIRST field
+# is unknown/misspelled (not just reordered) must still start an entry, so
+# `id` missing from a genuinely broken item surfaces as a schema error rather
+# than silently discarding the whole item (and everything after it).
+registry '  - iid: "cli:typo id field"
+    owner: "alice"
+    issue: 1
+    signature: "x"
+    added: "__TODAY__"
+    expires: "__FUTURE__"'
+results '[]'
+rc=$(run_check)
+check_exit "schema: an item starting with an unknown field still raises missing-id" 1 "$rc"
+grep -q "INVALID \[id\]" "$TMP/out.log" || { echo "FAIL: unknown-first-field item was silently dropped instead of erroring"; fail=1; }
+
+# --- Regression (round 2): renewal_count present but malformed must error,
+# not silently fall back to the same default (0) as "field absent".
+registry '  - id: "cli:bad renewal count"
+    owner: "alice"
+    issue: 1
+    signature: "x"
+    added: "__TODAY__"
+    expires: "__FUTURE__"
+    renewal_count: 1oops'
+results '[]'
+rc=$(run_check)
+check_exit "schema: a malformed renewal_count (1oops) is rejected, not defaulted to 0" 1 "$rc"
+grep -q "renewal_count must be a whole number" "$TMP/out.log" || { echo "FAIL: malformed-renewal_count error not found"; fail=1; }
+
+# --- Regression (round 2): a future `added` date must be rejected — a year
+# typo (2099 instead of 2026) would otherwise excuse failures for decades
+# while still satisfying the 14-day expiry-window check.
+registry '  - id: "cli:future added"
+    owner: "alice"
+    issue: 1
+    signature: "x"
+    added: "2099-01-01"
+    expires: "2099-01-15"'
+results '[]'
+rc=$(run_check)
+check_exit "schema: a future added date is rejected" 1 "$rc"
+grep -q "is in the future" "$TMP/out.log" || { echo "FAIL: future-added error not found"; fail=1; }
+
+# --- Regression (round 2): an empty " && "-joined signature clause (e.g. a
+# trailing delimiter) must be rejected — message.includes('') is true for
+# EVERY message, so an empty clause would excuse anything under that id.
+registry '  - id: "cli:empty clause"
+    owner: "alice"
+    issue: 1
+    signature: "known text && "
+    added: "__TODAY__"
+    expires: "__FUTURE__"'
+results '[]'
+rc=$(run_check)
+check_exit "schema: a signature with a trailing empty && clause is rejected" 1 "$rc"
+grep -q "empty \" && \"-joined clause" "$TMP/out.log" || { echo "FAIL: empty-signature-clause error not found"; fail=1; }
+
+# --- Regression (round 2): EVERY attached failure message must match the
+# signature, not just one of several joined into a blob. A quarantined test
+# with a known-signature failure PLUS a second, different failure message
+# (e.g. two expect.soft() failures in one test) must block on the second.
+registry '  - id: "cli:soft assertions"
+    owner: "alice"
+    issue: 1
+    signature: "expected true to be false"
+    added: "__TODAY__"
+    expires: "__FUTURE__"'
+results '[{"id":"cli:soft assertions","failed":true,"messages":["AssertionError: expected true to be false","AssertionError: a completely different, new regression"]}]'
+rc=$(run_check)
+check_exit "multi-message: a second, different failure message blocks even when the first matches" 1 "$rc"
+grep -q "BLOCKING: cli:soft assertions" "$TMP/out.log" || { echo "FAIL: multi-message mismatch did not block"; fail=1; }
+
+# Sanity: when EVERY attached message matches, it's still excused.
+results '[{"id":"cli:soft assertions","failed":true,"messages":["AssertionError: expected true to be false","AssertionError: expected true to be false (second assertion)"]}]'
+rc=$(run_check)
+check_exit "multi-message: all attached messages matching the signature still excuses" 0 "$rc"
+grep -q "EXCUSED: cli:soft assertions" "$TMP/out.log" || { echo "FAIL: all-matching multi-message did not excuse"; fail=1; }
 
 # --- Ceiling: too many active entries blocks regardless of test outcome ----
 registry '  - id: "cli:a"
@@ -242,7 +320,7 @@ registry '  - id: "cli:unaffected cli test"
     signature: "x"
     added: "__TODAY__"
     expires: "__FUTURE__"'
-results '[{"id":"cli:unaffected cli test","failed":false,"message":""}]'
+results '[{"id":"cli:unaffected cli test","failed":false,"messages":[""]}]'
 rc=$(run_check_pkg cli)
 check_exit "cross-package: --package cli ignores a broken ios: entry" 0 "$rc"
 grep -q "INVALID" "$TMP/out.log" && { echo "FAIL: --package cli should not even report the ios entry's error"; fail=1; }

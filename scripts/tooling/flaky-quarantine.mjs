@@ -164,7 +164,9 @@ function runCheck() {
         console.error(`  BLOCKING: ${b.id} — ${b.reason}`);
         if (b.expectedSignature) {
             console.error(`    expected signature: ${JSON.stringify(b.expectedSignature)}`);
-            console.error(`    actual message:     ${JSON.stringify((b.message ?? '').slice(0, 200))}`);
+            for (const m of b.messages ?? []) {
+                console.error(`    actual message:     ${JSON.stringify(m.slice(0, 200))}`);
+            }
         }
     }
     if (verdict.ceilingExceeded) {
@@ -174,16 +176,37 @@ function runCheck() {
     process.exit(verdict.pass ? 0 : 1);
 }
 
-/** Adapter: vitest `--reporter=json` -> normalized [{id, failed, message}]. */
+/**
+ * Adapter: vitest `--reporter=json` -> normalized [{id, failed, messages}].
+ *
+ * `messages` is an ARRAY, not a joined string: a quarantined test can fail
+ * with more than one message in one run (multiple `expect.soft()` failures,
+ * or a known assertion plus an unrelated hook failure). Joining them would
+ * let the signature match anywhere in the combined blob, excusing a second,
+ * different regression riding along next to the known flake — evaluate()
+ * requires every element of `messages` to independently match.
+ *
+ * A test FILE can also fail with NO assertions at all — a collection/import
+ * error, or an unhandled exception during setup. Vitest represents this as a
+ * `testResults[]` entry with `status: "failed"`, an empty `assertionResults`,
+ * and a file-level `message`. Emitting that as its own failed result (with
+ * an id no registry entry will ever match) is what makes it BLOCK instead of
+ * silently vanishing because nothing in `assertionResults` represented it.
+ */
 function fromVitestJson(path, pkgPrefix) {
     const data = JSON.parse(readFileSync(path, 'utf8'));
     const out = [];
     for (const file of data.testResults ?? []) {
-        for (const a of file.assertionResults ?? []) {
+        const assertions = file.assertionResults ?? [];
+        if (assertions.length === 0 && file.status === 'failed') {
+            out.push({ id: `${pkgPrefix}:(suite) ${file.name}`, failed: true, messages: [file.message ?? 'suite failed with no assertions'] });
+            continue;
+        }
+        for (const a of assertions) {
             out.push({
                 id: `${pkgPrefix}:${a.fullName}`,
                 failed: a.status === 'failed',
-                message: (a.failureMessages ?? []).join('\n'),
+                messages: a.failureMessages ?? [],
             });
         }
     }
@@ -196,18 +219,23 @@ function fromVitestJson(path, pkgPrefix) {
  * each XCTest failure. Only emits failed entries (xcodebuild's plain stdout
  * does not cleanly enumerate every PASSED test by id the way vitest JSON
  * does) — sufficient for this gate, which only ever needs to classify
- * failures, never passes.
+ * failures, never passes. One result per matched line (not grouped/deduped
+ * by id) so a test with multiple XCTAssert failures in one run is treated
+ * the same way the vitest adapter treats multiple failureMessages — every
+ * message must independently match the signature.
  */
 function fromXcodebuildLog(path) {
     const text = readFileSync(path, 'utf8');
-    const out = [];
+    const grouped = new Map();
     const re = /error: -\[\S+\.(\w+) (\w+)\] : (.+)$/gm;
     let m;
     while ((m = re.exec(text))) {
         const [, cls, method, message] = m;
-        out.push({ id: `ios:${cls}/${method}`, failed: true, message: message.trim() });
+        const id = `ios:${cls}/${method}`;
+        if (!grouped.has(id)) grouped.set(id, []);
+        grouped.get(id).push(message.trim());
     }
-    return out;
+    return [...grouped.entries()].map(([id, messages]) => ({ id, failed: true, messages }));
 }
 
 switch (cmd) {
