@@ -1,0 +1,185 @@
+#!/usr/bin/env bun
+/**
+ * flaky-quarantine — tracked quarantine for intermittently-failing tests.
+ *
+ * GENERIC MECHANISM, FORK-ONLY DATA: see the header of
+ * lib/flaky-quarantine-core.mjs — this CLI and that module contain no
+ * heavygee/hapi-specific logic and are a candidate for an eventual
+ * standalone/upstream extraction. config/flaky-quarantine.yaml (the data) is
+ * fork-specific and stays behind.
+ *
+ * A quarantined test still runs and still reports. This tool never hides a
+ * failure — it only decides whether a failure may be excused for gate-pass
+ * purposes, based on three rules (see core module for the why):
+ *   1. Known id + matching failure signature  -> excused (non-blocking)
+ *   2. Known id + DIFFERENT failure signature -> BLOCKS (new/real failure)
+ *   3. Expired entry (regardless of signature) -> BLOCKS
+ * Plus: more than --ceiling active entries -> the registry itself BLOCKS,
+ * independent of whether today's tests pass.
+ *
+ * Usage:
+ *   flaky-quarantine.mjs validate [--registry PATH] [--ceiling N] [--skip-issue-check]
+ *   flaky-quarantine.mjs check --results PATH.json [--registry PATH] [--ceiling N] [--skip-issue-check]
+ *   flaky-quarantine.mjs from-vitest-json PATH.json           # adapter: vitest --reporter=json -> normalized results
+ *   flaky-quarantine.mjs from-xcodebuild-log PATH.log          # adapter: xcodebuild test stdout  -> normalized results
+ *
+ * `check` reads normalized results from --results, or from stdin if omitted.
+ * Exit codes:
+ *   check:    0 = gate passes. 1 = blocking failure(s), OR registry invalid
+ *             (schema error / over ceiling) — either way, the gate must stop.
+ *   validate: 0 = registry OK. 2 = schema error or over ceiling (distinct
+ *             code so a dedicated lint step can tell "registry itself is
+ *             broken" apart from "a test failed").
+ */
+import { readFileSync, existsSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
+import { parseQuarantineYaml, validateEntries, evaluate, DEFAULT_CEILING } from './lib/flaky-quarantine-core.mjs';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = join(HERE, '..', '..');
+
+const argv = process.argv.slice(2);
+const cmd = argv[0];
+const flag = (name, fallback) => {
+    const i = argv.indexOf(`--${name}`);
+    return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback;
+};
+const has = (name) => argv.includes(`--${name}`);
+
+const registryPath = flag('registry', join(REPO_ROOT, 'config/flaky-quarantine.yaml'));
+const ceiling = Number.parseInt(flag('ceiling', String(DEFAULT_CEILING)), 10);
+const skipIssueCheck = has('skip-issue-check');
+
+function loadEntries() {
+    if (!existsSync(registryPath)) return [];
+    return parseQuarantineYaml(readFileSync(registryPath, 'utf8'));
+}
+
+function fetchIssueStates(entries) {
+    if (skipIssueCheck) return {};
+    const nums = [...new Set(entries.map((e) => e.issue).filter((n) => Number.isInteger(n)))];
+    const states = {};
+    for (const n of nums) {
+        const r = spawnSync('gh', ['issue', 'view', String(n), '--repo', 'heavygee/hapi', '--json', 'state', '--jq', '.state'], { encoding: 'utf8' });
+        states[n] = r.status === 0 ? r.stdout.trim() : 'UNKNOWN';
+    }
+    return states;
+}
+
+function printValidation({ errors, expired, valid }) {
+    console.log(`flaky-quarantine: ${valid.length} active, ${expired.length} expired, ${errors.length} schema error(s) (registry: ${registryPath})`);
+    for (const e of expired) {
+        console.log(`  EXPIRED (no longer excuses anything): ${e.id} — issue #${e.issue}, owner ${e.owner}, expired ${e.expires}`);
+    }
+    for (const err of errors) {
+        console.error(`  INVALID [${err.field}] ${err.id}: ${err.message}`);
+    }
+    for (const e of valid) {
+        console.log(`  active: ${e.id} — issue #${e.issue}, owner ${e.owner}, expires ${e.expires}`);
+    }
+}
+
+function runValidate() {
+    const entries = loadEntries();
+    const issueStates = fetchIssueStates(entries);
+    const result = validateEntries(entries, { issueStates });
+    printValidation(result);
+    const activeCount = result.valid.length;
+    const ceilingExceeded = activeCount > ceiling;
+    if (ceilingExceeded) {
+        console.error(`flaky-quarantine: CEILING EXCEEDED — ${activeCount} active entries > ceiling ${ceiling}. Clean up before adding more.`);
+    }
+    const ok = result.errors.length === 0 && !ceilingExceeded;
+    console.log(ok ? 'flaky-quarantine: validate OK' : 'flaky-quarantine: validate FAILED');
+    process.exit(ok ? 0 : (result.errors.length > 0 ? 2 : 2));
+}
+
+function runCheck() {
+    const resultsPath = flag('results', null);
+    const raw = resultsPath ? readFileSync(resultsPath, 'utf8') : readFileSync(0, 'utf8');
+    const results = JSON.parse(raw);
+
+    const entries = loadEntries();
+    const issueStates = fetchIssueStates(entries);
+    const { valid, errors, expired } = validateEntries(entries, { issueStates });
+    printValidation({ valid, errors, expired });
+
+    const verdict = evaluate({ validEntries: valid, errors, expired, results, ceiling });
+
+    console.log(`flaky-quarantine: ${verdict.excused.length} failure(s) excused, ${verdict.blocking.length} blocking, ${verdict.activeCount}/${verdict.ceiling} active`);
+    for (const x of verdict.excused) {
+        console.log(`  EXCUSED: ${x.id} (issue #${x.issue}, owner ${x.owner}) — known signature`);
+    }
+    for (const b of verdict.blocking) {
+        console.error(`  BLOCKING: ${b.id} — ${b.reason}`);
+        if (b.expectedSignature) {
+            console.error(`    expected signature: ${JSON.stringify(b.expectedSignature)}`);
+            console.error(`    actual message:     ${JSON.stringify((b.message ?? '').slice(0, 200))}`);
+        }
+    }
+    if (verdict.ceilingExceeded) {
+        console.error(`flaky-quarantine: CEILING EXCEEDED — ${verdict.activeCount} active entries > ceiling ${ceiling}. Gate fails until the registry is cleaned up, independent of test results.`);
+    }
+
+    process.exit(verdict.pass ? 0 : 1);
+}
+
+/** Adapter: vitest `--reporter=json` -> normalized [{id, failed, message}]. */
+function fromVitestJson(path, pkgPrefix) {
+    const data = JSON.parse(readFileSync(path, 'utf8'));
+    const out = [];
+    for (const file of data.testResults ?? []) {
+        for (const a of file.assertionResults ?? []) {
+            out.push({
+                id: `${pkgPrefix}:${a.fullName}`,
+                failed: a.status === 'failed',
+                message: (a.failureMessages ?? []).join('\n'),
+            });
+        }
+    }
+    return out;
+}
+
+/**
+ * Adapter: `xcodebuild test` plain stdout -> normalized results. Parses the
+ * `error: -[Module.Class method] : <message>` lines xcodebuild emits for
+ * each XCTest failure. Only emits failed entries (xcodebuild's plain stdout
+ * does not cleanly enumerate every PASSED test by id the way vitest JSON
+ * does) — sufficient for this gate, which only ever needs to classify
+ * failures, never passes.
+ */
+function fromXcodebuildLog(path) {
+    const text = readFileSync(path, 'utf8');
+    const out = [];
+    const re = /error: -\[\S+\.(\w+) (\w+)\] : (.+)$/gm;
+    let m;
+    while ((m = re.exec(text))) {
+        const [, cls, method, message] = m;
+        out.push({ id: `ios:${cls}/${method}`, failed: true, message: message.trim() });
+    }
+    return out;
+}
+
+switch (cmd) {
+    case 'validate':
+        runValidate();
+        break;
+    case 'check':
+        runCheck();
+        break;
+    case 'from-vitest-json': {
+        const results = fromVitestJson(argv[1], flag('package', 'cli'));
+        console.log(JSON.stringify(results, null, 2));
+        break;
+    }
+    case 'from-xcodebuild-log': {
+        const results = fromXcodebuildLog(argv[1]);
+        console.log(JSON.stringify(results, null, 2));
+        break;
+    }
+    default:
+        console.error('Usage: flaky-quarantine.mjs <validate|check|from-vitest-json|from-xcodebuild-log> [...]');
+        process.exit(2);
+}
