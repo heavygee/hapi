@@ -1227,13 +1227,14 @@ layers:
   - branch: driver/270-fleet-upgrade-idle-gate
 
   # tiann/hapi#2019 — session search clear hit target too small for touch /
-  # Quest pointer. Expanded search gets a min 48x48 clear end-cap; date filter
-  # is a sibling chip on the same row, never packed beside clear. Session list
-  # keeps showDateFilter=false (collapsed date stays in the filter menu) but
-  # expanded search still surfaces the date chip because that menu is hidden.
-  # Soup thin tip: driver/search-clear-touch @ 5acab80bf (date chip restore +
-  # collapsed shrink-0 so search does not steal the BlockedJumpPill row).
-  # Tip-unique verify marker: session-list-search-clear-endcap in web/dist
+  # Quest pointer. Layout A: expanded search embeds a 48x48 calendar inside the
+  # field, immediately left of the furthest-right 48x48 clear end-cap. Session
+  # list keeps showDateFilter=false (collapsed date stays in the filter menu).
+  # Collapsed search stays shrink-0 (no w-full) so it does not steal the
+  # BlockedJumpPill row.
+  # Soup thin tip: driver/search-clear-touch @ 496951fd1
+  # Tip-unique verify marker: session-list-search-clear-endcap +
+  # session-list-search-date-embedded in web/dist
   # Worktree: ~/coding/hapi/worktrees/search-clear-touch-soup
   # Web-only → remat --build-web; hard-reload (no hub restart).
   - branch: driver/search-clear-touch
