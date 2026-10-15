@@ -16,10 +16,16 @@ set -euo pipefail
 
 REPO_ROOT="${1:?usage: flaky-quarantine-gate.sh <repo-root>}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Honor an inherited $BUN (hapi-driver-rebuild.sh resolves "${BUN:-$HOME/.bun/bin/bun}"
+# but does not export it — callers must pass it through explicitly, e.g.
+# `BUN="$BUN" bash flaky-quarantine-gate.sh ...`). Falling back to bare `bun`
+# only works when it happens to be on PATH, which the caller's own fallback
+# does not guarantee (cold review, 2026-10-15).
+BUN="${BUN:-bun}"
 
 run_plain() {
     echo "Running $1 tests..."
-    (cd "$REPO_ROOT/$1" && bun run test)
+    (cd "$REPO_ROOT/$1" && "$BUN" run test)
 }
 
 run_plain hub
@@ -35,7 +41,7 @@ run_plain relay
 # --package flag on `check` exists to avoid. The ceiling itself is
 # deliberately whole-registry (not per-package) — see flaky-quarantine.mjs.
 echo "Validating quarantine registry (whole-file: ceiling + schema + issue-open)..."
-if ! bun "$HERE/flaky-quarantine.mjs" validate --registry "$REPO_ROOT/config/flaky-quarantine.yaml"; then
+if ! "$BUN" "$HERE/flaky-quarantine.mjs" validate --registry "$REPO_ROOT/config/flaky-quarantine.yaml"; then
     echo "ERROR: config/flaky-quarantine.yaml itself is invalid or over ceiling — fix the registry before any gate can trust it." >&2
     exit 1
 fi
@@ -46,14 +52,20 @@ cleanup() { rm -f "$CLI_JSON" "${NORMALIZED:-}"; }
 trap cleanup EXIT
 
 set +e
-(cd "$REPO_ROOT/cli" && bun run tools:unpack && bunx vitest run --reporter=default --reporter=json --outputFile.json="$CLI_JSON")
+(cd "$REPO_ROOT/cli" && "$BUN" run tools:unpack && "$BUN" x vitest run --reporter=default --reporter=json --outputFile.json="$CLI_JSON")
+VITEST_RC=$?
 set -e
 
 if [[ ! -s "$CLI_JSON" ]]; then
-    echo "ERROR: cli test run produced no JSON report (a setup step likely failed before vitest ran) — hard failure, not quarantine-eligible" >&2
+    echo "ERROR: cli test run produced no JSON report (a setup step likely failed before vitest ran, exit $VITEST_RC) — hard failure, not quarantine-eligible" >&2
     exit 1
 fi
 
 NORMALIZED="$(mktemp -t flaky-quarantine-results-XXXXXX.json)"
-bun "$HERE/flaky-quarantine.mjs" from-vitest-json "$CLI_JSON" --package cli >"$NORMALIZED"
-bun "$HERE/flaky-quarantine.mjs" check --results "$NORMALIZED" --package cli --registry "$REPO_ROOT/config/flaky-quarantine.yaml"
+"$BUN" "$HERE/flaky-quarantine.mjs" from-vitest-json "$CLI_JSON" --package cli >"$NORMALIZED"
+# --runner-exit-code: a JSON report CAN exist (vitest wrote it) while vitest
+# itself still exited non-zero with zero attributable per-test failures — a
+# collection/import error or zero tests discovered. Without passing this
+# through, that failure mode would silently normalize to an empty results
+# list and the gate would report a clean pass (cold review, 2026-10-15).
+"$BUN" "$HERE/flaky-quarantine.mjs" check --results "$NORMALIZED" --package cli --registry "$REPO_ROOT/config/flaky-quarantine.yaml" --runner-exit-code "$VITEST_RC"

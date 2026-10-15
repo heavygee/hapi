@@ -49,6 +49,13 @@ function parseDate(s, field, errors, id) {
         errors.push({ id, field, message: `${field} is not a valid calendar date: ${s}` });
         return null;
     }
+    // JS Date silently normalizes day-overflow (2026-02-30 -> 2026-03-02)
+    // instead of failing — round-trip through toISOString so a mistyped date
+    // is rejected rather than quietly shifting the quarantine window.
+    if (d.toISOString().slice(0, 10) !== s) {
+        errors.push({ id, field, message: `${field} is not a valid calendar date (normalizes to ${d.toISOString().slice(0, 10)}): ${s}` });
+        return null;
+    }
     return d;
 }
 
@@ -63,28 +70,51 @@ function daysBetween(a, b) {
  * Every field is a plain scalar on its own line; no nested lists except the
  * `quarantine:` top-level one.
  */
+const FIELD_NAMES = ['id', 'owner', 'issue', 'signature', 'added', 'expires', 'renewal_count', 'renewal_reason'];
+const STRICT_INT_RE = /^-?\d+$/;
+
+/**
+ * Returns NaN (not a partial parse) for anything that isn't ENTIRELY digits —
+ * `Number.parseInt` happily reads "27O" as 27 and "1oops" as 1, which would
+ * let a typo'd issue number silently point at a different, unrelated open
+ * issue, or a typo'd renewal_count silently still grant a renewal.
+ */
+function strictInt(s) {
+    return STRICT_INT_RE.test(s) ? Number.parseInt(s, 10) : NaN;
+}
+
+function coerceField(key, rawVal) {
+    const val = stripQuotes(rawVal.trim());
+    if (key === 'issue' || key === 'renewal_count') {
+        const n = strictInt(val);
+        return Number.isNaN(n) ? null : n;
+    }
+    return val;
+}
+
 export function parseQuarantineYaml(text) {
     const entries = [];
     let current = null;
+    // A `-`-prefixed line ALWAYS starts a new list item, regardless of which
+    // field happens to come first — starting only on `- id:` meant an entry
+    // with `id` misspelled, omitted, or merely reordered after another field
+    // silently vanished (never validated as missing, never quarantined).
+    const startRe = new RegExp(`^\\s*-\\s+(${FIELD_NAMES.join('|')}):\\s*(.*)$`);
+    const continuationRe = new RegExp(`^\\s+(${FIELD_NAMES.join('|')}):\\s*(.*)$`);
     for (const raw of text.split('\n')) {
         const line = raw.replace(/\s+$/, '');
         if (/^\s*#/.test(line) || !line.trim()) continue;
-        const start = line.match(/^\s*-\s+id:\s*(.+)$/);
+        const start = line.match(startRe);
         if (start) {
             if (current) entries.push(current);
-            current = { id: stripQuotes(start[1]), owner: null, issue: null, signature: null, added: null, expires: null, renewal_count: 0, renewal_reason: null };
+            current = { id: null, owner: null, issue: null, signature: null, added: null, expires: null, renewal_count: 0, renewal_reason: null };
+            current[start[1]] = coerceField(start[1], start[2]);
             continue;
         }
         if (!current) continue;
-        const kv = line.match(/^\s+(owner|issue|signature|added|expires|renewal_count|renewal_reason):\s*(.*)$/);
+        const kv = line.match(continuationRe);
         if (!kv) continue;
-        const [, key, rawVal] = kv;
-        const val = stripQuotes(rawVal.trim());
-        if (key === 'issue' || key === 'renewal_count') {
-            current[key] = Number.parseInt(val, 10);
-        } else {
-            current[key] = val;
-        }
+        current[kv[1]] = coerceField(kv[1], kv[2]);
     }
     if (current) entries.push(current);
     return entries;
@@ -182,12 +212,36 @@ export function validateEntries(entries, { today, issueStates } = {}) {
 }
 
 /**
+ * A `signature` may name more than one required substring, joined by ` && `,
+ * ALL of which must appear for a match. This exists because a single
+ * substring is a choice between two different gaps: generic assertion text
+ * alone ("expected true to be false") can match a DIFFERENT assertion in the
+ * same test; a stack-trace call site alone ("agentCliGuard.test.ts:309:")
+ * can match a DIFFERENT kind of failure that happens to throw from that same
+ * line (e.g. the function under test starts throwing instead of returning
+ * the wrong boolean). Requiring both closes both gaps at once (cold review,
+ * 2026-10-15 — see config/flaky-quarantine.yaml's cli: entry for a real one).
+ */
+function matchesSignature(message, signature) {
+    if (typeof message !== 'string') return false;
+    return signature.split(' && ').every((part) => message.includes(part.trim()));
+}
+
+/**
  * The actual gate decision. `results` is runner-agnostic:
  *   [{ id: string, failed: boolean, message: string }]
  * `validEntries` must already be schema-valid and non-expired (the output of
  * validateEntries().valid) — this function does not re-check lifecycle.
+ *
+ * `runnerExitCode`, when provided and non-zero, guards against a failure mode
+ * none of the per-test bookkeeping above can see: a runner-level crash
+ * (import error, uncaught rejection, zero tests discovered) that exits
+ * non-zero while producing NO per-test assertion results at all. Without
+ * this check, `results` would be empty, the loop above would find nothing to
+ * block on, and the gate would report a clean pass despite the runner itself
+ * having failed (cold review, 2026-10-15).
  */
-export function evaluate({ validEntries, errors = [], expired = [], results, ceiling = DEFAULT_CEILING }) {
+export function evaluate({ validEntries, errors = [], expired = [], results, ceiling = DEFAULT_CEILING, runnerExitCode = 0 }) {
     const byId = new Map(validEntries.map((e) => [e.id, e]));
     const blocking = [];
     const excused = [];
@@ -199,8 +253,7 @@ export function evaluate({ validEntries, errors = [], expired = [], results, cei
             blocking.push({ id: r.id, reason: 'not quarantined', message: r.message });
             continue;
         }
-        const matches = typeof r.message === 'string' && r.message.includes(entry.signature);
-        if (matches) {
+        if (matchesSignature(r.message, entry.signature)) {
             excused.push({ id: r.id, issue: entry.issue, owner: entry.owner });
         } else {
             blocking.push({
@@ -210,6 +263,14 @@ export function evaluate({ validEntries, errors = [], expired = [], results, cei
                 expectedSignature: entry.signature,
             });
         }
+    }
+
+    if (runnerExitCode !== 0 && results.filter((r) => r.failed).length === 0) {
+        blocking.push({
+            id: '(runner)',
+            reason: `test runner exited ${runnerExitCode} but produced no attributable per-test failure — cannot quarantine an unattributed failure (collection error, crash, or zero tests discovered)`,
+            message: '',
+        });
     }
 
     const activeCount = validEntries.length;
