@@ -1301,38 +1301,61 @@ export function SessionListSearch(props: {
         dateButtonRef.current?.focus()
     }
 
-    // Sibling chip beside the search field (same row) — never packed inside the
-    // clear end-cap cluster. tiann/hapi#2019 / Quest pointer hit targets.
-    // Session list passes showDateFilter=false so collapsed chrome stays lean
-    // (date lives in the filter menu). When search expands that menu is hidden,
-    // so we still surface the chip — otherwise the calendar vanishes entirely.
-    const dateChip = (showDateFilter || props.expanded) ? (
-        <div className="relative shrink-0">
+    // Layout A (operator 2026-10-15): calendar sits INSIDE the expanded field,
+    // immediately left of the 48px clear end-cap (clear stays furthest right).
+    // Collapsed chrome: optional standalone chip when showDateFilter (share);
+    // session list keeps date in the filter menu while collapsed.
+    // tiann/hapi#2019 / Quest: both calendar and clear are min 48x48.
+    const renderDateFilter = (variant: 'standalone' | 'embedded') => (
+        <div className={cn('relative shrink-0', variant === 'embedded' && 'flex items-stretch')}>
             <button
                 ref={dateButtonRef}
                 type="button"
+                data-testid={variant === 'embedded'
+                    ? 'session-list-search-date-embedded'
+                    : 'session-list-search-date-standalone'}
                 onClick={() => setDatePickerOpen(open => !open)}
                 className={cn(
-                    'relative flex min-h-[48px] min-w-[48px] items-center gap-2 rounded-full border px-3 py-2 text-sm transition-colors',
-                    'hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
-                    hasDateRange
-                        ? 'border-[var(--app-link)] text-[var(--app-link)]'
-                        : 'border-[var(--app-border)] text-[var(--app-hint)] hover:text-[var(--app-fg)]'
+                    'relative flex shrink-0 items-center justify-center transition-colors',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] focus-visible:ring-inset',
+                    variant === 'standalone'
+                        ? cn(
+                            'min-h-[48px] gap-2 rounded-full border px-3 py-2 text-sm',
+                            'hover:bg-[var(--app-subtle-bg)]',
+                            hasDateRange
+                                ? 'border-[var(--app-link)] text-[var(--app-link)]'
+                                : 'border-[var(--app-border)] text-[var(--app-hint)] hover:text-[var(--app-fg)]'
+                        )
+                        : cn(
+                            'session-list-search-date-embedded min-h-[48px] min-w-[48px] border-l border-[var(--app-border)] px-0',
+                            'hover:bg-[var(--app-subtle-bg)]',
+                            hasDateRange ? 'text-[var(--app-link)]' : 'text-[var(--app-hint)] hover:text-[var(--app-fg)]'
+                        )
                 )}
-                title={hasDateRange ? `${props.customStart} - ${props.customEnd}` : t('sessions.timeFilter.label')}
+                title={hasDateRange
+                    ? `${props.customStart} - ${props.customEnd}`
+                    : t('sessions.timeFilter.label')}
                 aria-label={hasDateRange
                     ? `${t('sessions.timeFilter.label')}: ${props.customStart} - ${props.customEnd}`
                     : t('sessions.timeFilter.label')}
                 aria-expanded={datePickerOpen}
             >
                 <CalendarIcon className="h-5 w-5 shrink-0" />
-                <span className="font-medium">
-                    {hasDateRange
-                        ? formatTimeFilterChipLabel(props.customStart, props.customEnd)
-                        : t('sessions.timeFilter.chip')}
-                </span>
+                {variant === 'standalone' ? (
+                    <span className="font-medium">
+                        {hasDateRange
+                            ? formatTimeFilterChipLabel(props.customStart, props.customEnd)
+                            : t('sessions.timeFilter.chip')}
+                    </span>
+                ) : null}
                 {hasDateRange ? (
-                    <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-[var(--app-link)]" aria-hidden="true" />
+                    <span
+                        className={cn(
+                            'absolute h-1.5 w-1.5 rounded-full bg-[var(--app-link)]',
+                            variant === 'standalone' ? 'right-1 top-1' : 'right-1.5 top-1.5'
+                        )}
+                        aria-hidden="true"
+                    />
                 ) : null}
             </button>
             {datePickerOpen ? (
@@ -1361,12 +1384,12 @@ export function SessionListSearch(props: {
                             setDatePickerOpen(false)
                             returnDateFocus()
                         }}
-                        align="left"
+                        align={variant === 'standalone' ? 'left' : 'right'}
                     />
                 </>
             ) : null}
         </div>
-    ) : null
+    )
 
     const searchMode = props.searchMode ?? 'metadata'
     const canSearchContent = Boolean(props.onSearchModeChange)
@@ -1552,7 +1575,7 @@ export function SessionListSearch(props: {
                         </button>
                     ) : null}
                 </div>
-                {dateChip}
+                {showDateFilter ? renderDateFilter('standalone') : null}
             </div>
         )
     }
@@ -1561,7 +1584,7 @@ export function SessionListSearch(props: {
         <div
             data-testid="session-list-search"
             data-expanded="true"
-            className="flex min-w-0 flex-1 flex-nowrap items-center gap-1.5"
+            className="relative min-w-0 flex-1"
             onBlur={(event) => {
                 // Losing focus while a hold's transcript is still being applied
                 // must not collapse the field out from under it.
@@ -1571,74 +1594,74 @@ export function SessionListSearch(props: {
                 }
             }}
         >
-            <div className="relative min-w-0 flex-1">
-                <div className="relative flex min-h-12 min-w-0 items-stretch rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] transition-colors focus-within:border-[var(--app-link)]">
-                    <div className="flex shrink-0 items-center pl-2 text-[var(--app-hint)]">
-                        {dictationListening ? (
-                            <span className="h-2 w-2 animate-pulse rounded-full bg-[#007AFF]" aria-hidden="true" />
-                        ) : (
-                            <SearchIcon className="h-5 w-5" />
-                        )}
-                        {dictationListening ? (
-                            <span className="sr-only">{t('sessions.search.dictationActive')}</span>
-                        ) : null}
-                    </div>
-                    {renderSearchMode()}
-                    <input
-                        ref={inputRef}
-                        type="search"
-                        value={props.value}
-                        onChange={(event) => props.onChange(event.target.value)}
-                        disabled={dictationListening}
-                        aria-busy={dictationListening}
-                        placeholder={dictationListening
-                            ? t('sessions.search.dictationProcessing')
-                            : searchMode === 'content'
-                                ? t('sessions.search.content.placeholder')
-                                : t('sessions.search.placeholder')}
-                        aria-label={searchLabel}
-                        title={searchLabel}
-                        className={cn(
-                            'min-w-0 flex-1 appearance-none bg-transparent px-2 py-2 text-sm text-[var(--app-fg)] outline-none placeholder:text-[var(--app-hint)] [text-overflow:ellipsis] [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden',
-                            dictationListening ? 'cursor-wait opacity-70' : null
-                        )}
-                    />
-                    {props.value ? (
-                        <button
-                            type="button"
-                            onClick={() => {
-                                props.onChange('')
-                                // The clear button unmounts with the query; keep focus off <body>
-                                // so a later outside click still routes blur through the wrapper.
-                                inputRef.current?.focus()
-                            }}
-                            className="session-list-search-clear-endcap flex min-h-[48px] min-w-[48px] shrink-0 items-center justify-center border-l border-[var(--app-border)] bg-[var(--app-subtle-bg)] text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] focus-visible:ring-inset"
-                            title={t('sessions.search.clear')}
-                            aria-label={t('sessions.search.clear')}
-                        >
-                            <XIcon className="h-5 w-5" />
-                        </button>
+            <div className="relative flex min-h-12 min-w-0 items-stretch rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] transition-colors focus-within:border-[var(--app-link)]">
+                <div className="flex shrink-0 items-center pl-2 text-[var(--app-hint)]">
+                    {dictationListening ? (
+                        <span className="h-2 w-2 animate-pulse rounded-full bg-[#007AFF]" aria-hidden="true" />
+                    ) : (
+                        <SearchIcon className="h-5 w-5" />
+                    )}
+                    {dictationListening ? (
+                        <span className="sr-only">{t('sessions.search.dictationActive')}</span>
                     ) : null}
                 </div>
-                {dictationListening && dictation.partialTranscript ? (
-                    <div
-                        role="status"
-                        aria-live="polite"
-                        className="absolute inset-x-0 top-full z-10 mt-1 max-h-20 overflow-y-auto rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm text-[var(--app-fg)] shadow-sm"
+                {renderSearchMode()}
+                <input
+                    ref={inputRef}
+                    type="search"
+                    value={props.value}
+                    onChange={(event) => props.onChange(event.target.value)}
+                    disabled={dictationListening}
+                    aria-busy={dictationListening}
+                    placeholder={dictationListening
+                        ? t('sessions.search.dictationProcessing')
+                        : searchMode === 'content'
+                            ? t('sessions.search.content.placeholder')
+                            : t('sessions.search.placeholder')}
+                    aria-label={searchLabel}
+                    title={searchLabel}
+                    className={cn(
+                        'min-w-0 flex-1 appearance-none bg-transparent px-2 py-2 text-sm text-[var(--app-fg)] outline-none placeholder:text-[var(--app-hint)] [text-overflow:ellipsis] [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden',
+                        dictationListening ? 'cursor-wait opacity-70' : null
+                    )}
+                />
+                {/* Calendar inside the field, left of clear (layout A). Always
+                    shown when expanded — session list hides the filter menu. */}
+                {renderDateFilter('embedded')}
+                {props.value ? (
+                    <button
+                        type="button"
+                        onClick={() => {
+                            props.onChange('')
+                            // The clear button unmounts with the query; keep focus off <body>
+                            // so a later outside click still routes blur through the wrapper.
+                            inputRef.current?.focus()
+                        }}
+                        className="session-list-search-clear-endcap flex min-h-[48px] min-w-[48px] shrink-0 items-center justify-center border-l border-[var(--app-border)] bg-[var(--app-subtle-bg)] text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] focus-visible:ring-inset"
+                        title={t('sessions.search.clear')}
+                        aria-label={t('sessions.search.clear')}
                     >
-                        {dictation.partialTranscript}
-                    </div>
-                ) : null}
-                {dictation.error ? (
-                    <div
-                        role="alert"
-                        className="absolute inset-x-0 top-full z-10 mt-1 rounded-md bg-[var(--app-subtle-bg)] px-3 py-2 text-xs text-red-600"
-                    >
-                        {dictation.error}
-                    </div>
+                        <XIcon className="h-5 w-5" />
+                    </button>
                 ) : null}
             </div>
-            {dateChip}
+            {dictationListening && dictation.partialTranscript ? (
+                <div
+                    role="status"
+                    aria-live="polite"
+                    className="absolute inset-x-0 top-full z-10 mt-1 max-h-20 overflow-y-auto rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm text-[var(--app-fg)] shadow-sm"
+                >
+                    {dictation.partialTranscript}
+                </div>
+            ) : null}
+            {dictation.error ? (
+                <div
+                    role="alert"
+                    className="absolute inset-x-0 top-full z-10 mt-1 rounded-md bg-[var(--app-subtle-bg)] px-3 py-2 text-xs text-red-600"
+                >
+                    {dictation.error}
+                </div>
+            ) : null}
         </div>
     )
 }
