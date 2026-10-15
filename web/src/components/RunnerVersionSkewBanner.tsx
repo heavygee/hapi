@@ -347,7 +347,7 @@ export function RunnerVersionSkewBanner({
                     type="button"
                     data-testid="runner-version-skew-expand"
                     onClick={onExpand}
-                    className="w-full rounded-md border-2 border-amber-500 bg-amber-50 px-3 py-1.5 text-left text-xs font-medium text-amber-950 shadow dark:bg-amber-950/90 dark:text-amber-50"
+                    className="w-full rounded-md border-2 border-amber-500 bg-zinc-50 px-3 py-1.5 text-left text-xs font-medium text-zinc-900 shadow dark:bg-zinc-900 dark:text-zinc-50"
                 >
                     {t('runner.skew.banner.minimized', { count: skewed.length, hosts })}
                 </button>
@@ -355,15 +355,17 @@ export function RunnerVersionSkewBanner({
         )
     }
 
+    // Amber border = attention signal only. Surfaces/text are zinc so NOTES
+    // stay readable — amber-50/amber-900 was unreadable taupe-on-tan.
     return (
         <div
             data-testid="runner-version-skew-banner"
             data-state="expanded"
             role="alert"
-            className={`${positionClass} max-h-[40vh] overflow-y-auto rounded-lg border-2 border-amber-500 bg-amber-50 p-3 shadow-lg dark:bg-amber-950/90`}
+            className={`${positionClass} max-h-[40vh] overflow-y-auto rounded-lg border-2 border-amber-500 bg-zinc-50 p-3 shadow-lg dark:bg-zinc-900`}
         >
             <div className="flex items-start justify-between gap-2">
-                <p className="min-w-0 flex-1 text-sm font-semibold text-amber-950 dark:text-amber-50">
+                <p className="min-w-0 flex-1 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
                     {policy === 'auto'
                         ? t('runner.skew.banner.autoProblemTitle', { count: skewed.length })
                         : t('runner.skew.banner.summaryTitle', { count: skewed.length })}
@@ -373,7 +375,7 @@ export function RunnerVersionSkewBanner({
                         type="button"
                         data-testid="runner-version-skew-minimize"
                         onClick={onMinimize}
-                        className="rounded px-2 py-1 text-xs font-medium text-amber-950 hover:bg-amber-200/60 dark:text-amber-50 dark:hover:bg-amber-900"
+                        className="rounded px-2 py-1 text-xs font-medium text-zinc-800 hover:bg-zinc-200/80 dark:text-zinc-100 dark:hover:bg-zinc-700"
                     >
                         {t('runner.skew.banner.minimize')}
                     </button>
@@ -381,7 +383,7 @@ export function RunnerVersionSkewBanner({
                         type="button"
                         data-testid="runner-version-skew-dismiss"
                         onClick={onTempDismiss}
-                        className="rounded px-2 py-1 text-xs font-medium text-amber-950 hover:bg-amber-200/60 dark:text-amber-50 dark:hover:bg-amber-900"
+                        className="rounded px-2 py-1 text-xs font-medium text-zinc-800 hover:bg-zinc-200/80 dark:text-zinc-100 dark:hover:bg-zinc-700"
                     >
                         {t('runner.skew.banner.dismissTemp')}
                     </button>
@@ -391,7 +393,7 @@ export function RunnerVersionSkewBanner({
             {/* Full banner width — body must not share the title row with Minimize/Snooze
                 or mobile leaves a dead column beside the prose (same class of bug as NOTES). */}
             <p
-                className="mt-1 w-full min-w-0 text-xs leading-relaxed text-amber-900 dark:text-amber-100"
+                className="mt-1 w-full min-w-0 text-xs leading-relaxed text-zinc-700 dark:text-zinc-200"
                 data-testid="runner-version-skew-banner-body"
             >
                 {policy === 'auto'
@@ -400,18 +402,19 @@ export function RunnerVersionSkewBanner({
             </p>
 
             {/* Full banner width — must sit outside the title/actions flex row or mobile
-                shrink-wraps NOTES beside Minimize/Snooze (~half width). */}
+                shrink-wraps NOTES beside Minimize/Snooze (~half width).
+                Dark code-block surface: never amber-on-amber for long NOTES. */}
             {offer?.releaseNotes ? (
                 <details
-                    className="mt-2 w-full min-w-0 rounded border border-amber-400/50 bg-amber-100/50 open:bg-amber-100/70 dark:border-amber-200/20 dark:bg-amber-900/30"
+                    className="mt-2 w-full min-w-0 rounded border border-zinc-300 bg-zinc-900 open:bg-zinc-900 dark:border-zinc-600"
                     data-testid="runner-version-skew-release-notes"
                 >
-                    <summary className="block w-full cursor-pointer px-2 py-1 text-xs font-medium text-amber-950 dark:text-amber-50">
+                    <summary className="block w-full cursor-pointer px-2 py-1 text-xs font-medium text-zinc-100">
                         {offer.soupTag
                             ? t('runner.skew.banner.whatsNewTag', { tag: offer.soupTag })
                             : t('runner.skew.banner.whatsNew')}
                     </summary>
-                    <pre className="max-h-40 w-full min-w-0 overflow-x-auto overflow-y-auto whitespace-pre-wrap break-words border-t border-amber-400/40 px-2 py-1.5 font-mono text-[11px] leading-relaxed text-amber-950 dark:border-amber-200/20 dark:text-amber-50">
+                    <pre className="max-h-40 w-full min-w-0 overflow-x-auto overflow-y-auto whitespace-pre-wrap break-words border-t border-zinc-700 px-2 py-1.5 font-mono text-[11px] leading-relaxed text-zinc-100">
                         {offer.releaseNotes}
                     </pre>
                 </details>
@@ -445,14 +448,14 @@ export function RunnerVersionSkewBanner({
                     return (
                         <li
                             key={machine.id}
-                            className="rounded border border-amber-400/60 bg-amber-100/40 p-2 dark:bg-amber-900/40"
+                            className="rounded border border-zinc-300 bg-white p-2 dark:border-zinc-600 dark:bg-zinc-800"
                             data-testid={`runner-version-skew-banner-${machine.id}`}
                         >
                             <div className="flex flex-wrap items-center justify-between gap-2">
-                                <div className="min-w-0 text-xs text-amber-950 dark:text-amber-50">
+                                <div className="min-w-0 text-xs text-zinc-900 dark:text-zinc-50">
                                     <span className="font-medium">{host}</span>
                                     {version ? ` · CLI ${version}` : null}
-                                    <span className="ml-1 text-amber-800 dark:text-amber-200">
+                                    <span className="ml-1 text-zinc-600 dark:text-zinc-300">
                                         {handoffDisabled
                                             ? t('runner.skew.banner.handoffDisabledHint')
                                             : !supportsSelfUpgrade
@@ -469,7 +472,7 @@ export function RunnerVersionSkewBanner({
                                         disabled={!canUpgrade || busy}
                                         title={canUpgrade ? undefined : upgradeDisabledTitle}
                                         onClick={() => void onUpgrade(machine)}
-                                        className="rounded bg-amber-900 px-2 py-1 text-xs font-medium text-amber-50 disabled:opacity-50 dark:bg-amber-100 dark:text-amber-950"
+                                        className="rounded bg-zinc-900 px-2 py-1 text-xs font-medium text-zinc-50 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
                                     >
                                         {busy && canUpgrade ? t('runner.skew.banner.upgrading') : t('runner.skew.banner.upgrade')}
                                     </button>
@@ -479,7 +482,7 @@ export function RunnerVersionSkewBanner({
                                         disabled={!canRestart || busy}
                                         title={canRestart ? undefined : restartDisabledTitle}
                                         onClick={() => void onRestart(machine)}
-                                        className="rounded border border-amber-700/50 px-2 py-1 text-xs font-medium text-amber-950 disabled:opacity-50 dark:border-amber-200/40 dark:text-amber-50"
+                                        className="rounded border border-zinc-400 px-2 py-1 text-xs font-medium text-zinc-900 disabled:opacity-50 dark:border-zinc-500 dark:text-zinc-50"
                                     >
                                         {t('runner.skew.banner.restart')}
                                     </button>
@@ -496,12 +499,12 @@ export function RunnerVersionSkewBanner({
                 </p>
             ) : null}
             {actionInfo && !actionError ? (
-                <p className="mt-2 text-xs text-amber-900 dark:text-amber-100" data-testid="runner-version-skew-action-info">
+                <p className="mt-2 text-xs text-zinc-700 dark:text-zinc-200" data-testid="runner-version-skew-action-info">
                     {actionInfo}
                 </p>
             ) : null}
 
-            <p className="mt-2 text-[11px] leading-relaxed text-amber-800 dark:text-amber-200">
+            <p className="mt-2 text-[11px] leading-relaxed text-zinc-600 dark:text-zinc-300">
                 {t('runner.skew.banner.handoffHint')}
             </p>
         </div>
