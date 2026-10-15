@@ -304,6 +304,13 @@ describe('agentCliGuard', () => {
         writeFileSync(join(dir, 'count'), '1', 'utf8');
         // Unlikely-to-be-alive PID — marker left by SIGKILL mid-publish.
         writeFileSync(join(dir, 'registering', '999999'), '1', 'utf8');
+        // Age past pre-spawn grace. A freshly mkdir'd count-without-pids lock is
+        // intentionally fail-closed (kept) for PRESPAWN_RESERVATION_GRACE_MS —
+        // that path is covered by the sibling "keeps a fresh count-without-pids"
+        // test. This case is crash debris, not a live reservation race.
+        const aged = Date.now() - 60_000;
+        utimesSync(dir, aged / 1000, aged / 1000);
+        utimesSync(join(dir, 'pids'), aged / 1000, aged / 1000);
         _setActiveAcpTransportCountForTests(0);
 
         expect(isAgentAcpTransportActive()).toBe(false);
