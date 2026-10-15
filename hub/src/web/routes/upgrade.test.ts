@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Hono } from 'hono'
@@ -11,6 +12,7 @@ import {
 } from '../../upgrade/fleetUpgradePolicy'
 
 const tmpDirs: string[] = []
+const previousSoupRoot = process.env.HAPI_SOUP_ARTIFACTS_ROOT
 
 function makeApp(namespace = 'default') {
     const app = new Hono<WebAppEnv>()
@@ -23,8 +25,53 @@ function makeApp(namespace = 'default') {
     return app
 }
 
+/** Tip with distinct linux vs windows digests — kill-criterion for #284. */
+function writeDualPlatformTip(root: string): { tag: string; linuxSha: string; winSha: string } {
+    const tag = 'hapi-soup-v2026.10.15-platform284'
+    const tipDir = join(root, tag)
+    const linuxBytes = 'linux-x64-baseline-bytes-for-284'
+    const winBytes = 'windows-x64-bytes-for-284-a0025e8d'
+    const linuxSha = createHash('sha256').update(linuxBytes).digest('hex')
+    const winSha = createHash('sha256').update(winBytes).digest('hex')
+    mkdirSync(join(tipDir, 'linux-x64-baseline'), { recursive: true })
+    mkdirSync(join(tipDir, 'windows-x64'), { recursive: true })
+    writeFileSync(join(tipDir, 'linux-x64-baseline', 'hapi'), linuxBytes)
+    writeFileSync(join(tipDir, 'windows-x64', 'hapi.exe'), winBytes)
+    writeFileSync(join(tipDir, 'manifest.json'), `${JSON.stringify({
+        schema: 1,
+        tag,
+        composedTipSha: 'deadbeefplatform284',
+        binaries: [
+            {
+                target: 'bun-linux-x64-baseline',
+                platform: 'linux',
+                arch: 'x64',
+                variant: 'baseline',
+                path: 'linux-x64-baseline/hapi',
+                sha256: linuxSha,
+                sizeBytes: Buffer.byteLength(linuxBytes),
+            },
+            {
+                target: 'bun-windows-x64',
+                platform: 'windows',
+                arch: 'x64',
+                path: 'windows-x64/hapi.exe',
+                sha256: winSha,
+                sizeBytes: Buffer.byteLength(winBytes),
+            },
+        ],
+    }, null, 2)}\n`)
+    symlinkSync(tag, join(root, 'latest'))
+    return { tag, linuxSha, winSha }
+}
+
 afterEach(() => {
     resetFleetUpgradePolicyForTests()
+    if (previousSoupRoot === undefined) {
+        delete process.env.HAPI_SOUP_ARTIFACTS_ROOT
+    } else {
+        process.env.HAPI_SOUP_ARTIFACTS_ROOT = previousSoupRoot
+    }
     for (const dir of tmpDirs.splice(0)) {
         rmSync(dir, { recursive: true, force: true })
     }
@@ -129,5 +176,94 @@ describe('upgrade routes', () => {
             body: JSON.stringify({ machineIds: ['ninja'] }),
         })
         expect(res.status).toBe(403)
+    })
+
+    it('GET /upgrade/offer?platform=win32 returns windows tip sha, not hub linux (#284)', async () => {
+        const soupRoot = mkdtempSync(join(tmpdir(), 'hapi-soup-284-'))
+        const policyDir = mkdtempSync(join(tmpdir(), 'hapi-upgrade-284-'))
+        tmpDirs.push(soupRoot, policyDir)
+        process.env.HAPI_SOUP_ARTIFACTS_ROOT = soupRoot
+        const { tag, linuxSha, winSha } = writeDualPlatformTip(soupRoot)
+        expect(linuxSha).not.toBe(winSha)
+        initFleetUpgradePolicy({ dataDir: policyDir, persisted: 'alert' })
+
+        const linuxRes = await makeApp().request('/api/upgrade/offer?platform=linux&arch=x64')
+        expect(linuxRes.status).toBe(200)
+        const linuxBody = await linuxRes.json() as {
+            offer: {
+                targetVersion: string
+                artifact?: { platform: string; arch: string; sha256: string }
+            }
+            availablePlatforms?: Array<{ platform: string; arch: string }>
+        }
+        expect(linuxBody.offer.targetVersion).toBe(tag)
+        expect(linuxBody.offer.artifact?.platform).toBe('linux')
+        expect(linuxBody.offer.artifact?.sha256).toBe(linuxSha)
+
+        const winRes = await makeApp().request('/api/upgrade/offer?platform=win32&arch=x64')
+        expect(winRes.status).toBe(200)
+        const winBody = await winRes.json() as {
+            offer: {
+                targetVersion: string
+                artifact?: { platform: string; arch: string; sha256: string }
+            }
+            availablePlatforms?: Array<{ platform: string; arch: string }>
+        }
+        expect(winBody.offer.targetVersion).toBe(tag)
+        expect(winBody.offer.artifact?.platform).toBe('win32')
+        expect(winBody.offer.artifact?.arch).toBe('x64')
+        expect(winBody.offer.artifact?.sha256).toBe(winSha)
+        expect(winBody.offer.artifact?.sha256).not.toBe(linuxSha)
+
+        // Alias: platform=windows must normalize to win32 Node token
+        const aliasRes = await makeApp().request('/api/upgrade/offer?platform=windows&arch=x64')
+        const aliasBody = await aliasRes.json() as {
+            offer: { artifact?: { platform: string; sha256: string } }
+        }
+        expect(aliasBody.offer.artifact?.platform).toBe('win32')
+        expect(aliasBody.offer.artifact?.sha256).toBe(winSha)
+
+        const platforms = winBody.availablePlatforms ?? []
+        expect(platforms.some((p) => p.platform === 'linux' && p.arch === 'x64')).toBe(true)
+        expect(platforms.some((p) => p.platform === 'win32' && p.arch === 'x64')).toBe(true)
+    })
+
+    it('GET /upgrade/offer with X-Hapi-Platform header selects win32 artifact', async () => {
+        const soupRoot = mkdtempSync(join(tmpdir(), 'hapi-soup-284h-'))
+        const policyDir = mkdtempSync(join(tmpdir(), 'hapi-upgrade-284h-'))
+        tmpDirs.push(soupRoot, policyDir)
+        process.env.HAPI_SOUP_ARTIFACTS_ROOT = soupRoot
+        const { winSha } = writeDualPlatformTip(soupRoot)
+        initFleetUpgradePolicy({ dataDir: policyDir, persisted: 'alert' })
+
+        const res = await makeApp().request('/api/upgrade/offer', {
+            headers: {
+                'X-Hapi-Platform': 'win32',
+                'X-Hapi-Arch': 'x64',
+            },
+        })
+        expect(res.status).toBe(200)
+        const body = await res.json() as {
+            offer: { artifact?: { platform: string; sha256: string } }
+        }
+        expect(body.offer.artifact?.platform).toBe('win32')
+        expect(body.offer.artifact?.sha256).toBe(winSha)
+    })
+
+    it('fail-closed: win32 query never returns linux artifact when tip has windows (#284)', async () => {
+        const soupRoot = mkdtempSync(join(tmpdir(), 'hapi-soup-284fc-'))
+        const policyDir = mkdtempSync(join(tmpdir(), 'hapi-upgrade-284fc-'))
+        tmpDirs.push(soupRoot, policyDir)
+        process.env.HAPI_SOUP_ARTIFACTS_ROOT = soupRoot
+        const { linuxSha } = writeDualPlatformTip(soupRoot)
+        initFleetUpgradePolicy({ dataDir: policyDir, persisted: 'alert' })
+
+        const res = await makeApp().request('/api/upgrade/offer?platform=win32&arch=x64')
+        const body = await res.json() as {
+            offer: { artifact?: { platform: string; sha256: string } }
+        }
+        // Kill-criterion: hub-OS-only regression would return linux sha here.
+        expect(body.offer.artifact?.platform).not.toBe('linux')
+        expect(body.offer.artifact?.sha256).not.toBe(linuxSha)
     })
 })

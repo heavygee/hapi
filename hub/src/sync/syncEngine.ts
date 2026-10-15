@@ -235,8 +235,12 @@ function extractClaudeUserMessageTextFromAgentOutput(content: unknown): string |
 }
 
 export type SyncEngineOptions = {
-    /** Resolve the current hub upgrade offer (channel + version + optional artifact). */
-    getUpgradeOffer?: () => HubUpgradeOffer
+    /**
+     * Resolve the current hub upgrade offer (channel + version + optional artifact).
+     * Optional platform/arch select a matching soup tip / compile target — do not
+     * assume hub `process.platform` (heavygee/hapi#284).
+     */
+    getUpgradeOffer?: (platform?: string, arch?: string) => HubUpgradeOffer
     /** Ensure hub-artifact bytes exist; returns offer with sha256 filled. */
     prepareArtifactOffer?: (offer: HubUpgradeOffer, platform: string, arch: string) => Promise<HubUpgradeOffer>
     /**
@@ -289,7 +293,7 @@ export class SyncEngine {
     private readonly fleetUpgradeAttemptAt = new Map<string, number>()
     private lastAutoUpgradeOfferKey: string | null = null
     private static readonly FLEET_UPGRADE_COOLDOWN_MS = 15 * 60_000
-    private readonly getUpgradeOffer: (() => HubUpgradeOffer) | null
+    private readonly getUpgradeOffer: ((platform?: string, arch?: string) => HubUpgradeOffer) | null
     private readonly prepareArtifactOffer: SyncEngineOptions['prepareArtifactOffer']
     private readonly getFleetUpgradePolicy: () => FleetUpgradePolicy
     /**
@@ -1567,11 +1571,6 @@ export class SyncEngine {
         if (getEffectiveFleetUpgradePolicy(machineId) !== 'auto') {
             return
         }
-        const offer = this.getUpgradeOffer()
-        if (offer.channel === 'off') {
-            return
-        }
-        this.clearFleetUpgradeCooldownIfTargetMoved(offer)
         const machine = this.machineCache.getMachine(machineId)
         if (!machine?.active || !machine.metadata) {
             return
@@ -1579,6 +1578,24 @@ export class SyncEngine {
         if (machine.metadata.versionHandoffDisabled === true) {
             return
         }
+        // Platform-aware offer (#284): do not trail-check win32 machines against
+        // the hub-OS linux artifact (keepalive used to hammer upgrade_unavailable).
+        const platform = machine.metadata.platform
+        const arch = machine.metadata.arch ?? inferMachineArch(platform)
+        const offer = this.getUpgradeOffer(platform ?? undefined, arch ?? undefined)
+        if (offer.channel === 'off') {
+            return
+        }
+        // Soup tip with no bytes for this platform — do not keepalive-nudge.
+        // Live-tree fingerprint offers omit artifact until prepare compiles.
+        if (
+            offer.channel === 'hub-artifact'
+            && !offer.artifact?.sha256
+            && (Boolean(offer.soupTag) || offer.targetVersion.startsWith('hapi-soup-v'))
+        ) {
+            return
+        }
+        this.clearFleetUpgradeCooldownIfTargetMoved(offer)
         if (!machineTrailsUpgradeOffer(
             offer,
             machine.metadata.happyCliVersion,
@@ -1838,7 +1855,12 @@ export class SyncEngine {
             }
         }
 
-        let offer = this.getUpgradeOffer()
+        const machinePlatform = machine.metadata?.platform
+        const machineArch = machine.metadata?.arch ?? inferMachineArch(machinePlatform)
+        let offer = this.getUpgradeOffer(
+            machinePlatform ?? undefined,
+            machineArch ?? undefined,
+        )
         if (offer.channel === 'off') {
             return { type: 'error', message: 'Fleet upgrade disabled (HAPI_UPGRADE_CHANNEL=off)', code: 'upgrade_unavailable' }
         }
@@ -1887,12 +1909,26 @@ export class SyncEngine {
             if (!this.prepareArtifactOffer) {
                 return { type: 'error', message: 'Artifact builder not configured', code: 'upgrade_unavailable' }
             }
-            const platform = machine.metadata?.platform
-            const arch = machine.metadata?.arch ?? inferMachineArch(platform)
+            const platform = machinePlatform
+            const arch = machineArch
             if (!platform || !arch) {
                 return {
                     type: 'error',
                     message: 'Machine platform/arch unavailable for hub-artifact upgrade',
+                    code: 'upgrade_unavailable',
+                }
+            }
+            // Soup tip with no binary for this platform — do not compile/serve hub-OS bytes.
+            // Fingerprint offers intentionally omit artifact until prepare builds one.
+            if (
+                !offer.artifact?.sha256
+                && (Boolean(offer.soupTag) || offer.targetVersion.startsWith('hapi-soup-v'))
+            ) {
+                return {
+                    type: 'error',
+                    message:
+                        `No hub-artifact for ${platform}/${arch} on tip ${offer.targetVersion}; `
+                        + 'publish that platform or plant the CLI on the machine',
                     code: 'upgrade_unavailable',
                 }
             }
@@ -1972,8 +2008,8 @@ export class SyncEngine {
         }
     }
 
-    getHubUpgradeOffer(): HubUpgradeOffer | null {
-        return this.getUpgradeOffer?.() ?? null
+    getHubUpgradeOffer(platform?: string, arch?: string): HubUpgradeOffer | null {
+        return this.getUpgradeOffer?.(platform, arch) ?? null
     }
 
     private expireInactive(): void {

@@ -46,8 +46,15 @@ export async function fetchHubTargetGeneration(deps: {
         if (typeof authBody.token !== 'string' || authBody.token.length === 0) {
             return null
         }
-        const offerRes = await fetchImpl(`${apiUrl}/api/upgrade/offer`, {
-            headers: { Authorization: `Bearer ${authBody.token}` },
+        const offerUrl = new URL(`${apiUrl}/api/upgrade/offer`)
+        offerUrl.searchParams.set('platform', process.platform)
+        offerUrl.searchParams.set('arch', process.arch)
+        const offerRes = await fetchImpl(offerUrl.toString(), {
+            headers: {
+                Authorization: `Bearer ${authBody.token}`,
+                'X-Hapi-Platform': process.platform,
+                'X-Hapi-Arch': process.arch,
+            },
             signal: AbortSignal.timeout(timeoutMs),
         })
         if (!offerRes.ok) {

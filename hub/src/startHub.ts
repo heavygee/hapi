@@ -136,11 +136,29 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     let tunnelManager: TunnelManager | null = null
     let upstreamSealSubscriber: UpstreamSealSubscriber | null = null
 
-    let cachedUpgradeOffer: { at: number; offer: ReturnType<typeof resolveUpgradeOffer> } | null = null
+    let cachedUpgradeOffer: {
+        at: number
+        platform: string
+        arch: string
+        offer: ReturnType<typeof resolveUpgradeOffer>
+    } | null = null
     const UPGRADE_OFFER_TTL_MS = 30_000
-    const resolveCurrentUpgradeOffer = () => {
+    /**
+     * Resolve offer for a runner platform/arch (#284). Hub-OS default stays
+     * cached; cross-platform requests never reuse the hub-OS artifact cache
+     * and never poison it (win32 prep must not become the GET default).
+     */
+    const resolveCurrentUpgradeOffer = (
+        platform: string = process.platform,
+        arch: string = process.arch,
+    ) => {
         const now = Date.now()
-        if (cachedUpgradeOffer && now - cachedUpgradeOffer.at < UPGRADE_OFFER_TTL_MS) {
+        if (
+            cachedUpgradeOffer
+            && now - cachedUpgradeOffer.at < UPGRADE_OFFER_TTL_MS
+            && cachedUpgradeOffer.platform === platform
+            && cachedUpgradeOffer.arch === arch
+        ) {
             return cachedUpgradeOffer.offer
         }
         const offer = resolveUpgradeOffer({
@@ -153,16 +171,38 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         if (offer.channel === 'hub-artifact' && preferPublishedSoupTip()) {
             const tip = readPublishedSoupTip()
             if (tip) {
-                const soupOffer = soupTipToUpgradeOffer(tip, process.platform, process.arch, offer)
-                if (soupOffer) {
-                    cachedUpgradeOffer = { at: now, offer: soupOffer }
+                const soupOffer = soupTipToUpgradeOffer(tip, platform, arch, offer)
+                if (soupOffer?.artifact) {
+                    cachedUpgradeOffer = { at: now, platform, arch, offer: soupOffer }
                     return soupOffer
                 }
-                console.warn(
-                    `[fleet-upgrade] soup tip ${tip.tag} present but no binary for `
-                    + `${process.platform}/${process.arch}; falling back to source fingerprint`,
-                )
+                if (soupOffer && !soupOffer.artifact) {
+                    // Tip identity without bytes for this platform — never hand
+                    // back the hub-OS linux artifact as a substitute.
+                    console.warn(
+                        `[fleet-upgrade] soup tip ${tip.tag} has no binary for `
+                        + `${platform}/${arch}`,
+                    )
+                    cachedUpgradeOffer = { at: now, platform, arch, offer: soupOffer }
+                    return soupOffer
+                }
+                if (platform === process.platform && arch === process.arch) {
+                    console.warn(
+                        `[fleet-upgrade] soup tip ${tip.tag} present but no binary for `
+                        + `${platform}/${arch}; falling back to source fingerprint`,
+                    )
+                }
             }
+        }
+        // Cross-platform request with no soup tip binary: do not compile a
+        // fingerprint offer that still lacks a matching artifact.
+        if (platform !== process.platform || arch !== process.arch) {
+            const cross: ReturnType<typeof resolveUpgradeOffer> = {
+                ...offer,
+                artifact: undefined,
+            }
+            cachedUpgradeOffer = { at: now, platform, arch, offer: cross }
+            return cross
         }
         if (offer.channel === 'hub-artifact' && !offer.targetGeneration) {
             const monorepoRoot = findMonorepoRoot(defaultHubPackageRoot())
@@ -177,11 +217,15 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
                 }
             }
         }
-        cachedUpgradeOffer = { at: now, offer }
+        cachedUpgradeOffer = { at: now, platform, arch, offer }
         return offer
     }
-    const rememberUpgradeOffer = (offer: ReturnType<typeof resolveUpgradeOffer>): void => {
-        cachedUpgradeOffer = { at: Date.now(), offer }
+    const rememberUpgradeOffer = (
+        offer: ReturnType<typeof resolveUpgradeOffer>,
+        platform: string = process.platform,
+        arch: string = process.arch,
+    ): void => {
+        cachedUpgradeOffer = { at: Date.now(), platform, arch, offer }
     }
     setConfiguredUpgradeTargetVersion(options.cliVersion)
     // Load configuration (async - loads from env/file with persistence)
@@ -282,7 +326,10 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     })
 
     syncEngine = new SyncEngine(store, socketServer.io, socketServer.rpcRegistry, sseManager, {
-        getUpgradeOffer: () => resolveCurrentUpgradeOffer(),
+        getUpgradeOffer: (platform, arch) => resolveCurrentUpgradeOffer(
+            platform ?? process.platform,
+            arch ?? process.arch,
+        ),
         getFleetUpgradePolicy: () => getFleetUpgradePolicy(),
         prepareArtifactOffer: async (offer, platform, arch) => {
             const tip = preferPublishedSoupTip()
@@ -317,7 +364,9 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
                     sizeBytes: meta.sizeBytes,
                 },
             }
-            rememberUpgradeOffer(prepared)
+            // Cache under the prepared platform only — never overwrite the
+            // hub-default linux offer with a win32 prep (#284).
+            rememberUpgradeOffer(prepared, platform, arch)
             return prepared
         },
     })

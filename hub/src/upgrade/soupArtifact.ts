@@ -166,6 +166,10 @@ export function findSoupBinary(
  * targetVersion and targetGeneration are both the soup tag — same contract as
  * `hapi-fleet-runner-upgrade` durable markers — so semver-skew (tip embeds
  * 0.29.x while stock sits at 0.30.x) cannot stomp the tip via versionBehind.
+ *
+ * When the tip has no binary for `platform`/`arch`, returns an offer with the
+ * tip identity but **no** `artifact` — callers must not fall back to the hub
+ * OS binary (gift/Ninja 2026-10-15: linux offer to win32).
  */
 export function soupTipToUpgradeOffer(
     tip: PublishedSoupTip,
@@ -173,19 +177,22 @@ export function soupTipToUpgradeOffer(
     arch: string = process.arch,
     baseOffer?: HubUpgradeOffer,
 ): HubUpgradeOffer | null {
-    const found = findSoupBinary(tip, platform, arch)
-    if (!found) {
-        return null
-    }
-    const { entry } = found
     const releaseNotes = tip.releaseNotes ?? readSoupReleaseNotes(tip.root)
-    return {
+    const tipIdentity: HubUpgradeOffer = {
         channel: 'hub-artifact',
         targetVersion: tip.tag,
         targetGeneration: tip.tag,
         soupTag: tip.tag,
         ...(releaseNotes ? { releaseNotes } : {}),
         targetCapabilities: baseOffer?.targetCapabilities ?? [],
+    }
+    const found = findSoupBinary(tip, platform, arch)
+    if (!found) {
+        return tipIdentity
+    }
+    const { entry } = found
+    return {
+        ...tipIdentity,
         artifact: {
             url: `/cli/upgrade/cli-artifact?sha256=${encodeURIComponent(entry.sha256)}`,
             sha256: entry.sha256,
