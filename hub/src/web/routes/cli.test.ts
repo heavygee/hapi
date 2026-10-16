@@ -709,4 +709,33 @@ describe('cli machine registration (#2038 / heavygee#287)', () => {
         expect(response.status).toBe(409)
         expect(await response.json()).toEqual({ error: 'Machine tag mismatch' })
     })
+
+    it('checks a machine tag without creating or rebinding the row', async () => {
+        const getOrCreateMachine = mock(() => {
+            throw new Error('check-tag must not register')
+        })
+        const app = createApp({
+            getMachineAuthMaterial: (id: string) => id === 'machine-1'
+                ? { namespace: 'default', tag: 'secret-tag', runnerProofHash: 'hash' }
+                : null,
+            getOrCreateMachine,
+        } as never)
+
+        const ok = await app.request('/cli/machines/machine-1/check-tag', {
+            method: 'POST',
+            headers: { ...authHeaders(), 'content-type': 'application/json' },
+            body: JSON.stringify({ tag: 'secret-tag' }),
+        })
+        expect(ok.status).toBe(200)
+        expect(await ok.json()).toEqual({ ok: true })
+
+        const mismatch = await app.request('/cli/machines/machine-1/check-tag', {
+            method: 'POST',
+            headers: { ...authHeaders(), 'content-type': 'application/json' },
+            body: JSON.stringify({ tag: 'wrong-tag' }),
+        })
+        expect(mismatch.status).toBe(409)
+        expect(await mismatch.json()).toEqual({ error: 'Machine tag mismatch' })
+        expect(getOrCreateMachine).not.toHaveBeenCalled()
+    })
 })

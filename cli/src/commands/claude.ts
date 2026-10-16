@@ -113,7 +113,7 @@ export const claudeCommand: CommandDefinition = {
             // Stay until the child owns runner.state.json. Session bootstrap
             // treats a live-but-not-ready runner as mid-rotation and will not
             // bind the legacy machine id (#288).
-            const spawnedDeadline = Date.now() + 90_000
+            const spawnedDeadline = Date.now() + 150_000
             while (Date.now() < spawnedDeadline) {
                 const state = await readRunnerState().catch(() => null)
                 if (typeof state?.pid === 'number' && isProcessAlive(state.pid)) {
