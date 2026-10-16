@@ -100,7 +100,7 @@ describe('bootstrapExistingSession', () => {
         getOrCreateSessionMock.mockReset()
         getOrCreateMachineMock.mockReset()
         getMachineMock.mockReset()
-        getMachineMock.mockResolvedValue(null)
+        getMachineMock.mockResolvedValue({ id: 'machine-1' })
         sessionSyncClientMock.mockReset()
         notifyRunnerSessionStartedMock.mockClear()
         readSettingsMock.mockReset()
@@ -350,7 +350,7 @@ describe('bootstrapLazySession', () => {
         getOrCreateSessionMock.mockReset()
         getOrCreateMachineMock.mockReset()
         getMachineMock.mockReset()
-        getMachineMock.mockResolvedValue(null)
+        getMachineMock.mockResolvedValue({ id: 'machine-1' })
         sessionSyncClientMock.mockReset()
         notifyRunnerSessionStartedMock.mockClear()
         readSettingsMock.mockReset()
@@ -410,7 +410,7 @@ describe('bootstrapLazySession', () => {
 
         const materialized = createSession()
         materialized.id = provisional.id
-        getOrCreateMachineMock.mockResolvedValue({ id: 'machine-1' })
+        getMachineMock.mockResolvedValue({ id: 'machine-1' })
         getOrCreateSessionMock.mockResolvedValue(materialized)
         const snapshot = {
             metadata: {
@@ -421,13 +421,14 @@ describe('bootstrapLazySession', () => {
         }
         await options.materialize(snapshot, new AbortController().signal)
 
+        expect(getOrCreateMachineMock).not.toHaveBeenCalled()
         expect(getOrCreateSessionMock).toHaveBeenCalledWith(expect.objectContaining({
             id: provisional.id,
             metadata: snapshot.metadata,
             state: snapshot.agentState,
             timeoutMs: 10_000,
-            machine: expect.objectContaining({ id: 'machine-1' })
         }))
+        expect(getOrCreateSessionMock.mock.calls[0][0].machine).toBeUndefined()
 
         options.onMaterialized(materialized, snapshot)
         expect(notifyRunnerSessionStartedMock).toHaveBeenCalledWith(
@@ -442,7 +443,7 @@ describe('bootstrapSession HAPI_SESSION_ID export', () => {
         getOrCreateSessionMock.mockReset()
         getOrCreateMachineMock.mockReset()
         getMachineMock.mockReset()
-        getMachineMock.mockResolvedValue(null)
+        getMachineMock.mockResolvedValue({ id: 'machine-1' })
         sessionSyncClientMock.mockReset()
         notifyRunnerSessionStartedMock.mockClear()
         readSettingsMock.mockReset()
@@ -466,10 +467,10 @@ describe('bootstrapSession HAPI_SESSION_ID export', () => {
         expect(process.env[HAPI_SESSION_ID_ENV]).toBe('hub-session-42')
     })
 
-    it('forwards settings machineTag into getOrCreateMachine (#2038)', async () => {
+    it('references an existing hub machine without re-registering (#2038)', async () => {
         const session = createSession()
         getOrCreateSessionMock.mockResolvedValue(session)
-        getOrCreateMachineMock.mockResolvedValue({ id: 'machine-1' })
+        getMachineMock.mockResolvedValue({ id: 'machine-1' })
         sessionSyncClientMock.mockReturnValue({ isPending: () => false })
         readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'secret-tag' })
 
@@ -478,12 +479,8 @@ describe('bootstrapSession HAPI_SESSION_ID export', () => {
             workingDirectory: '/tmp/project'
         })
 
-        expect(getOrCreateMachineMock).toHaveBeenCalledWith(
-            expect.objectContaining({
-                machineId: 'machine-1',
-                machineTag: 'secret-tag',
-            })
-        )
+        expect(getMachineMock).toHaveBeenCalledWith('machine-1')
+        expect(getOrCreateMachineMock).not.toHaveBeenCalled()
     })
 
     it('skips machine registration when the hub row already exists', async () => {
@@ -502,25 +499,16 @@ describe('bootstrapSession HAPI_SESSION_ID export', () => {
         expect(result.machineId).toBe('machine-1')
     })
 
-    it('creates a machine only when the hub has no row yet', async () => {
-        const session = createSession()
-        getOrCreateSessionMock.mockResolvedValue(session)
+    it('does not create a proof-less machine when the hub row is missing', async () => {
         getMachineMock.mockResolvedValue(null)
-        getOrCreateMachineMock.mockResolvedValue({ id: 'machine-rotated' })
         sessionSyncClientMock.mockReturnValue({ isPending: () => false })
         readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'secret-tag' })
 
-        const result = await bootstrapSession({
+        await expect(bootstrapSession({
             flavor: 'claude',
             workingDirectory: '/tmp/project'
-        })
-
-        expect(result.machineId).toBe('machine-rotated')
-        expect(getOrCreateSessionMock).toHaveBeenCalledWith(
-            expect.objectContaining({
-                metadata: expect.objectContaining({ machineId: 'machine-rotated' }),
-            })
-        )
+        })).rejects.toThrow(/not registered on the hub/)
+        expect(getOrCreateMachineMock).not.toHaveBeenCalled()
     })
 
     it('passes reservedSessionId as getOrCreateSession id (adopt-stub, #1911)', async () => {

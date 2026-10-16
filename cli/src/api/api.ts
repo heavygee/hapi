@@ -47,6 +47,10 @@ function isLegacyMachineReenrollError(error: unknown): boolean {
 }
 
 /** Hub refuses untagged / tag-mismatched migrate-sessions (#1473 Blocker). */
+function isMigrateUnavailableError(error: unknown): boolean {
+    return axios.isAxiosError(error) && error.response?.status === 404
+}
+
 function isMigrateSourceContinuityError(error: unknown): boolean {
     if (!axios.isAxiosError(error) || error.response?.status !== 403) {
         return false
@@ -330,7 +334,10 @@ export class ApiClient {
                     // namespace migrate route (takeover hole). Keep the new
                     // machine identity; leave legacy sessions on the old id
                     // until an operator-trusted remap exists (#1473 Major).
-                    if (isMigrateSourceContinuityError(migrateError)) {
+                    // 404: migrate-sessions is not implemented. 403: source continuity
+                    // not proven. Either way the new identity stands; do not abort
+                    // runner startup after rotation (#288).
+                    if (isMigrateSourceContinuityError(migrateError) || isMigrateUnavailableError(migrateError)) {
                         logger.warn(
                             `[API] Re-enrolled as ${machine.id}; sessions on ${fromMachineId} need operator-approved migration`
                         )

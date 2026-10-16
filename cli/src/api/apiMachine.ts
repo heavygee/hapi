@@ -828,6 +828,12 @@ export class ApiMachineClient {
      * Transient `connect_error` events are ignored — Socket.IO reconnection
      * stays active until success or timeout.
      */
+    /** Socket connect plus hub ack of the machine RPC handlers. */
+    async connectUntilRpcReady(timeoutMs = 30_000): Promise<void> {
+        await this.connectUntilReady(timeoutMs)
+        await this.rpcHandlerManager.whenHandlersRegistered(timeoutMs)
+    }
+
     connectUntilReady(timeoutMs = 30_000): Promise<void> {
         return new Promise((resolve, reject) => {
             this.connect()

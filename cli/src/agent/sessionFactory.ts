@@ -211,24 +211,25 @@ function pickExistingSessionMetadata(metadata: Metadata | null | undefined): Par
 }
 
 /**
- * Session bootstrap must not POST /cli/machines against a runner-bound row.
- * That call has no memory-only runnerProof and the hub returns 409 (#288).
- * Existing machines are referenced by id. Creation is only for a missing row.
+ * Session bootstrap must not POST /cli/machines. A tag-only create leaves a
+ * null proof hash, and the runner then rotates away from that row (#288).
+ * Reference the runner-registered machine, or fail until it exists.
  */
 async function resolveSessionMachine(
     api: ApiClient,
     identity: { machineId: string; machineTag?: string },
-): Promise<{ machineId: string; created: boolean }> {
-    const existing = await api.getMachine(identity.machineId)
-    if (existing) {
-        return { machineId: existing.id, created: false }
+): Promise<string> {
+    for (let attempt = 0; attempt < 5; attempt++) {
+        const existing = await api.getMachine(identity.machineId)
+        if (existing) {
+            return existing.id
+        }
+        await new Promise((resolve) => setTimeout(resolve, 200))
     }
-    const registered = await api.getOrCreateMachine({
-        machineId: identity.machineId,
-        machineTag: identity.machineTag,
-        metadata: buildMachineMetadata(),
-    })
-    return { machineId: registered.id, created: true }
+    throw new Error(
+        `Machine ${identity.machineId} is not registered on the hub. `
+        + 'Start the runner so it can bind runnerProof, then retry.'
+    )
 }
 
 async function getMachineIdentityOrExit(): Promise<{ machineId: string; machineTag?: string }> {
@@ -267,7 +268,7 @@ export async function bootstrapSession(options: SessionBootstrapOptions): Promis
     const api = await ApiClient.create()
 
     const identity = await getMachineIdentityOrExit()
-    const { machineId } = await resolveSessionMachine(api, identity)
+    const machineId = await resolveSessionMachine(api, identity)
 
     const metadata = buildSessionMetadata({
         flavor: options.flavor,
@@ -322,7 +323,6 @@ export async function bootstrapLazySession(options: SessionBootstrapOptions): Pr
     const api = await ApiClient.create()
     const identity = await getMachineIdentityOrExit()
     const machineId = identity.machineId
-    const machineMetadata = buildMachineMetadata()
     const metadata = buildSessionMetadata({
         flavor: options.flavor,
         startedBy,
@@ -361,11 +361,11 @@ export async function bootstrapLazySession(options: SessionBootstrapOptions): Pr
         materialize: async (snapshot, signal) => {
             // Defer hub machine touch until materialize so a pending lazy
             // session does not register (or 409) before the user sends.
-            const resolved = await resolveSessionMachine(api, identity)
+            const resolvedMachineId = await resolveSessionMachine(api, identity)
             const baseMetadata = snapshot.metadata ?? metadata
-            const sessionMetadata = resolved.machineId === machineId
+            const sessionMetadata = resolvedMachineId === machineId
                 ? baseMetadata
-                : { ...baseMetadata, machineId: resolved.machineId }
+                : { ...baseMetadata, machineId: resolvedMachineId }
             const materialized = await api.getOrCreateSession({
                 id: requestedId,
                 tag: sessionTag,
@@ -374,15 +374,6 @@ export async function bootstrapLazySession(options: SessionBootstrapOptions): Pr
                 model: options.model,
                 modelReasoningEffort: options.modelReasoningEffort,
                 effort: options.effort,
-                ...(resolved.created
-                    ? {
-                        machine: {
-                            id: resolved.machineId,
-                            tag: identity.machineTag,
-                            metadata: machineMetadata,
-                        },
-                    }
-                    : {}),
                 timeoutMs: 10_000,
                 signal
             })
@@ -423,7 +414,7 @@ export async function bootstrapExistingSession(options: {
     const startedBy = options.startedBy ?? 'terminal'
     const api = await ApiClient.create()
     const identity = await getMachineIdentityOrExit()
-    const { machineId } = await resolveSessionMachine(api, identity)
+    const machineId = await resolveSessionMachine(api, identity)
 
     const sessionInfo = await api.getSession(options.sessionId)
     // #1911 M1 belt: match hub merge-preserve scope — only hub-authored archive.
