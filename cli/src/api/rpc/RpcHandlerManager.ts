@@ -21,6 +21,11 @@ export class RpcHandlerManager {
     private readonly logger: (message: string, data?: any) => void
     private socket: Socket | null = null
     private registerRetryTimers: Map<string, ReturnType<typeof setTimeout>> = new Map()
+    private registrationWaiters = new Map<string, {
+        promise: Promise<void>
+        resolve: () => void
+        settled: boolean
+    }>()
 
     constructor(config: RpcHandlerConfig) {
         this.scopePrefix = config.scopePrefix
@@ -74,6 +79,29 @@ export class RpcHandlerManager {
      * reconnect (machine-alive can keep the row "active" while the registry
      * is empty).
      */
+    /**
+     * Resolves when every currently registered handler has been acknowledged
+     * by the hub. Connect alone is not enough: ownership conflicts retry
+     * asynchronously (#288).
+     */
+    async whenHandlersRegistered(timeoutMs: number): Promise<void> {
+        const pending = [...this.handlers.keys()].map((method) => this.waiterFor(method).promise)
+        if (pending.length === 0) {
+            return
+        }
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const timeout = new Promise<never>((_, reject) => {
+            timer = setTimeout(() => {
+                reject(new Error(`RPC handlers not acknowledged within ${timeoutMs}ms`))
+            }, timeoutMs)
+        })
+        try {
+            await Promise.race([Promise.all(pending), timeout])
+        } finally {
+            if (timer) clearTimeout(timer)
+        }
+    }
+
     reregisterAll(): void {
         if (!this.socket) {
             return
@@ -117,6 +145,7 @@ export class RpcHandlerManager {
         if (!socket) {
             return
         }
+        const waiter = this.waiterFor(prefixedMethod)
         const onAck = (err: Error | null, response?: { registered?: boolean }) => {
             if (this.socket !== socket) {
                 return
@@ -128,6 +157,10 @@ export class RpcHandlerManager {
                     ? true
                     : response.registered === true
             if (registered) {
+                if (!waiter.settled) {
+                    waiter.settled = true
+                    waiter.resolve()
+                }
                 const pending = this.registerRetryTimers.get(prefixedMethod)
                 if (pending) {
                     clearTimeout(pending)
@@ -152,6 +185,24 @@ export class RpcHandlerManager {
             ? socket.timeout(5_000)
             : socket
         withTimeout.emit('rpc-register', payload, onAck)
+    }
+
+    private waiterFor(prefixedMethod: string): {
+        promise: Promise<void>
+        resolve: () => void
+        settled: boolean
+    } {
+        const existing = this.registrationWaiters.get(prefixedMethod)
+        if (existing) {
+            return existing
+        }
+        let resolve!: () => void
+        const promise = new Promise<void>((done) => {
+            resolve = done
+        })
+        const waiter = { promise, resolve, settled: false }
+        this.registrationWaiters.set(prefixedMethod, waiter)
+        return waiter
     }
 
     private clearRegisterRetries(): void {

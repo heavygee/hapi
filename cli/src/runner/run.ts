@@ -1808,9 +1808,9 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       requestShutdown: () => requestShutdown('hapi-app')
     });
 
-    // hubReadyAt means the replacement can serve RPCs, not merely that REST
-    // registration returned (#288). Parents and version handoff wait on it.
-    await apiMachine.connectUntilReady()
+    // hubReadyAt means RPCs are acknowledged, not merely that the socket
+    // connected. Handoff overlap retries registration (#288).
+    await apiMachine.connectUntilRpcReady()
     fileState.hubReadyAt = Date.now()
     writeRunnerState(fileState)
     scheduleCursorModelsPrewarm();
