@@ -1267,7 +1267,9 @@ layers:
   # Follow-up after c5c658c20: dafe2c72f — missing machine rows start the runner;
   # legacy live runners without hubReadyAt still resolve; handoff kills the replacement
   # before it takes RPC methods back.
-  # Thin tip on soup HEAD 8d51206da: driver/2038-machine-tag-reregister @ dafe2c72f
+  # Follow-up after dafe2c72f: 58d71276e — locale runner clocks count as legacy;
+  # stale ready pids do not; a failed handoff restores the parent runner state.
+  # Thin tip on soup HEAD 8d51206da: driver/2038-machine-tag-reregister @ 58d71276e
   # Parent pin: driver/2038-machine-tag-parent @ 8d51206da
   # PR: heavygee/hapi#288 (fork fortress — not upstream-landable alone)
   # Hub+cli → remat + hapi-restart-hub; tip-unique: 409 MachineTagConflict +
