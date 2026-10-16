@@ -48,6 +48,7 @@ vi.mock('@/persistence', () => ({
 vi.mock('@/utils/process', () => ({
     isProcessAlive: isProcessAliveMock,
     killProcessTreeByPid: killProcessTreeByPidMock,
+    getHapiRunnerProcessIdentity: vi.fn(() => 'runner'),
 }))
 
 vi.mock('@/runner/controlClient', () => ({
@@ -101,9 +102,11 @@ describe('detachedRunnerHubReady', () => {
 
     it('kills the wrapper and a live Windows grandchild after timeout', () => {
         const alive = (pid: number) => pid === 10 || pid === 99
-        expect(runnerStartTimeoutPids(10, 99, alive)).toEqual([10, 99])
-        expect(runnerStartTimeoutPids(10, 10, alive)).toEqual([10])
-        expect(runnerStartTimeoutPids(10, 99, () => false)).toEqual([])
+        expect(runnerStartTimeoutPids(10, 99, alive, () => 'runner')).toEqual([10, 99])
+        expect(runnerStartTimeoutPids(10, 10, alive, () => 'runner')).toEqual([10])
+        expect(runnerStartTimeoutPids(10, 99, () => false, () => 'runner')).toEqual([])
+        expect(runnerStartTimeoutPids(10, 99, alive, () => 'unknown')).toEqual([10])
+        expect(runnerStartTimeoutPids(10, 99, alive, () => 'foreign')).toEqual([10])
     })
 })
 

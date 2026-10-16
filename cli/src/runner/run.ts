@@ -1982,8 +1982,9 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           // the child knows it is an authorized handoff and must NOT call
           // stopRunner() against us before writing its own state.
           // Codex review #814 [Major] on run.ts:892.
+          let replacement: ReturnType<typeof spawnHappyCLI> | null = null;
           try {
-            spawnHappyCLI(handoffArgv, {
+            replacement = spawnHappyCLI(handoffArgv, {
               detached: true,
               stdio: 'ignore',
               env: {
@@ -2016,10 +2017,15 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           // hubReadyAt is written only after RPC acks. Release our methods
           // first or the child and this process wait on each other (#288).
           apiMachine.releaseRpcOwnership();
-          const handoffOk = await waitForRunnerHandoff(process.pid, { timeoutMs: 30_000 });
+          // REST registration alone can take the 60s POST timeout. Reclaiming
+          // RPC ownership before that finishes deadlocks a still-live child.
+          const handoffOk = await waitForRunnerHandoff(process.pid, { timeoutMs: 90_000 });
           if (!handoffOk) {
+            if (typeof replacement?.pid === 'number') {
+              await killProcessTreeByPid(replacement.pid, true);
+            }
             apiMachine.restoreRpcOwnership();
-            logger.debug(`[RUNNER RUN] Replacement runner did not register within 30s; attempting to re-acquire lock and stay alive to avoid leaving the machine offline.`);
+            logger.debug(`[RUNNER RUN] Replacement runner did not register within 90s; attempting to re-acquire lock and stay alive to avoid leaving the machine offline.`);
             // Re-acquire the lock with a long window (the child has likely
             // either succeeded and we're seeing a stale state, or it gave
             // up - in either case the lock should be available shortly).
