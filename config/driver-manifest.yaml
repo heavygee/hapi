@@ -1255,7 +1255,9 @@ layers:
   # b76a95b0c — no proof-less rotate; hubReadyAt before detached start; doctor GET-before-POST.
   # Follow-up after b76a95b0c absorb: 9e347c654 — no proof-bound re-register on session bootstrap;
   # hubReadyAt only after socket connect; detached start kills child if registration does not finish.
-  # Thin tip on soup HEAD 8d51206da: driver/2038-machine-tag-reregister @ 9e347c654
+  # Follow-up after 9e347c654: 6d90c1bb0 — no proof-less session machine create;
+  # hubReadyAt after RPC ack; migrate-sessions 404 does not abort re-enroll.
+  # Thin tip on soup HEAD 8d51206da: driver/2038-machine-tag-reregister @ 6d90c1bb0
   # Parent pin: driver/2038-machine-tag-parent @ 8d51206da
   # PR: heavygee/hapi#288 (fork fortress — not upstream-landable alone)
   # Hub+cli → remat + hapi-restart-hub; tip-unique: 409 MachineTagConflict +
