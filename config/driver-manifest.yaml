@@ -1264,7 +1264,10 @@ layers:
   # session bootstrap follows the machine id the runner actually registered.
   # Follow-up after dfffbb191: c5c658c20 — direct launches use an existing machine row
   # when no runner is mid-registration. runnerProof stays (nametag comment was not enrollment).
-  # Thin tip on soup HEAD 8d51206da: driver/2038-machine-tag-reregister @ c5c658c20
+  # Follow-up after c5c658c20: dafe2c72f — missing machine rows start the runner;
+  # legacy live runners without hubReadyAt still resolve; handoff kills the replacement
+  # before it takes RPC methods back.
+  # Thin tip on soup HEAD 8d51206da: driver/2038-machine-tag-reregister @ dafe2c72f
   # Parent pin: driver/2038-machine-tag-parent @ 8d51206da
   # PR: heavygee/hapi#288 (fork fortress — not upstream-landable alone)
   # Hub+cli → remat + hapi-restart-hub; tip-unique: 409 MachineTagConflict +
