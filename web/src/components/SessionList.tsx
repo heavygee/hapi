@@ -1525,13 +1525,15 @@ export function SessionListSearch(props: {
         // grows for an existing query, which is stable before the hold begins.
         const showsChip = hasTextQuery
         return (
-            // min-w-0 (no shrink-0 / no w-full): group yields to toolbar neighbors;
-            // calendar/clear stay shrink-0; query truncates. (#2019 HAPI Bot)
+            // shrink-0 + max-w-full: do not crush below chrome (icon/clear).
+            // Crushing with overflow:visible painted clear over filter /
+            // BlockedJumpPill at narrow widths (tiann/hapi#2039). Query text
+            // still truncates inside the chip; header row wraps neighbors.
             <div
                 ref={searchRootRef}
                 data-testid="session-list-search"
                 data-expanded="false"
-                className="relative flex min-w-0 flex-nowrap items-center gap-1.5"
+                className="relative flex max-w-full shrink-0 flex-nowrap items-center gap-1.5"
             >
                 <div className={cn(
                     'relative flex min-w-0 items-center rounded-full transition-colors',
@@ -3234,7 +3236,12 @@ export function SessionList(props: {
         <div ref={sessionListRef} className="flex min-h-0 w-full flex-1 flex-col">
             <div className="session-list-scrollbar-offset mx-auto w-full max-w-content shrink-0">
             {showHeaderRow ? (
-                <div className="flex items-center gap-1 px-2 py-1">
+                // flex-wrap + actions group: icons wrap instead of painting over
+                // search clear (tiann/hapi#2039). flex-1 spacer removed.
+                <div
+                    data-testid="session-list-header-row"
+                    className="flex flex-wrap items-center gap-1 px-2 py-1"
+                >
                     {showSearch ? (
                         <SessionListSearch
                             value={searchQuery}
@@ -3255,8 +3262,10 @@ export function SessionList(props: {
                         />
                     ) : null}
                     {!(showSearch && searchExpanded) ? (
-                        <>
-                            <div className="flex-1" />
+                        <div
+                            data-testid="session-list-header-actions"
+                            className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-1"
+                        >
                             {showMachineFilterBar ? (
                                 <MachineFilterMenu
                                     machines={machineFilterItems}
@@ -3319,7 +3328,7 @@ export function SessionList(props: {
                                 </button>
                             ) : null}
                             {props.headerActions}
-                        </>
+                        </div>
                     ) : null}
                 </div>
             ) : null}
