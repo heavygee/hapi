@@ -167,9 +167,13 @@ export async function runDoctorCommand(filter?: 'all' | 'runner'): Promise<numbe
             exitCode = 1
         }
 
-        const registrationCode = await runDoctorMachineRegistrationProbe()
-        if (registrationCode !== 0) {
-            exitCode = registrationCode
+        if (hasToken) {
+            const registrationCode = await runDoctorMachineRegistrationProbe()
+            if (registrationCode !== 0) {
+                exitCode = registrationCode
+            }
+        } else {
+            console.log(chalk.gray('  Skipping machine registration probe until CLI_API_TOKEN is set'))
         }
 
     }

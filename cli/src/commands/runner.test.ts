@@ -87,11 +87,14 @@ function createContext(commandArgs: string[]) {
 }
 
 describe('detachedRunnerHubReady', () => {
-    it('requires the child pid and a post-registration hubReadyAt', () => {
+    it('accepts the wrapper pid or a live grandchild once hubReadyAt is set', () => {
         expect(detachedRunnerHubReady({ pid: 4242, hubReadyAt: 5 }, 4242)).toBe(true)
         expect(detachedRunnerHubReady({ pid: 4242 }, 4242)).toBe(false)
-        expect(detachedRunnerHubReady({ pid: 1, hubReadyAt: 5 }, 4242)).toBe(false)
         expect(detachedRunnerHubReady(null, 4242)).toBe(false)
+        isProcessAliveMock.mockReturnValue(true)
+        expect(detachedRunnerHubReady({ pid: 9001, hubReadyAt: 5 }, 4242)).toBe(true)
+        isProcessAliveMock.mockReturnValue(false)
+        expect(detachedRunnerHubReady({ pid: 9001, hubReadyAt: 5 }, 4242)).toBe(false)
     })
 })
 

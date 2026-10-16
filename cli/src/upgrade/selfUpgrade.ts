@@ -719,6 +719,10 @@ export async function applyRunnerSelfUpgrade(options: {
     localVersion?: string
     localGeneration?: string | null
     requestShutdown?: () => void
+    /** Drop machine RPC ownership before the child waits for hub acks. */
+    releaseRpcOwnership?: () => void
+    /** Re-claim methods when the replacement never becomes ready. */
+    restoreRpcOwnership?: () => void
 }): Promise<RunnerSelfUpgradeResponse> {
     if (runnerSelfUpgradeInFlight) {
         return {
@@ -812,6 +816,8 @@ async function applyRunnerSelfUpgradeUnlocked(options: {
     localVersion?: string
     localGeneration?: string | null
     requestShutdown?: () => void
+    releaseRpcOwnership?: () => void
+    restoreRpcOwnership?: () => void
 }): Promise<UpgradeOutcome> {
     const localVersion = options.localVersion ?? packageJson.version
     const localGeneration = options.localGeneration
@@ -912,8 +918,12 @@ async function applyRunnerSelfUpgradeUnlocked(options: {
         // path above is the fleet default for systemd.
         const candidate = await scheduleRunnerRelaunch(installedExecutable)
         await releaseRunnerLockForHandoff()
+        // Child hubReadyAt includes RPC acks. Those acks stay false while
+        // this socket still owns the methods.
+        options.releaseRpcOwnership?.()
         const handoffOk = await waitForRunnerHandoff(process.pid, { timeoutMs: 30_000 })
         if (!handoffOk) {
+            options.restoreRpcOwnership?.()
             // Child may still be retrying the runner lock (~885s budget). Kill it
             // before reclaiming so a later lock gap cannot produce a delayed takeover.
             const stopped = await terminateTimedOutUpgradeCandidate(candidate)

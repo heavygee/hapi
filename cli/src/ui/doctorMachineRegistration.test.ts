@@ -2,11 +2,15 @@ import { describe, expect, it } from 'vitest'
 import { classifyMachineRegistrationProbe } from './doctorMachineRegistration'
 
 describe('classifyMachineRegistrationProbe', () => {
-    it('treats 200 as ok', () => {
+    it('treats a proof-less 200 as a null-proof row', () => {
         expect(classifyMachineRegistrationProbe({
             httpStatus: 200,
             responseErrorText: '',
-        })).toEqual({ ok: true, status: 200, detail: 'registered' })
+        })).toEqual({
+            ok: false,
+            status: 200,
+            detail: 'Machine row has no runner proof. Runner start will rotate to a new machine id instead of binding this one.',
+        })
     })
 
     it('treats 409 proof mismatch as tag-verified ok', () => {

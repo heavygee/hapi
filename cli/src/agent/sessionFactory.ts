@@ -9,7 +9,8 @@ import type { AgentState, MachineMetadata, Metadata, Session } from '@/api/types
 import { getInstalledCliMtimeMs, notifyRunnerSessionStarted } from '@/runner/controlClient'
 import { isVersionHandoffDisabledByEnv } from '@/runner/versionHandoff'
 import { durableTargetGeneration, readUpgradeTarget } from '@/upgrade/upgradeTarget'
-import { readSettings } from '@/persistence'
+import { readRunnerState, readSettings } from '@/persistence'
+import { isProcessAlive } from '@/utils/process'
 import { configuration } from '@/configuration'
 import { logger } from '@/ui/logger'
 import { runtimePath } from '@/projectPath'
@@ -211,6 +212,14 @@ function pickExistingSessionMetadata(metadata: Metadata | null | undefined): Par
 }
 
 /**
+ * First launch spawns the runner and then opens a session. Registration can
+ * take as long as one POST timeout; a ~1s poll fails while the child is
+ * still connecting (#288). Vitest keeps the cap short so a missing row
+ * does not stall the suite.
+ */
+const SESSION_MACHINE_WAIT_MS = process.env.VITEST ? 1_000 : 90_000
+
+/**
  * Session bootstrap must not POST /cli/machines. A tag-only create leaves a
  * null proof hash, and the runner then rotates away from that row (#288).
  * Reference the runner-registered machine, or fail until it exists.
@@ -219,10 +228,16 @@ async function resolveSessionMachine(
     api: ApiClient,
     identity: { machineId: string; machineTag?: string },
 ): Promise<string> {
-    for (let attempt = 0; attempt < 5; attempt++) {
+    const deadline = Date.now() + SESSION_MACHINE_WAIT_MS
+    while (Date.now() < deadline) {
         const existing = await api.getMachine(identity.machineId)
         if (existing) {
             return existing.id
+        }
+        const state = await readRunnerState().catch(() => null)
+        const runnerAlive = typeof state?.pid === 'number' && isProcessAlive(state.pid)
+        if (state?.hubReadyAt && state.hubReadyAt > 0 && !runnerAlive) {
+            break
         }
         await new Promise((resolve) => setTimeout(resolve, 200))
     }

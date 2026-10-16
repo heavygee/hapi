@@ -2013,8 +2013,12 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
 
           logger.debug(`[RUNNER RUN] Spawned replacement runner with argv: ${JSON.stringify(handoffArgv)}; released lock; waiting for handoff`);
 
+          // hubReadyAt is written only after RPC acks. Release our methods
+          // first or the child and this process wait on each other (#288).
+          apiMachine.releaseRpcOwnership();
           const handoffOk = await waitForRunnerHandoff(process.pid, { timeoutMs: 30_000 });
           if (!handoffOk) {
+            apiMachine.restoreRpcOwnership();
             logger.debug(`[RUNNER RUN] Replacement runner did not register within 30s; attempting to re-acquire lock and stay alive to avoid leaving the machine offline.`);
             // Re-acquire the lock with a long window (the child has likely
             // either succeeded and we're seeing a stale state, or it gave

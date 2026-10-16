@@ -17,15 +17,27 @@ import { runDoctorCommand } from '@/ui/doctor'
 import { initializeToken } from '@/ui/tokenInit'
 import type { CommandDefinition } from './types'
 
-/** Parent `runner start` must not declare success until hub registration wrote hubReadyAt. */
+/**
+ * Parent `runner start` must not declare success until hub registration wrote hubReadyAt.
+ *
+ * On Windows, `HAPI_CLI_EXECUTABLE=hapi.cmd` makes `childPid` the cmd.exe wrapper
+ * while runner.state.json stores the binary grandchild. A different live PID
+ * with hubReadyAt is the same success the handoff helper already accepts.
+ */
 export function detachedRunnerHubReady(
     state: { pid?: number; hubReadyAt?: number } | null | undefined,
     childPid: number | undefined,
 ): boolean {
-    return typeof childPid === 'number'
-        && state?.pid === childPid
-        && typeof state.hubReadyAt === 'number'
-        && state.hubReadyAt > 0
+    if (typeof state?.hubReadyAt !== 'number' || state.hubReadyAt <= 0) {
+        return false
+    }
+    if (typeof state.pid !== 'number') {
+        return false
+    }
+    if (typeof childPid === 'number' && state.pid === childPid) {
+        return true
+    }
+    return isProcessAlive(state.pid)
 }
 
 /**
@@ -177,7 +189,11 @@ export const runnerCommand: CommandDefinition = {
                     started = true
                     break
                 }
-                if (typeof child.pid === 'number' && !isProcessAlive(child.pid)) {
+                const wrapperAlive = typeof child.pid === 'number' && isProcessAlive(child.pid)
+                const replacementAlive = typeof state?.pid === 'number'
+                    && state.pid !== child.pid
+                    && isProcessAlive(state.pid)
+                if (!wrapperAlive && !replacementAlive) {
                     break
                 }
                 await new Promise(resolve => setTimeout(resolve, pollMs))
