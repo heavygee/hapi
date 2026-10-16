@@ -1260,7 +1260,9 @@ layers:
   # Follow-up after 6d90c1bb0: 9984440e7 — release RPC ownership before handoff hubReadyAt;
   # session bootstrap waits out registration; Windows grandchild PID counts as ready;
   # doctor fails a null proof hash and stays non-interactive without a token.
-  # Thin tip on soup HEAD 8d51206da: driver/2038-machine-tag-reregister @ 9984440e7
+  # Follow-up after 9984440e7: dfffbb191 — handoff RPC release stays suspended across keepalive;
+  # session bootstrap follows the machine id the runner actually registered.
+  # Thin tip on soup HEAD 8d51206da: driver/2038-machine-tag-reregister @ dfffbb191
   # Parent pin: driver/2038-machine-tag-parent @ 8d51206da
   # PR: heavygee/hapi#288 (fork fortress — not upstream-landable alone)
   # Hub+cli → remat + hapi-restart-hub; tip-unique: 409 MachineTagConflict +
