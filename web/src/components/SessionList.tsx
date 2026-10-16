@@ -3236,8 +3236,8 @@ export function SessionList(props: {
         <div ref={sessionListRef} className="flex min-h-0 w-full flex-1 flex-col">
             <div className="session-list-scrollbar-offset mx-auto w-full max-w-content shrink-0">
             {showHeaderRow ? (
-                // flex-wrap + actions group: icons wrap instead of painting over
-                // search clear (tiann/hapi#2039). flex-1 spacer removed.
+                // Outer wrap only. Action group is one nowrap slab so icons do not
+                // split under the search when the row is tight (tiann/hapi#2039).
                 <div
                     data-testid="session-list-header-row"
                     className="flex flex-wrap items-center gap-1 px-2 py-1"
@@ -3264,7 +3264,7 @@ export function SessionList(props: {
                     {!(showSearch && searchExpanded) ? (
                         <div
                             data-testid="session-list-header-actions"
-                            className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-1"
+                            className="ml-auto flex w-max shrink-0 flex-nowrap items-center justify-end gap-1"
                         >
                             {showMachineFilterBar ? (
                                 <MachineFilterMenu
