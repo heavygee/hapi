@@ -619,7 +619,7 @@ export class ApiMachineClient {
                     this.rpcHandlerManager.releaseRegisteredMethods()
                 },
                 restoreRpcOwnership: () => {
-                    this.rpcHandlerManager.reregisterAll()
+                    this.rpcHandlerManager.resumeRegistration()
                 },
                 requestShutdown: () => {
                     setTimeout(() => requestShutdown(), 500)
@@ -841,7 +841,7 @@ export class ApiMachineClient {
 
     /** Re-claim methods after a failed handoff so this process can keep serving. */
     restoreRpcOwnership(): void {
-        this.rpcHandlerManager.reregisterAll()
+        this.rpcHandlerManager.resumeRegistration()
     }
 
     /** Socket connect plus hub ack of the machine RPC handlers. */

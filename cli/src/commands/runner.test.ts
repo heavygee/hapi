@@ -77,7 +77,7 @@ vi.mock('@/ui/tokenInit', () => ({
     initializeToken: initializeTokenMock
 }))
 
-import { detachedRunnerHubReady, runnerCommand } from './runner'
+import { detachedRunnerHubReady, runnerCommand, runnerStartTimeoutPids } from './runner'
 
 function createContext(commandArgs: string[]) {
     return {
@@ -93,8 +93,17 @@ describe('detachedRunnerHubReady', () => {
         expect(detachedRunnerHubReady(null, 4242)).toBe(false)
         isProcessAliveMock.mockReturnValue(true)
         expect(detachedRunnerHubReady({ pid: 9001, hubReadyAt: 5 }, 4242)).toBe(true)
+        expect(detachedRunnerHubReady({ pid: 4242, hubReadyAt: 5 }, 4242)).toBe(true)
         isProcessAliveMock.mockReturnValue(false)
         expect(detachedRunnerHubReady({ pid: 9001, hubReadyAt: 5 }, 4242)).toBe(false)
+        expect(detachedRunnerHubReady({ pid: 4242, hubReadyAt: 5 }, 4242)).toBe(false)
+    })
+
+    it('kills the wrapper and a live Windows grandchild after timeout', () => {
+        const alive = (pid: number) => pid === 10 || pid === 99
+        expect(runnerStartTimeoutPids(10, 99, alive)).toEqual([10, 99])
+        expect(runnerStartTimeoutPids(10, 10, alive)).toEqual([10])
+        expect(runnerStartTimeoutPids(10, 99, () => false)).toEqual([])
     })
 })
 

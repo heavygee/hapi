@@ -26,7 +26,7 @@ import type { CommandDefinition } from './types'
  */
 export function detachedRunnerHubReady(
     state: { pid?: number; hubReadyAt?: number } | null | undefined,
-    childPid: number | undefined,
+    _childPid: number | undefined,
 ): boolean {
     if (typeof state?.hubReadyAt !== 'number' || state.hubReadyAt <= 0) {
         return false
@@ -34,10 +34,23 @@ export function detachedRunnerHubReady(
     if (typeof state.pid !== 'number') {
         return false
     }
-    if (typeof childPid === 'number' && state.pid === childPid) {
-        return true
-    }
     return isProcessAlive(state.pid)
+}
+
+/** Wrapper and Windows grandchild to stop when hub registration never finishes. */
+export function runnerStartTimeoutPids(
+    childPid: number | undefined,
+    statePid: number | undefined,
+    isAlive: (pid: number) => boolean = isProcessAlive,
+): number[] {
+    const pids: number[] = []
+    if (typeof childPid === 'number' && isAlive(childPid)) {
+        pids.push(childPid)
+    }
+    if (typeof statePid === 'number' && statePid !== childPid && isAlive(statePid)) {
+        pids.push(statePid)
+    }
+    return pids
 }
 
 /**
@@ -199,8 +212,11 @@ export const runnerCommand: CommandDefinition = {
                 await new Promise(resolve => setTimeout(resolve, pollMs))
             }
 
-            if (!started && typeof child.pid === 'number' && isProcessAlive(child.pid)) {
-                await killProcessTreeByPid(child.pid, true)
+            if (!started) {
+                const state = await readRunnerState()
+                for (const pid of runnerStartTimeoutPids(child.pid, state?.pid)) {
+                    await killProcessTreeByPid(pid, true)
+                }
             }
 
             if (started) {

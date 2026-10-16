@@ -11,6 +11,7 @@ import { isVersionHandoffDisabledByEnv } from '@/runner/versionHandoff'
 import { durableTargetGeneration, readUpgradeTarget } from '@/upgrade/upgradeTarget'
 import { readRunnerState, readSettings } from '@/persistence'
 import { isProcessAlive } from '@/utils/process'
+import { extractErrorInfo, isRetryableConnectionError } from '@/utils/errorUtils'
 import { configuration } from '@/configuration'
 import { logger } from '@/ui/logger'
 import { runtimePath } from '@/projectPath'
@@ -219,30 +220,92 @@ function pickExistingSessionMetadata(metadata: Metadata | null | undefined): Par
  */
 const SESSION_MACHINE_WAIT_MS = process.env.VITEST ? 1_000 : 90_000
 
+function throwIfMachineWaitAborted(signal?: AbortSignal): void {
+    if (!signal?.aborted) {
+        return
+    }
+    const reason = signal.reason
+    if (reason instanceof Error) {
+        throw reason
+    }
+    const error = new Error('Machine registration wait aborted')
+    error.name = 'AbortError'
+    throw error
+}
+
+function delayMachineWait(ms: number, signal?: AbortSignal): Promise<void> {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+            signal?.removeEventListener('abort', onAbort)
+            resolve()
+        }, ms)
+        const onAbort = (): void => {
+            clearTimeout(timer)
+            try {
+                throwIfMachineWaitAborted(signal)
+                reject(new Error('Machine registration wait aborted'))
+            } catch (error) {
+                reject(error)
+            }
+        }
+        if (signal?.aborted) {
+            onAbort()
+            return
+        }
+        signal?.addEventListener('abort', onAbort, { once: true })
+    })
+}
+
+function isTransientMachineLookup(error: unknown): boolean {
+    if (isRetryableConnectionError(error)) {
+        return true
+    }
+    const { axiosCode, messageLower } = extractErrorInfo(error)
+    return axiosCode === 'ECONNABORTED' || messageLower.includes('timeout')
+}
+
 /**
  * Session bootstrap must not POST /cli/machines. A tag-only create leaves a
  * null proof hash, and the runner then rotates away from that row (#288).
- * Reference the runner-registered machine, or fail until it exists.
+ * Wait until the live runner has hubReadyAt, then use settings.machineId.
+ * An existing legacy row is not the runner's identity: untagged re-enroll
+ * rotates that id while the old row is still GET-able.
  */
 async function resolveSessionMachine(
     api: ApiClient,
     identity: { machineId: string; machineTag?: string },
+    signal?: AbortSignal,
 ): Promise<string> {
     const deadline = Date.now() + SESSION_MACHINE_WAIT_MS
+    let machineId = identity.machineId
     while (Date.now() < deadline) {
-        const existing = await api.getMachine(identity.machineId)
-        if (existing) {
-            return existing.id
+        throwIfMachineWaitAborted(signal)
+        try {
+            const settings = await readSettings()
+            if (settings?.machineId) {
+                machineId = settings.machineId
+            }
+            const state = await readRunnerState().catch(() => null)
+            const runnerReady = typeof state?.pid === 'number'
+                && typeof state.hubReadyAt === 'number'
+                && state.hubReadyAt > 0
+                && isProcessAlive(state.pid)
+            if (runnerReady) {
+                const existing = await api.getMachine(machineId)
+                if (existing) {
+                    return existing.id
+                }
+            }
+        } catch (error) {
+            throwIfMachineWaitAborted(signal)
+            if (!isTransientMachineLookup(error)) {
+                throw error
+            }
         }
-        const state = await readRunnerState().catch(() => null)
-        const runnerAlive = typeof state?.pid === 'number' && isProcessAlive(state.pid)
-        if (state?.hubReadyAt && state.hubReadyAt > 0 && !runnerAlive) {
-            break
-        }
-        await new Promise((resolve) => setTimeout(resolve, 200))
+        await delayMachineWait(200, signal)
     }
     throw new Error(
-        `Machine ${identity.machineId} is not registered on the hub. `
+        `Machine ${machineId} is not registered on the hub. `
         + 'Start the runner so it can bind runnerProof, then retry.'
     )
 }
@@ -376,7 +439,7 @@ export async function bootstrapLazySession(options: SessionBootstrapOptions): Pr
         materialize: async (snapshot, signal) => {
             // Defer hub machine touch until materialize so a pending lazy
             // session does not register (or 409) before the user sends.
-            const resolvedMachineId = await resolveSessionMachine(api, identity)
+            const resolvedMachineId = await resolveSessionMachine(api, identity, signal)
             const baseMetadata = snapshot.metadata ?? metadata
             const sessionMetadata = resolvedMachineId === machineId
                 ? baseMetadata
