@@ -1263,6 +1263,14 @@ layers:
   # Not product; keeps tip-forward verify green after MachineTag absorb.
   - branch: driver/fix-version-offer-query-test
 
+  # tiann/hapi#2039 / PR #2040 — narrow session toolbar: search clear painted over
+  # filter / BlockedJumpPill. Collapsed search stays shrink-0; header actions wrap
+  # as a group (no flex-1 spacer). Soup tip: driver/2039-toolbar-crowd @ a967469ce
+  # Tip-unique verify marker: session-list-header-actions in web/dist
+  # Upstream thin: fix/2039-session-toolbar-crowd (worktree fix-2039-toolbar-crowd)
+  # Web-only → remat --build-web; hard-reload (no hub restart).
+  - branch: driver/2039-toolbar-crowd
+
   # DROPPED 2026-10-06: driver/1933-claude-resume-amnesia — squash 94523eb0d is on
   # fork main (heavygee/hapi#204). Soup base is now origin/main, so tip-forward
   # absorbs it from the base; keeping the layer would double-apply / conflict.
