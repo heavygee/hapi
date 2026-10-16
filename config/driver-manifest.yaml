@@ -1253,7 +1253,9 @@ layers:
   # probe; enrollment bodies not retried even on 5xx.
   # Follow-up on same branch after first soup absorb of 1bd8d8c80:
   # b76a95b0c — no proof-less rotate; hubReadyAt before detached start; doctor GET-before-POST.
-  # Thin tip on soup HEAD 8d51206da: driver/2038-machine-tag-reregister @ b76a95b0c
+  # Follow-up after b76a95b0c absorb: 9e347c654 — no proof-bound re-register on session bootstrap;
+  # hubReadyAt only after socket connect; detached start kills child if registration does not finish.
+  # Thin tip on soup HEAD 8d51206da: driver/2038-machine-tag-reregister @ 9e347c654
   # Parent pin: driver/2038-machine-tag-parent @ 8d51206da
   # PR: heavygee/hapi#288 (fork fortress — not upstream-landable alone)
   # Hub+cli → remat + hapi-restart-hub; tip-unique: 409 MachineTagConflict +
