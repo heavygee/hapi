@@ -167,13 +167,16 @@ export class RpcHandlerManager {
      * overlap), retry until accepted or this socket disconnects (#1473 Major).
      */
     private emitRegister(prefixedMethod: string, attempt = 0): void {
+        if (this.registrationSuspended) {
+            return
+        }
         const socket = this.socket
         if (!socket) {
             return
         }
         const waiter = this.waiterFor(prefixedMethod)
         const onAck = (err: Error | null, response?: { registered?: boolean }) => {
-            if (this.socket !== socket) {
+            if (this.registrationSuspended || this.socket !== socket) {
                 return
             }
             // No-ack emitters (unit mocks, older servers): treat as fire-and-forget ok.

@@ -11,6 +11,7 @@ import { isVersionHandoffDisabledByEnv } from '@/runner/versionHandoff'
 import { durableTargetGeneration, readUpgradeTarget } from '@/upgrade/upgradeTarget'
 import { readRunnerState, readSettings } from '@/persistence'
 import { isProcessAlive } from '@/utils/process'
+import { spawnHappyCLI } from '@/utils/spawnHappyCLI'
 import { extractErrorInfo, isRetryableConnectionError } from '@/utils/errorUtils'
 import { configuration } from '@/configuration'
 import { logger } from '@/ui/logger'
@@ -265,13 +266,54 @@ function isTransientMachineLookup(error: unknown): boolean {
 }
 
 /**
+ * A runner that has been up longer than the registration window without
+ * hubReadyAt is a pre-marker binary. It will not write the field. A new
+ * runner still inside that window may be rotating settings.machineId.
+ */
+function isLegacyLiveRunner(state: {
+    pid?: number
+    hubReadyAt?: number
+    startTime?: string
+} | null): boolean {
+    if (!state || typeof state.pid !== 'number' || !isProcessAlive(state.pid)) {
+        return false
+    }
+    if (typeof state.hubReadyAt === 'number' && state.hubReadyAt > 0) {
+        return false
+    }
+    const started = Date.parse(state.startTime ?? '')
+    if (!Number.isFinite(started)) {
+        return false
+    }
+    return Date.now() - started > SESSION_MACHINE_WAIT_MS
+}
+
+let runnerStartRequested = false
+
+function requestRunnerStart(): void {
+    if (runnerStartRequested) {
+        return
+    }
+    runnerStartRequested = true
+    try {
+        const child = spawnHappyCLI(['runner', 'start-sync'], {
+            detached: true,
+            stdio: 'ignore',
+            env: process.env,
+        })
+        child.unref()
+    } catch (error) {
+        logger.debug('[START] Failed to spawn runner for machine registration', error)
+    }
+}
+
+/**
  * Session bootstrap must not POST /cli/machines. A tag-only create leaves a
  * null proof hash, and the runner then rotates away from that row (#288).
  *
- * A live runner that has not reached hubReadyAt may still be rotating
- * settings.machineId, so the old row is not safe yet. Direct launches
- * (cursor, codex, and the rest) do not start a runner: an existing row is
- * enough when nothing is mid-registration.
+ * A recently started runner without hubReadyAt may still be rotating
+ * settings.machineId. A long-lived runner that never wrote the marker, or
+ * no runner at all, can use an existing row. A missing row starts the runner.
  */
 async function resolveSessionMachine(
     api: ApiClient,
@@ -292,13 +334,15 @@ async function resolveSessionMachine(
             const runnerReady = runnerAlive
                 && typeof state?.hubReadyAt === 'number'
                 && state.hubReadyAt > 0
-            if (runnerAlive && !runnerReady) {
-                await delayMachineWait(200, signal)
-                continue
-            }
-            const existing = await api.getMachine(machineId)
-            if (existing) {
-                return existing.id
+            const registrationInProgress = runnerAlive && !runnerReady && !isLegacyLiveRunner(state)
+            if (!registrationInProgress) {
+                const existing = await api.getMachine(machineId)
+                if (existing) {
+                    return existing.id
+                }
+                if (!runnerAlive) {
+                    requestRunnerStart()
+                }
             }
         } catch (error) {
             throwIfMachineWaitAborted(signal)
@@ -444,6 +488,11 @@ export async function bootstrapLazySession(options: SessionBootstrapOptions): Pr
             // Defer hub machine touch until materialize so a pending lazy
             // session does not register (or 409) before the user sends.
             const resolvedMachineId = await resolveSessionMachine(api, identity, signal)
+            if (snapshot.metadata && snapshot.metadata.machineId !== resolvedMachineId) {
+                // Same object the pending client still holds. Leaving the old
+                // id here makes materialization reconcile the hub row backward.
+                snapshot.metadata.machineId = resolvedMachineId
+            }
             const baseMetadata = snapshot.metadata ?? metadata
             const sessionMetadata = resolvedMachineId === machineId
                 ? baseMetadata

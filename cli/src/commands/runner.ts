@@ -11,7 +11,7 @@ import {
     stopRunnerSession
 } from '@/runner/controlClient'
 import { getLatestRunnerLog } from '@/ui/logger'
-import { isProcessAlive, killProcessTreeByPid } from '@/utils/process'
+import { getHapiRunnerProcessIdentity, isProcessAlive, killProcessTreeByPid } from '@/utils/process'
 import { spawnHappyCLI } from '@/utils/spawnHappyCLI'
 import { runDoctorCommand } from '@/ui/doctor'
 import { initializeToken } from '@/ui/tokenInit'
@@ -42,12 +42,20 @@ export function runnerStartTimeoutPids(
     childPid: number | undefined,
     statePid: number | undefined,
     isAlive: (pid: number) => boolean = isProcessAlive,
+    stateIdentity: (pid: number) => 'runner' | 'foreign' | 'unknown' | 'dead' = getHapiRunnerProcessIdentity,
 ): number[] {
     const pids: number[] = []
     if (typeof childPid === 'number' && isAlive(childPid)) {
         pids.push(childPid)
     }
-    if (typeof statePid === 'number' && statePid !== childPid && isAlive(statePid)) {
+    // A stale state file can name an unrelated live PID. Only the wrapper we
+    // spawned, or a process that is actually a hapi runner, may be killed.
+    if (
+        typeof statePid === 'number'
+        && statePid !== childPid
+        && isAlive(statePid)
+        && stateIdentity(statePid) === 'runner'
+    ) {
         pids.push(statePid)
     }
     return pids
