@@ -1273,6 +1273,10 @@ layers:
   # Web-only → remat --build-web; hard-reload (no hub restart).
   - branch: driver/2039-toolbar-crowd
 
+  # Remat unblock: #2039 outer search is shrink-0 + max-w-full; blocked-header
+  # test still forbade shrink-0 (#2019). Thin tip on live driver 7e907c715 @ 9fb9af6d8.
+  - branch: driver/2039-blocked-search-test
+
   # DROPPED 2026-10-06: driver/1933-claude-resume-amnesia — squash 94523eb0d is on
   # fork main (heavygee/hapi#204). Soup base is now origin/main, so tip-forward
   # absorbs it from the base; keeping the layer would double-apply / conflict.
