@@ -5,6 +5,7 @@ const {
     getSessionMock,
     getOrCreateSessionMock,
     getOrCreateMachineMock,
+    getMachineMock,
     sessionSyncClientMock,
     notifyRunnerSessionStartedMock,
     readSettingsMock
@@ -12,6 +13,7 @@ const {
     getSessionMock: vi.fn(),
     getOrCreateSessionMock: vi.fn(),
     getOrCreateMachineMock: vi.fn(),
+    getMachineMock: vi.fn(async (): Promise<{ id: string } | null> => null),
     sessionSyncClientMock: vi.fn(),
     notifyRunnerSessionStartedMock: vi.fn(async () => ({})),
     readSettingsMock: vi.fn()
@@ -23,6 +25,7 @@ vi.mock('@/api/api', () => ({
             getSession: getSessionMock,
             getOrCreateSession: getOrCreateSessionMock,
             getOrCreateMachine: getOrCreateMachineMock,
+            getMachine: getMachineMock,
             sessionSyncClient: sessionSyncClientMock
         })
     }
@@ -96,6 +99,8 @@ describe('bootstrapExistingSession', () => {
         getSessionMock.mockReset()
         getOrCreateSessionMock.mockReset()
         getOrCreateMachineMock.mockReset()
+        getMachineMock.mockReset()
+        getMachineMock.mockResolvedValue(null)
         sessionSyncClientMock.mockReset()
         notifyRunnerSessionStartedMock.mockClear()
         readSettingsMock.mockReset()
@@ -344,6 +349,8 @@ describe('bootstrapLazySession', () => {
     beforeEach(() => {
         getOrCreateSessionMock.mockReset()
         getOrCreateMachineMock.mockReset()
+        getMachineMock.mockReset()
+        getMachineMock.mockResolvedValue(null)
         sessionSyncClientMock.mockReset()
         notifyRunnerSessionStartedMock.mockClear()
         readSettingsMock.mockReset()
@@ -403,6 +410,7 @@ describe('bootstrapLazySession', () => {
 
         const materialized = createSession()
         materialized.id = provisional.id
+        getOrCreateMachineMock.mockResolvedValue({ id: 'machine-1' })
         getOrCreateSessionMock.mockResolvedValue(materialized)
         const snapshot = {
             metadata: {
@@ -433,6 +441,8 @@ describe('bootstrapSession HAPI_SESSION_ID export', () => {
     beforeEach(() => {
         getOrCreateSessionMock.mockReset()
         getOrCreateMachineMock.mockReset()
+        getMachineMock.mockReset()
+        getMachineMock.mockResolvedValue(null)
         sessionSyncClientMock.mockReset()
         notifyRunnerSessionStartedMock.mockClear()
         readSettingsMock.mockReset()
@@ -476,9 +486,26 @@ describe('bootstrapSession HAPI_SESSION_ID export', () => {
         )
     })
 
-    it('uses the machine id returned after legacy re-enroll', async () => {
+    it('skips machine registration when the hub row already exists', async () => {
         const session = createSession()
         getOrCreateSessionMock.mockResolvedValue(session)
+        getMachineMock.mockResolvedValue({ id: 'machine-1' })
+        sessionSyncClientMock.mockReturnValue({ isPending: () => false })
+        readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'secret-tag' })
+
+        const result = await bootstrapSession({
+            flavor: 'claude',
+            workingDirectory: '/tmp/project'
+        })
+
+        expect(getOrCreateMachineMock).not.toHaveBeenCalled()
+        expect(result.machineId).toBe('machine-1')
+    })
+
+    it('creates a machine only when the hub has no row yet', async () => {
+        const session = createSession()
+        getOrCreateSessionMock.mockResolvedValue(session)
+        getMachineMock.mockResolvedValue(null)
         getOrCreateMachineMock.mockResolvedValue({ id: 'machine-rotated' })
         sessionSyncClientMock.mockReturnValue({ isPending: () => false })
         readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'secret-tag' })

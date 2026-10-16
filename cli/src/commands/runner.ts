@@ -11,7 +11,7 @@ import {
     stopRunnerSession
 } from '@/runner/controlClient'
 import { getLatestRunnerLog } from '@/ui/logger'
-import { isProcessAlive } from '@/utils/process'
+import { isProcessAlive, killProcessTreeByPid } from '@/utils/process'
 import { spawnHappyCLI } from '@/utils/spawnHappyCLI'
 import { runDoctorCommand } from '@/ui/doctor'
 import { initializeToken } from '@/ui/tokenInit'
@@ -164,11 +164,14 @@ export const runnerCommand: CommandDefinition = {
             })
             child.unref()
 
-            // Control-server liveness is not hub registration. Wait for
-            // hubReadyAt (written only after POST /cli/machines succeeds) or
-            // for the child to die on a non-retryable enrollment error.
+            // One POST /cli/machines attempt can sit on a 60s timeout. Wait
+            // past that, then kill the child so a late success cannot outlive
+            // the failure we print (#288).
+            const readyWaitMs = 90_000
+            const pollMs = 100
             let started = false
-            for (let i = 0; i < 300; i++) {
+            const deadline = Date.now() + readyWaitMs
+            while (Date.now() < deadline) {
                 const state = await readRunnerState()
                 if (detachedRunnerHubReady(state, child.pid)) {
                     started = true
@@ -177,7 +180,11 @@ export const runnerCommand: CommandDefinition = {
                 if (typeof child.pid === 'number' && !isProcessAlive(child.pid)) {
                     break
                 }
-                await new Promise(resolve => setTimeout(resolve, 100))
+                await new Promise(resolve => setTimeout(resolve, pollMs))
+            }
+
+            if (!started && typeof child.pid === 'number' && isProcessAlive(child.pid)) {
+                await killProcessTreeByPid(child.pid, true)
             }
 
             if (started) {

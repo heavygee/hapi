@@ -1791,9 +1791,8 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     // the persisted identity must match settings or the next start kills us.
     if (machine.id !== fileState.startedWithMachineId) {
       fileState.startedWithMachineId = machine.id
+      writeRunnerState(fileState)
     }
-    fileState.hubReadyAt = Date.now()
-    writeRunnerState(fileState)
 
     // Create realtime machine session
     const apiMachine = api.machineSyncClient(machine, {
@@ -1809,8 +1808,11 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       requestShutdown: () => requestShutdown('hapi-app')
     });
 
-    // Connect to server
-    apiMachine.connect();
+    // hubReadyAt means the replacement can serve RPCs, not merely that REST
+    // registration returned (#288). Parents and version handoff wait on it.
+    await apiMachine.connectUntilReady()
+    fileState.hubReadyAt = Date.now()
+    writeRunnerState(fileState)
     scheduleCursorModelsPrewarm();
 
     // Visible startup banner. Use console.log so it always appears on stdout,
