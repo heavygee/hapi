@@ -1271,7 +1271,9 @@ layers:
   # stale ready pids do not; a failed handoff restores the parent runner state.
   # Follow-up after 58d71276e: 9ab966c49 — failed handoff rebinds the parent runner proof;
   # a reused pid no longer blocks starting the runner.
-  # Thin tip on soup HEAD 8d51206da: driver/2038-machine-tag-reregister @ 9ab966c49
+  # Follow-up after 9ab966c49: a12a30014 — failed handoff reclaims the proof only after
+  # the child is dead and the lock is ours; a failed runner spawn can be retried.
+  # Thin tip on soup HEAD 8d51206da: driver/2038-machine-tag-reregister @ a12a30014
   # Parent pin: driver/2038-machine-tag-parent @ 8d51206da
   # PR: heavygee/hapi#288 (fork fortress — not upstream-landable alone)
   # Hub+cli → remat + hapi-restart-hub; tip-unique: 409 MachineTagConflict +
