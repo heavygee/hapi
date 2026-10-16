@@ -26,6 +26,8 @@ export class RpcHandlerManager {
         resolve: () => void
         settled: boolean
     }>()
+    /** While true, keepalive and reconnect must not reclaim methods (#288). */
+    private registrationSuspended = false
 
     constructor(config: RpcHandlerConfig) {
         this.scopePrefix = config.scopePrefix
@@ -40,7 +42,7 @@ export class RpcHandlerManager {
 
         this.handlers.set(prefixedMethod, handler)
 
-        if (this.socket) {
+        if (this.socket && !this.registrationSuspended) {
             this.emitRegister(prefixedMethod)
         }
     }
@@ -109,6 +111,7 @@ export class RpcHandlerManager {
      * until the replacement writes hubReadyAt (#288).
      */
     releaseRegisteredMethods(): void {
+        this.registrationSuspended = true
         const socket = this.socket
         if (!socket) {
             return
@@ -119,8 +122,14 @@ export class RpcHandlerManager {
         }
     }
 
+    /** End a handoff suspension and claim the methods again. */
+    resumeRegistration(): void {
+        this.registrationSuspended = false
+        this.reregisterAll()
+    }
+
     reregisterAll(): void {
-        if (!this.socket) {
+        if (!this.socket || this.registrationSuspended) {
             return
         }
         this.clearRegisterRetries()
