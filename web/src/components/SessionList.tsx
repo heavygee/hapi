@@ -3264,7 +3264,7 @@ export function SessionList(props: {
                     {!(showSearch && searchExpanded) ? (
                         <div
                             data-testid="session-list-header-actions"
-                            className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-1"
+                            className="ml-auto flex w-max shrink-0 flex-nowrap items-center justify-end gap-1"
                         >
                             {showMachineFilterBar ? (
                                 <MachineFilterMenu
