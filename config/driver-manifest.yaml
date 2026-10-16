@@ -1262,7 +1262,9 @@ layers:
   # doctor fails a null proof hash and stays non-interactive without a token.
   # Follow-up after 9984440e7: dfffbb191 — handoff RPC release stays suspended across keepalive;
   # session bootstrap follows the machine id the runner actually registered.
-  # Thin tip on soup HEAD 8d51206da: driver/2038-machine-tag-reregister @ dfffbb191
+  # Follow-up after dfffbb191: c5c658c20 — direct launches use an existing machine row
+  # when no runner is mid-registration. runnerProof stays (nametag comment was not enrollment).
+  # Thin tip on soup HEAD 8d51206da: driver/2038-machine-tag-reregister @ c5c658c20
   # Parent pin: driver/2038-machine-tag-parent @ 8d51206da
   # PR: heavygee/hapi#288 (fork fortress — not upstream-landable alone)
   # Hub+cli → remat + hapi-restart-hub; tip-unique: 409 MachineTagConflict +
