@@ -8,7 +8,8 @@ const {
     getMachineMock,
     sessionSyncClientMock,
     notifyRunnerSessionStartedMock,
-    readSettingsMock
+    readSettingsMock,
+    readRunnerStateMock
 } = vi.hoisted(() => ({
     getSessionMock: vi.fn(),
     getOrCreateSessionMock: vi.fn(),
@@ -16,7 +17,8 @@ const {
     getMachineMock: vi.fn(async (): Promise<{ id: string } | null> => null),
     sessionSyncClientMock: vi.fn(),
     notifyRunnerSessionStartedMock: vi.fn(async () => ({})),
-    readSettingsMock: vi.fn()
+    readSettingsMock: vi.fn(),
+    readRunnerStateMock: vi.fn(async () => null)
 }))
 
 vi.mock('@/api/api', () => ({
@@ -37,7 +39,8 @@ vi.mock('@/runner/controlClient', () => ({
 }))
 
 vi.mock('@/persistence', () => ({
-    readSettings: readSettingsMock
+    readSettings: readSettingsMock,
+    readRunnerState: readRunnerStateMock
 }))
 
 vi.mock('@/configuration', () => ({

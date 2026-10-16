@@ -102,6 +102,23 @@ export class RpcHandlerManager {
         }
     }
 
+    /**
+     * Drop hub ownership of every method this socket registered.
+     * Version handoff must do this before the replacement waits for acks:
+     * the hub refuses a second owner, and the old process will not exit
+     * until the replacement writes hubReadyAt (#288).
+     */
+    releaseRegisteredMethods(): void {
+        const socket = this.socket
+        if (!socket) {
+            return
+        }
+        this.clearRegisterRetries()
+        for (const method of this.handlers.keys()) {
+            socket.emit('rpc-unregister', { method })
+        }
+    }
+
     reregisterAll(): void {
         if (!this.socket) {
             return

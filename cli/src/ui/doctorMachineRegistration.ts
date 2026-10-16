@@ -3,7 +3,8 @@
  *
  * Sends machineTag from settings but deliberately omits runnerProof so a live
  * runner's bound proof hash is never cold-rebound by doctor. Interpret:
- * - 200 → registration path ok (untagged or tag-only row)
+ * - 200 → FAIL. A proof-less POST only succeeds when runner_proof_hash is null.
+ *   The real runner will then be told the proof is missing and rotate ids.
  * - 409 + proof mismatch/missing → tag verified; runner must present proof
  * - 409 + tag mismatch / legacy re-enroll → FAIL
  * - 5xx / auth errors → FAIL
@@ -37,7 +38,11 @@ export function classifyMachineRegistrationProbe(opts: {
     const lower = detail.toLowerCase()
 
     if (status !== undefined && status >= 200 && status < 300) {
-        return { ok: true, status, detail: detail || 'registered' }
+        return {
+            ok: false,
+            status,
+            detail: 'Machine row has no runner proof. Runner start will rotate to a new machine id instead of binding this one.',
+        }
     }
 
     if (status === 409) {

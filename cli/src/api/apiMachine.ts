@@ -615,6 +615,12 @@ export class ApiMachineClient {
                 offer,
                 downloadBaseUrl: configuration.apiUrl,
                 authToken: configuration.cliApiToken,
+                releaseRpcOwnership: () => {
+                    this.rpcHandlerManager.releaseRegisteredMethods()
+                },
+                restoreRpcOwnership: () => {
+                    this.rpcHandlerManager.reregisterAll()
+                },
                 requestShutdown: () => {
                     setTimeout(() => requestShutdown(), 500)
                 },
@@ -828,6 +834,16 @@ export class ApiMachineClient {
      * Transient `connect_error` events are ignored — Socket.IO reconnection
      * stays active until success or timeout.
      */
+    /** Let a replacement runner register the same methods during handoff. */
+    releaseRpcOwnership(): void {
+        this.rpcHandlerManager.releaseRegisteredMethods()
+    }
+
+    /** Re-claim methods after a failed handoff so this process can keep serving. */
+    restoreRpcOwnership(): void {
+        this.rpcHandlerManager.reregisterAll()
+    }
+
     /** Socket connect plus hub ack of the machine RPC handlers. */
     async connectUntilRpcReady(timeoutMs = 30_000): Promise<void> {
         await this.connectUntilReady(timeoutMs)
