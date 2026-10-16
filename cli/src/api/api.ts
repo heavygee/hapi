@@ -348,6 +348,26 @@ export class ApiClient {
         }
     }
 
+    /** Lookup only. 404 is null so session bootstrap can skip proof-bound re-registration. */
+    async getMachine(machineId: string): Promise<Machine | null> {
+        const response = await axios.get(
+            `${configuration.apiUrl}/cli/machines/${encodeURIComponent(machineId)}`,
+            {
+                headers: this.authHeaders(),
+                timeout: 15_000,
+                validateStatus: (status) => status === 404 || (status >= 200 && status < 300),
+            }
+        )
+        if (response.status === 404) {
+            return null
+        }
+        const parsed = CreateMachineResponseSchema.safeParse(response.data)
+        if (!parsed.success) {
+            throw apiValidationError('Invalid /cli/machines/:id response', response)
+        }
+        return parsed.data.machine
+    }
+
     private async postMachine(opts: {
         machineId: string
         metadata: MachineMetadata

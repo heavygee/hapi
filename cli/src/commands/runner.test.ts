@@ -14,6 +14,7 @@ const {
     statSyncMock,
     readRunnerStateMock,
     isProcessAliveMock,
+    killProcessTreeByPidMock,
 } = vi.hoisted(() => ({
     checkIfRunnerRunningAndCleanupStaleStateMock: vi.fn(),
     listRunnerSessionsMock: vi.fn(async () => []),
@@ -28,6 +29,7 @@ const {
     statSyncMock: vi.fn(() => ({ isDirectory: () => true })),
     readRunnerStateMock: vi.fn(async () => ({ pid: 4242, hubReadyAt: 1 })),
     isProcessAliveMock: vi.fn(() => true),
+    killProcessTreeByPidMock: vi.fn(async () => true),
 }))
 
 vi.mock('node:fs', async () => {
@@ -45,6 +47,7 @@ vi.mock('@/persistence', () => ({
 
 vi.mock('@/utils/process', () => ({
     isProcessAlive: isProcessAliveMock,
+    killProcessTreeByPid: killProcessTreeByPidMock,
 }))
 
 vi.mock('@/runner/controlClient', () => ({
