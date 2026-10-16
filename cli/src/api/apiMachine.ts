@@ -2,11 +2,13 @@
  * WebSocket client for machine/runner communication with hapi-hub
  */
 
+import axios from 'axios'
 import { io, type Socket } from 'socket.io-client'
 import { readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { logger } from '@/ui/logger'
 import { configuration } from '@/configuration'
+import { buildHubRequestHeaders } from '@/api/hubExtraHeaders'
 import type { ClientToServerEvents, ServerToClientEvents, Update, UpdateMachineBody } from '@hapi/protocol'
 import {
     ArchiveCodexSessionRpcRequestSchema,
@@ -621,6 +623,7 @@ export class ApiMachineClient {
                 restoreRpcOwnership: () => {
                     this.rpcHandlerManager.resumeRegistration()
                 },
+                rebindRunnerProof: () => this.rebindStoredRunnerProof(),
                 requestShutdown: () => {
                     setTimeout(() => requestShutdown(), 500)
                 },
@@ -834,6 +837,35 @@ export class ApiMachineClient {
      * Transient `connect_error` events are ignored — Socket.IO reconnection
      * stays active until success or timeout.
      */
+    /**
+     * Child registration can rebind runner_proof_hash before hubReadyAt.
+     * Put this process's proof back or the next reconnect is rejected.
+     */
+    async rebindStoredRunnerProof(): Promise<void> {
+        const proof = this.runnerProof?.trim()
+        const tag = this.machineTag?.trim()
+        if (!proof || !tag) {
+            return
+        }
+        await axios.post(
+            `${configuration.apiUrl}/cli/machines`,
+            {
+                id: this.machine.id,
+                tag,
+                runnerProof: proof,
+                metadata: this.machine.metadata ?? undefined,
+                runnerState: this.machine.runnerState ?? null,
+            },
+            {
+                headers: buildHubRequestHeaders({
+                    Authorization: `Bearer ${this.token}`,
+                    'Content-Type': 'application/json',
+                }),
+                timeout: 60_000,
+            },
+        )
+    }
+
     /** Let a replacement runner register the same methods during handoff. */
     releaseRpcOwnership(): void {
         this.rpcHandlerManager.releaseRegisteredMethods()

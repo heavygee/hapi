@@ -723,6 +723,8 @@ export async function applyRunnerSelfUpgrade(options: {
     releaseRpcOwnership?: () => void
     /** Re-claim methods when the replacement never becomes ready. */
     restoreRpcOwnership?: () => void
+    /** Put the parent's runner proof back if the child rebound the hub hash. */
+    rebindRunnerProof?: () => Promise<void>
 }): Promise<RunnerSelfUpgradeResponse> {
     if (runnerSelfUpgradeInFlight) {
         return {
@@ -818,6 +820,7 @@ async function applyRunnerSelfUpgradeUnlocked(options: {
     requestShutdown?: () => void
     releaseRpcOwnership?: () => void
     restoreRpcOwnership?: () => void
+    rebindRunnerProof?: () => Promise<void>
 }): Promise<UpgradeOutcome> {
     const localVersion = options.localVersion ?? packageJson.version
     const localGeneration = options.localGeneration
@@ -927,6 +930,11 @@ async function applyRunnerSelfUpgradeUnlocked(options: {
             // still-running child finish REST and then lose the method acks.
             const stopped = await terminateTimedOutUpgradeCandidate(candidate)
             if (stopped) {
+                try {
+                    await options.rebindRunnerProof?.()
+                } catch (error) {
+                    logger.debug('[SELF-UPGRADE] Failed to restore parent runner proof', error)
+                }
                 options.restoreRpcOwnership?.()
             }
             if (!stopped) {

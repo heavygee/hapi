@@ -11,7 +11,8 @@ const {
     readSettingsMock,
     readRunnerStateMock,
     isProcessAliveMock,
-    spawnHappyCLIMock
+    spawnHappyCLIMock,
+    getHapiRunnerProcessIdentityMock
 } = vi.hoisted(() => ({
     getSessionMock: vi.fn(),
     getOrCreateSessionMock: vi.fn(),
@@ -22,7 +23,8 @@ const {
     readSettingsMock: vi.fn(),
     readRunnerStateMock: vi.fn(async (): Promise<{ pid: number; hubReadyAt?: number; startTime?: string } | null> => ({ pid: 4242, hubReadyAt: 1 })),
     isProcessAliveMock: vi.fn(() => true),
-    spawnHappyCLIMock: vi.fn(() => ({ unref: vi.fn(), pid: 1 }))
+    spawnHappyCLIMock: vi.fn(() => ({ unref: vi.fn(), pid: 1 })),
+    getHapiRunnerProcessIdentityMock: vi.fn((): 'runner' | 'foreign' | 'unknown' | 'dead' => 'runner')
 }))
 
 vi.mock('@/api/api', () => ({
@@ -48,7 +50,8 @@ vi.mock('@/persistence', () => ({
 }))
 
 vi.mock('@/utils/process', () => ({
-    isProcessAlive: isProcessAliveMock
+    isProcessAlive: isProcessAliveMock,
+    getHapiRunnerProcessIdentity: getHapiRunnerProcessIdentityMock
 }))
 
 vi.mock('@/utils/spawnHappyCLI', () => ({
@@ -73,6 +76,7 @@ import {
     HAPI_SESSION_ID_ENV,
     bootstrapExistingSession,
     bootstrapLazySession,
+    resetRunnerStartForTests,
     bootstrapSession,
     buildMachineMetadata,
     buildSessionMetadata
@@ -124,6 +128,9 @@ describe('bootstrapExistingSession', () => {
         isProcessAliveMock.mockReset()
         isProcessAliveMock.mockReturnValue(true)
         spawnHappyCLIMock.mockClear()
+        resetRunnerStartForTests()
+        getHapiRunnerProcessIdentityMock.mockReset()
+        getHapiRunnerProcessIdentityMock.mockReturnValue('runner')
         delete process.env[HAPI_SESSION_ID_ENV]
     })
 
@@ -379,6 +386,9 @@ describe('bootstrapLazySession', () => {
         isProcessAliveMock.mockReset()
         isProcessAliveMock.mockReturnValue(true)
         spawnHappyCLIMock.mockClear()
+        resetRunnerStartForTests()
+        getHapiRunnerProcessIdentityMock.mockReset()
+        getHapiRunnerProcessIdentityMock.mockReturnValue('runner')
         delete process.env[HAPI_SESSION_ID_ENV]
     })
 
@@ -497,6 +507,9 @@ describe('bootstrapSession HAPI_SESSION_ID export', () => {
         isProcessAliveMock.mockReset()
         isProcessAliveMock.mockReturnValue(true)
         spawnHappyCLIMock.mockClear()
+        resetRunnerStartForTests()
+        getHapiRunnerProcessIdentityMock.mockReset()
+        getHapiRunnerProcessIdentityMock.mockReturnValue('runner')
         delete process.env[HAPI_SESSION_ID_ENV]
     })
 
@@ -583,6 +596,24 @@ describe('bootstrapSession HAPI_SESSION_ID export', () => {
         expect(spawnHappyCLIMock).toHaveBeenCalledWith(['runner', 'start-sync'], expect.objectContaining({
             detached: true,
         }))
+    })
+
+    it('starts a runner when the state pid is not a hapi process', async () => {
+        getMachineMock.mockResolvedValue(null)
+        sessionSyncClientMock.mockReturnValue({ isPending: () => false })
+        readSettingsMock.mockResolvedValue({ machineId: 'machine-1' })
+        readRunnerStateMock.mockResolvedValue({
+            pid: 4242,
+            startTime: new Date().toISOString(),
+        })
+        isProcessAliveMock.mockReturnValue(true)
+        getHapiRunnerProcessIdentityMock.mockReturnValue('foreign')
+
+        await expect(bootstrapSession({
+            flavor: 'cursor',
+            workingDirectory: '/tmp/project'
+        })).rejects.toThrow(/not registered on the hub/)
+        expect(spawnHappyCLIMock).toHaveBeenCalled()
     })
 
     it('uses a long-lived runner that never wrote hubReadyAt', async () => {

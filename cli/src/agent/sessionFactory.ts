@@ -10,7 +10,7 @@ import { getInstalledCliMtimeMs, notifyRunnerSessionStarted } from '@/runner/con
 import { isVersionHandoffDisabledByEnv } from '@/runner/versionHandoff'
 import { durableTargetGeneration, readUpgradeTarget } from '@/upgrade/upgradeTarget'
 import { readRunnerState, readSettings } from '@/persistence'
-import { isProcessAlive } from '@/utils/process'
+import { getHapiRunnerProcessIdentity, isProcessAlive } from '@/utils/process'
 import { spawnHappyCLI } from '@/utils/spawnHappyCLI'
 import { extractErrorInfo, isRetryableConnectionError } from '@/utils/errorUtils'
 import { configuration } from '@/configuration'
@@ -292,6 +292,11 @@ function isLegacyLiveRunner(state: {
 
 let runnerStartRequested = false
 
+/** Vitest isolation: the flag is process-wide otherwise. */
+export function resetRunnerStartForTests(): void {
+    runnerStartRequested = false
+}
+
 function requestRunnerStart(): void {
     if (runnerStartRequested) {
         return
@@ -332,7 +337,9 @@ async function resolveSessionMachine(
                 machineId = settings.machineId
             }
             const state = await readRunnerState().catch(() => null)
-            const runnerAlive = typeof state?.pid === 'number' && isProcessAlive(state.pid)
+            // Liveness alone is not a runner. A reused pid must not block startup.
+            const runnerAlive = typeof state?.pid === 'number'
+                && getHapiRunnerProcessIdentity(state.pid) === 'runner'
             const runnerReady = runnerAlive
                 && typeof state?.hubReadyAt === 'number'
                 && state.hubReadyAt > 0
