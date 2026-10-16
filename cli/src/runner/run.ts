@@ -1,4 +1,5 @@
 import fs from 'fs/promises';
+import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 
 import { ApiClient } from '@/api/api';
@@ -30,7 +31,7 @@ import {
 import { PERMISSION_MODES } from '@hapi/protocol/modes';
 import { RUNNER_CAPABILITIES } from '@hapi/protocol';
 import { withRetry } from '@/utils/time';
-import { isRetryableConnectionError } from '@/utils/errorUtils';
+import { extractErrorInfo, isRetryableConnectionError } from '@/utils/errorUtils';
 
 import { cleanupRunnerState, getInstalledCliMtimeMs, isRunnerRunningCurrentlyInstalledHappyVersion, stopRunner, waitForRunnerHandoff } from './controlClient';
 import { startRunnerControlServer } from './controlServer';
@@ -279,7 +280,10 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
 
   try {
     // Ensure auth and machine registration BEFORE anything else
-    const { machineId } = await authAndSetupMachineIfNeeded();
+    const { machineId, machineTag } = await authAndSetupMachineIfNeeded();
+    // Memory-only generation proof (#1473). Cold restart rebinds hash in place
+    // when machineTag matches — keep this process-local, never persist to disk.
+    const runnerProof = randomUUID();
     logger.debug('[RUNNER RUN] Auth and machine setup complete');
 
     // Setup state - key by PID
@@ -1738,32 +1742,58 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     logger.debug(`[RUNNER RUN] Workspace roots: ${workspaceRoots?.join(', ') ?? '(not set)'}`);
 
     // Get or create machine (with retry for transient connection errors)
-    const machine = await withRetry(
-      () => api.getOrCreateMachine({
-        machineId,
-        metadata: buildMachineMetadata({
-            workspaceRoots,
-            startedCliMtimeMs: startedWithCliMtimeMs,
-            asRunner: true,
-            versionHandoffDisabled: startedWithVersionHandoffDisabled,
+    let machine;
+    try {
+      machine = await withRetry(
+        () => api.getOrCreateMachine({
+          machineId,
+          machineTag,
+          runnerProof,
+          metadata: buildMachineMetadata({
+              workspaceRoots,
+              startedCliMtimeMs: startedWithCliMtimeMs,
+              asRunner: true,
+              versionHandoffDisabled: startedWithVersionHandoffDisabled,
+          }),
+          runnerState: initialRunnerState
         }),
-        runnerState: initialRunnerState
-      }),
-      {
-        maxAttempts: 60,
-        minDelay: 1000,
-        maxDelay: 30000,
-        shouldRetry: isRetryableConnectionError,
-        onRetry: (error, attempt, nextDelayMs) => {
-          const errorMsg = error instanceof Error ? error.message : String(error)
-          logger.debug(`[RUNNER RUN] Failed to register machine (attempt ${attempt}), retrying in ${nextDelayMs}ms: ${errorMsg}`)
+        {
+          maxAttempts: 60,
+          minDelay: 1000,
+          maxDelay: 30000,
+          shouldRetry: isRetryableConnectionError,
+          onRetry: (error, attempt, nextDelayMs) => {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            const line = `[RUNNER RUN] Failed to register machine (attempt ${attempt}), retrying in ${nextDelayMs}ms: ${errorMsg}`
+            if (attempt >= 3) {
+              logger.warn(line)
+            } else {
+              logger.debug(line)
+            }
+          }
         }
-      }
-    );
+      );
+    } catch (error) {
+      const { httpStatus, responseErrorText, message } = extractErrorInfo(error)
+      const detail = responseErrorText || message
+      console.error('')
+      console.error('FATAL: Runner failed to register machine with the hub.')
+      console.error(`  Machine ID: ${machineId}`)
+      console.error(`  Hub status: ${httpStatus ?? 'n/a'}`)
+      console.error(`  Detail: ${detail}`)
+      console.error('  Check that ~/.hapi/settings.json machineTag matches the hub machines.tag row.')
+      console.error('  Run `hapi doctor` for a registration probe. Do not wipe tag unless re-enrolling.')
+      console.error('')
+      throw error
+    }
     logger.debug(`[RUNNER RUN] Machine registered: ${machine.id}`);
 
     // Create realtime machine session
-    const apiMachine = api.machineSyncClient(machine, { workspaceRoots });
+    const apiMachine = api.machineSyncClient(machine, {
+      workspaceRoots,
+      machineTag,
+      runnerProof,
+    });
 
     // Set RPC handlers
     apiMachine.setRPCHandlers({
