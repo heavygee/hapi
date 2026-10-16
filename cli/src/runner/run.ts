@@ -1787,6 +1787,13 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       throw error
     }
     logger.debug(`[RUNNER RUN] Machine registered: ${machine.id}`);
+    // Legacy re-enroll can return a new id. Heartbeats rewrite fileState, so
+    // the persisted identity must match settings or the next start kills us.
+    if (machine.id !== fileState.startedWithMachineId) {
+      fileState.startedWithMachineId = machine.id
+    }
+    fileState.hubReadyAt = Date.now()
+    writeRunnerState(fileState)
 
     // Create realtime machine session
     const apiMachine = api.machineSyncClient(machine, {

@@ -15,6 +15,7 @@ import { configuration } from '@/configuration'
 import { buildHubRequestHeaders } from '@/api/hubExtraHeaders'
 import { getAuthToken } from '@/api/auth'
 import { readSettings } from '@/persistence'
+import { initializeToken } from '@/ui/tokenInit'
 import { buildMachineMetadata } from '@/agent/sessionFactory'
 import { extractErrorInfo } from '@/utils/errorUtils'
 
@@ -76,6 +77,13 @@ export async function probeMachineRegistration(): Promise<MachineRegistrationPro
         return { ok: false, detail: 'No machineTag in ~/.hapi/settings.json', machineId }
     }
 
+    try {
+        await initializeToken()
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return { ok: false, detail: message, machineId }
+    }
+
     let token: string
     try {
         token = getAuthToken()
@@ -85,6 +93,37 @@ export async function probeMachineRegistration(): Promise<MachineRegistrationPro
     }
 
     try {
+        const existing = await axios.get(
+            `${configuration.apiUrl}/cli/machines/${encodeURIComponent(machineId)}`,
+            {
+                headers: buildHubRequestHeaders({
+                    Authorization: `Bearer ${token}`,
+                }),
+                timeout: 15_000,
+                validateStatus: () => true,
+            }
+        )
+        if (existing.status === 404) {
+            return {
+                ok: false,
+                machineId,
+                status: 404,
+                detail: 'Machine is not registered on the hub yet. Start the runner; doctor will not create a proof-less row.',
+            }
+        }
+        if (existing.status < 200 || existing.status >= 300) {
+            const body = existing.data
+            const responseErrorText = body && typeof body === 'object' && typeof body.error === 'string'
+                ? body.error
+                : ''
+            return {
+                ok: false,
+                machineId,
+                status: existing.status,
+                detail: responseErrorText || `Machine lookup failed (HTTP ${existing.status})`,
+            }
+        }
+
         const response = await axios.post(
             `${configuration.apiUrl}/cli/machines`,
             {

@@ -22,7 +22,7 @@ import {
     LEGACY_MACHINE_REENROLL_MESSAGE,
     rotateMachineIdForLegacyReenroll,
 } from '@/ui/auth'
-import { apiValidationError } from '@/utils/errorUtils'
+import { apiValidationError, isRunnerProofRequiredError } from '@/utils/errorUtils'
 import { logger } from '@/ui/logger'
 import { ApiMachineClient } from './apiMachine'
 import { ApiSessionClient, type ApiSessionClientOptions } from './apiSession'
@@ -97,6 +97,11 @@ export class ApiClient {
         try {
             return await this.postSession(opts)
         } catch (error) {
+            // Proof-bound rows reject a tag-only embed. Rotating here would
+            // split the terminal session off the live runner (#288 P1).
+            if (isRunnerProofRequiredError(error)) {
+                throw error
+            }
             if (!opts.machine || !isLegacyMachineReenrollError(error)) {
                 throw error
             }
@@ -290,6 +295,11 @@ export class ApiClient {
         try {
             return await this.postMachine(opts)
         } catch (error) {
+            // Omitting runnerProof against a bound hash is not a legacy re-enroll.
+            // Only the runner process holds the memory-only proof (#288 P1).
+            if (isRunnerProofRequiredError(error) && !opts.runnerProof?.trim()) {
+                throw error
+            }
             if (!isLegacyMachineReenrollError(error) || opts.allowLegacyReenroll === false) {
                 throw error
             }

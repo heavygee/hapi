@@ -4,6 +4,7 @@ import {
     apiValidationError,
     isMachineEnrollmentConflictError,
     isRetryableConnectionError,
+    isRunnerProofRequiredError,
 } from './errorUtils'
 
 describe('extractErrorInfo', () => {
@@ -111,6 +112,13 @@ describe('isRetryableConnectionError enrollment conflicts (#2038)', () => {
     it('does not retry 500 machine tag mismatch (legacy hub defense)', () => {
         const error = axiosError(500, 'Machine tag mismatch')
         expect(isRetryableConnectionError(error)).toBe(false)
+    })
+
+    it('classifies proof-required 409 separately from generic tag mismatch', () => {
+        const proof = axiosError(409, 'Machine runner proof mismatch; re-enroll with a new machine id')
+        expect(isRunnerProofRequiredError(proof)).toBe(true)
+        expect(isRetryableConnectionError(proof)).toBe(false)
+        expect(isRunnerProofRequiredError(axiosError(409, 'Machine tag mismatch'))).toBe(false)
     })
 
     it('still retries unrelated 503', () => {

@@ -2,6 +2,7 @@ import chalk from 'chalk'
 import { existsSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, resolve } from 'node:path'
+import { readRunnerState } from '@/persistence'
 import { startRunner } from '@/runner/run'
 import {
     checkIfRunnerRunningAndCleanupStaleState,
@@ -10,10 +11,22 @@ import {
     stopRunnerSession
 } from '@/runner/controlClient'
 import { getLatestRunnerLog } from '@/ui/logger'
+import { isProcessAlive } from '@/utils/process'
 import { spawnHappyCLI } from '@/utils/spawnHappyCLI'
 import { runDoctorCommand } from '@/ui/doctor'
 import { initializeToken } from '@/ui/tokenInit'
 import type { CommandDefinition } from './types'
+
+/** Parent `runner start` must not declare success until hub registration wrote hubReadyAt. */
+export function detachedRunnerHubReady(
+    state: { pid?: number; hubReadyAt?: number } | null | undefined,
+    childPid: number | undefined,
+): boolean {
+    return typeof childPid === 'number'
+        && state?.pid === childPid
+        && typeof state.hubReadyAt === 'number'
+        && state.hubReadyAt > 0
+}
 
 /**
  * Parses repeated `--workspace-root <path>` / `--workspace-root=<path>` from
@@ -151,10 +164,17 @@ export const runnerCommand: CommandDefinition = {
             })
             child.unref()
 
+            // Control-server liveness is not hub registration. Wait for
+            // hubReadyAt (written only after POST /cli/machines succeeds) or
+            // for the child to die on a non-retryable enrollment error.
             let started = false
-            for (let i = 0; i < 50; i++) {
-                if (await checkIfRunnerRunningAndCleanupStaleState()) {
+            for (let i = 0; i < 300; i++) {
+                const state = await readRunnerState()
+                if (detachedRunnerHubReady(state, child.pid)) {
                     started = true
+                    break
+                }
+                if (typeof child.pid === 'number' && !isProcessAlive(child.pid)) {
                     break
                 }
                 await new Promise(resolve => setTimeout(resolve, 100))
@@ -163,7 +183,7 @@ export const runnerCommand: CommandDefinition = {
             if (started) {
                 console.log('Runner started successfully')
             } else {
-                console.error('Failed to start runner')
+                console.error('Failed to start runner (hub registration did not complete)')
                 process.exit(1)
             }
             process.exit(0)
