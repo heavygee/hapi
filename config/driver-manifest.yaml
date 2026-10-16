@@ -1246,6 +1246,18 @@ layers:
   # Hub+cli+web → remat --build-web + hapi-restart-hub; then seal to gift.
   - branch: driver/284-platform-aware-offer
 
+  # heavygee/hapi#287 (ref tiann/hapi#2038) — tagged machine re-register omitted
+  # tag/proof → MachineTagConflictError uncaught 500 → silent 60× runner retry.
+  # Hub forwards tag/runnerProof + 409 on conflict; runner sends machineTag +
+  # process-local runnerProof and FATALs on fail; doctor tag-only registration
+  # probe; enrollment bodies not retried even on 5xx.
+  # Thin tip on soup HEAD 8d51206da: driver/2038-machine-tag-reregister @ 1bd8d8c80
+  # Parent pin: driver/2038-machine-tag-parent @ 8d51206da
+  # PR: heavygee/hapi#288 (fork fortress — not upstream-landable alone)
+  # Hub+cli → remat + hapi-restart-hub; tip-unique: 409 MachineTagConflict +
+  # doctorMachineRegistration module.
+  - branch: driver/2038-machine-tag-reregister
+
   # DROPPED 2026-10-06: driver/1933-claude-resume-amnesia — squash 94523eb0d is on
   # fork main (heavygee/hapi#204). Soup base is now origin/main, so tip-forward
   # absorbs it from the base; keeping the layer would double-apply / conflict.
