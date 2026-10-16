@@ -5,6 +5,8 @@ import type { StartOptions } from '@/claude/runClaude'
 import { CLAUDE_PERMISSION_MODES } from '@hapi/protocol/modes'
 import { configuration } from '@/configuration'
 import { isRunnerRunningCurrentlyInstalledHappyVersion } from '@/runner/controlClient'
+import { readRunnerState } from '@/persistence'
+import { isProcessAlive } from '@/utils/process'
 import { authAndSetupMachineIfNeeded } from '@/ui/auth'
 import { logger } from '@/ui/logger'
 import { initializeToken } from '@/ui/tokenInit'
@@ -108,7 +110,17 @@ export const claudeCommand: CommandDefinition = {
             })
             runnerProcess.unref()
 
-            await new Promise(resolve => setTimeout(resolve, 200))
+            // Stay until the child owns runner.state.json. Session bootstrap
+            // treats a live-but-not-ready runner as mid-rotation and will not
+            // bind the legacy machine id (#288).
+            const spawnedDeadline = Date.now() + 90_000
+            while (Date.now() < spawnedDeadline) {
+                const state = await readRunnerState().catch(() => null)
+                if (typeof state?.pid === 'number' && isProcessAlive(state.pid)) {
+                    break
+                }
+                await new Promise(resolve => setTimeout(resolve, 200))
+            }
         }
 
         try {

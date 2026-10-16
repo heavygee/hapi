@@ -267,9 +267,11 @@ function isTransientMachineLookup(error: unknown): boolean {
 /**
  * Session bootstrap must not POST /cli/machines. A tag-only create leaves a
  * null proof hash, and the runner then rotates away from that row (#288).
- * Wait until the live runner has hubReadyAt, then use settings.machineId.
- * An existing legacy row is not the runner's identity: untagged re-enroll
- * rotates that id while the old row is still GET-able.
+ *
+ * A live runner that has not reached hubReadyAt may still be rotating
+ * settings.machineId, so the old row is not safe yet. Direct launches
+ * (cursor, codex, and the rest) do not start a runner: an existing row is
+ * enough when nothing is mid-registration.
  */
 async function resolveSessionMachine(
     api: ApiClient,
@@ -286,15 +288,17 @@ async function resolveSessionMachine(
                 machineId = settings.machineId
             }
             const state = await readRunnerState().catch(() => null)
-            const runnerReady = typeof state?.pid === 'number'
-                && typeof state.hubReadyAt === 'number'
+            const runnerAlive = typeof state?.pid === 'number' && isProcessAlive(state.pid)
+            const runnerReady = runnerAlive
+                && typeof state?.hubReadyAt === 'number'
                 && state.hubReadyAt > 0
-                && isProcessAlive(state.pid)
-            if (runnerReady) {
-                const existing = await api.getMachine(machineId)
-                if (existing) {
-                    return existing.id
-                }
+            if (runnerAlive && !runnerReady) {
+                await delayMachineWait(200, signal)
+                continue
+            }
+            const existing = await api.getMachine(machineId)
+            if (existing) {
+                return existing.id
             }
         } catch (error) {
             throwIfMachineWaitAborted(signal)

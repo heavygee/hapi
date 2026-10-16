@@ -19,7 +19,7 @@ const {
     sessionSyncClientMock: vi.fn(),
     notifyRunnerSessionStartedMock: vi.fn(async () => ({})),
     readSettingsMock: vi.fn(),
-    readRunnerStateMock: vi.fn(async () => ({ pid: 4242, hubReadyAt: 1 })),
+    readRunnerStateMock: vi.fn(async (): Promise<{ pid: number; hubReadyAt: number } | null> => ({ pid: 4242, hubReadyAt: 1 })),
     isProcessAliveMock: vi.fn(() => true)
 }))
 
@@ -538,6 +538,25 @@ describe('bootstrapSession HAPI_SESSION_ID export', () => {
 
         expect(getOrCreateMachineMock).not.toHaveBeenCalled()
         expect(result.machineId).toBe('machine-1')
+    })
+
+    it('uses an existing machine row when the runner is not running', async () => {
+        const session = createSession()
+        getOrCreateSessionMock.mockResolvedValue(session)
+        getMachineMock.mockResolvedValue({ id: 'machine-1' })
+        sessionSyncClientMock.mockReturnValue({ isPending: () => false })
+        readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'secret-tag' })
+        readRunnerStateMock.mockResolvedValue(null)
+        isProcessAliveMock.mockReturnValue(false)
+
+        const result = await bootstrapSession({
+            flavor: 'cursor',
+            workingDirectory: '/tmp/project'
+        })
+
+        expect(result.machineId).toBe('machine-1')
+        expect(getOrCreateMachineMock).not.toHaveBeenCalled()
+        expect(getMachineMock).toHaveBeenCalledWith('machine-1')
     })
 
     it('does not create a proof-less machine when the hub row is missing', async () => {
