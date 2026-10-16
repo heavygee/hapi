@@ -106,11 +106,13 @@ describe('SessionList blocked chrome (#1717)', () => {
 
         const search = screen.getByTestId('session-list-search')
         expect(search).toHaveAttribute('data-expanded', 'false')
-        // Regression: w-full on collapsed search ate the header row and sat on the pill.
-        // Group must stay min-w-0 (can yield) without w-full/shrink-0 hogging the row.
+        // #2019: collapsed search must not be w-full (that ate the header and sat on the pill).
+        // #2039: outer group is shrink-0 + max-w-full so icon/clear are not crushed over the
+        // pill; the query chip inside still yields. Do not require min-w-0 on this node.
         expect(search.className.split(/\s+/)).not.toContain('w-full')
-        expect(search.className.split(/\s+/)).not.toContain('shrink-0')
-        expect(search.className.split(/\s+/)).toContain('min-w-0')
+        expect(search.className.split(/\s+/)).toContain('shrink-0')
+        expect(search.className.split(/\s+/)).toContain('max-w-full')
+        expect(search.className.split(/\s+/)).not.toContain('min-w-0')
         expect(screen.getByTestId('blocked-jump-pill')).toBeTruthy()
         expect(screen.getByRole('button', { name: 'Clear search' })).toBeTruthy()
     })
