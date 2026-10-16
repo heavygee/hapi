@@ -1251,7 +1251,9 @@ layers:
   # Hub forwards tag/runnerProof + 409 on conflict; runner sends machineTag +
   # process-local runnerProof and FATALs on fail; doctor tag-only registration
   # probe; enrollment bodies not retried even on 5xx.
-  # Thin tip on soup HEAD 8d51206da: driver/2038-machine-tag-reregister @ 1bd8d8c80
+  # Follow-up on same branch after first soup absorb of 1bd8d8c80:
+  # b76a95b0c — no proof-less rotate; hubReadyAt before detached start; doctor GET-before-POST.
+  # Thin tip on soup HEAD 8d51206da: driver/2038-machine-tag-reregister @ b76a95b0c
   # Parent pin: driver/2038-machine-tag-parent @ 8d51206da
   # PR: heavygee/hapi#288 (fork fortress — not upstream-landable alone)
   # Hub+cli → remat + hapi-restart-hub; tip-unique: 409 MachineTagConflict +
