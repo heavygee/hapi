@@ -2024,6 +2024,11 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             if (typeof replacement?.pid === 'number') {
               await killProcessTreeByPid(replacement.pid, true);
             }
+            try {
+              await apiMachine.rebindStoredRunnerProof();
+            } catch (error) {
+              logger.debug('[RUNNER RUN] Failed to restore parent runner proof after failed handoff', error);
+            }
             apiMachine.restoreRpcOwnership();
             logger.debug(`[RUNNER RUN] Replacement runner did not register within 90s; attempting to re-acquire lock and stay alive to avoid leaving the machine offline.`);
             // Re-acquire the lock with a long window (the child has likely
