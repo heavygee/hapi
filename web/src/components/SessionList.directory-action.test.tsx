@@ -129,10 +129,12 @@ describe('SessionList directory action', () => {
 
         fireEvent.click(screen.getByRole('button', { name: SEARCH_LABEL }))
         const searchInput = screen.getByPlaceholderText(SEARCH_PLACEHOLDER)
-        // input → field row → session-list-search → header actions row
+        // input → field row → session-list-search → header row
         const headerRow = searchInput.parentElement?.parentElement?.parentElement
+        expect(headerRow).toHaveAttribute('data-testid', 'session-list-header-row')
         expect(headerRow).toHaveClass('px-2')
         expect(headerRow).toHaveClass('py-1')
+        expect(headerRow).toHaveClass('flex-wrap')
     })
 
     it('hides the directory action for sessions without path metadata', () => {
@@ -197,8 +199,12 @@ describe('SessionList time filter', () => {
         const searchControl = searchButton.parentElement
         expect(searchControl?.nextElementSibling).toBe(filterButton.parentElement)
         expect(searchControl?.parentElement).toBe(filterButton.parentElement?.parentElement)
-        expect(searchControl?.parentElement).toHaveClass('relative', 'gap-1', 'min-w-0')
-        expect(searchControl?.parentElement?.className.split(/\s+/)).not.toContain('shrink-0')
+        // #2039: collapsed search must not shrink under neighbors (overlap);
+        // header wraps trailing actions instead.
+        expect(searchControl?.parentElement).toHaveClass('relative', 'gap-1', 'shrink-0', 'max-w-full')
+        expect(searchControl?.parentElement?.className.split(/\s+/)).not.toContain('min-w-0')
+        expect(screen.getByTestId('session-list-header-row')).toHaveClass('flex-wrap')
+        expect(screen.getByTestId('session-list-header-actions')).toBeInTheDocument()
         expect(screen.queryByPlaceholderText(SEARCH_PLACEHOLDER)).toBeNull()
 
         fireEvent.click(filterButton)
@@ -1091,6 +1097,45 @@ describe('SessionList search toggle', () => {
         expect(screen.getByRole('button', { name: SEARCH_LABEL })).toHaveFocus()
         expect(screen.getByRole('button', { name: /Matching task/ })).toBeInTheDocument()
         expect(screen.getByRole('button', { name: /Other task/ })).toBeInTheDocument()
+    })
+
+    it('keeps collapsed search chrome from sharing a shrink row with header actions (tiann/hapi#2039)', () => {
+        renderWithProviders(
+            <SessionList
+                sessions={[makeSession({
+                    id: 'session-1',
+                    updatedAt: 100,
+                    metadata: { path: '/work/hapi', name: 'Matching task', flavor: 'codex' },
+                })]}
+                selectedSessionId={null}
+                onSelect={vi.fn()}
+                onNewSession={vi.fn()}
+                onRefresh={vi.fn()}
+                isLoading={false}
+                renderHeader={false}
+                api={null}
+            />
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: SEARCH_LABEL }))
+        const input = screen.getByPlaceholderText(SEARCH_PLACEHOLDER)
+        fireEvent.change(input, { target: { value: 'Matching' } })
+        fireEvent.blur(input)
+
+        const searchGroup = screen.getByTestId('session-list-search')
+        const headerRow = screen.getByTestId('session-list-header-row')
+        const actions = screen.getByTestId('session-list-header-actions')
+        const clearButton = screen.getByRole('button', { name: 'Clear search' })
+
+        expect(searchGroup).toHaveAttribute('data-expanded', 'false')
+        expect(searchGroup).toHaveClass('shrink-0')
+        expect(searchGroup.className.split(/\s+/)).not.toContain('min-w-0')
+        expect(headerRow).toContainElement(searchGroup)
+        expect(headerRow).toContainElement(actions)
+        expect(actions).not.toContainElement(clearButton)
+        expect(searchGroup).toContainElement(clearButton)
+        // Actions are a sibling flex child so wrap can move them off the search line.
+        expect(searchGroup.nextElementSibling).toBe(actions)
     })
 
     it('gives expanded search a 48px clear end-cap with calendar immediately left (tiann/hapi#2019)', () => {

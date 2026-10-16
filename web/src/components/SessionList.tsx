@@ -859,12 +859,15 @@ export function SessionListSearch(props: {
         const hasTextQuery = props.value.length > 0
         const collapsedLabel = hasTextQuery ? `${searchLabel}: ${props.value}` : searchLabel
         return (
-            // min-w-0 (no shrink-0): group can yield space to neighboring toolbar
-            // controls; calendar + clear stay shrink-0; query text truncates.
+            // shrink-0 + max-w-full: do not let the group crush below its chrome
+            // (icon / clear / calendar). Crushing with overflow:visible was how
+            // clear painted over filter / BlockedJumpPill at narrow widths
+            // (tiann/hapi#2039). Query text still truncates inside the chip.
+            // Neighboring toolbar icons wrap via the header row instead.
             <div
                 data-testid="session-list-search"
                 data-expanded="false"
-                className="relative flex min-w-0 flex-nowrap items-center gap-1"
+                className="relative flex max-w-full shrink-0 flex-nowrap items-center gap-1"
             >
                 <div className={cn(
                     'relative flex min-w-0 items-center rounded-full transition-colors',
@@ -1952,7 +1955,14 @@ export function SessionList(props: {
         <div className="flex min-h-0 w-full flex-1 flex-col">
             <div className="session-list-scrollbar-offset mx-auto w-full max-w-content shrink-0">
             {showHeaderRow ? (
-                <div className="flex items-center gap-1 px-2 py-1">
+                // flex-wrap + actions as one flex child: when search chrome + icons
+                // exceed the row, icons wrap as a group instead of painting over
+                // search clear (tiann/hapi#2039). flex-1 spacer removed — it ate
+                // the line and blocked wrap.
+                <div
+                    data-testid="session-list-header-row"
+                    className="flex flex-wrap items-center gap-1 px-2 py-1"
+                >
                     {showSearch ? (
                         <SessionListSearch
                             value={searchQuery}
@@ -1969,8 +1979,10 @@ export function SessionList(props: {
                         />
                     ) : null}
                     {!(showSearch && searchExpanded) ? (
-                        <>
-                            <div className="flex-1" />
+                        <div
+                            data-testid="session-list-header-actions"
+                            className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-1"
+                        >
                             {showMachineFilterBar ? (
                                 <MachineFilterMenu
                                     machines={machineFilterItems}
@@ -1997,7 +2009,7 @@ export function SessionList(props: {
                                 title={t('sessions.unreadFilter.toggle')}
                                 aria-label={t('sessions.unreadFilter.toggle')}
                                 className={cn(
-                                    'flex h-9 w-9 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
+                                    'flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
                                     showUnreadOnly
                                         ? 'bg-[var(--app-subtle-bg)]'
                                         : 'hover:bg-[var(--app-subtle-bg)]'
@@ -2018,14 +2030,14 @@ export function SessionList(props: {
                                 <button
                                     type="button"
                                     onClick={props.onNewSession}
-                                    className="session-list-new-button flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-link)] transition-colors"
+                                    className="session-list-new-button flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--app-link)] transition-colors"
                                     title={t('sessions.new')}
                                 >
                                     <PlusIcon className="h-5 w-5" />
                                 </button>
                             ) : null}
                             {props.headerActions}
-                        </>
+                        </div>
                     ) : null}
                 </div>
             ) : null}
