@@ -18,6 +18,7 @@ import { readSessionSummaryContractEnabled } from '../../config/sessionSummaryCo
 import { constantTimeEquals } from '../../utils/crypto'
 import { parseAccessToken } from '../../utils/accessToken'
 import type { Machine, Session, SyncEngine } from '../../sync/syncEngine'
+import { MachineTagConflictError } from '../../store/machines'
 import { SessionIdentityConflictError, SessionNotAdoptableError } from '../../store/sessions'
 
 const bearerSchema = z.string().regex(/^Bearer\s+(.+)$/i)
@@ -116,12 +117,21 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
             if (existingMachine && existingMachine.namespace !== namespace) {
                 return c.json({ error: 'Machine access denied' }, 403)
             }
-            engine.getOrCreateMachine(
-                machineInput.id,
-                machineInput.metadata,
-                machineInput.runnerState ?? null,
-                namespace
-            )
+            try {
+                engine.getOrCreateMachine(
+                    machineInput.id,
+                    machineInput.metadata,
+                    machineInput.runnerState ?? null,
+                    namespace,
+                    machineInput.tag,
+                    machineInput.runnerProof
+                )
+            } catch (error) {
+                if (error instanceof MachineTagConflictError) {
+                    return c.json({ error: error.message }, 409)
+                }
+                throw error
+            }
         }
 
         try {
@@ -522,8 +532,23 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
         if (existing && existing.namespace !== namespace) {
             return c.json({ error: 'Machine access denied' }, 403)
         }
-        const machine = engine.getOrCreateMachine(parsed.data.id, parsed.data.metadata, parsed.data.runnerState ?? null, namespace)
-        return c.json({ machine })
+        try {
+            const machine = engine.getOrCreateMachine(
+                parsed.data.id,
+                parsed.data.metadata,
+                parsed.data.runnerState ?? null,
+                namespace,
+                parsed.data.tag,
+                parsed.data.runnerProof
+            )
+            return c.json({ machine })
+        } catch (error) {
+            // Enrollment conflicts are client-correctable; never bare 500 (#2038 / #287).
+            if (error instanceof MachineTagConflictError) {
+                return c.json({ error: error.message }, 409)
+            }
+            throw error
+        }
     })
 
     app.get('/machines/:id', (c) => {

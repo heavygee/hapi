@@ -3,6 +3,7 @@ import { Hono } from 'hono'
 import type { SyncEngine } from '../../sync/syncEngine'
 import { createConfiguration } from '../../configuration'
 import { createCliRoutes } from './cli'
+import { MachineTagConflictError } from '../../store/machines'
 import { SessionIdentityConflictError } from '../../store/sessions'
 
 function createApp(engine: Partial<SyncEngine>) {
@@ -224,7 +225,9 @@ describe('cli lazy session creation', () => {
             'machine-1',
             { host: 'localhost' },
             null,
-            'default'
+            'default',
+            undefined,
+            undefined
         )
         expect(getOrCreateSession).toHaveBeenCalledWith(
             'lazy-tag',
@@ -235,6 +238,45 @@ describe('cli lazy session creation', () => {
             undefined,
             undefined,
             sessionId
+        )
+    })
+
+    it('forwards embedded machine tag and runnerProof into getOrCreateMachine', async () => {
+        const getOrCreateMachine = mock(() => ({ id: 'machine-1' }))
+        const getOrCreateSession = mock(() => ({ id: sessionId }))
+        const app = createApp({
+            getMachine: () => null,
+            getOrCreateMachine,
+            getOrCreateSession
+        } as never)
+
+        const response = await app.request('/cli/sessions', {
+            method: 'POST',
+            headers: {
+                ...authHeaders(),
+                'content-type': 'application/json'
+            },
+            body: JSON.stringify({
+                id: sessionId,
+                tag: 'lazy-tag',
+                metadata: {},
+                machine: {
+                    id: 'machine-1',
+                    tag: 'secret-tag',
+                    runnerProof: 'proof-1',
+                    metadata: { host: 'localhost' }
+                }
+            })
+        })
+
+        expect(response.status).toBe(200)
+        expect(getOrCreateMachine).toHaveBeenCalledWith(
+            'machine-1',
+            { host: 'localhost' },
+            null,
+            'default',
+            'secret-tag',
+            'proof-1'
         )
     })
 
@@ -580,5 +622,91 @@ describe('POST /cli/sessions/:id/peer-messages', () => {
         })
 
         expect(response.status).toBe(409)
+    })
+})
+
+describe('cli machine registration (#2038 / heavygee#287)', () => {
+    it('forwards tag and runnerProof on happy tagged rebind', async () => {
+        const getOrCreateMachine = mock(() => ({ id: 'machine-1' }))
+        const app = createApp({
+            getMachine: () => null,
+            getOrCreateMachine
+        } as never)
+
+        const response = await app.request('/cli/machines', {
+            method: 'POST',
+            headers: {
+                ...authHeaders(),
+                'content-type': 'application/json'
+            },
+            body: JSON.stringify({
+                id: 'machine-1',
+                tag: 'secret-tag',
+                runnerProof: 'proof-restart',
+                metadata: { host: 'dl-in-linux' },
+                runnerState: { status: 'offline', pid: 1 }
+            })
+        })
+
+        expect(response.status).toBe(200)
+        expect(getOrCreateMachine).toHaveBeenCalledWith(
+            'machine-1',
+            { host: 'dl-in-linux' },
+            { status: 'offline', pid: 1 },
+            'default',
+            'secret-tag',
+            'proof-restart'
+        )
+    })
+
+    it('returns 409 when tag is omitted against a tagged machine', async () => {
+        const app = createApp({
+            getMachine: () => null,
+            getOrCreateMachine: () => {
+                throw new MachineTagConflictError()
+            }
+        } as never)
+
+        const response = await app.request('/cli/machines', {
+            method: 'POST',
+            headers: {
+                ...authHeaders(),
+                'content-type': 'application/json'
+            },
+            body: JSON.stringify({
+                id: 'machine-1',
+                metadata: { host: 'dl-in-linux' },
+                runnerState: { status: 'offline', pid: 1 }
+            })
+        })
+
+        expect(response.status).toBe(409)
+        expect(await response.json()).toEqual({ error: 'Machine tag mismatch' })
+    })
+
+    it('returns 409 when the presented tag does not match', async () => {
+        const app = createApp({
+            getMachine: () => null,
+            getOrCreateMachine: () => {
+                throw new MachineTagConflictError('Machine tag mismatch')
+            }
+        } as never)
+
+        const response = await app.request('/cli/machines', {
+            method: 'POST',
+            headers: {
+                ...authHeaders(),
+                'content-type': 'application/json'
+            },
+            body: JSON.stringify({
+                id: 'machine-1',
+                tag: 'wrong-tag',
+                metadata: { host: 'dl-in-linux' },
+                runnerState: { status: 'offline', pid: 1 }
+            })
+        })
+
+        expect(response.status).toBe(409)
+        expect(await response.json()).toEqual({ error: 'Machine tag mismatch' })
     })
 })

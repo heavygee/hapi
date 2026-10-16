@@ -210,15 +210,16 @@ function pickExistingSessionMetadata(metadata: Metadata | null | undefined): Par
     return preserved
 }
 
-async function getMachineIdOrExit(): Promise<string> {
+async function getMachineIdentityOrExit(): Promise<{ machineId: string; machineTag?: string }> {
     const settings = await readSettings()
     const machineId = settings?.machineId
     if (!machineId) {
         console.error(`[START] No machine ID found in settings, which is unexpected since authAndSetupMachineIfNeeded should have created it. Please report this issue on ${packageJson.bugs}`)
         process.exit(1)
     }
+    const machineTag = settings?.machineTag?.trim() || undefined
     logger.debug(`Using machineId: ${machineId}`)
-    return machineId
+    return { machineId, machineTag }
 }
 
 async function reportSessionStarted(sessionId: string, metadata: Metadata): Promise<void> {
@@ -244,9 +245,10 @@ export async function bootstrapSession(options: SessionBootstrapOptions): Promis
 
     const api = await ApiClient.create()
 
-    const machineId = await getMachineIdOrExit()
+    const { machineId, machineTag } = await getMachineIdentityOrExit()
     await api.getOrCreateMachine({
         machineId,
+        machineTag,
         metadata: buildMachineMetadata()
     })
 
@@ -301,7 +303,7 @@ export async function bootstrapLazySession(options: SessionBootstrapOptions): Pr
     }
 
     const api = await ApiClient.create()
-    const machineId = await getMachineIdOrExit()
+    const { machineId, machineTag } = await getMachineIdentityOrExit()
     const machineMetadata = buildMachineMetadata()
     const metadata = buildSessionMetadata({
         flavor: options.flavor,
@@ -349,6 +351,7 @@ export async function bootstrapLazySession(options: SessionBootstrapOptions): Pr
                 effort: options.effort,
                 machine: {
                     id: machineId,
+                    tag: machineTag,
                     metadata: machineMetadata
                 },
                 timeoutMs: 10_000,
@@ -390,10 +393,11 @@ export async function bootstrapExistingSession(options: {
 }): Promise<SessionBootstrapResult> {
     const startedBy = options.startedBy ?? 'terminal'
     const api = await ApiClient.create()
-    const machineId = await getMachineIdOrExit()
+    const { machineId, machineTag } = await getMachineIdentityOrExit()
 
     await api.getOrCreateMachine({
         machineId,
+        machineTag,
         metadata: buildMachineMetadata()
     })
 

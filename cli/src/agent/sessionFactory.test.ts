@@ -456,6 +456,26 @@ describe('bootstrapSession HAPI_SESSION_ID export', () => {
         expect(process.env[HAPI_SESSION_ID_ENV]).toBe('hub-session-42')
     })
 
+    it('forwards settings machineTag into getOrCreateMachine (#2038)', async () => {
+        const session = createSession()
+        getOrCreateSessionMock.mockResolvedValue(session)
+        getOrCreateMachineMock.mockResolvedValue({ id: 'machine-1' })
+        sessionSyncClientMock.mockReturnValue({ isPending: () => false })
+        readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'secret-tag' })
+
+        await bootstrapSession({
+            flavor: 'claude',
+            workingDirectory: '/tmp/project'
+        })
+
+        expect(getOrCreateMachineMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                machineId: 'machine-1',
+                machineTag: 'secret-tag',
+            })
+        )
+    })
+
     it('passes reservedSessionId as getOrCreateSession id (adopt-stub, #1911)', async () => {
         const session = createSession()
         session.id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'

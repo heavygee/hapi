@@ -17,6 +17,7 @@ import { join } from 'node:path'
 import { isBunCompiled, projectPath, runtimePath } from '@/projectPath'
 import { getInvokedCwd } from '@/utils/invokedCwd'
 import packageJson from '../../package.json'
+import { runDoctorMachineRegistrationProbe } from './doctorMachineRegistration'
 
 /**
  * Get relevant environment information for debugging
@@ -86,16 +87,17 @@ function getLogFiles(logDir: string): { file: string, path: string, modified: Da
 /**
  * Run doctor command specifically for runner diagnostics
  */
-export async function runDoctorRunner(): Promise<void> {
+export async function runDoctorRunner(): Promise<number> {
     return runDoctorCommand('runner');
 }
 
-export async function runDoctorCommand(filter?: 'all' | 'runner'): Promise<void> {
+export async function runDoctorCommand(filter?: 'all' | 'runner'): Promise<number> {
     // Default to 'all' if no filter specified
     if (!filter) {
         filter = 'all';
     }
-    
+    let exitCode = 0
+
     console.log(chalk.bold.cyan('\n🩺 hapi CLI Doctor\n'));
 
     // For 'all' filter, show everything. For 'runner', only show runner-related info
@@ -162,6 +164,12 @@ export async function runDoctorCommand(filter?: 'all' | 'runner'): Promise<void>
         } else {
             console.log(chalk.red('❌ CLI_API_TOKEN is not set'));
             console.log(chalk.gray('  Run `hapi auth login` to configure or set CLI_API_TOKEN env var'));
+            exitCode = 1
+        }
+
+        const registrationCode = await runDoctorMachineRegistrationProbe()
+        if (registrationCode !== 0) {
+            exitCode = registrationCode
         }
 
     }
@@ -296,5 +304,10 @@ export async function runDoctorCommand(filter?: 'all' | 'runner'): Promise<void>
         console.log(`Documentation: ${chalk.blue(pkg.homepage ?? 'See project README')}`);
     }
 
-    console.log(chalk.green('\n✅ Doctor diagnosis complete!\n'));
+    if (exitCode === 0) {
+        console.log(chalk.green('\n✅ Doctor diagnosis complete!\n'));
+    } else {
+        console.log(chalk.red('\n❌ Doctor found problems — see above.\n'));
+    }
+    return exitCode
 }
