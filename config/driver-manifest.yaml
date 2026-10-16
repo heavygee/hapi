@@ -1251,7 +1251,9 @@ layers:
   # Hub forwards tag/runnerProof + 409 on conflict; runner sends machineTag +
   # process-local runnerProof and FATALs on fail; doctor tag-only registration
   # probe; enrollment bodies not retried even on 5xx.
-  # Thin tip on soup HEAD 8d51206da: driver/2038-machine-tag-reregister @ 1bd8d8c80
+  # Follow-up on same branch after first soup absorb of 1bd8d8c80:
+  # b76a95b0c — no proof-less rotate; hubReadyAt before detached start; doctor GET-before-POST.
+  # Thin tip on soup HEAD 8d51206da: driver/2038-machine-tag-reregister @ b76a95b0c
   # Parent pin: driver/2038-machine-tag-parent @ 8d51206da
   # PR: heavygee/hapi#288 (fork fortress — not upstream-landable alone)
   # Hub+cli → remat + hapi-restart-hub; tip-unique: 409 MachineTagConflict +
@@ -1262,6 +1264,18 @@ layers:
   # version.test.ts endsWith mock (got null gen). Thin tip on 8d51206da @ 16d119434.
   # Not product; keeps tip-forward verify green after MachineTag absorb.
   - branch: driver/fix-version-offer-query-test
+
+  # tiann/hapi#2039 / PR #2040 — narrow session toolbar: search clear painted over
+  # filter / BlockedJumpPill. Collapsed search stays shrink-0; header actions wrap
+  # as a group (no flex-1 spacer). Soup tip: driver/2039-toolbar-crowd @ a967469ce
+  # Tip-unique verify marker: session-list-header-actions in web/dist
+  # Upstream thin: fix/2039-session-toolbar-crowd (worktree fix-2039-toolbar-crowd)
+  # Web-only → remat --build-web; hard-reload (no hub restart).
+  - branch: driver/2039-toolbar-crowd
+
+  # Remat unblock: #2039 outer search is shrink-0 + max-w-full; blocked-header
+  # test still forbade shrink-0 (#2019). Thin tip on live driver 7e907c715 @ 9fb9af6d8.
+  - branch: driver/2039-blocked-search-test
 
   # DROPPED 2026-10-06: driver/1933-claude-resume-amnesia — squash 94523eb0d is on
   # fork main (heavygee/hapi#204). Soup base is now origin/main, so tip-forward
