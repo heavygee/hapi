@@ -375,6 +375,34 @@ export class ApiClient {
         return parsed.data.machine
     }
 
+    /**
+     * Confirm settings.machineTag against the stored row without creating or
+     * rebinding it. GET does not expose the tag (#288).
+     */
+    async confirmMachineTag(machineId: string, machineTag: string): Promise<void> {
+        const response = await axios.post(
+            `${configuration.apiUrl}/cli/machines/${encodeURIComponent(machineId)}/check-tag`,
+            { tag: machineTag },
+            {
+                headers: this.authHeaders(),
+                timeout: 15_000,
+                validateStatus: () => true,
+            },
+        )
+        if (response.status >= 200 && response.status < 300) {
+            return
+        }
+        const body = response.data
+        const responseErrorText = body && typeof body === 'object' && typeof body.error === 'string'
+            ? body.error
+            : ''
+        const error = new Error(responseErrorText || `Machine tag check failed (HTTP ${response.status})`)
+        Object.assign(error, {
+            response: { status: response.status, data: body },
+        })
+        throw error
+    }
+
     private async postMachine(opts: {
         machineId: string
         metadata: MachineMetadata

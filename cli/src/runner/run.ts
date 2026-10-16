@@ -2019,7 +2019,8 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           apiMachine.releaseRpcOwnership();
           // REST registration alone can take the 60s POST timeout. Reclaiming
           // RPC ownership before that finishes deadlocks a still-live child.
-          const handoffOk = await waitForRunnerHandoff(process.pid, { timeoutMs: 90_000 });
+          // Child budget is one 60s machine POST plus 30s connect plus 30s RPC ack.
+          const handoffOk = await waitForRunnerHandoff(process.pid, { timeoutMs: 150_000 });
           if (!handoffOk) {
             const stopped = typeof replacement?.pid === 'number'
               ? await killProcessTreeByPid(replacement.pid, true)

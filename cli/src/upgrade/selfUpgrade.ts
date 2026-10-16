@@ -924,7 +924,7 @@ async function applyRunnerSelfUpgradeUnlocked(options: {
         // Child hubReadyAt includes RPC acks. Those acks stay false while
         // this socket still owns the methods.
         options.releaseRpcOwnership?.()
-        const handoffOk = await waitForRunnerHandoff(process.pid, { timeoutMs: 90_000 })
+        const handoffOk = await waitForRunnerHandoff(process.pid, { timeoutMs: 150_000 })
         if (!handoffOk) {
             // Kill before reclaiming RPC ownership. Restoring first lets the
             // still-running child finish REST and then lose the method acks.

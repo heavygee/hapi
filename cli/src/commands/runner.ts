@@ -206,7 +206,7 @@ export const runnerCommand: CommandDefinition = {
             // One POST /cli/machines attempt can sit on a 60s timeout. Wait
             // past that, then kill the child so a late success cannot outlive
             // the failure we print (#288).
-            const readyWaitMs = 90_000
+            const readyWaitMs = 150_000
             const pollMs = 100
             let started = false
             const deadline = Date.now() + readyWaitMs

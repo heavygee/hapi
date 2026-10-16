@@ -565,5 +565,37 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
         return c.json({ machine: resolved.machine })
     })
 
+    // Read-only. GET /machines/:id does not return the stored tag, and a
+    // proof-less POST can create or refresh a row (#288).
+    app.post('/machines/:id/check-tag', async (c) => {
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ error: 'Not ready' }, 503)
+        }
+        const machineId = c.req.param('id')
+        const namespace = c.get('namespace')
+        const json = await c.req.json().catch(() => null)
+        const tag = json && typeof json === 'object' && typeof json.tag === 'string'
+            ? json.tag.trim()
+            : ''
+        if (!tag) {
+            return c.json({ error: 'tag is required' }, 400)
+        }
+        const material = engine.getMachineAuthMaterial(machineId)
+        if (!material) {
+            return c.json({ error: 'Machine not found' }, 404)
+        }
+        if (material.namespace !== namespace) {
+            return c.json({ error: 'Machine access denied' }, 403)
+        }
+        if (!material.tag) {
+            return c.json({ error: 'Legacy machine must be re-enrolled with a new machine id' }, 409)
+        }
+        if (!constantTimeEquals(material.tag, tag)) {
+            return c.json({ error: 'Machine tag mismatch' }, 409)
+        }
+        return c.json({ ok: true })
+    })
+
     return app
 }

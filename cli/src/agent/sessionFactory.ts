@@ -219,7 +219,7 @@ function pickExistingSessionMetadata(metadata: Metadata | null | undefined): Par
  * still connecting (#288). Vitest keeps the cap short so a missing row
  * does not stall the suite.
  */
-const SESSION_MACHINE_WAIT_MS = process.env.VITEST ? 1_000 : 90_000
+const SESSION_MACHINE_WAIT_MS = process.env.VITEST ? 1_000 : 150_000
 
 function throwIfMachineWaitAborted(signal?: AbortSignal): void {
     if (!signal?.aborted) {
@@ -352,6 +352,10 @@ async function resolveSessionMachine(
             if (!registrationInProgress) {
                 const existing = await api.getMachine(machineId)
                 if (existing) {
+                    const tag = settings?.machineTag?.trim()
+                    if (tag) {
+                        await api.confirmMachineTag(machineId, tag)
+                    }
                     return existing.id
                 }
                 if (!runnerAlive) {
