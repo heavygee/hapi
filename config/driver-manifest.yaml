@@ -1269,7 +1269,9 @@ layers:
   # before it takes RPC methods back.
   # Follow-up after dafe2c72f: 58d71276e — locale runner clocks count as legacy;
   # stale ready pids do not; a failed handoff restores the parent runner state.
-  # Thin tip on soup HEAD 8d51206da: driver/2038-machine-tag-reregister @ 58d71276e
+  # Follow-up after 58d71276e: 9ab966c49 — failed handoff rebinds the parent runner proof;
+  # a reused pid no longer blocks starting the runner.
+  # Thin tip on soup HEAD 8d51206da: driver/2038-machine-tag-reregister @ 9ab966c49
   # Parent pin: driver/2038-machine-tag-parent @ 8d51206da
   # PR: heavygee/hapi#288 (fork fortress — not upstream-landable alone)
   # Hub+cli → remat + hapi-restart-hub; tip-unique: 409 MachineTagConflict +
