@@ -53,6 +53,12 @@ export type {
     SessionTitleSuggestionResponse,
     SessionsResponse,
     SpawnResponse,
+    AssignableUsersResponse,
+    BoardAssignableUser,
+    BoardItem,
+    BoardItemsResponse,
+    BoardSummary,
+    BoardsResponse,
     UploadFileResponse
 } from '@hapi/protocol/apiTypes'
 

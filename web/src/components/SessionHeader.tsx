@@ -15,6 +15,8 @@ import { retargetSharePendingTransfer } from '@/lib/sharePendingState'
 import { getSessionModelLabel } from '@/lib/sessionModelLabel'
 import { useTranslation } from '@/lib/use-translation'
 import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
+import { IssueRefChip } from '@/components/IssueRefChip'
+import { getLinkedGithubIssue } from '@/lib/externalRefs'
 import { isFastServiceTier } from '@/components/AssistantChat/codexFastMode'
 import { getSessionTitle } from '@/lib/sessionTitle'
 import { useToast } from '@/lib/toast-context'
@@ -212,6 +214,7 @@ export function SessionHeader(props: {
         fastMode: headerMetadata.fastMode && showFastBadge,
     })
     const showMobileMetadata = (headerMetadata.agent && agentLabel !== null) || mobileSecondary !== null
+    const linkedIssue = getLinkedGithubIssue(session.metadata)
 
     const [menuOpen, setMenuOpen] = useState(false)
     const [menuAnchorPoint, setMenuAnchorPoint] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
@@ -394,8 +397,9 @@ export function SessionHeader(props: {
 
                     {/* Session info - two lines: title and path */}
                     <div className="min-w-0 flex-1">
-                        <div className="truncate font-semibold">
-                            {title}
+                        <div className="flex min-w-0 items-center gap-1.5">
+                            <span className="min-w-0 flex-1 truncate font-semibold">{title}</span>
+                            {linkedIssue ? <IssueRefChip ref={linkedIssue} className="h-5" /> : null}
                         </div>
                         {showMobileMetadata ? (
                             <div className="flex min-w-0 flex-nowrap items-center gap-2 overflow-hidden text-xs text-[var(--app-hint)] sm:hidden">

@@ -2,6 +2,7 @@ import type { Database } from 'bun:sqlite'
 import { prepareCached } from './statementCache'
 import { bumpSessionDeletionEpoch } from './sessionInvalidation'
 import { randomUUID } from 'node:crypto'
+import { reconcileExternalRefs, type ExternalRef } from '@hapi/protocol/schemas'
 
 import type { StoredSession, VersionedUpdateResult } from './types'
 import { safeJsonParse } from './json'
@@ -37,6 +38,18 @@ import { updateVersionedField } from './versionedUpdates'
 //   - SIMPLE_RESUME_TOKENS: flavor-specific resume identifiers that are
 //     write-once-keep semantics. Mirror of pickExistingSessionMetadata
 //     in cli/src/agent/sessionFactory.ts.
+//
+//   - externalRefs: issue/PR links written via `hapi link-issue`/the MCP
+//     `link_issue` tool (hub/src/sync/sessionCache.ts linkIssue). Those
+//     writes go through this same updateSessionMetadata/mergeSessionMetadata
+//     path, so a CLI's own routine metadata write — built from a sparse or
+//     stale local cache that predates the link — would otherwise silently
+//     wipe it, the same failure mode PARSE_IDENTITY_FIELDS exists to guard
+//     against (Codex review, hapi#238). Merged, not just carried-forward-if-
+//     missing like the tiers above: a sparse `next.externalRefs` can be a
+//     present-but-incomplete array rather than strictly `undefined`, so
+//     mergeExternalRefs unions both sides instead of only covering the
+//     all-or-nothing case.
 //
 // `cursorSessionProtocol` is paired with `cursorSessionId`: protocol is
 // tied to a specific chat id, so a write that explicitly sets a new
@@ -122,6 +135,47 @@ function preserveCursorProtocolPair(
     return merged
 }
 
+function isExternalRefArray(value: unknown): value is ExternalRef[] {
+    return Array.isArray(value)
+}
+
+// Named CONTRIBUTION_FIELDS (matching scripts/tooling/verify-
+// externalrefs-preserve.mjs's incident-driven check for this exact field +
+// name) and carried forward via the same carryForwardIfMissing used by the
+// tiers above — that alone covers the omitted-key sparse-write case. But a
+// sparse write can also include its own stale-but-present externalRefs
+// array — built before an out-of-band `hapi link-issue`/linkIssue write (or
+// the fork's own `hapi-meta-daily.sh` tooling, which writes PR-chip fields
+// directly) landed — which an undefined-only check would miss.
+// mergeContributionFields below reconciles both sides via
+// reconcileExternalRefs (Codex review, hapi#238) as a strict superset of
+// that coverage.
+const CONTRIBUTION_FIELDS = ['externalRefs'] as const
+
+function mergeContributionFields(
+    prior: Record<string, unknown>,
+    next: Record<string, unknown>,
+    merged: Record<string, unknown> | null
+): Record<string, unknown> | null {
+    merged = carryForwardIfMissing(prior, next, merged, CONTRIBUTION_FIELDS)
+    const priorRefs = isExternalRefArray(prior.externalRefs) ? prior.externalRefs : []
+    const nextRefs = isExternalRefArray(next.externalRefs) ? next.externalRefs : []
+    // An explicit `next.externalRefs = []` is a deliberate unlink-to-empty,
+    // not a sparse/stale write merely missing some refs it didn't know
+    // about yet — those two look identical as "an empty-ish array" without
+    // this check, and reconciling prior back in here would silently
+    // resurrect an intentional clear (found during a soup absorb by Meta,
+    // confirmed by hand against this exact code, hapi#238). Only a
+    // *non-empty* next array is treated as "possibly partial/stale" and
+    // eligible for reconciliation.
+    if (priorRefs.length === 0 || nextRefs.length === 0) {
+        return merged
+    }
+    const result = merged ?? { ...next }
+    result.externalRefs = reconcileExternalRefs(priorRefs, nextRefs)
+    return result
+}
+
 export function mergeSessionMetadata(prior: unknown, next: unknown): unknown {
     if (!isPlainObject(prior) || !isPlainObject(next)) {
         return next
@@ -130,6 +184,7 @@ export function mergeSessionMetadata(prior: unknown, next: unknown): unknown {
     merged = carryForwardIfMissing(prior, next, merged, PARSE_IDENTITY_FIELDS)
     merged = carryForwardIfMissing(prior, next, merged, ROUTING_FIELDS)
     merged = carryForwardIfMissing(prior, next, merged, SIMPLE_RESUME_TOKENS)
+    merged = mergeContributionFields(prior, next, merged)
     merged = preserveCursorProtocolPair(prior, next, merged)
     return merged ?? next
 }

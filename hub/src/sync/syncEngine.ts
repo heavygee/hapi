@@ -8,6 +8,7 @@
  */
 
 import { isKnownFlavor, isLiveLifecycleState, isSteeringSupportedForSession, type LocalResumeTarget, type ResumableSession, type SessionEndReason } from '@hapi/protocol'
+import type { ExternalRef } from '@hapi/protocol/schemas'
 import {
     cliBinaryUpdatedOnDisk,
     isMachineCapabilitySkewed,
@@ -2101,6 +2102,10 @@ export class SyncEngine {
 
     async updateSessionSummary(sessionId: string, text: string): Promise<void> {
         await this.sessionCache.updateSessionSummary(sessionId, text)
+    }
+
+    async linkIssue(sessionId: string, ref: ExternalRef): Promise<void> {
+        await this.sessionCache.linkIssue(sessionId, ref)
     }
 
     async deleteSession(sessionId: string): Promise<void> {
