@@ -1712,7 +1712,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       sharedCodexRuntime: true,
       pid: process.pid,
       httpPort: controlPort,
-      startTime: new Date().toLocaleString(),
+      startTime: new Date().toISOString(),
       startedWithCliVersion: packageJson.version,
       startedWithCliMtimeMs,
       startedWithApiUrl: configuration.apiUrl,
@@ -2044,6 +2044,14 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
               return;
             }
             runnerLockHandle = reacquired;
+            // The child may have replaced runner.state.json with its own pid.
+            // The next heartbeat treats a foreign pid as a takeover and shuts
+            // this process down. Put our snapshot back first.
+            try {
+              writeRunnerState(fileState);
+            } catch (error) {
+              logger.debug('[RUNNER RUN] Failed to restore parent runner state after failed handoff', error);
+            }
             deferHandoffRetry();
             return;
           }

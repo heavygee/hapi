@@ -98,6 +98,10 @@ describe('detachedRunnerHubReady', () => {
         isProcessAliveMock.mockReturnValue(false)
         expect(detachedRunnerHubReady({ pid: 9001, hubReadyAt: 5 }, 4242)).toBe(false)
         expect(detachedRunnerHubReady({ pid: 4242, hubReadyAt: 5 }, 4242)).toBe(false)
+        isProcessAliveMock.mockReturnValue(true)
+        expect(detachedRunnerHubReady({ pid: 9001, hubReadyAt: 5 }, 4242, () => 'unknown')).toBe(false)
+        expect(detachedRunnerHubReady({ pid: 9001, hubReadyAt: 5 }, 4242, () => 'foreign')).toBe(false)
+        expect(detachedRunnerHubReady({ pid: 4242, hubReadyAt: 5 }, 4242, () => 'unknown')).toBe(true)
     })
 
     it('kills the wrapper and a live Windows grandchild after timeout', () => {

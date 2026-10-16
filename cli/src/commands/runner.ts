@@ -26,15 +26,21 @@ import type { CommandDefinition } from './types'
  */
 export function detachedRunnerHubReady(
     state: { pid?: number; hubReadyAt?: number } | null | undefined,
-    _childPid: number | undefined,
+    childPid: number | undefined,
+    stateIdentity: (pid: number) => 'runner' | 'foreign' | 'unknown' | 'dead' = getHapiRunnerProcessIdentity,
 ): boolean {
     if (typeof state?.hubReadyAt !== 'number' || state.hubReadyAt <= 0) {
         return false
     }
-    if (typeof state.pid !== 'number') {
+    if (typeof state.pid !== 'number' || !isProcessAlive(state.pid)) {
         return false
     }
-    return isProcessAlive(state.pid)
+    if (typeof childPid === 'number' && state.pid === childPid) {
+        return true
+    }
+    // A reused pid can be alive and still carry an old hubReadyAt. Only a
+    // confirmed hapi runner, or the process we just spawned, counts.
+    return stateIdentity(state.pid) === 'runner'
 }
 
 /** Wrapper and Windows grandchild to stop when hub registration never finishes. */

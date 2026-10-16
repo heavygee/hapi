@@ -282,8 +282,10 @@ function isLegacyLiveRunner(state: {
         return false
     }
     const started = Date.parse(state.startTime ?? '')
+    // Older runners persisted startTime with toLocaleString(). Those strings
+    // do not parse, and that process will never write hubReadyAt.
     if (!Number.isFinite(started)) {
-        return false
+        return true
     }
     return Date.now() - started > SESSION_MACHINE_WAIT_MS
 }
