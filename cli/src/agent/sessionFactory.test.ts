@@ -476,6 +476,26 @@ describe('bootstrapSession HAPI_SESSION_ID export', () => {
         )
     })
 
+    it('uses the machine id returned after legacy re-enroll', async () => {
+        const session = createSession()
+        getOrCreateSessionMock.mockResolvedValue(session)
+        getOrCreateMachineMock.mockResolvedValue({ id: 'machine-rotated' })
+        sessionSyncClientMock.mockReturnValue({ isPending: () => false })
+        readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'secret-tag' })
+
+        const result = await bootstrapSession({
+            flavor: 'claude',
+            workingDirectory: '/tmp/project'
+        })
+
+        expect(result.machineId).toBe('machine-rotated')
+        expect(getOrCreateSessionMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                metadata: expect.objectContaining({ machineId: 'machine-rotated' }),
+            })
+        )
+    })
+
     it('passes reservedSessionId as getOrCreateSession id (adopt-stub, #1911)', async () => {
         const session = createSession()
         session.id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'

@@ -245,12 +245,13 @@ export async function bootstrapSession(options: SessionBootstrapOptions): Promis
 
     const api = await ApiClient.create()
 
-    const { machineId, machineTag } = await getMachineIdentityOrExit()
-    await api.getOrCreateMachine({
-        machineId,
-        machineTag,
+    const identity = await getMachineIdentityOrExit()
+    const registered = await api.getOrCreateMachine({
+        machineId: identity.machineId,
+        machineTag: identity.machineTag,
         metadata: buildMachineMetadata()
     })
+    const machineId = registered.id
 
     const metadata = buildSessionMetadata({
         flavor: options.flavor,
@@ -393,13 +394,13 @@ export async function bootstrapExistingSession(options: {
 }): Promise<SessionBootstrapResult> {
     const startedBy = options.startedBy ?? 'terminal'
     const api = await ApiClient.create()
-    const { machineId, machineTag } = await getMachineIdentityOrExit()
-
-    await api.getOrCreateMachine({
-        machineId,
-        machineTag,
+    const identity = await getMachineIdentityOrExit()
+    const registered = await api.getOrCreateMachine({
+        machineId: identity.machineId,
+        machineTag: identity.machineTag,
         metadata: buildMachineMetadata()
     })
+    const machineId = registered.id
 
     const sessionInfo = await api.getSession(options.sessionId)
     // #1911 M1 belt: match hub merge-preserve scope — only hub-authored archive.

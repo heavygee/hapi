@@ -93,6 +93,13 @@ export function isMachineEnrollmentConflictError(error: unknown): boolean {
         || text.includes('legacy machine must be re-enrolled')
 }
 
+/** Bound proof hash, client did not present a matching proof. Must not rotate identity. */
+export function isRunnerProofRequiredError(error: unknown): boolean {
+    const { responseErrorText, message } = extractErrorInfo(error)
+    const text = `${responseErrorText} ${message}`.toLowerCase()
+    return text.includes('runner proof mismatch') || text.includes('runner proof missing')
+}
+
 /**
  * Check if an error is a retryable connection error
  *
