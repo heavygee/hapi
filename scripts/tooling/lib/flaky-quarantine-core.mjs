@@ -1,0 +1,337 @@
+/**
+ * Flaky-test quarantine — pure decision core (no I/O, no network, no fs).
+ *
+ * GENERIC MECHANISM, FORK-ONLY DATA: this module and its CLI wrapper
+ * (../flaky-quarantine.mjs) contain no heavygee/hapi-specific logic — any repo
+ * with CI could use them unchanged. The data that gives them meaning
+ * (config/flaky-quarantine.yaml: which tests, which issues, which owners) is
+ * fork-specific. Keep that split when touching this file: if a change only
+ * makes sense because of something about THIS repo, it belongs in the YAML or
+ * the caller, not here. This is the shape an eventual standalone/upstream
+ * extraction would take with the YAML left behind.
+ *
+ * Design (see heavygee/hapi issue thread for #273 / #274, the two seed
+ * entries, and the review that shaped these rules):
+ *
+ *   - A quarantined test still runs and still reports. This module never
+ *     hides a failure; it only decides whether a failure may be ignored for
+ *     gate-pass purposes.
+ *   - Signature match -> excused (non-blocking). Signature MISMATCH -> BLOCKS.
+ *     Id-matching alone cannot tell "the same old flake" from "a new bug that
+ *     landed in the same test" — comparing the failure text closes most of
+ *     that gap. A warning nobody must act on trains people to ignore red, so
+ *     a mismatch blocks rather than merely warns.
+ *   - An expired entry excuses nothing. It is not a grace period; it is the
+ *     entry falling out of the active set, so the next failure under that id
+ *     is treated as an ordinary (blocking) failure until someone renews (with
+ *     a reason) or removes it.
+ *   - A ceiling on the number of ACTIVE (valid, non-expired) entries is a
+ *     forcing function, not a decoration: once active count exceeds it, the
+ *     gate fails regardless of whether today's tests pass, until someone
+ *     cleans the registry up.
+ */
+
+/** Default max days an entry excuses anything before it must be renewed or removed. */
+export const DEFAULT_EXPIRY_DAYS = 14;
+
+/** Default ceiling on ACTIVE entries before the registry itself is the failure. */
+export const DEFAULT_CEILING = 8;
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function parseDate(s, field, errors, id) {
+    if (typeof s !== 'string' || !DATE_RE.test(s)) {
+        errors.push({ id, field, message: `${field} must be an ISO date (YYYY-MM-DD), got ${JSON.stringify(s)}` });
+        return null;
+    }
+    const d = new Date(`${s}T00:00:00Z`);
+    if (Number.isNaN(d.getTime())) {
+        errors.push({ id, field, message: `${field} is not a valid calendar date: ${s}` });
+        return null;
+    }
+    // JS Date silently normalizes day-overflow (2026-02-30 -> 2026-03-02)
+    // instead of failing — round-trip through toISOString so a mistyped date
+    // is rejected rather than quietly shifting the quarantine window.
+    if (d.toISOString().slice(0, 10) !== s) {
+        errors.push({ id, field, message: `${field} is not a valid calendar date (normalizes to ${d.toISOString().slice(0, 10)}): ${s}` });
+        return null;
+    }
+    return d;
+}
+
+function daysBetween(a, b) {
+    return Math.round((b.getTime() - a.getTime()) / 86_400_000);
+}
+
+/**
+ * Minimal block-scalar-unaware YAML read for the flat `quarantine:` list —
+ * deliberately hand-rolled rather than pulling a parser dependency, matching
+ * the house style in hapi-soup-excised-check.mjs / config/soup-excised.yaml.
+ * Every field is a plain scalar on its own line; no nested lists except the
+ * `quarantine:` top-level one.
+ */
+const FIELD_NAMES = ['id', 'owner', 'issue', 'signature', 'added', 'expires', 'renewal_count', 'renewal_reason'];
+const STRICT_INT_RE = /^-?\d+$/;
+
+/**
+ * Returns NaN (not a partial parse) for anything that isn't ENTIRELY digits —
+ * `Number.parseInt` happily reads "27O" as 27 and "1oops" as 1, which would
+ * let a typo'd issue number silently point at a different, unrelated open
+ * issue, or a typo'd renewal_count silently still grant a renewal.
+ */
+function strictInt(s) {
+    return STRICT_INT_RE.test(s) ? Number.parseInt(s, 10) : NaN;
+}
+
+/**
+ * For issue/renewal_count: returns the parsed integer, or an { invalid }
+ * marker (NOT a silent default) when the scalar is present but not entirely
+ * digits — "renewal_count: 1oops" must be a schema error, not silently
+ * treated as "renewal_count absent" (which would default to 0 and pass).
+ */
+function coerceField(key, rawVal) {
+    const val = stripQuotes(rawVal.trim());
+    if (key === 'issue' || key === 'renewal_count') {
+        const n = strictInt(val);
+        return Number.isNaN(n) ? { invalid: val } : n;
+    }
+    return val;
+}
+
+export function parseQuarantineYaml(text) {
+    const entries = [];
+    let current = null;
+    // A `-`-prefixed line ALWAYS starts a new list item, regardless of which
+    // field (or even an unknown/misspelled one) comes first — matching only
+    // known field names here would let `- iid: "cli:test"` (typo'd `id`)
+    // start no entry at all, silently discarding every field that follows it
+    // instead of surfacing a "missing id" schema error.
+    const startRe = /^\s*-\s+([\w-]+):\s*(.*)$/;
+    const continuationRe = new RegExp(`^\\s+(${FIELD_NAMES.join('|')}):\\s*(.*)$`);
+    for (const raw of text.split('\n')) {
+        const line = raw.replace(/\s+$/, '');
+        if (/^\s*#/.test(line) || !line.trim()) continue;
+        const start = line.match(startRe);
+        if (start) {
+            if (current) entries.push(current);
+            current = { id: null, owner: null, issue: null, signature: null, added: null, expires: null, renewal_count: 0, renewal_reason: null };
+            if (FIELD_NAMES.includes(start[1])) {
+                current[start[1]] = coerceField(start[1], start[2]);
+            }
+            continue;
+        }
+        if (!current) continue;
+        const kv = line.match(continuationRe);
+        if (!kv) continue;
+        current[kv[1]] = coerceField(kv[1], kv[2]);
+    }
+    if (current) entries.push(current);
+    return entries;
+}
+
+function stripQuotes(s) {
+    const t = s.trim();
+    if (t.startsWith('"') && t.endsWith('"') && t.length >= 2) {
+        // YAML double-quoted scalars support backslash escapes — a signature
+        // that legitimately contains an embedded quoted type name (e.g.
+        // `expected non-nil value of type "UICollectionView"`) is written as
+        // \" in the file. Un-escaping \\ before \" matters so "\\\"" round-trips.
+        return t.slice(1, -1).replace(/\\\\/g, '\\').replace(/\\"/g, '"');
+    }
+    if (t.startsWith("'") && t.endsWith("'") && t.length >= 2) {
+        return t.slice(1, -1).replace(/''/g, "'");
+    }
+    return t;
+}
+
+/**
+ * Schema + lifecycle validation. Pure and synchronous — issue-open-ness is
+ * NOT checked here (that needs a network call); pass `issueStates` (a map of
+ * issue number -> 'OPEN' | 'CLOSED') when the caller has fetched it, or omit
+ * to skip that one check (used by unit tests that must stay network-free).
+ *
+ * Returns { valid, errors, expired } where `valid` is entries that are
+ * schema-correct, issue-open (if checked), and NOT expired as of `today`.
+ * Schema-invalid or closed-issue entries are dropped from `valid` and fail
+ * closed (treated as if no quarantine exists for that id) rather than being
+ * silently kept — see module doc.
+ */
+export function validateEntries(entries, { today, issueStates } = {}) {
+    const now = today ?? new Date();
+    const errors = [];
+    const valid = [];
+    const expired = [];
+
+    for (const e of entries) {
+        const localErrors = [];
+        if (!e.id) localErrors.push({ id: e.id ?? '(no id)', field: 'id', message: 'id is required' });
+        if (!e.owner) localErrors.push({ id: e.id, field: 'owner', message: 'owner is required — no anonymous quarantine entries' });
+        if (!Number.isInteger(e.issue) || e.issue <= 0) {
+            localErrors.push({ id: e.id, field: 'issue', message: 'issue must be a positive GitHub issue number' });
+        }
+        if (!e.signature) {
+            localErrors.push({ id: e.id, field: 'signature', message: 'signature is required — "failed once" with no captured failure text is not sufficient evidence' });
+        } else if (typeof e.signature === 'string' && e.signature.split(' && ').some((part) => part.trim() === '')) {
+            // "known text && " or " && " alone produces an empty clause after
+            // split+trim, and `message.includes('')` is true for EVERY
+            // message — an empty clause silently excuses anything.
+            localErrors.push({ id: e.id, field: 'signature', message: `signature has an empty " && "-joined clause: ${JSON.stringify(e.signature)}` });
+        }
+        const added = parseDate(e.added, 'added', localErrors, e.id);
+        const expires = parseDate(e.expires, 'expires', localErrors, e.id);
+        if (added && added.getTime() > now.getTime()) {
+            localErrors.push({ id: e.id, field: 'added', message: `added (${e.added}) is in the future — a typo'd year would otherwise excuse failures for decades while still satisfying the expiry window` });
+        }
+        // A present-but-malformed renewal_count ("1oops") must not silently
+        // fall back to the same default (0) as a genuinely absent field —
+        // that would let a typo quietly skip renewal enforcement instead of
+        // failing the schema check.
+        if (e.renewal_count !== null && typeof e.renewal_count === 'object') {
+            localErrors.push({ id: e.id, field: 'renewal_count', message: `renewal_count must be a whole number, got ${JSON.stringify(e.renewal_count.invalid)}` });
+        }
+        const renewalCount = Number.isInteger(e.renewal_count) ? e.renewal_count : 0;
+        if (renewalCount > 0 && !e.renewal_reason) {
+            localErrors.push({ id: e.id, field: 'renewal_reason', message: 'renewal_count > 0 requires a renewal_reason — renewal is a deliberate act with a reason attached, not a bumped date' });
+        }
+        if (added && expires) {
+            const maxAllowedDays = DEFAULT_EXPIRY_DAYS + DEFAULT_EXPIRY_DAYS * renewalCount;
+            const actualDays = daysBetween(added, expires);
+            if (actualDays > maxAllowedDays) {
+                localErrors.push({
+                    id: e.id,
+                    field: 'expires',
+                    message: `expires is ${actualDays}d after added, but renewal_count=${renewalCount} only allows ${maxAllowedDays}d — bump renewal_count and add a renewal_reason to extend further`,
+                });
+            }
+            if (actualDays <= 0) {
+                localErrors.push({ id: e.id, field: 'expires', message: 'expires must be after added' });
+            }
+        }
+        if (issueStates && Number.isInteger(e.issue) && issueStates[e.issue] && issueStates[e.issue] !== 'OPEN') {
+            localErrors.push({
+                id: e.id,
+                field: 'issue',
+                message: `issue #${e.issue} is ${issueStates[e.issue]}, not OPEN — a quarantined test whose issue is closed is either fixed or abandoned; remove the entry`,
+            });
+        }
+
+        if (localErrors.length > 0) {
+            errors.push(...localErrors);
+            continue;
+        }
+
+        // `expires` parses as UTC midnight of that calendar date (parseDate
+        // above) — an entry must stay valid through the WHOLE of that date,
+        // not just its first instant, or "expires 2026-10-29" silently means
+        // "expires 2026-10-28T23:59:59.999Z" to anyone reading the date.
+        if (expires && now.getTime() >= expires.getTime() + 86_400_000) {
+            expired.push(e);
+            continue;
+        }
+
+        valid.push(e);
+    }
+
+    return { valid, errors, expired };
+}
+
+/**
+ * A `signature` may name more than one required substring, joined by ` && `,
+ * ALL of which must appear for a match. This exists because a single
+ * substring is a choice between two different gaps: generic assertion text
+ * alone ("expected true to be false") can match a DIFFERENT assertion in the
+ * same test; a stack-trace call site alone ("agentCliGuard.test.ts:309:")
+ * can match a DIFFERENT kind of failure that happens to throw from that same
+ * line (e.g. the function under test starts throwing instead of returning
+ * the wrong boolean). Requiring both closes both gaps at once (cold review,
+ * 2026-10-15 — see config/flaky-quarantine.yaml's cli: entry for a real one).
+ */
+function matchesSignature(message, signature) {
+    if (typeof message !== 'string') return false;
+    const clauses = signature.split(' && ').map((p) => p.trim());
+    // Defense in depth: validateEntries already rejects an empty clause at
+    // schema time (an empty clause would otherwise match any message), but
+    // this function has no other guarantee its caller went through that
+    // check first — never let a blank clause silently pass.
+    return clauses.every((part) => part.length > 0 && message.includes(part));
+}
+
+/**
+ * A quarantined test can legitimately fail with MORE THAN ONE message in one
+ * run — multiple `expect.soft()` failures, or a known assertion plus an
+ * unrelated hook failure. Requiring EVERY attached message to match is what
+ * stops a second, different regression from riding along: joining all
+ * messages into one string and matching the signature anywhere in that
+ * blob would let one real match excuse an unrelated failure sitting right
+ * next to it (cold review, 2026-10-15 — cli/src/agent/permissionJson.test.ts
+ * already uses soft assertions, so this is a real, not hypothetical, shape).
+ */
+function matchesAllMessages(messages, signature) {
+    const list = messages.length > 0 ? messages : [''];
+    return list.every((m) => matchesSignature(m, signature));
+}
+
+/**
+ * The actual gate decision. `results` is runner-agnostic:
+ *   [{ id: string, failed: boolean, messages: string[] }]
+ * `validEntries` must already be schema-valid and non-expired (the output of
+ * validateEntries().valid) — this function does not re-check lifecycle.
+ *
+ * `runnerExitCode`, when provided and non-zero, guards against a failure mode
+ * none of the per-test bookkeeping above can see: a runner-level crash
+ * (import error, uncaught rejection, zero tests discovered) that exits
+ * non-zero while producing NO per-test assertion results at all. Without
+ * this check, `results` would be empty, the loop above would find nothing to
+ * block on, and the gate would report a clean pass despite the runner itself
+ * having failed (cold review, 2026-10-15). Adapters should ALSO represent a
+ * suite-level/collection failure as its own failed result with no matching
+ * registry id (so it blocks as "not quarantined") rather than relying on
+ * this as the only backstop — see from-vitest-json's suite-failure handling.
+ */
+export function evaluate({ validEntries, errors = [], expired = [], results, ceiling = DEFAULT_CEILING, runnerExitCode = 0 }) {
+    const byId = new Map(validEntries.map((e) => [e.id, e]));
+    const blocking = [];
+    const excused = [];
+
+    for (const r of results) {
+        if (!r.failed) continue;
+        const messages = r.messages ?? [];
+        const entry = byId.get(r.id);
+        if (!entry) {
+            blocking.push({ id: r.id, reason: 'not quarantined', messages });
+            continue;
+        }
+        if (matchesAllMessages(messages, entry.signature)) {
+            excused.push({ id: r.id, issue: entry.issue, owner: entry.owner });
+        } else {
+            blocking.push({
+                id: r.id,
+                reason: 'quarantined signature mismatch — treated as a new failure',
+                messages,
+                expectedSignature: entry.signature,
+            });
+        }
+    }
+
+    if (runnerExitCode !== 0 && results.filter((r) => r.failed).length === 0) {
+        blocking.push({
+            id: '(runner)',
+            reason: `test runner exited ${runnerExitCode} but produced no attributable per-test failure — cannot quarantine an unattributed failure (collection error, crash, or zero tests discovered)`,
+            message: '',
+        });
+    }
+
+    const activeCount = validEntries.length;
+    const ceilingExceeded = activeCount > ceiling;
+
+    return {
+        blocking,
+        excused,
+        activeCount,
+        ceiling,
+        ceilingExceeded,
+        schemaErrors: errors,
+        expiredEntries: expired,
+        pass: blocking.length === 0 && errors.length === 0 && !ceilingExceeded,
+    };
+}

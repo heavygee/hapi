@@ -24,7 +24,27 @@ jobs:
             # inspect alone does not pull; silent skip was fake B1 coverage (#1911).
             - run: docker pull mcr.microsoft.com/powershell:latest
             - run: bun run test:e2e -- terminal-wrap-fidelity.spec.ts composer-copy.spec.ts session-list-scroll.spec.ts cold-initial-tail.spec.ts scrollbar-auto-hide.spec.ts
-            - run: bun run test
+            # Fork: cli tests run through the flaky-quarantine gate (same
+            # script the local remat gate uses — config/flaky-quarantine.yaml
+            # is fork-only data, see docs/tooling/flaky-quarantine.md).
+            # Upstream/other forks: unchanged plain `bun run test`.
+            - name: Run tests
+              env:
+                  # flaky-quarantine.mjs validate/check shell out to `gh issue
+                  # view` to confirm a quarantine entry's issue is still open
+                  # (requirement: a closed-issue entry must fail loudly, not
+                  # sit there forever). Without this, every gh call returns
+                  # UNKNOWN on a fresh runner and the gate fails for the wrong
+                  # reason — matches the GH_TOKEN/GITHUB_TOKEN pattern already
+                  # used by codex-mention-response.yml / issue-auto-response.yml.
+                  GH_TOKEN: ${{ github.token }}
+                  GITHUB_TOKEN: ${{ github.token }}
+              run: |
+                  if [[ "${{ github.repository_owner }}" == "heavygee" ]]; then
+                      bash scripts/tooling/flaky-quarantine-gate.sh "$PWD"
+                  else
+                      bun run test
+                  fi
             # Fork has no windows-latest budget; cover the same file on Linux.
             - name: Codex MCP proxy unit (Linux stand-in for windows-codex-mcp)
               if: github.repository_owner == 'heavygee'
