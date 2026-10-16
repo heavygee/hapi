@@ -112,4 +112,15 @@ describe('buildSessionCitationSteerInstruction', () => {
         expect(text).toContain('mcp__hapi__list_peers')
         expect(text.toLowerCase()).toMatch(/not.*(grep|glob|filesystem|local file)/i)
     })
+
+    it('mentions search_content when searchContentTool is set', () => {
+        const text = buildSessionCitationSteerInstruction({
+            inspectTool: 'mcp__hapi__inspect_peer',
+            pingTool: 'mcp__hapi__ping_peer',
+            searchContentTool: 'mcp__hapi__search_content',
+        })
+        expect(text).toContain('mcp__hapi__search_content')
+        expect(text).toContain('hapi search-content')
+        expect(text).toMatch(/transcript/i)
+    })
 })

@@ -131,6 +131,8 @@ export type SessionCitationSteerTools = {
     pingTool: string
     /** Flavor-specific discovery tool when no citation is available. */
     listPeersTool?: string
+    /** Transcript / tool-output fleet search (not titles). */
+    searchContentTool?: string
 }
 
 /**
@@ -150,6 +152,12 @@ export function buildSessionCitationSteerInstruction(tools: SessionCitationSteer
             ` To discover peers without a citation, call "${tools.listPeersTool}" ` +
             `(same hub/namespace; works from runner-spawned sessions). ` +
             `Shell fallback: hapi ping-peer --list.`
+    }
+    if (tools.searchContentTool) {
+        text +=
+            ` To search transcript / tool-output text across sessions (not just name/path), call "${tools.searchContentTool}" ` +
+            `with query=…. Prefer that over grepping ~/.claude/projects. ` +
+            `Shell fallback: hapi search-content <query> via PATH (~/.local/bin/hapi).`
     }
     return text
 }
