@@ -1955,10 +1955,11 @@ export function SessionList(props: {
         <div className="flex min-h-0 w-full flex-1 flex-col">
             <div className="session-list-scrollbar-offset mx-auto w-full max-w-content shrink-0">
             {showHeaderRow ? (
-                // flex-wrap + actions as one flex child: when search chrome + icons
-                // exceed the row, icons wrap as a group instead of painting over
-                // search clear (tiann/hapi#2039). flex-1 spacer removed — it ate
-                // the line and blocked wrap.
+                // flex-wrap + actions as one content-sized flex child: when search
+                // chrome + icons exceed the row, the action group moves to the next
+                // line instead of painting over search clear (tiann/hapi#2039).
+                // w-max/shrink-0 (not flex-1 min-w-0) so a long query in a 280px
+                // sidebar wraps the group before its children overflow.
                 <div
                     data-testid="session-list-header-row"
                     className="flex flex-wrap items-center gap-1 px-2 py-1"
@@ -1981,7 +1982,7 @@ export function SessionList(props: {
                     {!(showSearch && searchExpanded) ? (
                         <div
                             data-testid="session-list-header-actions"
-                            className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-1"
+                            className="ml-auto flex w-max max-w-full shrink-0 flex-wrap items-center justify-end gap-1"
                         >
                             {showMachineFilterBar ? (
                                 <MachineFilterMenu

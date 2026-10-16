@@ -248,7 +248,7 @@ function SessionsPage() {
                         isLoading={isLoading}
                         renderHeader={false}
                         headerActions={(
-                            <div className="flex items-center gap-2">
+                            <div className="flex shrink-0 items-center gap-2">
                                 {canBrowse && (
                                     <button
                                         type="button"

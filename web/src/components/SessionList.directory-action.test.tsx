@@ -1136,6 +1136,11 @@ describe('SessionList search toggle', () => {
         expect(searchGroup).toContainElement(clearButton)
         // Actions are a sibling flex child so wrap can move them off the search line.
         expect(searchGroup.nextElementSibling).toBe(actions)
+        // Content width, not flex-1 min-w-0 — otherwise a 280px sidebar keeps
+        // the group beside search and its children overflow onto the calendar.
+        expect(actions).toHaveClass('w-max', 'shrink-0', 'max-w-full')
+        expect(actions.className.split(/\s+/)).not.toContain('min-w-0')
+        expect(actions.className.split(/\s+/)).not.toContain('flex-1')
     })
 
     it('gives expanded search a 48px clear end-cap with calendar immediately left (tiann/hapi#2019)', () => {
