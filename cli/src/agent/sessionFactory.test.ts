@@ -606,6 +606,27 @@ describe('bootstrapSession HAPI_SESSION_ID export', () => {
         expect(spawnHappyCLIMock).not.toHaveBeenCalled()
     })
 
+    it('treats an unparseable legacy startTime as a live older runner', async () => {
+        const session = createSession()
+        getOrCreateSessionMock.mockResolvedValue(session)
+        getMachineMock.mockResolvedValue({ id: 'machine-1' })
+        sessionSyncClientMock.mockReturnValue({ isPending: () => false })
+        readSettingsMock.mockResolvedValue({ machineId: 'machine-1' })
+        readRunnerStateMock.mockResolvedValue({
+            pid: 4242,
+            startTime: '16/10/2026, 12:34:56',
+        })
+        isProcessAliveMock.mockReturnValue(true)
+
+        const result = await bootstrapSession({
+            flavor: 'cursor',
+            workingDirectory: '/tmp/project'
+        })
+
+        expect(result.machineId).toBe('machine-1')
+        expect(spawnHappyCLIMock).not.toHaveBeenCalled()
+    })
+
     it('follows settings.machineId after the runner rotates a legacy row', async () => {
         const session = createSession()
         getOrCreateSessionMock.mockResolvedValue(session)
@@ -622,7 +643,7 @@ describe('bootstrapSession HAPI_SESSION_ID export', () => {
         readRunnerStateMock.mockImplementation(async () => {
             runnerPolls += 1
             if (runnerPolls < 2) {
-                return { pid: 4242, hubReadyAt: 0 }
+                return { pid: 4242, hubReadyAt: 0, startTime: new Date().toISOString() }
             }
             return { pid: 4242, hubReadyAt: 1 }
         })
