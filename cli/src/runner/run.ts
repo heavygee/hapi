@@ -2021,15 +2021,17 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           // RPC ownership before that finishes deadlocks a still-live child.
           const handoffOk = await waitForRunnerHandoff(process.pid, { timeoutMs: 90_000 });
           if (!handoffOk) {
-            if (typeof replacement?.pid === 'number') {
-              await killProcessTreeByPid(replacement.pid, true);
+            const stopped = typeof replacement?.pid === 'number'
+              ? await killProcessTreeByPid(replacement.pid, true)
+              : true;
+            if (!stopped) {
+              // A live grandchild still owns the handoff. Rebinding the proof
+              // or the lock from here races that process.
+              logger.debug('[RUNNER RUN] Could not stop timed-out replacement; exiting');
+              clearInterval(restartOnStaleVersionAndHeartbeat);
+              process.exit(1);
+              return;
             }
-            try {
-              await apiMachine.rebindStoredRunnerProof();
-            } catch (error) {
-              logger.debug('[RUNNER RUN] Failed to restore parent runner proof after failed handoff', error);
-            }
-            apiMachine.restoreRpcOwnership();
             logger.debug(`[RUNNER RUN] Replacement runner did not register within 90s; attempting to re-acquire lock and stay alive to avoid leaving the machine offline.`);
             // Re-acquire the lock with a long window (the child has likely
             // either succeeded and we're seeing a stale state, or it gave
@@ -2049,6 +2051,12 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
               return;
             }
             runnerLockHandle = reacquired;
+            try {
+              await apiMachine.rebindStoredRunnerProof();
+            } catch (error) {
+              logger.debug('[RUNNER RUN] Failed to restore parent runner proof after failed handoff', error);
+            }
+            apiMachine.restoreRpcOwnership();
             // The child may have replaced runner.state.json with its own pid.
             // The next heartbeat treats a foreign pid as a takeover and shuts
             // this process down. Put our snapshot back first.

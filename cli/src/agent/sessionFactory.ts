@@ -308,8 +308,13 @@ function requestRunnerStart(): void {
             stdio: 'ignore',
             env: process.env,
         })
+        child.on('error', (error) => {
+            runnerStartRequested = false
+            logger.debug('[START] Runner spawn failed', error)
+        })
         child.unref()
     } catch (error) {
+        runnerStartRequested = false
         logger.debug('[START] Failed to spawn runner for machine registration', error)
     }
 }

@@ -929,14 +929,6 @@ async function applyRunnerSelfUpgradeUnlocked(options: {
             // Kill before reclaiming RPC ownership. Restoring first lets the
             // still-running child finish REST and then lose the method acks.
             const stopped = await terminateTimedOutUpgradeCandidate(candidate)
-            if (stopped) {
-                try {
-                    await options.rebindRunnerProof?.()
-                } catch (error) {
-                    logger.debug('[SELF-UPGRADE] Failed to restore parent runner proof', error)
-                }
-                options.restoreRpcOwnership?.()
-            }
             if (!stopped) {
                 // Surviving candidate + reclaim would recreate the race. Exit so
                 // a supervisor can restart a known-good generation instead.
@@ -959,6 +951,14 @@ async function applyRunnerSelfUpgradeUnlocked(options: {
             // Do NOT rewrite the durable marker — a failed target must not become
             // the next supervisor restart's entrypoint.
             const reacquired = await reacquireRunnerLockAfterFailedHandoff()
+            if (reacquired) {
+                try {
+                    await options.rebindRunnerProof?.()
+                } catch (error) {
+                    logger.debug('[SELF-UPGRADE] Failed to restore parent runner proof', error)
+                }
+                options.restoreRpcOwnership?.()
+            }
             if (!reacquired) {
                 logger.debug('[SELF-UPGRADE] Could not re-acquire runner lock after failed handoff; exiting cleanly')
                 if (options.requestShutdown) {

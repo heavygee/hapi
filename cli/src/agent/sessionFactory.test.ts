@@ -23,7 +23,7 @@ const {
     readSettingsMock: vi.fn(),
     readRunnerStateMock: vi.fn(async (): Promise<{ pid: number; hubReadyAt?: number; startTime?: string } | null> => ({ pid: 4242, hubReadyAt: 1 })),
     isProcessAliveMock: vi.fn(() => true),
-    spawnHappyCLIMock: vi.fn(() => ({ unref: vi.fn(), pid: 1 })),
+    spawnHappyCLIMock: vi.fn(() => ({ unref: vi.fn(), on: vi.fn(), pid: 1 })),
     getHapiRunnerProcessIdentityMock: vi.fn((): 'runner' | 'foreign' | 'unknown' | 'dead' => 'runner')
 }))
 
