@@ -17,6 +17,14 @@ Blameless. Systems and process gaps only.
 
 On **2026-10-16 ~11:17-11:33 UTC**, cold runner registration on the estate hit **tagged-machine conflict (`409`)**, rotated to **new machine UUIDs**, then called **`POST /cli/machines/:id/migrate-sessions` which returned `404`**. Sessions stayed on the retired machine ids. The UI looked like two oos hosts ("oos" with hundreds of sessions vs "oos-linux" with a handful) and Cursor resume failed with **`No machine online`** (`strictMachineId`).
 
+### Why (trigger ≠ mechanism)
+
+**Trigger:** soup tip-forward of the MachineTag registration fix ([heavygee/hapi#287](https://github.com/heavygee/hapi/issues/287) / [PR #288](https://github.com/heavygee/hapi/pull/288)) for fleet/cattle dogfood. At **11:17:55** Meta remat did a **hub+runner restart** (journal: `HAPI_OPERATOR_SYSTEMCTL_OVERRIDE=1 systemctl restart hapi-hub-oos.service hapi-runner-oos.service`, PWD `/work/coding/hapi`). That cold start is what made every runner re-register.
+
+**Mechanism (unchanged #1473 family):** cold runner loses memory-only `runnerProof` → register conflict → CLI rotates machine UUID → `migrate-sessions` **404** → sessions stay on the ghost id. Hub bounce then forced **proxmox + Teemo** through the same path (~11:32).
+
+**#288's job vs this outage:** #288 fixes omit-tag → silent **500** retry loop (forward tag/proof, map conflict to **409**, loud FATAL, doctor probe). It does **not** fix migrate **404**, and a cold remat restart still exercises rotate+migrate. Dogfooding the fix via soup remat is what detonated the adjacent unfixed path - ouroboros, not "fleet upgrade keepalive randomly ate the kitchen."
+
 **2026-10-17 heal:** emergency SQL remap (runbook) moved:
 
 | Host | Retired id | Live id | Sessions moved |
@@ -51,6 +59,40 @@ Kill-test canary: [Cove Discord Media Bot](/sessions/e6937f3e-1c3f-4784-a902-b5f
 
 ---
 
+## How fleet work, #287, and this outage interrelate
+
+```text
+Fleet / cattle goal          Machine identity must survive upgrade + VM swap
+        │
+        ├─ Oct 13 cattle cutover ──► #264 (column backfill), #265 (persist tag)
+        │
+        └─ Doug cattle host 409/500 ──► #287 / PR #288 (send tag+proof; no silent 500)
+                    │
+                    ▼
+         Soup tip-forward #288 on oos (MachineTag register fix session)
+                    │
+                    ▼
+         Patient hub+RUNNER restart (required to load new CLI tip)
+                    │
+                    ▼
+         Cold re-enroll hazard (#1473 proof + migrate 404)  ◄── still open
+                    │
+                    ▼
+         oos UUID rotate + proxmox/Teemo reconnect wave → orphaned sessions
+```
+
+| Piece | Role |
+|-------|------|
+| Fleet upgrade / seal / keepalive | Why durable machine id matters; morning `/api/upgrade/offer` chatter is context, **not** the 11:17 smoking gun |
+| Cattle-swap (#264/#265) | Same identity problem after VM/root moves; checklist debt |
+| **#287 / #288** | Real bugfix for **omit-tag registration**; dogfood remat was the **bounce that started the wave** |
+| migrate-sessions 404 | Separate product hole; rotate without move = resume death for Cursor |
+| This SQL heal | Estate mitigation only; next remat can re-orphan until migrate/rebind is solid |
+
+Sessions: [MachineTag register fix](/sessions/3695d9cc-c0f0-4c5c-ad88-959dc2c98a00), [cursor - tooling/meta bot](/sessions/028d0a86-262e-4538-a735-92247d17cb5f).
+
+---
+
 ## Timeline
 
 Facts from `journalctl` (hub + runners), hub DB `machines.created_at`, settings `previousMachineIds`, recovery TSVs under `/var/lib/hapi/recovery/`.
@@ -58,6 +100,9 @@ Facts from `journalctl` (hub + runners), hub DB `machines.created_at`, settings 
 | Time (local / journal) | Event |
 |------------------------|--------|
 | 2026-08-10 | Prior #1473 dogfood; live oos settled on `5f5a87e8` (see Aug postmortem) |
+| ~2026-10-13 | Cattle cutover; #264/#265 filed (identity / tag persist) |
+| **2026-10-16 ~10:14** | [#287](https://github.com/heavygee/hapi/issues/287) filed (Doug `dl-in-linux` tagged re-register); [PR #288](https://github.com/heavygee/hapi/pull/288) ~10:22 |
+| **2026-10-16 11:17:55** | `systemctl restart hapi-hub-oos + hapi-runner-oos` with `HAPI_OPERATOR_SYSTEMCTL_OVERRIDE=1` (soup remat / MachineTag tip-forward) |
 | **2026-10-16 11:17:57** | oos runner FATAL: re-enrolled `5f5a87e8` → `59986e68` but **session migrate failed: 404** |
 | 2026-10-16 11:18+ | oos runner stays on `59986e68`; only new sessions bind there (~7 by 2026-10-17) |
 | **2026-10-16 11:32:50** | Hub: proxmox `POST /cli/machines` **409** → **200** as `d1ca1b41`; **`migrate-sessions` 404** |
