@@ -1141,16 +1141,11 @@ describe('SessionList search toggle', () => {
         expect(actions.className.split(/\s+/)).not.toContain('flex-wrap')
         expect(headerRow).toHaveClass('flex-nowrap', '@container')
         expect(headerRow.className.split(/\s+/)).not.toContain('flex-wrap')
-        // Unmeasured query chip is narrower than unread + Settings. More is
-        // the same width as one icon, so both move together — neither stays
-        // inline to paint over the clear button.
-        expect(within(actions).queryByRole('button', { name: 'Unread only' })).toBeNull()
-        expect(within(actions).queryByRole('button', { name: 'Settings' })).toBeNull()
-        const overflow = screen.getByTestId('session-list-header-overflow')
-        expect(overflow).toHaveAccessibleName('More session list actions')
-        fireEvent.click(overflow)
-        expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument()
-        expect(screen.getByRole('button', { name: 'Unread only' })).toBeInTheDocument()
+        // Unmeasured query: keep the daily lens on the row. Do not collapse
+        // to [chip][⋯] and waste the right half of a Quest sidebar.
+        expect(within(actions).getByRole('button', { name: 'Unread only' })).toBeInTheDocument()
+        expect(within(actions).getByRole('button', { name: 'Settings' })).toBeInTheDocument()
+        expect(screen.queryByTestId('session-list-header-overflow')).toBeNull()
     })
 
     function stubHeaderWidth(width: number) {
