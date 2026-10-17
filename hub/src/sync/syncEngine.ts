@@ -245,7 +245,8 @@ export type SyncEngineOptions = {
     prepareArtifactOffer?: (offer: HubUpgradeOffer, platform: string, arch: string) => Promise<HubUpgradeOffer>
     /**
      * Hub-default fleet policy (banner / fallback). Keepalive apply uses
-     * per-machine effective `auto` only — hub-wide `auto` still needs push.
+     * {@link getEffectiveFleetUpgradePolicy} (hub default or per-machine
+     * override). Hub default `auto` (#292) keepalive pull-applies.
      */
     getFleetUpgradePolicy?: () => FleetUpgradePolicy
 }
@@ -1536,7 +1537,7 @@ export class SyncEngine {
 
     handleMachineAlive(payload: { machineId: string; time: number; health?: unknown }): void {
         this.machineCache.handleMachineAlive(payload)
-        // Per-machine effective `auto` only — hub-wide alert/silent stay push-only.
+        // Effective `auto` (hub default or per-machine override) pull-applies.
         void this.maybeFleetUpgradeMachine(payload.machineId, { source: 'machine-alive' }).catch((error) => {
             console.warn('[fleet-upgrade] offer resolution failed', error)
         })
@@ -1544,7 +1545,7 @@ export class SyncEngine {
 
     /**
      * When a connected runner with effective policy `auto` trails the hub offer,
-     * ask it to self-upgrade. Hub-default `alert`/`silent` never enter here.
+     * ask it to self-upgrade. Effective `alert`/`silent` never enter here.
      * Transient `upgrade_unavailable` (RPC not live yet) does **not** start the
      * 15m cooldown so the next keepalive (~20s) can retry after re-register.
      */
@@ -1567,7 +1568,7 @@ export class SyncEngine {
         if (!this.getUpgradeOffer) {
             return
         }
-        // Per-machine effective policy — hub-wide `auto` alone does not keepalive-apply.
+        // Effective policy (hub default or per-machine override).
         if (getEffectiveFleetUpgradePolicy(machineId) !== 'auto') {
             return
         }
@@ -1837,7 +1838,7 @@ export class SyncEngine {
         }
 
         // #270: soup patient-drain signal on ALL fleet upgrades — deliberate
-        // push (POST /fleet/push-upgrade), keepalive pull-apply (per-machine
+        // push (POST /fleet/push-upgrade), keepalive pull-apply (effective
         // auto), and Layer A seal pull → self-upgrade. Defer while any session
         // on this machine is mid-turn (`thinking` = WORKING). Idle sessions do
         // not block: the supervised restart terminates them. Under pull that is

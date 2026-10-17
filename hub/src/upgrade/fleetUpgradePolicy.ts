@@ -4,10 +4,11 @@
  * Steady-state apply is a **pull** (box watches seal / local offer) — see
  * docs/plans/2026-10-13-fleet-seal-contract.md. Hub default (Settings) is
  * silent/alert/auto for banner UX and as the fallback when a machine has no
- * override. Hub-wide `auto` does **not** keepalive-apply (deliberate
- * POST /fleet/push-upgrade only — #247 tip thrash). Per-machine `auto` means
- * "pull-apply when you can": keepalive / machine-updated retry once the live
- * self-upgrade RPC is registered; deliberate push remains available too.
+ * override. Default is `auto` (#292): joining the fleet is consent. Effective
+ * `auto` (hub default or per-machine override) keepalive / machine-updated
+ * pull-applies once the live self-upgrade RPC is registered; deliberate
+ * `POST /fleet/push-upgrade` remains available. Opt down to alert/silent in
+ * Settings when a host should not auto-converge.
  */
 import {
     DEFAULT_FLEET_UPGRADE_POLICY,

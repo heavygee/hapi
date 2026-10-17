@@ -47,7 +47,7 @@ curl -X PUT "$HUB/api/upgrade/machine-policies/<local-machine-id>" \
   -d '{"policy":"auto"}'
 ```
 
-Keep hub-wide `fleetUpgradePolicy=alert` (or leave default). Only that machine id gets effective `auto` (= apply when you push).
+Keep hub-wide `fleetUpgradePolicy=alert` (opt down from default `auto`, #292). Only that machine id gets effective `auto` (= apply when you push).
 
 ### 3. Deliberate push thereafter (still that hub)
 

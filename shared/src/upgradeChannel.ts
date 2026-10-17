@@ -208,9 +208,10 @@ export function machineTrailsUpgradeOffer(
  * Operator-facing fleet-management policy (3-pole switch in Settings):
  * - silent: hub neither alerts nor auto-upgrades drifted runners
  * - alert: hub surfaces the skew banner; operator upgrades manually
- * - auto: on a **deliberate operator push**, apply immediately (no confirm).
- *   Keepalive/startup must not unattended-push. Per-machine overrides let one
- *   host be `auto` while the hub default stays `alert`.
+ * - auto: keepalive / machine-updated pull-apply when the live self-upgrade
+ *   RPC is up; deliberate `POST /fleet/push-upgrade` applies immediately.
+ *   Per-machine overrides can pin one host to alert/silent while the hub
+ *   default stays auto (or the reverse).
  *
  * Orthogonal to {@link UpgradeChannel}: `HAPI_UPGRADE_CHANNEL=off` is a hard
  * kill (no upgrades at all); this policy governs banner vs push-apply behavior.
@@ -219,14 +220,15 @@ export function machineTrailsUpgradeOffer(
  * is the daemon (`hapi runner start`) that handles spawn + self-upgrade RPCs.
  * Skew banners list machines whose runners trail the hub offer.
  *
- * Default is `alert`, not `auto`: mutating someone's remote machines without
- * an explicit opt-in is too aggressive for the 99% single-machine case.
+ * Default is `auto`: joining the fleet is consent to tip convergence. Opt down
+ * to `alert`/`silent` in Settings (or per-machine override). Pet installer
+ * already shipped `--fleet-policy=auto` as the install default (#257).
  */
 export type FleetUpgradePolicy = 'silent' | 'alert' | 'auto'
 
 export const FLEET_UPGRADE_POLICIES: readonly FleetUpgradePolicy[] = ['silent', 'alert', 'auto']
 
-export const DEFAULT_FLEET_UPGRADE_POLICY: FleetUpgradePolicy = 'alert'
+export const DEFAULT_FLEET_UPGRADE_POLICY: FleetUpgradePolicy = 'auto'
 
 export function isFleetUpgradePolicy(value: unknown): value is FleetUpgradePolicy {
     return typeof value === 'string' && (FLEET_UPGRADE_POLICIES as readonly string[]).includes(value)

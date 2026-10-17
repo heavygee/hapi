@@ -6,6 +6,7 @@ import { TransientArtifactBuildError } from '../upgrade/cliArtifact'
 import {
     resetFleetUpgradePolicyForTests,
     setFleetUpgradeMachinePolicy,
+    setFleetUpgradePolicy,
 } from '../upgrade/fleetUpgradePolicy'
 import { SyncEngine } from './syncEngine'
 import type { HubUpgradeOffer } from '@hapi/protocol/upgradeChannel'
@@ -66,6 +67,10 @@ describe('SyncEngine fleet upgrade', () => {
     })
 
     it('upgradeMachineRunner defers when a session on the machine is thinking (#270)', async () => {
+        // Pin hub alert so handleMachineAlive does not race a keepalive apply
+        // before thinking is set (#292 default is auto).
+        resetFleetUpgradePolicyForTests()
+        await setFleetUpgradePolicy('alert')
         const offer: HubUpgradeOffer = {
             channel: 'npm',
             targetVersion: '0.24.0',
@@ -127,6 +132,7 @@ describe('SyncEngine fleet upgrade', () => {
             expect(runnerSelfUpgrade).not.toHaveBeenCalled()
         } finally {
             engine.stop()
+            resetFleetUpgradePolicyForTests()
         }
     })
 
@@ -686,6 +692,8 @@ describe('SyncEngine fleet upgrade', () => {
 
     it('deliberate push upgrades pure semver drift when machine policy is auto', async () => {
         resetFleetUpgradePolicyForTests()
+        // Module-level policy drives keepalive (getFleetUpgradePolicy inject is unused).
+        await setFleetUpgradePolicy('alert')
         const offer: HubUpgradeOffer = {
             channel: 'npm',
             targetVersion: '0.24.0',
@@ -699,7 +707,7 @@ describe('SyncEngine fleet upgrade', () => {
             {} as never,
             registry,
             { broadcast() {} } as never,
-            { getUpgradeOffer: () => offer, getFleetUpgradePolicy: () => 'alert' },
+            { getUpgradeOffer: () => offer },
         )
 
         try {
@@ -830,6 +838,8 @@ describe('SyncEngine fleet upgrade', () => {
     })
 
     it('does not auto-fire when policy is not auto (alert/silent)', async () => {
+        resetFleetUpgradePolicyForTests()
+        await setFleetUpgradePolicy('alert')
         const offer: HubUpgradeOffer = {
             channel: 'npm',
             targetVersion: '0.24.0',
@@ -844,7 +854,7 @@ describe('SyncEngine fleet upgrade', () => {
             {} as never,
             registry,
             { broadcast() {} } as never,
-            { getUpgradeOffer, getFleetUpgradePolicy: () => 'alert' },
+            { getUpgradeOffer },
         )
 
         try {
@@ -882,6 +892,7 @@ describe('SyncEngine fleet upgrade', () => {
             expect(getUpgradeOffer).toHaveBeenCalled()
         } finally {
             engine.stop()
+            resetFleetUpgradePolicyForTests()
         }
     })
 
