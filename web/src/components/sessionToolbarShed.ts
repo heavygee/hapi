@@ -26,14 +26,21 @@ export const TOOLBAR_ICON_PX = 40
 export const TOOLBAR_MORE_PX = 40
 export const TOOLBAR_GAP_PX = 4
 
-/** Horizontal budget left for action slots after search chrome and row padding. */
+/**
+ * Horizontal budget left for action slots after search chrome and row padding.
+ *
+ * Prefer measuring the actions flex box and passing that width directly.
+ * This fallback is for first paint / tests that stub the full header row.
+ * The collapsed query chip is `max-w-[9rem]` + a 40px clear — not 200px.
+ * Reserving 200 left a Quest-width desert of empty space after More (#2039).
+ */
 export function toolbarActionBudget(headerRowWidth: number, hasQuery: boolean): number {
     if (headerRowWidth <= 0) {
-        // Unmeasured: don't flash a crowded row on an idle list. A query chip
-        // is already wide, so assume a phone-sized remainder.
-        return hasQuery ? 72 : Number.POSITIVE_INFINITY
+        // Unmeasured: idle lists keep everything. With a query chip, keep the
+        // daily controls (blocked + filter + new + More) — never [chip][P][⋯].
+        return hasQuery ? 220 : Number.POSITIVE_INFINITY
     }
-    const searchReserve = hasQuery ? 200 : 56
+    const searchReserve = hasQuery ? 152 : 56
     const rowPadding = 16
     return Math.max(0, headerRowWidth - searchReserve - rowPadding)
 }
