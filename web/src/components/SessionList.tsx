@@ -108,6 +108,20 @@ import { Spinner } from '@/components/Spinner'
 import { useToast } from '@/lib/toast-context'
 import { transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
 import { getPathDisplayName } from '@/utils/path'
+import {
+    shedToolbarSlots,
+    toolbarActionBudget,
+    TOOLBAR_ICON_PX,
+    type ToolbarShedSlot
+} from '@/components/sessionToolbarShed'
+
+export type SessionToolbarExtra = {
+    id: string
+    /** Higher sheds into More first. See sessionToolbarShed.ts. */
+    keep: number
+    node: ReactNode
+    widthPx?: number
+}
 
 export { getWorktreeSessionLabel } from '@/lib/sessionWorktreeLabel'
 
@@ -2123,7 +2137,9 @@ export function SessionList(props: {
     onRefresh: () => Promise<unknown> | void
     isLoading: boolean
     renderHeader?: boolean
+    /** @deprecated Prefer `toolbarExtras` so each control has its own keep rank. */
     headerActions?: React.ReactNode
+    toolbarExtras?: SessionToolbarExtra[]
     api: ApiClient | null
     titleSuggestionAvailable?: boolean
     machineLabelsById?: Record<string, string>
@@ -2982,7 +2998,7 @@ export function SessionList(props: {
         if (!showSearch) setSearchExpanded(false)
     }, [showSearch])
 
-    const showHeaderRow = showSearch || renderHeader || Boolean(props.headerActions)
+    const showHeaderRow = showSearch || renderHeader || Boolean(props.headerActions) || Boolean(props.toolbarExtras?.length)
 
     useEffect(() => {
         if (!showHeaderRow) {
@@ -3341,45 +3357,36 @@ export function SessionList(props: {
                             className="flex min-w-0 flex-1 flex-nowrap items-center gap-1"
                         >
                             {(() => {
-                                // Fold primaries into More only when they truly will not fit.
-                                // A flat 32rem gate made every Quest-width sidebar [search][⋯]
-                                // with a desert of empty space. Empty query needs ~348px at
-                                // 130% font (bot); a query chip needs a higher bar (#2039/#2040).
-                                const TOOLBAR_CROWDED_MAX_PX = searchQuery.length > 0
-                                    ? 32 * 16 // chip + primaries
-                                    : 22 * 16 // ~352px — catches 320px/130%, not Quest ~400px
-                                const toolbarCrowded = headerRowWidth > 0
-                                    ? headerRowWidth < TOOLBAR_CROWDED_MAX_PX
-                                    : searchQuery.length > 0
-                                const renderSecondary = () => (
-                                    <>
-                                        <SessionListFilterMenu
-                                            value={sessionFilters}
-                                            onChange={setSessionFilters}
-                                            customStart={customStart}
-                                            customEnd={customEnd}
-                                            sessionActivityDates={sessionActivityDates}
-                                            onDateRangeChange={(start, end) => {
-                                                setCustomStart(start)
-                                                setCustomEnd(end)
-                                            }}
-                                            datePickerCenterRef={sessionListRef}
-                                            className={showMachineFilterBar ? 'max-md:hidden' : undefined}
-                                        />
-                                        <KitchenStatusChip api={api} />
-                                        {props.headerActions}
-                                    </>
-                                )
-                                const renderPrimary = () => (
-                                    <>
-                                        {showMachineFilterBar ? (
-                                            <MachineFilterMenu
-                                                machines={machineFilterItems}
-                                                totalCount={allSessions.length}
-                                                value={activeMachineFilter}
-                                                onChange={setMachineFilter}
-                                                sessionFilter={sessionFilters}
-                                                onSessionFilterChange={setSessionFilters}
+                                // Shed highest keep first. Machine menu and the
+                                // kitchen chip are not in the ladder: the menu is
+                                // the mobile machine control, and the chip renders
+                                // nothing unless the kitchen is dirty (#2039).
+                                const budget = toolbarActionBudget(headerRowWidth, searchQuery.length > 0)
+                                const definedSlots: Array<ToolbarShedSlot & { node: ReactNode }> = []
+                                if (blockedCount > 0) {
+                                    definedSlots.push({
+                                        id: 'blocked',
+                                        keep: 2,
+                                        widthPx: 72,
+                                        node: (
+                                            <BlockedJumpPill
+                                                count={blockedCount}
+                                                direction={blockedDirection}
+                                                alerting={blockedAlerting}
+                                                onJump={jumpToNextBlocked}
+                                            />
+                                        )
+                                    })
+                                }
+                                definedSlots.push({
+                                    id: 'filter',
+                                    keep: 5,
+                                    widthPx: TOOLBAR_ICON_PX,
+                                    node: (
+                                        <>
+                                            <SessionListFilterMenu
+                                                value={sessionFilters}
+                                                onChange={setSessionFilters}
                                                 customStart={customStart}
                                                 customEnd={customEnd}
                                                 sessionActivityDates={sessionActivityDates}
@@ -3388,17 +3395,35 @@ export function SessionList(props: {
                                                     setCustomEnd(end)
                                                 }}
                                                 datePickerCenterRef={sessionListRef}
+                                                className={showMachineFilterBar ? 'max-md:hidden' : undefined}
                                             />
-                                        ) : null}
-                                        {blockedCount > 0 ? (
-                                            <BlockedJumpPill
-                                                count={blockedCount}
-                                                direction={blockedDirection}
-                                                alerting={blockedAlerting}
-                                                onJump={jumpToNextBlocked}
-                                            />
-                                        ) : null}
-                                        {unreadSessionCount > 0 ? (
+                                            {showMachineFilterBar ? (
+                                                <MachineFilterMenu
+                                                    machines={machineFilterItems}
+                                                    totalCount={allSessions.length}
+                                                    value={activeMachineFilter}
+                                                    onChange={setMachineFilter}
+                                                    sessionFilter={sessionFilters}
+                                                    onSessionFilterChange={setSessionFilters}
+                                                    customStart={customStart}
+                                                    customEnd={customEnd}
+                                                    sessionActivityDates={sessionActivityDates}
+                                                    onDateRangeChange={(start, end) => {
+                                                        setCustomStart(start)
+                                                        setCustomEnd(end)
+                                                    }}
+                                                    datePickerCenterRef={sessionListRef}
+                                                />
+                                            ) : null}
+                                        </>
+                                    )
+                                })
+                                if (unreadSessionCount > 0) {
+                                    definedSlots.push({
+                                        id: 'mark-all',
+                                        keep: 7,
+                                        widthPx: TOOLBAR_ICON_PX,
+                                        node: (
                                             <button
                                                 type="button"
                                                 onClick={() => setMarkAllReadOpen(true)}
@@ -3408,8 +3433,15 @@ export function SessionList(props: {
                                             >
                                                 <MarkAllReadIcon className="h-5 w-5" />
                                             </button>
-                                        ) : null}
-                                        {renderHeader ? (
+                                        )
+                                    })
+                                }
+                                if (renderHeader) {
+                                    definedSlots.push({
+                                        id: 'new',
+                                        keep: 4,
+                                        widthPx: TOOLBAR_ICON_PX,
+                                        node: (
                                             <button
                                                 type="button"
                                                 onClick={props.onNewSession}
@@ -3418,39 +3450,53 @@ export function SessionList(props: {
                                             >
                                                 <PlusIcon className="h-5 w-5" />
                                             </button>
-                                        ) : null}
-                                    </>
-                                )
-                                if (toolbarCrowded) {
-                                    // Keep More beside search — do not ml-auto a lone ⋯
-                                    // across a Quest-width desert.
-                                    return (
-                                        <SessionListHeaderOverflow>
-                                            {renderPrimary()}
-                                            {renderSecondary()}
-                                        </SessionListHeaderOverflow>
-                                    )
+                                        )
+                                    })
                                 }
+                                for (const extra of props.toolbarExtras ?? []) {
+                                    definedSlots.push({
+                                        id: extra.id,
+                                        keep: extra.keep,
+                                        widthPx: extra.widthPx ?? TOOLBAR_ICON_PX,
+                                        node: extra.node
+                                    })
+                                }
+                                if (props.headerActions) {
+                                    definedSlots.push({
+                                        id: 'header-actions',
+                                        keep: 6,
+                                        widthPx: TOOLBAR_ICON_PX,
+                                        node: props.headerActions
+                                    })
+                                }
+                                const { visibleIds, overflowIds } = shedToolbarSlots(definedSlots, budget)
+                                const byId = new Map(definedSlots.map((slot) => [slot.id, slot]))
+                                const visible = visibleIds.map((id) => byId.get(id)).filter((slot) => slot != null)
+                                const overflow = overflowIds.map((id) => byId.get(id)).filter((slot) => slot != null)
+                                const blockedSlot = visible.find((slot) => slot.id === 'blocked')
+                                const otherVisible = visible.filter((slot) => slot.id !== 'blocked')
                                 return (
                                     <>
-                                        {renderPrimary()}
-                                        {/* Trailing cluster: [search][primaries] … [filter|⋯] */}
-                                        <div
-                                            data-testid="session-list-header-trailing"
-                                            className="ml-auto flex shrink-0 flex-nowrap items-center gap-1"
-                                        >
-                                            <div
-                                                data-testid="session-list-header-secondary"
-                                                className="hidden @[26rem]:contents"
-                                            >
-                                                {renderSecondary()}
-                                            </div>
-                                            <div className="shrink-0 @[26rem]:hidden">
-                                                <SessionListHeaderOverflow>
-                                                    {renderSecondary()}
-                                                </SessionListHeaderOverflow>
-                                            </div>
-                                        </div>
+                                        {blockedSlot ? (
+                                            <span data-testid={`session-toolbar-slot-${blockedSlot.id}`} className="contents">
+                                                {blockedSlot.node}
+                                            </span>
+                                        ) : null}
+                                        <KitchenStatusChip api={api} />
+                                        {otherVisible.map((slot) => (
+                                            <span key={slot.id} data-testid={`session-toolbar-slot-${slot.id}`} className="contents">
+                                                {slot.node}
+                                            </span>
+                                        ))}
+                                        {overflow.length > 0 ? (
+                                            <SessionListHeaderOverflow>
+                                                {overflow.map((slot) => (
+                                                    <span key={slot.id} data-testid={`session-toolbar-slot-${slot.id}`} className="contents">
+                                                        {slot.node}
+                                                    </span>
+                                                ))}
+                                            </SessionListHeaderOverflow>
+                                        ) : null}
                                     </>
                                 )
                             })()}

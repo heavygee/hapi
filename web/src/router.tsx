@@ -1102,23 +1102,33 @@ function SessionsPage() {
                         onBrowse={canBrowse ? () => navigate({ to: '/browse' }) : undefined}
                         onRefresh={handleRefresh}
                         isLoading={isLoading}
-                        // New stays primary via renderHeader. Import/browse/overseer/
-                        // settings shed on narrow headers (tiann/hapi#2039).
-                        renderHeader
-                        headerActions={(
-                            <div className="flex items-center gap-2">
-                                <button
-                                    type="button"
-                                    onClick={() => void openCodexImportDialog()}
-                                    disabled={isSyncingCodexSession || isLoadingCodexSessions || isImportingCursorSessions || isSyncingClaudeSession || isLoadingClaudeSessions}
-                                    aria-label={t('agentImport.tooltip')}
-                                    aria-busy={isSyncingCodexSession || isLoadingCodexSessions || isImportingCursorSessions || isSyncingClaudeSession || isLoadingClaudeSessions}
-                                    className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors disabled:opacity-60 disabled:cursor-wait"
-                                    title={t('agentImport.tooltip')}
-                                >
-                                    <CodexImportIcon className={`h-5 w-5 ${isLoadingCodexSessions || isLoadingCursorSessions || isLoadingClaudeSessions ? 'animate-spin' : ''}`} />
-                                </button>
-                                {canBrowse && (
+                        // Keep ranks (higher sheds first): blocked 2, kitchen
+                        // pinned, new 4, session filter 5, settings 6, mark-all 7,
+                        // browse 8, overseer 9, import 10 (#2039).
+                        renderHeader={false}
+                        toolbarExtras={[
+                            {
+                                id: 'settings',
+                                keep: 6,
+                                node: (
+                                    <button
+                                        ref={tourSettingsRef}
+                                        type="button"
+                                        onClick={() => navigate({ to: '/settings' })}
+                                        className="relative p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
+                                        title={t('settings.title')}
+                                    >
+                                        <SettingsIcon className="h-5 w-5" />
+                                        {visibleTourStep === 'settings' ? (
+                                            <FueDot pulsing ariaLabel={t('fue.newFeatureDot')} />
+                                        ) : null}
+                                    </button>
+                                )
+                            },
+                            ...(canBrowse ? [{
+                                id: 'browse',
+                                keep: 8,
+                                node: (
                                     <button
                                         ref={tourBrowseRef}
                                         type="button"
@@ -1131,31 +1141,61 @@ function SessionsPage() {
                                             <FueDot pulsing ariaLabel={t('fue.newFeatureDot')} />
                                         ) : null}
                                     </button>
-                                )}
-                                <button
-                                    type="button"
-                                    onClick={() => navigate({ to: '/overseer' })}
-                                    className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
-                                    title="Overseer"
-                                >
-                                    <OverseerIcon className="h-5 w-5" />
-                                </button>
-                                <button
-                                    ref={tourSettingsRef}
-                                    type="button"
-                                    onClick={() => navigate({ to: '/settings' })}
-                                    className="relative p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
-                                    title={t('settings.title')}
-                                >
-                                    <SettingsIcon className="h-5 w-5" />
-                                    {visibleTourStep === 'settings' ? (
-                                        <FueDot pulsing ariaLabel={t('fue.newFeatureDot')} />
-                                    ) : null}
-                                </button>
-                                {/* Tour anchor only — visible New is SessionList renderHeader. */}
-                                <span ref={tourNewSessionRef} className="sr-only" aria-hidden />
-                            </div>
-                        )}
+                                )
+                            }] : []),
+                            {
+                                id: 'overseer',
+                                keep: 9,
+                                node: (
+                                    <button
+                                        type="button"
+                                        onClick={() => navigate({ to: '/overseer' })}
+                                        className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
+                                        title="Overseer"
+                                    >
+                                        <OverseerIcon className="h-5 w-5" />
+                                    </button>
+                                )
+                            },
+                            {
+                                id: 'import',
+                                keep: 10,
+                                node: (
+                                    <button
+                                        type="button"
+                                        onClick={() => void openCodexImportDialog()}
+                                        disabled={isSyncingCodexSession || isLoadingCodexSessions || isImportingCursorSessions || isSyncingClaudeSession || isLoadingClaudeSessions}
+                                        aria-label={t('agentImport.tooltip')}
+                                        aria-busy={isSyncingCodexSession || isLoadingCodexSessions || isImportingCursorSessions || isSyncingClaudeSession || isLoadingClaudeSessions}
+                                        className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors disabled:opacity-60 disabled:cursor-wait"
+                                        title={t('agentImport.tooltip')}
+                                    >
+                                        <CodexImportIcon className={`h-5 w-5 ${isLoadingCodexSessions || isLoadingCursorSessions || isLoadingClaudeSessions ? 'animate-spin' : ''}`} />
+                                    </button>
+                                )
+                            },
+                            {
+                                id: 'new',
+                                keep: 4,
+                                node: (
+                                    <button
+                                        ref={tourNewSessionRef}
+                                        type="button"
+                                        onClick={() => navigate({
+                                            to: '/sessions/new',
+                                            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
+                                        })}
+                                        className="session-list-new-button relative flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-link)] transition-colors"
+                                        title={t('sessions.new')}
+                                    >
+                                        <PlusIcon className="h-5 w-5" />
+                                        {visibleTourStep === 'new-session' ? (
+                                            <FueDot pulsing ariaLabel={t('fue.newFeatureDot')} />
+                                        ) : null}
+                                    </button>
+                                )
+                            }
+                        ]}
                         api={api}
                         machineLabelsById={machineLabelsById}
                         machinesById={machinesById}
