@@ -2168,6 +2168,10 @@ export function SessionList(props: {
     const { machineFilter, setMachineFilter } = useSessionListMachineFilter()
     const showDetailedStatus = sessionListStatusMode === 'detailed'
     const [searchQuery, setSearchQuery] = useState('')
+    // Header container width — fold primaries into More only when a query chip
+    // is present AND the toolbar is actually narrow (tiann/hapi#2040 Minor).
+    const headerRowRef = useRef<HTMLDivElement>(null)
+    const [headerRowWidth, setHeaderRowWidth] = useState(0)
     const [searchMode, setSearchMode] = useState<'metadata' | 'content'>('metadata')
     const [contentSearchResponse, setContentSearchResponse] = useState<SessionContentSearchResponse | null>(null)
     const [contentSearchLoading, setContentSearchLoading] = useState(false)
@@ -2979,6 +2983,23 @@ export function SessionList(props: {
     }, [showSearch])
 
     const showHeaderRow = showSearch || renderHeader || Boolean(props.headerActions)
+
+    useEffect(() => {
+        if (!showHeaderRow) {
+            setHeaderRowWidth(0)
+            return
+        }
+        const el = headerRowRef.current
+        if (!el || typeof ResizeObserver === 'undefined') return
+        const ro = new ResizeObserver((entries) => {
+            const width = entries[0]?.contentRect.width
+            if (typeof width === 'number') setHeaderRowWidth(width)
+        })
+        ro.observe(el)
+        const initial = el.getBoundingClientRect().width
+        if (initial > 0) setHeaderRowWidth(initial)
+        return () => ro.disconnect()
+    }, [showHeaderRow])
     const sessionListRef = useRef<HTMLDivElement>(null)
 
     // Pull-to-refresh on the scrollable list. Touch-only gesture mirroring the
@@ -3289,6 +3310,7 @@ export function SessionList(props: {
                 // One toolbar row always. Never wrap — secondary chrome sheds via
                 // container query instead of burning a Quest line (tiann/hapi#2039).
                 <div
+                    ref={headerRowRef}
                     data-testid="session-list-header-row"
                     className="@container flex flex-nowrap items-center gap-1 px-2 py-1"
                 >
@@ -3321,8 +3343,11 @@ export function SessionList(props: {
                         >
                             {(() => {
                                 // Collapsed query chip + primary icons exceed ~320px.
-                                // Fold primary into More so Settings/New stay reachable (#2039).
+                                // Fold primary into More only when the header is actually
+                                // narrow — wide lists keep inline actions (#2039 / #2040).
+                                const TOOLBAR_CROWDED_MAX_PX = 32 * 16 // matches prior @[32rem] bar
                                 const toolbarCrowded = searchQuery.length > 0
+                                    && (headerRowWidth === 0 || headerRowWidth < TOOLBAR_CROWDED_MAX_PX)
                                 const renderSecondary = () => (
                                     <>
                                         <SessionListFilterMenu
