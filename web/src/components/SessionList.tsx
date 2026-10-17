@@ -124,6 +124,7 @@ import { getPathDisplayName } from '@/utils/path'
 import {
     shedToolbarSlots,
     toolbarActionBudget,
+    TOOLBAR_GAP_PX,
     TOOLBAR_ICON_PX,
     type ToolbarShedSlot
 } from '@/components/sessionToolbarShed'
@@ -3039,11 +3040,15 @@ export function SessionList(props: {
         const el = headerActionsRef.current ?? headerRowRef.current
         if (!el || typeof ResizeObserver === 'undefined') return
         const ro = new ResizeObserver((entries) => {
-            const width = entries[0]?.contentRect.width
-            if (typeof width === 'number') setHeaderRowWidth(width)
+            const target = entries[0]?.target
+            const reported = entries[0]?.contentRect.width ?? 0
+            const client = target instanceof HTMLElement ? target.clientWidth : 0
+            const width = client > 0 ? client : reported
+            // Ignore 0 so a hidden frame cannot reopen the permissive path.
+            if (width > 0) setHeaderRowWidth(width)
         })
         ro.observe(el)
-        const initial = el.getBoundingClientRect().width
+        const initial = el.clientWidth || el.getBoundingClientRect().width
         if (initial > 0) setHeaderRowWidth(initial)
         return () => ro.disconnect()
     }, [showHeaderRow])
@@ -3382,7 +3387,7 @@ export function SessionList(props: {
                 <div
                     ref={headerRowRef}
                     data-testid="session-list-header-row"
-                    className="@container flex flex-nowrap items-center gap-1 px-2 py-1"
+                    className="@container flex min-w-0 w-full flex-nowrap items-center gap-1 px-2 py-1"
                 >
                     {showSearch ? (
                         <SessionListSearch
@@ -3418,8 +3423,25 @@ export function SessionList(props: {
                                 // kitchen chip are not in the ladder: the menu is
                                 // the mobile machine control, and the chip renders
                                 // nothing unless the kitchen is dirty (#2039).
-                                const budget = headerRowWidth > 0
-                                    ? headerRowWidth
+                                // Cap the actions-box reading by the real row
+                                // gutter (row − search) so a content-sized flex
+                                // item cannot claim every icon "fits" while they
+                                // paint past the split (#2039 desktop).
+                                const rowPx = headerRowRef.current?.clientWidth ?? 0
+                                const searchPx = headerRowRef.current
+                                    ?.querySelector<HTMLElement>('[data-testid="session-list-search"]')
+                                    ?.offsetWidth ?? 0
+                                const fromRow = rowPx > 0
+                                    ? Math.max(0, rowPx - searchPx - TOOLBAR_GAP_PX)
+                                    : 0
+                                const fromActions = headerRowWidth > 0 ? headerRowWidth : 0
+                                const gutter = fromActions > 0 && fromRow > 0
+                                    ? Math.min(fromActions, fromRow)
+                                    : fromActions > 0
+                                        ? fromActions
+                                        : fromRow
+                                const budget = gutter > 0
+                                    ? gutter
                                     : toolbarActionBudget(0, searchQuery.length > 0)
                                 const slotWidth = (id: string, fallback: number) => {
                                     const measured = toolbarSlotWidths[id] ?? 0
