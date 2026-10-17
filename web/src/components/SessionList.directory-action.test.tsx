@@ -1139,6 +1139,8 @@ describe('SessionList search toggle', () => {
         expect(searchGroup.nextElementSibling).toBe(actions)
         expect(actions).toHaveClass('shrink-0', 'flex-nowrap')
         expect(actions.className.split(/\s+/)).not.toContain('flex-wrap')
+        // No ml-auto spacer — actions sit next to search, not viewport-right.
+        expect(actions.className.split(/\s+/)).not.toContain('ml-auto')
         expect(headerRow).toHaveClass('flex-nowrap', '@container')
         expect(headerRow.className.split(/\s+/)).not.toContain('flex-wrap')
         expect(screen.queryByTestId('session-list-header-secondary')).toBeNull()

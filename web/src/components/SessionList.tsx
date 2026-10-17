@@ -2032,7 +2032,10 @@ export function SessionList(props: {
                     {!(showSearch && searchExpanded) ? (
                         <div
                             data-testid="session-list-header-actions"
-                            className="ml-auto flex shrink-0 flex-nowrap items-center justify-end gap-1"
+                            // Pack beside search — ml-auto left a Quest-width
+                            // desert between the search icon and BlockedJumpPill
+                            // (tiann/hapi#2039).
+                            className="flex shrink-0 flex-nowrap items-center gap-1"
                         >
                             {(() => {
                                 // Collapsed query chip + full primary icon set exceeds ~320px.
