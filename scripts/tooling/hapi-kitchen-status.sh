@@ -11,8 +11,8 @@
 #   hapi-kitchen-status --json       # machine-readable object
 #
 # Exit codes (kitchen health, not driver busy):
-#   0   green (idle, no hold, mirror clean enough for sync/rebuild)
-#   1   mirror porcelain blocks sync/rebuild (tracked dirt on primary)
+#   0   green (idle, no hold, primary on main, mirror clean enough for sync/rebuild)
+#   1   mirror unclean: tracked porcelain and/or primary not on main
 #   76  remat-hold active
 #   75  driver rebuild/switch busy (informational — not a hygiene fail)
 
@@ -60,22 +60,39 @@ if [[ -f "$PRIMARY/config/driver-manifest.yaml" ]]; then
 fi
 
 mirror_dirty=0
+mirror_wrong_branch=0
+mirror_branch="?"
 mirror_note="clean"
-if [[ -d "$PRIMARY/.git" ]]; then
+if [[ -d "$PRIMARY/.git" ]] || git -C "$PRIMARY" rev-parse --git-dir >/dev/null 2>&1; then
+    mirror_branch="$(git -C "$PRIMARY" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "?")"
+    if [[ "$mirror_branch" != "main" ]]; then
+        mirror_wrong_branch=1
+        mirror_note="branch=${mirror_branch} (want main)"
+    fi
     porcelain="$(git -C "$PRIMARY" status --porcelain --untracked-files=no 2>/dev/null || true)"
     if [[ -n "$porcelain" ]]; then
         mirror_dirty=1
-        mirror_note="dirty ($(echo "$porcelain" | wc -l | tr -d ' ') tracked)"
+        dirt_n="$(printf '%s\n' "$porcelain" | wc -l | tr -d ' ')"
+        if [[ "$mirror_wrong_branch" -eq 1 ]]; then
+            mirror_note="branch=${mirror_branch} + dirty (${dirt_n} tracked)"
+        else
+            mirror_note="dirty (${dirt_n} tracked)"
+        fi
     fi
-    untracked="$(git -C "$PRIMARY" status --porcelain --untracked-files=all 2>/dev/null | grep '^??' | wc -l | tr -d ' ')"
-    if [[ "$untracked" -gt 0 && "$mirror_dirty" -eq 0 ]]; then
+    # grep exits 1 when no matches — must not trip set -o pipefail
+    untracked="$(git -C "$PRIMARY" status --porcelain --untracked-files=all 2>/dev/null | grep '^??' | wc -l | tr -d ' ' || true)"
+    [[ -z "$untracked" ]] && untracked=0
+    if [[ "$untracked" -gt 0 && "$mirror_dirty" -eq 0 && "$mirror_wrong_branch" -eq 0 ]]; then
         mirror_note="clean (+${untracked} untracked)"
     fi
 fi
 
 fork_behind=0 fork_ahead=0
 if git -C "$PRIMARY" rev-parse upstream/main >/dev/null 2>&1; then
+    # Count against the main ref (not HEAD) so a wrong-branch primary still
+    # reports fork sync debt honestly.
     read -r fork_behind fork_ahead < <(git -C "$PRIMARY" rev-list --left-right --count upstream/main...main 2>/dev/null || echo "0 0")
+    : "${fork_behind:=0}" "${fork_ahead:=0}"
 fi
 
 # WORKING count: optional. Default off — GET /api/kitchen-status polls this often,
@@ -107,17 +124,19 @@ fi
 exit_code=0
 if [[ "$hold_active" -eq 1 ]]; then
     exit_code=76
-elif [[ "$mirror_dirty" -eq 1 ]]; then
+elif [[ "$mirror_dirty" -eq 1 || "$mirror_wrong_branch" -eq 1 ]]; then
     exit_code=1
 fi
 
 status_word=green
 [[ "$hold_active" -eq 1 ]] && status_word=hold
 [[ "$mirror_dirty" -eq 1 ]] && status_word=dirty
+[[ "$mirror_wrong_branch" -eq 1 && "$status_word" == green ]] && status_word=wrong-branch
+[[ "$mirror_wrong_branch" -eq 1 && "$status_word" == dirty ]] && status_word=dirty+wrong-branch
 [[ "$driver_busy" -eq 1 && "$status_word" == green ]] && status_word=busy
 [[ "$rule_chopped" -eq 1 ]] && status_word="${status_word}+rule-chop"
 
-oneliner="kitchen: ${status_word} | driver ${driver_head} (${driver_layers} layers) | mirror ${mirror_note} | fork +${fork_ahead}/-${fork_behind} | WORKING=${working} | remat-hold=$([[ $hold_active -eq 0 ]] && echo off || echo "$hold_reason") | lease ${lease_note}"
+oneliner="kitchen: ${status_word} | driver ${driver_head} (${driver_layers} layers) | mirror ${mirror_note} | branch ${mirror_branch} | fork +${fork_ahead}/-${fork_behind} | WORKING=${working} | remat-hold=$([[ $hold_active -eq 0 ]] && echo off || echo "$hold_reason") | lease ${lease_note}"
 
 case "$MODE" in
 json)
@@ -130,7 +149,9 @@ json)
         --arg driverHead "$driver_head" \
         --argjson driverLayers "$driver_layers_json" \
         --arg mirror "$mirror_note" \
+        --arg mirrorBranch "$mirror_branch" \
         --argjson mirrorDirty "$mirror_dirty" \
+        --argjson mirrorWrongBranch "$mirror_wrong_branch" \
         --argjson forkAhead "$fork_ahead" \
         --argjson forkBehind "$fork_behind" \
         --arg working "$working" \
@@ -140,7 +161,7 @@ json)
         --argjson driverBusy "$driver_busy" \
         --argjson ruleChopped "$rule_chopped" \
         --arg oneliner "$oneliner" \
-        '{status: $status, driverHead: $driverHead, driverLayers: $driverLayers, mirror: $mirror, mirrorDirty: ($mirrorDirty == 1), forkAhead: $forkAhead, forkBehind: $forkBehind, working: $working, holdActive: ($holdActive == 1), holdReason: $holdReason, lease: $lease, driverBusy: ($driverBusy == 1), ruleChopped: ($ruleChopped == 1), oneliner: $oneliner}'
+        '{status: $status, driverHead: $driverHead, driverLayers: $driverLayers, mirror: $mirror, mirrorBranch: $mirrorBranch, mirrorDirty: ($mirrorDirty == 1), mirrorWrongBranch: ($mirrorWrongBranch == 1), forkAhead: $forkAhead, forkBehind: $forkBehind, working: $working, holdActive: ($holdActive == 1), holdReason: $holdReason, lease: $lease, driverBusy: ($driverBusy == 1), ruleChopped: ($ruleChopped == 1), oneliner: $oneliner}'
     ;;
 quiet)
     echo "$oneliner"
@@ -149,6 +170,7 @@ human)
     echo "$oneliner"
     echo ""
     echo "Detail: hapi-driver-status | hapi-remat-hold status | git -C $PRIMARY status -sb"
+    [[ "$mirror_wrong_branch" -eq 1 ]] && echo "WARN: primary not on main (branch=${mirror_branch}) — park feature work in a worktree, checkout main on ~/coding/hapi"
     [[ "$rule_chopped" -eq 1 ]] && echo "WARN: hapi-session.mdc missing identity section (overlay chop?) — git checkout -- .cursor/rules/hapi-session.mdc"
     ;;
 esac
