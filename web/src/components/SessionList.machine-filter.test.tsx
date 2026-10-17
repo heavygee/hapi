@@ -11,6 +11,11 @@ import { SessionList } from './SessionList'
 const SEARCH_LABEL = 'Search sessions (title, path, Agent, machine name, ID, and more)'
 const SEARCH_PLACEHOLDER = 'Search title/path/Agent/machine/ID…'
 
+/** Class token `md:hidden`, not the substring inside `max-md:hidden`. */
+function parentHasMdHidden(button: HTMLElement): boolean {
+    return button.parentElement?.className.split(/\s+/).includes('md:hidden') ?? false
+}
+
 afterEach(() => cleanup())
 
 function makeSession(overrides: Partial<SessionSummary> & { id: string }): SessionSummary {
@@ -111,7 +116,7 @@ describe('SessionList machine filter', () => {
         // Mobile (below md) counterpart: the session and machine filters share
         // one compact filter icon and menu.
         const filterButtons = screen.getAllByRole('button', { name: 'Filter sessions' })
-        expect(filterButtons.some((button) => button.parentElement?.className.includes('md:hidden'))).toBe(true)
+        expect(filterButtons.some((button) => parentHasMdHidden(button))).toBe(true)
         expect(screen.getByRole('button', { name: /All \(2\)/ })).toBeTruthy()
         expect(screen.getByText('work/hapi · Mint')).toBeTruthy()
         expect(screen.getByText('work/docs · Teemo')).toBeTruthy()
@@ -165,7 +170,7 @@ describe('SessionList machine filter', () => {
         renderSessionList(multiMachineSessions)
 
         const mobileTrigger = screen.getAllByRole('button', { name: 'Filter sessions' })
-            .find((button) => button.parentElement?.className.includes('md:hidden'))
+            .find((button) => parentHasMdHidden(button))
         expect(mobileTrigger).toBeTruthy()
         fireEvent.click(mobileTrigger!)
 
