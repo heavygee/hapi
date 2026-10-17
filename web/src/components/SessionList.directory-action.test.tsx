@@ -1153,6 +1153,56 @@ describe('SessionList search toggle', () => {
         expect(screen.getByRole('button', { name: 'Unread only' })).toBeInTheDocument()
     })
 
+    it('keeps primary actions inline with a query chip when the header is wide (tiann/hapi#2040)', () => {
+        const observe = vi.fn()
+        const disconnect = vi.fn()
+        class FakeResizeObserver {
+            callback: ResizeObserverCallback
+            constructor(cb: ResizeObserverCallback) {
+                this.callback = cb
+            }
+            observe = (target: Element) => {
+                observe(target)
+                this.callback(
+                    [{ target, contentRect: { width: 640 } as DOMRectReadOnly } as ResizeObserverEntry],
+                    this as unknown as ResizeObserver
+                )
+            }
+            unobserve = vi.fn()
+            disconnect = disconnect
+        }
+        vi.stubGlobal('ResizeObserver', FakeResizeObserver)
+
+        renderWithProviders(
+            <SessionList
+                sessions={[makeSession({
+                    id: 'session-1',
+                    updatedAt: 100,
+                    metadata: { path: '/work/hapi', name: 'Wide header', flavor: 'codex' },
+                })]}
+                selectedSessionId={null}
+                onSelect={vi.fn()}
+                onNewSession={vi.fn()}
+                onRefresh={vi.fn()}
+                isLoading={false}
+                renderHeader
+                headerActions={<button type="button">Settings</button>}
+                api={null}
+            />
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: SEARCH_LABEL }))
+        const input = screen.getByPlaceholderText(SEARCH_PLACEHOLDER)
+        fireEvent.change(input, { target: { value: 'Wide' } })
+        fireEvent.blur(input)
+
+        // Wide header + query: New stays inline (not folded into More-only).
+        expect(screen.getByRole('button', { name: 'New Session' })).toBeInTheDocument()
+        expect(within(screen.getByTestId('session-list-header-actions')).getByRole('button', { name: 'Unread only' })).toBeInTheDocument()
+
+        vi.unstubAllGlobals()
+    })
+
     it('keeps secondary headerActions inline via container query when search is idle (tiann/hapi#2039)', () => {
         renderWithProviders(
             <SessionList
