@@ -47,12 +47,15 @@ describe('toolbarActionBudget', () => {
         expect(toolbarActionBudget(320, false)).toBeGreaterThan(200)
     })
 
-    it('reserves more space once a query chip is showing', () => {
+    it('reserves only the compact query chip, not a 200px desert', () => {
+        // max-w-[9rem] + clear ≈ 152. Old 200 left empty space after More on Quest.
+        expect(toolbarActionBudget(400, true)).toBeGreaterThanOrEqual(220)
+        expect(toolbarActionBudget(320, true)).toBeGreaterThanOrEqual(140)
         expect(toolbarActionBudget(320, true)).toBeLessThan(toolbarActionBudget(320, false))
     })
 
-    it('does not crowd an idle row before it has been measured', () => {
+    it('keeps daily controls before the row has been measured', () => {
         expect(toolbarActionBudget(0, false)).toBe(Number.POSITIVE_INFINITY)
-        expect(toolbarActionBudget(0, true)).toBe(72)
+        expect(toolbarActionBudget(0, true)).toBe(220)
     })
 })

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import * as Popover from '@radix-ui/react-popover'
 import { SessionListScrollAnchor } from './SessionListScrollAnchor'
 import type { SessionContentSearchResponse, SessionSummary } from '@/types/api'
@@ -2187,7 +2187,10 @@ export function SessionList(props: {
     // Header container width — fold primaries into More only when a query chip
     // is present AND the toolbar is actually narrow (tiann/hapi#2040 Minor).
     const headerRowRef = useRef<HTMLDivElement>(null)
+    const headerActionsRef = useRef<HTMLDivElement>(null)
+    const toolbarMeasureRef = useRef<HTMLDivElement>(null)
     const [headerRowWidth, setHeaderRowWidth] = useState(0)
+    const [toolbarSlotWidths, setToolbarSlotWidths] = useState<Record<string, number>>({})
     const [searchMode, setSearchMode] = useState<'metadata' | 'content'>('metadata')
     const [contentSearchResponse, setContentSearchResponse] = useState<SessionContentSearchResponse | null>(null)
     const [contentSearchLoading, setContentSearchLoading] = useState(false)
@@ -3005,7 +3008,7 @@ export function SessionList(props: {
             setHeaderRowWidth(0)
             return
         }
-        const el = headerRowRef.current
+        const el = headerActionsRef.current ?? headerRowRef.current
         if (!el || typeof ResizeObserver === 'undefined') return
         const ro = new ResizeObserver((entries) => {
             const width = entries[0]?.contentRect.width
@@ -3016,6 +3019,24 @@ export function SessionList(props: {
         if (initial > 0) setHeaderRowWidth(initial)
         return () => ro.disconnect()
     }, [showHeaderRow])
+    useLayoutEffect(() => {
+        const root = toolbarMeasureRef.current
+        if (!root) return
+        const next: Record<string, number> = {}
+        for (const node of root.querySelectorAll<HTMLElement>('[data-measure-id]')) {
+            const id = node.dataset.measureId
+            if (!id) continue
+            next[id] = node.offsetWidth
+        }
+        setToolbarSlotWidths((previous) => {
+            const previousKeys = Object.keys(previous)
+            const nextKeys = Object.keys(next)
+            if (previousKeys.length === nextKeys.length && nextKeys.every((key) => previous[key] === next[key])) {
+                return previous
+            }
+            return next
+        })
+    })
     const sessionListRef = useRef<HTMLDivElement>(null)
 
     // Pull-to-refresh on the scrollable list. Touch-only gesture mirroring the
@@ -3351,23 +3372,32 @@ export function SessionList(props: {
                     ) : null}
                     {!(showSearch && searchExpanded) ? (
                         <div
+                            ref={headerActionsRef}
                             data-testid="session-list-header-actions"
-                            // flex-1 so secondary/More can ml-auto to the trailing edge
-                            // without shoving primaries away from search (#2039).
-                            className="flex min-w-0 flex-1 flex-nowrap items-center gap-1"
+                            // flex-1 is the real icon budget. Measuring this box
+                            // (not the whole row minus a guessed search width)
+                            // is what keeps the trailing gap from swallowing
+                            // the next icon (#2039).
+                            className="relative flex min-w-0 flex-1 flex-nowrap items-center gap-1"
                         >
                             {(() => {
                                 // Shed highest keep first. Machine menu and the
                                 // kitchen chip are not in the ladder: the menu is
                                 // the mobile machine control, and the chip renders
                                 // nothing unless the kitchen is dirty (#2039).
-                                const budget = toolbarActionBudget(headerRowWidth, searchQuery.length > 0)
+                                const budget = headerRowWidth > 0
+                                    ? headerRowWidth
+                                    : toolbarActionBudget(0, searchQuery.length > 0)
+                                const slotWidth = (id: string, fallback: number) => {
+                                    const measured = toolbarSlotWidths[id] ?? 0
+                                    return measured > 0 ? measured : fallback
+                                }
                                 const definedSlots: Array<ToolbarShedSlot & { node: ReactNode }> = []
                                 if (blockedCount > 0) {
                                     definedSlots.push({
                                         id: 'blocked',
                                         keep: 2,
-                                        widthPx: 72,
+                                        widthPx: slotWidth('blocked', 72),
                                         node: (
                                             <BlockedJumpPill
                                                 count={blockedCount}
@@ -3381,7 +3411,7 @@ export function SessionList(props: {
                                 definedSlots.push({
                                     id: 'filter',
                                     keep: 5,
-                                    widthPx: TOOLBAR_ICON_PX,
+                                    widthPx: slotWidth('filter', TOOLBAR_ICON_PX),
                                     node: (
                                         <>
                                             <SessionListFilterMenu
@@ -3422,7 +3452,7 @@ export function SessionList(props: {
                                     definedSlots.push({
                                         id: 'mark-all',
                                         keep: 7,
-                                        widthPx: TOOLBAR_ICON_PX,
+                                        widthPx: slotWidth('mark-all', TOOLBAR_ICON_PX),
                                         node: (
                                             <button
                                                 type="button"
@@ -3440,7 +3470,7 @@ export function SessionList(props: {
                                     definedSlots.push({
                                         id: 'new',
                                         keep: 4,
-                                        widthPx: TOOLBAR_ICON_PX,
+                                        widthPx: slotWidth('new', TOOLBAR_ICON_PX),
                                         node: (
                                             <button
                                                 type="button"
@@ -3457,7 +3487,7 @@ export function SessionList(props: {
                                     definedSlots.push({
                                         id: extra.id,
                                         keep: extra.keep,
-                                        widthPx: extra.widthPx ?? TOOLBAR_ICON_PX,
+                                        widthPx: slotWidth(extra.id, extra.widthPx ?? TOOLBAR_ICON_PX),
                                         node: extra.node
                                     })
                                 }
@@ -3465,7 +3495,7 @@ export function SessionList(props: {
                                     definedSlots.push({
                                         id: 'header-actions',
                                         keep: 6,
-                                        widthPx: TOOLBAR_ICON_PX,
+                                        widthPx: slotWidth('header-actions', TOOLBAR_ICON_PX),
                                         node: props.headerActions
                                     })
                                 }
@@ -3477,6 +3507,18 @@ export function SessionList(props: {
                                 const otherVisible = visible.filter((slot) => slot.id !== 'blocked')
                                 return (
                                     <>
+                                        <div
+                                            ref={toolbarMeasureRef}
+                                            aria-hidden
+                                            inert
+                                            className="pointer-events-none absolute left-0 top-0 -z-10 flex h-0 w-max gap-1 overflow-hidden opacity-0"
+                                        >
+                                            {definedSlots.map((slot) => (
+                                                <span key={slot.id} data-measure-id={slot.id} className="inline-flex shrink-0">
+                                                    {slot.node}
+                                                </span>
+                                            ))}
+                                        </div>
                                         {blockedSlot ? (
                                             <span data-testid={`session-toolbar-slot-${blockedSlot.id}`} className="contents">
                                                 {blockedSlot.node}
