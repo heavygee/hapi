@@ -2061,11 +2061,13 @@ export function SessionList(props: {
                             className="flex shrink-0 flex-nowrap items-center gap-1"
                         >
                             {(() => {
-                                // Full primary icon set (esp. at 130% font scale) exceeds ~320px
-                                // even with an empty query. Fold into More from available width
-                                // in both query states — wide lists keep inline actions
-                                // (#2039 / #2040).
-                                const TOOLBAR_CROWDED_MAX_PX = 32 * 16 // covers 320px + 130% font
+                                // Fold primaries into More only when they truly will not fit.
+                                // A flat 32rem gate made every Quest-width sidebar [search][⋯]
+                                // with a desert of empty space. Empty query needs ~348px at
+                                // 130% font (bot); a query chip needs a higher bar (#2039/#2040).
+                                const TOOLBAR_CROWDED_MAX_PX = searchQuery.length > 0
+                                    ? 32 * 16 // chip + primaries
+                                    : 22 * 16 // ~352px — catches 320px/130%, not Quest ~400px
                                 const toolbarCrowded = headerRowWidth > 0
                                     ? headerRowWidth < TOOLBAR_CROWDED_MAX_PX
                                     // Until measured: only crowd when a query chip is already

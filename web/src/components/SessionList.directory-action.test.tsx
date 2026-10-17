@@ -1153,8 +1153,7 @@ describe('SessionList search toggle', () => {
         expect(screen.getByRole('button', { name: 'Unread only' })).toBeInTheDocument()
     })
 
-    it('folds primary actions into More on a narrow empty-query header (tiann/hapi#2040)', () => {
-        localStorage.setItem('hapi-font-scale', '1.3')
+    function stubHeaderWidth(width: number) {
         class FakeResizeObserver {
             callback: ResizeObserverCallback
             constructor(cb: ResizeObserverCallback) {
@@ -1162,7 +1161,7 @@ describe('SessionList search toggle', () => {
             }
             observe = (target: Element) => {
                 this.callback(
-                    [{ target, contentRect: { width: 320 } as DOMRectReadOnly } as ResizeObserverEntry],
+                    [{ target, contentRect: { width } as DOMRectReadOnly } as ResizeObserverEntry],
                     this as unknown as ResizeObserver
                 )
             }
@@ -1170,6 +1169,11 @@ describe('SessionList search toggle', () => {
             disconnect = vi.fn()
         }
         vi.stubGlobal('ResizeObserver', FakeResizeObserver)
+    }
+
+    it('folds primary actions into More on a narrow empty-query header (tiann/hapi#2040)', () => {
+        localStorage.setItem('hapi-font-scale', '1.3')
+        stubHeaderWidth(320)
 
         const now = Date.now()
         renderWithProviders(
@@ -1221,6 +1225,38 @@ describe('SessionList search toggle', () => {
 
         vi.unstubAllGlobals()
         localStorage.removeItem('hapi-font-scale')
+    })
+
+    it('keeps primary actions inline on a Quest-width empty-query header (tiann/hapi#2040)', () => {
+        // ~400px empty query must NOT collapse to [search][⋯] — that was the
+        // 32rem-for-everything regression on Quest dogfood.
+        stubHeaderWidth(400)
+
+        renderWithProviders(
+            <SessionList
+                sessions={[makeSession({
+                    id: 'session-1',
+                    updatedAt: Date.now(),
+                    metadata: { path: '/work/hapi', name: 'Quest width', flavor: 'codex' },
+                })]}
+                selectedSessionId={null}
+                onSelect={vi.fn()}
+                onNewSession={vi.fn()}
+                onRefresh={vi.fn()}
+                isLoading={false}
+                renderHeader
+                headerActions={<button type="button">Settings</button>}
+                api={null}
+            />
+        )
+
+        const actions = screen.getByTestId('session-list-header-actions')
+        expect(within(actions).getByRole('button', { name: 'Unread only' })).toBeInTheDocument()
+        expect(within(actions).getByRole('button', { name: 'New Session' })).toBeInTheDocument()
+        // Secondary still sheds into More below @[26rem]; primaries stay visible.
+        expect(screen.getByTestId('session-list-header-overflow')).toBeInTheDocument()
+
+        vi.unstubAllGlobals()
     })
 
     it('keeps primary actions inline with a query chip when the header is wide (tiann/hapi#2040)', () => {
