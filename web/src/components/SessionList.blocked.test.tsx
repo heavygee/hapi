@@ -113,6 +113,10 @@ describe('SessionList blocked chrome (#1717)', () => {
         expect(search.className.split(/\s+/)).toContain('shrink-0')
         expect(search.className.split(/\s+/)).toContain('max-w-full')
         expect(search.className.split(/\s+/)).not.toContain('min-w-0')
+        // #2039/#2040: with a collapsed query chip, primary chrome (incl. BlockedJumpPill)
+        // folds into More — pill is not in the header row until overflow opens.
+        expect(screen.queryByTestId('blocked-jump-pill')).toBeNull()
+        fireEvent.click(screen.getByTestId('session-list-header-overflow'))
         expect(screen.getByTestId('blocked-jump-pill')).toBeTruthy()
         expect(screen.getByRole('button', { name: 'Clear search' })).toBeTruthy()
     })
