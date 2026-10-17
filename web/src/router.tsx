@@ -226,12 +226,14 @@ function SessionsPage() {
                         onBrowse={canBrowse ? () => navigate({ to: '/browse' }) : undefined}
                         onRefresh={handleRefresh}
                         isLoading={isLoading}
-                        // New stays primary (renderHeader). Browse/settings are
-                        // secondary and shed on narrow session-list headers (#2039).
+                        // Keep ranks: new 4, unread lens 5, settings 6,
+                        // mark-all 7, browse 8. Higher sheds into More first (#2039).
                         renderHeader
-                        headerActions={(
-                            <div className="flex shrink-0 items-center gap-2">
-                                {canBrowse && (
+                        toolbarExtras={[
+                            ...(canBrowse ? [{
+                                id: 'browse',
+                                keep: 8,
+                                node: (
                                     <button
                                         type="button"
                                         onClick={() => navigate({ to: '/browse' })}
@@ -240,17 +242,23 @@ function SessionsPage() {
                                     >
                                         <FolderOpenIcon className="h-5 w-5" />
                                     </button>
-                                )}
-                                <button
-                                    type="button"
-                                    onClick={() => navigate({ to: '/settings' })}
-                                    className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
-                                    title={t('settings.title')}
-                                >
-                                    <SettingsIcon className="h-5 w-5" />
-                                </button>
-                            </div>
-                        )}
+                                )
+                            }] : []),
+                            {
+                                id: 'settings',
+                                keep: 6,
+                                node: (
+                                    <button
+                                        type="button"
+                                        onClick={() => navigate({ to: '/settings' })}
+                                        className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
+                                        title={t('settings.title')}
+                                    >
+                                        <SettingsIcon className="h-5 w-5" />
+                                    </button>
+                                )
+                            }
+                        ]}
                         api={api}
                         titleSuggestionAvailable={titleSuggestionAvailable}
                         machineLabelsById={machineLabelsById}

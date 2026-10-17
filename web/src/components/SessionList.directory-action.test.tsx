@@ -1139,17 +1139,17 @@ describe('SessionList search toggle', () => {
         expect(searchGroup.nextElementSibling).toBe(actions)
         expect(actions).toHaveClass('flex-1', 'flex-nowrap')
         expect(actions.className.split(/\s+/)).not.toContain('flex-wrap')
-        // Crowded (query chip): More stays packed beside search — no trailing ml-auto desert.
-        expect(screen.queryByTestId('session-list-header-trailing')).toBeNull()
         expect(headerRow).toHaveClass('flex-nowrap', '@container')
         expect(headerRow.className.split(/\s+/)).not.toContain('flex-wrap')
-        expect(screen.queryByTestId('session-list-header-secondary')).toBeNull()
-        // Unread toggle is primary chrome — not inline while the chip is present.
+        // Unmeasured query chip is narrower than unread + Settings. More is
+        // the same width as one icon, so both move together — neither stays
+        // inline to paint over the clear button.
         expect(within(actions).queryByRole('button', { name: 'Unread only' })).toBeNull()
+        expect(within(actions).queryByRole('button', { name: 'Settings' })).toBeNull()
         const overflow = screen.getByTestId('session-list-header-overflow')
         expect(overflow).toHaveAccessibleName('More session list actions')
         fireEvent.click(overflow)
-        expect(screen.getAllByRole('button', { name: 'Settings' }).length).toBeGreaterThanOrEqual(1)
+        expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument()
         expect(screen.getByRole('button', { name: 'Unread only' })).toBeInTheDocument()
     })
 
@@ -1212,16 +1212,14 @@ describe('SessionList search toggle', () => {
             />
         )
 
-        // Empty query + 320px: primaries must not stay inline and shove More offscreen.
-        expect(screen.queryByTestId('session-list-header-secondary')).toBeNull()
-        expect(within(screen.getByTestId('session-list-header-actions')).queryByRole('button', { name: 'Unread only' })).toBeNull()
-        expect(within(screen.getByTestId('session-list-header-actions')).queryByRole('button', { name: 'New Session' })).toBeNull()
-        const overflow = screen.getByTestId('session-list-header-overflow')
-        fireEvent.click(overflow)
-        expect(screen.getByRole('button', { name: 'Unread only' })).toBeInTheDocument()
-        expect(screen.getByRole('button', { name: 'New Session' })).toBeInTheDocument()
-        expect(screen.getByRole('button', { name: 'Filter sessions by machine' })).toBeInTheDocument()
-        expect(screen.getAllByRole('button', { name: 'Settings' }).length).toBeGreaterThanOrEqual(1)
+        // Empty query + 320px still fits the daily controls. Do not collapse
+        // the row to [search][⋯]. Machine menu stays in the row (not shed).
+        const actions = screen.getByTestId('session-list-header-actions')
+        expect(within(actions).getByRole('button', { name: 'Unread only' })).toBeInTheDocument()
+        expect(within(actions).getByRole('button', { name: 'New Session' })).toBeInTheDocument()
+        expect(within(actions).getByRole('button', { name: 'Settings' })).toBeInTheDocument()
+        expect(within(actions).getByRole('button', { name: 'Filter sessions by machine' })).toBeInTheDocument()
+        expect(screen.queryByTestId('session-list-header-overflow')).toBeNull()
 
         vi.unstubAllGlobals()
         localStorage.removeItem('hapi-font-scale')
@@ -1254,10 +1252,9 @@ describe('SessionList search toggle', () => {
         expect(actions).toHaveClass('flex-1')
         expect(within(actions).getByRole('button', { name: 'Unread only' })).toBeInTheDocument()
         expect(within(actions).getByRole('button', { name: 'New Session' })).toBeInTheDocument()
-        // Trailing More sits on the right edge — not a left-packed desert after +.
-        const trailing = screen.getByTestId('session-list-header-trailing')
-        expect(trailing).toHaveClass('ml-auto')
-        expect(within(trailing).getByTestId('session-list-header-overflow')).toBeInTheDocument()
+        expect(within(actions).getByRole('button', { name: 'Settings' })).toBeInTheDocument()
+        // Nothing shed — no More, and no ml-auto hole between + and ⋯.
+        expect(screen.queryByTestId('session-list-header-overflow')).toBeNull()
 
         vi.unstubAllGlobals()
     })
@@ -1331,11 +1328,9 @@ describe('SessionList search toggle', () => {
             />
         )
 
-        const secondary = screen.getByTestId('session-list-header-secondary')
-        expect(secondary).toHaveClass('hidden')
-        expect(secondary.className.split(/\s+/)).toContain('@[26rem]:contents')
-        expect(secondary).toHaveTextContent('Settings')
-        expect(screen.getByTestId('session-list-header-overflow')).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Unread only' })).toBeInTheDocument()
+        expect(screen.queryByTestId('session-list-header-overflow')).toBeNull()
     })
 
     it('gives expanded search a 48px clear end-cap with calendar immediately left (tiann/hapi#2019)', () => {

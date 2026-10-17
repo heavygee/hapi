@@ -112,6 +112,20 @@ import { Spinner } from '@/components/Spinner'
 import { transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
 import { useToast } from '@/lib/toast-context'
 import { getPathDisplayName } from '@/utils/path'
+import {
+    shedToolbarSlots,
+    toolbarActionBudget,
+    TOOLBAR_ICON_PX,
+    type ToolbarShedSlot
+} from '@/components/sessionToolbarShed'
+
+export type SessionToolbarExtra = {
+    id: string
+    /** Higher sheds into More first. See sessionToolbarShed.ts. */
+    keep: number
+    node: ReactNode
+    widthPx?: number
+}
 
 export { getWorktreeSessionLabel } from '@/lib/sessionWorktreeLabel'
 
@@ -1301,7 +1315,9 @@ export function SessionList(props: {
     onRefresh: () => Promise<unknown> | void
     isLoading: boolean
     renderHeader?: boolean
+    /** @deprecated Prefer `toolbarExtras` so each control has its own keep rank. */
     headerActions?: React.ReactNode
+    toolbarExtras?: SessionToolbarExtra[]
     api: ApiClient | null
     titleSuggestionAvailable?: boolean
     machineLabelsById?: Record<string, string>
@@ -1914,7 +1930,7 @@ export function SessionList(props: {
         if (!showSearch) setSearchExpanded(false)
     }, [showSearch])
 
-    const showHeaderRow = showSearch || renderHeader || Boolean(props.headerActions)
+    const showHeaderRow = showSearch || renderHeader || Boolean(props.headerActions) || Boolean(props.toolbarExtras?.length)
 
     useEffect(() => {
         if (!showHeaderRow) {
@@ -2060,29 +2076,17 @@ export function SessionList(props: {
                             className="flex min-w-0 flex-1 flex-nowrap items-center gap-1"
                         >
                             {(() => {
-                                // Fold primaries into More only when they truly will not fit.
-                                // A flat 32rem gate made every Quest-width sidebar [search][⋯]
-                                // with a desert of empty space. Empty query needs ~348px at
-                                // 130% font (bot); a query chip needs a higher bar (#2039/#2040).
-                                const TOOLBAR_CROWDED_MAX_PX = searchQuery.length > 0
-                                    ? 32 * 16 // chip + primaries
-                                    : 22 * 16 // ~352px — catches 320px/130%, not Quest ~400px
-                                const toolbarCrowded = headerRowWidth > 0
-                                    ? headerRowWidth < TOOLBAR_CROWDED_MAX_PX
-                                    // Until measured: only crowd when a query chip is already
-                                    // eating horizontal budget (avoids idle wide-list flash).
-                                    : searchQuery.length > 0
-                                const primaryControls = (
-                                    <>
-                                        {showMachineFilterBar ? (
-                                            <MachineFilterMenu
-                                                machines={machineFilterItems}
-                                                totalCount={allSessions.length}
-                                                value={activeMachineFilter}
-                                                onChange={setMachineFilter}
-                                            />
-                                        ) : null}
-                                        {unreadSessionCount > 0 ? (
+                                // Shed one control at a time, highest keep first.
+                                // Do not ml-auto a lone ⋯ across empty space, and do
+                                // not fold the whole row at a single width gate (#2039).
+                                const budget = toolbarActionBudget(headerRowWidth, searchQuery.length > 0)
+                                const definedSlots: Array<ToolbarShedSlot & { node: ReactNode }> = []
+                                if (unreadSessionCount > 0) {
+                                    definedSlots.push({
+                                        id: 'mark-all',
+                                        keep: 7,
+                                        widthPx: TOOLBAR_ICON_PX,
+                                        node: (
                                             <button
                                                 type="button"
                                                 onClick={() => setMarkAllReadOpen(true)}
@@ -2092,7 +2096,14 @@ export function SessionList(props: {
                                             >
                                                 <MarkAllReadIcon className="h-5 w-5" />
                                             </button>
-                                        ) : null}
+                                        )
+                                    })
+                                }
+                                definedSlots.push({
+                                    id: 'unread',
+                                    keep: 5,
+                                    widthPx: TOOLBAR_ICON_PX,
+                                    node: (
                                         <button
                                             type="button"
                                             onClick={() => setShowUnreadOnly(!showUnreadOnly)}
@@ -2116,7 +2127,14 @@ export function SessionList(props: {
                                                 )}
                                             />
                                         </button>
-                                        {renderHeader ? (
+                                    )
+                                })
+                                if (renderHeader) {
+                                    definedSlots.push({
+                                        id: 'new',
+                                        keep: 4,
+                                        widthPx: TOOLBAR_ICON_PX,
+                                        node: (
                                             <button
                                                 type="button"
                                                 onClick={props.onNewSession}
@@ -2125,41 +2143,52 @@ export function SessionList(props: {
                                             >
                                                 <PlusIcon className="h-5 w-5" />
                                             </button>
-                                        ) : null}
-                                    </>
-                                )
-                                if (toolbarCrowded) {
-                                    // Keep More beside search — do not ml-auto a lone ⋯
-                                    // across a Quest-width desert.
-                                    return (
-                                        <SessionListHeaderOverflow>
-                                            {primaryControls}
-                                            {props.headerActions}
-                                        </SessionListHeaderOverflow>
-                                    )
+                                        )
+                                    })
                                 }
+                                for (const extra of props.toolbarExtras ?? []) {
+                                    definedSlots.push({
+                                        id: extra.id,
+                                        keep: extra.keep,
+                                        widthPx: extra.widthPx ?? TOOLBAR_ICON_PX,
+                                        node: extra.node
+                                    })
+                                }
+                                if (props.headerActions) {
+                                    definedSlots.push({
+                                        id: 'header-actions',
+                                        keep: 6,
+                                        widthPx: TOOLBAR_ICON_PX,
+                                        node: props.headerActions
+                                    })
+                                }
+                                const { visibleIds, overflowIds } = shedToolbarSlots(definedSlots, budget)
+                                const byId = new Map(definedSlots.map((slot) => [slot.id, slot]))
+                                const visible = visibleIds.map((id) => byId.get(id)).filter((slot) => slot != null)
+                                const overflow = overflowIds.map((id) => byId.get(id)).filter((slot) => slot != null)
                                 return (
                                     <>
-                                        {primaryControls}
-                                        {props.headerActions ? (
-                                            // Trailing cluster absorbs leftover width so the
-                                            // row is [search][primaries] … [Settings|⋯].
-                                            <div
-                                                data-testid="session-list-header-trailing"
-                                                className="ml-auto flex shrink-0 flex-nowrap items-center gap-1"
-                                            >
-                                                <div
-                                                    data-testid="session-list-header-secondary"
-                                                    className="hidden @[26rem]:contents"
-                                                >
-                                                    {props.headerActions}
-                                                </div>
-                                                <div className="shrink-0 @[26rem]:hidden">
-                                                    <SessionListHeaderOverflow>
-                                                        {props.headerActions}
-                                                    </SessionListHeaderOverflow>
-                                                </div>
-                                            </div>
+                                        {showMachineFilterBar ? (
+                                            <MachineFilterMenu
+                                                machines={machineFilterItems}
+                                                totalCount={allSessions.length}
+                                                value={activeMachineFilter}
+                                                onChange={setMachineFilter}
+                                            />
+                                        ) : null}
+                                        {visible.map((slot) => (
+                                            <span key={slot.id} data-testid={`session-toolbar-slot-${slot.id}`} className="contents">
+                                                {slot.node}
+                                            </span>
+                                        ))}
+                                        {overflow.length > 0 ? (
+                                            <SessionListHeaderOverflow>
+                                                {overflow.map((slot) => (
+                                                    <span key={slot.id} data-testid={`session-toolbar-slot-${slot.id}`} className="contents">
+                                                        {slot.node}
+                                                    </span>
+                                                ))}
+                                            </SessionListHeaderOverflow>
                                         ) : null}
                                     </>
                                 )
