@@ -1145,6 +1145,11 @@ describe('SessionList search toggle', () => {
         // Collapsed query chip → higher threshold before secondary returns.
         expect(secondary.className.split(/\s+/)).toContain('@[32rem]:contents')
         expect(secondary).toHaveTextContent('Settings')
+        // Narrow path keeps Settings reachable via overflow ⋯ (not gone forever).
+        const overflow = screen.getByTestId('session-list-header-overflow')
+        expect(overflow).toHaveAccessibleName('More session list actions')
+        fireEvent.click(overflow)
+        expect(screen.getAllByRole('button', { name: 'Settings' }).length).toBeGreaterThanOrEqual(1)
     })
 
     it('gives expanded search a 48px clear end-cap with calendar immediately left (tiann/hapi#2019)', () => {

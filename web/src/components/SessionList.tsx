@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import * as Popover from '@radix-ui/react-popover'
 import { SessionListScrollAnchor } from './SessionListScrollAnchor'
 import type { SessionSummary } from '@/types/api'
 import { SESSION_LIFECYCLE_IDLE } from '@hapi/protocol'
@@ -26,6 +27,55 @@ function PinnedSectionIcon(props: { className?: string }) {
             <path d="M5 17h14" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" />
             <path d="M7 4V2h10v2l-2 5v4l2 2H7l2-2V9Z" />
         </svg>
+    )
+}
+
+function MoreHorizontalIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+            aria-hidden="true"
+        >
+            <circle cx="5" cy="12" r="1.5" fill="currentColor" stroke="none" />
+            <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
+            <circle cx="19" cy="12" r="1.5" fill="currentColor" stroke="none" />
+        </svg>
+    )
+}
+
+/** Narrow-header overflow for shed secondary actions (tiann/hapi#2039). */
+function SessionListHeaderOverflow(props: { children: ReactNode }) {
+    const { t } = useTranslation()
+    return (
+        <Popover.Root>
+            <Popover.Trigger asChild>
+                <button
+                    type="button"
+                    data-testid="session-list-header-overflow"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                    title={t('sessions.toolbar.more')}
+                    aria-label={t('sessions.toolbar.more')}
+                >
+                    <MoreHorizontalIcon className="h-5 w-5" />
+                </button>
+            </Popover.Trigger>
+            <Popover.Portal>
+                <Popover.Content
+                    align="end"
+                    sideOffset={6}
+                    className="z-50 flex max-w-[min(100vw-1rem,20rem)] flex-wrap items-center justify-end gap-1 rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] p-1.5 shadow-xl"
+                >
+                    {props.children}
+                </Popover.Content>
+            </Popover.Portal>
+        </Popover.Root>
     )
 }
 import { cn } from '@/lib/utils'
@@ -2037,18 +2087,30 @@ export function SessionList(props: {
                                 </button>
                             ) : null}
                             {props.headerActions ? (
-                                <div
-                                    data-testid="session-list-header-secondary"
-                                    className={cn(
-                                        // Shed browse/settings/import before they force a
-                                        // second toolbar row. Wider threshold when the
-                                        // collapsed query chip is present.
-                                        'hidden',
-                                        searchQuery.length > 0 ? '@[32rem]:contents' : '@[26rem]:contents'
-                                    )}
-                                >
-                                    {props.headerActions}
-                                </div>
+                                <>
+                                    <div
+                                        data-testid="session-list-header-secondary"
+                                        className={cn(
+                                            // Inline secondary when the header container is wide.
+                                            // Narrow Quest/sidebars use the overflow ⋯ instead
+                                            // so Settings stays reachable without a second row.
+                                            'hidden',
+                                            searchQuery.length > 0 ? '@[32rem]:contents' : '@[26rem]:contents'
+                                        )}
+                                    >
+                                        {props.headerActions}
+                                    </div>
+                                    <div
+                                        className={cn(
+                                            'shrink-0',
+                                            searchQuery.length > 0 ? '@[32rem]:hidden' : '@[26rem]:hidden'
+                                        )}
+                                    >
+                                        <SessionListHeaderOverflow>
+                                            {props.headerActions}
+                                        </SessionListHeaderOverflow>
+                                    </div>
+                                </>
                             ) : null}
                         </div>
                     ) : null}
