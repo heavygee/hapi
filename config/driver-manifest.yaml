@@ -819,12 +819,12 @@ layers:
   # Tip: f0803e996
   - branch: fix/claude-mcp-spawn-model-effort
 
-  # heavygee/hapi#120 / Heavygee-Projects/hapi-inline#514 — vendor hapi-inline operator dock (fork-local, not tiann).
-  # Tip: f75998631 (driver/hapi-inline-revendor-0222) — pin v0.22.2 CodeQL xss-through-dom barrier (#514/#518).
-  # Replaces driver/hapi-inline-revendor-0221 / operator-dock v0.22.1. Keeps #508/#497/#498/#492.
-  # Worktree: ~/coding/hapi/worktrees/hapi-inline-revendor-0222
+  # heavygee/hapi#120 / Heavygee-Projects/hapi-inline#535 — vendor hapi-inline operator dock (fork-local, not tiann).
+  # Tip: 5a1ea4297 (driver/hapi-inline-revendor-0223) — pin v0.22.3 fail-closed stale machineId (#535/#534).
+  # Replaces driver/hapi-inline-revendor-0222 / operator-dock v0.22.2. Keeps #531/#533/#528/#514/#508/#497/#498/#492.
+  # Worktree: ~/coding/hapi/worktrees/hapi-inline-revendor-0223
   # Hub+web → remat needs --build-web + hapi-restart-hub (embedded web assets).
-  - branch: driver/hapi-inline-revendor-0222
+  - branch: driver/hapi-inline-revendor-0223
 
   # heavygee/hapi#121 — operator-hold chip pulse (🛑 needs_operator / babysit.hold).
   # Soup UI on awareness ancestry (schema enum + SessionPrChip FueDot). Classifier
