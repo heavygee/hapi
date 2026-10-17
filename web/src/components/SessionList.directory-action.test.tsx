@@ -1137,10 +1137,10 @@ describe('SessionList search toggle', () => {
         // Actions stay on the same row; with a query chip, primaries fold into More
         // so [chip][⋯] fits ~320px instead of pushing Settings offscreen.
         expect(searchGroup.nextElementSibling).toBe(actions)
-        expect(actions).toHaveClass('shrink-0', 'flex-nowrap')
+        expect(actions).toHaveClass('flex-1', 'flex-nowrap')
         expect(actions.className.split(/\s+/)).not.toContain('flex-wrap')
-        // No ml-auto spacer — actions sit next to search, not viewport-right.
-        expect(actions.className.split(/\s+/)).not.toContain('ml-auto')
+        // Crowded (query chip): More stays packed beside search — no trailing ml-auto desert.
+        expect(screen.queryByTestId('session-list-header-trailing')).toBeNull()
         expect(headerRow).toHaveClass('flex-nowrap', '@container')
         expect(headerRow.className.split(/\s+/)).not.toContain('flex-wrap')
         expect(screen.queryByTestId('session-list-header-secondary')).toBeNull()
@@ -1251,10 +1251,13 @@ describe('SessionList search toggle', () => {
         )
 
         const actions = screen.getByTestId('session-list-header-actions')
+        expect(actions).toHaveClass('flex-1')
         expect(within(actions).getByRole('button', { name: 'Unread only' })).toBeInTheDocument()
         expect(within(actions).getByRole('button', { name: 'New Session' })).toBeInTheDocument()
-        // Secondary still sheds into More below @[26rem]; primaries stay visible.
-        expect(screen.getByTestId('session-list-header-overflow')).toBeInTheDocument()
+        // Trailing More sits on the right edge — not a left-packed desert after +.
+        const trailing = screen.getByTestId('session-list-header-trailing')
+        expect(trailing).toHaveClass('ml-auto')
+        expect(within(trailing).getByTestId('session-list-header-overflow')).toBeInTheDocument()
 
         vi.unstubAllGlobals()
     })
