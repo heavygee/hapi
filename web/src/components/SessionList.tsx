@@ -1,4 +1,17 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState , type ReactNode } from 'react'
+import {
+    Children,
+    cloneElement,
+    Fragment,
+    isValidElement,
+    useCallback,
+    useEffect,
+    useLayoutEffect,
+    useMemo,
+    useRef,
+    useState,
+    type ReactElement,
+    type ReactNode
+} from 'react'
 import * as Popover from '@radix-ui/react-popover'
 import { SessionListScrollAnchor } from './SessionListScrollAnchor'
 import type { SessionContentSearchResponse, SessionSummary } from '@/types/api'
@@ -115,12 +128,76 @@ import {
     type ToolbarShedSlot
 } from '@/components/sessionToolbarShed'
 
+function MoreHorizontalIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+            aria-hidden="true"
+        >
+            <circle cx="5" cy="12" r="1.5" fill="currentColor" stroke="none" />
+            <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
+            <circle cx="19" cy="12" r="1.5" fill="currentColor" stroke="none" />
+        </svg>
+    )
+}
+
+function SessionListHeaderOverflow(props: { children: ReactNode }) {
+    const { t } = useTranslation()
+    return (
+        <Popover.Root>
+            <Popover.Trigger asChild>
+                <button
+                    type="button"
+                    data-testid="session-list-header-overflow"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                    title={t('sessions.toolbar.more')}
+                    aria-label={t('sessions.toolbar.more')}
+                >
+                    <MoreHorizontalIcon className="h-5 w-5" />
+                </button>
+            </Popover.Trigger>
+            <Popover.Portal>
+                <Popover.Content
+                    align="end"
+                    sideOffset={6}
+                    className="z-50 flex max-w-[min(100vw-1rem,20rem)] flex-wrap items-center justify-end gap-1 rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] p-1.5 shadow-xl"
+                >
+                    {props.children}
+                </Popover.Content>
+            </Popover.Portal>
+        </Popover.Root>
+    )
+}
+
 export type SessionToolbarExtra = {
     id: string
     /** Higher sheds into More first. See sessionToolbarShed.ts. */
     keep: number
     node: ReactNode
     widthPx?: number
+}
+
+/** Offscreen measure clones must not duplicate data-testid for Testing Library. */
+function stripTestIds(node: ReactNode): ReactNode {
+    if (node == null || typeof node === 'boolean') return node
+    if (typeof node === 'string' || typeof node === 'number') return node
+    if (Array.isArray(node)) return Children.map(node, stripTestIds)
+    if (!isValidElement(node)) return node
+    const element = node as ReactElement<{ 'data-testid'?: string; children?: ReactNode }>
+    const nextChildren = element.props.children !== undefined
+        ? stripTestIds(element.props.children)
+        : element.props.children
+    if (element.type === Fragment) {
+        return cloneElement(element, undefined, nextChildren)
+    }
+    return cloneElement(element, { 'data-testid': undefined }, nextChildren)
 }
 
 export { getWorktreeSessionLabel } from '@/lib/sessionWorktreeLabel'
@@ -2973,6 +3050,11 @@ export function SessionList(props: {
     useLayoutEffect(() => {
         const root = toolbarMeasureRef.current
         if (!root) return
+        // Measure clones mirror live controls; strip test ids so Testing Library
+        // does not see duplicates under aria-hidden (#2039).
+        for (const el of root.querySelectorAll('[data-testid]')) {
+            el.removeAttribute('data-testid')
+        }
         const next: Record<string, number> = {}
         for (const node of root.querySelectorAll<HTMLElement>('[data-measure-id]')) {
             const id = node.dataset.measureId
@@ -3460,13 +3542,14 @@ export function SessionList(props: {
                                     <>
                                         <div
                                             ref={toolbarMeasureRef}
+                                            data-testid="session-toolbar-measure"
                                             aria-hidden
                                             inert
                                             className="pointer-events-none absolute left-0 top-0 -z-10 flex h-0 w-max gap-1 overflow-hidden opacity-0"
                                         >
                                             {definedSlots.map((slot) => (
                                                 <span key={slot.id} data-measure-id={slot.id} className="inline-flex shrink-0">
-                                                    {slot.node}
+                                                    {stripTestIds(slot.node)}
                                                 </span>
                                             ))}
                                         </div>

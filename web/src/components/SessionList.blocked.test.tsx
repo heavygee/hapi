@@ -91,13 +91,26 @@ function wrapList(
     )
 }
 
+/** Skip the offscreen toolbar measure clone (#2039 measure-actions tip). */
+function visibleBlockedJumpPills(): HTMLElement[] {
+    return screen.queryAllByTestId('blocked-jump-pill').filter(
+        (el) => el.closest('[data-testid="session-toolbar-measure"]') == null
+    )
+}
+
+function visibleBlockedJumpPill(): HTMLElement {
+    const pills = visibleBlockedJumpPills()
+    expect(pills).toHaveLength(1)
+    return pills[0]!
+}
+
 describe('SessionList blocked chrome (#1717)', () => {
     it('keeps collapsed search with a query from overlapping the blocked jump pill (#2019)', () => {
         const SEARCH_LABEL = 'Search sessions (title, path, Agent, machine name, ID, and more)'
         const SEARCH_PLACEHOLDER = 'Search title/path/Agent/machine/ID…'
         renderList([blocked('stuck-one'), makeSession({ id: 'fine-one', metadata: { path: '/home/ubuntu', name: 'DJ session', flavor: 'claude' } })])
 
-        expect(screen.getByTestId('blocked-jump-pill')).toBeTruthy()
+        expect(visibleBlockedJumpPill()).toBeTruthy()
 
         fireEvent.click(screen.getByRole('button', { name: SEARCH_LABEL }))
         const input = screen.getByPlaceholderText(SEARCH_PLACEHOLDER)
@@ -106,12 +119,19 @@ describe('SessionList blocked chrome (#1717)', () => {
 
         const search = screen.getByTestId('session-list-search')
         expect(search).toHaveAttribute('data-expanded', 'false')
-        // Regression: w-full on collapsed search ate the header row and sat on the pill.
-        // Group must stay min-w-0 (can yield) without w-full/shrink-0 hogging the row.
+        // #2019: collapsed search must not be w-full (that ate the header and sat on the pill).
+        // #2039: outer group is shrink-0 + max-w-full so icon/clear are not crushed over the
+        // pill; the query chip inside still yields. Do not require min-w-0 on this node.
         expect(search.className.split(/\s+/)).not.toContain('w-full')
-        expect(search.className.split(/\s+/)).not.toContain('shrink-0')
-        expect(search.className.split(/\s+/)).toContain('min-w-0')
-        expect(screen.getByTestId('blocked-jump-pill')).toBeTruthy()
+        expect(search.className.split(/\s+/)).toContain('shrink-0')
+        expect(search.className.split(/\s+/)).toContain('max-w-full')
+        expect(search.className.split(/\s+/)).not.toContain('min-w-0')
+        // Pill stays reachable: on a measured actions box it may remain visible;
+        // on a tight row it sheds into More. Either way Clear search must work.
+        if (visibleBlockedJumpPills().length === 0) {
+            fireEvent.click(screen.getByTestId('session-list-header-overflow'))
+        }
+        expect(visibleBlockedJumpPill()).toBeTruthy()
         expect(screen.getByRole('button', { name: 'Clear search' })).toBeTruthy()
     })
 
@@ -152,7 +172,7 @@ describe('SessionList blocked chrome (#1717)', () => {
     it('counts all blocked work in the header pill', () => {
         renderList([blocked('stuck-one'), blocked('stuck-two'), makeSession({ id: 'fine-one' })])
 
-        const pill = screen.getByTestId('blocked-jump-pill')
+        const pill = visibleBlockedJumpPill()
         expect(within(pill).getByText('2')).toBeTruthy()
     })
 
@@ -171,7 +191,7 @@ describe('SessionList blocked chrome (#1717)', () => {
         expect(screen.queryByText('fine-one')).toBeNull()
         expect(screen.getAllByTestId('session-blocked-chip')).toHaveLength(2)
         // Jump pill stays — navigation, not a filter (#1996).
-        expect(screen.getByTestId('blocked-jump-pill')).toBeTruthy()
+        expect(visibleBlockedJumpPill()).toBeTruthy()
     })
 
     it('counts a session awaiting a permission prompt as blocked', () => {
@@ -181,7 +201,7 @@ describe('SessionList blocked chrome (#1717)', () => {
 
         const section = screen.getByTestId('blocked-section')
         expect(within(section).getByText('Permission')).toBeTruthy()
-        expect(within(screen.getByTestId('blocked-jump-pill')).getByText('1')).toBeTruthy()
+        expect(within(visibleBlockedJumpPill()).getByText('1')).toBeTruthy()
         expect(document.querySelector('[data-session-id="awaiting-one"]')?.getAttribute('data-session-blocked'))
             .toBe('active')
     })
@@ -189,7 +209,7 @@ describe('SessionList blocked chrome (#1717)', () => {
     it('counts self-reported and prompt-parked agents in one number', () => {
         renderList([blocked('stuck-one'), pending('awaiting-one'), makeSession({ id: 'fine-one' })])
 
-        expect(within(screen.getByTestId('blocked-jump-pill')).getByText('2')).toBeTruthy()
+        expect(within(visibleBlockedJumpPill()).getByText('2')).toBeTruthy()
         expect(screen.getAllByTestId('session-blocked-chip')).toHaveLength(2)
     })
 
@@ -209,7 +229,7 @@ describe('SessionList blocked chrome (#1717)', () => {
         rerender(wrapList([makeSession({ id: 'awaiting-one', active: true })]))
 
         expect(screen.queryByTestId('blocked-section')).toBeNull()
-        expect(screen.queryByTestId('blocked-jump-pill')).toBeNull()
+        expect(visibleBlockedJumpPills()).toHaveLength(0)
     })
 
     it('offers Mark unblocked only on blocked rows, and demands a reason', async () => {
@@ -250,7 +270,7 @@ describe('SessionList blocked chrome (#1717)', () => {
         ])
 
         expect(screen.queryByTestId('blocked-section')).toBeNull()
-        expect(screen.queryByTestId('blocked-jump-pill')).toBeNull()
+        expect(visibleBlockedJumpPills()).toHaveLength(0)
     })
 
     it('counts a disconnected blocked agent even with "active sessions only" on', () => {
@@ -259,7 +279,7 @@ describe('SessionList blocked chrome (#1717)', () => {
         localStorage.setItem('hapi-show-active-sessions-only', 'true')
         try {
             renderList([blocked('stuck-offline'), makeSession({ id: 'live-one', active: true })])
-            expect(within(screen.getByTestId('blocked-jump-pill')).getByText('1')).toBeTruthy()
+            expect(within(visibleBlockedJumpPill()).getByText('1')).toBeTruthy()
         } finally {
             localStorage.removeItem('hapi-show-active-sessions-only')
         }
@@ -268,7 +288,7 @@ describe('SessionList blocked chrome (#1717)', () => {
     it('renders no controls and no section when nothing is blocked', () => {
         renderList([makeSession({ id: 'fine-one' }), makeSession({ id: 'fine-two' })])
 
-        expect(screen.queryByTestId('blocked-jump-pill')).toBeNull()
+        expect(visibleBlockedJumpPills()).toHaveLength(0)
         expect(screen.queryByTestId('blocked-lens-toggle')).toBeNull()
         expect(screen.queryByTestId('blocked-section')).toBeNull()
     })
@@ -277,6 +297,6 @@ describe('SessionList blocked chrome (#1717)', () => {
         renderList([blocked('stuck-one', { active: true, thinking: true })])
 
         expect(screen.queryByTestId('blocked-section')).toBeNull()
-        expect(screen.queryByTestId('blocked-jump-pill')).toBeNull()
+        expect(visibleBlockedJumpPills()).toHaveLength(0)
     })
 })

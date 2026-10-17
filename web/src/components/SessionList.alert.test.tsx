@@ -75,8 +75,13 @@ function tree(sessions: SessionSummary[]): ReactNode {
     )
 }
 
+/** Skip the offscreen toolbar measure clone (#2039 measure-actions tip). */
 function pill(): HTMLElement {
-    return screen.getByTestId('blocked-jump-pill')
+    const pills = screen.getAllByTestId('blocked-jump-pill').filter(
+        (el) => el.closest('[data-testid="session-toolbar-measure"]') == null
+    )
+    expect(pills).toHaveLength(1)
+    return pills[0]!
 }
 
 describe('blocked arrival alert (#1717)', () => {
@@ -160,8 +165,7 @@ describe('blocked arrival alert (#1717)', () => {
         rerender(tree([blocked('a'), blocked('b'), blocked('c')]))
 
         expect(playSpy).not.toHaveBeenCalled()
-        expect(screen.queryByTestId('blocked-jump-pill')?.className ?? '')
-            .not.toContain('animate-blocked-alert')
+        expect(pill().className).not.toContain('animate-blocked-alert')
     })
 
     it('stays silent in count-only mode', () => {
