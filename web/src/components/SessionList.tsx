@@ -3337,6 +3337,31 @@ export function SessionList(props: {
                                 <KitchenStatusChip api={api} />
                                 {props.headerActions}
                             </div>
+                            <div
+                                className={
+                                    searchQuery.length > 0
+                                        ? 'shrink-0 @[32rem]:hidden'
+                                        : 'shrink-0 @[26rem]:hidden'
+                                }
+                            >
+                                <SessionListHeaderOverflow>
+                                    <SessionListFilterMenu
+                                        value={sessionFilters}
+                                        onChange={setSessionFilters}
+                                        customStart={customStart}
+                                        customEnd={customEnd}
+                                        sessionActivityDates={sessionActivityDates}
+                                        onDateRangeChange={(start, end) => {
+                                            setCustomStart(start)
+                                            setCustomEnd(end)
+                                        }}
+                                        datePickerCenterRef={sessionListRef}
+                                        className={showMachineFilterBar ? 'max-md:hidden' : undefined}
+                                    />
+                                    <KitchenStatusChip api={api} />
+                                    {props.headerActions}
+                                </SessionListHeaderOverflow>
+                            </div>
                         </div>
                     ) : null}
                 </div>
