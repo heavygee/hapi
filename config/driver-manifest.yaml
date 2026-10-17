@@ -1301,7 +1301,7 @@ layers:
   # tiann/hapi#2039 / PR #2040 — narrow session toolbar. One nowrap row;
   # shed by keep rank into More (blocked 2, new 4, filter 5, settings 6,
   # mark-all 7, browse 8, overseer 9, import 10). Soup tip:
-  # driver/2039-toolbar-crowd @ 384eb9704 (c4e0 + strip measure-clone testids)
+  # driver/2039-toolbar-crowd @ 91df8bd2f (finite shed budget + sidebar min-w-0; was 384eb9704)
   # Tip-unique verify marker: session-list-header-actions in web/dist
   # Upstream thin: fix/2039-session-toolbar-crowd (worktree fix-2039-toolbar-crowd)
   # Web-only → remat --build-web; hard-reload (no hub restart). Re-thin after dogfood bump.
