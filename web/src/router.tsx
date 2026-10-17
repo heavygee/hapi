@@ -1102,7 +1102,9 @@ function SessionsPage() {
                         onBrowse={canBrowse ? () => navigate({ to: '/browse' }) : undefined}
                         onRefresh={handleRefresh}
                         isLoading={isLoading}
-                        renderHeader={false}
+                        // New stays primary via renderHeader. Import/browse/overseer/
+                        // settings shed on narrow headers (tiann/hapi#2039).
+                        renderHeader
                         headerActions={(
                             <div className="flex items-center gap-2">
                                 <button
@@ -1150,21 +1152,8 @@ function SessionsPage() {
                                         <FueDot pulsing ariaLabel={t('fue.newFeatureDot')} />
                                     ) : null}
                                 </button>
-                                <button
-                                    ref={tourNewSessionRef}
-                                    type="button"
-                                    onClick={() => navigate({
-                                        to: '/sessions/new',
-                                        ...PRESERVE_SESSION_SIDEBAR_SCROLL,
-                                    })}
-                                    className="session-list-new-button relative flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-link)] transition-colors"
-                                    title={t('sessions.new')}
-                                >
-                                    <PlusIcon className="h-5 w-5" />
-                                    {visibleTourStep === 'new-session' ? (
-                                        <FueDot pulsing ariaLabel={t('fue.newFeatureDot')} />
-                                    ) : null}
-                                </button>
+                                {/* Tour anchor only — visible New is SessionList renderHeader. */}
+                                <span ref={tourNewSessionRef} className="sr-only" aria-hidden />
                             </div>
                         )}
                         api={api}

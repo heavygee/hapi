@@ -3236,11 +3236,11 @@ export function SessionList(props: {
         <div ref={sessionListRef} className="flex min-h-0 w-full flex-1 flex-col">
             <div className="session-list-scrollbar-offset mx-auto w-full max-w-content shrink-0">
             {showHeaderRow ? (
-                // Outer wrap only. Action group is one nowrap slab so icons do not
-                // split under the search when the row is tight (tiann/hapi#2039).
+                // One toolbar row always. Never wrap — secondary chrome sheds via
+                // container query instead of burning a Quest line (tiann/hapi#2039).
                 <div
                     data-testid="session-list-header-row"
-                    className="flex flex-wrap items-center gap-1 px-2 py-1"
+                    className="@container flex flex-nowrap items-center gap-1 px-2 py-1"
                 >
                     {showSearch ? (
                         <SessionListSearch
@@ -3264,7 +3264,7 @@ export function SessionList(props: {
                     {!(showSearch && searchExpanded) ? (
                         <div
                             data-testid="session-list-header-actions"
-                            className="ml-auto flex w-max shrink-0 flex-nowrap items-center justify-end gap-1"
+                            className="ml-auto flex shrink-0 flex-nowrap items-center justify-end gap-1"
                         >
                             {showMachineFilterBar ? (
                                 <MachineFilterMenu
@@ -3303,31 +3303,40 @@ export function SessionList(props: {
                                     <MarkAllReadIcon className="h-5 w-5" />
                                 </button>
                             ) : null}
-                            <SessionListFilterMenu
-                                value={sessionFilters}
-                                onChange={setSessionFilters}
-                                customStart={customStart}
-                                customEnd={customEnd}
-                                sessionActivityDates={sessionActivityDates}
-                                onDateRangeChange={(start, end) => {
-                                    setCustomStart(start)
-                                    setCustomEnd(end)
-                                }}
-                                datePickerCenterRef={sessionListRef}
-                                className={showMachineFilterBar ? 'max-md:hidden' : undefined}
-                            />
-                            <KitchenStatusChip api={api} />
                             {renderHeader ? (
                                 <button
                                     type="button"
                                     onClick={props.onNewSession}
-                                    className="session-list-new-button flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-link)] transition-colors"
+                                    className="session-list-new-button flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--app-link)] transition-colors"
                                     title={t('sessions.new')}
                                 >
                                     <PlusIcon className="h-5 w-5" />
                                 </button>
                             ) : null}
-                            {props.headerActions}
+                            <div
+                                data-testid="session-list-header-secondary"
+                                className={
+                                    searchQuery.length > 0
+                                        ? 'hidden @[32rem]:contents'
+                                        : 'hidden @[26rem]:contents'
+                                }
+                            >
+                                <SessionListFilterMenu
+                                    value={sessionFilters}
+                                    onChange={setSessionFilters}
+                                    customStart={customStart}
+                                    customEnd={customEnd}
+                                    sessionActivityDates={sessionActivityDates}
+                                    onDateRangeChange={(start, end) => {
+                                        setCustomStart(start)
+                                        setCustomEnd(end)
+                                    }}
+                                    datePickerCenterRef={sessionListRef}
+                                    className={showMachineFilterBar ? 'max-md:hidden' : undefined}
+                                />
+                                <KitchenStatusChip api={api} />
+                                {props.headerActions}
+                            </div>
                         </div>
                     ) : null}
                 </div>
