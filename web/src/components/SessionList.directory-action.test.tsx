@@ -1153,6 +1153,76 @@ describe('SessionList search toggle', () => {
         expect(screen.getByRole('button', { name: 'Unread only' })).toBeInTheDocument()
     })
 
+    it('folds primary actions into More on a narrow empty-query header (tiann/hapi#2040)', () => {
+        localStorage.setItem('hapi-font-scale', '1.3')
+        class FakeResizeObserver {
+            callback: ResizeObserverCallback
+            constructor(cb: ResizeObserverCallback) {
+                this.callback = cb
+            }
+            observe = (target: Element) => {
+                this.callback(
+                    [{ target, contentRect: { width: 320 } as DOMRectReadOnly } as ResizeObserverEntry],
+                    this as unknown as ResizeObserver
+                )
+            }
+            unobserve = vi.fn()
+            disconnect = vi.fn()
+        }
+        vi.stubGlobal('ResizeObserver', FakeResizeObserver)
+
+        const now = Date.now()
+        renderWithProviders(
+            <SessionList
+                sessions={[
+                    makeSession({
+                        id: 'session-a',
+                        updatedAt: now,
+                        metadata: {
+                            path: '/work/hapi',
+                            name: 'Machine A task',
+                            flavor: 'codex',
+                            machineId: 'machine-a',
+                        },
+                    }),
+                    makeSession({
+                        id: 'session-b',
+                        updatedAt: now - 1000,
+                        metadata: {
+                            path: '/work/other',
+                            name: 'Machine B task',
+                            flavor: 'codex',
+                            machineId: 'machine-b',
+                        },
+                    }),
+                ]}
+                selectedSessionId={null}
+                onSelect={vi.fn()}
+                onNewSession={vi.fn()}
+                onRefresh={vi.fn()}
+                isLoading={false}
+                renderHeader
+                headerActions={<button type="button">Settings</button>}
+                api={null}
+                machineLabelsById={{ 'machine-a': 'Mint', 'machine-b': 'Teemo' }}
+            />
+        )
+
+        // Empty query + 320px: primaries must not stay inline and shove More offscreen.
+        expect(screen.queryByTestId('session-list-header-secondary')).toBeNull()
+        expect(within(screen.getByTestId('session-list-header-actions')).queryByRole('button', { name: 'Unread only' })).toBeNull()
+        expect(within(screen.getByTestId('session-list-header-actions')).queryByRole('button', { name: 'New Session' })).toBeNull()
+        const overflow = screen.getByTestId('session-list-header-overflow')
+        fireEvent.click(overflow)
+        expect(screen.getByRole('button', { name: 'Unread only' })).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'New Session' })).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Filter sessions by machine' })).toBeInTheDocument()
+        expect(screen.getAllByRole('button', { name: 'Settings' }).length).toBeGreaterThanOrEqual(1)
+
+        vi.unstubAllGlobals()
+        localStorage.removeItem('hapi-font-scale')
+    })
+
     it('keeps primary actions inline with a query chip when the header is wide (tiann/hapi#2040)', () => {
         const observe = vi.fn()
         const disconnect = vi.fn()

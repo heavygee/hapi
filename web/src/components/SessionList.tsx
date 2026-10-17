@@ -2061,12 +2061,16 @@ export function SessionList(props: {
                             className="flex shrink-0 flex-nowrap items-center gap-1"
                         >
                             {(() => {
-                                // Collapsed query chip + full primary icon set exceeds ~320px.
-                                // Fold primary into More only when the header is actually
-                                // narrow — wide lists keep inline actions (#2039 / #2040).
-                                const TOOLBAR_CROWDED_MAX_PX = 32 * 16 // matches prior @[32rem] bar
-                                const toolbarCrowded = searchQuery.length > 0
-                                    && (headerRowWidth === 0 || headerRowWidth < TOOLBAR_CROWDED_MAX_PX)
+                                // Full primary icon set (esp. at 130% font scale) exceeds ~320px
+                                // even with an empty query. Fold into More from available width
+                                // in both query states — wide lists keep inline actions
+                                // (#2039 / #2040).
+                                const TOOLBAR_CROWDED_MAX_PX = 32 * 16 // covers 320px + 130% font
+                                const toolbarCrowded = headerRowWidth > 0
+                                    ? headerRowWidth < TOOLBAR_CROWDED_MAX_PX
+                                    // Until measured: only crowd when a query chip is already
+                                    // eating horizontal budget (avoids idle wide-list flash).
+                                    : searchQuery.length > 0
                                 const primaryControls = (
                                     <>
                                         {showMachineFilterBar ? (
