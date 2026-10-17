@@ -351,6 +351,55 @@ function BlockedJumpPill(props: {
     )
 }
 
+
+function MoreHorizontalIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+            aria-hidden="true"
+        >
+            <circle cx="5" cy="12" r="1.5" fill="currentColor" stroke="none" />
+            <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
+            <circle cx="19" cy="12" r="1.5" fill="currentColor" stroke="none" />
+        </svg>
+    )
+}
+
+function SessionListHeaderOverflow(props: { children: ReactNode }) {
+    const { t } = useTranslation()
+    return (
+        <Popover.Root>
+            <Popover.Trigger asChild>
+                <button
+                    type="button"
+                    data-testid="session-list-header-overflow"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                    title={t('sessions.toolbar.more')}
+                    aria-label={t('sessions.toolbar.more')}
+                >
+                    <MoreHorizontalIcon className="h-5 w-5" />
+                </button>
+            </Popover.Trigger>
+            <Popover.Portal>
+                <Popover.Content
+                    align="end"
+                    sideOffset={6}
+                    className="z-50 flex max-w-[min(100vw-1rem,20rem)] flex-wrap items-center justify-end gap-1 rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] p-1.5 shadow-xl"
+                >
+                    {props.children}
+                </Popover.Content>
+            </Popover.Portal>
+        </Popover.Root>
+    )
+}
+
 export type SessionTimeRange = {
     start: number | null
     end: number | null
@@ -3336,6 +3385,31 @@ export function SessionList(props: {
                                 />
                                 <KitchenStatusChip api={api} />
                                 {props.headerActions}
+                            </div>
+                            <div
+                                className={
+                                    searchQuery.length > 0
+                                        ? 'shrink-0 @[32rem]:hidden'
+                                        : 'shrink-0 @[26rem]:hidden'
+                                }
+                            >
+                                <SessionListHeaderOverflow>
+                                    <SessionListFilterMenu
+                                        value={sessionFilters}
+                                        onChange={setSessionFilters}
+                                        customStart={customStart}
+                                        customEnd={customEnd}
+                                        sessionActivityDates={sessionActivityDates}
+                                        onDateRangeChange={(start, end) => {
+                                            setCustomStart(start)
+                                            setCustomEnd(end)
+                                        }}
+                                        datePickerCenterRef={sessionListRef}
+                                        className={showMachineFilterBar ? 'max-md:hidden' : undefined}
+                                    />
+                                    <KitchenStatusChip api={api} />
+                                    {props.headerActions}
+                                </SessionListHeaderOverflow>
                             </div>
                         </div>
                     ) : null}
