@@ -560,6 +560,9 @@ export class ApiClient {
         toMachineId: string
         machineTag: string
         runnerProof: string
+        /** Required when the source row is still tagged and proof-bound. */
+        sourceMachineTag?: string
+        sourceRunnerProof?: string
     }): Promise<number> {
         const response = await axios.post(
             `${configuration.apiUrl}/cli/machines/${encodeURIComponent(opts.toMachineId)}/migrate-sessions`,
@@ -567,6 +570,8 @@ export class ApiClient {
                 fromMachineId: opts.fromMachineId,
                 machineTag: opts.machineTag,
                 runnerProof: opts.runnerProof,
+                ...(opts.sourceMachineTag ? { sourceMachineTag: opts.sourceMachineTag } : {}),
+                ...(opts.sourceRunnerProof ? { sourceRunnerProof: opts.sourceRunnerProof } : {}),
             },
             {
                 headers: this.authHeaders(),
