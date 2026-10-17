@@ -135,8 +135,21 @@ Two runner bugs that make resume itself fail closed:
 
 Do **not** bulk-parallel resume; serialize with upload kill-criteria. `cursor-models` 200 ≠ uploads work.
 
+## Fleet audit after one FATAL re-enroll (2026-10-17)
+
+One host logging `Re-enrolled as <new> but session migrate failed: … 404` usually means a **multi-host wave** (oos + proxmox + Teemo hit the same pattern within minutes on 2026-10-16). Do not stop at the host that complained.
+
+1. Hub journal: `rg 'migrate-sessions|/cli/machines' journalctl -u hapi-hub-oos` around the FATAL - look for `409` then `200` then `migrate-sessions 404` on **each** fleet host.
+2. Count sessions by `metadata.machineId` joined to `machines.runner_state` (not by displayName alone). Dual labels (`oos` vs `oos-linux`) = ghost + live on the same box.
+3. For each live runner: `GET /api/machines/:id/cursor-models` must be **200**. Retired ids return missing RPC / 500.
+4. Align **both** `/var/lib/hapi/settings.json` and `~/.hapi/settings.json` `machineId` after remap; patch `HAPI_INLINE_MACHINE_ID` if set.
+5. Remap with SQL (above), then **`hapi-restart-hub --no-runner` only**.
+
+Full narrative + post-heal audit table: [`2026-10-17-machine-reenroll-dual-host-orphan-postmortem.md`](../plans/2026-10-17-machine-reenroll-dual-host-orphan-postmortem.md).
+
 ## Related
 
-- Postmortem: [`2026-08-10-1473-provenance-dogfood-machine-id-postmortem.md`](../plans/2026-08-10-1473-provenance-dogfood-machine-id-postmortem.md)
-- Upstream: [tiann/hapi#1473](https://github.com/tiann/hapi/pull/1473), [tiann/hapi#1108](https://github.com/tiann/hapi/pull/1108), [tiann/hapi#929](https://github.com/tiann/hapi/issues/929)
+- Postmortems: [`2026-08-10-1473-provenance-dogfood-machine-id-postmortem.md`](../plans/2026-08-10-1473-provenance-dogfood-machine-id-postmortem.md), [`2026-10-17-machine-reenroll-dual-host-orphan-postmortem.md`](../plans/2026-10-17-machine-reenroll-dual-host-orphan-postmortem.md)
+- Fork trackers: [heavygee/hapi#264](https://github.com/heavygee/hapi/issues/264), [#265](https://github.com/heavygee/hapi/issues/265), [#287](https://github.com/heavygee/hapi/issues/287) / [PR #288](https://github.com/heavygee/hapi/pull/288)
+- Upstream: [tiann/hapi#1473](https://github.com/tiann/hapi/pull/1473), [tiann/hapi#1108](https://github.com/tiann/hapi/pull/1108), [tiann/hapi#929](https://github.com/tiann/hapi/issues/929), [tiann/hapi#2038](https://github.com/tiann/hapi/issues/2038) (fork-soup note)
 - Soup comments: `driver/cli/src/runner/run.ts` (cold rotate residual), `hub/src/sync/syncEngine.ts` `migrateSessionsMachineId`, `resolveOnlineMachineForSession` + Cursor `strictMachineId`
