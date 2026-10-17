@@ -1276,7 +1276,10 @@ layers:
   # Follow-up after a12a30014: 77c4c3e23 — handoff waits 150s so a slow register is not killed at 90s;
   # session bootstrap confirms settings.machineTag via POST /cli/machines/:id/check-tag
   # before accepting an existing row. That route does not create or rebind.
-  # Thin tip on soup HEAD 8d51206da: driver/2038-machine-tag-reregister @ 77c4c3e23
+  # Follow-up after 77c4c3e23: 03ac154d9 — legacy rotate uses POST /cli/machines/:id/migrate-sessions
+  # (destination tag + runner proof); migrate failure fails registration. Failed parent-proof
+  # restore exits instead of resuming RPC with a hash the hub will reject. Self-upgrade matches.
+  # Thin tip on soup HEAD 8d51206da: driver/2038-machine-tag-reregister @ 03ac154d9
   # Parent pin: driver/2038-machine-tag-parent @ 8d51206da
   # PR: heavygee/hapi#288 (fork fortress — not upstream-landable alone)
   # Hub+cli → remat + hapi-restart-hub; tip-unique: 409 MachineTagConflict +
