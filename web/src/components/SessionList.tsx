@@ -124,10 +124,19 @@ import { getPathDisplayName } from '@/utils/path'
 import {
     shedToolbarSlots,
     toolbarActionBudget,
-    TOOLBAR_GAP_PX,
+    toolbarGutterPx,
     TOOLBAR_ICON_PX,
     type ToolbarShedSlot
 } from '@/components/sessionToolbarShed'
+
+function readToolbarGutter(row: HTMLElement | null, actions: HTMLElement | null): number {
+    if (!row || !actions) return 0
+    const rowRect = row.getBoundingClientRect()
+    const actionsRect = actions.getBoundingClientRect()
+    if (rowRect.width <= 0 || actionsRect.width <= 0) return 0
+    const padRight = Number.parseFloat(getComputedStyle(row).paddingRight) || 0
+    return toolbarGutterPx(actionsRect.left, rowRect.right, padRight)
+}
 
 function MoreHorizontalIcon(props: { className?: string }) {
     return (
@@ -3037,19 +3046,27 @@ export function SessionList(props: {
             setHeaderRowWidth(0)
             return
         }
-        const el = headerActionsRef.current ?? headerRowRef.current
+        const actions = headerActionsRef.current
+        const row = headerRowRef.current
+        const el = actions ?? row
         if (!el || typeof ResizeObserver === 'undefined') return
+        const publish = (reported = 0) => {
+            // The gutter is the row's right edge, not the icon cluster's width
+            // and not "row minus a guessed search chip". If the icons fit there,
+            // nothing belongs in More.
+            const gutter = readToolbarGutter(row, actions)
+            const width = gutter > 0 ? gutter : reported
+            if (width > 0) setHeaderRowWidth(width)
+        }
         const ro = new ResizeObserver((entries) => {
             const target = entries[0]?.target
             const reported = entries[0]?.contentRect.width ?? 0
             const client = target instanceof HTMLElement ? target.clientWidth : 0
-            const width = client > 0 ? client : reported
-            // Ignore 0 so a hidden frame cannot reopen the permissive path.
-            if (width > 0) setHeaderRowWidth(width)
+            publish(client > 0 ? client : reported)
         })
-        ro.observe(el)
-        const initial = el.clientWidth || el.getBoundingClientRect().width
-        if (initial > 0) setHeaderRowWidth(initial)
+        if (row) ro.observe(row)
+        if (actions && actions !== row) ro.observe(actions)
+        publish(el.clientWidth || el.getBoundingClientRect().width)
         return () => ro.disconnect()
     }, [showHeaderRow])
     useLayoutEffect(() => {
@@ -3419,30 +3436,15 @@ export function SessionList(props: {
                             className="relative flex min-w-0 flex-1 flex-nowrap items-center gap-1"
                         >
                             {(() => {
-                                // Shed highest keep first. Machine menu and the
-                                // kitchen chip are not in the ladder: the menu is
-                                // the mobile machine control, and the chip renders
-                                // nothing unless the kitchen is dirty (#2039).
-                                // Cap the actions-box reading by the real row
-                                // gutter (row − search) so a content-sized flex
-                                // item cannot claim every icon "fits" while they
-                                // paint past the split (#2039 desktop).
-                                const rowPx = headerRowRef.current?.clientWidth ?? 0
-                                const searchPx = headerRowRef.current
-                                    ?.querySelector<HTMLElement>('[data-testid="session-list-search"]')
-                                    ?.offsetWidth ?? 0
-                                const fromRow = rowPx > 0
-                                    ? Math.max(0, rowPx - searchPx - TOOLBAR_GAP_PX)
-                                    : 0
-                                const fromActions = headerRowWidth > 0 ? headerRowWidth : 0
-                                const gutter = fromActions > 0 && fromRow > 0
-                                    ? Math.min(fromActions, fromRow)
-                                    : fromActions > 0
-                                        ? fromActions
-                                        : fromRow
-                                const budget = gutter > 0
-                                    ? gutter
-                                    : toolbarActionBudget(0, searchQuery.length > 0)
+                                // Shed highest keep first. More is only for what does not
+                                // fit between the actions' left edge and the row's
+                                // right edge. If the whole set fits, overflow is empty.
+                                const liveGutter = readToolbarGutter(headerRowRef.current, headerActionsRef.current)
+                                const budget = liveGutter > 0
+                                    ? liveGutter
+                                    : headerRowWidth > 0
+                                        ? headerRowWidth
+                                        : toolbarActionBudget(0, searchQuery.length > 0)
                                 const slotWidth = (id: string, fallback: number) => {
                                     const measured = toolbarSlotWidths[id] ?? 0
                                     return measured > 0 ? measured : fallback
