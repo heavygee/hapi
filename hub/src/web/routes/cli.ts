@@ -16,6 +16,7 @@ import { getConfiguration } from '../../configuration'
 import { mapExternalRefRouteError } from '../../sync/externalRefErrors'
 import { readSessionSummaryContractEnabled } from '../../config/sessionSummaryContract'
 import { constantTimeEquals } from '../../utils/crypto'
+import { verifyRunnerProof } from '../../utils/runnerProof'
 import { parseAccessToken } from '../../utils/accessToken'
 import type { Machine, Session, SyncEngine } from '../../sync/syncEngine'
 import { MachineTagConflictError } from '../../store/machines'
@@ -595,6 +596,52 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
             return c.json({ error: 'Machine tag mismatch' }, 409)
         }
         return c.json({ ok: true })
+    })
+
+    // Destination tag + runner proof authorize the move. The retired source
+    // has no live proof after a legacy rotate (#1473 / #288).
+    app.post('/machines/:id/migrate-sessions', async (c) => {
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ error: 'Not ready' }, 503)
+        }
+        const toMachineId = c.req.param('id')
+        const namespace = c.get('namespace')
+        const json = await c.req.json().catch(() => null)
+        const fromMachineId = json && typeof json === 'object' && typeof json.fromMachineId === 'string'
+            ? json.fromMachineId.trim()
+            : ''
+        const tag = json && typeof json === 'object' && typeof json.machineTag === 'string'
+            ? json.machineTag.trim()
+            : ''
+        const runnerProof = json && typeof json === 'object' && typeof json.runnerProof === 'string'
+            ? json.runnerProof.trim()
+            : ''
+        if (!fromMachineId || !tag || !runnerProof) {
+            return c.json({ error: 'fromMachineId, machineTag, and runnerProof are required' }, 400)
+        }
+        if (fromMachineId === toMachineId) {
+            return c.json({ migrated: 0 })
+        }
+        const material = engine.getMachineAuthMaterial(toMachineId)
+        if (!material) {
+            return c.json({ error: 'Machine not found' }, 404)
+        }
+        if (material.namespace !== namespace) {
+            return c.json({ error: 'Machine access denied' }, 403)
+        }
+        if (!material.tag || !constantTimeEquals(material.tag, tag)) {
+            return c.json({ error: 'Machine tag mismatch' }, 409)
+        }
+        if (!verifyRunnerProof(runnerProof, material.runnerProofHash)) {
+            return c.json({ error: 'Runner proof mismatch' }, 403)
+        }
+        const source = engine.getMachineAuthMaterial(fromMachineId)
+        if (source && source.namespace !== namespace) {
+            return c.json({ error: 'Machine access denied' }, 403)
+        }
+        const migrated = engine.migrateSessionsMachineId(fromMachineId, toMachineId, namespace)
+        return c.json({ migrated })
     })
 
     return app

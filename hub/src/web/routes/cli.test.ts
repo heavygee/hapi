@@ -4,6 +4,7 @@ import type { SyncEngine } from '../../sync/syncEngine'
 import { createConfiguration } from '../../configuration'
 import { createCliRoutes } from './cli'
 import { MachineTagConflictError } from '../../store/machines'
+import { hashRunnerProof } from '../../utils/runnerProof'
 import { SessionIdentityConflictError } from '../../store/sessions'
 
 function createApp(engine: Partial<SyncEngine>) {
@@ -737,5 +738,51 @@ describe('cli machine registration (#2038 / heavygee#287)', () => {
         expect(mismatch.status).toBe(409)
         expect(await mismatch.json()).toEqual({ error: 'Machine tag mismatch' })
         expect(getOrCreateMachine).not.toHaveBeenCalled()
+    })
+
+    it('moves sessions onto a proven destination machine', async () => {
+        const migrateSessionsMachineId = mock(() => 2)
+        const proof = 'proof-restart'
+        const app = createApp({
+            getMachineAuthMaterial: (id: string) => {
+                if (id === 'machine-new') {
+                    return {
+                        namespace: 'default',
+                        tag: 'secret-tag',
+                        runnerProofHash: hashRunnerProof(proof),
+                    }
+                }
+                if (id === 'machine-old') {
+                    return { namespace: 'default', tag: null, runnerProofHash: null }
+                }
+                return null
+            },
+            migrateSessionsMachineId,
+        } as never)
+
+        const response = await app.request('/cli/machines/machine-new/migrate-sessions', {
+            method: 'POST',
+            headers: { ...authHeaders(), 'content-type': 'application/json' },
+            body: JSON.stringify({
+                fromMachineId: 'machine-old',
+                machineTag: 'secret-tag',
+                runnerProof: proof,
+            }),
+        })
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ migrated: 2 })
+        expect(migrateSessionsMachineId).toHaveBeenCalledWith('machine-old', 'machine-new', 'default')
+
+        const rejected = await app.request('/cli/machines/machine-new/migrate-sessions', {
+            method: 'POST',
+            headers: { ...authHeaders(), 'content-type': 'application/json' },
+            body: JSON.stringify({
+                fromMachineId: 'machine-old',
+                machineTag: 'secret-tag',
+                runnerProof: 'wrong-proof',
+            }),
+        })
+        expect(rejected.status).toBe(403)
+        expect(await rejected.json()).toEqual({ error: 'Runner proof mismatch' })
     })
 })

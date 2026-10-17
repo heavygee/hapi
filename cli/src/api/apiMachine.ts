@@ -847,23 +847,38 @@ export class ApiMachineClient {
         if (!proof || !tag) {
             return
         }
-        await axios.post(
-            `${configuration.apiUrl}/cli/machines`,
-            {
-                id: this.machine.id,
-                tag,
-                runnerProof: proof,
-                metadata: this.machine.metadata ?? undefined,
-                runnerState: this.machine.runnerState ?? null,
-            },
-            {
-                headers: buildHubRequestHeaders({
-                    Authorization: `Bearer ${this.token}`,
-                    'Content-Type': 'application/json',
-                }),
-                timeout: 60_000,
-            },
-        )
+        let lastError: unknown
+        for (let attempt = 1; attempt <= 3; attempt += 1) {
+            try {
+                await axios.post(
+                    `${configuration.apiUrl}/cli/machines`,
+                    {
+                        id: this.machine.id,
+                        tag,
+                        runnerProof: proof,
+                        metadata: this.machine.metadata ?? undefined,
+                        runnerState: this.machine.runnerState ?? null,
+                    },
+                    {
+                        headers: buildHubRequestHeaders({
+                            Authorization: `Bearer ${this.token}`,
+                            'Content-Type': 'application/json',
+                        }),
+                        timeout: 60_000,
+                    },
+                )
+                return
+            } catch (error) {
+                lastError = error
+                logger.debug(`[API MACHINE] Runner proof restore attempt ${attempt} failed`, error)
+                if (attempt < 3) {
+                    await new Promise((resolve) => setTimeout(resolve, 500))
+                }
+            }
+        }
+        throw lastError instanceof Error
+            ? lastError
+            : new Error('Failed to restore runner proof')
     }
 
     /** Let a replacement runner register the same methods during handoff. */

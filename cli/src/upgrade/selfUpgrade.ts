@@ -955,7 +955,19 @@ async function applyRunnerSelfUpgradeUnlocked(options: {
                 try {
                     await options.rebindRunnerProof?.()
                 } catch (error) {
-                    logger.debug('[SELF-UPGRADE] Failed to restore parent runner proof', error)
+                    logger.debug('[SELF-UPGRADE] Failed to restore parent runner proof; exiting', error)
+                    if (options.requestShutdown) {
+                        options.requestShutdown()
+                    } else {
+                        setTimeout(() => {
+                            process.exit(1)
+                        }, 250)
+                    }
+                    return scheduleExit({
+                        status: 'failed',
+                        message: 'Replacement did not register and parent runner proof could not be restored',
+                        channel: options.offer.channel,
+                    })
                 }
                 options.restoreRpcOwnership?.()
             }

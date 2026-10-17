@@ -23,7 +23,6 @@ import {
     rotateMachineIdForLegacyReenroll,
 } from '@/ui/auth'
 import { apiValidationError, isRunnerProofRequiredError } from '@/utils/errorUtils'
-import { logger } from '@/ui/logger'
 import { ApiMachineClient } from './apiMachine'
 import { ApiSessionClient, type ApiSessionClientOptions } from './apiSession'
 import { buildHubRequestHeaders } from './hubExtraHeaders'
@@ -44,23 +43,6 @@ function isLegacyMachineReenrollError(error: unknown): boolean {
     // new machine id (#1473).
     return message.includes('re-enroll with a new machine id')
         || message === LEGACY_MACHINE_REENROLL_MESSAGE
-}
-
-/** Hub refuses untagged / tag-mismatched migrate-sessions (#1473 Blocker). */
-function isMigrateUnavailableError(error: unknown): boolean {
-    return axios.isAxiosError(error) && error.response?.status === 404
-}
-
-function isMigrateSourceContinuityError(error: unknown): boolean {
-    if (!axios.isAxiosError(error) || error.response?.status !== 403) {
-        return false
-    }
-    const body = error.response.data
-    if (!body || typeof body !== 'object') {
-        return false
-    }
-    const message = (body as { error?: unknown }).error
-    return message === 'Source machine continuity not proven'
 }
 
 export class ApiClient {
@@ -330,19 +312,9 @@ export class ApiClient {
                         runnerProof: opts.runnerProof,
                     })
                 } catch (migrateError) {
-                    // Untagged v23 sources cannot prove continuity on the
-                    // namespace migrate route (takeover hole). Keep the new
-                    // machine identity; leave legacy sessions on the old id
-                    // until an operator-trusted remap exists (#1473 Major).
-                    // 404: migrate-sessions is not implemented. 403: source continuity
-                    // not proven. Either way the new identity stands; do not abort
-                    // runner startup after rotation (#288).
-                    if (isMigrateSourceContinuityError(migrateError) || isMigrateUnavailableError(migrateError)) {
-                        logger.warn(
-                            `[API] Re-enrolled as ${machine.id}; sessions on ${fromMachineId} need operator-approved migration`
-                        )
-                        return machine
-                    }
+                    // Coming online on the new id while sessions stay on the
+                    // retired id breaks strictMachineId resume. Fail the
+                    // register so startup does not report success (#288).
                     const message = migrateError instanceof Error
                         ? migrateError.message
                         : String(migrateError)
