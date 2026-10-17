@@ -61,6 +61,24 @@
   max-height: none !important;
   overflow: visible !important;
 }
+/* #534: sticky alert sits upper-center so Quest/VR does not miss a bottom toast. */
+.opdock-blocking-error[popover],
+.opdock-blocking-error:popover-open {
+  position: fixed !important;
+  inset: auto !important;
+  top: 18% !important;
+  right: auto !important;
+  left: 50% !important;
+  bottom: auto !important;
+  margin: 0 !important;
+  border: none !important;
+  width: min(92vw, 420px) !important;
+  height: max-content !important;
+  max-width: 92vw !important;
+  max-height: none !important;
+  overflow: visible !important;
+  transform: translate(-50%, 0) !important;
+}
 .opdock-overlay[popover],
 .opdock-overlay:popover-open {
   position: fixed !important;
@@ -134,12 +152,50 @@
   background: #dc2626;
   animation: opdock-pulse 1.2s infinite;
 }
-.opdock--busy .opdock-btn { background: #4338ca; }
+/* #527: busy = purple + spinner on the pressed control (FAB / Send / mic-as-send). */
+.opdock--busy .opdock-btn {
+  background: #4338ca;
+  position: relative;
+}
+.opdock--busy .opdock-btn::after,
+.opdock-send--busy::after,
+.opdock-sat--send.opdock-send--busy::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  animation: opdock-send-spin 0.75s linear infinite;
+  pointer-events: none;
+  z-index: 2;
+}
+.opdock-send.opdock-send--busy,
+.opdock-sat--send.opdock-send--busy {
+  position: relative;
+  pointer-events: none;
+  color: transparent !important;
+}
+.opdock-send.opdock-send--busy { background: #4338ca; }
 
 @keyframes opdock-pulse {
   0%   { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.55); }
   70%  { box-shadow: 0 0 0 14px rgba(220, 38, 38, 0); }
   100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
+}
+@keyframes opdock-send-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .opdock--busy .opdock-btn::after,
+  .opdock-send--busy::after,
+  .opdock-sat--send.opdock-send--busy::after {
+    animation-duration: 2.4s;
+  }
 }
 
 /* #134 / #166: absolute left of the hub. Must set min-width — shrink-to-fit +
@@ -188,6 +244,53 @@
 .opdock-toast--show { opacity: 1; transform: translate(-50%, 0); }
 .opdock-toast--ok  { background: #15803d; }
 .opdock-toast--err { background: #b91c1c; }
+
+/* #534: sticky connectivity failure — toasts auto-dismiss and are easy to miss in VR. */
+.opdock-blocking-error[popover],
+.opdock-blocking-error:popover-open {
+  margin: 0;
+  border: 0;
+  padding: 0;
+  overflow: visible;
+  background: transparent;
+  color: inherit;
+  inset: unset;
+}
+.opdock-blocking-error {
+  position: fixed;
+  left: 50%;
+  top: 18%;
+  transform: translate(-50%, 0);
+  z-index: 2147483500;
+  width: min(92vw, 420px);
+  max-width: 92vw;
+  padding: 16px 16px 12px;
+  border-radius: 12px;
+  font: 16px/1.45 ui-sans-serif, system-ui, sans-serif;
+  color: #fff;
+  background: #7f1d1d;
+  border: 2px solid #fecaca;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  pointer-events: auto;
+}
+.opdock-blocking-error__body {
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: normal;
+  margin-bottom: 12px;
+}
+.opdock-blocking-error__dismiss {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  border: 0;
+  border-radius: 8px;
+  font: 600 15px/1.2 ui-sans-serif, system-ui, sans-serif;
+  color: #7f1d1d;
+  background: #fecaca;
+  cursor: pointer;
+  pointer-events: auto;
+}
 
 /* --- annotation overlay --------------------------------------------------------------- */
 /* #437: applied to html + body while markup/capture freezes host scroll. */
