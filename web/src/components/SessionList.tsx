@@ -3267,102 +3267,105 @@ export function SessionList(props: {
                             data-testid="session-list-header-actions"
                             className="ml-auto flex shrink-0 flex-nowrap items-center justify-end gap-1"
                         >
-                            {showMachineFilterBar ? (
-                                <MachineFilterMenu
-                                    machines={machineFilterItems}
-                                    totalCount={allSessions.length}
-                                    value={activeMachineFilter}
-                                    onChange={setMachineFilter}
-                                    sessionFilter={sessionFilters}
-                                    onSessionFilterChange={setSessionFilters}
-                                    customStart={customStart}
-                                    customEnd={customEnd}
-                                    sessionActivityDates={sessionActivityDates}
-                                    onDateRangeChange={(start, end) => {
-                                        setCustomStart(start)
-                                        setCustomEnd(end)
-                                    }}
-                                    datePickerCenterRef={sessionListRef}
-                                />
-                            ) : null}
-                            {blockedCount > 0 ? (
-                                <BlockedJumpPill
-                                    count={blockedCount}
-                                    direction={blockedDirection}
-                                    alerting={blockedAlerting}
-                                    onJump={jumpToNextBlocked}
-                                />
-                            ) : null}
-                            {unreadSessionCount > 0 ? (
-                                <button
-                                    type="button"
-                                    onClick={() => setMarkAllReadOpen(true)}
-                                    title={t('sessions.markAllRead.button', { count: unreadSessionCount })}
-                                    aria-label={t('sessions.markAllRead.button', { count: unreadSessionCount })}
-                                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                                >
-                                    <MarkAllReadIcon className="h-5 w-5" />
-                                </button>
-                            ) : null}
-                            {renderHeader ? (
-                                <button
-                                    type="button"
-                                    onClick={props.onNewSession}
-                                    className="session-list-new-button flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--app-link)] transition-colors"
-                                    title={t('sessions.new')}
-                                >
-                                    <PlusIcon className="h-5 w-5" />
-                                </button>
-                            ) : null}
-                            <div
-                                data-testid="session-list-header-secondary"
-                                className={
-                                    searchQuery.length > 0
-                                        ? 'hidden @[32rem]:contents'
-                                        : 'hidden @[26rem]:contents'
+                            {(() => {
+                                // Collapsed query chip + primary icons exceed ~320px.
+                                // Fold primary into More so Settings/New stay reachable (#2039).
+                                const toolbarCrowded = searchQuery.length > 0
+                                const renderSecondary = () => (
+                                    <>
+                                        <SessionListFilterMenu
+                                            value={sessionFilters}
+                                            onChange={setSessionFilters}
+                                            customStart={customStart}
+                                            customEnd={customEnd}
+                                            sessionActivityDates={sessionActivityDates}
+                                            onDateRangeChange={(start, end) => {
+                                                setCustomStart(start)
+                                                setCustomEnd(end)
+                                            }}
+                                            datePickerCenterRef={sessionListRef}
+                                            className={showMachineFilterBar ? 'max-md:hidden' : undefined}
+                                        />
+                                        <KitchenStatusChip api={api} />
+                                        {props.headerActions}
+                                    </>
+                                )
+                                const renderPrimary = () => (
+                                    <>
+                                        {showMachineFilterBar ? (
+                                            <MachineFilterMenu
+                                                machines={machineFilterItems}
+                                                totalCount={allSessions.length}
+                                                value={activeMachineFilter}
+                                                onChange={setMachineFilter}
+                                                sessionFilter={sessionFilters}
+                                                onSessionFilterChange={setSessionFilters}
+                                                customStart={customStart}
+                                                customEnd={customEnd}
+                                                sessionActivityDates={sessionActivityDates}
+                                                onDateRangeChange={(start, end) => {
+                                                    setCustomStart(start)
+                                                    setCustomEnd(end)
+                                                }}
+                                                datePickerCenterRef={sessionListRef}
+                                            />
+                                        ) : null}
+                                        {blockedCount > 0 ? (
+                                            <BlockedJumpPill
+                                                count={blockedCount}
+                                                direction={blockedDirection}
+                                                alerting={blockedAlerting}
+                                                onJump={jumpToNextBlocked}
+                                            />
+                                        ) : null}
+                                        {unreadSessionCount > 0 ? (
+                                            <button
+                                                type="button"
+                                                onClick={() => setMarkAllReadOpen(true)}
+                                                title={t('sessions.markAllRead.button', { count: unreadSessionCount })}
+                                                aria-label={t('sessions.markAllRead.button', { count: unreadSessionCount })}
+                                                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                            >
+                                                <MarkAllReadIcon className="h-5 w-5" />
+                                            </button>
+                                        ) : null}
+                                        {renderHeader ? (
+                                            <button
+                                                type="button"
+                                                onClick={props.onNewSession}
+                                                className="session-list-new-button flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--app-link)] transition-colors"
+                                                title={t('sessions.new')}
+                                            >
+                                                <PlusIcon className="h-5 w-5" />
+                                            </button>
+                                        ) : null}
+                                    </>
+                                )
+                                if (toolbarCrowded) {
+                                    return (
+                                        <SessionListHeaderOverflow>
+                                            {renderPrimary()}
+                                            {renderSecondary()}
+                                        </SessionListHeaderOverflow>
+                                    )
                                 }
-                            >
-                                <SessionListFilterMenu
-                                    value={sessionFilters}
-                                    onChange={setSessionFilters}
-                                    customStart={customStart}
-                                    customEnd={customEnd}
-                                    sessionActivityDates={sessionActivityDates}
-                                    onDateRangeChange={(start, end) => {
-                                        setCustomStart(start)
-                                        setCustomEnd(end)
-                                    }}
-                                    datePickerCenterRef={sessionListRef}
-                                    className={showMachineFilterBar ? 'max-md:hidden' : undefined}
-                                />
-                                <KitchenStatusChip api={api} />
-                                {props.headerActions}
-                            </div>
-                            <div
-                                className={
-                                    searchQuery.length > 0
-                                        ? 'shrink-0 @[32rem]:hidden'
-                                        : 'shrink-0 @[26rem]:hidden'
-                                }
-                            >
-                                <SessionListHeaderOverflow>
-                                    <SessionListFilterMenu
-                                        value={sessionFilters}
-                                        onChange={setSessionFilters}
-                                        customStart={customStart}
-                                        customEnd={customEnd}
-                                        sessionActivityDates={sessionActivityDates}
-                                        onDateRangeChange={(start, end) => {
-                                            setCustomStart(start)
-                                            setCustomEnd(end)
-                                        }}
-                                        datePickerCenterRef={sessionListRef}
-                                        className={showMachineFilterBar ? 'max-md:hidden' : undefined}
-                                    />
-                                    <KitchenStatusChip api={api} />
-                                    {props.headerActions}
-                                </SessionListHeaderOverflow>
-                            </div>
+                                return (
+                                    <>
+                                        {renderPrimary()}
+                                        <div
+                                            data-testid="session-list-header-secondary"
+                                            className="hidden @[26rem]:contents"
+                                        >
+                                            {renderSecondary()}
+                                        </div>
+                                        <div className="shrink-0 @[26rem]:hidden">
+                                            <SessionListHeaderOverflow>
+                                                {renderSecondary()}
+                                            </SessionListHeaderOverflow>
+                                        </div>
+                                    </>
+                                )
+                            })()}
                         </div>
                     ) : null}
                 </div>
