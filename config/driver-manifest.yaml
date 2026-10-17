@@ -1282,7 +1282,9 @@ layers:
   # Follow-up after 03ac154d9: fbebd48b8 — migrate-sessions requires source tag+proof when
   # the from-machine is still tagged and proof-bound. Legacy/unbound sources still move with
   # destination proof alone.
-  # Thin tip on soup HEAD 8d51206da: driver/2038-machine-tag-reregister @ fbebd48b8
+  # Follow-up after fbebd48b8: d2ba08aa6 — Claude version-mismatch spawn waits until the
+  # replacement owns runner.state.json and hubReadyAt is set; still-live previous PID is not ready.
+  # Thin tip on soup HEAD 8d51206da: driver/2038-machine-tag-reregister @ d2ba08aa6
   # Parent pin: driver/2038-machine-tag-parent @ 8d51206da
   # PR: heavygee/hapi#288 (fork fortress — not upstream-landable alone)
   # Hub+cli → remat + hapi-restart-hub; tip-unique: 409 MachineTagConflict +
