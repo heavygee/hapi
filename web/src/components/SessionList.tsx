@@ -1,4 +1,16 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import {
+    Children,
+    cloneElement,
+    isValidElement,
+    useCallback,
+    useEffect,
+    useLayoutEffect,
+    useMemo,
+    useRef,
+    useState,
+    type ReactElement,
+    type ReactNode
+} from 'react'
 import * as Popover from '@radix-ui/react-popover'
 import { SessionListScrollAnchor } from './SessionListScrollAnchor'
 import type { SessionContentSearchResponse, SessionSummary } from '@/types/api'
@@ -121,6 +133,19 @@ export type SessionToolbarExtra = {
     keep: number
     node: ReactNode
     widthPx?: number
+}
+
+/** Offscreen measure clones must not duplicate data-testid for Testing Library. */
+function stripTestIds(node: ReactNode): ReactNode {
+    if (node == null || typeof node === 'boolean') return node
+    if (typeof node === 'string' || typeof node === 'number') return node
+    if (Array.isArray(node)) return Children.map(node, stripTestIds)
+    if (!isValidElement(node)) return node
+    const element = node as ReactElement<{ 'data-testid'?: string; children?: ReactNode }>
+    const nextChildren = element.props.children !== undefined
+        ? stripTestIds(element.props.children)
+        : element.props.children
+    return cloneElement(element, { 'data-testid': undefined }, nextChildren)
 }
 
 export { getWorktreeSessionLabel } from '@/lib/sessionWorktreeLabel'
@@ -3022,6 +3047,11 @@ export function SessionList(props: {
     useLayoutEffect(() => {
         const root = toolbarMeasureRef.current
         if (!root) return
+        // Measure clones mirror live controls; strip test ids so Testing Library
+        // does not see duplicates under aria-hidden (#2039).
+        for (const el of root.querySelectorAll('[data-testid]')) {
+            el.removeAttribute('data-testid')
+        }
         const next: Record<string, number> = {}
         for (const node of root.querySelectorAll<HTMLElement>('[data-measure-id]')) {
             const id = node.dataset.measureId
@@ -3509,13 +3539,14 @@ export function SessionList(props: {
                                     <>
                                         <div
                                             ref={toolbarMeasureRef}
+                                            data-testid="session-toolbar-measure"
                                             aria-hidden
                                             inert
                                             className="pointer-events-none absolute left-0 top-0 -z-10 flex h-0 w-max gap-1 overflow-hidden opacity-0"
                                         >
                                             {definedSlots.map((slot) => (
                                                 <span key={slot.id} data-measure-id={slot.id} className="inline-flex shrink-0">
-                                                    {slot.node}
+                                                    {stripTestIds(slot.node)}
                                                 </span>
                                             ))}
                                         </div>
