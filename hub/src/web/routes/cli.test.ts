@@ -785,4 +785,58 @@ describe('cli machine registration (#2038 / heavygee#287)', () => {
         expect(rejected.status).toBe(403)
         expect(await rejected.json()).toEqual({ error: 'Runner proof mismatch' })
     })
+
+    it('refuses proof-less migration from a live tagged source', async () => {
+        const migrateSessionsMachineId = mock(() => 1)
+        const destProof = 'proof-dest'
+        const sourceProof = 'proof-source'
+        const app = createApp({
+            getMachineAuthMaterial: (id: string) => {
+                if (id === 'machine-new') {
+                    return {
+                        namespace: 'default',
+                        tag: 'dest-tag',
+                        runnerProofHash: hashRunnerProof(destProof),
+                    }
+                }
+                if (id === 'machine-live') {
+                    return {
+                        namespace: 'default',
+                        tag: 'source-tag',
+                        runnerProofHash: hashRunnerProof(sourceProof),
+                    }
+                }
+                return null
+            },
+            migrateSessionsMachineId,
+        } as never)
+
+        const stolen = await app.request('/cli/machines/machine-new/migrate-sessions', {
+            method: 'POST',
+            headers: { ...authHeaders(), 'content-type': 'application/json' },
+            body: JSON.stringify({
+                fromMachineId: 'machine-live',
+                machineTag: 'dest-tag',
+                runnerProof: destProof,
+            }),
+        })
+        expect(stolen.status).toBe(403)
+        expect(await stolen.json()).toEqual({ error: 'Source machine continuity not proven' })
+        expect(migrateSessionsMachineId).not.toHaveBeenCalled()
+
+        const ok = await app.request('/cli/machines/machine-new/migrate-sessions', {
+            method: 'POST',
+            headers: { ...authHeaders(), 'content-type': 'application/json' },
+            body: JSON.stringify({
+                fromMachineId: 'machine-live',
+                machineTag: 'dest-tag',
+                runnerProof: destProof,
+                sourceMachineTag: 'source-tag',
+                sourceRunnerProof: sourceProof,
+            }),
+        })
+        expect(ok.status).toBe(200)
+        expect(await ok.json()).toEqual({ migrated: 1 })
+        expect(migrateSessionsMachineId).toHaveBeenCalledWith('machine-live', 'machine-new', 'default')
+    })
 })
