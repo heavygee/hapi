@@ -1301,7 +1301,7 @@ layers:
   # tiann/hapi#2039 / PR #2040 — narrow session toolbar: search clear painted over
   # filter / BlockedJumpPill. One nowrap row; query chip folds primary+secondary
   # into More ([chip][⋯]); no ml-auto (pack beside search). Soup tip:
-  # driver/2039-toolbar-crowd @ d3cb5b591
+  # driver/2039-toolbar-crowd @ 6611b597b
   # Tip-unique verify marker: session-list-header-actions in web/dist
   # Upstream thin: fix/2039-session-toolbar-crowd (worktree fix-2039-toolbar-crowd)
   # Web-only → remat --build-web; hard-reload (no hub restart). Re-thin after dogfood bump.
