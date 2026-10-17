@@ -3336,10 +3336,9 @@ export function SessionList(props: {
                     {!(showSearch && searchExpanded) ? (
                         <div
                             data-testid="session-list-header-actions"
-                            // Pack beside search — ml-auto left a Quest-width
-                            // desert between the search icon and BlockedJumpPill
-                            // (tiann/hapi#2039).
-                            className="flex shrink-0 flex-nowrap items-center gap-1"
+                            // flex-1 so secondary/More can ml-auto to the trailing edge
+                            // without shoving primaries away from search (#2039).
+                            className="flex min-w-0 flex-1 flex-nowrap items-center gap-1"
                         >
                             {(() => {
                                 // Fold primaries into More only when they truly will not fit.
@@ -3423,6 +3422,8 @@ export function SessionList(props: {
                                     </>
                                 )
                                 if (toolbarCrowded) {
+                                    // Keep More beside search — do not ml-auto a lone ⋯
+                                    // across a Quest-width desert.
                                     return (
                                         <SessionListHeaderOverflow>
                                             {renderPrimary()}
@@ -3433,16 +3434,22 @@ export function SessionList(props: {
                                 return (
                                     <>
                                         {renderPrimary()}
+                                        {/* Trailing cluster: [search][primaries] … [filter|⋯] */}
                                         <div
-                                            data-testid="session-list-header-secondary"
-                                            className="hidden @[26rem]:contents"
+                                            data-testid="session-list-header-trailing"
+                                            className="ml-auto flex shrink-0 flex-nowrap items-center gap-1"
                                         >
-                                            {renderSecondary()}
-                                        </div>
-                                        <div className="shrink-0 @[26rem]:hidden">
-                                            <SessionListHeaderOverflow>
+                                            <div
+                                                data-testid="session-list-header-secondary"
+                                                className="hidden @[26rem]:contents"
+                                            >
                                                 {renderSecondary()}
-                                            </SessionListHeaderOverflow>
+                                            </div>
+                                            <div className="shrink-0 @[26rem]:hidden">
+                                                <SessionListHeaderOverflow>
+                                                    {renderSecondary()}
+                                                </SessionListHeaderOverflow>
+                                            </div>
                                         </div>
                                     </>
                                 )
