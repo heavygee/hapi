@@ -34,20 +34,29 @@ done
 
 command -v jq >/dev/null 2>&1 || { echo "jq required" >&2; exit 1; }
 
+# PATH install copies this script to ~/.local/bin without siblings — fall back
+# to the primary mirror's tooling dir for driver-status / remat-hold.
+TOOLING="$SCRIPT_DIR"
+if [[ ! -f "$TOOLING/hapi-remat-hold.sh" ]]; then
+    TOOLING="$PRIMARY/scripts/tooling"
+fi
+
 driver_q=0
 driver_busy=0
-if ! bash "$SCRIPT_DIR/hapi-driver-status.sh" --quiet 2>/dev/null; then
+if ! bash "$TOOLING/hapi-driver-status.sh" --quiet 2>/dev/null; then
     driver_q=$?
     driver_busy=1
 fi
 
 hold_active=0
 hold_reason=""
-if bash "$SCRIPT_DIR/hapi-remat-hold.sh" check 2>/dev/null; then
+if bash "$TOOLING/hapi-remat-hold.sh" check 2>/dev/null; then
     :
 else
     hold_active=1
-    hold_reason="$(jq -r '.reason // "?"' "$HOME/.hapi/remat-hold.json" 2>/dev/null || echo "?")"
+    # Only surface reason when the hold file says active (stale reasons linger after clear).
+    hold_reason="$(jq -r 'if .active == true then (.reason // "?") else empty end' "$HOME/.hapi/remat-hold.json" 2>/dev/null || echo "?")"
+    [[ -z "$hold_reason" ]] && hold_reason="?"
 fi
 
 driver_head="?"
