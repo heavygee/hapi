@@ -923,6 +923,7 @@ export function SessionListSearch(props: {
                     'relative flex min-w-0 items-center rounded-full transition-colors',
                     hasTextQuery
                         // Keep the query and its clear action inside the same compact chip.
+                        // Cap stays modest so [chip][⋯] fits a 320px phone (#2039 Major).
                         ? 'max-w-[9rem] bg-[var(--app-chat-user-chip-bg)] text-[var(--app-chat-user-chip-fg)]'
                         : 'shrink-0'
                 )}>
@@ -2033,85 +2034,95 @@ export function SessionList(props: {
                             data-testid="session-list-header-actions"
                             className="ml-auto flex shrink-0 flex-nowrap items-center justify-end gap-1"
                         >
-                            {showMachineFilterBar ? (
-                                <MachineFilterMenu
-                                    machines={machineFilterItems}
-                                    totalCount={allSessions.length}
-                                    value={activeMachineFilter}
-                                    onChange={setMachineFilter}
-                                />
-                            ) : null}
-                            {unreadSessionCount > 0 ? (
-                                <button
-                                    type="button"
-                                    onClick={() => setMarkAllReadOpen(true)}
-                                    title={t('sessions.markAllRead.button', { count: unreadSessionCount })}
-                                    aria-label={t('sessions.markAllRead.button', { count: unreadSessionCount })}
-                                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                                >
-                                    <MarkAllReadIcon className="h-5 w-5" />
-                                </button>
-                            ) : null}
-                            <button
-                                type="button"
-                                onClick={() => setShowUnreadOnly(!showUnreadOnly)}
-                                aria-pressed={showUnreadOnly}
-                                title={t('sessions.unreadFilter.toggle')}
-                                aria-label={t('sessions.unreadFilter.toggle')}
-                                className={cn(
-                                    'flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
-                                    showUnreadOnly
-                                        ? 'bg-[var(--app-subtle-bg)]'
-                                        : 'hover:bg-[var(--app-subtle-bg)]'
-                                )}
-                            >
-                                {/* Same shape/color language as session-row unread dots (SessionAttentionIndicator). */}
-                                <span
-                                    aria-hidden
-                                    className={cn(
-                                        'inline-flex h-2.5 w-2.5 shrink-0 rounded-full',
-                                        showUnreadOnly
-                                            ? 'bg-[var(--app-link)]'
-                                            : 'bg-[var(--app-hint)]'
-                                    )}
-                                />
-                            </button>
-                            {renderHeader ? (
-                                <button
-                                    type="button"
-                                    onClick={props.onNewSession}
-                                    className="session-list-new-button flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--app-link)] transition-colors"
-                                    title={t('sessions.new')}
-                                >
-                                    <PlusIcon className="h-5 w-5" />
-                                </button>
-                            ) : null}
-                            {props.headerActions ? (
-                                <>
-                                    <div
-                                        data-testid="session-list-header-secondary"
-                                        className={cn(
-                                            // Inline secondary when the header container is wide.
-                                            // Narrow Quest/sidebars use the overflow ⋯ instead
-                                            // so Settings stays reachable without a second row.
-                                            'hidden',
-                                            searchQuery.length > 0 ? '@[32rem]:contents' : '@[26rem]:contents'
-                                        )}
-                                    >
-                                        {props.headerActions}
-                                    </div>
-                                    <div
-                                        className={cn(
-                                            'shrink-0',
-                                            searchQuery.length > 0 ? '@[32rem]:hidden' : '@[26rem]:hidden'
-                                        )}
-                                    >
+                            {(() => {
+                                // Collapsed query chip + full primary icon set exceeds ~320px.
+                                // Fold primary into More so Settings/New stay reachable (#2039).
+                                const toolbarCrowded = searchQuery.length > 0
+                                const primaryControls = (
+                                    <>
+                                        {showMachineFilterBar ? (
+                                            <MachineFilterMenu
+                                                machines={machineFilterItems}
+                                                totalCount={allSessions.length}
+                                                value={activeMachineFilter}
+                                                onChange={setMachineFilter}
+                                            />
+                                        ) : null}
+                                        {unreadSessionCount > 0 ? (
+                                            <button
+                                                type="button"
+                                                onClick={() => setMarkAllReadOpen(true)}
+                                                title={t('sessions.markAllRead.button', { count: unreadSessionCount })}
+                                                aria-label={t('sessions.markAllRead.button', { count: unreadSessionCount })}
+                                                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                            >
+                                                <MarkAllReadIcon className="h-5 w-5" />
+                                            </button>
+                                        ) : null}
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowUnreadOnly(!showUnreadOnly)}
+                                            aria-pressed={showUnreadOnly}
+                                            title={t('sessions.unreadFilter.toggle')}
+                                            aria-label={t('sessions.unreadFilter.toggle')}
+                                            className={cn(
+                                                'flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
+                                                showUnreadOnly
+                                                    ? 'bg-[var(--app-subtle-bg)]'
+                                                    : 'hover:bg-[var(--app-subtle-bg)]'
+                                            )}
+                                        >
+                                            <span
+                                                aria-hidden
+                                                className={cn(
+                                                    'inline-flex h-2.5 w-2.5 shrink-0 rounded-full',
+                                                    showUnreadOnly
+                                                        ? 'bg-[var(--app-link)]'
+                                                        : 'bg-[var(--app-hint)]'
+                                                )}
+                                            />
+                                        </button>
+                                        {renderHeader ? (
+                                            <button
+                                                type="button"
+                                                onClick={props.onNewSession}
+                                                className="session-list-new-button flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--app-link)] transition-colors"
+                                                title={t('sessions.new')}
+                                            >
+                                                <PlusIcon className="h-5 w-5" />
+                                            </button>
+                                        ) : null}
+                                    </>
+                                )
+                                if (toolbarCrowded) {
+                                    return (
                                         <SessionListHeaderOverflow>
+                                            {primaryControls}
                                             {props.headerActions}
                                         </SessionListHeaderOverflow>
-                                    </div>
-                                </>
-                            ) : null}
+                                    )
+                                }
+                                return (
+                                    <>
+                                        {primaryControls}
+                                        {props.headerActions ? (
+                                            <>
+                                                <div
+                                                    data-testid="session-list-header-secondary"
+                                                    className="hidden @[26rem]:contents"
+                                                >
+                                                    {props.headerActions}
+                                                </div>
+                                                <div className="shrink-0 @[26rem]:hidden">
+                                                    <SessionListHeaderOverflow>
+                                                        {props.headerActions}
+                                                    </SessionListHeaderOverflow>
+                                                </div>
+                                            </>
+                                        ) : null}
+                                    </>
+                                )
+                            })()}
                         </div>
                     ) : null}
                 </div>

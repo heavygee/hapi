@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
@@ -1134,22 +1134,47 @@ describe('SessionList search toggle', () => {
         expect(headerRow).toContainElement(actions)
         expect(actions).not.toContainElement(clearButton)
         expect(searchGroup).toContainElement(clearButton)
-        // Actions stay on the same row; secondary chrome sheds instead of wrapping.
+        // Actions stay on the same row; with a query chip, primaries fold into More
+        // so [chip][⋯] fits ~320px instead of pushing Settings offscreen.
         expect(searchGroup.nextElementSibling).toBe(actions)
         expect(actions).toHaveClass('shrink-0', 'flex-nowrap')
         expect(actions.className.split(/\s+/)).not.toContain('flex-wrap')
         expect(headerRow).toHaveClass('flex-nowrap', '@container')
         expect(headerRow.className.split(/\s+/)).not.toContain('flex-wrap')
-        const secondary = screen.getByTestId('session-list-header-secondary')
-        expect(secondary).toHaveClass('hidden')
-        // Collapsed query chip → higher threshold before secondary returns.
-        expect(secondary.className.split(/\s+/)).toContain('@[32rem]:contents')
-        expect(secondary).toHaveTextContent('Settings')
-        // Narrow path keeps Settings reachable via overflow ⋯ (not gone forever).
+        expect(screen.queryByTestId('session-list-header-secondary')).toBeNull()
+        // Unread toggle is primary chrome — not inline while the chip is present.
+        expect(within(actions).queryByRole('button', { name: 'Unread only' })).toBeNull()
         const overflow = screen.getByTestId('session-list-header-overflow')
         expect(overflow).toHaveAccessibleName('More session list actions')
         fireEvent.click(overflow)
         expect(screen.getAllByRole('button', { name: 'Settings' }).length).toBeGreaterThanOrEqual(1)
+        expect(screen.getByRole('button', { name: 'Unread only' })).toBeInTheDocument()
+    })
+
+    it('keeps secondary headerActions inline via container query when search is idle (tiann/hapi#2039)', () => {
+        renderWithProviders(
+            <SessionList
+                sessions={[makeSession({
+                    id: 'session-1',
+                    updatedAt: 100,
+                    metadata: { path: '/work/hapi', name: 'Idle search', flavor: 'codex' },
+                })]}
+                selectedSessionId={null}
+                onSelect={vi.fn()}
+                onNewSession={vi.fn()}
+                onRefresh={vi.fn()}
+                isLoading={false}
+                renderHeader={false}
+                headerActions={<button type="button">Settings</button>}
+                api={null}
+            />
+        )
+
+        const secondary = screen.getByTestId('session-list-header-secondary')
+        expect(secondary).toHaveClass('hidden')
+        expect(secondary.className.split(/\s+/)).toContain('@[26rem]:contents')
+        expect(secondary).toHaveTextContent('Settings')
+        expect(screen.getByTestId('session-list-header-overflow')).toBeInTheDocument()
     })
 
     it('gives expanded search a 48px clear end-cap with calendar immediately left (tiann/hapi#2019)', () => {
