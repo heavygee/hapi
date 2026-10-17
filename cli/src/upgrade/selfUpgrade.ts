@@ -719,6 +719,12 @@ export async function applyRunnerSelfUpgrade(options: {
     localVersion?: string
     localGeneration?: string | null
     requestShutdown?: () => void
+    /** Drop machine RPC ownership before the child waits for hub acks. */
+    releaseRpcOwnership?: () => void
+    /** Re-claim methods when the replacement never becomes ready. */
+    restoreRpcOwnership?: () => void
+    /** Put the parent's runner proof back if the child rebound the hub hash. */
+    rebindRunnerProof?: () => Promise<void>
 }): Promise<RunnerSelfUpgradeResponse> {
     if (runnerSelfUpgradeInFlight) {
         return {
@@ -812,6 +818,9 @@ async function applyRunnerSelfUpgradeUnlocked(options: {
     localVersion?: string
     localGeneration?: string | null
     requestShutdown?: () => void
+    releaseRpcOwnership?: () => void
+    restoreRpcOwnership?: () => void
+    rebindRunnerProof?: () => Promise<void>
 }): Promise<UpgradeOutcome> {
     const localVersion = options.localVersion ?? packageJson.version
     const localGeneration = options.localGeneration
@@ -912,10 +921,13 @@ async function applyRunnerSelfUpgradeUnlocked(options: {
         // path above is the fleet default for systemd.
         const candidate = await scheduleRunnerRelaunch(installedExecutable)
         await releaseRunnerLockForHandoff()
-        const handoffOk = await waitForRunnerHandoff(process.pid, { timeoutMs: 30_000 })
+        // Child hubReadyAt includes RPC acks. Those acks stay false while
+        // this socket still owns the methods.
+        options.releaseRpcOwnership?.()
+        const handoffOk = await waitForRunnerHandoff(process.pid, { timeoutMs: 150_000 })
         if (!handoffOk) {
-            // Child may still be retrying the runner lock (~885s budget). Kill it
-            // before reclaiming so a later lock gap cannot produce a delayed takeover.
+            // Kill before reclaiming RPC ownership. Restoring first lets the
+            // still-running child finish REST and then lose the method acks.
             const stopped = await terminateTimedOutUpgradeCandidate(candidate)
             if (!stopped) {
                 // Surviving candidate + reclaim would recreate the race. Exit so
@@ -939,6 +951,26 @@ async function applyRunnerSelfUpgradeUnlocked(options: {
             // Do NOT rewrite the durable marker — a failed target must not become
             // the next supervisor restart's entrypoint.
             const reacquired = await reacquireRunnerLockAfterFailedHandoff()
+            if (reacquired) {
+                try {
+                    await options.rebindRunnerProof?.()
+                } catch (error) {
+                    logger.debug('[SELF-UPGRADE] Failed to restore parent runner proof; exiting', error)
+                    if (options.requestShutdown) {
+                        options.requestShutdown()
+                    } else {
+                        setTimeout(() => {
+                            process.exit(1)
+                        }, 250)
+                    }
+                    return scheduleExit({
+                        status: 'failed',
+                        message: 'Replacement did not register and parent runner proof could not be restored',
+                        channel: options.offer.channel,
+                    })
+                }
+                options.restoreRpcOwnership?.()
+            }
             if (!reacquired) {
                 logger.debug('[SELF-UPGRADE] Could not re-acquire runner lock after failed handoff; exiting cleanly')
                 if (options.requestShutdown) {

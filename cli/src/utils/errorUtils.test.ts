@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { extractErrorInfo, apiValidationError } from './errorUtils'
+import {
+    extractErrorInfo,
+    apiValidationError,
+    isMachineEnrollmentConflictError,
+    isRetryableConnectionError,
+    isRunnerProofRequiredError,
+} from './errorUtils'
 
 describe('extractErrorInfo', () => {
     it('extracts serverProtocolVersion from axios-style response header', () => {
@@ -83,5 +89,40 @@ describe('apiValidationError', () => {
         const info = extractErrorInfo(err)
         expect(info.serverProtocolVersion).toBe(2)
         expect(info.messageLower).toContain('invalid /cli/')
+    })
+})
+
+describe('isRetryableConnectionError enrollment conflicts (#2038)', () => {
+    function axiosError(status: number, bodyError: string) {
+        return {
+            message: `Request failed with status code ${status}`,
+            response: {
+                status,
+                data: { error: bodyError },
+            },
+        }
+    }
+
+    it('does not retry 409 machine tag mismatch', () => {
+        const error = axiosError(409, 'Machine tag mismatch')
+        expect(isMachineEnrollmentConflictError(error)).toBe(true)
+        expect(isRetryableConnectionError(error)).toBe(false)
+    })
+
+    it('does not retry 500 machine tag mismatch (legacy hub defense)', () => {
+        const error = axiosError(500, 'Machine tag mismatch')
+        expect(isRetryableConnectionError(error)).toBe(false)
+    })
+
+    it('classifies proof-required 409 separately from generic tag mismatch', () => {
+        const proof = axiosError(409, 'Machine runner proof mismatch; re-enroll with a new machine id')
+        expect(isRunnerProofRequiredError(proof)).toBe(true)
+        expect(isRetryableConnectionError(proof)).toBe(false)
+        expect(isRunnerProofRequiredError(axiosError(409, 'Machine tag mismatch'))).toBe(false)
+    })
+
+    it('still retries unrelated 503', () => {
+        const error = axiosError(503, 'Not ready')
+        expect(isRetryableConnectionError(error)).toBe(true)
     })
 })

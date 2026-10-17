@@ -16,8 +16,10 @@ import { getConfiguration } from '../../configuration'
 import { mapExternalRefRouteError } from '../../sync/externalRefErrors'
 import { readSessionSummaryContractEnabled } from '../../config/sessionSummaryContract'
 import { constantTimeEquals } from '../../utils/crypto'
+import { verifyRunnerProof } from '../../utils/runnerProof'
 import { parseAccessToken } from '../../utils/accessToken'
 import type { Machine, Session, SyncEngine } from '../../sync/syncEngine'
+import { MachineTagConflictError } from '../../store/machines'
 import { SessionIdentityConflictError, SessionNotAdoptableError } from '../../store/sessions'
 
 const bearerSchema = z.string().regex(/^Bearer\s+(.+)$/i)
@@ -116,12 +118,21 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
             if (existingMachine && existingMachine.namespace !== namespace) {
                 return c.json({ error: 'Machine access denied' }, 403)
             }
-            engine.getOrCreateMachine(
-                machineInput.id,
-                machineInput.metadata,
-                machineInput.runnerState ?? null,
-                namespace
-            )
+            try {
+                engine.getOrCreateMachine(
+                    machineInput.id,
+                    machineInput.metadata,
+                    machineInput.runnerState ?? null,
+                    namespace,
+                    machineInput.tag,
+                    machineInput.runnerProof
+                )
+            } catch (error) {
+                if (error instanceof MachineTagConflictError) {
+                    return c.json({ error: error.message }, 409)
+                }
+                throw error
+            }
         }
 
         try {
@@ -522,8 +533,23 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
         if (existing && existing.namespace !== namespace) {
             return c.json({ error: 'Machine access denied' }, 403)
         }
-        const machine = engine.getOrCreateMachine(parsed.data.id, parsed.data.metadata, parsed.data.runnerState ?? null, namespace)
-        return c.json({ machine })
+        try {
+            const machine = engine.getOrCreateMachine(
+                parsed.data.id,
+                parsed.data.metadata,
+                parsed.data.runnerState ?? null,
+                namespace,
+                parsed.data.tag,
+                parsed.data.runnerProof
+            )
+            return c.json({ machine })
+        } catch (error) {
+            // Enrollment conflicts are client-correctable; never bare 500 (#2038 / #287).
+            if (error instanceof MachineTagConflictError) {
+                return c.json({ error: error.message }, 409)
+            }
+            throw error
+        }
     })
 
     app.get('/machines/:id', (c) => {
@@ -538,6 +564,106 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
             return c.json({ error: resolved.error }, resolved.status)
         }
         return c.json({ machine: resolved.machine })
+    })
+
+    // Read-only. GET /machines/:id does not return the stored tag, and a
+    // proof-less POST can create or refresh a row (#288).
+    app.post('/machines/:id/check-tag', async (c) => {
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ error: 'Not ready' }, 503)
+        }
+        const machineId = c.req.param('id')
+        const namespace = c.get('namespace')
+        const json = await c.req.json().catch(() => null)
+        const tag = json && typeof json === 'object' && typeof json.tag === 'string'
+            ? json.tag.trim()
+            : ''
+        if (!tag) {
+            return c.json({ error: 'tag is required' }, 400)
+        }
+        const material = engine.getMachineAuthMaterial(machineId)
+        if (!material) {
+            return c.json({ error: 'Machine not found' }, 404)
+        }
+        if (material.namespace !== namespace) {
+            return c.json({ error: 'Machine access denied' }, 403)
+        }
+        if (!material.tag) {
+            return c.json({ error: 'Legacy machine must be re-enrolled with a new machine id' }, 409)
+        }
+        if (!constantTimeEquals(material.tag, tag)) {
+            return c.json({ error: 'Machine tag mismatch' }, 409)
+        }
+        return c.json({ ok: true })
+    })
+
+    // Destination tag + runner proof authorize the move. Proof-less source
+    // migration is only for missing/legacy/unbound rows. A live tagged source
+    // needs its own tag+proof so one runner cannot pull another machine's
+    // sessions (#288).
+    app.post('/machines/:id/migrate-sessions', async (c) => {
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ error: 'Not ready' }, 503)
+        }
+        const toMachineId = c.req.param('id')
+        const namespace = c.get('namespace')
+        const json = await c.req.json().catch(() => null)
+        const fromMachineId = json && typeof json === 'object' && typeof json.fromMachineId === 'string'
+            ? json.fromMachineId.trim()
+            : ''
+        const tag = json && typeof json === 'object' && typeof json.machineTag === 'string'
+            ? json.machineTag.trim()
+            : ''
+        const runnerProof = json && typeof json === 'object' && typeof json.runnerProof === 'string'
+            ? json.runnerProof.trim()
+            : ''
+        const sourceTag = json && typeof json === 'object' && typeof json.sourceMachineTag === 'string'
+            ? json.sourceMachineTag.trim()
+            : ''
+        const sourceRunnerProof = json && typeof json === 'object' && typeof json.sourceRunnerProof === 'string'
+            ? json.sourceRunnerProof.trim()
+            : ''
+        if (!fromMachineId || !tag || !runnerProof) {
+            return c.json({ error: 'fromMachineId, machineTag, and runnerProof are required' }, 400)
+        }
+        if (fromMachineId === toMachineId) {
+            return c.json({ migrated: 0 })
+        }
+        const material = engine.getMachineAuthMaterial(toMachineId)
+        if (!material) {
+            return c.json({ error: 'Machine not found' }, 404)
+        }
+        if (material.namespace !== namespace) {
+            return c.json({ error: 'Machine access denied' }, 403)
+        }
+        if (!material.tag || !constantTimeEquals(material.tag, tag)) {
+            return c.json({ error: 'Machine tag mismatch' }, 409)
+        }
+        if (!verifyRunnerProof(runnerProof, material.runnerProofHash)) {
+            return c.json({ error: 'Runner proof mismatch' }, 403)
+        }
+        const source = engine.getMachineAuthMaterial(fromMachineId)
+        if (source) {
+            if (source.namespace !== namespace) {
+                return c.json({ error: 'Machine access denied' }, 403)
+            }
+            const sourceBound = Boolean(source.tag && source.runnerProofHash)
+            if (sourceBound) {
+                if (
+                    !sourceTag
+                    || !sourceRunnerProof
+                    || !source.tag
+                    || !constantTimeEquals(source.tag, sourceTag)
+                    || !verifyRunnerProof(sourceRunnerProof, source.runnerProofHash)
+                ) {
+                    return c.json({ error: 'Source machine continuity not proven' }, 403)
+                }
+            }
+        }
+        const migrated = engine.migrateSessionsMachineId(fromMachineId, toMachineId, namespace)
+        return c.json({ migrated })
     })
 
     return app

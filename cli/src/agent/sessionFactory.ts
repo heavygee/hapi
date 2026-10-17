@@ -9,7 +9,10 @@ import type { AgentState, MachineMetadata, Metadata, Session } from '@/api/types
 import { getInstalledCliMtimeMs, notifyRunnerSessionStarted } from '@/runner/controlClient'
 import { isVersionHandoffDisabledByEnv } from '@/runner/versionHandoff'
 import { durableTargetGeneration, readUpgradeTarget } from '@/upgrade/upgradeTarget'
-import { readSettings } from '@/persistence'
+import { readRunnerState, readSettings } from '@/persistence'
+import { getHapiRunnerProcessIdentity, isProcessAlive } from '@/utils/process'
+import { spawnHappyCLI } from '@/utils/spawnHappyCLI'
+import { extractErrorInfo, isRetryableConnectionError } from '@/utils/errorUtils'
 import { configuration } from '@/configuration'
 import { logger } from '@/ui/logger'
 import { runtimePath } from '@/projectPath'
@@ -210,15 +213,179 @@ function pickExistingSessionMetadata(metadata: Metadata | null | undefined): Par
     return preserved
 }
 
-async function getMachineIdOrExit(): Promise<string> {
+/**
+ * First launch spawns the runner and then opens a session. Registration can
+ * take as long as one POST timeout; a ~1s poll fails while the child is
+ * still connecting (#288). Vitest keeps the cap short so a missing row
+ * does not stall the suite.
+ */
+const SESSION_MACHINE_WAIT_MS = process.env.VITEST ? 1_000 : 150_000
+
+function throwIfMachineWaitAborted(signal?: AbortSignal): void {
+    if (!signal?.aborted) {
+        return
+    }
+    const reason = signal.reason
+    if (reason instanceof Error) {
+        throw reason
+    }
+    const error = new Error('Machine registration wait aborted')
+    error.name = 'AbortError'
+    throw error
+}
+
+function delayMachineWait(ms: number, signal?: AbortSignal): Promise<void> {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+            signal?.removeEventListener('abort', onAbort)
+            resolve()
+        }, ms)
+        const onAbort = (): void => {
+            clearTimeout(timer)
+            try {
+                throwIfMachineWaitAborted(signal)
+                reject(new Error('Machine registration wait aborted'))
+            } catch (error) {
+                reject(error)
+            }
+        }
+        if (signal?.aborted) {
+            onAbort()
+            return
+        }
+        signal?.addEventListener('abort', onAbort, { once: true })
+    })
+}
+
+function isTransientMachineLookup(error: unknown): boolean {
+    if (isRetryableConnectionError(error)) {
+        return true
+    }
+    const { axiosCode, messageLower } = extractErrorInfo(error)
+    return axiosCode === 'ECONNABORTED' || messageLower.includes('timeout')
+}
+
+/**
+ * A runner that has been up longer than the registration window without
+ * hubReadyAt is a pre-marker binary. It will not write the field. A new
+ * runner still inside that window may be rotating settings.machineId.
+ */
+function isLegacyLiveRunner(state: {
+    pid?: number
+    hubReadyAt?: number
+    startTime?: string
+} | null): boolean {
+    if (!state || typeof state.pid !== 'number' || !isProcessAlive(state.pid)) {
+        return false
+    }
+    if (typeof state.hubReadyAt === 'number' && state.hubReadyAt > 0) {
+        return false
+    }
+    const started = Date.parse(state.startTime ?? '')
+    // Older runners persisted startTime with toLocaleString(). Those strings
+    // do not parse, and that process will never write hubReadyAt.
+    if (!Number.isFinite(started)) {
+        return true
+    }
+    return Date.now() - started > SESSION_MACHINE_WAIT_MS
+}
+
+let runnerStartRequested = false
+
+/** Vitest isolation: the flag is process-wide otherwise. */
+export function resetRunnerStartForTests(): void {
+    runnerStartRequested = false
+}
+
+function requestRunnerStart(): void {
+    if (runnerStartRequested) {
+        return
+    }
+    runnerStartRequested = true
+    try {
+        const child = spawnHappyCLI(['runner', 'start-sync'], {
+            detached: true,
+            stdio: 'ignore',
+            env: process.env,
+        })
+        child.on('error', (error) => {
+            runnerStartRequested = false
+            logger.debug('[START] Runner spawn failed', error)
+        })
+        child.unref()
+    } catch (error) {
+        runnerStartRequested = false
+        logger.debug('[START] Failed to spawn runner for machine registration', error)
+    }
+}
+
+/**
+ * Session bootstrap must not POST /cli/machines. A tag-only create leaves a
+ * null proof hash, and the runner then rotates away from that row (#288).
+ *
+ * A recently started runner without hubReadyAt may still be rotating
+ * settings.machineId. A long-lived runner that never wrote the marker, or
+ * no runner at all, can use an existing row. A missing row starts the runner.
+ */
+async function resolveSessionMachine(
+    api: ApiClient,
+    identity: { machineId: string; machineTag?: string },
+    signal?: AbortSignal,
+): Promise<string> {
+    const deadline = Date.now() + SESSION_MACHINE_WAIT_MS
+    let machineId = identity.machineId
+    while (Date.now() < deadline) {
+        throwIfMachineWaitAborted(signal)
+        try {
+            const settings = await readSettings()
+            if (settings?.machineId) {
+                machineId = settings.machineId
+            }
+            const state = await readRunnerState().catch(() => null)
+            // Liveness alone is not a runner. A reused pid must not block startup.
+            const runnerAlive = typeof state?.pid === 'number'
+                && getHapiRunnerProcessIdentity(state.pid) === 'runner'
+            const runnerReady = runnerAlive
+                && typeof state?.hubReadyAt === 'number'
+                && state.hubReadyAt > 0
+            const registrationInProgress = runnerAlive && !runnerReady && !isLegacyLiveRunner(state)
+            if (!registrationInProgress) {
+                const existing = await api.getMachine(machineId)
+                if (existing) {
+                    const tag = settings?.machineTag?.trim()
+                    if (tag) {
+                        await api.confirmMachineTag(machineId, tag)
+                    }
+                    return existing.id
+                }
+                if (!runnerAlive) {
+                    requestRunnerStart()
+                }
+            }
+        } catch (error) {
+            throwIfMachineWaitAborted(signal)
+            if (!isTransientMachineLookup(error)) {
+                throw error
+            }
+        }
+        await delayMachineWait(200, signal)
+    }
+    throw new Error(
+        `Machine ${machineId} is not registered on the hub. `
+        + 'Start the runner so it can bind runnerProof, then retry.'
+    )
+}
+
+async function getMachineIdentityOrExit(): Promise<{ machineId: string; machineTag?: string }> {
     const settings = await readSettings()
     const machineId = settings?.machineId
     if (!machineId) {
         console.error(`[START] No machine ID found in settings, which is unexpected since authAndSetupMachineIfNeeded should have created it. Please report this issue on ${packageJson.bugs}`)
         process.exit(1)
     }
+    const machineTag = settings?.machineTag?.trim() || undefined
     logger.debug(`Using machineId: ${machineId}`)
-    return machineId
+    return { machineId, machineTag }
 }
 
 async function reportSessionStarted(sessionId: string, metadata: Metadata): Promise<void> {
@@ -244,11 +411,8 @@ export async function bootstrapSession(options: SessionBootstrapOptions): Promis
 
     const api = await ApiClient.create()
 
-    const machineId = await getMachineIdOrExit()
-    await api.getOrCreateMachine({
-        machineId,
-        metadata: buildMachineMetadata()
-    })
+    const identity = await getMachineIdentityOrExit()
+    const machineId = await resolveSessionMachine(api, identity)
 
     const metadata = buildSessionMetadata({
         flavor: options.flavor,
@@ -301,8 +465,8 @@ export async function bootstrapLazySession(options: SessionBootstrapOptions): Pr
     }
 
     const api = await ApiClient.create()
-    const machineId = await getMachineIdOrExit()
-    const machineMetadata = buildMachineMetadata()
+    const identity = await getMachineIdentityOrExit()
+    const machineId = identity.machineId
     const metadata = buildSessionMetadata({
         flavor: options.flavor,
         startedBy,
@@ -339,18 +503,26 @@ export async function bootstrapLazySession(options: SessionBootstrapOptions): Pr
 
     const session = api.sessionSyncClient(sessionInfo, {
         materialize: async (snapshot, signal) => {
+            // Defer hub machine touch until materialize so a pending lazy
+            // session does not register (or 409) before the user sends.
+            const resolvedMachineId = await resolveSessionMachine(api, identity, signal)
+            if (snapshot.metadata && snapshot.metadata.machineId !== resolvedMachineId) {
+                // Same object the pending client still holds. Leaving the old
+                // id here makes materialization reconcile the hub row backward.
+                snapshot.metadata.machineId = resolvedMachineId
+            }
+            const baseMetadata = snapshot.metadata ?? metadata
+            const sessionMetadata = resolvedMachineId === machineId
+                ? baseMetadata
+                : { ...baseMetadata, machineId: resolvedMachineId }
             const materialized = await api.getOrCreateSession({
                 id: requestedId,
                 tag: sessionTag,
-                metadata: snapshot.metadata ?? metadata,
+                metadata: sessionMetadata,
                 state: snapshot.agentState,
                 model: options.model,
                 modelReasoningEffort: options.modelReasoningEffort,
                 effort: options.effort,
-                machine: {
-                    id: machineId,
-                    metadata: machineMetadata
-                },
                 timeoutMs: 10_000,
                 signal
             })
@@ -390,12 +562,8 @@ export async function bootstrapExistingSession(options: {
 }): Promise<SessionBootstrapResult> {
     const startedBy = options.startedBy ?? 'terminal'
     const api = await ApiClient.create()
-    const machineId = await getMachineIdOrExit()
-
-    await api.getOrCreateMachine({
-        machineId,
-        metadata: buildMachineMetadata()
-    })
+    const identity = await getMachineIdentityOrExit()
+    const machineId = await resolveSessionMachine(api, identity)
 
     const sessionInfo = await api.getSession(options.sessionId)
     // #1911 M1 belt: match hub merge-preserve scope — only hub-authored archive.

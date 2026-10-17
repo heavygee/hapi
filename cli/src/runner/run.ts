@@ -1,4 +1,5 @@
 import fs from 'fs/promises';
+import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 
 import { ApiClient } from '@/api/api';
@@ -30,7 +31,7 @@ import {
 import { PERMISSION_MODES } from '@hapi/protocol/modes';
 import { RUNNER_CAPABILITIES } from '@hapi/protocol';
 import { withRetry } from '@/utils/time';
-import { isRetryableConnectionError } from '@/utils/errorUtils';
+import { extractErrorInfo, isRetryableConnectionError } from '@/utils/errorUtils';
 
 import { cleanupRunnerState, getInstalledCliMtimeMs, isRunnerRunningCurrentlyInstalledHappyVersion, stopRunner, waitForRunnerHandoff } from './controlClient';
 import { startRunnerControlServer } from './controlServer';
@@ -279,7 +280,10 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
 
   try {
     // Ensure auth and machine registration BEFORE anything else
-    const { machineId } = await authAndSetupMachineIfNeeded();
+    const { machineId, machineTag } = await authAndSetupMachineIfNeeded();
+    // Memory-only generation proof (#1473). Cold restart rebinds hash in place
+    // when machineTag matches — keep this process-local, never persist to disk.
+    const runnerProof = randomUUID();
     logger.debug('[RUNNER RUN] Auth and machine setup complete');
 
     // Setup state - key by PID
@@ -1708,7 +1712,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       sharedCodexRuntime: true,
       pid: process.pid,
       httpPort: controlPort,
-      startTime: new Date().toLocaleString(),
+      startTime: new Date().toISOString(),
       startedWithCliVersion: packageJson.version,
       startedWithCliMtimeMs,
       startedWithApiUrl: configuration.apiUrl,
@@ -1738,32 +1742,64 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     logger.debug(`[RUNNER RUN] Workspace roots: ${workspaceRoots?.join(', ') ?? '(not set)'}`);
 
     // Get or create machine (with retry for transient connection errors)
-    const machine = await withRetry(
-      () => api.getOrCreateMachine({
-        machineId,
-        metadata: buildMachineMetadata({
-            workspaceRoots,
-            startedCliMtimeMs: startedWithCliMtimeMs,
-            asRunner: true,
-            versionHandoffDisabled: startedWithVersionHandoffDisabled,
+    let machine;
+    try {
+      machine = await withRetry(
+        () => api.getOrCreateMachine({
+          machineId,
+          machineTag,
+          runnerProof,
+          metadata: buildMachineMetadata({
+              workspaceRoots,
+              startedCliMtimeMs: startedWithCliMtimeMs,
+              asRunner: true,
+              versionHandoffDisabled: startedWithVersionHandoffDisabled,
+          }),
+          runnerState: initialRunnerState
         }),
-        runnerState: initialRunnerState
-      }),
-      {
-        maxAttempts: 60,
-        minDelay: 1000,
-        maxDelay: 30000,
-        shouldRetry: isRetryableConnectionError,
-        onRetry: (error, attempt, nextDelayMs) => {
-          const errorMsg = error instanceof Error ? error.message : String(error)
-          logger.debug(`[RUNNER RUN] Failed to register machine (attempt ${attempt}), retrying in ${nextDelayMs}ms: ${errorMsg}`)
+        {
+          maxAttempts: 60,
+          minDelay: 1000,
+          maxDelay: 30000,
+          shouldRetry: isRetryableConnectionError,
+          onRetry: (error, attempt, nextDelayMs) => {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            const line = `[RUNNER RUN] Failed to register machine (attempt ${attempt}), retrying in ${nextDelayMs}ms: ${errorMsg}`
+            if (attempt >= 3) {
+              logger.warn(line)
+            } else {
+              logger.debug(line)
+            }
+          }
         }
-      }
-    );
+      );
+    } catch (error) {
+      const { httpStatus, responseErrorText, message } = extractErrorInfo(error)
+      const detail = responseErrorText || message
+      console.error('')
+      console.error('FATAL: Runner failed to register machine with the hub.')
+      console.error(`  Machine ID: ${machineId}`)
+      console.error(`  Hub status: ${httpStatus ?? 'n/a'}`)
+      console.error(`  Detail: ${detail}`)
+      console.error('  Check that ~/.hapi/settings.json machineTag matches the hub machines.tag row.')
+      console.error('  Run `hapi doctor` for a registration probe. Do not wipe tag unless re-enrolling.')
+      console.error('')
+      throw error
+    }
     logger.debug(`[RUNNER RUN] Machine registered: ${machine.id}`);
+    // Legacy re-enroll can return a new id. Heartbeats rewrite fileState, so
+    // the persisted identity must match settings or the next start kills us.
+    if (machine.id !== fileState.startedWithMachineId) {
+      fileState.startedWithMachineId = machine.id
+      writeRunnerState(fileState)
+    }
 
     // Create realtime machine session
-    const apiMachine = api.machineSyncClient(machine, { workspaceRoots });
+    const apiMachine = api.machineSyncClient(machine, {
+      workspaceRoots,
+      machineTag,
+      runnerProof,
+    });
 
     // Set RPC handlers
     apiMachine.setRPCHandlers({
@@ -1772,8 +1808,11 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       requestShutdown: () => requestShutdown('hapi-app')
     });
 
-    // Connect to server
-    apiMachine.connect();
+    // hubReadyAt means RPCs are acknowledged, not merely that the socket
+    // connected. Handoff overlap retries registration (#288).
+    await apiMachine.connectUntilRpcReady()
+    fileState.hubReadyAt = Date.now()
+    writeRunnerState(fileState)
     scheduleCursorModelsPrewarm();
 
     // Visible startup banner. Use console.log so it always appears on stdout,
@@ -1943,8 +1982,9 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           // the child knows it is an authorized handoff and must NOT call
           // stopRunner() against us before writing its own state.
           // Codex review #814 [Major] on run.ts:892.
+          let replacement: ReturnType<typeof spawnHappyCLI> | null = null;
           try {
-            spawnHappyCLI(handoffArgv, {
+            replacement = spawnHappyCLI(handoffArgv, {
               detached: true,
               stdio: 'ignore',
               env: {
@@ -1974,9 +2014,26 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
 
           logger.debug(`[RUNNER RUN] Spawned replacement runner with argv: ${JSON.stringify(handoffArgv)}; released lock; waiting for handoff`);
 
-          const handoffOk = await waitForRunnerHandoff(process.pid, { timeoutMs: 30_000 });
+          // hubReadyAt is written only after RPC acks. Release our methods
+          // first or the child and this process wait on each other (#288).
+          apiMachine.releaseRpcOwnership();
+          // REST registration alone can take the 60s POST timeout. Reclaiming
+          // RPC ownership before that finishes deadlocks a still-live child.
+          // Child budget is one 60s machine POST plus 30s connect plus 30s RPC ack.
+          const handoffOk = await waitForRunnerHandoff(process.pid, { timeoutMs: 150_000 });
           if (!handoffOk) {
-            logger.debug(`[RUNNER RUN] Replacement runner did not register within 30s; attempting to re-acquire lock and stay alive to avoid leaving the machine offline.`);
+            const stopped = typeof replacement?.pid === 'number'
+              ? await killProcessTreeByPid(replacement.pid, true)
+              : true;
+            if (!stopped) {
+              // A live grandchild still owns the handoff. Rebinding the proof
+              // or the lock from here races that process.
+              logger.debug('[RUNNER RUN] Could not stop timed-out replacement; exiting');
+              clearInterval(restartOnStaleVersionAndHeartbeat);
+              process.exit(1);
+              return;
+            }
+            logger.debug(`[RUNNER RUN] Replacement runner did not register within 150s; attempting to re-acquire lock and stay alive to avoid leaving the machine offline.`);
             // Re-acquire the lock with a long window (the child has likely
             // either succeeded and we're seeing a stale state, or it gave
             // up - in either case the lock should be available shortly).
@@ -1995,6 +2052,25 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
               return;
             }
             runnerLockHandle = reacquired;
+            try {
+              await apiMachine.rebindStoredRunnerProof();
+            } catch (error) {
+              // Child may already have replaced runner_proof_hash. Staying up
+              // with the old proof fails every later reconnect.
+              logger.debug('[RUNNER RUN] Failed to restore parent runner proof after failed handoff; exiting', error);
+              clearInterval(restartOnStaleVersionAndHeartbeat);
+              process.exit(1);
+              return;
+            }
+            apiMachine.restoreRpcOwnership();
+            // The child may have replaced runner.state.json with its own pid.
+            // The next heartbeat treats a foreign pid as a takeover and shuts
+            // this process down. Put our snapshot back first.
+            try {
+              writeRunnerState(fileState);
+            } catch (error) {
+              logger.debug('[RUNNER RUN] Failed to restore parent runner state after failed handoff', error);
+            }
             deferHandoffRetry();
             return;
           }

@@ -2,11 +2,13 @@
  * WebSocket client for machine/runner communication with hapi-hub
  */
 
+import axios from 'axios'
 import { io, type Socket } from 'socket.io-client'
 import { readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { logger } from '@/ui/logger'
 import { configuration } from '@/configuration'
+import { buildHubRequestHeaders } from '@/api/hubExtraHeaders'
 import type { ClientToServerEvents, ServerToClientEvents, Update, UpdateMachineBody } from '@hapi/protocol'
 import {
     ArchiveCodexSessionRpcRequestSchema,
@@ -615,6 +617,13 @@ export class ApiMachineClient {
                 offer,
                 downloadBaseUrl: configuration.apiUrl,
                 authToken: configuration.cliApiToken,
+                releaseRpcOwnership: () => {
+                    this.rpcHandlerManager.releaseRegisteredMethods()
+                },
+                restoreRpcOwnership: () => {
+                    this.rpcHandlerManager.resumeRegistration()
+                },
+                rebindRunnerProof: () => this.rebindStoredRunnerProof(),
                 requestShutdown: () => {
                     setTimeout(() => requestShutdown(), 500)
                 },
@@ -828,6 +837,66 @@ export class ApiMachineClient {
      * Transient `connect_error` events are ignored — Socket.IO reconnection
      * stays active until success or timeout.
      */
+    /**
+     * Child registration can rebind runner_proof_hash before hubReadyAt.
+     * Put this process's proof back or the next reconnect is rejected.
+     */
+    async rebindStoredRunnerProof(): Promise<void> {
+        const proof = this.runnerProof?.trim()
+        const tag = this.machineTag?.trim()
+        if (!proof || !tag) {
+            return
+        }
+        let lastError: unknown
+        for (let attempt = 1; attempt <= 3; attempt += 1) {
+            try {
+                await axios.post(
+                    `${configuration.apiUrl}/cli/machines`,
+                    {
+                        id: this.machine.id,
+                        tag,
+                        runnerProof: proof,
+                        metadata: this.machine.metadata ?? undefined,
+                        runnerState: this.machine.runnerState ?? null,
+                    },
+                    {
+                        headers: buildHubRequestHeaders({
+                            Authorization: `Bearer ${this.token}`,
+                            'Content-Type': 'application/json',
+                        }),
+                        timeout: 60_000,
+                    },
+                )
+                return
+            } catch (error) {
+                lastError = error
+                logger.debug(`[API MACHINE] Runner proof restore attempt ${attempt} failed`, error)
+                if (attempt < 3) {
+                    await new Promise((resolve) => setTimeout(resolve, 500))
+                }
+            }
+        }
+        throw lastError instanceof Error
+            ? lastError
+            : new Error('Failed to restore runner proof')
+    }
+
+    /** Let a replacement runner register the same methods during handoff. */
+    releaseRpcOwnership(): void {
+        this.rpcHandlerManager.releaseRegisteredMethods()
+    }
+
+    /** Re-claim methods after a failed handoff so this process can keep serving. */
+    restoreRpcOwnership(): void {
+        this.rpcHandlerManager.resumeRegistration()
+    }
+
+    /** Socket connect plus hub ack of the machine RPC handlers. */
+    async connectUntilRpcReady(timeoutMs = 30_000): Promise<void> {
+        await this.connectUntilReady(timeoutMs)
+        await this.rpcHandlerManager.whenHandlersRegistered(timeoutMs)
+    }
+
     connectUntilReady(timeoutMs = 30_000): Promise<void> {
         return new Promise((resolve, reject) => {
             this.connect()

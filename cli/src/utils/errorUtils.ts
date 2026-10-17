@@ -79,6 +79,28 @@ export function extractErrorInfo(error: unknown): ErrorInfo {
 }
 
 /**
+ * Machine enrollment conflicts (tag/proof) must never spin forever even if a
+ * hub still maps them to 500 (#2038 / heavygee#287). Prefer hub 409; this is
+ * defense in depth for older hubs.
+ */
+export function isMachineEnrollmentConflictError(error: unknown): boolean {
+    const { responseErrorText, message } = extractErrorInfo(error)
+    const text = `${responseErrorText} ${message}`.toLowerCase()
+    return text.includes('machine tag mismatch')
+        || text.includes('runner proof mismatch')
+        || text.includes('runner proof missing')
+        || text.includes('re-enroll with a new machine id')
+        || text.includes('legacy machine must be re-enrolled')
+}
+
+/** Bound proof hash, client did not present a matching proof. Must not rotate identity. */
+export function isRunnerProofRequiredError(error: unknown): boolean {
+    const { responseErrorText, message } = extractErrorInfo(error)
+    const text = `${responseErrorText} ${message}`.toLowerCase()
+    return text.includes('runner proof mismatch') || text.includes('runner proof missing')
+}
+
+/**
  * Check if an error is a retryable connection error
  *
  * Retryable errors:
@@ -87,16 +109,23 @@ export function extractErrorInfo(error: unknown): ErrorInfo {
  * - ENOTFOUND - DNS resolution failed
  * - ENETUNREACH - network unreachable
  * - ECONNRESET - connection reset
- * - 5xx - server errors
+ * - 5xx - server errors (except machine enrollment conflicts)
  *
  * Non-retryable errors:
  * - 401 - authentication failed
  * - 403 - permission denied
  * - 404 - endpoint not found
+ * - 409 - conflicts (including machine tag/proof enrollment)
  * - other 4xx errors
+ * - machine enrollment conflict bodies even when status is 5xx
  */
 export function isRetryableConnectionError(error: unknown): boolean {
     const { axiosCode, httpStatus } = extractErrorInfo(error)
+
+    // Enrollment conflicts are never "transient connection" failures.
+    if (isMachineEnrollmentConflictError(error)) {
+        return false
+    }
 
     // Retryable network errors
     if (axiosCode === 'ECONNREFUSED' ||
@@ -112,6 +141,6 @@ export function isRetryableConnectionError(error: unknown): boolean {
         return true
     }
 
-    // Other errors (401, 403, 404, etc.) are not retryable
+    // Other errors (401, 403, 404, 409, etc.) are not retryable
     return false
 }

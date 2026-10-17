@@ -22,8 +22,7 @@ import {
     LEGACY_MACHINE_REENROLL_MESSAGE,
     rotateMachineIdForLegacyReenroll,
 } from '@/ui/auth'
-import { apiValidationError } from '@/utils/errorUtils'
-import { logger } from '@/ui/logger'
+import { apiValidationError, isRunnerProofRequiredError } from '@/utils/errorUtils'
 import { ApiMachineClient } from './apiMachine'
 import { ApiSessionClient, type ApiSessionClientOptions } from './apiSession'
 import { buildHubRequestHeaders } from './hubExtraHeaders'
@@ -44,19 +43,6 @@ function isLegacyMachineReenrollError(error: unknown): boolean {
     // new machine id (#1473).
     return message.includes('re-enroll with a new machine id')
         || message === LEGACY_MACHINE_REENROLL_MESSAGE
-}
-
-/** Hub refuses untagged / tag-mismatched migrate-sessions (#1473 Blocker). */
-function isMigrateSourceContinuityError(error: unknown): boolean {
-    if (!axios.isAxiosError(error) || error.response?.status !== 403) {
-        return false
-    }
-    const body = error.response.data
-    if (!body || typeof body !== 'object') {
-        return false
-    }
-    const message = (body as { error?: unknown }).error
-    return message === 'Source machine continuity not proven'
 }
 
 export class ApiClient {
@@ -97,6 +83,11 @@ export class ApiClient {
         try {
             return await this.postSession(opts)
         } catch (error) {
+            // Proof-bound rows reject a tag-only embed. Rotating here would
+            // split the terminal session off the live runner (#288 P1).
+            if (isRunnerProofRequiredError(error)) {
+                throw error
+            }
             if (!opts.machine || !isLegacyMachineReenrollError(error)) {
                 throw error
             }
@@ -290,6 +281,11 @@ export class ApiClient {
         try {
             return await this.postMachine(opts)
         } catch (error) {
+            // Omitting runnerProof against a bound hash is not a legacy re-enroll.
+            // Only the runner process holds the memory-only proof (#288 P1).
+            if (isRunnerProofRequiredError(error) && !opts.runnerProof?.trim()) {
+                throw error
+            }
             if (!isLegacyMachineReenrollError(error) || opts.allowLegacyReenroll === false) {
                 throw error
             }
@@ -316,16 +312,9 @@ export class ApiClient {
                         runnerProof: opts.runnerProof,
                     })
                 } catch (migrateError) {
-                    // Untagged v23 sources cannot prove continuity on the
-                    // namespace migrate route (takeover hole). Keep the new
-                    // machine identity; leave legacy sessions on the old id
-                    // until an operator-trusted remap exists (#1473 Major).
-                    if (isMigrateSourceContinuityError(migrateError)) {
-                        logger.warn(
-                            `[API] Re-enrolled as ${machine.id}; sessions on ${fromMachineId} need operator-approved migration`
-                        )
-                        return machine
-                    }
+                    // Coming online on the new id while sessions stay on the
+                    // retired id breaks strictMachineId resume. Fail the
+                    // register so startup does not report success (#288).
                     const message = migrateError instanceof Error
                         ? migrateError.message
                         : String(migrateError)
@@ -336,6 +325,54 @@ export class ApiClient {
             }
             return machine
         }
+    }
+
+    /** Lookup only. 404 is null so session bootstrap can skip proof-bound re-registration. */
+    async getMachine(machineId: string): Promise<Machine | null> {
+        const response = await axios.get(
+            `${configuration.apiUrl}/cli/machines/${encodeURIComponent(machineId)}`,
+            {
+                headers: this.authHeaders(),
+                timeout: 15_000,
+                validateStatus: (status) => status === 404 || (status >= 200 && status < 300),
+            }
+        )
+        if (response.status === 404) {
+            return null
+        }
+        const parsed = CreateMachineResponseSchema.safeParse(response.data)
+        if (!parsed.success) {
+            throw apiValidationError('Invalid /cli/machines/:id response', response)
+        }
+        return parsed.data.machine
+    }
+
+    /**
+     * Confirm settings.machineTag against the stored row without creating or
+     * rebinding it. GET does not expose the tag (#288).
+     */
+    async confirmMachineTag(machineId: string, machineTag: string): Promise<void> {
+        const response = await axios.post(
+            `${configuration.apiUrl}/cli/machines/${encodeURIComponent(machineId)}/check-tag`,
+            { tag: machineTag },
+            {
+                headers: this.authHeaders(),
+                timeout: 15_000,
+                validateStatus: () => true,
+            },
+        )
+        if (response.status >= 200 && response.status < 300) {
+            return
+        }
+        const body = response.data
+        const responseErrorText = body && typeof body === 'object' && typeof body.error === 'string'
+            ? body.error
+            : ''
+        const error = new Error(responseErrorText || `Machine tag check failed (HTTP ${response.status})`)
+        Object.assign(error, {
+            response: { status: response.status, data: body },
+        })
+        throw error
     }
 
     private async postMachine(opts: {
@@ -523,6 +560,9 @@ export class ApiClient {
         toMachineId: string
         machineTag: string
         runnerProof: string
+        /** Required when the source row is still tagged and proof-bound. */
+        sourceMachineTag?: string
+        sourceRunnerProof?: string
     }): Promise<number> {
         const response = await axios.post(
             `${configuration.apiUrl}/cli/machines/${encodeURIComponent(opts.toMachineId)}/migrate-sessions`,
@@ -530,6 +570,8 @@ export class ApiClient {
                 fromMachineId: opts.fromMachineId,
                 machineTag: opts.machineTag,
                 runnerProof: opts.runnerProof,
+                ...(opts.sourceMachineTag ? { sourceMachineTag: opts.sourceMachineTag } : {}),
+                ...(opts.sourceRunnerProof ? { sourceRunnerProof: opts.sourceRunnerProof } : {}),
             },
             {
                 headers: this.authHeaders(),

@@ -21,6 +21,13 @@ export class RpcHandlerManager {
     private readonly logger: (message: string, data?: any) => void
     private socket: Socket | null = null
     private registerRetryTimers: Map<string, ReturnType<typeof setTimeout>> = new Map()
+    private registrationWaiters = new Map<string, {
+        promise: Promise<void>
+        resolve: () => void
+        settled: boolean
+    }>()
+    /** While true, keepalive and reconnect must not reclaim methods (#288). */
+    private registrationSuspended = false
 
     constructor(config: RpcHandlerConfig) {
         this.scopePrefix = config.scopePrefix
@@ -35,7 +42,7 @@ export class RpcHandlerManager {
 
         this.handlers.set(prefixedMethod, handler)
 
-        if (this.socket) {
+        if (this.socket && !this.registrationSuspended) {
             this.emitRegister(prefixedMethod)
         }
     }
@@ -74,8 +81,55 @@ export class RpcHandlerManager {
      * reconnect (machine-alive can keep the row "active" while the registry
      * is empty).
      */
+    /**
+     * Resolves when every currently registered handler has been acknowledged
+     * by the hub. Connect alone is not enough: ownership conflicts retry
+     * asynchronously (#288).
+     */
+    async whenHandlersRegistered(timeoutMs: number): Promise<void> {
+        const pending = [...this.handlers.keys()].map((method) => this.waiterFor(method).promise)
+        if (pending.length === 0) {
+            return
+        }
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const timeout = new Promise<never>((_, reject) => {
+            timer = setTimeout(() => {
+                reject(new Error(`RPC handlers not acknowledged within ${timeoutMs}ms`))
+            }, timeoutMs)
+        })
+        try {
+            await Promise.race([Promise.all(pending), timeout])
+        } finally {
+            if (timer) clearTimeout(timer)
+        }
+    }
+
+    /**
+     * Drop hub ownership of every method this socket registered.
+     * Version handoff must do this before the replacement waits for acks:
+     * the hub refuses a second owner, and the old process will not exit
+     * until the replacement writes hubReadyAt (#288).
+     */
+    releaseRegisteredMethods(): void {
+        this.registrationSuspended = true
+        const socket = this.socket
+        if (!socket) {
+            return
+        }
+        this.clearRegisterRetries()
+        for (const method of this.handlers.keys()) {
+            socket.emit('rpc-unregister', { method })
+        }
+    }
+
+    /** End a handoff suspension and claim the methods again. */
+    resumeRegistration(): void {
+        this.registrationSuspended = false
+        this.reregisterAll()
+    }
+
     reregisterAll(): void {
-        if (!this.socket) {
+        if (!this.socket || this.registrationSuspended) {
             return
         }
         this.clearRegisterRetries()
@@ -113,12 +167,16 @@ export class RpcHandlerManager {
      * overlap), retry until accepted or this socket disconnects (#1473 Major).
      */
     private emitRegister(prefixedMethod: string, attempt = 0): void {
+        if (this.registrationSuspended) {
+            return
+        }
         const socket = this.socket
         if (!socket) {
             return
         }
+        const waiter = this.waiterFor(prefixedMethod)
         const onAck = (err: Error | null, response?: { registered?: boolean }) => {
-            if (this.socket !== socket) {
+            if (this.registrationSuspended || this.socket !== socket) {
                 return
             }
             // No-ack emitters (unit mocks, older servers): treat as fire-and-forget ok.
@@ -128,6 +186,10 @@ export class RpcHandlerManager {
                     ? true
                     : response.registered === true
             if (registered) {
+                if (!waiter.settled) {
+                    waiter.settled = true
+                    waiter.resolve()
+                }
                 const pending = this.registerRetryTimers.get(prefixedMethod)
                 if (pending) {
                     clearTimeout(pending)
@@ -152,6 +214,24 @@ export class RpcHandlerManager {
             ? socket.timeout(5_000)
             : socket
         withTimeout.emit('rpc-register', payload, onAck)
+    }
+
+    private waiterFor(prefixedMethod: string): {
+        promise: Promise<void>
+        resolve: () => void
+        settled: boolean
+    } {
+        const existing = this.registrationWaiters.get(prefixedMethod)
+        if (existing) {
+            return existing
+        }
+        let resolve!: () => void
+        const promise = new Promise<void>((done) => {
+            resolve = done
+        })
+        const waiter = { promise, resolve, settled: false }
+        this.registrationWaiters.set(prefixedMethod, waiter)
+        return waiter
     }
 
     private clearRegisterRetries(): void {

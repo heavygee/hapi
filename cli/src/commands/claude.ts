@@ -5,7 +5,9 @@ import type { StartOptions } from '@/claude/runClaude'
 import { CLAUDE_PERMISSION_MODES } from '@hapi/protocol/modes'
 import { configuration } from '@/configuration'
 import { isRunnerRunningCurrentlyInstalledHappyVersion } from '@/runner/controlClient'
+import { readRunnerState } from '@/persistence'
 import { authAndSetupMachineIfNeeded } from '@/ui/auth'
+import { detachedReplacementOwnsState } from '@/commands/runner'
 import { logger } from '@/ui/logger'
 import { initializeToken } from '@/ui/tokenInit'
 import { spawnHappyCLI } from '@/utils/spawnHappyCLI'
@@ -101,6 +103,10 @@ export const claudeCommand: CommandDefinition = {
         if (!(await isRunnerRunningCurrentlyInstalledHappyVersion())) {
             logger.debug('Starting hapi background service...')
 
+            // Old runner may still own runner.state.json until handoff finishes.
+            const previous = await readRunnerState().catch(() => null)
+            const previousPid = typeof previous?.pid === 'number' ? previous.pid : null
+
             const runnerProcess = spawnHappyCLI(['runner', 'start-sync'], {
                 detached: true,
                 stdio: 'ignore',
@@ -108,7 +114,16 @@ export const claudeCommand: CommandDefinition = {
             })
             runnerProcess.unref()
 
-            await new Promise(resolve => setTimeout(resolve, 200))
+            // Stay until the replacement owns runner.state.json and is hub-ready.
+            // A still-live previous PID must not count (#288).
+            const spawnedDeadline = Date.now() + 150_000
+            while (Date.now() < spawnedDeadline) {
+                const state = await readRunnerState().catch(() => null)
+                if (detachedReplacementOwnsState(state, runnerProcess.pid, previousPid)) {
+                    break
+                }
+                await new Promise(resolve => setTimeout(resolve, 200))
+            }
         }
 
         try {

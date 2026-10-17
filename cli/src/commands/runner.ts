@@ -2,6 +2,7 @@ import chalk from 'chalk'
 import { existsSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, resolve } from 'node:path'
+import { readRunnerState } from '@/persistence'
 import { startRunner } from '@/runner/run'
 import {
     checkIfRunnerRunningAndCleanupStaleState,
@@ -10,10 +11,89 @@ import {
     stopRunnerSession
 } from '@/runner/controlClient'
 import { getLatestRunnerLog } from '@/ui/logger'
+import { getHapiRunnerProcessIdentity, isProcessAlive, killProcessTreeByPid } from '@/utils/process'
 import { spawnHappyCLI } from '@/utils/spawnHappyCLI'
 import { runDoctorCommand } from '@/ui/doctor'
 import { initializeToken } from '@/ui/tokenInit'
 import type { CommandDefinition } from './types'
+
+/**
+ * Parent `runner start` must not declare success until hub registration wrote hubReadyAt.
+ *
+ * On Windows, `HAPI_CLI_EXECUTABLE=hapi.cmd` makes `childPid` the cmd.exe wrapper
+ * while runner.state.json stores the binary grandchild. A different live PID
+ * with hubReadyAt is the same success the handoff helper already accepts.
+ */
+export function detachedRunnerHubReady(
+    state: { pid?: number; hubReadyAt?: number } | null | undefined,
+    childPid: number | undefined,
+    stateIdentity: (pid: number) => 'runner' | 'foreign' | 'unknown' | 'dead' = getHapiRunnerProcessIdentity,
+): boolean {
+    if (typeof state?.hubReadyAt !== 'number' || state.hubReadyAt <= 0) {
+        return false
+    }
+    if (typeof state.pid !== 'number' || !isProcessAlive(state.pid)) {
+        return false
+    }
+    if (typeof childPid === 'number' && state.pid === childPid) {
+        return true
+    }
+    // A reused pid can be alive and still carry an old hubReadyAt. Only a
+    // confirmed hapi runner, or the process we just spawned, counts.
+    return stateIdentity(state.pid) === 'runner'
+}
+
+/**
+ * Version-mismatch Claude spawn leaves the old runner alive until handoff.
+ * Do not treat that still-live previous PID as ready (#288).
+ */
+export function detachedReplacementOwnsState(
+    state: { pid?: number; hubReadyAt?: number } | null | undefined,
+    childPid: number | undefined,
+    previousPid: number | null | undefined,
+    stateIdentity: (pid: number) => 'runner' | 'foreign' | 'unknown' | 'dead' = getHapiRunnerProcessIdentity,
+): boolean {
+    if (typeof previousPid === 'number') {
+        if (typeof state?.hubReadyAt !== 'number' || state.hubReadyAt <= 0) {
+            return false
+        }
+        if (typeof state.pid !== 'number' || !isProcessAlive(state.pid)) {
+            return false
+        }
+        if (state.pid === previousPid) {
+            return false
+        }
+        if (typeof childPid === 'number' && state.pid === childPid) {
+            return true
+        }
+        return stateIdentity(state.pid) === 'runner'
+    }
+    return detachedRunnerHubReady(state, childPid, stateIdentity)
+}
+
+/** Wrapper and Windows grandchild to stop when hub registration never finishes. */
+export function runnerStartTimeoutPids(
+    childPid: number | undefined,
+    statePid: number | undefined,
+    isAlive: (pid: number) => boolean = isProcessAlive,
+    stateIdentity: (pid: number) => 'runner' | 'foreign' | 'unknown' | 'dead' = getHapiRunnerProcessIdentity,
+): number[] {
+    const pids: number[] = []
+    if (typeof childPid === 'number' && isAlive(childPid)) {
+        pids.push(childPid)
+    }
+    // A stale state file can name an unrelated live PID. Only the wrapper we
+    // spawned, or a process that is actually a hapi runner, may be killed.
+    if (
+        typeof statePid === 'number'
+        && statePid !== childPid
+        && isAlive(statePid)
+        && stateIdentity(statePid) === 'runner'
+    ) {
+        pids.push(statePid)
+    }
+    return pids
+}
 
 /**
  * Parses repeated `--workspace-root <path>` / `--workspace-root=<path>` from
@@ -151,19 +231,40 @@ export const runnerCommand: CommandDefinition = {
             })
             child.unref()
 
+            // One POST /cli/machines attempt can sit on a 60s timeout. Wait
+            // past that, then kill the child so a late success cannot outlive
+            // the failure we print (#288).
+            const readyWaitMs = 150_000
+            const pollMs = 100
             let started = false
-            for (let i = 0; i < 50; i++) {
-                if (await checkIfRunnerRunningAndCleanupStaleState()) {
+            const deadline = Date.now() + readyWaitMs
+            while (Date.now() < deadline) {
+                const state = await readRunnerState()
+                if (detachedRunnerHubReady(state, child.pid)) {
                     started = true
                     break
                 }
-                await new Promise(resolve => setTimeout(resolve, 100))
+                const wrapperAlive = typeof child.pid === 'number' && isProcessAlive(child.pid)
+                const replacementAlive = typeof state?.pid === 'number'
+                    && state.pid !== child.pid
+                    && isProcessAlive(state.pid)
+                if (!wrapperAlive && !replacementAlive) {
+                    break
+                }
+                await new Promise(resolve => setTimeout(resolve, pollMs))
+            }
+
+            if (!started) {
+                const state = await readRunnerState()
+                for (const pid of runnerStartTimeoutPids(child.pid, state?.pid)) {
+                    await killProcessTreeByPid(pid, true)
+                }
             }
 
             if (started) {
                 console.log('Runner started successfully')
             } else {
-                console.error('Failed to start runner')
+                console.error('Failed to start runner (hub registration did not complete)')
                 process.exit(1)
             }
             process.exit(0)

@@ -11,19 +11,25 @@ const {
     runDoctorCommandMock,
     initializeTokenMock,
     existsSyncMock,
-    statSyncMock
+    statSyncMock,
+    readRunnerStateMock,
+    isProcessAliveMock,
+    killProcessTreeByPidMock,
 } = vi.hoisted(() => ({
     checkIfRunnerRunningAndCleanupStaleStateMock: vi.fn(),
     listRunnerSessionsMock: vi.fn(async () => []),
     stopRunnerMock: vi.fn(async () => {}),
     stopRunnerSessionMock: vi.fn(async (_sessionId: string): Promise<'stopped' | 'already_gone' | 'still_alive'> => 'stopped'),
-    spawnHappyCLIMock: vi.fn(() => ({ unref: vi.fn() })),
+    spawnHappyCLIMock: vi.fn(() => ({ unref: vi.fn(), pid: 4242 })),
     startRunnerMock: vi.fn(async () => {}),
     getLatestRunnerLogMock: vi.fn(async () => null),
     runDoctorCommandMock: vi.fn(async () => {}),
     initializeTokenMock: vi.fn(async () => {}),
     existsSyncMock: vi.fn(() => true),
-    statSyncMock: vi.fn(() => ({ isDirectory: () => true }))
+    statSyncMock: vi.fn(() => ({ isDirectory: () => true })),
+    readRunnerStateMock: vi.fn(async () => ({ pid: 4242, hubReadyAt: 1 })),
+    isProcessAliveMock: vi.fn(() => true),
+    killProcessTreeByPidMock: vi.fn(async () => true),
 }))
 
 vi.mock('node:fs', async () => {
@@ -34,6 +40,16 @@ vi.mock('node:fs', async () => {
         statSync: statSyncMock
     }
 })
+
+vi.mock('@/persistence', () => ({
+    readRunnerState: readRunnerStateMock,
+}))
+
+vi.mock('@/utils/process', () => ({
+    isProcessAlive: isProcessAliveMock,
+    killProcessTreeByPid: killProcessTreeByPidMock,
+    getHapiRunnerProcessIdentity: vi.fn(() => 'runner'),
+}))
 
 vi.mock('@/runner/controlClient', () => ({
     checkIfRunnerRunningAndCleanupStaleState: checkIfRunnerRunningAndCleanupStaleStateMock,
@@ -62,7 +78,12 @@ vi.mock('@/ui/tokenInit', () => ({
     initializeToken: initializeTokenMock
 }))
 
-import { runnerCommand } from './runner'
+import {
+    detachedReplacementOwnsState,
+    detachedRunnerHubReady,
+    runnerCommand,
+    runnerStartTimeoutPids,
+} from './runner'
 
 function createContext(commandArgs: string[]) {
     return {
@@ -71,11 +92,73 @@ function createContext(commandArgs: string[]) {
     }
 }
 
+describe('detachedReplacementOwnsState', () => {
+    it('does not treat the previous runner pid as a successful replacement', () => {
+        expect(detachedReplacementOwnsState(
+            { pid: 100, hubReadyAt: 5 },
+            200,
+            100,
+            () => 'runner',
+        )).toBe(false)
+        expect(detachedReplacementOwnsState(
+            { pid: 200, hubReadyAt: 5 },
+            200,
+            100,
+            () => 'runner',
+        )).toBe(true)
+        expect(detachedReplacementOwnsState(
+            { pid: 300, hubReadyAt: 5 },
+            200,
+            100,
+            () => 'runner',
+        )).toBe(true)
+        expect(detachedReplacementOwnsState(
+            { pid: 300, hubReadyAt: 5 },
+            200,
+            100,
+            () => 'foreign',
+        )).toBe(false)
+    })
+})
+
+describe('detachedRunnerHubReady', () => {
+    it('accepts the wrapper pid or a live grandchild once hubReadyAt is set', () => {
+        expect(detachedRunnerHubReady({ pid: 4242, hubReadyAt: 5 }, 4242)).toBe(true)
+        expect(detachedRunnerHubReady({ pid: 4242 }, 4242)).toBe(false)
+        expect(detachedRunnerHubReady(null, 4242)).toBe(false)
+        isProcessAliveMock.mockReturnValue(true)
+        expect(detachedRunnerHubReady({ pid: 9001, hubReadyAt: 5 }, 4242)).toBe(true)
+        expect(detachedRunnerHubReady({ pid: 4242, hubReadyAt: 5 }, 4242)).toBe(true)
+        isProcessAliveMock.mockReturnValue(false)
+        expect(detachedRunnerHubReady({ pid: 9001, hubReadyAt: 5 }, 4242)).toBe(false)
+        expect(detachedRunnerHubReady({ pid: 4242, hubReadyAt: 5 }, 4242)).toBe(false)
+        isProcessAliveMock.mockReturnValue(true)
+        expect(detachedRunnerHubReady({ pid: 9001, hubReadyAt: 5 }, 4242, () => 'unknown')).toBe(false)
+        expect(detachedRunnerHubReady({ pid: 9001, hubReadyAt: 5 }, 4242, () => 'foreign')).toBe(false)
+        expect(detachedRunnerHubReady({ pid: 4242, hubReadyAt: 5 }, 4242, () => 'unknown')).toBe(true)
+    })
+
+    it('kills the wrapper and a live Windows grandchild after timeout', () => {
+        const alive = (pid: number) => pid === 10 || pid === 99
+        expect(runnerStartTimeoutPids(10, 99, alive, () => 'runner')).toEqual([10, 99])
+        expect(runnerStartTimeoutPids(10, 10, alive, () => 'runner')).toEqual([10])
+        expect(runnerStartTimeoutPids(10, 99, () => false, () => 'runner')).toEqual([])
+        expect(runnerStartTimeoutPids(10, 99, alive, () => 'unknown')).toEqual([10])
+        expect(runnerStartTimeoutPids(10, 99, alive, () => 'foreign')).toEqual([10])
+    })
+})
+
 describe('runnerCommand start', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         existsSyncMock.mockReturnValue(true)
         statSyncMock.mockReturnValue({ isDirectory: () => true })
+        checkIfRunnerRunningAndCleanupStaleStateMock.mockReset()
+        checkIfRunnerRunningAndCleanupStaleStateMock.mockResolvedValue(false)
+        readRunnerStateMock.mockReset()
+        readRunnerStateMock.mockResolvedValue({ pid: 4242, hubReadyAt: 1 })
+        isProcessAliveMock.mockReset()
+        isProcessAliveMock.mockReturnValue(true)
     })
 
     it('stops an existing runner before starting a new detached runner', async () => {
@@ -123,6 +206,26 @@ describe('runnerCommand start', () => {
             expect(consoleLogSpy).toHaveBeenCalledWith('Runner started successfully')
         } finally {
             consoleLogSpy.mockRestore()
+            exitSpy.mockRestore()
+        }
+    })
+
+    it('fails when the child dies before hub registration', async () => {
+        const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+        const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+            throw new Error(`process.exit:${code ?? 'undefined'}`)
+        }) as never)
+        checkIfRunnerRunningAndCleanupStaleStateMock.mockResolvedValue(false)
+        readRunnerStateMock.mockResolvedValue({ pid: 4242, hubReadyAt: 0 })
+        isProcessAliveMock.mockReturnValue(false)
+
+        try {
+            await expect(runnerCommand.run(createContext(['start']))).rejects.toThrow('process.exit:1')
+            expect(consoleErrorSpy).toHaveBeenCalledWith(
+                'Failed to start runner (hub registration did not complete)'
+            )
+        } finally {
+            consoleErrorSpy.mockRestore()
             exitSpy.mockRestore()
         }
     })

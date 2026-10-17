@@ -5,16 +5,28 @@ const {
     getSessionMock,
     getOrCreateSessionMock,
     getOrCreateMachineMock,
+    getMachineMock,
+    confirmMachineTagMock,
     sessionSyncClientMock,
     notifyRunnerSessionStartedMock,
-    readSettingsMock
+    readSettingsMock,
+    readRunnerStateMock,
+    isProcessAliveMock,
+    spawnHappyCLIMock,
+    getHapiRunnerProcessIdentityMock
 } = vi.hoisted(() => ({
     getSessionMock: vi.fn(),
     getOrCreateSessionMock: vi.fn(),
     getOrCreateMachineMock: vi.fn(),
+    getMachineMock: vi.fn(async (_id?: string): Promise<{ id: string } | null> => null),
+    confirmMachineTagMock: vi.fn(async () => {}),
     sessionSyncClientMock: vi.fn(),
     notifyRunnerSessionStartedMock: vi.fn(async () => ({})),
-    readSettingsMock: vi.fn()
+    readSettingsMock: vi.fn(),
+    readRunnerStateMock: vi.fn(async (): Promise<{ pid: number; hubReadyAt?: number; startTime?: string } | null> => ({ pid: 4242, hubReadyAt: 1 })),
+    isProcessAliveMock: vi.fn(() => true),
+    spawnHappyCLIMock: vi.fn(() => ({ unref: vi.fn(), on: vi.fn(), pid: 1 })),
+    getHapiRunnerProcessIdentityMock: vi.fn((): 'runner' | 'foreign' | 'unknown' | 'dead' => 'runner')
 }))
 
 vi.mock('@/api/api', () => ({
@@ -23,6 +35,8 @@ vi.mock('@/api/api', () => ({
             getSession: getSessionMock,
             getOrCreateSession: getOrCreateSessionMock,
             getOrCreateMachine: getOrCreateMachineMock,
+            getMachine: getMachineMock,
+            confirmMachineTag: confirmMachineTagMock,
             sessionSyncClient: sessionSyncClientMock
         })
     }
@@ -34,7 +48,17 @@ vi.mock('@/runner/controlClient', () => ({
 }))
 
 vi.mock('@/persistence', () => ({
-    readSettings: readSettingsMock
+    readSettings: readSettingsMock,
+    readRunnerState: readRunnerStateMock
+}))
+
+vi.mock('@/utils/process', () => ({
+    isProcessAlive: isProcessAliveMock,
+    getHapiRunnerProcessIdentity: getHapiRunnerProcessIdentityMock
+}))
+
+vi.mock('@/utils/spawnHappyCLI', () => ({
+    spawnHappyCLI: spawnHappyCLIMock
 }))
 
 vi.mock('@/configuration', () => ({
@@ -55,6 +79,7 @@ import {
     HAPI_SESSION_ID_ENV,
     bootstrapExistingSession,
     bootstrapLazySession,
+    resetRunnerStartForTests,
     bootstrapSession,
     buildMachineMetadata,
     buildSessionMetadata
@@ -96,9 +121,21 @@ describe('bootstrapExistingSession', () => {
         getSessionMock.mockReset()
         getOrCreateSessionMock.mockReset()
         getOrCreateMachineMock.mockReset()
+        getMachineMock.mockReset()
+        getMachineMock.mockResolvedValue({ id: 'machine-1' })
+        confirmMachineTagMock.mockReset()
+        confirmMachineTagMock.mockResolvedValue(undefined)
         sessionSyncClientMock.mockReset()
         notifyRunnerSessionStartedMock.mockClear()
         readSettingsMock.mockReset()
+        readRunnerStateMock.mockReset()
+        readRunnerStateMock.mockResolvedValue({ pid: 4242, hubReadyAt: 1 })
+        isProcessAliveMock.mockReset()
+        isProcessAliveMock.mockReturnValue(true)
+        spawnHappyCLIMock.mockClear()
+        resetRunnerStartForTests()
+        getHapiRunnerProcessIdentityMock.mockReset()
+        getHapiRunnerProcessIdentityMock.mockReturnValue('runner')
         delete process.env[HAPI_SESSION_ID_ENV]
     })
 
@@ -344,9 +381,21 @@ describe('bootstrapLazySession', () => {
     beforeEach(() => {
         getOrCreateSessionMock.mockReset()
         getOrCreateMachineMock.mockReset()
+        getMachineMock.mockReset()
+        getMachineMock.mockResolvedValue({ id: 'machine-1' })
+        confirmMachineTagMock.mockReset()
+        confirmMachineTagMock.mockResolvedValue(undefined)
         sessionSyncClientMock.mockReset()
         notifyRunnerSessionStartedMock.mockClear()
         readSettingsMock.mockReset()
+        readRunnerStateMock.mockReset()
+        readRunnerStateMock.mockResolvedValue({ pid: 4242, hubReadyAt: 1 })
+        isProcessAliveMock.mockReset()
+        isProcessAliveMock.mockReturnValue(true)
+        spawnHappyCLIMock.mockClear()
+        resetRunnerStartForTests()
+        getHapiRunnerProcessIdentityMock.mockReset()
+        getHapiRunnerProcessIdentityMock.mockReturnValue('runner')
         delete process.env[HAPI_SESSION_ID_ENV]
     })
 
@@ -403,6 +452,7 @@ describe('bootstrapLazySession', () => {
 
         const materialized = createSession()
         materialized.id = provisional.id
+        getMachineMock.mockResolvedValue({ id: 'machine-1' })
         getOrCreateSessionMock.mockResolvedValue(materialized)
         const snapshot = {
             metadata: {
@@ -413,13 +463,14 @@ describe('bootstrapLazySession', () => {
         }
         await options.materialize(snapshot, new AbortController().signal)
 
+        expect(getOrCreateMachineMock).not.toHaveBeenCalled()
         expect(getOrCreateSessionMock).toHaveBeenCalledWith(expect.objectContaining({
             id: provisional.id,
             metadata: snapshot.metadata,
             state: snapshot.agentState,
             timeoutMs: 10_000,
-            machine: expect.objectContaining({ id: 'machine-1' })
         }))
+        expect(getOrCreateSessionMock.mock.calls[0][0].machine).toBeUndefined()
 
         options.onMaterialized(materialized, snapshot)
         expect(notifyRunnerSessionStartedMock).toHaveBeenCalledWith(
@@ -427,15 +478,47 @@ describe('bootstrapLazySession', () => {
             expect.objectContaining({ codexSessionId: 'codex-thread-1' })
         )
     })
+
+    it('aborts the machine wait when materialize is cancelled', async () => {
+        sessionSyncClientMock.mockReturnValue({ isPending: () => true })
+        readSettingsMock.mockResolvedValue({ machineId: 'machine-1' })
+        readRunnerStateMock.mockResolvedValue({ pid: 4242, hubReadyAt: 0 })
+        getMachineMock.mockResolvedValue(null)
+
+        await bootstrapLazySession({
+            flavor: 'codex',
+            workingDirectory: '/tmp/project'
+        })
+        const [, options] = sessionSyncClientMock.mock.calls[0]
+        const controller = new AbortController()
+        controller.abort()
+        await expect(options.materialize({
+            metadata: { machineId: 'machine-1' },
+            agentState: {}
+        }, controller.signal)).rejects.toThrow(/abort/i)
+        expect(getOrCreateSessionMock).not.toHaveBeenCalled()
+    })
 })
 
 describe('bootstrapSession HAPI_SESSION_ID export', () => {
     beforeEach(() => {
         getOrCreateSessionMock.mockReset()
         getOrCreateMachineMock.mockReset()
+        getMachineMock.mockReset()
+        getMachineMock.mockResolvedValue({ id: 'machine-1' })
+        confirmMachineTagMock.mockReset()
+        confirmMachineTagMock.mockResolvedValue(undefined)
         sessionSyncClientMock.mockReset()
         notifyRunnerSessionStartedMock.mockClear()
         readSettingsMock.mockReset()
+        readRunnerStateMock.mockReset()
+        readRunnerStateMock.mockResolvedValue({ pid: 4242, hubReadyAt: 1 })
+        isProcessAliveMock.mockReset()
+        isProcessAliveMock.mockReturnValue(true)
+        spawnHappyCLIMock.mockClear()
+        resetRunnerStartForTests()
+        getHapiRunnerProcessIdentityMock.mockReset()
+        getHapiRunnerProcessIdentityMock.mockReturnValue('runner')
         delete process.env[HAPI_SESSION_ID_ENV]
     })
 
@@ -454,6 +537,207 @@ describe('bootstrapSession HAPI_SESSION_ID export', () => {
 
         expect(result.sessionInfo.id).toBe('hub-session-42')
         expect(process.env[HAPI_SESSION_ID_ENV]).toBe('hub-session-42')
+    })
+
+    it('references an existing hub machine without re-registering (#2038)', async () => {
+        const session = createSession()
+        getOrCreateSessionMock.mockResolvedValue(session)
+        getMachineMock.mockResolvedValue({ id: 'machine-1' })
+        sessionSyncClientMock.mockReturnValue({ isPending: () => false })
+        readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'secret-tag' })
+
+        await bootstrapSession({
+            flavor: 'claude',
+            workingDirectory: '/tmp/project'
+        })
+
+        expect(getMachineMock).toHaveBeenCalledWith('machine-1')
+        expect(confirmMachineTagMock).toHaveBeenCalledWith('machine-1', 'secret-tag')
+        expect(getOrCreateMachineMock).not.toHaveBeenCalled()
+    })
+
+    it('rejects an existing row when settings.machineTag does not match', async () => {
+        const session = createSession()
+        getOrCreateSessionMock.mockResolvedValue(session)
+        getMachineMock.mockResolvedValue({ id: 'machine-1' })
+        confirmMachineTagMock.mockRejectedValue(Object.assign(new Error('Machine tag mismatch'), {
+            response: { status: 409, data: { error: 'Machine tag mismatch' } },
+        }))
+        sessionSyncClientMock.mockReturnValue({ isPending: () => false })
+        readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'wrong-tag' })
+        readRunnerStateMock.mockResolvedValue(null)
+
+        await expect(bootstrapSession({
+            flavor: 'cursor',
+            workingDirectory: '/tmp/project'
+        })).rejects.toThrow(/Machine tag mismatch/)
+        expect(getOrCreateSessionMock).not.toHaveBeenCalled()
+    })
+
+    it('skips machine registration when the hub row already exists', async () => {
+        const session = createSession()
+        getOrCreateSessionMock.mockResolvedValue(session)
+        getMachineMock.mockResolvedValue({ id: 'machine-1' })
+        sessionSyncClientMock.mockReturnValue({ isPending: () => false })
+        readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'secret-tag' })
+
+        const result = await bootstrapSession({
+            flavor: 'claude',
+            workingDirectory: '/tmp/project'
+        })
+
+        expect(getOrCreateMachineMock).not.toHaveBeenCalled()
+        expect(result.machineId).toBe('machine-1')
+    })
+
+    it('uses an existing machine row when the runner is not running', async () => {
+        const session = createSession()
+        getOrCreateSessionMock.mockResolvedValue(session)
+        getMachineMock.mockResolvedValue({ id: 'machine-1' })
+        sessionSyncClientMock.mockReturnValue({ isPending: () => false })
+        readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'secret-tag' })
+        readRunnerStateMock.mockResolvedValue(null)
+        isProcessAliveMock.mockReturnValue(false)
+
+        const result = await bootstrapSession({
+            flavor: 'cursor',
+            workingDirectory: '/tmp/project'
+        })
+
+        expect(result.machineId).toBe('machine-1')
+        expect(getOrCreateMachineMock).not.toHaveBeenCalled()
+        expect(getMachineMock).toHaveBeenCalledWith('machine-1')
+    })
+
+    it('does not create a proof-less machine when the hub row is missing', async () => {
+        getMachineMock.mockResolvedValue(null)
+        sessionSyncClientMock.mockReturnValue({ isPending: () => false })
+        readSettingsMock.mockResolvedValue({ machineId: 'machine-1', machineTag: 'secret-tag' })
+        readRunnerStateMock.mockResolvedValue(null)
+        isProcessAliveMock.mockReturnValue(false)
+
+        await expect(bootstrapSession({
+            flavor: 'claude',
+            workingDirectory: '/tmp/project'
+        })).rejects.toThrow(/not registered on the hub/)
+        expect(getOrCreateMachineMock).not.toHaveBeenCalled()
+        expect(spawnHappyCLIMock).toHaveBeenCalledWith(['runner', 'start-sync'], expect.objectContaining({
+            detached: true,
+        }))
+    })
+
+    it('starts a runner when the state pid is not a hapi process', async () => {
+        getMachineMock.mockResolvedValue(null)
+        sessionSyncClientMock.mockReturnValue({ isPending: () => false })
+        readSettingsMock.mockResolvedValue({ machineId: 'machine-1' })
+        readRunnerStateMock.mockResolvedValue({
+            pid: 4242,
+            startTime: new Date().toISOString(),
+        })
+        isProcessAliveMock.mockReturnValue(true)
+        getHapiRunnerProcessIdentityMock.mockReturnValue('foreign')
+
+        await expect(bootstrapSession({
+            flavor: 'cursor',
+            workingDirectory: '/tmp/project'
+        })).rejects.toThrow(/not registered on the hub/)
+        expect(spawnHappyCLIMock).toHaveBeenCalled()
+    })
+
+    it('uses a long-lived runner that never wrote hubReadyAt', async () => {
+        const session = createSession()
+        getOrCreateSessionMock.mockResolvedValue(session)
+        getMachineMock.mockResolvedValue({ id: 'machine-1' })
+        sessionSyncClientMock.mockReturnValue({ isPending: () => false })
+        readSettingsMock.mockResolvedValue({ machineId: 'machine-1' })
+        readRunnerStateMock.mockResolvedValue({
+            pid: 4242,
+            startTime: new Date(Date.now() - 10 * 60_000).toISOString(),
+        })
+        isProcessAliveMock.mockReturnValue(true)
+
+        const result = await bootstrapSession({
+            flavor: 'cursor',
+            workingDirectory: '/tmp/project'
+        })
+
+        expect(result.machineId).toBe('machine-1')
+        expect(spawnHappyCLIMock).not.toHaveBeenCalled()
+    })
+
+    it('treats an unparseable legacy startTime as a live older runner', async () => {
+        const session = createSession()
+        getOrCreateSessionMock.mockResolvedValue(session)
+        getMachineMock.mockResolvedValue({ id: 'machine-1' })
+        sessionSyncClientMock.mockReturnValue({ isPending: () => false })
+        readSettingsMock.mockResolvedValue({ machineId: 'machine-1' })
+        readRunnerStateMock.mockResolvedValue({
+            pid: 4242,
+            startTime: '16/10/2026, 12:34:56',
+        })
+        isProcessAliveMock.mockReturnValue(true)
+
+        const result = await bootstrapSession({
+            flavor: 'cursor',
+            workingDirectory: '/tmp/project'
+        })
+
+        expect(result.machineId).toBe('machine-1')
+        expect(spawnHappyCLIMock).not.toHaveBeenCalled()
+    })
+
+    it('follows settings.machineId after the runner rotates a legacy row', async () => {
+        const session = createSession()
+        getOrCreateSessionMock.mockResolvedValue(session)
+        sessionSyncClientMock.mockReturnValue({ isPending: () => false })
+        let settingsReads = 0
+        readSettingsMock.mockImplementation(async () => {
+            settingsReads += 1
+            if (settingsReads < 3) {
+                return { machineId: 'machine-legacy', machineTag: 'secret-tag' }
+            }
+            return { machineId: 'machine-rotated', machineTag: 'secret-tag' }
+        })
+        let runnerPolls = 0
+        readRunnerStateMock.mockImplementation(async () => {
+            runnerPolls += 1
+            if (runnerPolls < 2) {
+                return { pid: 4242, hubReadyAt: 0, startTime: new Date().toISOString() }
+            }
+            return { pid: 4242, hubReadyAt: 1 }
+        })
+        getMachineMock.mockImplementation(async (id?: string) => ({ id: id ?? 'machine-legacy' }))
+
+        const result = await bootstrapSession({
+            flavor: 'claude',
+            workingDirectory: '/tmp/project'
+        })
+
+        expect(result.machineId).toBe('machine-rotated')
+        expect(getOrCreateSessionMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                metadata: expect.objectContaining({ machineId: 'machine-rotated' }),
+            })
+        )
+        expect(getOrCreateMachineMock).not.toHaveBeenCalled()
+    })
+
+    it('keeps polling when machine lookup hits a transient hub error', async () => {
+        const session = createSession()
+        getOrCreateSessionMock.mockResolvedValue(session)
+        sessionSyncClientMock.mockReturnValue({ isPending: () => false })
+        readSettingsMock.mockResolvedValue({ machineId: 'machine-1' })
+        getMachineMock
+            .mockRejectedValueOnce(Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }))
+            .mockResolvedValue({ id: 'machine-1' })
+
+        const result = await bootstrapSession({
+            flavor: 'claude',
+            workingDirectory: '/tmp/project'
+        })
+
+        expect(result.machineId).toBe('machine-1')
+        expect(getMachineMock).toHaveBeenCalledTimes(2)
     })
 
     it('passes reservedSessionId as getOrCreateSession id (adopt-stub, #1911)', async () => {
