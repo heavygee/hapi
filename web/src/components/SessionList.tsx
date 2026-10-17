@@ -124,9 +124,58 @@ import { getPathDisplayName } from '@/utils/path'
 import {
     shedToolbarSlots,
     toolbarActionBudget,
+    TOOLBAR_GAP_PX,
     TOOLBAR_ICON_PX,
     type ToolbarShedSlot
 } from '@/components/sessionToolbarShed'
+
+function MoreHorizontalIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+            aria-hidden="true"
+        >
+            <circle cx="5" cy="12" r="1.5" fill="currentColor" stroke="none" />
+            <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
+            <circle cx="19" cy="12" r="1.5" fill="currentColor" stroke="none" />
+        </svg>
+    )
+}
+
+function SessionListHeaderOverflow(props: { children: ReactNode }) {
+    const { t } = useTranslation()
+    return (
+        <Popover.Root>
+            <Popover.Trigger asChild>
+                <button
+                    type="button"
+                    data-testid="session-list-header-overflow"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                    title={t('sessions.toolbar.more')}
+                    aria-label={t('sessions.toolbar.more')}
+                >
+                    <MoreHorizontalIcon className="h-5 w-5" />
+                </button>
+            </Popover.Trigger>
+            <Popover.Portal>
+                <Popover.Content
+                    align="end"
+                    sideOffset={6}
+                    className="z-50 flex max-w-[min(100vw-1rem,20rem)] flex-wrap items-center justify-end gap-1 rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] p-1.5 shadow-xl"
+                >
+                    {props.children}
+                </Popover.Content>
+            </Popover.Portal>
+        </Popover.Root>
+    )
+}
 
 export type SessionToolbarExtra = {
     id: string
@@ -3040,11 +3089,15 @@ export function SessionList(props: {
         const el = headerActionsRef.current ?? headerRowRef.current
         if (!el || typeof ResizeObserver === 'undefined') return
         const ro = new ResizeObserver((entries) => {
-            const width = entries[0]?.contentRect.width
-            if (typeof width === 'number') setHeaderRowWidth(width)
+            const target = entries[0]?.target
+            const reported = entries[0]?.contentRect.width ?? 0
+            const client = target instanceof HTMLElement ? target.clientWidth : 0
+            const width = client > 0 ? client : reported
+            // Ignore 0 so a hidden frame cannot reopen the permissive path.
+            if (width > 0) setHeaderRowWidth(width)
         })
         ro.observe(el)
-        const initial = el.getBoundingClientRect().width
+        const initial = el.clientWidth || el.getBoundingClientRect().width
         if (initial > 0) setHeaderRowWidth(initial)
         return () => ro.disconnect()
     }, [showHeaderRow])
@@ -3383,7 +3436,7 @@ export function SessionList(props: {
                 <div
                     ref={headerRowRef}
                     data-testid="session-list-header-row"
-                    className="@container flex flex-nowrap items-center gap-1 px-2 py-1"
+                    className="@container flex min-w-0 w-full flex-nowrap items-center gap-1 px-2 py-1"
                 >
                     {showSearch ? (
                         <SessionListSearch
@@ -3419,8 +3472,25 @@ export function SessionList(props: {
                                 // kitchen chip are not in the ladder: the menu is
                                 // the mobile machine control, and the chip renders
                                 // nothing unless the kitchen is dirty (#2039).
-                                const budget = headerRowWidth > 0
-                                    ? headerRowWidth
+                                // Cap the actions-box reading by the real row
+                                // gutter (row − search) so a content-sized flex
+                                // item cannot claim every icon "fits" while they
+                                // paint past the split (#2039 desktop).
+                                const rowPx = headerRowRef.current?.clientWidth ?? 0
+                                const searchPx = headerRowRef.current
+                                    ?.querySelector<HTMLElement>('[data-testid="session-list-search"]')
+                                    ?.offsetWidth ?? 0
+                                const fromRow = rowPx > 0
+                                    ? Math.max(0, rowPx - searchPx - TOOLBAR_GAP_PX)
+                                    : 0
+                                const fromActions = headerRowWidth > 0 ? headerRowWidth : 0
+                                const gutter = fromActions > 0 && fromRow > 0
+                                    ? Math.min(fromActions, fromRow)
+                                    : fromActions > 0
+                                        ? fromActions
+                                        : fromRow
+                                const budget = gutter > 0
+                                    ? gutter
                                     : toolbarActionBudget(0, searchQuery.length > 0)
                                 const slotWidth = (id: string, fallback: number) => {
                                     const measured = toolbarSlotWidths[id] ?? 0
