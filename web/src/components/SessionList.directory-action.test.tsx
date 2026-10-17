@@ -134,7 +134,9 @@ describe('SessionList directory action', () => {
         expect(headerRow).toHaveAttribute('data-testid', 'session-list-header-row')
         expect(headerRow).toHaveClass('px-2')
         expect(headerRow).toHaveClass('py-1')
-        expect(headerRow).toHaveClass('flex-wrap')
+        expect(headerRow).toHaveClass('@container')
+        expect(headerRow).toHaveClass('flex-nowrap')
+        expect(headerRow.className.split(/\s+/)).not.toContain('flex-wrap')
     })
 
     it('hides the directory action for sessions without path metadata', () => {
@@ -203,7 +205,7 @@ describe('SessionList time filter', () => {
         // header wraps trailing actions instead.
         expect(searchControl?.parentElement).toHaveClass('relative', 'gap-1', 'shrink-0', 'max-w-full')
         expect(searchControl?.parentElement?.className.split(/\s+/)).not.toContain('min-w-0')
-        expect(screen.getByTestId('session-list-header-row')).toHaveClass('flex-wrap')
+        expect(screen.getByTestId('session-list-header-row')).toHaveClass('flex-nowrap', '@container')
         expect(screen.getByTestId('session-list-header-actions')).toBeInTheDocument()
         expect(screen.queryByPlaceholderText(SEARCH_PLACEHOLDER)).toBeNull()
 
@@ -1113,6 +1115,7 @@ describe('SessionList search toggle', () => {
                 onRefresh={vi.fn()}
                 isLoading={false}
                 renderHeader={false}
+                headerActions={<button type="button">Settings</button>}
                 api={null}
             />
         )
@@ -1134,15 +1137,17 @@ describe('SessionList search toggle', () => {
         expect(headerRow).toContainElement(actions)
         expect(actions).not.toContainElement(clearButton)
         expect(searchGroup).toContainElement(clearButton)
-        // Actions are a sibling flex child so wrap can move them off the search line.
+        // Actions stay on the same row; secondary chrome sheds instead of wrapping.
         expect(searchGroup.nextElementSibling).toBe(actions)
-        // Content width, not flex-1 min-w-0 — otherwise a 280px sidebar keeps
-        // the group beside search and its children overflow onto the calendar.
-        expect(actions).toHaveClass('w-max', 'shrink-0', 'flex-nowrap')
-        expect(actions.className.split(/\s+/)).not.toContain('min-w-0')
-        expect(actions.className.split(/\s+/)).not.toContain('flex-1')
-        expect(actions.className.split(/\s+/)).not.toContain('max-w-full')
+        expect(actions).toHaveClass('shrink-0', 'flex-nowrap')
         expect(actions.className.split(/\s+/)).not.toContain('flex-wrap')
+        expect(headerRow).toHaveClass('flex-nowrap', '@container')
+        expect(headerRow.className.split(/\s+/)).not.toContain('flex-wrap')
+        const secondary = screen.getByTestId('session-list-header-secondary')
+        expect(secondary).toHaveClass('hidden')
+        // Collapsed query chip → higher threshold before secondary returns.
+        expect(secondary.className.split(/\s+/)).toContain('@[32rem]:contents')
+        expect(secondary).toHaveTextContent('Settings')
     })
 
     it('gives expanded search a 48px clear end-cap with calendar immediately left (tiann/hapi#2019)', () => {

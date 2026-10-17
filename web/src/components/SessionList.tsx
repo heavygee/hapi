@@ -1955,13 +1955,13 @@ export function SessionList(props: {
         <div className="flex min-h-0 w-full flex-1 flex-col">
             <div className="session-list-scrollbar-offset mx-auto w-full max-w-content shrink-0">
             {showHeaderRow ? (
-                // Outer wrap only. The action group is one nowrap slab (w-max,
-                // shrink-0, no max-w-full): if it does not fit beside search it
-                // moves to the next line intact. Inner flex-wrap + max-w-full
-                // clamped the slab and split icons under the search (tiann/hapi#2039).
+                // One toolbar row always. Never flex-wrap: wrapping burned a whole
+                // line on Quest when the icon slab did not fit beside search
+                // (tiann/hapi#2039). Secondary chrome sheds via container query
+                // instead of taking a second row.
                 <div
                     data-testid="session-list-header-row"
-                    className="flex flex-wrap items-center gap-1 px-2 py-1"
+                    className="@container flex flex-nowrap items-center gap-1 px-2 py-1"
                 >
                     {showSearch ? (
                         <SessionListSearch
@@ -1981,7 +1981,7 @@ export function SessionList(props: {
                     {!(showSearch && searchExpanded) ? (
                         <div
                             data-testid="session-list-header-actions"
-                            className="ml-auto flex w-max shrink-0 flex-nowrap items-center justify-end gap-1"
+                            className="ml-auto flex shrink-0 flex-nowrap items-center justify-end gap-1"
                         >
                             {showMachineFilterBar ? (
                                 <MachineFilterMenu
@@ -2036,7 +2036,20 @@ export function SessionList(props: {
                                     <PlusIcon className="h-5 w-5" />
                                 </button>
                             ) : null}
-                            {props.headerActions}
+                            {props.headerActions ? (
+                                <div
+                                    data-testid="session-list-header-secondary"
+                                    className={cn(
+                                        // Shed browse/settings/import before they force a
+                                        // second toolbar row. Wider threshold when the
+                                        // collapsed query chip is present.
+                                        'hidden',
+                                        searchQuery.length > 0 ? '@[32rem]:contents' : '@[26rem]:contents'
+                                    )}
+                                >
+                                    {props.headerActions}
+                                </div>
+                            ) : null}
                         </div>
                     ) : null}
                 </div>

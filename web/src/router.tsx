@@ -96,26 +96,6 @@ function BackIcon(props: { className?: string }) {
     )
 }
 
-function PlusIcon(props: { className?: string }) {
-    return (
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="24"
-            height="24"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className={props.className}
-        >
-            <line x1="12" y1="5" x2="12" y2="19" />
-            <line x1="5" y1="12" x2="19" y2="12" />
-        </svg>
-    )
-}
-
 function FolderOpenIcon(props: { className?: string }) {
     return (
         <svg
@@ -246,7 +226,9 @@ function SessionsPage() {
                         onBrowse={canBrowse ? () => navigate({ to: '/browse' }) : undefined}
                         onRefresh={handleRefresh}
                         isLoading={isLoading}
-                        renderHeader={false}
+                        // New stays primary (renderHeader). Browse/settings are
+                        // secondary and shed on narrow session-list headers (#2039).
+                        renderHeader
                         headerActions={(
                             <div className="flex shrink-0 items-center gap-2">
                                 {canBrowse && (
@@ -266,17 +248,6 @@ function SessionsPage() {
                                     title={t('settings.title')}
                                 >
                                     <SettingsIcon className="h-5 w-5" />
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => navigate({
-                                        to: '/sessions/new',
-                                        ...PRESERVE_SESSION_SIDEBAR_SCROLL,
-                                    })}
-                                    className="session-list-new-button flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-link)] transition-colors"
-                                    title={t('sessions.new')}
-                                >
-                                    <PlusIcon className="h-5 w-5" />
                                 </button>
                             </div>
                         )}
