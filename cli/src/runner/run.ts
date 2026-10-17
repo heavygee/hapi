@@ -2033,7 +2033,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
               process.exit(1);
               return;
             }
-            logger.debug(`[RUNNER RUN] Replacement runner did not register within 90s; attempting to re-acquire lock and stay alive to avoid leaving the machine offline.`);
+            logger.debug(`[RUNNER RUN] Replacement runner did not register within 150s; attempting to re-acquire lock and stay alive to avoid leaving the machine offline.`);
             // Re-acquire the lock with a long window (the child has likely
             // either succeeded and we're seeing a stale state, or it gave
             // up - in either case the lock should be available shortly).
@@ -2055,7 +2055,12 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             try {
               await apiMachine.rebindStoredRunnerProof();
             } catch (error) {
-              logger.debug('[RUNNER RUN] Failed to restore parent runner proof after failed handoff', error);
+              // Child may already have replaced runner_proof_hash. Staying up
+              // with the old proof fails every later reconnect.
+              logger.debug('[RUNNER RUN] Failed to restore parent runner proof after failed handoff; exiting', error);
+              clearInterval(restartOnStaleVersionAndHeartbeat);
+              process.exit(1);
+              return;
             }
             apiMachine.restoreRpcOwnership();
             // The child may have replaced runner.state.json with its own pid.
