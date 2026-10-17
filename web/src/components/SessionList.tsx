@@ -1,6 +1,7 @@
 import {
     Children,
     cloneElement,
+    Fragment,
     isValidElement,
     useCallback,
     useEffect,
@@ -145,6 +146,9 @@ function stripTestIds(node: ReactNode): ReactNode {
     const nextChildren = element.props.children !== undefined
         ? stripTestIds(element.props.children)
         : element.props.children
+    if (element.type === Fragment) {
+        return cloneElement(element, undefined, nextChildren)
+    }
     return cloneElement(element, { 'data-testid': undefined }, nextChildren)
 }
 
