@@ -1284,7 +1284,9 @@ layers:
   # destination proof alone.
   # Follow-up after fbebd48b8: d2ba08aa6 — Claude version-mismatch spawn waits until the
   # replacement owns runner.state.json and hubReadyAt is set; still-live previous PID is not ready.
-  # Thin tip on soup HEAD 8d51206da: driver/2038-machine-tag-reregister @ d2ba08aa6
+  # Follow-up after d2ba08aa6: 300e9bd82 — declare mdast on shared + vitest on hub so
+  # fresh isolated-linker typecheck works (local oos-linux/test green).
+  # Thin tip on soup HEAD 8d51206da: driver/2038-machine-tag-reregister @ 300e9bd82
   # Parent pin: driver/2038-machine-tag-parent @ 8d51206da
   # PR: heavygee/hapi#288 (fork fortress — not upstream-landable alone)
   # Hub+cli → remat + hapi-restart-hub; tip-unique: 409 MachineTagConflict +
