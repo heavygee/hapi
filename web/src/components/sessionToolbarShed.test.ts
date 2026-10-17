@@ -32,6 +32,19 @@ describe('shedToolbarSlots', () => {
         expect(tighter.overflowIds).toEqual(['mark-all', 'settings', 'browse'])
     })
 
+    it('keeps the next icon when the hole is one gap short of its width', () => {
+        // blocked 110 + new 40 + filter 40 + More 40 + 3 gaps = 242.
+        // A 238px gutter leaves a 40px hole if filter is shed — one icon, minus the gap.
+        const slots = [
+            { id: 'blocked', keep: 2, widthPx: 110 },
+            { id: 'new', keep: 4, widthPx: 40 },
+            { id: 'filter', keep: 5, widthPx: 40 },
+        ]
+        const result = shedToolbarSlots(slots, 238)
+        expect(result.visibleIds).toEqual(['blocked', 'new', 'filter'])
+        expect(result.overflowIds).toEqual([])
+    })
+
     it('drops new only after the lower-priority controls are already in More', () => {
         // New + More. A single equal-width icon cannot be swapped for More
         // without also shedding the next one — More occupies a slot too.
