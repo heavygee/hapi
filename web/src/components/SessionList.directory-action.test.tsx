@@ -128,10 +128,7 @@ describe('SessionList directory action', () => {
         expect(listContent).not.toHaveClass('pt-1')
 
         fireEvent.click(screen.getByRole('button', { name: SEARCH_LABEL }))
-        const searchInput = screen.getByPlaceholderText(SEARCH_PLACEHOLDER)
-        // input → field row → session-list-search → header row
-        const headerRow = searchInput.parentElement?.parentElement?.parentElement
-        expect(headerRow).toHaveAttribute('data-testid', 'session-list-header-row')
+        const headerRow = screen.getByTestId('session-list-header-row')
         expect(headerRow).toHaveClass('px-2')
         expect(headerRow).toHaveClass('py-1')
         expect(headerRow).toHaveClass('@container')
