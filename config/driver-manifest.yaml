@@ -1314,6 +1314,14 @@ layers:
   # More — blocked-search test opens overflow before asserting the pill.
   - branch: driver/2039-blocked-search-test
 
+  # #292 — DEFAULT_FLEET_UPGRADE_POLICY=auto (joining fleet = consent).
+  # Thin tip on soup HEAD 31e67a6ac: driver/292-fleet-default-auto @ ee9445082
+  # Parent pin: driver/292-fleet-default-auto-parent @ 31e67a6ac
+  # PR: heavygee/hapi#293 (fork fortress — not upstream-landable alone)
+  # Hub+shared → remat + hapi-restart-hub; tip-unique: DEFAULT=auto + keepalive
+  # tests for hub-wide effective auto.
+  - branch: driver/292-fleet-default-auto
+
   # DROPPED 2026-10-06: driver/1933-claude-resume-amnesia — squash 94523eb0d is on
   # fork main (heavygee/hapi#204). Soup base is now origin/main, so tip-forward
   # absorbs it from the base; keeping the layer would double-apply / conflict.
