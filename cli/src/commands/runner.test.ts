@@ -78,7 +78,12 @@ vi.mock('@/ui/tokenInit', () => ({
     initializeToken: initializeTokenMock
 }))
 
-import { detachedRunnerHubReady, runnerCommand, runnerStartTimeoutPids } from './runner'
+import {
+    detachedReplacementOwnsState,
+    detachedRunnerHubReady,
+    runnerCommand,
+    runnerStartTimeoutPids,
+} from './runner'
 
 function createContext(commandArgs: string[]) {
     return {
@@ -86,6 +91,35 @@ function createContext(commandArgs: string[]) {
         commandArgs
     }
 }
+
+describe('detachedReplacementOwnsState', () => {
+    it('does not treat the previous runner pid as a successful replacement', () => {
+        expect(detachedReplacementOwnsState(
+            { pid: 100, hubReadyAt: 5 },
+            200,
+            100,
+            () => 'runner',
+        )).toBe(false)
+        expect(detachedReplacementOwnsState(
+            { pid: 200, hubReadyAt: 5 },
+            200,
+            100,
+            () => 'runner',
+        )).toBe(true)
+        expect(detachedReplacementOwnsState(
+            { pid: 300, hubReadyAt: 5 },
+            200,
+            100,
+            () => 'runner',
+        )).toBe(true)
+        expect(detachedReplacementOwnsState(
+            { pid: 300, hubReadyAt: 5 },
+            200,
+            100,
+            () => 'foreign',
+        )).toBe(false)
+    })
+})
 
 describe('detachedRunnerHubReady', () => {
     it('accepts the wrapper pid or a live grandchild once hubReadyAt is set', () => {

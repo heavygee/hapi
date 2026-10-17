@@ -43,6 +43,34 @@ export function detachedRunnerHubReady(
     return stateIdentity(state.pid) === 'runner'
 }
 
+/**
+ * Version-mismatch Claude spawn leaves the old runner alive until handoff.
+ * Do not treat that still-live previous PID as ready (#288).
+ */
+export function detachedReplacementOwnsState(
+    state: { pid?: number; hubReadyAt?: number } | null | undefined,
+    childPid: number | undefined,
+    previousPid: number | null | undefined,
+    stateIdentity: (pid: number) => 'runner' | 'foreign' | 'unknown' | 'dead' = getHapiRunnerProcessIdentity,
+): boolean {
+    if (typeof previousPid === 'number') {
+        if (typeof state?.hubReadyAt !== 'number' || state.hubReadyAt <= 0) {
+            return false
+        }
+        if (typeof state.pid !== 'number' || !isProcessAlive(state.pid)) {
+            return false
+        }
+        if (state.pid === previousPid) {
+            return false
+        }
+        if (typeof childPid === 'number' && state.pid === childPid) {
+            return true
+        }
+        return stateIdentity(state.pid) === 'runner'
+    }
+    return detachedRunnerHubReady(state, childPid, stateIdentity)
+}
+
 /** Wrapper and Windows grandchild to stop when hub registration never finishes. */
 export function runnerStartTimeoutPids(
     childPid: number | undefined,
