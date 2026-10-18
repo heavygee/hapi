@@ -6,6 +6,7 @@ import { ApiClient } from '@/api/api';
 import { TrackedSession } from './types';
 import { RunnerState, Metadata } from '@/api/types';
 import { SpawnSessionOptions, SpawnSessionResult } from '@/modules/common/rpcTypes';
+import { resolveWebhookTimeoutMs, webhookTimeoutHint } from './webhookTimeout';
 import { logger } from '@/ui/logger';
 import { authAndSetupMachineIfNeeded } from '@/ui/auth';
 import { configuration } from '@/configuration';
@@ -404,18 +405,6 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     }
     persistResumeProcesses();
 
-    // Webhook timeout tolerance. Opus 1M + --resume can legitimately take
-    // longer than the default 15s to reach the "Session started" webhook
-    // (observed real-world durations of 30s – 60min under rate-limit /
-    // heavy session restore). Allow advanced users to raise this ceiling
-    // so that slow starts no longer leave orphaned child processes which
-    // later report back as ghost sessions.
-    const envWebhookTimeout = Number(process.env.HAPI_RUNNER_WEBHOOK_TIMEOUT_MS);
-    const webhookTimeoutMs =
-      Number.isFinite(envWebhookTimeout) && envWebhookTimeout > 0
-        ? envWebhookTimeout
-        : 15_000;
-
     // Session spawning awaiter system
     const pidToAwaiter = new Map<number, (session: TrackedSession) => void>();
     const pidToErrorAwaiter = new Map<number, (errorMessage: string) => void>();
@@ -646,6 +635,16 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         };
       }
       const yolo = options.yolo === true;
+      // Webhook timeout tolerance, resolved per spawn so a Settings change on
+      // the hub applies to the next session without restarting this runner.
+      // Opus 1M + --resume can legitimately take far longer than the default
+      // 15s to reach the "Session started" webhook (observed 30s – 60min under
+      // rate-limit / heavy session restore), and constrained hosts (ChromeOS
+      // Crostini, #2062) exceed it on a plain cold create.
+      const webhookTimeoutMs = resolveWebhookTimeoutMs({
+        env: process.env.HAPI_RUNNER_WEBHOOK_TIMEOUT_MS,
+        requestedMs: options.sessionStartTimeoutMs
+      });
       // Cursor project MCP isolation refuses a second live bare `hapi` mailbox in
       // the same cwd. Dock/machine spawn uses sessionType=simple into the project
       // path — escalate to worktree so the new session gets its own mcp.json
@@ -937,6 +936,10 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             }
           }
 
+          if (reason === 'timeout') {
+            message += `. ${webhookTimeoutHint(webhookTimeoutMs)}`;
+          }
+
           const trimmedTail = stderrTail.trim();
           if (trimmedTail) {
             const compactTail = trimmedTail.replace(/\s+/g, ' ');
@@ -1009,9 +1012,6 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         logger.debug(`[RUNNER RUN] Waiting for session webhook for PID ${pid}`);
 
         const spawnResult = await new Promise<SpawnSessionResult>((resolve) => {
-          // Set timeout for webhook. Default is 15s but can be raised via
-          // HAPI_RUNNER_WEBHOOK_TIMEOUT_MS for users on slow models
-          // (e.g. opus[1m] --resume).
           const timeout = setTimeout(() => {
             void (async () => {
               clearAgentReadyTimeout();
@@ -1072,7 +1072,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
                 }
               }
 
-              logger.debug(`[RUNNER RUN] Session webhook timeout for PID ${pid}`);
+              logger.debug(`[RUNNER RUN] Session webhook timeout for PID ${pid} after ${webhookTimeoutMs}ms`);
               logStderrTail();
               resolve({
                 type: 'error',

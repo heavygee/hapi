@@ -6,6 +6,8 @@ import { Hono } from 'hono'
 import { STOCK_PEER_SPAWN_DEFAULTS } from '@hapi/protocol/peerSpawnDefaults'
 import type { WebAppEnv } from '../middleware/auth'
 import { createHubSettingsRoutes } from './hubSettings'
+import { SESSION_START_TIMEOUT_MS_MAX } from '@hapi/protocol'
+import { getSettingsFile, updateSettings } from '../../config/settings'
 import { writeSessionSummaryContractEnabled } from '../../config/sessionSummaryContract'
 import { writeSessionSummaryInChatEnabled } from '../../config/sessionSummaryInChat'
 
@@ -40,7 +42,8 @@ describe('GET/PUT /api/hub-settings', () => {
         expect(await response.json()).toEqual({
             sessionSummaryContract: false,
             sessionSummaryInChat: false,
-            peerSpawnDefaults: stockPeerSpawnDefaults
+            peerSpawnDefaults: stockPeerSpawnDefaults,
+            sessionStartTimeoutMs: null
         })
     })
 
@@ -55,14 +58,16 @@ describe('GET/PUT /api/hub-settings', () => {
         expect(await put.json()).toEqual({
             sessionSummaryContract: true,
             sessionSummaryInChat: false,
-            peerSpawnDefaults: stockPeerSpawnDefaults
+            peerSpawnDefaults: stockPeerSpawnDefaults,
+            sessionStartTimeoutMs: null
         })
 
         const get = await app.request('/api/hub-settings')
         expect(await get.json()).toEqual({
             sessionSummaryContract: true,
             sessionSummaryInChat: false,
-            peerSpawnDefaults: stockPeerSpawnDefaults
+            peerSpawnDefaults: stockPeerSpawnDefaults,
+            sessionStartTimeoutMs: null
         })
     })
 
@@ -79,7 +84,8 @@ describe('GET/PUT /api/hub-settings', () => {
         expect(await put.json()).toEqual({
             sessionSummaryContract: true,
             sessionSummaryInChat: true,
-            peerSpawnDefaults: stockPeerSpawnDefaults
+            peerSpawnDefaults: stockPeerSpawnDefaults,
+            sessionStartTimeoutMs: null
         })
     })
 
@@ -147,7 +153,8 @@ describe('GET/PUT /api/hub-settings', () => {
         expect(await get.json()).toEqual({
             sessionSummaryContract: false,
             sessionSummaryInChat: true,
-            peerSpawnDefaults: stockPeerSpawnDefaults
+            peerSpawnDefaults: stockPeerSpawnDefaults,
+            sessionStartTimeoutMs: null
         })
 
         const put = await tenantApp.request('/api/hub-settings', {
@@ -158,6 +165,63 @@ describe('GET/PUT /api/hub-settings', () => {
         expect(put.status).toBe(403)
     })
 
+    it('persists the session start timeout and clears it with null', async () => {
+        const { app } = await createApp()
+
+        const put = await app.request('/api/hub-settings', {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ sessionStartTimeoutMs: 60_000 })
+        })
+        expect(put.status).toBe(200)
+        expect(await put.json()).toEqual({
+            sessionSummaryContract: false,
+            sessionSummaryInChat: false,
+            sessionStartTimeoutMs: 60_000
+        })
+
+        const get = await app.request('/api/hub-settings')
+        expect(await get.json()).toEqual({
+            sessionSummaryContract: false,
+            sessionSummaryInChat: false,
+            sessionStartTimeoutMs: 60_000
+        })
+
+        const cleared = await app.request('/api/hub-settings', {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ sessionStartTimeoutMs: null })
+        })
+        expect(await cleared.json()).toEqual({
+            sessionSummaryContract: false,
+            sessionSummaryInChat: false,
+            sessionStartTimeoutMs: null
+        })
+    })
+
+    it('rejects a session start timeout outside the supported range', async () => {
+        const { app } = await createApp()
+        for (const value of [1_000, 24 * 60 * 60 * 1000, 30.5]) {
+            const response = await app.request('/api/hub-settings', {
+                method: 'PUT',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ sessionStartTimeoutMs: value })
+            })
+            expect(response.status).toBe(400)
+        }
+    })
+
+    it('clamps an out-of-range value that reached settings.json another way', async () => {
+        const { app, dataDir } = await createApp()
+        await updateSettings(getSettingsFile(dataDir), (current) => ({
+            settings: { ...current, sessionStartTimeoutMs: 24 * 60 * 60 * 1000 },
+            result: null
+        }))
+        const response = await app.request('/api/hub-settings')
+        expect((await response.json() as { sessionStartTimeoutMs: number }).sessionStartTimeoutMs)
+            .toBe(SESSION_START_TIMEOUT_MS_MAX)
+    })
+
     it('survives a prior write via settings helpers', async () => {
         const { app, dataDir } = await createApp()
         await writeSessionSummaryContractEnabled(dataDir, true)
@@ -166,7 +230,8 @@ describe('GET/PUT /api/hub-settings', () => {
         expect(await response.json()).toEqual({
             sessionSummaryContract: true,
             sessionSummaryInChat: true,
-            peerSpawnDefaults: stockPeerSpawnDefaults
+            peerSpawnDefaults: stockPeerSpawnDefaults,
+            sessionStartTimeoutMs: null
         })
     })
 })

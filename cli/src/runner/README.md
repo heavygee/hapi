@@ -146,7 +146,11 @@ Initiated by mobile app via backend RPC:
    - Configures agent-specific token environment
    - Spawns detached HAPI process with `--hapi-starting-mode remote --started-by runner`
    - Adds to `pidToTrackedSession` map
-   - Waits for the session-start webhook (15 seconds by default; `HAPI_RUNNER_WEBHOOK_TIMEOUT_MS` overrides)
+   - Waits for the session-start webhook. Resolution order, highest first:
+     `HAPI_RUNNER_WEBHOOK_TIMEOUT_MS` on this host (unclamped escape hatch for
+     headless/systemd installs), the hub's Settings -> Machines -> Session start
+     timeout sent with the spawn request (clamped to 5s-300s), then 15 seconds.
+     On timeout the child is tree-killed and the error names both controls.
 4. New HAPI process:
    - Creates session with backend, receives `happySessionId`
    - Calls `notifyRunnerSessionStarted()` to POST to runner's `/session-started`

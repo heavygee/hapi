@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { UpdateHubSettingsRequestSchema, type HubSettingsResponse } from '@hapi/protocol'
+import { UpdateHubSettingsRequestSchema, clampSessionStartTimeoutMs, type HubSettingsResponse } from '@hapi/protocol'
 import { mergePeerSpawnDefaults } from '@hapi/protocol/peerSpawnDefaults'
 import {
     getSettingsFile,
@@ -16,7 +16,8 @@ function toHubSettings(settings: Settings): HubSettingsResponse {
     return {
         sessionSummaryContract: settings.sessionSummaryContract === true,
         sessionSummaryInChat: settings.sessionSummaryInChat === true,
-        peerSpawnDefaults: mergePeerSpawnDefaults(settings.peerSpawnDefaults)
+        peerSpawnDefaults: mergePeerSpawnDefaults(settings.peerSpawnDefaults),
+        sessionStartTimeoutMs: clampSessionStartTimeoutMs(settings.sessionStartTimeoutMs)
     }
 }
 
@@ -53,6 +54,14 @@ export function createHubSettingsRoutes(dataDir: string): Hono<WebAppEnv> {
                     current,
                     parsed.data.peerSpawnDefaults
                 )
+            }
+            if (parsed.data.sessionStartTimeoutMs !== undefined) {
+                // null clears the override so runners fall back to their default.
+                if (parsed.data.sessionStartTimeoutMs === null) {
+                    delete settings.sessionStartTimeoutMs
+                } else {
+                    settings.sessionStartTimeoutMs = parsed.data.sessionStartTimeoutMs
+                }
             }
             return {
                 settings,

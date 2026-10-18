@@ -48,6 +48,7 @@ import type {
     UploadFileResponse
 } from '@hapi/protocol/apiTypes'
 import type { Server } from 'socket.io'
+import { getConfiguredSessionStartTimeoutMs } from '../config/sessionStartTimeout'
 import type { RpcRegistry } from '../socket/rpcRegistry'
 
 const DEFAULT_RPC_TIMEOUT_MS = 30_000
@@ -131,7 +132,9 @@ export type RpcListPiModelsResponse = PiModelsResponse
 export class RpcGateway {
     constructor(
         private readonly io: Server,
-        private readonly rpcRegistry: RpcRegistry
+        private readonly rpcRegistry: RpcRegistry,
+        /** Injectable for unit tests — avoids initialising the hub configuration singleton. */
+        private readonly resolveSessionStartTimeoutMs: () => Promise<number | null> = getConfiguredSessionStartTimeoutMs
     ) {
     }
 
@@ -279,6 +282,11 @@ export class RpcGateway {
         }
     > {
         try {
+            // Hub-configured wait for the session-start webhook (#2062). The
+            // runner clamps it and still lets HAPI_RUNNER_WEBHOOK_TIMEOUT_MS on
+            // the runner host win, so this is a hub-wide default rather than a
+            // value the hub imposes on a machine.
+            const sessionStartTimeoutMs = await this.resolveSessionStartTimeoutMs()
             const result = await this.machineRpc(
                 machineId,
                 RPC_METHODS.SpawnHappySession,
@@ -305,6 +313,7 @@ export class RpcGateway {
                     startingMode,
                     forkSession: forkSession === true,
                     resumePeerMintNonce,
+                    ...(sessionStartTimeoutMs !== null ? { sessionStartTimeoutMs } : {})
                 }
             )
             if (result && typeof result === 'object') {

@@ -26,6 +26,7 @@
         "./peerParentStamp": "./src/peerParentStamp.ts",
         "./sessionExport": "./src/sessionExport.ts",
         "./sessionLifecycle": "./src/sessionLifecycle.ts",
+        "./sessionStartTimeout": "./src/sessionStartTimeout.ts",
         "./types": "./src/types.ts",
         "./runPrEmojiBatch": "./src/runPrEmojiBatch.ts",
         "./attachGithubPrRef": "./src/attachGithubPrRef.ts",

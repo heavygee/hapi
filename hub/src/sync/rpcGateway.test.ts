@@ -4,7 +4,7 @@ import { PERMISSION_REQUEST_NOT_FOUND_MESSAGE } from '@hapi/protocol/rpcMethods'
 import type { RpcRegistry } from '../socket/rpcRegistry'
 import { PermissionRequestNotFoundError, RpcGateway, RpcTargetMissingError } from './rpcGateway'
 
-function createGateway() {
+function createGateway(resolveSessionStartTimeoutMs?: () => Promise<number | null>) {
     const timeouts: number[] = []
     const calls: Array<{ method: string; params: string }> = []
     const socket = {
@@ -45,11 +45,29 @@ function createGateway() {
     } as unknown as RpcRegistry
 
     return {
-        gateway: new RpcGateway(io, rpcRegistry),
+        gateway: new RpcGateway(io, rpcRegistry, resolveSessionStartTimeoutMs),
         timeouts,
         calls
     }
 }
+
+describe('RpcGateway spawn session-start timeout', () => {
+    it('forwards the hub-configured session start timeout to the runner', async () => {
+        const { gateway, calls } = createGateway(async () => 60_000)
+
+        await gateway.spawnSession('machine-1', '/workspace')
+
+        expect(JSON.parse(calls[0]!.params)).toMatchObject({ sessionStartTimeoutMs: 60_000 })
+    })
+
+    it('omits the field when nothing is configured, so the runner keeps its own default', async () => {
+        const { gateway, calls } = createGateway(async () => null)
+
+        await gateway.spawnSession('machine-1', '/workspace')
+
+        expect(JSON.parse(calls[0]!.params)).not.toHaveProperty('sessionStartTimeoutMs')
+    })
+})
 
 describe('RpcGateway RPC timeouts', () => {
     it('uses the default RPC timeout for regular machine RPCs', async () => {
