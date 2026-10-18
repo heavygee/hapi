@@ -62,11 +62,61 @@ describe('ExternalRefSchema', () => {
         }
     })
 
-    it('rejects unknown status values', () => {
+    it('accepts a status value outside this project\'s own vocabulary (operator decision, hapi#238 schema reconciliation)', () => {
+        // Regression: status used to be a hardcoded GithubPrStatusSchema enum
+        // — this fork's own chip-emoji vocabulary, not a universal concept
+        // every project embedding this schema shares. A project with its own
+        // PR-workflow status values must be able to write them without the
+        // wire schema rejecting the whole ref (and by extension the whole
+        // metadata object) over a string it doesn't recognize.
+        // GithubPrStatusSchema/GithubPrStatus still exist for this project's
+        // own UI code to use as a *display* convenience, just not as the
+        // wire-level validator.
         expect(ExternalRefSchema.safeParse({
             ...validPr,
             status: 'purple'
-        }).success).toBe(false)
+        }).success).toBe(true)
+    })
+
+    it('preserves fork-tooling fields beyond the ones this schema explicitly names (operator decision, hapi#238)', () => {
+        // Regression: a plain z.object() with no .passthrough() silently
+        // strips unrecognized keys on every parse — hapi-meta-daily.sh
+        // writes estateCode/openState/checks/merge beyond what this schema
+        // ever named, and those would vanish the moment metadata round-trips
+        // through this schema without this.
+        const parsed = ExternalRefSchema.safeParse({
+            ...validPr,
+            estateCode: 'fork',
+            openState: 'open',
+            checks: 'passing',
+            merge: 'clean'
+        })
+        expect(parsed.success).toBe(true)
+        if (parsed.success) {
+            expect(parsed.data).toMatchObject({ estateCode: 'fork', openState: 'open', checks: 'passing', merge: 'clean' })
+        }
+    })
+
+    it('accepts a GHE-hosted PR url, not just github.com (operator decision, hapi#238)', () => {
+        // A GHE-hosted project's PRs are exactly as valid a "connection" as a
+        // github.com one — the board feature already supports GHE hosts for
+        // issues; PRs are no more HAPI/github.com-specific.
+        const parsed = ExternalRefSchema.safeParse({
+            kind: 'github_pr',
+            repo: 'lockhouse/repo',
+            number: 9,
+            url: 'https://lhs.ghe.com/lockhouse/repo/pull/9',
+            role: 'primary'
+        })
+        expect(parsed.success).toBe(true)
+    })
+
+    it('still rejects a userinfo-deceptive url pointing at a different host than it displays', () => {
+        const parsed = ExternalRefSchema.safeParse({
+            ...validPr,
+            url: 'https://github.com@evil.example/tiann/hapi/pull/1160'
+        })
+        expect(parsed.success).toBe(false)
     })
 
     it('rejects invalid repo shape', () => {

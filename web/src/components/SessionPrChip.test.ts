@@ -69,6 +69,19 @@ describe('SessionPrChip helpers', () => {
         })
     })
 
+    it('falls back to the uncached display for a status outside this project\'s known vocabulary (operator decision, hapi#238 schema reconciliation)', () => {
+        // Regression: the wire schema stopped enforcing this fork's own
+        // chip-status enum, so a status value from a different project's
+        // own PR-workflow vocabulary (or just a typo) can now arrive here as
+        // a plain string the type system doesn't guarantee is one of the
+        // known values — must degrade gracefully, not crash or render junk.
+        expect(resolveGithubPrChipDisplay(baseRef({ status: 'purple' }), Date.now())).toEqual({
+            status: undefined,
+            stale: false
+        })
+        expect(formatGithubPrChipLabel(baseRef({ status: 'purple' }))).toBe('PR')
+    })
+
     it('does not infer a PR from title-like strings (structured refs only)', () => {
         // Callers must pass metadata.externalRefs — never parse "PR #1160" titles.
         expect(getPrimaryGithubPrRef(undefined)).toBeNull()
