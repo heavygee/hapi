@@ -14,7 +14,7 @@ import { useMachines } from '@/hooks/queries/useMachines'
 import { getMachineTitle } from '@/hooks/useMachineLabels'
 import { queryKeys } from '@/lib/query-keys'
 import { Button } from '@/components/ui/button'
-import { getNamespaceFromToken } from '@/components/settings/SettingsNav'
+import { getNamespaceFromToken } from '@/lib/namespace'
 import { SettingsPageContent, SettingsSection } from '@/components/settings/SettingsPrimitives'
 
 const SESSION_START_TIMEOUT_MIN_SECONDS = SESSION_START_TIMEOUT_MS_MIN / 1000
