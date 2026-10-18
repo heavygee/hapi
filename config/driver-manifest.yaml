@@ -1298,21 +1298,10 @@ layers:
   # Not product; keeps tip-forward verify green after MachineTag absorb.
   - branch: driver/fix-version-offer-query-test
 
-  # tiann/hapi#2039 / PR #2040 — narrow session toolbar. One nowrap row;
-  # shed by keep rank into More (blocked 2, new 4, filter 5, settings 6,
-  # mark-all 7, browse 8, overseer 9, import 10). Soup tip:
-  # driver/2039-toolbar-crowd @ d3aa1b6e0 (3b85c2cfb + blocked-search shrink test)
-  # Tip-unique verify marker: session-list-header-actions in web/dist
-  # Upstream thin: fix/2039-session-toolbar-crowd (worktree fix-2039-toolbar-crowd)
-  # Web-only → remat --build-web; hard-reload (no hub restart). Re-thin after dogfood bump.
-  - branch: driver/2039-toolbar-crowd
-
-  # Remat unblock: #2039 outer search is shrink-0 + max-w-full; blocked-header
-  # test still forbade shrink-0 from the earlier clear-target work. Thin tip on
-  # live driver 7e907c715 @ 9fb9af6d8.
-  # Follow-up dc858f6c7: with query chip active, #2039 folds BlockedJumpPill into
-  # More — blocked-search test opens overflow before asserting the pill.
-  - branch: driver/2039-blocked-search-test
+  # DROPPED 2026-10-18: driver/2039-toolbar-crowd + driver/2039-blocked-search-test
+  # — tiann/hapi#2040 merged (squash f13a1aae). Absorb from upstream/main on next remat.
+  # - branch: driver/2039-toolbar-crowd
+  # - branch: driver/2039-blocked-search-test
 
   # #292 — DEFAULT_FLEET_UPGRADE_POLICY=auto (joining fleet = consent).
   # Thin tip on soup HEAD 31e67a6ac: driver/292-fleet-default-auto @ ee9445082
