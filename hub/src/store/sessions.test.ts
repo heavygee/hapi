@@ -1133,6 +1133,60 @@ describe('updateSessionMetadata: protocol resume token preservation', () => {
         expect(metadata?.externalRefs).toEqual([])
     })
 
+    // Codex review (hapi#238): updateMetadataSchema accepts metadata as
+    // z.unknown(), so a malformed externalRefs element from an authenticated
+    // CLI used to reach reconcileExternalRefs' identity comparison and throw
+    // (e.g. calling .toLowerCase() on a ref missing `repo`) — caught by
+    // updateSessionMetadata's own try/catch, but that collapsed the ENTIRE
+    // write into a generic error instead of just dropping the one bad ref.
+    it('drops a malformed externalRefs element instead of throwing and failing the whole write', () => {
+        const store = makeStore()
+        const ref = { kind: 'github_issue', url: 'https://github.com/acme/repo/issues/1', repo: 'acme/repo', number: 1, linkedAt: 1 }
+        const session = store.sessions.getOrCreateSession(
+            'malformed-ref-element',
+            { path: '/tmp/project', host: 'example', externalRefs: [ref] },
+            null,
+            'default'
+        )
+
+        const malformed = { kind: 'github_issue' } // missing url/repo/number/linkedAt entirely
+        const result = store.sessions.updateSessionMetadata(
+            session.id,
+            { path: '/tmp/project', host: 'example', name: 'renamed', externalRefs: [malformed] },
+            session.metadataVersion,
+            'default'
+        )
+        expect(result.result).toBe('success')
+
+        const metadata = getMetadata(store, session.id)
+        expect(metadata?.name).toBe('renamed')
+        expect(metadata?.externalRefs).toEqual([])
+    })
+
+    it('keeps the valid refs and drops only the malformed one when a write mixes both', () => {
+        const store = makeStore()
+        const validRef = { kind: 'github_issue', url: 'https://github.com/acme/repo/issues/1', repo: 'acme/repo', number: 1, linkedAt: 1 }
+        const session = store.sessions.getOrCreateSession(
+            'mixed-valid-and-malformed-refs',
+            { path: '/tmp/project', host: 'example', externalRefs: [validRef] },
+            null,
+            'default'
+        )
+
+        const newValidRef = { kind: 'github_issue', url: 'https://github.com/acme/repo/issues/2', repo: 'acme/repo', number: 2, linkedAt: 2 }
+        const malformed = { kind: 'github_issue', url: 'not even a url', repo: 'acme/repo', number: 2, linkedAt: 2 }
+        const result = store.sessions.updateSessionMetadata(
+            session.id,
+            { path: '/tmp/project', host: 'example', externalRefs: [newValidRef, malformed] },
+            session.metadataVersion,
+            'default'
+        )
+        expect(result.result).toBe('success')
+
+        const metadata = getMetadata(store, session.id)
+        expect(metadata?.externalRefs).toEqual([validRef, newValidRef])
+    })
+
     // Codex review (hapi#238, second finding on this path): identity-only
     // collision handling (plain array-length no-op check) let a stale write
     // silently roll back a field-level update already applied directly to

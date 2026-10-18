@@ -2,7 +2,7 @@ import type { Database } from 'bun:sqlite'
 import { prepareCached } from './statementCache'
 import { bumpSessionDeletionEpoch } from './sessionInvalidation'
 import { randomUUID } from 'node:crypto'
-import { reconcileExternalRefs, type ExternalRef } from '@hapi/protocol/schemas'
+import { ExternalRefSchema, reconcileExternalRefs, type ExternalRef } from '@hapi/protocol/schemas'
 
 import type { StoredSession, VersionedUpdateResult } from './types'
 import { safeJsonParse } from './json'
@@ -135,8 +135,21 @@ function preserveCursorProtocolPair(
     return merged
 }
 
-function isExternalRefArray(value: unknown): value is ExternalRef[] {
-    return Array.isArray(value)
+// Was a type predicate that only checked Array.isArray, claiming the result
+// was ExternalRef[] without validating a single element — any array survived
+// (Codex review, hapi#238). The socket's own updateMetadataSchema accepts
+// metadata as z.unknown(), so an authenticated CLI sending a nonempty but
+// malformed externalRefs element could reach reconcileExternalRefs' identity
+// comparison and throw (e.g. `b.repo.toLowerCase()` on an element missing
+// `repo`) — caught by updateSessionMetadata's own try/catch, but that
+// collapses the ENTIRE write (every other field in it too) into a generic
+// {result: 'error'} instead of just dropping the one bad ref. Filtering
+// through ExternalRefSchema.safeParse per element keeps the valid ones and
+// silently drops anything malformed, rather than letting one bad element
+// poison the whole write.
+function toValidExternalRefs(value: unknown): ExternalRef[] {
+    if (!Array.isArray(value)) return []
+    return value.filter((item): item is ExternalRef => ExternalRefSchema.safeParse(item).success)
 }
 
 // Named CONTRIBUTION_FIELDS (matching scripts/tooling/verify-
@@ -158,8 +171,20 @@ function mergeContributionFields(
     merged: Record<string, unknown> | null
 ): Record<string, unknown> | null {
     merged = carryForwardIfMissing(prior, next, merged, CONTRIBUTION_FIELDS)
-    const priorRefs = isExternalRefArray(prior.externalRefs) ? prior.externalRefs : []
-    const nextRefs = isExternalRefArray(next.externalRefs) ? next.externalRefs : []
+    const priorRefs = toValidExternalRefs(prior.externalRefs)
+    const nextRefs = toValidExternalRefs(next.externalRefs)
+    // Sanitize next.externalRefs unconditionally once it's present, not just
+    // when reconciliation actually runs below — otherwise a malformed
+    // element would pass through into the persisted row untouched whenever
+    // priorRefs/nextRefs end up empty after filtering (Codex review,
+    // hapi#238). A next array that's entirely malformed filters down to [],
+    // which then reads as the already-established "deliberate unlink to
+    // empty" case below — safe (never throws, never persists garbage), even
+    // if not ideal for a genuinely buggy client.
+    if (next.externalRefs !== undefined) {
+        merged = merged ?? { ...next }
+        merged.externalRefs = nextRefs
+    }
     // An explicit `next.externalRefs = []` is a deliberate unlink-to-empty,
     // not a sparse/stale write merely missing some refs it didn't know
     // about yet — those two look identical as "an empty-ish array" without

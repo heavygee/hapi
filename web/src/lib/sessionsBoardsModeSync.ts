@@ -112,7 +112,35 @@ export function isBoardItemDetailNavigation(
  *
  * Callers must track `maxIndexSeen` across navigations themselves (it is not
  * global router state) and update it to `Math.max(maxIndexSeen, toIndex)`
- * after each call, regardless of the result.
+ * after each call, regardless of the result — seeded from the current entry's
+ * own index at mount (not a hardcoded 0), so a page reloaded mid-session
+ * already knows its real starting position.
+ *
+ * Known accepted gap (Codex review, hapi#238, investigated in depth — not an
+ * oversight): a page *reload* only resets what this ref has personally
+ * observed, not the browser's actual history stack. If, before the reload,
+ * the user had selected an item (pushing a higher index) and then gone Back,
+ * a Forward *after* the reload lands on that pre-existing higher index —
+ * which this ref has never seen since remounting — and gets misread as a
+ * fresh push. Seeding from `window.history.length` instead was considered
+ * and rejected: a genuine fresh push always lands at exactly
+ * `currentIndex + 1` regardless of how much (now-truncated) forward history
+ * used to exist beyond it, so that seed can just as easily misclassify an
+ * unrelated fresh push (a toast click, an in-chat link) as a pop — trading
+ * one bug for another, not fixing it. The one signal that *would* resolve
+ * this unambiguously — TanStack Router's own internal `HistoryAction` per
+ * commit — is recorded in `@tanstack/router-core`'s `locationHistoryActions`
+ * WeakMap, but that symbol isn't part of the package's public `exports` map
+ * (confirmed: a subpath import throws at resolution, not just at the type
+ * level) and the package's public events give no other way to correlate the
+ * real action with the specific `onBeforeNavigate` event that needs it
+ * (`router.history.subscribe` and raw `popstate` both fire for the *same*
+ * commit, but strictly *after* `onBeforeNavigate` has already run for it,
+ * since TanStack's own internal history subscriber — the one that actually
+ * computes and emits `onBeforeNavigate` — is always registered first). Given
+ * no accessible ground truth and no index-only heuristic that doesn't just
+ * relocate the ambiguity, this narrow sequence (select → Back → reload →
+ * Forward) is an accepted limitation rather than something to keep patching.
  */
 export function isHistoryPopNavigation(toIndex: number, maxIndexSeen: number): boolean {
     return toIndex <= maxIndexSeen
