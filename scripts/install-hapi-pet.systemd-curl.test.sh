@@ -74,5 +74,55 @@ fi
 rg -q 'companion' "$SCRIPT" || fail "expected companion-present branch"
 pass "script embeds user-pet units and guards BASH_SOURCE"
 
+# 5) #294: user-bus preflight fails closed without a bus (copy-paste, no silent nohup).
+rg -q 'hapi_pet_require_user_systemd_bus' "$SCRIPT" || fail "missing hapi_pet_require_user_systemd_bus"
+rg -q 'hapi_pet_require_user_systemd_bus' "$SCRIPT" || fail "install_user_pet_systemd must call preflight"
+# Call site is inside install_user_pet_systemd, before companion/embedded writes.
+awk '
+  /^install_user_pet_systemd\(\)/ { in_fn=1 }
+  in_fn && /hapi_pet_require_user_systemd_bus/ { found=1 }
+  in_fn && /^}$/ { exit }
+  END { exit found ? 0 : 1 }
+' "$SCRIPT" || fail "preflight must run at start of install_user_pet_systemd"
+
+probe_src="$(mktemp)"
+bus_err="$(mktemp)"
+{
+    echo 'log()  { printf "==> %s\n" "$1"; }'
+    echo 'fail() { printf "ERROR: %s\n" "$1" >&2; exit 1; }'
+    # Three consecutive helpers: bus_ok, linger_enabled, require.
+    awk '
+      /^hapi_pet_user_systemd_bus_ok\(\)/ { keep=1 }
+      keep { print }
+      keep && /^}$/ { n++; if (n == 3) exit }
+    ' "$SCRIPT"
+    echo 'hapi_pet_require_user_systemd_bus'
+} >"$probe_src"
+
+# Force a missing-bus probe: wrap systemctl so --user always fails even if this
+# developer machine has a real user session.
+set +e
+env PATH="/usr/bin:/bin" bash -c '
+  systemctl() {
+    if [[ "${1:-}" == "--user" ]]; then
+      echo "Failed to connect to user scope bus via local transport: \$DBUS_SESSION_BUS_ADDRESS and \$XDG_RUNTIME_DIR not defined" >&2
+      return 1
+    fi
+    command systemctl "$@"
+  }
+  export -f systemctl
+  # shellcheck disable=SC1090
+  source "'"$probe_src"'"
+' >"$bus_err" 2>&1
+bus_rc=$?
+set -e
+[[ "$bus_rc" -ne 0 ]] || fail "preflight should fail without user bus (rc=0); out=$(cat "$bus_err")"
+rg -q 'enable-linger' "$bus_err" || fail "preflight stderr missing enable-linger: $(cat "$bus_err")"
+rg -q 'user@[0-9]+\.service' "$bus_err" || fail "preflight stderr missing user@UID.service: $(cat "$bus_err")"
+rg -q 'Do not substitute nohup|systemd persistence' "$bus_err" \
+    || fail "preflight should refuse silent nohup: $(cat "$bus_err")"
+pass "#294 fail-fast without user bus (copy-paste linger + user@UID)"
+rm -f "$probe_src" "$bus_err"
+
 echo
 echo "All install-hapi-pet systemd curl regressions passed."
