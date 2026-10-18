@@ -1320,3 +1320,11 @@ layers:
   # fork main + PATH (~/.local/bin/hapi-tick → mirror scripts/tooling/hapi-tick.sh).
   # Upstream path still needs pluggable backend (systemd-only today).
   # - branch: tooling/hapi-tick-v1
+
+  # tiann/hapi#2062 — Settings -> Machines "Session start timeout" (session-start
+  # webhook wait) so slow hosts (ChromeOS Crostini) can raise it without editing
+  # systemd. Hub settings.json -> spawn RPC -> runner; HAPI_RUNNER_WEBHOOK_TIMEOUT_MS
+  # on the runner still wins. Thin tip on upstream/main @ 872da05a3.
+  # hub+cli+shared+web -> remat --build-web + hapi-restart-hub.
+  # Tip-unique web marker: "HAPI_RUNNER_WEBHOOK_TIMEOUT_MS keeps"
+  - branch: feat/2062-webhook-timeout-settings
