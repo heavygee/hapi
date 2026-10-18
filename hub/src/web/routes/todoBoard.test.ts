@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { Hono } from 'hono'
 import type { BoardItemsResponse, BoardsResponse } from '@hapi/protocol'
 import type { WebAppEnv } from '../middleware/auth'
-import { createBoardRoutes, makeBoardId, parseProjectUrl, parseValidatedItemUrl, resolveProjectView } from './todoBoard'
+import { createBoardRoutes, fetchAllProjectItems, makeBoardId, parseProjectUrl, parseValidatedItemUrl, resolveProjectView } from './todoBoard'
 
 const ENV_KEYS = [
     'HAPI_BOARD_HOST',
@@ -228,18 +228,30 @@ describe('GET /api/todo-boards', () => {
         expect(await response.json()).toEqual({ boards: [{ id: 'github.com::acme::42', label: 'acme/42' }] })
     })
 
-    it('ignores a non-numeric board number and falls back to the default', async () => {
+    it('treats a non-numeric board number with no owner set as unconfigured — never invents an owner/project (hapi#238)', async () => {
         process.env.HAPI_BOARD_NUMBER = 'not-a-number'
         const app = await createApp(() => ({ data: {} }))
         const response = await app.request('/api/todo-boards')
-        expect(await response.json()).toEqual({ boards: [{ id: 'github.com::heavygee::6', label: 'heavygee/6' }] })
+        expect(await response.json()).toEqual({ boards: [] })
     })
 
-    it('ignores a fractional board number and falls back to the default', async () => {
+    it('treats a fractional board number with no owner set as unconfigured — never invents an owner/project (hapi#238)', async () => {
         process.env.HAPI_BOARD_NUMBER = '1.5'
         const app = await createApp(() => ({ data: {} }))
         const response = await app.request('/api/todo-boards')
-        expect(await response.json()).toEqual({ boards: [{ id: 'github.com::heavygee::6', label: 'heavygee/6' }] })
+        expect(await response.json()).toEqual({ boards: [] })
+    })
+
+    it('treats an owner with no valid number as unconfigured — a partial HAPI_BOARD_* set must never fall back to a hardcoded owner/project (hapi#238)', async () => {
+        // Regression guard: this used to silently fall back to a hardcoded
+        // heavygee/6 board for *any* missing field, so an operator who set
+        // only HAPI_BOARD_OWNER (or mistyped HAPI_BOARD_NUMBER) would
+        // unknowingly load someone else's project. Owner and number must
+        // both be valid together, or there is no env-seeded board at all.
+        process.env.HAPI_BOARD_OWNER = 'acme'
+        const app = await createApp(() => ({ data: {} }))
+        const response = await app.request('/api/todo-boards')
+        expect(await response.json()).toEqual({ boards: [] })
     })
 })
 
@@ -573,6 +585,80 @@ describe('resolveProjectView', () => {
     it('surfaces top-level GraphQL errors without a "not found" message', () => {
         const result = resolveProjectView({ errors: [{ message: 'Could not resolve to a ProjectV2Owner' }] }, 8)
         expect(result).toEqual({ ok: false, error: 'Could not resolve to a ProjectV2Owner' })
+    })
+})
+
+describe('fetchAllProjectItems (operator-reported dogfood bug: #431 missing after manual refresh)', () => {
+    // Lockhouse Work has well over 100 items — items(first: 100) with no
+    // pagination silently dropped everything past page 1, so a card moved
+    // into a tracked status (or any item past that boundary) never appeared
+    // no matter how many times "refresh" was pressed, since refresh re-ran
+    // the exact same first-100 query rather than a real re-fetch of the
+    // whole board.
+    function page(nodeIds: string[], hasNextPage: boolean, endCursor: string | null = null): string {
+        return JSON.stringify({
+            data: {
+                repositoryOwner: {
+                    projectV2: {
+                        title: 'Lockhouse Work',
+                        items: {
+                            nodes: nodeIds.map(id => ({ id, content: null })),
+                            pageInfo: { hasNextPage, endCursor }
+                        }
+                    }
+                }
+            }
+        })
+    }
+
+    it('returns a single page unchanged when there is nothing more to fetch', async () => {
+        const execPage = async () => page(['a', 'b'], false)
+        const result = await fetchAllProjectItems(execPage)
+        expect(result.data?.repositoryOwner?.projectV2?.items?.nodes).toEqual([{ id: 'a', content: null }, { id: 'b', content: null }])
+    })
+
+    it('follows pageInfo.endCursor across pages and merges every item into one list', async () => {
+        const calls: Array<string | undefined> = []
+        const execPage = async (after: string | undefined) => {
+            calls.push(after)
+            if (after === undefined) return page(['a', 'b'], true, 'cursor-1')
+            if (after === 'cursor-1') return page(['c'], true, 'cursor-2')
+            return page(['d'], false)
+        }
+        const result = await fetchAllProjectItems(execPage)
+        expect(result.data?.repositoryOwner?.projectV2?.items?.nodes).toEqual([{ id: 'a', content: null }, { id: 'b', content: null }, { id: 'c', content: null }, { id: 'd', content: null }])
+        expect(calls).toEqual([undefined, 'cursor-1', 'cursor-2'])
+    })
+
+    it('stops at the page cap instead of looping forever on a pathological board', async () => {
+        let calls = 0
+        const execPage = async () => {
+            calls += 1
+            return page([`item-${calls}`], true, `cursor-${calls}`)
+        }
+        const result = await fetchAllProjectItems(execPage)
+        expect(calls).toBe(20)
+        expect(result.data?.repositoryOwner?.projectV2?.items?.nodes?.length).toBe(20)
+    })
+
+    it('returns top-level errors from the first page immediately, without paginating further', async () => {
+        let calls = 0
+        const execPage = async () => {
+            calls += 1
+            return JSON.stringify({ errors: [{ message: 'Could not resolve to a ProjectV2Owner' }] })
+        }
+        const result = await fetchAllProjectItems(execPage)
+        expect(result.errors).toEqual([{ message: 'Could not resolve to a ProjectV2Owner' }])
+        expect(calls).toBe(1)
+    })
+
+    it('returns errors surfaced on a later page without silently dropping them', async () => {
+        const execPage = async (after: string | undefined) => {
+            if (after === undefined) return page(['a'], true, 'cursor-1')
+            return JSON.stringify({ errors: [{ message: 'rate limited' }] })
+        }
+        const result = await fetchAllProjectItems(execPage)
+        expect(result.errors).toEqual([{ message: 'rate limited' }])
     })
 })
 

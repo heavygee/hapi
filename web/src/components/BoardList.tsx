@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { BoardItem, BoardSummary } from '@/types/api'
 import type { SessionSummary } from '@/types/api'
 import { BoardSwitcherBar, BoardSwitcherMenu, type BoardFilterItem } from '@/components/BoardSwitcher'
@@ -6,8 +6,7 @@ import { AddBoardDialog } from '@/components/AddBoardDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Button } from '@/components/ui/button'
 import { LoadingState } from '@/components/LoadingState'
-import { Spinner } from '@/components/Spinner'
-import { ExternalLinkIcon, RefreshIcon } from '@/components/icons'
+import { CloseIcon, ExternalLinkIcon, RefreshIcon } from '@/components/icons'
 import { SessionLinkedBadge } from '@/components/SessionLinkedBadge'
 import { chipBaseClass, chipIdleClass } from '@/components/filterChipStyles'
 import { getApiErrorMessage } from '@/lib/apiErrorMessage'
@@ -84,6 +83,26 @@ function ChevronIcon(props: { className?: string; collapsed?: boolean }) {
     )
 }
 
+function SearchIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+        >
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
+    )
+}
+
 type StatusGroup = {
     // `null` means "no status assigned" — kept distinct from a string so a
     // board with a real status column literally named "noStatus" can't
@@ -115,6 +134,17 @@ const STATUS_DOT_PALETTE = ['bg-blue-500', 'bg-amber-500', 'bg-emerald-500', 'bg
 
 function statusDotClass(colorIndex: number): string {
     return STATUS_DOT_PALETTE[colorIndex % STATUS_DOT_PALETTE.length]
+}
+
+// Client-side title filter over the items already loaded for the active
+// board (operator ask) — titles only, not body/comments/other content, and
+// deliberately no facets (assignee/label/status chips): a plain substring,
+// case-insensitive match is the whole scope. Applied before grouping so
+// status-group counts/collapse state reflect what's actually visible.
+export function filterItemsByTitle(items: BoardItem[], query: string): BoardItem[] {
+    const trimmed = query.trim().toLowerCase()
+    if (!trimmed) return items
+    return items.filter(item => item.title.toLowerCase().includes(trimmed))
 }
 
 // Groups by the board's own status field (verbatim), in board-defined column
@@ -158,48 +188,29 @@ export function groupItemsByStatus(items: BoardItem[], statusOrder: string[]): S
     return groups
 }
 
-// The same dull, public demo project the hub falls back to per-field in
-// readEnvBoardConfig() (hub/src/web/routes/todoBoard.ts's DEFAULT_BOARD) —
-// offered here as an optional "try it" shortcut (hapi#238), not a silent
-// default. Adding it goes through the normal POST /todo-boards flow, same as
-// pasting any other project URL.
-const DEMO_BOARD_URL = 'https://github.com/users/heavygee/projects/6'
-
 // Genuinely nothing configured — no stored boards, no HAPI_BOARD_* env vars
-// (hub's hasAnyBoardEnvConfig(), hapi#238 operator decision). A static
-// explainer, not an empty list rendered through the normal fetch path: there
-// is no board id to fetch items for, so this can never surface a raw `gh api
-// graphql failed` wall of text on a machine with no `gh` auth configured at
-// all. Distinct from BoardList's other empty state (a board IS configured
-// but happens to have zero items right now).
-function NoBoardsExplainer(props: { onAddBoard: () => void; onTryExample: (url: string) => Promise<void> }) {
+// (hub's readEnvBoardConfig() returning null, hapi#238 operator decision). A
+// static explainer, not an empty list rendered through the normal fetch
+// path: there is no board id to fetch items for, so this can never surface a
+// raw `gh api graphql failed` wall of text on a machine with no `gh` auth
+// configured at all. Distinct from BoardList's other empty state (a board IS
+// configured but happens to have zero items right now).
+//
+// No "try it with an example board" shortcut here (hapi#235 discussion,
+// fork issue tracked separately): the only project that could back one is a
+// specific operator's own GitHub Projects board, which isn't a demo anyone
+// installing HAPI can actually open. An install-wide CTA must not point at
+// one person's board — Add a board (the operator's own) is the only path.
+function NoBoardsExplainer(props: { onAddBoard: () => void }) {
     const { t } = useTranslation()
-    const [addingExample, setAddingExample] = useState(false)
-    const [exampleError, setExampleError] = useState<string | null>(null)
-
-    const handleTryExample = () => {
-        setAddingExample(true)
-        setExampleError(null)
-        props.onTryExample(DEMO_BOARD_URL)
-            .catch(error => setExampleError(getApiErrorMessage(error, t('dialog.error.default'))))
-            .finally(() => setAddingExample(false))
-    }
 
     return (
         <div className="flex flex-col items-center gap-3 px-4 py-10 text-center">
             <div className="text-sm font-medium text-[var(--app-fg)]">{t('boards.noBoardsConfigured.title')}</div>
             <div className="max-w-sm text-sm text-[var(--app-hint)]">{t('boards.noBoardsConfigured.body')}</div>
-            <div className="flex flex-wrap items-center justify-center gap-2">
-                <Button type="button" variant="default" onClick={props.onAddBoard}>
-                    {t('boards.addBoard.chipLabel')}
-                </Button>
-                <Button type="button" variant="outline" onClick={handleTryExample} disabled={addingExample} aria-busy={addingExample}>
-                    {addingExample ? <Spinner size="sm" label={null} className="text-[var(--app-fg)]" /> : t('boards.noBoardsConfigured.tryExample')}
-                </Button>
-            </div>
-            {exampleError ? (
-                <div className="text-sm text-red-600">{t('boards.error', { message: exampleError })}</div>
-            ) : null}
+            <Button type="button" variant="default" onClick={props.onAddBoard}>
+                {t('boards.addBoard.chipLabel')}
+            </Button>
         </div>
     )
 }
@@ -351,13 +362,25 @@ export function BoardList(props: {
     const [removeTarget, setRemoveTarget] = useState<BoardFilterItem | null>(null)
     const [isRemoving, setIsRemoving] = useState(false)
     const boardId = props.selectedBoardId ?? ''
+    // Resets on board switch (same self-correcting pattern as the assignee
+    // picker's own search box) — a filter left over from a previous board
+    // would otherwise read as "this board has no matching items" instead of
+    // "you're still filtering by a term from the last one."
+    const [titleFilter, setTitleFilter] = useState('')
+    useEffect(() => {
+        setTitleFilter('')
+    }, [boardId])
     const boardFilterItems = useMemo(
         () => props.boards.map(board => ({ id: board.id, label: board.label })),
         [props.boards]
     )
+    const filteredItems = useMemo(
+        () => filterItemsByTitle(props.items, titleFilter),
+        [props.items, titleFilter]
+    )
     const groups = useMemo(
-        () => groupItemsByStatus(props.items, props.statusOrder),
-        [props.items, props.statusOrder]
+        () => groupItemsByStatus(filteredItems, props.statusOrder),
+        [filteredItems, props.statusOrder]
     )
     // Color index only advances for real statuses — "no status" always gets
     // the same neutral dot rather than consuming a palette slot.
@@ -488,10 +511,7 @@ export function BoardList(props: {
                     // machine with no `gh` auth configured. Distinct from the
                     // "boards.empty" state below, which is for a board that
                     // IS configured but happens to have zero items right now.
-                    <NoBoardsExplainer
-                        onAddBoard={() => setAddDialogOpen(true)}
-                        onTryExample={props.onAddBoard}
-                    />
+                    <NoBoardsExplainer onAddBoard={() => setAddDialogOpen(true)} />
                 ) : props.error && props.items.length === 0 ? (
                     <div className="px-1 py-4 text-sm text-red-600">
                         {t('boards.error', { message: props.error })}
@@ -511,7 +531,37 @@ export function BoardList(props: {
                                 {t('boards.staleError', { message: props.error })}
                             </div>
                         ) : null}
-                        {groupsWithDot.map(({ group, key, compositeKey, isNoStatus, dotClass, collapsed }) => (
+                        <div className="relative mb-2">
+                            <div className="pointer-events-none absolute inset-y-0 left-2.5 flex items-center text-[var(--app-hint)]">
+                                <SearchIcon className="h-3.5 w-3.5" />
+                            </div>
+                            <input
+                                type="search"
+                                value={titleFilter}
+                                onChange={(event) => setTitleFilter(event.target.value)}
+                                placeholder={t('boards.filter.placeholder')}
+                                aria-label={t('boards.filter.placeholder')}
+                                className={cn(
+                                    'w-full appearance-none rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] py-1.5 pl-8 pr-7 text-sm text-[var(--app-fg)] outline-none transition-colors placeholder:text-[var(--app-hint)] focus:border-[var(--app-link)] [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden'
+                                )}
+                            />
+                            {titleFilter ? (
+                                <button
+                                    type="button"
+                                    onClick={() => setTitleFilter('')}
+                                    aria-label={t('boards.filter.clear')}
+                                    title={t('boards.filter.clear')}
+                                    className="absolute inset-y-0 right-1.5 flex items-center justify-center rounded-full p-1 text-[var(--app-hint)] hover:text-[var(--app-fg)]"
+                                >
+                                    <CloseIcon className="h-3.5 w-3.5" />
+                                </button>
+                            ) : null}
+                        </div>
+                        {filteredItems.length === 0 ? (
+                            <div className="px-1 py-4 text-center text-sm text-[var(--app-hint)]">
+                                {t('boards.filter.noResults', { query: titleFilter })}
+                            </div>
+                        ) : groupsWithDot.map(({ group, key, compositeKey, isNoStatus, dotClass, collapsed }) => (
                             <div key={key} className="mb-3">
                                 <button
                                     type="button"

@@ -23,24 +23,23 @@ import { getSettingsFile, readSettingsOrThrow, updateSettings, type StoredTodoBo
  * multi-identity auth, caching, or pagination beyond a single page of items
  * — that's the full data-layer issue (#234).
  *
- * Boards are config (env default + user-added, persisted in settings.json),
- * never a hardcoded constant — a real personal board was hardcoded here
- * earlier and caught before it shipped (see hapi#235 discussion). The env
- * default must stay a dull, public, nothing-real demo board
- * (`heavygee/hapi-demo-board`, project 6) so a forgotten env var never
- * surfaces anyone's real data — that invariant still holds, but a genuinely
- * empty board list is no longer prevented (operator decision, hapi#238):
- * it used to be impossible to tell "nothing configured" from "the hardcoded
- * demo," so a fresh install with no `gh` auth at all would silently load the
- * demo board and then 502 on its items fetch with a raw `gh api graphql
- * failed` error. GET /todo-boards now genuinely returns `[]` when nothing is
- * configured, and the frontend shows a static explainer instead of ever
- * attempting that fetch. See `loadBoards`/`updateBoards` below — every
- * settings.json reader/writer for `todoBoards` must go through them, not
- * reimplement the env-seed-or-empty fallback inline.
+ * Boards are config (env + user-added, persisted in settings.json), never a
+ * hardcoded constant — a real personal board was hardcoded here earlier and
+ * caught before it shipped (see hapi#235 discussion). There is no shipped
+ * default owner/project at all: HAPI_BOARD_OWNER and HAPI_BOARD_NUMBER must
+ * both be set together before an env-seeded board exists, and a genuinely
+ * empty board list is a real, intentional state (operator decision,
+ * hapi#238) — it used to be impossible to tell "nothing configured" from
+ * "the hardcoded demo," so a fresh install with no `gh` auth at all would
+ * silently load a demo board and then 502 on its items fetch with a raw
+ * `gh api graphql failed` error. GET /todo-boards now genuinely returns `[]`
+ * when nothing is configured, and the frontend shows a static explainer
+ * instead of ever attempting that fetch. See `loadBoards`/`updateBoards`
+ * below — every settings.json reader/writer for `todoBoards` must go through
+ * them, not reimplement the env-seed-or-empty fallback inline.
  *
  * Known landmine for the next person touching this file: every board added
- * via POST /todo-boards (and the env-configured default) hardcodes
+ * via POST /todo-boards (and the env-configured board) hardcodes
  * `statusFieldName: 'Status'` — a board whose status field is actually named
  * something else ("Stage", "Workflow Status") will silently come back with
  * an empty `statusOrder` and every item dumped in the "no status" bucket, no
@@ -48,15 +47,9 @@ import { getSettingsFile, readSettingsOrThrow, updateSettings, type StoredTodoBo
  * out-of-scope for this slice (#234), but it's worth knowing before
  * debugging a "board looks broken" report.
  */
-const DEFAULT_BOARD: StoredTodoBoard = {
-    id: 'github.com::heavygee::6',
-    label: 'heavygee/6',
-    host: 'github.com',
-    ownerLogin: 'heavygee',
-    projectNumber: 6,
-    statusFieldName: 'Status',
-    doneValues: ['Done']
-}
+const DEFAULT_BOARD_HOST = 'github.com'
+const DEFAULT_STATUS_FIELD_NAME = 'Status'
+const DEFAULT_DONE_VALUES = ['Done']
 
 // Percent-encode each component before joining: host/ownerLogin come from a
 // loosely-validated URL regex (parseProjectUrl), so without encoding, a
@@ -95,38 +88,30 @@ function isValidProjectNumber(value: number): boolean {
     return Number.isInteger(value) && value > 0 && value <= MAX_GRAPHQL_INT
 }
 
-// Whether the operator has actually set any HAPI_BOARD_* env var — distinct
-// from readEnvBoardConfig() always being able to *produce* a board, since
-// every one of its fields individually falls back to DEFAULT_BOARD's demo
-// values. Without this check there's no way to tell "operator configured a
-// real board via env vars" from "nothing is configured at all, here's the
-// hardcoded demo" — both looked identical to loadBoards()'s caller (operator
-// decision, hapi#238: a genuinely-empty board list is now a real, displayed
-// state — a static explainer, not a silently-loaded demo board that 502s
-// with a raw `gh api graphql failed` wall of text on a machine with no `gh`
-// auth at all).
-function hasAnyBoardEnvConfig(): boolean {
-    return Boolean(
-        process.env.HAPI_BOARD_HOST?.trim() ||
-        process.env.HAPI_BOARD_OWNER?.trim() ||
-        process.env.HAPI_BOARD_NUMBER?.trim() ||
-        process.env.HAPI_BOARD_STATUS_FIELD?.trim() ||
-        process.env.HAPI_BOARD_DONE_VALUES?.trim() ||
-        process.env.HAPI_BOARD_LABEL?.trim()
-    )
-}
-
-function readEnvBoardConfig(): StoredTodoBoard {
-    const host = process.env.HAPI_BOARD_HOST?.trim() || DEFAULT_BOARD.host
-    const ownerLogin = process.env.HAPI_BOARD_OWNER?.trim() || DEFAULT_BOARD.ownerLogin
+// Builds the env-seeded board, or null if the operator hasn't actually
+// configured one. HAPI_BOARD_OWNER and a valid HAPI_BOARD_NUMBER must both be
+// present together — these two fields are what identify *whose* board this
+// is, so unlike host/statusFieldName/doneValues (which have safe, generic
+// defaults below) they must never individually fall back to someone else's
+// project. Setting only HAPI_BOARD_DONE_VALUES (say) to tweak one field, or
+// mistyping HAPI_BOARD_NUMBER, must read as "not configured," never as "load
+// whichever owner/project happened to be hardcoded here" (hapi#238: a real
+// personal board was previously the hardcoded fallback for exactly this
+// case — see the module doc comment above).
+function readEnvBoardConfig(): StoredTodoBoard | null {
+    const ownerLogin = process.env.HAPI_BOARD_OWNER?.trim()
     const numberRaw = process.env.HAPI_BOARD_NUMBER?.trim()
     const parsedNumber = numberRaw ? Number(numberRaw) : NaN
-    const projectNumber = isValidProjectNumber(parsedNumber) ? parsedNumber : DEFAULT_BOARD.projectNumber
-    const statusFieldName = process.env.HAPI_BOARD_STATUS_FIELD?.trim() || DEFAULT_BOARD.statusFieldName
+    if (!ownerLogin || !isValidProjectNumber(parsedNumber)) {
+        return null
+    }
+    const host = process.env.HAPI_BOARD_HOST?.trim() || DEFAULT_BOARD_HOST
+    const projectNumber = parsedNumber
+    const statusFieldName = process.env.HAPI_BOARD_STATUS_FIELD?.trim() || DEFAULT_STATUS_FIELD_NAME
     const doneValuesRaw = process.env.HAPI_BOARD_DONE_VALUES?.trim()
     const doneValues = doneValuesRaw
         ? doneValuesRaw.split(',').map(value => value.trim()).filter(Boolean)
-        : DEFAULT_BOARD.doneValues
+        : DEFAULT_DONE_VALUES
     const label = process.env.HAPI_BOARD_LABEL?.trim() || `${ownerLogin}/${projectNumber}`
 
     return {
@@ -142,12 +127,12 @@ function readEnvBoardConfig(): StoredTodoBoard {
 
 /**
  * Stored list is the source of truth once non-empty; otherwise fall back to
- * the env-configured board if any HAPI_BOARD_* var is actually set, or
- * genuinely empty otherwise — never persisted until the operator explicitly
- * adds a board. A truly empty list is a real, intentional state now
- * (operator decision, hapi#238): the frontend shows a static explainer
- * instead of ever hitting the items endpoint for a board nobody configured,
- * which used to always exist as a hardcoded demo default.
+ * the env-configured board if HAPI_BOARD_OWNER + HAPI_BOARD_NUMBER are both
+ * actually set, or genuinely empty otherwise — never persisted until the
+ * operator explicitly adds a board. A truly empty list is a real,
+ * intentional state now (operator decision, hapi#238): the frontend shows a
+ * static explainer instead of ever hitting the items endpoint for a board
+ * nobody configured, which used to always exist as a hardcoded demo default.
  *
  * Deliberate consequence, not a bug: env vars are a one-time *seed*, not an
  * ongoing config source. The moment any board is added (the entire point of
@@ -167,13 +152,14 @@ async function loadBoards(dataDir: string): Promise<StoredTodoBoard[]> {
     if (settings.todoBoards && settings.todoBoards.length > 0) {
         return settings.todoBoards
     }
-    return hasAnyBoardEnvConfig() ? [readEnvBoardConfig()] : []
+    const envBoard = readEnvBoardConfig()
+    return envBoard ? [envBoard] : []
 }
 
 /**
  * Single choke point for every settings.json write to `todoBoards`.
- * `mutate` receives the current list (stored, or the env-derived seed if any
- * HAPI_BOARD_* var is set, or genuinely empty otherwise) and returns the
+ * `mutate` receives the current list (stored, or the env-derived seed if one
+ * is actually configured, or genuinely empty otherwise) and returns the
  * next list; if `mutate` returns the same array reference back (no-op, e.g.
  * deleting an id that was never there), the write is skipped entirely —
  * mirrors POST's existing idempotent-add behavior. Removing the last stored
@@ -185,7 +171,8 @@ async function updateBoards(
     dataDir: string,
     mutate: (current: StoredTodoBoard[]) => StoredTodoBoard[]
 ): Promise<StoredTodoBoard[]> {
-    const envSeed = hasAnyBoardEnvConfig() ? [readEnvBoardConfig()] : []
+    const envBoard = readEnvBoardConfig()
+    const envSeed = envBoard ? [envBoard] : []
     return updateSettings(getSettingsFile(dataDir), (current) => {
         const existing = current.todoBoards && current.todoBoards.length > 0 ? current.todoBoards : envSeed
         const next = mutate(existing)
@@ -212,6 +199,16 @@ const ISSUE_OR_PR_FIELDS = `
   labels(first: 20) { nodes { name color } }
   milestone { title dueOn }`
 
+// fieldValues is first: 100, not 20 (Codex review, hapi#238): every built-in
+// field (Assignees, Labels, Milestone, Repository, Reviewers, Linked Pull
+// Requests, ...) occupies a slot in this connection alongside custom ones,
+// even though only single-select/text/number/date fields are actually
+// selected below — an item with 20+ total fields silently dropped its later
+// custom fields from the detail pane with no indication anything was
+// missing. True pagination of this per-item connection would need a
+// per-item follow-up query and isn't worth it at this scale (contrast with
+// the top-level `items` connection itself, which does paginate — see
+// fetchAllProjectItems below).
 const ITEM_FIELDS = `
   id
   content {
@@ -223,7 +220,7 @@ const ITEM_FIELDS = `
   fieldValueByName(name: $statusField) {
     ... on ProjectV2ItemFieldSingleSelectValue { name }
   }
-  fieldValues(first: 20) {
+  fieldValues(first: 100) {
     nodes {
       __typename
       ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2FieldCommon { name } } }
@@ -234,7 +231,7 @@ const ITEM_FIELDS = `
   }`
 
 const PROJECT_QUERY = `
-query($login: String!, $number: Int!, $statusField: String!) {
+query($login: String!, $number: Int!, $statusField: String!, $after: String) {
   repositoryOwner(login: $login) {
     ... on ProjectV2Owner {
       projectV2(number: $number) {
@@ -244,8 +241,9 @@ query($login: String!, $number: Int!, $statusField: String!) {
             options { name }
           }
         }
-        items(first: 100) {
+        items(first: 100, after: $after) {
           nodes { ${ITEM_FIELDS} }
+          pageInfo { hasNextPage endCursor }
         }
       }
     }
@@ -270,7 +268,7 @@ query($login: String!, $number: Int!, $statusField: String!) {
 // configured, so the new argument's host requirement is scoped to the new
 // capability, not the existing one.
 const PROJECT_QUERY_FILTERED = `
-query($login: String!, $number: Int!, $statusField: String!, $itemsFilter: String) {
+query($login: String!, $number: Int!, $statusField: String!, $itemsFilter: String, $after: String) {
   repositoryOwner(login: $login) {
     ... on ProjectV2Owner {
       projectV2(number: $number) {
@@ -280,8 +278,9 @@ query($login: String!, $number: Int!, $statusField: String!, $itemsFilter: Strin
             options { name }
           }
         }
-        items(first: 100, query: $itemsFilter) {
+        items(first: 100, query: $itemsFilter, after: $after) {
           nodes { ${ITEM_FIELDS} }
+          pageInfo { hasNextPage endCursor }
         }
       }
     }
@@ -363,6 +362,7 @@ type GhProjectV2Response = {
                             nodes?: Array<GhFieldValueNode | null>
                         } | null
                     } | null>
+                    pageInfo?: { hasNextPage?: boolean; endCursor?: string | null } | null
                 } | null
             } | null
         } | null
@@ -723,18 +723,65 @@ async function runGhGraphqlView(target: ProjectViewLookupTarget): Promise<GhProj
     }
 }
 
-async function runGhGraphql(target: ProjectQueryTarget): Promise<GhProjectV2Response> {
-    if (target.viewNumber === undefined) {
-        const stdout = await execGhGraphql(target.host, PROJECT_QUERY, {
-            login: target.ownerLogin,
-            number: target.projectNumber,
-            statusField: target.statusFieldName
-        })
+// A board's items connection had no pagination at all until now — a board
+// with more than 100 items (Lockhouse Work: well over 100) silently dropped
+// everything past page 1, so a card recently moved into view (or any item
+// past that boundary) never appeared no matter how many times "refresh" was
+// pressed — manual refresh re-ran the exact same first-100 query, not a real
+// re-fetch of the whole board (operator-reported dogfood bug, #431 missing).
+// Caps at MAX_ITEM_PAGES pages (2000 items) rather than looping until
+// genuinely exhausted — a real safety bound against a pathological project,
+// while comfortably covering every board size seen in practice; if a board
+// ever legitimately exceeds that, the extra items are dropped the same way
+// they always were, not a new regression.
+const MAX_ITEM_PAGES = 20
+
+export async function fetchAllProjectItems(execPage: (after: string | undefined) => Promise<string>): Promise<GhProjectV2Response> {
+    const firstStdout = await execPage(undefined)
+    let response: GhProjectV2Response
+    try {
+        response = JSON.parse(firstStdout) as GhProjectV2Response
+    } catch {
+        throw new Error('gh api graphql returned non-JSON output')
+    }
+
+    const project = response.data?.repositoryOwner?.projectV2
+    if (response.errors?.length || !project?.items) {
+        return response
+    }
+
+    const allNodes = [...(project.items.nodes ?? [])]
+    let pageInfo = project.items.pageInfo
+    let pageCount = 1
+    while (pageInfo?.hasNextPage && pageInfo.endCursor && pageCount < MAX_ITEM_PAGES) {
+        const stdout = await execPage(pageInfo.endCursor)
+        let pageResponse: GhProjectV2Response
         try {
-            return JSON.parse(stdout) as GhProjectV2Response
+            pageResponse = JSON.parse(stdout) as GhProjectV2Response
         } catch {
             throw new Error('gh api graphql returned non-JSON output')
         }
+        if (pageResponse.errors?.length) {
+            return pageResponse
+        }
+        const pageItems = pageResponse.data?.repositoryOwner?.projectV2?.items
+        allNodes.push(...(pageItems?.nodes ?? []))
+        pageInfo = pageItems?.pageInfo
+        pageCount += 1
+    }
+
+    project.items.nodes = allNodes
+    return response
+}
+
+async function runGhGraphql(target: ProjectQueryTarget): Promise<GhProjectV2Response> {
+    if (target.viewNumber === undefined) {
+        return fetchAllProjectItems(after => execGhGraphql(target.host, PROJECT_QUERY, {
+            login: target.ownerLogin,
+            number: target.projectNumber,
+            statusField: target.statusFieldName,
+            after
+        }))
     }
 
     const viewResponse = await runGhGraphqlView({
@@ -748,17 +795,13 @@ async function runGhGraphql(target: ProjectQueryTarget): Promise<GhProjectV2Resp
         throw new Error(resolved.error)
     }
 
-    const stdout = await execGhGraphql(target.host, PROJECT_QUERY_FILTERED, {
+    return fetchAllProjectItems(after => execGhGraphql(target.host, PROJECT_QUERY_FILTERED, {
         login: target.ownerLogin,
         number: target.projectNumber,
         statusField: target.statusFieldName,
-        itemsFilter: resolved.itemsFilter
-    })
-    try {
-        return JSON.parse(stdout) as GhProjectV2Response
-    } catch {
-        throw new Error('gh api graphql returned non-JSON output')
-    }
+        itemsFilter: resolved.itemsFilter,
+        after
+    }))
 }
 
 export type ResolveProjectViewResult =
@@ -1017,8 +1060,8 @@ export function createBoardRoutes(
             host: target.host,
             ownerLogin: target.ownerLogin,
             projectNumber: target.projectNumber,
-            statusFieldName: DEFAULT_BOARD.statusFieldName,
-            doneValues: DEFAULT_BOARD.doneValues,
+            statusFieldName: DEFAULT_STATUS_FIELD_NAME,
+            doneValues: DEFAULT_DONE_VALUES,
             ...(target.viewNumber !== undefined ? { viewNumber: target.viewNumber } : {})
         }
 
