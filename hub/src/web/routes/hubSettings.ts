@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { UpdateHubSettingsRequestSchema, type HubSettingsResponse } from '@hapi/protocol'
+import { UpdateHubSettingsRequestSchema, clampSessionStartTimeoutMs, type HubSettingsResponse } from '@hapi/protocol'
 import {
     getSettingsFile,
     readSettingsOrThrow,
@@ -13,7 +13,8 @@ const OWNER_ONLY_ERROR = 'Hub settings are only available to the hub owner'
 function toHubSettings(settings: Settings): HubSettingsResponse {
     return {
         sessionSummaryContract: settings.sessionSummaryContract === true,
-        sessionSummaryInChat: settings.sessionSummaryInChat === true
+        sessionSummaryInChat: settings.sessionSummaryInChat === true,
+        sessionStartTimeoutMs: clampSessionStartTimeoutMs(settings.sessionStartTimeoutMs)
     }
 }
 
@@ -44,6 +45,14 @@ export function createHubSettingsRoutes(dataDir: string): Hono<WebAppEnv> {
             }
             if (parsed.data.sessionSummaryInChat !== undefined) {
                 settings.sessionSummaryInChat = parsed.data.sessionSummaryInChat
+            }
+            if (parsed.data.sessionStartTimeoutMs !== undefined) {
+                // null clears the override so runners fall back to their default.
+                if (parsed.data.sessionStartTimeoutMs === null) {
+                    delete settings.sessionStartTimeoutMs
+                } else {
+                    settings.sessionStartTimeoutMs = parsed.data.sessionStartTimeoutMs
+                }
             }
             return {
                 settings,

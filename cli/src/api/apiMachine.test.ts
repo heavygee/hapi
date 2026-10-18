@@ -747,6 +747,40 @@ describe('ApiMachineClient SpawnHappySession handler', () => {
         }
     })
 
+    it('forwards a hub-configured sessionStartTimeoutMs, and omits junk', async () => {
+        const machine = makeMachine('machine-spawn-timeout')
+        const client = new ApiMachineClient('cli-token', machine, [workspaceRoot])
+        const spawnSession = vi.fn(async () => ({ type: 'success' as const, sessionId: 'session-1' }))
+
+        client.setRPCHandlers({
+            spawnSession,
+            stopSession: vi.fn(async () => 'stopped' as const),
+            requestShutdown: vi.fn()
+        })
+
+        try {
+            await callSpawnHappySession(client, machine.id, {
+                directory: workspaceRoot,
+                agent: 'claude',
+                sessionStartTimeoutMs: 90_000
+            })
+            expect(spawnSession).toHaveBeenCalledWith(expect.objectContaining({
+                sessionStartTimeoutMs: 90_000
+            }))
+
+            await callSpawnHappySession(client, machine.id, {
+                directory: workspaceRoot,
+                agent: 'claude',
+                sessionStartTimeoutMs: 'soon'
+            })
+            expect(spawnSession).toHaveBeenLastCalledWith(expect.objectContaining({
+                sessionStartTimeoutMs: undefined
+            }))
+        } finally {
+            client.shutdown()
+        }
+    })
+
     it('returns childStarted:false on outside_workspace_roots so hub deletes the stub', async () => {
         const machine = makeMachine('machine-spawn-outside')
         const client = new ApiMachineClient('cli-token', machine, [workspaceRoot])

@@ -19,6 +19,7 @@
         "./sessionCitation": "./src/sessionCitation.ts",
         "./sessionExport": "./src/sessionExport.ts",
         "./sessionLifecycle": "./src/sessionLifecycle.ts",
+        "./sessionStartTimeout": "./src/sessionStartTimeout.ts",
         "./types": "./src/types.ts",
         "./voice": "./src/voice.ts",
         "./voicePickerCatalog": "./src/voicePickerCatalog.ts",

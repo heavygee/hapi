@@ -9,6 +9,7 @@ import {
     SessionSchema
 } from './schemas'
 import { AgentFlavorSchema } from './modes'
+import { SESSION_START_TIMEOUT_MS_MAX, SESSION_START_TIMEOUT_MS_MIN } from './sessionStartTimeout'
 import type {
     DecryptedMessage,
     Machine,
@@ -73,7 +74,13 @@ export type CreateSessionResponse = z.infer<typeof CreateSessionResponseSchema>
 export const HubSettingsResponseSchema = z.object({
     sessionSummaryContract: z.boolean(),
     /** Show compact AGENT_NOTIFY_SUMMARY in chat (default off / hide). */
-    sessionSummaryInChat: z.boolean()
+    sessionSummaryInChat: z.boolean(),
+    /**
+     * How long a runner waits for a freshly spawned session to report back
+     * before it kills the child (tiann/hapi#2062). `null` = runner default.
+     * `HAPI_RUNNER_WEBHOOK_TIMEOUT_MS` on the runner host still wins.
+     */
+    sessionStartTimeoutMs: z.number().int().positive().nullable()
 })
 
 export type HubSettingsResponse = z.infer<typeof HubSettingsResponseSchema>
@@ -81,10 +88,21 @@ export type HubSettingsResponse = z.infer<typeof HubSettingsResponseSchema>
 export const UpdateHubSettingsRequestSchema = z
     .object({
         sessionSummaryContract: z.boolean().optional(),
-        sessionSummaryInChat: z.boolean().optional()
+        sessionSummaryInChat: z.boolean().optional(),
+        /** `null` clears the override and restores the runner default. */
+        sessionStartTimeoutMs: z
+            .number()
+            .int()
+            .min(SESSION_START_TIMEOUT_MS_MIN)
+            .max(SESSION_START_TIMEOUT_MS_MAX)
+            .nullable()
+            .optional()
     })
     .refine(
-        (data) => data.sessionSummaryContract !== undefined || data.sessionSummaryInChat !== undefined,
+        (data) =>
+            data.sessionSummaryContract !== undefined
+            || data.sessionSummaryInChat !== undefined
+            || data.sessionStartTimeoutMs !== undefined,
         { message: 'At least one hub setting field is required' }
     )
 

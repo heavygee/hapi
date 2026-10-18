@@ -284,7 +284,7 @@ Source: `hub/src/web/routes/hubSettings.ts`.
 
 | Method & path | Response |
 |---|---|
-| `GET /api/hub-settings` | `{sessionSummaryContract: boolean, sessionSummaryInChat: boolean}` — readable by any namespace |
+| `GET /api/hub-settings` | `{sessionSummaryContract: boolean, sessionSummaryInChat: boolean, sessionStartTimeoutMs: number \| null}` — readable by any namespace. `sessionStartTimeoutMs` is how long a runner waits for a new session to report back (null = runner default 15000; 5000–300000 when set) |
 
 ### SSE
 

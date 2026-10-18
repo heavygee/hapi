@@ -56,6 +56,13 @@ export interface Settings {
      * ELEVENLABS_MAX_DURATION_SECONDS still wins when set at process start.
      */
     elevenLabsMaxDurationSeconds?: number
+    /**
+     * How long a runner waits for a freshly spawned session to report back
+     * before it kills the child (tiann/hapi#2062). Sent to the runner with
+     * each spawn; `HAPI_RUNNER_WEBHOOK_TIMEOUT_MS` on the runner host wins.
+     * Unset = runner default.
+     */
+    sessionStartTimeoutMs?: number
 }
 
 export function getSettingsFile(dataDir: string): string {

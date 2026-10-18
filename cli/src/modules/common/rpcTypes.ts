@@ -27,6 +27,11 @@ export interface SpawnSessionOptions {
     startingMode?: 'remote' | 'pty'
     /** Claude: spawn with --fork-session after --resume. */
     forkSession?: boolean
+    /**
+     * Hub-configured wait (ms) for the session-start webhook (#2062). Clamped
+     * by the runner; HAPI_RUNNER_WEBHOOK_TIMEOUT_MS on this host still wins.
+     */
+    sessionStartTimeoutMs?: number
     /** Runner-internal post-create containment revalidation. Never serialized. */
     validateDirectory?: (path: string) => Promise<boolean>
 }
