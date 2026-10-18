@@ -26,6 +26,25 @@ export type GithubPrChipDisplay = {
     stale: boolean
 }
 
+// `GithubPrExternalRef.status` is a plain string at the wire level now —
+// the shared schema stopped enforcing this fork's own chip-status
+// vocabulary (operator decision, hapi#238 schema reconciliation: a project
+// with its own PR-workflow status values must be able to write them without
+// the wire schema rejecting the whole ref). This chip's own emoji/tone
+// display is still this project's business, so it narrows to the known
+// subset here and falls back to the neutral "uncached" display — matching
+// the existing `!ref.status` early-return below — for anything else, rather
+// than assuming the wire value is always one of these.
+const KNOWN_GITHUB_PR_STATUSES = new Set<GithubPrStatus>(
+    ['unknown', 'pending', 'clean', 'needs_work', 'needs_operator', 'pre_pr', 'merged', 'complete']
+)
+
+function toKnownGithubPrStatus(status: string | undefined): GithubPrStatus | undefined {
+    return status !== undefined && KNOWN_GITHUB_PR_STATUSES.has(status as GithubPrStatus)
+        ? (status as GithubPrStatus)
+        : undefined
+}
+
 /**
  * Resolve display status from cached `externalRefs` fields.
  * Never live-queries GitHub — when `statusCheckedAt` is older than staleMs
@@ -36,14 +55,15 @@ export function resolveGithubPrChipDisplay(
     nowMs: number = Date.now(),
     staleMs: number = GITHUB_PR_CHIP_STALE_MS
 ): GithubPrChipDisplay {
-    if (!ref.status) return { status: undefined, stale: false }
+    const knownStatus = toKnownGithubPrStatus(ref.status)
+    if (!knownStatus) return { status: undefined, stale: false }
     if (
         typeof ref.statusCheckedAt === 'number'
         && nowMs - ref.statusCheckedAt > staleMs
     ) {
         return { status: 'unknown', stale: true }
     }
-    return { status: ref.status, stale: false }
+    return { status: knownStatus, stale: false }
 }
 
 /** Pulse on the existing PR chip while Meta hold is latched (not a new FUE id). */

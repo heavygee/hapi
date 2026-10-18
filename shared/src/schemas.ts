@@ -125,6 +125,26 @@ export const GithubPrStatusSchema = z.enum([
 ])
 export type GithubPrStatus = z.infer<typeof GithubPrStatusSchema>
 
+// `status` was a hardcoded GithubPrStatusSchema enum — this fork's own
+// chip-emoji vocabulary (clean/pending/needs_work/...), not a universal
+// concept every project embedding this schema shares (operator decision,
+// hapi#238 schema reconciliation: a project with its own PR-workflow
+// vocabulary must be able to write its own status values without the wire
+// schema rejecting the whole ref, and by extension the whole metadata
+// object, over a status string it doesn't recognize). Loosened to a plain
+// string; GithubPrStatusSchema/GithubPrStatus stay exported for this
+// project's own UI code to use as a *display* convenience (falling back
+// gracefully for an unrecognized value), not as the wire-level validator.
+// `.passthrough()` added for the same reason the fork's own chip tooling
+// already writes fields beyond this list (estateCode, openState, checks,
+// merge, ...) that a plain z.object() would otherwise silently strip on
+// every parse — passthrough preserves them, matching GithubIssueExternalRefSchema's
+// own passthrough-style tolerance below. URL match now accepts any host,
+// not just github.com — a GHE-hosted project's PRs are exactly as valid a
+// "connection" as a github.com one (the board feature itself already
+// supports GHE hosts for issues; PRs are no more HAPI-specific).
+const PR_URL_RE = /^https?:\/\/([A-Za-z0-9.-]+(?::\d+)?)\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/pull\/(\d+)\/?$/i
+
 export const GithubPrExternalRefSchema = z.object({
     kind: z.literal('github_pr'),
     repo: GithubRepoSlugSchema,
@@ -133,16 +153,19 @@ export const GithubPrExternalRefSchema = z.object({
     role: z.enum(['primary', 'secondary']),
     source: z.enum(['agent', 'user', 'inferred']).optional(),
     linkedAt: z.number().int().positive().optional(),
-    status: GithubPrStatusSchema.optional(),
+    status: z.string().optional(),
     statusCheckedAt: z.number().int().positive().optional(),
     statusAction: z.string().max(400).optional()
-}).superRefine((ref, ctx) => {
-    const expectedUrl = `https://github.com/${ref.repo}/pull/${ref.number}`
-    if (ref.url !== expectedUrl) {
+}).passthrough().superRefine((ref, ctx) => {
+    const match = PR_URL_RE.exec(ref.url)
+    const matchesRepoAndNumber = match !== null
+        && match[2]!.toLowerCase() === ref.repo.toLowerCase()
+        && Number(match[3]) === ref.number
+    if (!matchesRepoAndNumber) {
         ctx.addIssue({
             code: 'custom',
             path: ['url'],
-            message: 'expected GitHub PR URL matching repo and number'
+            message: 'expected a GitHub pull request URL matching repo and number'
         })
     }
 })
