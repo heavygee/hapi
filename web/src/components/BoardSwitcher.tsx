@@ -81,7 +81,7 @@ export function BoardSwitcherMenu(props: {
     const triggerRef = useRef<HTMLButtonElement>(null)
     const wrapperRef = useRef<HTMLDivElement>(null)
     const menuRef = useRef<HTMLDivElement>(null)
-    const [anchor, setAnchor] = useState<{ right: number; bottom: number } | null>(null)
+    const [anchor, setAnchor] = useState<{ left: number; right: number; bottom: number } | null>(null)
 
     const close = useCallback(() => {
         setOpen(false)
@@ -101,7 +101,7 @@ export function BoardSwitcherMenu(props: {
         const updateAnchor = () => {
             const rect = wrapperRef.current?.getBoundingClientRect()
             if (!rect) return
-            setAnchor({ right: rect.right, bottom: rect.bottom })
+            setAnchor({ left: rect.left, right: rect.right, bottom: rect.bottom })
         }
         updateAnchor()
         window.addEventListener('resize', updateAnchor)
