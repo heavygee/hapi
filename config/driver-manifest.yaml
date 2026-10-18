@@ -1096,6 +1096,11 @@ layers:
   # ab3cd07f0 (CTA + title filter + items pagination). externalRefs validate parked (schema drift).
   - branch: driver/235-todo-board-view
 
+  # heavygee/hapi#238 — GithubPrExternalRefSchema: status enum -> passthrough,
+  # any-host URL match. Thin on soup f516d1a58 @ 03fc0d272.
+  # Shared+web → remat --build-web + hapi-restart-hub.
+  - branch: driver/238-github-pr-schema-reconcile
+
   # heavygee/hapi#247 — deliberate fleet push + restore upgrade-runner; kill
   # keepalive/startup unattended auto-upgrade. Hub default stays alert; per-machine
   # auto (standalone personal hub) applies only on POST /api/fleet/push-upgrade.
