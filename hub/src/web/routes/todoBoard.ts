@@ -199,6 +199,16 @@ const ISSUE_OR_PR_FIELDS = `
   labels(first: 20) { nodes { name color } }
   milestone { title dueOn }`
 
+// fieldValues is first: 100, not 20 (Codex review, hapi#238): every built-in
+// field (Assignees, Labels, Milestone, Repository, Reviewers, Linked Pull
+// Requests, ...) occupies a slot in this connection alongside custom ones,
+// even though only single-select/text/number/date fields are actually
+// selected below — an item with 20+ total fields silently dropped its later
+// custom fields from the detail pane with no indication anything was
+// missing. True pagination of this per-item connection would need a
+// per-item follow-up query and isn't worth it at this scale (contrast with
+// the top-level `items` connection itself, which does paginate — see
+// fetchAllProjectItems below).
 const ITEM_FIELDS = `
   id
   content {
@@ -210,7 +220,7 @@ const ITEM_FIELDS = `
   fieldValueByName(name: $statusField) {
     ... on ProjectV2ItemFieldSingleSelectValue { name }
   }
-  fieldValues(first: 20) {
+  fieldValues(first: 100) {
     nodes {
       __typename
       ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2FieldCommon { name } } }
@@ -221,7 +231,7 @@ const ITEM_FIELDS = `
   }`
 
 const PROJECT_QUERY = `
-query($login: String!, $number: Int!, $statusField: String!) {
+query($login: String!, $number: Int!, $statusField: String!, $after: String) {
   repositoryOwner(login: $login) {
     ... on ProjectV2Owner {
       projectV2(number: $number) {
@@ -231,8 +241,9 @@ query($login: String!, $number: Int!, $statusField: String!) {
             options { name }
           }
         }
-        items(first: 100) {
+        items(first: 100, after: $after) {
           nodes { ${ITEM_FIELDS} }
+          pageInfo { hasNextPage endCursor }
         }
       }
     }
@@ -257,7 +268,7 @@ query($login: String!, $number: Int!, $statusField: String!) {
 // configured, so the new argument's host requirement is scoped to the new
 // capability, not the existing one.
 const PROJECT_QUERY_FILTERED = `
-query($login: String!, $number: Int!, $statusField: String!, $itemsFilter: String) {
+query($login: String!, $number: Int!, $statusField: String!, $itemsFilter: String, $after: String) {
   repositoryOwner(login: $login) {
     ... on ProjectV2Owner {
       projectV2(number: $number) {
@@ -267,8 +278,9 @@ query($login: String!, $number: Int!, $statusField: String!, $itemsFilter: Strin
             options { name }
           }
         }
-        items(first: 100, query: $itemsFilter) {
+        items(first: 100, query: $itemsFilter, after: $after) {
           nodes { ${ITEM_FIELDS} }
+          pageInfo { hasNextPage endCursor }
         }
       }
     }
@@ -350,6 +362,7 @@ type GhProjectV2Response = {
                             nodes?: Array<GhFieldValueNode | null>
                         } | null
                     } | null>
+                    pageInfo?: { hasNextPage?: boolean; endCursor?: string | null } | null
                 } | null
             } | null
         } | null
@@ -710,18 +723,65 @@ async function runGhGraphqlView(target: ProjectViewLookupTarget): Promise<GhProj
     }
 }
 
-async function runGhGraphql(target: ProjectQueryTarget): Promise<GhProjectV2Response> {
-    if (target.viewNumber === undefined) {
-        const stdout = await execGhGraphql(target.host, PROJECT_QUERY, {
-            login: target.ownerLogin,
-            number: target.projectNumber,
-            statusField: target.statusFieldName
-        })
+// A board's items connection had no pagination at all until now — a board
+// with more than 100 items (Lockhouse Work: well over 100) silently dropped
+// everything past page 1, so a card recently moved into view (or any item
+// past that boundary) never appeared no matter how many times "refresh" was
+// pressed — manual refresh re-ran the exact same first-100 query, not a real
+// re-fetch of the whole board (operator-reported dogfood bug, #431 missing).
+// Caps at MAX_ITEM_PAGES pages (2000 items) rather than looping until
+// genuinely exhausted — a real safety bound against a pathological project,
+// while comfortably covering every board size seen in practice; if a board
+// ever legitimately exceeds that, the extra items are dropped the same way
+// they always were, not a new regression.
+const MAX_ITEM_PAGES = 20
+
+export async function fetchAllProjectItems(execPage: (after: string | undefined) => Promise<string>): Promise<GhProjectV2Response> {
+    const firstStdout = await execPage(undefined)
+    let response: GhProjectV2Response
+    try {
+        response = JSON.parse(firstStdout) as GhProjectV2Response
+    } catch {
+        throw new Error('gh api graphql returned non-JSON output')
+    }
+
+    const project = response.data?.repositoryOwner?.projectV2
+    if (response.errors?.length || !project?.items) {
+        return response
+    }
+
+    const allNodes = [...(project.items.nodes ?? [])]
+    let pageInfo = project.items.pageInfo
+    let pageCount = 1
+    while (pageInfo?.hasNextPage && pageInfo.endCursor && pageCount < MAX_ITEM_PAGES) {
+        const stdout = await execPage(pageInfo.endCursor)
+        let pageResponse: GhProjectV2Response
         try {
-            return JSON.parse(stdout) as GhProjectV2Response
+            pageResponse = JSON.parse(stdout) as GhProjectV2Response
         } catch {
             throw new Error('gh api graphql returned non-JSON output')
         }
+        if (pageResponse.errors?.length) {
+            return pageResponse
+        }
+        const pageItems = pageResponse.data?.repositoryOwner?.projectV2?.items
+        allNodes.push(...(pageItems?.nodes ?? []))
+        pageInfo = pageItems?.pageInfo
+        pageCount += 1
+    }
+
+    project.items.nodes = allNodes
+    return response
+}
+
+async function runGhGraphql(target: ProjectQueryTarget): Promise<GhProjectV2Response> {
+    if (target.viewNumber === undefined) {
+        return fetchAllProjectItems(after => execGhGraphql(target.host, PROJECT_QUERY, {
+            login: target.ownerLogin,
+            number: target.projectNumber,
+            statusField: target.statusFieldName,
+            after
+        }))
     }
 
     const viewResponse = await runGhGraphqlView({
@@ -735,17 +795,13 @@ async function runGhGraphql(target: ProjectQueryTarget): Promise<GhProjectV2Resp
         throw new Error(resolved.error)
     }
 
-    const stdout = await execGhGraphql(target.host, PROJECT_QUERY_FILTERED, {
+    return fetchAllProjectItems(after => execGhGraphql(target.host, PROJECT_QUERY_FILTERED, {
         login: target.ownerLogin,
         number: target.projectNumber,
         statusField: target.statusFieldName,
-        itemsFilter: resolved.itemsFilter
-    })
-    try {
-        return JSON.parse(stdout) as GhProjectV2Response
-    } catch {
-        throw new Error('gh api graphql returned non-JSON output')
-    }
+        itemsFilter: resolved.itemsFilter,
+        after
+    }))
 }
 
 export type ResolveProjectViewResult =
