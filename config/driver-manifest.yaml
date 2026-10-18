@@ -819,12 +819,12 @@ layers:
   # Tip: f0803e996
   - branch: fix/claude-mcp-spawn-model-effort
 
-  # heavygee/hapi#120 / Heavygee-Projects/hapi-inline#514 — vendor hapi-inline operator dock (fork-local, not tiann).
-  # Tip: f75998631 (driver/hapi-inline-revendor-0222) — pin v0.22.2 CodeQL xss-through-dom barrier (#514/#518).
-  # Replaces driver/hapi-inline-revendor-0221 / operator-dock v0.22.1. Keeps #508/#497/#498/#492.
-  # Worktree: ~/coding/hapi/worktrees/hapi-inline-revendor-0222
+  # heavygee/hapi#120 / Heavygee-Projects/hapi-inline#535 — vendor hapi-inline operator dock (fork-local, not tiann).
+  # Tip: 5a1ea4297 (driver/hapi-inline-revendor-0223) — pin v0.22.3 fail-closed stale machineId (#535/#534).
+  # Replaces driver/hapi-inline-revendor-0222 / operator-dock v0.22.2. Keeps #531/#533/#528/#514/#508/#497/#498/#492.
+  # Worktree: ~/coding/hapi/worktrees/hapi-inline-revendor-0223
   # Hub+web → remat needs --build-web + hapi-restart-hub (embedded web assets).
-  - branch: driver/hapi-inline-revendor-0222
+  - branch: driver/hapi-inline-revendor-0223
 
   # heavygee/hapi#121 — operator-hold chip pulse (🛑 needs_operator / babysit.hold).
   # Soup UI on awareness ancestry (schema enum + SessionPrChip FueDot). Classifier
@@ -1092,9 +1092,8 @@ layers:
 
   # heavygee/hapi#235 / PR #238 — Boards view (cards/chips/relative-time,
   # Projects v2 /views/<n> filter capture). Renamed To-Do → Boards.
-  # Re-tip 2026-10-14: driver/235-todo-board-view @ 6e5ee7bc4 (= feat tip —
-  # isHistoryPopNavigation push-vs-pop; assignee picker name+login). Was
-  # 7f565cac6 (Open-session / clearable status / mention tooltip).
+  # Re-tip 2026-10-18: driver/235-todo-board-view @ 531479bba thin onto soup
+  # ab3cd07f0 (CTA rip + title-only filter). Fat feat tip 17c2fa61d skipped.
   - branch: driver/235-todo-board-view
 
   # heavygee/hapi#247 — deliberate fleet push + restore upgrade-runner; kill
@@ -1226,18 +1225,90 @@ layers:
   # Hub-only → remat + hapi-restart-hub (no --build-web). Agents must not --activate.
   - branch: driver/270-fleet-upgrade-idle-gate
 
-  # tiann/hapi#2019 — session search clear hit target too small for touch /
-  # Quest pointer. Layout A: expanded search embeds a 48x48 calendar inside the
-  # field, immediately left of the furthest-right 48x48 clear end-cap. Session
-  # list keeps showDateFilter=false (collapsed date stays in the filter menu).
-  # Collapsed search stays shrink-0 (no w-full) so it does not steal the
-  # BlockedJumpPill row.
-  # Soup thin tip: driver/search-clear-touch @ 496951fd1
-  # Tip-unique verify marker: session-list-search-clear-endcap +
-  # session-list-search-date-embedded in web/dist
-  # Worktree: ~/coding/hapi/worktrees/search-clear-touch-soup
+  # DROPPED 2026-10-15: driver/search-clear-touch — MERGED tiann/hapi#2034
+  # (squash 317e39a0b). Fixes #2019 layout A clear end-cap + embedded calendar.
+  # - branch: driver/search-clear-touch
+
+  # heavygee/hapi#270 follow-on — skew-banner release NOTES were amber-on-amber
+  # (taupe/tan, unreadable). Amber stays as attention border only; surfaces and
+  # copy are zinc; NOTES dump is a dark mono block. Tip @ e5c1b959e.
+  # Worktree: ~/coding/hapi/worktrees/skew-notes-contrast
   # Web-only → remat --build-web; hard-reload (no hub restart).
-  - branch: driver/search-clear-touch
+  - branch: driver/270-skew-notes-contrast
+
+  # heavygee/hapi#284 — platform/arch-aware GET /api/upgrade/offer (+ /cli/upgrade/offer)
+  # so Linux fleet hubs return windows-x64 tip sha for win32 runners (not
+  # linux-x64-baseline). Cache keyed by platform; keepalive trail-check is
+  # platform-aware; runners reject cross-OS artifacts; banner gates Upgrade on
+  # availablePlatforms. Tip @ 16540195e (PR #285 merged into parent tip branch).
+  # Worktree: ~/coding/hapi/worktrees/platform-aware-offer
+  # Hub+cli+web → remat --build-web + hapi-restart-hub; then seal to gift.
+  - branch: driver/284-platform-aware-offer
+
+  # heavygee/hapi#287 (ref tiann/hapi#2038) — tagged machine re-register omitted
+  # tag/proof → MachineTagConflictError uncaught 500 → silent 60× runner retry.
+  # Hub forwards tag/runnerProof + 409 on conflict; runner sends machineTag +
+  # process-local runnerProof and FATALs on fail; doctor tag-only registration
+  # probe; enrollment bodies not retried even on 5xx.
+  # Follow-up on same branch after first soup absorb of 1bd8d8c80:
+  # b76a95b0c — no proof-less rotate; hubReadyAt before detached start; doctor GET-before-POST.
+  # Follow-up after b76a95b0c absorb: 9e347c654 — no proof-bound re-register on session bootstrap;
+  # hubReadyAt only after socket connect; detached start kills child if registration does not finish.
+  # Follow-up after 9e347c654: 6d90c1bb0 — no proof-less session machine create;
+  # hubReadyAt after RPC ack; migrate-sessions 404 does not abort re-enroll.
+  # Follow-up after 6d90c1bb0: 9984440e7 — release RPC ownership before handoff hubReadyAt;
+  # session bootstrap waits out registration; Windows grandchild PID counts as ready;
+  # doctor fails a null proof hash and stays non-interactive without a token.
+  # Follow-up after 9984440e7: dfffbb191 — handoff RPC release stays suspended across keepalive;
+  # session bootstrap follows the machine id the runner actually registered.
+  # Follow-up after dfffbb191: c5c658c20 — direct launches use an existing machine row
+  # when no runner is mid-registration. runnerProof stays (nametag comment was not enrollment).
+  # Follow-up after c5c658c20: dafe2c72f — missing machine rows start the runner;
+  # legacy live runners without hubReadyAt still resolve; handoff kills the replacement
+  # before it takes RPC methods back.
+  # Follow-up after dafe2c72f: 58d71276e — locale runner clocks count as legacy;
+  # stale ready pids do not; a failed handoff restores the parent runner state.
+  # Follow-up after 58d71276e: 9ab966c49 — failed handoff rebinds the parent runner proof;
+  # a reused pid no longer blocks starting the runner.
+  # Follow-up after 9ab966c49: a12a30014 — failed handoff reclaims the proof only after
+  # the child is dead and the lock is ours; a failed runner spawn can be retried.
+  # Follow-up after a12a30014: 77c4c3e23 — handoff waits 150s so a slow register is not killed at 90s;
+  # session bootstrap confirms settings.machineTag via POST /cli/machines/:id/check-tag
+  # before accepting an existing row. That route does not create or rebind.
+  # Follow-up after 77c4c3e23: 03ac154d9 — legacy rotate uses POST /cli/machines/:id/migrate-sessions
+  # (destination tag + runner proof); migrate failure fails registration. Failed parent-proof
+  # restore exits instead of resuming RPC with a hash the hub will reject. Self-upgrade matches.
+  # Follow-up after 03ac154d9: fbebd48b8 — migrate-sessions requires source tag+proof when
+  # the from-machine is still tagged and proof-bound. Legacy/unbound sources still move with
+  # destination proof alone.
+  # Follow-up after fbebd48b8: d2ba08aa6 — Claude version-mismatch spawn waits until the
+  # replacement owns runner.state.json and hubReadyAt is set; still-live previous PID is not ready.
+  # Follow-up after d2ba08aa6: 300e9bd82 — declare mdast on shared + vitest on hub so
+  # fresh isolated-linker typecheck works (local oos-linux/test green).
+  # Thin tip on soup HEAD 8d51206da: driver/2038-machine-tag-reregister @ 300e9bd82
+  # Parent pin: driver/2038-machine-tag-parent @ 8d51206da
+  # PR: heavygee/hapi#288 (fork fortress — not upstream-landable alone)
+  # Hub+cli → remat + hapi-restart-hub; tip-unique: 409 MachineTagConflict +
+  # doctorMachineRegistration module.
+  - branch: driver/2038-machine-tag-reregister
+
+  # Remat unblock: #284 platform query on /api/upgrade/offer broke
+  # version.test.ts endsWith mock (got null gen). Thin tip on 8d51206da @ 16d119434.
+  # Not product; keeps tip-forward verify green after MachineTag absorb.
+  - branch: driver/fix-version-offer-query-test
+
+  # DROPPED 2026-10-18 #2040: driver/2039-toolbar-crowd + driver/2039-blocked-search-test
+  # MERGED as tiann/hapi#2040 (squash f13a1aae). Absorb from upstream/main on next remat.
+  # - branch: driver/2039-toolbar-crowd
+  # - branch: driver/2039-blocked-search-test
+
+  # #292 — DEFAULT_FLEET_UPGRADE_POLICY=auto (joining fleet = consent).
+  # Thin tip on soup HEAD 31e67a6ac: driver/292-fleet-default-auto @ ee9445082
+  # Parent pin: driver/292-fleet-default-auto-parent @ 31e67a6ac
+  # PR: heavygee/hapi#293 (fork fortress — not upstream-landable alone)
+  # Hub+shared → remat + hapi-restart-hub; tip-unique: DEFAULT=auto + keepalive
+  # tests for hub-wide effective auto.
+  - branch: driver/292-fleet-default-auto
 
   # DROPPED 2026-10-06: driver/1933-claude-resume-amnesia — squash 94523eb0d is on
   # fork main (heavygee/hapi#204). Soup base is now origin/main, so tip-forward
@@ -1249,3 +1320,11 @@ layers:
   # fork main + PATH (~/.local/bin/hapi-tick → mirror scripts/tooling/hapi-tick.sh).
   # Upstream path still needs pluggable backend (systemd-only today).
   # - branch: tooling/hapi-tick-v1
+
+  # tiann/hapi#2062 — Settings -> Machines "Session start timeout" (session-start
+  # webhook wait) so slow hosts (ChromeOS Crostini) can raise it without editing
+  # systemd. Hub settings.json -> spawn RPC -> runner; HAPI_RUNNER_WEBHOOK_TIMEOUT_MS
+  # on the runner still wins. Thin tip on upstream/main @ 872da05a3.
+  # hub+cli+shared+web -> remat --build-web + hapi-restart-hub.
+  # Tip-unique web marker: "HAPI_RUNNER_WEBHOOK_TIMEOUT_MS keeps"
+  - branch: feat/2062-webhook-timeout-settings

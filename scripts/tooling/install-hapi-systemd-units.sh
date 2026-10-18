@@ -432,6 +432,19 @@ case "$PROFILE" in
         fi
         ;;
     user-pet)
+        # Same class of failure as install-hapi-pet.sh #294: no user bus →
+        # raw dbus error mid-install. Fail before writing units.
+        if ! systemctl --user show-environment >/dev/null 2>&1; then
+            _u="$(id -un)"
+            _uid="$(id -u)"
+            echo "ERROR: --profile user-pet needs a working systemd --user bus for ${_u}." >&2
+            echo "       Missing \$XDG_RUNTIME_DIR / \$DBUS_SESSION_BUS_ADDRESS, or user@${_uid}.service is down." >&2
+            echo "       A sudo-capable person should run:" >&2
+            echo "         sudo loginctl enable-linger ${_u}" >&2
+            echo "         sudo systemctl start user@${_uid}.service" >&2
+            echo "       Then re-run this installer (#294)." >&2
+            exit 1
+        fi
         USER_UNIT_DIR="$HOME/.config/systemd/user"
         mkdir -p "$USER_UNIT_DIR"
         render_pair \

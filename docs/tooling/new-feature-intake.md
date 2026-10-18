@@ -156,6 +156,8 @@ Wait for confirmation or correction.
 
 Do **not** treat operator mic / voice / interrupt as a waive. Incident 2026-10-14: affordance work reached a soup tip before [tiann/hapi#2019](https://github.com/tiann/hapi/issues/2019) existed — that sequencing is forbidden.
 
+**Layout mocks A–D (or similar lettered options):** before the first "implement the mock" turn, confirm the chosen **letter** against a one-line layout sentence the operator agrees with (e.g. "calendar inside the field, clear furthest right"). Letter alone is not enough — A≠D bit people on #2019 when "alongside" sounded right for the wrong mock. Re-state the sentence in the handoff / dogfood ask.
+
 Upstream PR branches stay **`upstream/main...HEAD`** for review. Soup manifest merge order is **local only** — see [driver-soup.md](./driver-soup.md).
 
 ### 5 — Proof path + soup dogfood (not either/or)
