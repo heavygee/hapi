@@ -111,7 +111,6 @@ export default {
   'boards.empty.body': 'Раздел «Доски» отражает здесь доску GitHub Projects (v2), сгруппированную по статусу — сессия, созданная из элемента, автоматически с ним связывается.',
   'boards.noBoardsConfigured.title': 'Доски пока не настроены',
   'boards.noBoardsConfigured.body': 'Раздел «Доски» подключает доску GitHub Projects (v2) к HAPI, чтобы вы могли видеть и работать с её элементами — исполнители, метки, статус и запуск сессии в один клик — не переключаясь на другую вкладку. Добавьте доску через + выше или кнопку ниже.',
-  'boards.noBoardsConfigured.tryExample': 'Попробовать на примере доски',
   'boards.noStatus': 'Без статуса',
   'boards.sessionLinked': 'Сессия',
   'boards.openInGithub': 'Открыть в GitHub',

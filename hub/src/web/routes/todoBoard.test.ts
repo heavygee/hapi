@@ -228,18 +228,30 @@ describe('GET /api/todo-boards', () => {
         expect(await response.json()).toEqual({ boards: [{ id: 'github.com::acme::42', label: 'acme/42' }] })
     })
 
-    it('ignores a non-numeric board number and falls back to the default', async () => {
+    it('treats a non-numeric board number with no owner set as unconfigured — never invents an owner/project (hapi#238)', async () => {
         process.env.HAPI_BOARD_NUMBER = 'not-a-number'
         const app = await createApp(() => ({ data: {} }))
         const response = await app.request('/api/todo-boards')
-        expect(await response.json()).toEqual({ boards: [{ id: 'github.com::heavygee::6', label: 'heavygee/6' }] })
+        expect(await response.json()).toEqual({ boards: [] })
     })
 
-    it('ignores a fractional board number and falls back to the default', async () => {
+    it('treats a fractional board number with no owner set as unconfigured — never invents an owner/project (hapi#238)', async () => {
         process.env.HAPI_BOARD_NUMBER = '1.5'
         const app = await createApp(() => ({ data: {} }))
         const response = await app.request('/api/todo-boards')
-        expect(await response.json()).toEqual({ boards: [{ id: 'github.com::heavygee::6', label: 'heavygee/6' }] })
+        expect(await response.json()).toEqual({ boards: [] })
+    })
+
+    it('treats an owner with no valid number as unconfigured — a partial HAPI_BOARD_* set must never fall back to a hardcoded owner/project (hapi#238)', async () => {
+        // Regression guard: this used to silently fall back to a hardcoded
+        // heavygee/6 board for *any* missing field, so an operator who set
+        // only HAPI_BOARD_OWNER (or mistyped HAPI_BOARD_NUMBER) would
+        // unknowingly load someone else's project. Owner and number must
+        // both be valid together, or there is no env-seeded board at all.
+        process.env.HAPI_BOARD_OWNER = 'acme'
+        const app = await createApp(() => ({ data: {} }))
+        const response = await app.request('/api/todo-boards')
+        expect(await response.json()).toEqual({ boards: [] })
     })
 })
 
