@@ -1298,8 +1298,8 @@ layers:
   # Not product; keeps tip-forward verify green after MachineTag absorb.
   - branch: driver/fix-version-offer-query-test
 
-  # DROPPED 2026-10-18: driver/2039-toolbar-crowd + driver/2039-blocked-search-test
-  # — tiann/hapi#2040 merged (squash f13a1aae). Absorb from upstream/main on next remat.
+  # DROPPED 2026-10-18 #2040: driver/2039-toolbar-crowd + driver/2039-blocked-search-test
+  # MERGED as tiann/hapi#2040 (squash f13a1aae). Absorb from upstream/main on next remat.
   # - branch: driver/2039-toolbar-crowd
   # - branch: driver/2039-blocked-search-test
 
