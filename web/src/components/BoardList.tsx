@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { BoardItem, BoardSummary } from '@/types/api'
 import type { SessionSummary } from '@/types/api'
 import { BoardSwitcherBar, BoardSwitcherMenu, type BoardFilterItem } from '@/components/BoardSwitcher'
@@ -6,7 +6,7 @@ import { AddBoardDialog } from '@/components/AddBoardDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Button } from '@/components/ui/button'
 import { LoadingState } from '@/components/LoadingState'
-import { ExternalLinkIcon, RefreshIcon } from '@/components/icons'
+import { CloseIcon, ExternalLinkIcon, RefreshIcon } from '@/components/icons'
 import { SessionLinkedBadge } from '@/components/SessionLinkedBadge'
 import { chipBaseClass, chipIdleClass } from '@/components/filterChipStyles'
 import { getApiErrorMessage } from '@/lib/apiErrorMessage'
@@ -83,6 +83,26 @@ function ChevronIcon(props: { className?: string; collapsed?: boolean }) {
     )
 }
 
+function SearchIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+        >
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
+    )
+}
+
 type StatusGroup = {
     // `null` means "no status assigned" — kept distinct from a string so a
     // board with a real status column literally named "noStatus" can't
@@ -114,6 +134,17 @@ const STATUS_DOT_PALETTE = ['bg-blue-500', 'bg-amber-500', 'bg-emerald-500', 'bg
 
 function statusDotClass(colorIndex: number): string {
     return STATUS_DOT_PALETTE[colorIndex % STATUS_DOT_PALETTE.length]
+}
+
+// Client-side title filter over the items already loaded for the active
+// board (operator ask) — titles only, not body/comments/other content, and
+// deliberately no facets (assignee/label/status chips): a plain substring,
+// case-insensitive match is the whole scope. Applied before grouping so
+// status-group counts/collapse state reflect what's actually visible.
+export function filterItemsByTitle(items: BoardItem[], query: string): BoardItem[] {
+    const trimmed = query.trim().toLowerCase()
+    if (!trimmed) return items
+    return items.filter(item => item.title.toLowerCase().includes(trimmed))
 }
 
 // Groups by the board's own status field (verbatim), in board-defined column
@@ -331,13 +362,25 @@ export function BoardList(props: {
     const [removeTarget, setRemoveTarget] = useState<BoardFilterItem | null>(null)
     const [isRemoving, setIsRemoving] = useState(false)
     const boardId = props.selectedBoardId ?? ''
+    // Resets on board switch (same self-correcting pattern as the assignee
+    // picker's own search box) — a filter left over from a previous board
+    // would otherwise read as "this board has no matching items" instead of
+    // "you're still filtering by a term from the last one."
+    const [titleFilter, setTitleFilter] = useState('')
+    useEffect(() => {
+        setTitleFilter('')
+    }, [boardId])
     const boardFilterItems = useMemo(
         () => props.boards.map(board => ({ id: board.id, label: board.label })),
         [props.boards]
     )
+    const filteredItems = useMemo(
+        () => filterItemsByTitle(props.items, titleFilter),
+        [props.items, titleFilter]
+    )
     const groups = useMemo(
-        () => groupItemsByStatus(props.items, props.statusOrder),
-        [props.items, props.statusOrder]
+        () => groupItemsByStatus(filteredItems, props.statusOrder),
+        [filteredItems, props.statusOrder]
     )
     // Color index only advances for real statuses — "no status" always gets
     // the same neutral dot rather than consuming a palette slot.
@@ -488,7 +531,37 @@ export function BoardList(props: {
                                 {t('boards.staleError', { message: props.error })}
                             </div>
                         ) : null}
-                        {groupsWithDot.map(({ group, key, compositeKey, isNoStatus, dotClass, collapsed }) => (
+                        <div className="relative mb-2">
+                            <div className="pointer-events-none absolute inset-y-0 left-2.5 flex items-center text-[var(--app-hint)]">
+                                <SearchIcon className="h-3.5 w-3.5" />
+                            </div>
+                            <input
+                                type="search"
+                                value={titleFilter}
+                                onChange={(event) => setTitleFilter(event.target.value)}
+                                placeholder={t('boards.filter.placeholder')}
+                                aria-label={t('boards.filter.placeholder')}
+                                className={cn(
+                                    'w-full appearance-none rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] py-1.5 pl-8 pr-7 text-sm text-[var(--app-fg)] outline-none transition-colors placeholder:text-[var(--app-hint)] focus:border-[var(--app-link)] [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden'
+                                )}
+                            />
+                            {titleFilter ? (
+                                <button
+                                    type="button"
+                                    onClick={() => setTitleFilter('')}
+                                    aria-label={t('boards.filter.clear')}
+                                    title={t('boards.filter.clear')}
+                                    className="absolute inset-y-0 right-1.5 flex items-center justify-center rounded-full p-1 text-[var(--app-hint)] hover:text-[var(--app-fg)]"
+                                >
+                                    <CloseIcon className="h-3.5 w-3.5" />
+                                </button>
+                            ) : null}
+                        </div>
+                        {filteredItems.length === 0 ? (
+                            <div className="px-1 py-4 text-center text-sm text-[var(--app-hint)]">
+                                {t('boards.filter.noResults', { query: titleFilter })}
+                            </div>
+                        ) : groupsWithDot.map(({ group, key, compositeKey, isNoStatus, dotClass, collapsed }) => (
                             <div key={key} className="mb-3">
                                 <button
                                     type="button"
