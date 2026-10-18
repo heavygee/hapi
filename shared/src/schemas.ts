@@ -91,26 +91,62 @@ export const GithubIssueExternalRefSchema = z.object({
     path: ['url']
 })
 
+// Same canonical-match validation as isValidGithubIssueRef above, for PR
+// URLs instead of issue URLs (operator decision, hapi#238: reconciling this
+// schema with the upstream-shaped one already running in driver/soup —
+// `tiann/hapi#1160`-`#1163` — which independently arrived at the same
+// strict-URL-match requirement). `url`/`repo`/`number` identity is universal
+// regardless of what project this feature runs against; nothing here is
+// HAPI/fork-specific. PR_URL_RE itself is defined further down, alongside
+// ISSUE_URL_RE, since both share GH_NAME_SEGMENT/URL_HOST_SEGMENT (defined
+// there too) — this function is a hoisted declaration, so its own position
+// here doesn't matter, only PR_URL_RE's module-eval-order does.
+function isValidGithubPrRef(ref: { url: string; repo: string; number: number }): boolean {
+    const match = PR_URL_RE.exec(ref.url.trim())
+    if (!match) return false
+    const [, , repo, numberRaw] = match
+    return repo!.toLowerCase() === ref.repo.toLowerCase() && Number(numberRaw) === ref.number
+}
+
 /**
  * The fork's existing PR-chip mechanism (`scripts/tooling/hapi-meta-daily.sh`
  * --backfill-refs / md_refs_apply_status) already writes `kind: 'github_pr'`
  * entries into this same `metadata.externalRefs` array, in production,
- * today — entirely from bash/jq, independent of this schema. Its shape
- * grows fields over time (role, source, linkedAt, status, statusCheckedAt,
- * estateCode, statusAction, openState, checks, merge, ...) as that tooling
- * evolves, so this only pins down the fields every write path shares
- * (`kind`/`repo`/`number`/`url`) and `.passthrough()`es the rest — a
- * discriminated union member that validated only `github_issue`'s exact
- * shape would make `ExternalRefSchema` (and therefore `MetadataSchema`)
- * reject the entire metadata object for any session already carrying a
- * `github_pr` chip (Codex review, hapi#238).
+ * today — entirely from bash/jq, independent of this schema.
+ *
+ * `role`/`source`/`linkedAt` are recognized, optional core fields (not
+ * `.passthrough()`-only) — the bash tooling's only ref-creation site
+ * (`hapi-meta-daily.sh:440`) always sets all three, and `role`
+ * (primary/secondary — which PR a session is actually working vs.
+ * incidentally mentions) is a structural concept independent of any
+ * particular project's workflow, not a HAPI-specific one.
+ *
+ * Everything past that — `status`, `statusCheckedAt`, `statusAction`,
+ * `estateCode`, `openState`, `checks`, `merge`, and whatever this fork's own
+ * chip tooling grows next — stays `.passthrough()`, deliberately NOT pinned
+ * to a fixed enum/shape here (operator decision, hapi#238): those are this
+ * *project's* specific PR-workflow vocabulary (which emoji/status means
+ * what), not something every project embedding this schema should be forced
+ * to share. A project-specific config (e.g. a YAML) is the right place for
+ * that vocabulary, not the universal wire schema. A discriminated union
+ * member that validated only `github_issue`'s exact shape would make
+ * `ExternalRefSchema` (and therefore `MetadataSchema`) reject the entire
+ * metadata object for any session already carrying a `github_pr` chip
+ * (Codex review, hapi#238) — passthrough here is what avoids that, same as
+ * before this reconciliation.
  */
 export const GithubPrExternalRefSchema = z.object({
     kind: z.literal('github_pr'),
     url: z.string(),
     repo: z.string(),
-    number: z.number()
-}).passthrough()
+    number: z.number(),
+    role: z.enum(['primary', 'secondary']).optional(),
+    source: z.enum(['agent', 'user', 'inferred']).optional(),
+    linkedAt: z.number().optional()
+}).passthrough().refine(isValidGithubPrRef, {
+    message: 'url must be a canonical GitHub pull request URL matching repo/number',
+    path: ['url']
+})
 
 export const ExternalRefSchema = z.discriminatedUnion('kind', [
     GithubIssueExternalRefSchema,
@@ -184,6 +220,8 @@ const GH_NAME_SEGMENT = '[A-Za-z0-9_.-]+'
 // delimiter-injection gap.
 const URL_HOST_SEGMENT = '[A-Za-z0-9.-]+(?::\\d+)?'
 const ISSUE_URL_RE = new RegExp(`^(?:https?:\\/\\/)?(${URL_HOST_SEGMENT})\\/(${GH_NAME_SEGMENT}\\/${GH_NAME_SEGMENT})\\/issues\\/(\\d+)\\/?(?:[/?#].*)?$`, 'i')
+// Used by isValidGithubPrRef (defined earlier, above GithubPrExternalRefSchema) — same shape as ISSUE_URL_RE but for /pull/ instead of /issues/.
+const PR_URL_RE = new RegExp(`^(?:https?:\\/\\/)?(${URL_HOST_SEGMENT})\\/(${GH_NAME_SEGMENT}\\/${GH_NAME_SEGMENT})\\/pull\\/(\\d+)\\/?(?:[/?#].*)?$`, 'i')
 // Optional `host:` prefix (design-consult review, hapi#238): the shorthand
 // originally had no way to express a GHE host at all, always resolving to
 // github.com regardless — a session guessing at syntax for a GHE item could

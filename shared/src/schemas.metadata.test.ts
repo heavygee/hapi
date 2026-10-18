@@ -78,6 +78,58 @@ describe('MetadataSchema externalRefs github_pr chip (Codex review, hapi#238)', 
     });
 });
 
+describe('MetadataSchema externalRefs github_pr url validation (operator decision, hapi#238)', () => {
+    // Reconciled with the upstream-shaped schema already running in
+    // driver/soup (tiann/hapi#1160-#1163), which independently arrived at
+    // the same strict-URL-match requirement for the same reason the
+    // github_issue schema above was hardened: url/repo/number identity is
+    // universal, not a HAPI-specific workflow concern.
+    const base = { path: '/tmp', host: 'test' };
+
+    it('accepts a canonical github_pr ref matching repo/number', () => {
+        const result = MetadataSchema.safeParse({
+            ...base,
+            externalRefs: [{ kind: 'github_pr', url: 'https://github.com/heavygee/hapi/pull/238', repo: 'heavygee/hapi', number: 238 }]
+        });
+        expect(result.success).toBe(true);
+    });
+
+    it('rejects a userinfo-deceptive url pointing at a different host than it displays', () => {
+        const result = MetadataSchema.safeParse({
+            ...base,
+            externalRefs: [{ kind: 'github_pr', url: 'https://github.com@evil.example/heavygee/hapi/pull/238', repo: 'heavygee/hapi', number: 238 }]
+        });
+        expect(result.success).toBe(false);
+    });
+
+    it('rejects a url whose embedded repo/number disagrees with the ref\'s own fields', () => {
+        const result = MetadataSchema.safeParse({
+            ...base,
+            externalRefs: [{ kind: 'github_pr', url: 'https://github.com/heavygee/hapi/pull/999', repo: 'heavygee/hapi', number: 238 }]
+        });
+        expect(result.success).toBe(false);
+    });
+
+    it('still passes through role/source/linkedAt and unrelated chip-status fields on an otherwise-valid ref', () => {
+        const result = MetadataSchema.safeParse({
+            ...base,
+            externalRefs: [{
+                kind: 'github_pr',
+                url: 'https://github.com/heavygee/hapi/pull/238',
+                repo: 'heavygee/hapi',
+                number: 238,
+                role: 'primary',
+                source: 'inferred',
+                linkedAt: 1,
+                status: 'needs-work',
+                estateCode: 'fork'
+            }]
+        });
+        expect(result.success).toBe(true);
+        expect(result.data?.externalRefs?.[0]).toMatchObject({ role: 'primary', status: 'needs-work', estateCode: 'fork' });
+    });
+});
+
 describe('MetadataSchema externalRefs github_issue url validation (Codex review, hapi#238)', () => {
     // Regression: GithubIssueExternalRefSchema.url accepted any string.
     // `hapi link-issue`/MCP `link_issue` always build this ref via
