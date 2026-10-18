@@ -124,19 +124,11 @@ import { getPathDisplayName } from '@/utils/path'
 import {
     shedToolbarSlots,
     toolbarActionBudget,
-    toolbarGutterPx,
+    TOOLBAR_GAP_PX,
     TOOLBAR_ICON_PX,
+    TOOLBAR_MORE_PX,
     type ToolbarShedSlot
 } from '@/components/sessionToolbarShed'
-
-function readToolbarGutter(row: HTMLElement | null, actions: HTMLElement | null): number {
-    if (!row || !actions) return 0
-    const rowRect = row.getBoundingClientRect()
-    const actionsRect = actions.getBoundingClientRect()
-    if (rowRect.width <= 0 || actionsRect.width <= 0) return 0
-    const padRight = Number.parseFloat(getComputedStyle(row).paddingRight) || 0
-    return toolbarGutterPx(actionsRect.left, rowRect.right, padRight)
-}
 
 function MoreHorizontalIcon(props: { className?: string }) {
     return (
@@ -1366,6 +1358,8 @@ export function SessionListSearch(props: {
     searchMode?: 'metadata' | 'content'
     onSearchModeChange?: (mode: 'metadata' | 'content') => void
     showDateFilter?: boolean
+    /** Caps the collapsed query so More (+ machine menu) stay in the row (#2040). */
+    maxWidthPx?: number
 }) {
     const { t } = useTranslation()
     const [datePickerOpen, setDatePickerOpen] = useState(false)
@@ -1626,16 +1620,22 @@ export function SessionListSearch(props: {
         // that stops the recording almost as soon as it starts. The chip only
         // grows for an existing query, which is stable before the hold begins.
         const showsChip = hasTextQuery
+        // Idle: shrink-0 so the icon does not crush under neighbors (#2039).
+        // Active query: min-w-0 + maxWidth reserves More (+ machine menu) so a
+        // 9rem chip cannot shove the overflow control off a phone row (#2040).
+        const reservedCap = hasTextQuery && props.maxWidthPx && props.maxWidthPx > 0
+            ? props.maxWidthPx
+            : 0
         return (
-            // shrink-0 + max-w-full: do not crush below chrome (icon/clear).
-            // Crushing with overflow:visible painted clear over filter /
-            // BlockedJumpPill at narrow widths (tiann/hapi#2039). Query text
-            // still truncates inside the chip; header row wraps neighbors.
             <div
                 ref={searchRootRef}
                 data-testid="session-list-search"
                 data-expanded="false"
-                className="relative flex max-w-full shrink-0 flex-nowrap items-center gap-1.5"
+                style={reservedCap > 0 ? { maxWidth: reservedCap } : undefined}
+                className={cn(
+                    'relative flex max-w-full flex-nowrap items-center gap-1.5',
+                    hasTextQuery ? 'min-w-0 max-w-full shrink' : 'shrink-0'
+                )}
             >
                 <div className={cn(
                     'relative flex min-w-0 items-center rounded-full transition-colors',
@@ -2227,8 +2227,49 @@ export function SessionList(props: {
     const headerRowRef = useRef<HTMLDivElement>(null)
     const headerActionsRef = useRef<HTMLDivElement>(null)
     const toolbarMeasureRef = useRef<HTMLDivElement>(null)
+    const machineMenuRef = useRef<HTMLDivElement>(null)
+    const actionsObserverRef = useRef<ResizeObserver | null>(null)
     const [headerRowWidth, setHeaderRowWidth] = useState(0)
+    const [toolbarRowBoxPx, setToolbarRowBoxPx] = useState(0)
+    const [searchMaxPx, setSearchMaxPx] = useState(0)
     const [toolbarSlotWidths, setToolbarSlotWidths] = useState<Record<string, number>>({})
+    // Search expand unmounts the actions box; callback ref re-observes on collapse.
+    const setHeaderActionsNode = useCallback((node: HTMLDivElement | null) => {
+        headerActionsRef.current = node
+        actionsObserverRef.current?.disconnect()
+        actionsObserverRef.current = null
+        if (!node || typeof ResizeObserver === 'undefined') return
+        const publishActions = (reported = 0) => {
+            // flex-1 allocation, not the icon cluster and not a crushed-search
+            // gutter that follows the retained icons (#2040).
+            const allocated = node.clientWidth
+            const width = allocated > 0 ? allocated : reported
+            if (width > 0) setHeaderRowWidth(width)
+        }
+        const ro = new ResizeObserver((entries) => {
+            let actionsWidth = 0
+            let sawActions = false
+            for (const entry of entries) {
+                const target = entry.target
+                const reported = entry.contentRect.width ?? 0
+                const client = target instanceof HTMLElement ? target.clientWidth : 0
+                const width = client > 0 ? client : reported
+                if (target === headerRowRef.current && target !== node && width > 0) {
+                    setToolbarRowBoxPx((previous) => previous === width ? previous : width)
+                }
+                if (target === node) {
+                    sawActions = true
+                    actionsWidth = width
+                }
+            }
+            if (sawActions) publishActions(actionsWidth)
+        })
+        ro.observe(node)
+        const row = headerRowRef.current
+        if (row && row !== node) ro.observe(row)
+        actionsObserverRef.current = ro
+        publishActions(node.clientWidth || node.getBoundingClientRect().width)
+    }, [])
     const [searchMode, setSearchMode] = useState<'metadata' | 'content'>('metadata')
     const [contentSearchResponse, setContentSearchResponse] = useState<SessionContentSearchResponse | null>(null)
     const [contentSearchLoading, setContentSearchLoading] = useState(false)
@@ -3041,34 +3082,9 @@ export function SessionList(props: {
 
     const showHeaderRow = showSearch || renderHeader || Boolean(props.headerActions) || Boolean(props.toolbarExtras?.length)
 
-    useEffect(() => {
-        if (!showHeaderRow) {
-            setHeaderRowWidth(0)
-            return
-        }
-        const actions = headerActionsRef.current
-        const row = headerRowRef.current
-        const el = actions ?? row
-        if (!el || typeof ResizeObserver === 'undefined') return
-        const publish = (reported = 0) => {
-            // The gutter is the row's right edge, not the icon cluster's width
-            // and not "row minus a guessed search chip". If the icons fit there,
-            // nothing belongs in More.
-            const gutter = readToolbarGutter(row, actions)
-            const width = gutter > 0 ? gutter : reported
-            if (width > 0) setHeaderRowWidth(width)
-        }
-        const ro = new ResizeObserver((entries) => {
-            const target = entries[0]?.target
-            const reported = entries[0]?.contentRect.width ?? 0
-            const client = target instanceof HTMLElement ? target.clientWidth : 0
-            publish(client > 0 ? client : reported)
-        })
-        if (row) ro.observe(row)
-        if (actions && actions !== row) ro.observe(actions)
-        publish(el.clientWidth || el.getBoundingClientRect().width)
-        return () => ro.disconnect()
-    }, [showHeaderRow])
+    useEffect(() => () => {
+        actionsObserverRef.current?.disconnect()
+    }, [])
     useLayoutEffect(() => {
         const root = toolbarMeasureRef.current
         if (!root) return
@@ -3080,8 +3096,9 @@ export function SessionList(props: {
         const next: Record<string, number> = {}
         for (const node of root.querySelectorAll<HTMLElement>('[data-measure-id]')) {
             const id = node.dataset.measureId
-            if (!id) continue
-            next[id] = node.offsetWidth
+            if (!id || id === '__more') continue
+            const width = node.offsetWidth
+            if (width > 0) next[id] = width
         }
         setToolbarSlotWidths((previous) => {
             const previousKeys = Object.keys(previous)
@@ -3091,6 +3108,22 @@ export function SessionList(props: {
             }
             return next
         })
+        const moreNode = root.querySelector<HTMLElement>('[data-measure-id="__more"]')
+        const parsedGap = Number.parseFloat(getComputedStyle(root).columnGap)
+        const morePx = moreNode && moreNode.offsetWidth > 0 ? moreNode.offsetWidth : TOOLBAR_MORE_PX
+        const gapPx = Number.isFinite(parsedGap) && parsedGap > 0 ? parsedGap : TOOLBAR_GAP_PX
+        const machinePx = machineMenuRef.current?.offsetWidth ?? 0
+        const row = headerRowRef.current
+        const rowBox = row && row.clientWidth > 0 ? row.clientWidth : toolbarRowBoxPx
+        const rowStyle = row ? getComputedStyle(row) : null
+        const rowPad = rowStyle
+            ? (Number.parseFloat(rowStyle.paddingLeft) || 0) + (Number.parseFloat(rowStyle.paddingRight) || 0)
+            : 0
+        const trailing = gapPx
+            + (machinePx > 0 ? machinePx + gapPx : 0)
+            + morePx
+        const nextSearchMax = rowBox > 0 ? Math.max(0, rowBox - rowPad - trailing) : 0
+        setSearchMaxPx((previous) => previous === nextSearchMax ? previous : nextSearchMax)
     })
     const sessionListRef = useRef<HTMLDivElement>(null)
 
@@ -3423,28 +3456,29 @@ export function SessionList(props: {
                             searchMode={searchMode}
                             onSearchModeChange={setSearchMode}
                             showDateFilter={false}
+                            maxWidthPx={searchQuery.length > 0 ? searchMaxPx : 0}
                         />
                     ) : null}
                     {!(showSearch && searchExpanded) ? (
                         <div
-                            ref={headerActionsRef}
+                            ref={setHeaderActionsNode}
                             data-testid="session-list-header-actions"
-                            // flex-1 is the real icon budget. Measuring this box
-                            // (not the whole row minus a guessed search width)
-                            // is what keeps the trailing gap from swallowing
-                            // the next icon (#2039).
+                            // flex-1 min-w-0: leftover after search, not the icon
+                            // cluster's intrinsic width (#2040).
                             className="relative flex min-w-0 flex-1 flex-nowrap items-center gap-1"
                         >
                             {(() => {
-                                // Shed highest keep first. More is only for what does not
-                                // fit between the actions' left edge and the row's
-                                // right edge. If the whole set fits, overflow is empty.
-                                const liveGutter = readToolbarGutter(headerRowRef.current, headerActionsRef.current)
-                                const budget = liveGutter > 0
-                                    ? liveGutter
+                                // Prefer the flex allocation. If every icon fits,
+                                // More stays empty — do not open overflow for neatness.
+                                const allocated = headerActionsRef.current?.clientWidth ?? 0
+                                const gutter = allocated > 0
+                                    ? allocated
                                     : headerRowWidth > 0
                                         ? headerRowWidth
-                                        : toolbarActionBudget(0, searchQuery.length > 0)
+                                        : 0
+                                const budget = gutter > 0
+                                    ? gutter
+                                    : toolbarActionBudget(0, searchQuery.length > 0)
                                 const slotWidth = (id: string, fallback: number) => {
                                     const measured = toolbarSlotWidths[id] ?? 0
                                     return measured > 0 ? measured : fallback
@@ -3485,22 +3519,28 @@ export function SessionList(props: {
                                                 className={showMachineFilterBar ? 'max-md:hidden' : undefined}
                                             />
                                             {showMachineFilterBar ? (
-                                                <MachineFilterMenu
-                                                    machines={machineFilterItems}
-                                                    totalCount={allSessions.length}
-                                                    value={activeMachineFilter}
-                                                    onChange={setMachineFilter}
-                                                    sessionFilter={sessionFilters}
-                                                    onSessionFilterChange={setSessionFilters}
-                                                    customStart={customStart}
-                                                    customEnd={customEnd}
-                                                    sessionActivityDates={sessionActivityDates}
-                                                    onDateRangeChange={(start, end) => {
-                                                        setCustomStart(start)
-                                                        setCustomEnd(end)
-                                                    }}
-                                                    datePickerCenterRef={sessionListRef}
-                                                />
+                                                <div
+                                                    ref={machineMenuRef}
+                                                    data-testid="session-list-header-machine-menu"
+                                                    className="inline-flex shrink-0"
+                                                >
+                                                    <MachineFilterMenu
+                                                        machines={machineFilterItems}
+                                                        totalCount={allSessions.length}
+                                                        value={activeMachineFilter}
+                                                        onChange={setMachineFilter}
+                                                        sessionFilter={sessionFilters}
+                                                        onSessionFilterChange={setSessionFilters}
+                                                        customStart={customStart}
+                                                        customEnd={customEnd}
+                                                        sessionActivityDates={sessionActivityDates}
+                                                        onDateRangeChange={(start, end) => {
+                                                            setCustomStart(start)
+                                                            setCustomEnd(end)
+                                                        }}
+                                                        datePickerCenterRef={sessionListRef}
+                                                    />
+                                                </div>
                                             ) : null}
                                         </>
                                     )
@@ -3576,6 +3616,7 @@ export function SessionList(props: {
                                                     {stripTestIds(slot.node)}
                                                 </span>
                                             ))}
+                                            <span data-measure-id="__more" className="inline-flex h-9 w-9 shrink-0" />
                                         </div>
                                         {blockedSlot ? (
                                             <span data-testid={`session-toolbar-slot-${blockedSlot.id}`} className="contents">
