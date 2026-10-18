@@ -113,7 +113,8 @@ describe('GET/PUT /api/hub-settings', () => {
                     claude: 'sonnet',
                     cursor: 'auto'
                 }
-            }
+            },
+            sessionStartTimeoutMs: null
         })
     })
 
@@ -177,6 +178,7 @@ describe('GET/PUT /api/hub-settings', () => {
         expect(await put.json()).toEqual({
             sessionSummaryContract: false,
             sessionSummaryInChat: false,
+            peerSpawnDefaults: stockPeerSpawnDefaults,
             sessionStartTimeoutMs: 60_000
         })
 
@@ -184,6 +186,7 @@ describe('GET/PUT /api/hub-settings', () => {
         expect(await get.json()).toEqual({
             sessionSummaryContract: false,
             sessionSummaryInChat: false,
+            peerSpawnDefaults: stockPeerSpawnDefaults,
             sessionStartTimeoutMs: 60_000
         })
 
@@ -195,6 +198,7 @@ describe('GET/PUT /api/hub-settings', () => {
         expect(await cleared.json()).toEqual({
             sessionSummaryContract: false,
             sessionSummaryInChat: false,
+            peerSpawnDefaults: stockPeerSpawnDefaults,
             sessionStartTimeoutMs: null
         })
     })
