@@ -6,7 +6,6 @@ import { AddBoardDialog } from '@/components/AddBoardDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Button } from '@/components/ui/button'
 import { LoadingState } from '@/components/LoadingState'
-import { Spinner } from '@/components/Spinner'
 import { ExternalLinkIcon, RefreshIcon } from '@/components/icons'
 import { SessionLinkedBadge } from '@/components/SessionLinkedBadge'
 import { chipBaseClass, chipIdleClass } from '@/components/filterChipStyles'
@@ -158,48 +157,29 @@ export function groupItemsByStatus(items: BoardItem[], statusOrder: string[]): S
     return groups
 }
 
-// The same dull, public demo project the hub falls back to per-field in
-// readEnvBoardConfig() (hub/src/web/routes/todoBoard.ts's DEFAULT_BOARD) —
-// offered here as an optional "try it" shortcut (hapi#238), not a silent
-// default. Adding it goes through the normal POST /todo-boards flow, same as
-// pasting any other project URL.
-const DEMO_BOARD_URL = 'https://github.com/users/heavygee/projects/6'
-
 // Genuinely nothing configured — no stored boards, no HAPI_BOARD_* env vars
-// (hub's hasAnyBoardEnvConfig(), hapi#238 operator decision). A static
-// explainer, not an empty list rendered through the normal fetch path: there
-// is no board id to fetch items for, so this can never surface a raw `gh api
-// graphql failed` wall of text on a machine with no `gh` auth configured at
-// all. Distinct from BoardList's other empty state (a board IS configured
-// but happens to have zero items right now).
-function NoBoardsExplainer(props: { onAddBoard: () => void; onTryExample: (url: string) => Promise<void> }) {
+// (hub's readEnvBoardConfig() returning null, hapi#238 operator decision). A
+// static explainer, not an empty list rendered through the normal fetch
+// path: there is no board id to fetch items for, so this can never surface a
+// raw `gh api graphql failed` wall of text on a machine with no `gh` auth
+// configured at all. Distinct from BoardList's other empty state (a board IS
+// configured but happens to have zero items right now).
+//
+// No "try it with an example board" shortcut here (hapi#235 discussion,
+// fork issue tracked separately): the only project that could back one is a
+// specific operator's own GitHub Projects board, which isn't a demo anyone
+// installing HAPI can actually open. An install-wide CTA must not point at
+// one person's board — Add a board (the operator's own) is the only path.
+function NoBoardsExplainer(props: { onAddBoard: () => void }) {
     const { t } = useTranslation()
-    const [addingExample, setAddingExample] = useState(false)
-    const [exampleError, setExampleError] = useState<string | null>(null)
-
-    const handleTryExample = () => {
-        setAddingExample(true)
-        setExampleError(null)
-        props.onTryExample(DEMO_BOARD_URL)
-            .catch(error => setExampleError(getApiErrorMessage(error, t('dialog.error.default'))))
-            .finally(() => setAddingExample(false))
-    }
 
     return (
         <div className="flex flex-col items-center gap-3 px-4 py-10 text-center">
             <div className="text-sm font-medium text-[var(--app-fg)]">{t('boards.noBoardsConfigured.title')}</div>
             <div className="max-w-sm text-sm text-[var(--app-hint)]">{t('boards.noBoardsConfigured.body')}</div>
-            <div className="flex flex-wrap items-center justify-center gap-2">
-                <Button type="button" variant="default" onClick={props.onAddBoard}>
-                    {t('boards.addBoard.chipLabel')}
-                </Button>
-                <Button type="button" variant="outline" onClick={handleTryExample} disabled={addingExample} aria-busy={addingExample}>
-                    {addingExample ? <Spinner size="sm" label={null} className="text-[var(--app-fg)]" /> : t('boards.noBoardsConfigured.tryExample')}
-                </Button>
-            </div>
-            {exampleError ? (
-                <div className="text-sm text-red-600">{t('boards.error', { message: exampleError })}</div>
-            ) : null}
+            <Button type="button" variant="default" onClick={props.onAddBoard}>
+                {t('boards.addBoard.chipLabel')}
+            </Button>
         </div>
     )
 }
@@ -488,10 +468,7 @@ export function BoardList(props: {
                     // machine with no `gh` auth configured. Distinct from the
                     // "boards.empty" state below, which is for a board that
                     // IS configured but happens to have zero items right now.
-                    <NoBoardsExplainer
-                        onAddBoard={() => setAddDialogOpen(true)}
-                        onTryExample={props.onAddBoard}
-                    />
+                    <NoBoardsExplainer onAddBoard={() => setAddDialogOpen(true)} />
                 ) : props.error && props.items.length === 0 ? (
                     <div className="px-1 py-4 text-sm text-red-600">
                         {t('boards.error', { message: props.error })}

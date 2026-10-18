@@ -23,24 +23,23 @@ import { getSettingsFile, readSettingsOrThrow, updateSettings, type StoredTodoBo
  * multi-identity auth, caching, or pagination beyond a single page of items
  * — that's the full data-layer issue (#234).
  *
- * Boards are config (env default + user-added, persisted in settings.json),
- * never a hardcoded constant — a real personal board was hardcoded here
- * earlier and caught before it shipped (see hapi#235 discussion). The env
- * default must stay a dull, public, nothing-real demo board
- * (`heavygee/hapi-demo-board`, project 6) so a forgotten env var never
- * surfaces anyone's real data — that invariant still holds, but a genuinely
- * empty board list is no longer prevented (operator decision, hapi#238):
- * it used to be impossible to tell "nothing configured" from "the hardcoded
- * demo," so a fresh install with no `gh` auth at all would silently load the
- * demo board and then 502 on its items fetch with a raw `gh api graphql
- * failed` error. GET /todo-boards now genuinely returns `[]` when nothing is
- * configured, and the frontend shows a static explainer instead of ever
- * attempting that fetch. See `loadBoards`/`updateBoards` below — every
- * settings.json reader/writer for `todoBoards` must go through them, not
- * reimplement the env-seed-or-empty fallback inline.
+ * Boards are config (env + user-added, persisted in settings.json), never a
+ * hardcoded constant — a real personal board was hardcoded here earlier and
+ * caught before it shipped (see hapi#235 discussion). There is no shipped
+ * default owner/project at all: HAPI_BOARD_OWNER and HAPI_BOARD_NUMBER must
+ * both be set together before an env-seeded board exists, and a genuinely
+ * empty board list is a real, intentional state (operator decision,
+ * hapi#238) — it used to be impossible to tell "nothing configured" from
+ * "the hardcoded demo," so a fresh install with no `gh` auth at all would
+ * silently load a demo board and then 502 on its items fetch with a raw
+ * `gh api graphql failed` error. GET /todo-boards now genuinely returns `[]`
+ * when nothing is configured, and the frontend shows a static explainer
+ * instead of ever attempting that fetch. See `loadBoards`/`updateBoards`
+ * below — every settings.json reader/writer for `todoBoards` must go through
+ * them, not reimplement the env-seed-or-empty fallback inline.
  *
  * Known landmine for the next person touching this file: every board added
- * via POST /todo-boards (and the env-configured default) hardcodes
+ * via POST /todo-boards (and the env-configured board) hardcodes
  * `statusFieldName: 'Status'` — a board whose status field is actually named
  * something else ("Stage", "Workflow Status") will silently come back with
  * an empty `statusOrder` and every item dumped in the "no status" bucket, no
@@ -48,15 +47,9 @@ import { getSettingsFile, readSettingsOrThrow, updateSettings, type StoredTodoBo
  * out-of-scope for this slice (#234), but it's worth knowing before
  * debugging a "board looks broken" report.
  */
-const DEFAULT_BOARD: StoredTodoBoard = {
-    id: 'github.com::heavygee::6',
-    label: 'heavygee/6',
-    host: 'github.com',
-    ownerLogin: 'heavygee',
-    projectNumber: 6,
-    statusFieldName: 'Status',
-    doneValues: ['Done']
-}
+const DEFAULT_BOARD_HOST = 'github.com'
+const DEFAULT_STATUS_FIELD_NAME = 'Status'
+const DEFAULT_DONE_VALUES = ['Done']
 
 // Percent-encode each component before joining: host/ownerLogin come from a
 // loosely-validated URL regex (parseProjectUrl), so without encoding, a
@@ -95,38 +88,30 @@ function isValidProjectNumber(value: number): boolean {
     return Number.isInteger(value) && value > 0 && value <= MAX_GRAPHQL_INT
 }
 
-// Whether the operator has actually set any HAPI_BOARD_* env var — distinct
-// from readEnvBoardConfig() always being able to *produce* a board, since
-// every one of its fields individually falls back to DEFAULT_BOARD's demo
-// values. Without this check there's no way to tell "operator configured a
-// real board via env vars" from "nothing is configured at all, here's the
-// hardcoded demo" — both looked identical to loadBoards()'s caller (operator
-// decision, hapi#238: a genuinely-empty board list is now a real, displayed
-// state — a static explainer, not a silently-loaded demo board that 502s
-// with a raw `gh api graphql failed` wall of text on a machine with no `gh`
-// auth at all).
-function hasAnyBoardEnvConfig(): boolean {
-    return Boolean(
-        process.env.HAPI_BOARD_HOST?.trim() ||
-        process.env.HAPI_BOARD_OWNER?.trim() ||
-        process.env.HAPI_BOARD_NUMBER?.trim() ||
-        process.env.HAPI_BOARD_STATUS_FIELD?.trim() ||
-        process.env.HAPI_BOARD_DONE_VALUES?.trim() ||
-        process.env.HAPI_BOARD_LABEL?.trim()
-    )
-}
-
-function readEnvBoardConfig(): StoredTodoBoard {
-    const host = process.env.HAPI_BOARD_HOST?.trim() || DEFAULT_BOARD.host
-    const ownerLogin = process.env.HAPI_BOARD_OWNER?.trim() || DEFAULT_BOARD.ownerLogin
+// Builds the env-seeded board, or null if the operator hasn't actually
+// configured one. HAPI_BOARD_OWNER and a valid HAPI_BOARD_NUMBER must both be
+// present together — these two fields are what identify *whose* board this
+// is, so unlike host/statusFieldName/doneValues (which have safe, generic
+// defaults below) they must never individually fall back to someone else's
+// project. Setting only HAPI_BOARD_DONE_VALUES (say) to tweak one field, or
+// mistyping HAPI_BOARD_NUMBER, must read as "not configured," never as "load
+// whichever owner/project happened to be hardcoded here" (hapi#238: a real
+// personal board was previously the hardcoded fallback for exactly this
+// case — see the module doc comment above).
+function readEnvBoardConfig(): StoredTodoBoard | null {
+    const ownerLogin = process.env.HAPI_BOARD_OWNER?.trim()
     const numberRaw = process.env.HAPI_BOARD_NUMBER?.trim()
     const parsedNumber = numberRaw ? Number(numberRaw) : NaN
-    const projectNumber = isValidProjectNumber(parsedNumber) ? parsedNumber : DEFAULT_BOARD.projectNumber
-    const statusFieldName = process.env.HAPI_BOARD_STATUS_FIELD?.trim() || DEFAULT_BOARD.statusFieldName
+    if (!ownerLogin || !isValidProjectNumber(parsedNumber)) {
+        return null
+    }
+    const host = process.env.HAPI_BOARD_HOST?.trim() || DEFAULT_BOARD_HOST
+    const projectNumber = parsedNumber
+    const statusFieldName = process.env.HAPI_BOARD_STATUS_FIELD?.trim() || DEFAULT_STATUS_FIELD_NAME
     const doneValuesRaw = process.env.HAPI_BOARD_DONE_VALUES?.trim()
     const doneValues = doneValuesRaw
         ? doneValuesRaw.split(',').map(value => value.trim()).filter(Boolean)
-        : DEFAULT_BOARD.doneValues
+        : DEFAULT_DONE_VALUES
     const label = process.env.HAPI_BOARD_LABEL?.trim() || `${ownerLogin}/${projectNumber}`
 
     return {
@@ -142,12 +127,12 @@ function readEnvBoardConfig(): StoredTodoBoard {
 
 /**
  * Stored list is the source of truth once non-empty; otherwise fall back to
- * the env-configured board if any HAPI_BOARD_* var is actually set, or
- * genuinely empty otherwise — never persisted until the operator explicitly
- * adds a board. A truly empty list is a real, intentional state now
- * (operator decision, hapi#238): the frontend shows a static explainer
- * instead of ever hitting the items endpoint for a board nobody configured,
- * which used to always exist as a hardcoded demo default.
+ * the env-configured board if HAPI_BOARD_OWNER + HAPI_BOARD_NUMBER are both
+ * actually set, or genuinely empty otherwise — never persisted until the
+ * operator explicitly adds a board. A truly empty list is a real,
+ * intentional state now (operator decision, hapi#238): the frontend shows a
+ * static explainer instead of ever hitting the items endpoint for a board
+ * nobody configured, which used to always exist as a hardcoded demo default.
  *
  * Deliberate consequence, not a bug: env vars are a one-time *seed*, not an
  * ongoing config source. The moment any board is added (the entire point of
@@ -167,13 +152,14 @@ async function loadBoards(dataDir: string): Promise<StoredTodoBoard[]> {
     if (settings.todoBoards && settings.todoBoards.length > 0) {
         return settings.todoBoards
     }
-    return hasAnyBoardEnvConfig() ? [readEnvBoardConfig()] : []
+    const envBoard = readEnvBoardConfig()
+    return envBoard ? [envBoard] : []
 }
 
 /**
  * Single choke point for every settings.json write to `todoBoards`.
- * `mutate` receives the current list (stored, or the env-derived seed if any
- * HAPI_BOARD_* var is set, or genuinely empty otherwise) and returns the
+ * `mutate` receives the current list (stored, or the env-derived seed if one
+ * is actually configured, or genuinely empty otherwise) and returns the
  * next list; if `mutate` returns the same array reference back (no-op, e.g.
  * deleting an id that was never there), the write is skipped entirely —
  * mirrors POST's existing idempotent-add behavior. Removing the last stored
@@ -185,7 +171,8 @@ async function updateBoards(
     dataDir: string,
     mutate: (current: StoredTodoBoard[]) => StoredTodoBoard[]
 ): Promise<StoredTodoBoard[]> {
-    const envSeed = hasAnyBoardEnvConfig() ? [readEnvBoardConfig()] : []
+    const envBoard = readEnvBoardConfig()
+    const envSeed = envBoard ? [envBoard] : []
     return updateSettings(getSettingsFile(dataDir), (current) => {
         const existing = current.todoBoards && current.todoBoards.length > 0 ? current.todoBoards : envSeed
         const next = mutate(existing)
@@ -1017,8 +1004,8 @@ export function createBoardRoutes(
             host: target.host,
             ownerLogin: target.ownerLogin,
             projectNumber: target.projectNumber,
-            statusFieldName: DEFAULT_BOARD.statusFieldName,
-            doneValues: DEFAULT_BOARD.doneValues,
+            statusFieldName: DEFAULT_STATUS_FIELD_NAME,
+            doneValues: DEFAULT_DONE_VALUES,
             ...(target.viewNumber !== undefined ? { viewNumber: target.viewNumber } : {})
         }
 

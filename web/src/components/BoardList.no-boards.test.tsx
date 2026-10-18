@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { I18nProvider } from '@/lib/i18n-context'
 import { BoardList } from './BoardList'
@@ -41,33 +41,16 @@ describe('BoardList with zero boards configured', () => {
         expect(screen.queryByText('Nothing on this board yet')).not.toBeInTheDocument()
     })
 
-    it('offers an Add a board action that opens the add-board dialog', () => {
+    it('offers an Add a board action that opens the add-board dialog, with no other action offered', () => {
         renderList()
 
         const buttons = screen.getAllByRole('button', { name: 'Add a board' })
         fireEvent.click(buttons[buttons.length - 1]!)
         expect(screen.getByRole('dialog')).toBeInTheDocument()
-    })
 
-    it('adds the demo board directly when "Try it with an example board" is clicked', async () => {
-        const onAddBoard = vi.fn(() => Promise.resolve())
-        renderList(onAddBoard)
-
-        fireEvent.click(screen.getByRole('button', { name: 'Try it with an example board' }))
-
-        await waitFor(() => {
-            expect(onAddBoard).toHaveBeenCalledWith('https://github.com/users/heavygee/projects/6')
-        })
-    })
-
-    it('surfaces an error if adding the demo board fails', async () => {
-        const onAddBoard = vi.fn(() => Promise.reject(new Error('boom')))
-        renderList(onAddBoard)
-
-        fireEvent.click(screen.getByRole('button', { name: 'Try it with an example board' }))
-
-        await waitFor(() => {
-            expect(screen.getByText(/boom/)).toBeInTheDocument()
-        })
+        // No install-wide "try an example" shortcut — the only project that
+        // could back one is a specific operator's own board, not a public
+        // demo every installer can open (hapi#235 discussion).
+        expect(screen.queryByRole('button', { name: /example/i })).not.toBeInTheDocument()
     })
 })
