@@ -80,6 +80,9 @@ Usage:
 
 --with-systemd         Install user-level systemd units (works via curl|bash;
                        units are embedded — no git checkout required).
+                       Needs a working systemd --user bus for this account.
+                       Headless/service users: linger + user@UID.service first
+                       (script fails fast with copy-paste if the bus is missing).
 --fleet-policy=POLE    silent | alert | auto (default auto). Seeds settings.json
                        fleetUpgradePolicy when unset. alert/silent are opt-outs.
 --skip-upstream-seal   Do not wire HAPI_UPSTREAM_SEAL_URL (foundry/break-glass).
@@ -95,6 +98,56 @@ done
 
 log()  { printf '==> %s\n' "$1"; }
 fail() { printf 'ERROR: %s\n' "$1" >&2; exit 1; }
+
+# --with-systemd preflight (#294): talk to the user bus before writing units or
+# calling systemctl --user. Missing bus (service account, no linger, no login
+# session) used to die mid-install on a raw dbus error. Hard-fail with
+# copy-paste for a sudo-capable person; never silently fall back to nohup.
+hapi_pet_user_systemd_bus_ok() {
+    command -v systemctl >/dev/null 2>&1 || return 1
+    # show-environment needs a live user bus; is-system-running can be
+    # "degraded" while the bus is still usable.
+    systemctl --user show-environment >/dev/null 2>&1
+}
+
+hapi_pet_user_linger_enabled() {
+    local user
+    user="$(id -un)"
+    [[ "$(loginctl show-user "$user" -p Linger --value 2>/dev/null || true)" == "yes" ]]
+}
+
+hapi_pet_require_user_systemd_bus() {
+    local user uid
+    user="$(id -un)"
+    uid="$(id -u)"
+    command -v systemctl >/dev/null 2>&1 \
+        || fail "systemctl not found — cannot install --with-systemd on this host"
+
+    if hapi_pet_user_systemd_bus_ok; then
+        if ! hapi_pet_user_linger_enabled; then
+            log "WARN: systemd --user bus is up but linger is off for ${user}."
+            log "      Units stop when this login ends. For headless pets, a sudo-capable person should run:"
+            log "        sudo loginctl enable-linger ${user}"
+        fi
+        return 0
+    fi
+
+    fail "$(cat <<EOF
+--with-systemd needs a working systemd --user bus for this account (${user}),
+but none is available (missing \$XDG_RUNTIME_DIR / \$DBUS_SESSION_BUS_ADDRESS,
+or user@${uid}.service is not running).
+
+A sudo-capable person must prepare the account, then re-run this install
+(the script is idempotent — no need to undo the partial binary/settings work):
+
+  sudo loginctl enable-linger ${user}
+  sudo systemctl start user@${uid}.service
+
+Then re-run the same install command. Do not substitute nohup — you asked
+for systemd persistence (#294).
+EOF
+)"
+}
 
 case "$HAPI_FLEET_UPGRADE_POLICY" in
     silent|alert|auto) ;;
@@ -587,6 +640,9 @@ hapi_pet_migrate_legacy_oauth_if_needed() {
 # repo checkout. Keep in sync with scripts/tooling/systemd/units/user-pet/*.in —
 # the checkout path below prefers the companion installer when present.
 install_user_pet_systemd() {
+    # Fail before writing units / any systemctl --user (thinkpadt14 field fail #294).
+    hapi_pet_require_user_systemd_bus
+
     local companion=""
     if [[ -n "${SCRIPT_DIR}" && -x "${SCRIPT_DIR}/tooling/install-hapi-systemd-units.sh" ]]; then
         companion="${SCRIPT_DIR}/tooling/install-hapi-systemd-units.sh"

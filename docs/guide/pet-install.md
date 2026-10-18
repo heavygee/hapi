@@ -29,6 +29,16 @@ curl -fsSL https://raw.githubusercontent.com/heavygee/hapi/main/scripts/install-
 `--with-systemd` works via `curl | bash` (units are embedded in the installer — no git
 checkout required). After install: `systemctl --user status hapi-hub hapi-runner`.
 
+**Headless / service accounts** (no interactive login, no `$XDG_RUNTIME_DIR`): systemd
+`--user` is not running until linger is enabled. The installer **fails fast** with
+copy-paste for a sudo-capable person — it does **not** silently fall back to nohup:
+
+```bash
+sudo loginctl enable-linger <user>
+sudo systemctl start user@$(id -u <user>).service
+# then re-run the same --with-systemd install (idempotent)
+```
+
 ## Finish setup
 
 Open a **new terminal**, then:
