@@ -1333,3 +1333,11 @@ layers:
   # hub+cli+shared+web -> remat --build-web + hapi-restart-hub.
   # Tip-unique web marker: "HAPI_RUNNER_WEBHOOK_TIMEOUT_MS keeps"
   - branch: feat/2062-webhook-timeout-settings
+
+  # #296 — post-apply changelog after fleet auto clears skew.
+  # Thin tip on soup HEAD 3fcbdb55c: driver/applied-changelog @ 7f73cae28
+  # Parent pin: driver/applied-changelog-parent @ 3fcbdb55c
+  # PR: heavygee/hapi#297
+  # Web-only → remat --build-web; hard-reload (no hub restart).
+  # Tip-unique: runner-version-applied-banner
+  - branch: driver/applied-changelog
