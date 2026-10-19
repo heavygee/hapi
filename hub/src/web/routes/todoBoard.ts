@@ -191,12 +191,17 @@ const GH_TIMEOUT_MS = 15_000
 // custom fields (handled generically via fieldValues below). DraftIssue has
 // none of these — it's a title-only card with no linked Issue/PR, so it also
 // has no author/assignees/labels/milestone/close-reopen-comment support.
+//
+// labels is first: 100, not 20 (Codex review, hapi#238): same class of bug
+// as fieldValues below — an issue/PR with more than 20 labels silently
+// truncated the list with no indication anything was missing, and mapItems
+// presents whatever comes back as the complete array.
 const ISSUE_OR_PR_FIELDS = `
   title number url state updatedAt createdAt closedAt body
   repository { nameWithOwner }
   author { login avatarUrl }
   assignees(first: 10) { nodes { login avatarUrl } }
-  labels(first: 20) { nodes { name color } }
+  labels(first: 100) { nodes { name color } }
   milestone { title dueOn }`
 
 // fieldValues is first: 100, not 20 (Codex review, hapi#238): every built-in

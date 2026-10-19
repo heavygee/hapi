@@ -128,6 +128,28 @@ describe('MetadataSchema externalRefs github_pr url validation (operator decisio
         expect(result.success).toBe(true);
         expect(result.data?.externalRefs?.[0]).toMatchObject({ role: 'primary', status: 'needs-work', estateCode: 'fork' });
     });
+
+    it('rewrites a non-canonical but otherwise-valid url to the canonical https form (Codex review)', () => {
+        // Regression: a plain string-match check only confirmed the *parsed*
+        // repo/number agreed, never that the stored url equaled the parser's
+        // own canonical reconstruction. A ref stored as http:// rendered a
+        // cleartext link; one stored scheme-less rendered as a broken
+        // same-origin relative link, since IssueRefChip/the PR chip render
+        // `ref.url` verbatim.
+        const httpResult = MetadataSchema.safeParse({
+            ...base,
+            externalRefs: [{ kind: 'github_pr', url: 'http://github.com/heavygee/hapi/pull/238', repo: 'heavygee/hapi', number: 238 }]
+        });
+        expect(httpResult.success).toBe(true);
+        expect(httpResult.data?.externalRefs?.[0]).toMatchObject({ url: 'https://github.com/heavygee/hapi/pull/238' });
+
+        const schemelessResult = MetadataSchema.safeParse({
+            ...base,
+            externalRefs: [{ kind: 'github_pr', url: 'github.com/heavygee/hapi/pull/238', repo: 'heavygee/hapi', number: 238 }]
+        });
+        expect(schemelessResult.success).toBe(true);
+        expect(schemelessResult.data?.externalRefs?.[0]).toMatchObject({ url: 'https://github.com/heavygee/hapi/pull/238' });
+    });
 });
 
 describe('MetadataSchema externalRefs github_issue url validation (Codex review, hapi#238)', () => {
@@ -164,6 +186,22 @@ describe('MetadataSchema externalRefs github_issue url validation (Codex review,
             externalRefs: [{ kind: 'github_issue', url: 'https://github.com/heavygee/hapi/issues/999', repo: 'heavygee/hapi', number: 235, linkedAt: 1 }]
         });
         expect(result.success).toBe(false);
+    });
+
+    it('rewrites a non-canonical but otherwise-valid url to the canonical https form (Codex review)', () => {
+        const httpResult = MetadataSchema.safeParse({
+            ...base,
+            externalRefs: [{ kind: 'github_issue', url: 'http://github.com/heavygee/hapi/issues/235', repo: 'heavygee/hapi', number: 235, linkedAt: 1 }]
+        });
+        expect(httpResult.success).toBe(true);
+        expect(httpResult.data?.externalRefs?.[0]).toMatchObject({ url: 'https://github.com/heavygee/hapi/issues/235' });
+
+        const schemelessResult = MetadataSchema.safeParse({
+            ...base,
+            externalRefs: [{ kind: 'github_issue', url: 'github.com/heavygee/hapi/issues/235', repo: 'heavygee/hapi', number: 235, linkedAt: 1 }]
+        });
+        expect(schemelessResult.success).toBe(true);
+        expect(schemelessResult.data?.externalRefs?.[0]).toMatchObject({ url: 'https://github.com/heavygee/hapi/issues/235' });
     });
 
     it('rejects a non-issue-shaped url entirely', () => {

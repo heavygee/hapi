@@ -80,6 +80,24 @@ function isValidGithubIssueRef(ref: { url: string; repo: string; number: number 
         && parsed.number === ref.number
 }
 
+// `parseIssueUrl` itself accepts an optional `http`/`https` scheme and even a
+// scheme-less host (`ISSUE_URL_RE`'s `(?:https?:\/\/)?` group) — fine for a
+// human typing a quick reference, but `isValidGithubIssueRef` above only
+// checks that the *parsed* repo/number match, never that `ref.url` itself
+// equals the parser's own canonical reconstruction. A ref stored (and
+// rendered verbatim by `IssueRefChip`) as `http://github.com/o/r/issues/1`
+// passes validation but renders a cleartext link; one stored as
+// `github.com/o/r/issues/1` (no scheme at all) passes too, but a browser
+// treats that `href` as *relative* to the current page, producing a broken
+// same-origin link instead of the intended issue (Codex review, hapi#238).
+// Rewriting `url` to the parser's own canonical form (always `https://`,
+// always absolute) after validation closes this regardless of what shape the
+// original input took.
+function toCanonicalGithubIssueRef<T extends { url: string }>(ref: T): T {
+    const parsed = parseIssueUrl(ref.url)
+    return parsed ? { ...ref, url: parsed.url } : ref
+}
+
 export const GithubIssueExternalRefSchema = z.object({
     kind: z.literal('github_issue'),
     url: z.string(),
@@ -89,7 +107,7 @@ export const GithubIssueExternalRefSchema = z.object({
 }).refine(isValidGithubIssueRef, {
     message: 'url must be a canonical GitHub issue URL matching repo/number',
     path: ['url']
-})
+}).transform(toCanonicalGithubIssueRef)
 
 // Same canonical-match validation as isValidGithubIssueRef above, for PR
 // URLs instead of issue URLs (operator decision, hapi#238: reconciling this
@@ -106,6 +124,17 @@ function isValidGithubPrRef(ref: { url: string; repo: string; number: number }):
     if (!match) return false
     const [, , repo, numberRaw] = match
     return repo!.toLowerCase() === ref.repo.toLowerCase() && Number(numberRaw) === ref.number
+}
+
+// Same reasoning as toCanonicalGithubIssueRef above — PR_URL_RE's optional
+// scheme also lets a `http://`/scheme-less `url` pass isValidGithubPrRef's
+// repo/number check while the original, non-canonical string is what
+// actually gets stored and rendered (Codex review, hapi#238).
+function toCanonicalGithubPrRef<T extends { url: string; repo: string; number: number }>(ref: T): T {
+    const match = PR_URL_RE.exec(ref.url.trim())
+    if (!match) return ref
+    const host = match[1]!
+    return { ...ref, url: `https://${host}/${ref.repo}/pull/${ref.number}` }
 }
 
 /**
@@ -146,7 +175,7 @@ export const GithubPrExternalRefSchema = z.object({
 }).passthrough().refine(isValidGithubPrRef, {
     message: 'url must be a canonical GitHub pull request URL matching repo/number',
     path: ['url']
-})
+}).transform(toCanonicalGithubPrRef)
 
 export const ExternalRefSchema = z.discriminatedUnion('kind', [
     GithubIssueExternalRefSchema,
