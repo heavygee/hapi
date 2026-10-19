@@ -15,6 +15,7 @@ import {
 import { I18nProvider } from '@/lib/i18n-context'
 import { ToastProvider } from '@/lib/toast-context'
 import {
+    acknowledgeFleetOfferId,
     clearRunnerSkewTempDismiss,
     resetRunnerSkewBannerMemoryForTests,
     runnerSkewBannerScope,
@@ -296,6 +297,7 @@ describe('listSkewedMachines', () => {
 describe('RunnerVersionSkewBanner', () => {
     beforeEach(() => {
         window.sessionStorage.clear()
+        window.localStorage.clear()
         resetRunnerSkewBannerMemoryForTests()
         const scope = runnerSkewBannerScope('http://localhost', getTokenNamespace('t'))
         setRunnerSkewMinimized(scope, false)
@@ -737,5 +739,86 @@ describe('RunnerVersionSkewBanner', () => {
         const body = screen.getByTestId('runner-version-skew-banner-body')
         expect(body.parentElement).toBe(banner)
         expect(body.className).toMatch(/\bw-full\b/)
+    })
+
+    it('seeds the current tip without announcing it (#296)', async () => {
+        useUpgradeInfoMock.mockReturnValue({
+            info: {
+                offer: {
+                    ...TEST_OFFER,
+                    soupTag: 'hapi-soup-v-current',
+                    releaseNotes: 'already on this tip',
+                },
+                policy: 'auto',
+            },
+            isLoading: false,
+        })
+        useMachinesMock.mockReturnValue({
+            machines: [
+                makeMachine({
+                    id: 'new',
+                    metadata: {
+                        host: 'oos',
+                        platform: 'linux',
+                        happyCliVersion: '0.23.0',
+                        capabilities: [...CURRENT_MACHINE_CAPABILITIES],
+                    },
+                }),
+            ],
+            isLoading: false,
+            error: null,
+        })
+
+        renderBanner()
+
+        await waitFor(() => {
+            expect(screen.queryByTestId('runner-version-applied-banner')).not.toBeInTheDocument()
+            expect(screen.queryByTestId('runner-version-skew-banner')).not.toBeInTheDocument()
+        })
+    })
+
+    it('shows a past-tense changelog after the tip moves and skew is gone (#296)', () => {
+        const scope = runnerSkewBannerScope('http://localhost', getTokenNamespace('t'))
+        acknowledgeFleetOfferId(scope, 'hapi-soup-v-previous')
+        useUpgradeInfoMock.mockReturnValue({
+            info: {
+                offer: {
+                    ...TEST_OFFER,
+                    channel: 'hub-artifact',
+                    targetVersion: 'hapi-soup-v-next',
+                    targetGeneration: 'hapi-soup-v-next',
+                    soupTag: 'hapi-soup-v-next',
+                    releaseNotes: '### Changes\n\n- auto apply changelog\n',
+                },
+                policy: 'auto',
+            },
+            isLoading: false,
+        })
+        useMachinesMock.mockReturnValue({
+            machines: [
+                makeMachine({
+                    id: 'new',
+                    metadata: {
+                        host: 'oos',
+                        platform: 'linux',
+                        happyCliVersion: 'hapi-soup-v-next',
+                        capabilities: [...CURRENT_MACHINE_CAPABILITIES],
+                        cliArtifactGeneration: 'hapi-soup-v-next',
+                    },
+                }),
+            ],
+            isLoading: false,
+            error: null,
+        })
+
+        renderBanner()
+
+        expect(screen.getByTestId('runner-version-applied-banner')).toHaveAttribute('data-state', 'expanded')
+        expect(screen.getByText(/We updated/)).toBeInTheDocument()
+        expect(screen.getByTestId('runner-version-applied-release-notes')).toHaveTextContent(/auto apply changelog/)
+        expect(screen.queryByTestId('runner-version-skew-upgrade-new')).not.toBeInTheDocument()
+
+        fireEvent.click(screen.getByTestId('runner-version-applied-dismiss'))
+        expect(screen.queryByTestId('runner-version-applied-banner')).not.toBeInTheDocument()
     })
 })

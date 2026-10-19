@@ -108,4 +108,65 @@ export function clearRunnerSkewTempDismiss(scope: string): void {
 export function resetRunnerSkewBannerMemoryForTests(): void {
     memoryMinimizedByScope.clear()
     memoryDismissUntilByScope.clear()
+    memoryAcknowledgedOfferByScope.clear()
+}
+
+const ACK_OFFER_PREFIX = 'hapi.fleetUpgrade.acknowledgedOffer.v1'
+const memoryAcknowledgedOfferByScope = new Map<string, string>()
+
+function ackOfferKey(scope: string): string {
+    return `${ACK_OFFER_PREFIX}.${encodeURIComponent(scope)}`
+}
+
+function readLocalStorage(): Storage | null {
+    if (typeof window === 'undefined') {
+        return null
+    }
+    try {
+        return window.localStorage
+    } catch {
+        return null
+    }
+}
+
+/** Stable id for "which tip did this browser already see". */
+export function fleetOfferNoticeId(offer: {
+    channel: string
+    targetVersion: string
+    soupTag?: string
+    targetGeneration?: string
+}): string {
+    if (offer.soupTag && offer.soupTag.length > 0) {
+        return offer.soupTag
+    }
+    if (offer.targetGeneration && offer.targetGeneration.length > 0) {
+        return offer.targetGeneration
+    }
+    return `${offer.channel}:${offer.targetVersion}`
+}
+
+export function getAcknowledgedFleetOfferId(scope: string): string | null {
+    const memory = memoryAcknowledgedOfferByScope.get(scope)
+    if (memory !== undefined) {
+        return memory
+    }
+    try {
+        return readLocalStorage()?.getItem(ackOfferKey(scope)) ?? null
+    } catch {
+        return null
+    }
+}
+
+/** Remember this tip so the post-apply notice does not repeat. Also used to seed the first sighting. */
+export function acknowledgeFleetOfferId(scope: string, offerId: string): void {
+    memoryAcknowledgedOfferByScope.set(scope, offerId)
+    const storage = readLocalStorage()
+    if (!storage) {
+        return
+    }
+    try {
+        storage.setItem(ackOfferKey(scope), offerId)
+    } catch {
+        // QuotaExceededError — memory mirror still suppresses a repeat this session.
+    }
 }
