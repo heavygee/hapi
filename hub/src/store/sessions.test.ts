@@ -1139,7 +1139,13 @@ describe('updateSessionMetadata: protocol resume token preservation', () => {
     // (e.g. calling .toLowerCase() on a ref missing `repo`) — caught by
     // updateSessionMetadata's own try/catch, but that collapsed the ENTIRE
     // write into a generic error instead of just dropping the one bad ref.
-    it('drops a malformed externalRefs element instead of throwing and failing the whole write', () => {
+    it('drops a malformed externalRefs element instead of throwing and failing the whole write, preserving the prior ref', () => {
+        // Codex review (hapi#238, fresh finding after this exact fix landed):
+        // a nonempty-but-wholly-invalid array must NOT be treated the same
+        // as an explicit `externalRefs: []` clear — that would silently
+        // unlink every valid ref over one malformed element. Updated from
+        // this test's own earlier expectation (which asserted the
+        // then-current, since-corrected "clears to []" behavior).
         const store = makeStore()
         const ref = { kind: 'github_issue', url: 'https://github.com/acme/repo/issues/1', repo: 'acme/repo', number: 1, linkedAt: 1 }
         const session = store.sessions.getOrCreateSession(
@@ -1160,6 +1166,28 @@ describe('updateSessionMetadata: protocol resume token preservation', () => {
 
         const metadata = getMetadata(store, session.id)
         expect(metadata?.name).toBe('renamed')
+        expect(metadata?.externalRefs).toEqual([ref])
+    })
+
+    it('still honors an explicit externalRefs: [] clear, distinct from an all-rejected nonempty array', () => {
+        const store = makeStore()
+        const ref = { kind: 'github_issue', url: 'https://github.com/acme/repo/issues/1', repo: 'acme/repo', number: 1, linkedAt: 1 }
+        const session = store.sessions.getOrCreateSession(
+            'explicit-clear-vs-all-rejected',
+            { path: '/tmp/project', host: 'example', externalRefs: [ref] },
+            null,
+            'default'
+        )
+
+        const result = store.sessions.updateSessionMetadata(
+            session.id,
+            { path: '/tmp/project', host: 'example', externalRefs: [] },
+            session.metadataVersion,
+            'default'
+        )
+        expect(result.result).toBe('success')
+
+        const metadata = getMetadata(store, session.id)
         expect(metadata?.externalRefs).toEqual([])
     })
 

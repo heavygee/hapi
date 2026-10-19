@@ -560,6 +560,29 @@ describe('parseValidatedItemUrl', () => {
         expect(parseValidatedItemUrl('https://ghe.example/acme/widgets/issues/12', portedBoard)).toBeNull()
         expect(parseValidatedItemUrl('https://ghe.example:9999/acme/widgets/issues/12', portedBoard)).toBeNull()
     })
+
+    it('normalizes an explicit default HTTPS port before comparing hosts (Codex review)', () => {
+        // A board added from a URL that explicitly includes :443 stores
+        // board.host verbatim as "ghe.example:443" (parseProjectUrl's regex
+        // doesn't normalize), but WHATWG URL.host always strips an explicit
+        // default port — so an item URL on that same host never carries
+        // :443 once parsed, and the two sides never matched without this fix.
+        const explicitDefaultPortBoard = { host: 'ghe.example:443' }
+        expect(parseValidatedItemUrl('https://ghe.example/acme/widgets/issues/12', explicitDefaultPortBoard)).toEqual({
+            url: 'https://ghe.example/acme/widgets/issues/12',
+            isPullRequest: false,
+            owner: 'acme',
+            repo: 'widgets'
+        })
+        expect(parseValidatedItemUrl('https://ghe.example:443/acme/widgets/issues/12', explicitDefaultPortBoard)).toEqual({
+            url: 'https://ghe.example/acme/widgets/issues/12',
+            isPullRequest: false,
+            owner: 'acme',
+            repo: 'widgets'
+        })
+        // A genuinely different host must still be rejected.
+        expect(parseValidatedItemUrl('https://attacker.example/acme/widgets/issues/12', explicitDefaultPortBoard)).toBeNull()
+    })
 })
 
 describe('resolveProjectView', () => {

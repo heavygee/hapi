@@ -699,7 +699,19 @@ export function parseValidatedItemUrl(url: string, board: Pick<StoredTodoBoard, 
     // review); rebuilding the canonical URL from `.hostname` had the same
     // bug the other direction — it would have handed `gh` a URL pointed at
     // the default port instead of the board's actual one.
-    if (parsed.host.toLowerCase() !== board.host.toLowerCase()) {
+    //
+    // Normalized before comparing (Codex review, hapi#238, second finding on
+    // this path): `board.host` is captured verbatim by parseProjectUrl's
+    // regex, so a board added from a URL that explicitly includes the HTTPS
+    // default port (`ghe.example:443`) stores it that way — but WHATWG
+    // `URL.host` always strips an explicit default port, so `parsed.host`
+    // for the exact same host never carries `:443`. Comparing the two
+    // unnormalized rejected every item on that board. Stripping a trailing
+    // `:443` from both sides before comparing (this feature is HTTPS-only —
+    // `parsed.protocol !== 'https:'` already returned above) makes the
+    // comparison agree regardless of which form either side happens to use.
+    const normalizeHttpsAuthority = (host: string) => host.replace(/:443$/, '')
+    if (normalizeHttpsAuthority(parsed.host.toLowerCase()) !== normalizeHttpsAuthority(board.host.toLowerCase())) {
         return null
     }
     const match = /^\/([^/]+)\/([^/]+)\/(issues|pull)\/(\d+)\/?$/.exec(parsed.pathname)

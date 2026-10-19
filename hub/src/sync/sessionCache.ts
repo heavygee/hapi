@@ -1,5 +1,5 @@
 import { SESSION_LIFECYCLE_IDLE, SESSION_LIFECYCLE_RUNNING } from '@hapi/protocol'
-import { mergeExternalRefs, upsertExternalRef, type ExternalRef } from '@hapi/protocol/schemas'
+import { mergeExternalRefs, toValidExternalRefs, upsertExternalRef, type ExternalRef } from '@hapi/protocol/schemas'
 import { AgentStateSchema, MetadataSchema, SessionPatchSchema, TeamStateSchema } from '@hapi/protocol/schemas'
 import type { CodexCollaborationMode, CopilotAgentMode, PermissionMode, Session, SessionPatch } from '@hapi/protocol/types'
 import type { Store } from '../store'
@@ -1585,9 +1585,15 @@ export class SessionCache {
 
         // The old session is deleted after this merge — any externalRefs
         // (issue/PR links) that only exist there would otherwise be lost for
-        // good (Codex review, hapi#238).
-        const oldRefs = Array.isArray(oldObj.externalRefs) ? oldObj.externalRefs as ExternalRef[] : []
-        const newRefs = Array.isArray(newObj.externalRefs) ? newObj.externalRefs as ExternalRef[] : []
+        // good (Codex review, hapi#238). toValidExternalRefs, not an
+        // unchecked `Array.isArray(...) ? (value as ExternalRef[]) : []`
+        // cast (Codex review, hapi#238, second finding on this path): either
+        // persisted row's externalRefs can contain a malformed element
+        // (legacy row, out-of-band writer) that would otherwise reach
+        // mergeExternalRefs' identity comparison and throw, aborting this
+        // session-consolidation merge after earlier merge work has already run.
+        const oldRefs = toValidExternalRefs(oldObj.externalRefs)
+        const newRefs = toValidExternalRefs(newObj.externalRefs)
         if (oldRefs.length > 0) {
             const combinedRefs = mergeExternalRefs(newRefs, oldRefs)
             if (combinedRefs.length !== newRefs.length) {

@@ -185,6 +185,29 @@ export const ExternalRefSchema = z.discriminatedUnion('kind', [
 export type ExternalRef = z.infer<typeof ExternalRefSchema>
 
 /**
+ * Parses an `unknown` value (raw, possibly attacker- or bug-controlled
+ * metadata) into a validated `ExternalRef[]`, silently dropping any element
+ * that doesn't parse — never throwing, never returning a malformed element
+ * (Codex review, hapi#238). Every call site that reads `metadata.externalRefs`
+ * off a stored or incoming session row before passing it to identity-
+ * comparing helpers like `mergeExternalRefs`/`upsertExternalRef`/
+ * `reconcileExternalRefs` (which call `.repo.toLowerCase()` etc. and throw on
+ * a malformed element) must go through this rather than an unchecked
+ * `Array.isArray(...) ? (value as ExternalRef[]) : []` cast — a cast confirms
+ * the value is *an* array, never that its elements are valid refs, and a
+ * single malformed one (legacy row, out-of-band writer, generic
+ * `update-metadata` socket path with `z.unknown()` metadata) can reach that
+ * throw from more than one place in the hub.
+ */
+export function toValidExternalRefs(value: unknown): ExternalRef[] {
+    if (!Array.isArray(value)) return []
+    return value.flatMap(item => {
+        const result = ExternalRefSchema.safeParse(item)
+        return result.success ? [result.data] : []
+    })
+}
+
+/**
  * Accepts the full GitHub issue URL (any host — GHE boards are a real
  * board-feature use case, e.g. a view-scoped `lhs.ghe.com` board) and the
  * `owner/repo#N` shorthand, with an optional `host:` prefix for a non-

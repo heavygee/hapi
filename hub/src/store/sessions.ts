@@ -2,7 +2,7 @@ import type { Database } from 'bun:sqlite'
 import { prepareCached } from './statementCache'
 import { bumpSessionDeletionEpoch } from './sessionInvalidation'
 import { randomUUID } from 'node:crypto'
-import { ExternalRefSchema, reconcileExternalRefs, type ExternalRef } from '@hapi/protocol/schemas'
+import { reconcileExternalRefs, toValidExternalRefs, type ExternalRef } from '@hapi/protocol/schemas'
 
 import type { StoredSession, VersionedUpdateResult } from './types'
 import { safeJsonParse } from './json'
@@ -135,33 +135,14 @@ function preserveCursorProtocolPair(
     return merged
 }
 
-// Was a type predicate that only checked Array.isArray, claiming the result
-// was ExternalRef[] without validating a single element — any array survived
-// (Codex review, hapi#238). The socket's own updateMetadataSchema accepts
-// metadata as z.unknown(), so an authenticated CLI sending a nonempty but
-// malformed externalRefs element could reach reconcileExternalRefs' identity
-// comparison and throw (e.g. `b.repo.toLowerCase()` on an element missing
-// `repo`) — caught by updateSessionMetadata's own try/catch, but that
-// collapses the ENTIRE write (every other field in it too) into a generic
-// {result: 'error'} instead of just dropping the one bad ref. Parsing each
-// element through ExternalRefSchema.safeParse keeps the valid ones and
-// silently drops anything malformed, rather than letting one bad element
-// poison the whole write.
-//
-// Maps to `result.data`, not the original `item` (Codex review, hapi#238):
-// an earlier version used `.safeParse(item).success` purely as a filter
-// predicate and returned the original, pre-parse item — silently discarding
-// ExternalRefSchema's own canonical-URL transform (http:// or scheme-less
-// input rewritten to a canonical https:// URL). That bug made the schema
-// hardening a no-op from this function's callers' point of view: the
-// non-canonical raw url still ended up persisted and rendered.
-function toValidExternalRefs(value: unknown): ExternalRef[] {
-    if (!Array.isArray(value)) return []
-    return value.flatMap(item => {
-        const result = ExternalRefSchema.safeParse(item)
-        return result.success ? [result.data] : []
-    })
-}
+// toValidExternalRefs itself now lives in shared/src/schemas.ts (Codex
+// review, hapi#238) — hub/src/sync/sessionCache.ts needed the same
+// parse-and-drop-malformed-elements behavior for its own, separate
+// session-consolidation merge path, which previously used an unchecked
+// `Array.isArray(...) ? (value as ExternalRef[]) : []` cast that could reach
+// mergeExternalRefs' identity comparison and throw on a malformed element.
+// One shared implementation avoids a third place ever needing to
+// reimplement this same validation.
 
 // Named CONTRIBUTION_FIELDS (matching scripts/tooling/verify-
 // externalrefs-preserve.mjs's incident-driven check for this exact field +
@@ -182,34 +163,43 @@ function mergeContributionFields(
     merged: Record<string, unknown> | null
 ): Record<string, unknown> | null {
     merged = carryForwardIfMissing(prior, next, merged, CONTRIBUTION_FIELDS)
-    const priorRefs = toValidExternalRefs(prior.externalRefs)
-    const nextRefs = toValidExternalRefs(next.externalRefs)
-    // Sanitize next.externalRefs unconditionally once it's present, not just
-    // when reconciliation actually runs below — otherwise a malformed
-    // element would pass through into the persisted row untouched whenever
-    // priorRefs/nextRefs end up empty after filtering (Codex review,
-    // hapi#238). A next array that's entirely malformed filters down to [],
-    // which then reads as the already-established "deliberate unlink to
-    // empty" case below — safe (never throws, never persists garbage), even
-    // if not ideal for a genuinely buggy client.
-    if (next.externalRefs !== undefined) {
-        merged = merged ?? { ...next }
-        merged.externalRefs = nextRefs
-    }
-    // An explicit `next.externalRefs = []` is a deliberate unlink-to-empty,
-    // not a sparse/stale write merely missing some refs it didn't know
-    // about yet — those two look identical as "an empty-ish array" without
-    // this check, and reconciling prior back in here would silently
-    // resurrect an intentional clear (found during a soup absorb by Meta,
-    // confirmed by hand against this exact code, hapi#238). Only a
-    // *non-empty* next array is treated as "possibly partial/stale" and
-    // eligible for reconciliation.
-    if (priorRefs.length === 0 || nextRefs.length === 0) {
+    // Omitted key — carryForwardIfMissing above already handled it.
+    if (next.externalRefs === undefined) {
         return merged
     }
-    const result = merged ?? { ...next }
-    result.externalRefs = reconcileExternalRefs(priorRefs, nextRefs)
-    return result
+
+    const priorRefs = toValidExternalRefs(prior.externalRefs)
+    // An explicit, genuinely empty `next.externalRefs: []` is a deliberate
+    // unlink-to-empty, not a sparse/stale write merely missing some refs it
+    // didn't know about yet (found during a soup absorb by Meta, confirmed
+    // by hand against this exact code, hapi#238) — checked against the raw
+    // input, before sanitization, so it can't be confused with the
+    // all-elements-rejected case below.
+    const isDeliberateClear = Array.isArray(next.externalRefs) && next.externalRefs.length === 0
+    const nextRefs = toValidExternalRefs(next.externalRefs)
+
+    merged = merged ?? { ...next }
+    if (isDeliberateClear) {
+        merged.externalRefs = []
+        return merged
+    }
+    if (nextRefs.length === 0) {
+        // Something nonempty was sent (or next.externalRefs wasn't even an
+        // array), but nothing in it survived validation. Treating this the
+        // same as a deliberate clear would unlink every valid ref over one
+        // malformed element or a wholly garbage payload — removing the PR
+        // chips the fork's own session discovery relies on (Codex review,
+        // hapi#238, fresh regression from the sanitize-unconditionally fix
+        // the round before). Preserve what's already persisted instead.
+        merged.externalRefs = priorRefs
+        return merged
+    }
+    if (priorRefs.length === 0) {
+        merged.externalRefs = nextRefs
+        return merged
+    }
+    merged.externalRefs = reconcileExternalRefs(priorRefs, nextRefs)
+    return merged
 }
 
 export function mergeSessionMetadata(prior: unknown, next: unknown): unknown {
