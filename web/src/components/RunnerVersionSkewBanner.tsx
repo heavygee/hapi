@@ -17,7 +17,10 @@ import { usePlatform } from '@/hooks/usePlatform'
 import { useToast } from '@/lib/toast-context'
 import { queryKeys } from '@/lib/query-keys'
 import {
+    acknowledgeFleetOfferId,
     clearRunnerSkewTempDismiss,
+    fleetOfferNoticeId,
+    getAcknowledgedFleetOfferId,
     getRunnerSkewDismissUntil,
     isRunnerSkewMinimized,
     isRunnerSkewTempDismissed,
@@ -205,8 +208,11 @@ export function RunnerVersionSkewBanner({
     const availablePlatforms = info?.availablePlatforms ?? null
     const skewed = listBannerSkewMachines(machines, offer, policy)
     const bannerScope = runnerSkewBannerScope(baseUrl, getTokenNamespace(token))
+    const offerNoticeId = offer ? fleetOfferNoticeId(offer) : null
     const [minimized, setMinimized] = useState(() => isRunnerSkewMinimized(bannerScope))
     const [dismissed, setDismissed] = useState(() => isRunnerSkewTempDismissed(bannerScope))
+    const [ackedOfferId, setAckedOfferId] = useState<string | null>(() => getAcknowledgedFleetOfferId(bannerScope))
+    const [appliedMinimized, setAppliedMinimized] = useState(false)
     const [busyId, setBusyId] = useState<string | null>(null)
     const [actionError, setActionError] = useState<string | null>(null)
     const [actionInfo, setActionInfo] = useState<string | null>(null)
@@ -249,7 +255,23 @@ export function RunnerVersionSkewBanner({
     useEffect(() => {
         setMinimized(isRunnerSkewMinimized(bannerScope))
         setDismissed(isRunnerSkewTempDismissed(bannerScope))
+        setAckedOfferId(getAcknowledgedFleetOfferId(bannerScope))
+        setAppliedMinimized(false)
     }, [bannerScope])
+
+    // First sighting of a tip is a baseline, not news. A later tip with no
+    // remaining skew is the post-apply changelog (#296) — auto clears the
+    // pending banner before anyone can read NOTES.
+    useEffect(() => {
+        if (!offerNoticeId) {
+            return
+        }
+        if (getAcknowledgedFleetOfferId(bannerScope)) {
+            return
+        }
+        acknowledgeFleetOfferId(bannerScope, offerNoticeId)
+        setAckedOfferId(offerNoticeId)
+    }, [offerNoticeId, bannerScope])
 
     useEffect(() => {
         if (!dismissed) {
@@ -285,6 +307,16 @@ export function RunnerVersionSkewBanner({
         setDismissed(true)
         tempDismissRunnerSkew(bannerScope)
     }, [haptic, bannerScope])
+
+    const onDismissApplied = useCallback(() => {
+        if (!offerNoticeId) {
+            return
+        }
+        haptic.impact('light')
+        acknowledgeFleetOfferId(bannerScope, offerNoticeId)
+        setAckedOfferId(offerNoticeId)
+        setAppliedMinimized(false)
+    }, [haptic, bannerScope, offerNoticeId])
 
     const refreshFleetQueries = useCallback(async () => {
         await Promise.all([
@@ -347,15 +379,104 @@ export function RunnerVersionSkewBanner({
         }
     }, [api, haptic, refreshFleetQueries, t])
 
+    const showAppliedNotice = skewed.length === 0
+        && policy !== 'silent'
+        && offerNoticeId !== null
+        && ackedOfferId !== null
+        && ackedOfferId !== offerNoticeId
+
+    const topClass = topClassName ?? (isOnline ? 'top-2' : 'top-10')
+    const positionClass = stacked
+        ? 'relative w-full'
+        : `fixed left-4 right-4 z-40 ${topClass}`
+
+    if (showAppliedNotice && offer) {
+        const appliedTag = offer.soupTag || offer.targetVersion
+        if (appliedMinimized) {
+            return (
+                <div
+                    data-testid="runner-version-applied-banner"
+                    data-state="minimized"
+                    className={positionClass}
+                >
+                    <button
+                        type="button"
+                        data-testid="runner-version-applied-expand"
+                        onClick={() => {
+                            haptic.impact('light')
+                            setAppliedMinimized(false)
+                        }}
+                        className="w-full rounded-md border-2 border-amber-500 bg-zinc-50 px-3 py-1.5 text-left text-xs font-medium text-zinc-900 shadow dark:bg-zinc-900 dark:text-zinc-50"
+                    >
+                        {t('runner.skew.banner.appliedMinimized', { tag: appliedTag })}
+                    </button>
+                </div>
+            )
+        }
+        return (
+            <div
+                data-testid="runner-version-applied-banner"
+                data-state="expanded"
+                role="status"
+                className={`${positionClass} max-h-[40vh] overflow-y-auto rounded-lg border-2 border-amber-500 bg-zinc-50 p-3 shadow-lg dark:bg-zinc-900`}
+            >
+                <div className="flex items-start justify-between gap-2">
+                    <p className="min-w-0 flex-1 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+                        {t('runner.skew.banner.appliedTitle')}
+                    </p>
+                    <div className="flex shrink-0 gap-1">
+                        <button
+                            type="button"
+                            data-testid="runner-version-applied-minimize"
+                            onClick={() => {
+                                haptic.impact('light')
+                                setAppliedMinimized(true)
+                            }}
+                            className="rounded px-2 py-1 text-xs font-medium text-zinc-800 hover:bg-zinc-200/80 dark:text-zinc-100 dark:hover:bg-zinc-700"
+                        >
+                            {t('runner.skew.banner.minimize')}
+                        </button>
+                        <button
+                            type="button"
+                            data-testid="runner-version-applied-dismiss"
+                            onClick={onDismissApplied}
+                            className="rounded px-2 py-1 text-xs font-medium text-zinc-800 hover:bg-zinc-200/80 dark:text-zinc-100 dark:hover:bg-zinc-700"
+                        >
+                            {t('runner.skew.banner.appliedDismiss')}
+                        </button>
+                    </div>
+                </div>
+                <p
+                    className="mt-1 w-full min-w-0 text-xs leading-relaxed text-zinc-700 dark:text-zinc-200"
+                    data-testid="runner-version-applied-banner-body"
+                >
+                    {t('runner.skew.banner.appliedBody')}
+                </p>
+                {offer.releaseNotes ? (
+                    <details
+                        open
+                        className="mt-2 w-full min-w-0 rounded border border-zinc-300 bg-zinc-900 open:bg-zinc-900 dark:border-zinc-600"
+                        data-testid="runner-version-applied-release-notes"
+                    >
+                        <summary className="block w-full cursor-pointer px-2 py-1 text-xs font-medium text-zinc-100">
+                            {offer.soupTag
+                                ? t('runner.skew.banner.whatsNewTag', { tag: offer.soupTag })
+                                : t('runner.skew.banner.whatsNew')}
+                        </summary>
+                        <pre className="max-h-40 w-full min-w-0 overflow-x-auto overflow-y-auto whitespace-pre-wrap break-words border-t border-zinc-700 px-2 py-1.5 font-mono text-[11px] leading-relaxed text-zinc-100">
+                            {offer.releaseNotes}
+                        </pre>
+                    </details>
+                ) : null}
+            </div>
+        )
+    }
+
     if (skewed.length === 0 || dismissed) {
         return null
     }
 
-    const topClass = topClassName ?? (isOnline ? 'top-2' : 'top-10')
     const hosts = skewed.map(machineDisplayHost).join(', ')
-    const positionClass = stacked
-        ? 'relative w-full'
-        : `fixed left-4 right-4 z-40 ${topClass}`
 
     if (minimized) {
         return (
