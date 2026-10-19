@@ -69,12 +69,20 @@ describe('MetadataSchema externalRefs github_pr chip (Codex review, hapi#238)', 
         expect(result.data?.externalRefs?.[0]).toMatchObject({ kind: 'github_pr', status: 'needs-work' });
     });
 
-    it('still rejects an actually-malformed ref (missing required github_pr fields)', () => {
+    it('drops an actually-malformed ref (missing required github_pr fields) instead of rejecting the whole metadata object', () => {
+        // Updated (Codex review, hapi#238): externalRefs is now preprocessed
+        // through toValidExternalRefs before MetadataSchema validates it, so
+        // a single malformed element no longer fails this WHOLE field (and
+        // therefore the whole MetadataSchema.safeParse call) — it's silently
+        // dropped instead, same as every other externalRefs consumer in the
+        // hub already does. This test previously asserted the since-replaced
+        // "rejects the whole object" behavior.
         const result = MetadataSchema.safeParse({
             ...base,
             externalRefs: [{ kind: 'github_pr', url: 'https://github.com/heavygee/hapi/pull/238' }]
         });
-        expect(result.success).toBe(false);
+        expect(result.success).toBe(true);
+        expect(result.data?.externalRefs).toEqual([]);
     });
 });
 
@@ -94,20 +102,26 @@ describe('MetadataSchema externalRefs github_pr url validation (operator decisio
         expect(result.success).toBe(true);
     });
 
-    it('rejects a userinfo-deceptive url pointing at a different host than it displays', () => {
+    it('drops a userinfo-deceptive url pointing at a different host than it displays, instead of rejecting the whole object', () => {
+        // Updated (Codex review, hapi#238): see the drops-malformed-ref test
+        // above for why MetadataSchema now sanitizes rather than rejects.
+        // The underlying GithubPrExternalRefSchema itself still rejects this
+        // exact ref when tested directly — see schemas.externalRefs.test.ts.
         const result = MetadataSchema.safeParse({
             ...base,
             externalRefs: [{ kind: 'github_pr', url: 'https://github.com@evil.example/heavygee/hapi/pull/238', repo: 'heavygee/hapi', number: 238 }]
         });
-        expect(result.success).toBe(false);
+        expect(result.success).toBe(true);
+        expect(result.data?.externalRefs).toEqual([]);
     });
 
-    it('rejects a url whose embedded repo/number disagrees with the ref\'s own fields', () => {
+    it('drops a url whose embedded repo/number disagrees with the ref\'s own fields, instead of rejecting the whole object', () => {
         const result = MetadataSchema.safeParse({
             ...base,
             externalRefs: [{ kind: 'github_pr', url: 'https://github.com/heavygee/hapi/pull/999', repo: 'heavygee/hapi', number: 238 }]
         });
-        expect(result.success).toBe(false);
+        expect(result.success).toBe(true);
+        expect(result.data?.externalRefs).toEqual([]);
     });
 
     it('still passes through role/source/linkedAt and unrelated chip-status fields on an otherwise-valid ref', () => {
@@ -172,20 +186,30 @@ describe('MetadataSchema externalRefs github_issue url validation (Codex review,
         expect(result.success).toBe(true);
     });
 
-    it('rejects a userinfo-deceptive url pointing at a different host than it displays', () => {
+    it('drops a userinfo-deceptive url pointing at a different host than it displays, instead of rejecting the whole object', () => {
+        // Updated (Codex review, hapi#238): MetadataSchema's externalRefs is
+        // now preprocessed through toValidExternalRefs, so a malformed
+        // element is dropped rather than failing this whole field (and
+        // therefore the whole MetadataSchema.safeParse call) — a
+        // single bad ref must never corrupt the rest of a session's cached
+        // metadata (title, flavor, path, host, resume tokens, ...). The
+        // underlying GithubIssueExternalRefSchema itself still rejects this
+        // exact ref when tested directly — see schemas.externalRefs.test.ts.
         const result = MetadataSchema.safeParse({
             ...base,
             externalRefs: [{ kind: 'github_issue', url: 'https://github.com@evil.example/heavygee/hapi/issues/235', repo: 'heavygee/hapi', number: 235, linkedAt: 1 }]
         });
-        expect(result.success).toBe(false);
+        expect(result.success).toBe(true);
+        expect(result.data?.externalRefs).toEqual([]);
     });
 
-    it('rejects a url whose embedded repo/number disagrees with the ref\'s own fields', () => {
+    it('drops a url whose embedded repo/number disagrees with the ref\'s own fields, instead of rejecting the whole object', () => {
         const result = MetadataSchema.safeParse({
             ...base,
             externalRefs: [{ kind: 'github_issue', url: 'https://github.com/heavygee/hapi/issues/999', repo: 'heavygee/hapi', number: 235, linkedAt: 1 }]
         });
-        expect(result.success).toBe(false);
+        expect(result.success).toBe(true);
+        expect(result.data?.externalRefs).toEqual([]);
     });
 
     it('rewrites a non-canonical but otherwise-valid url to the canonical https form (Codex review)', () => {
@@ -204,11 +228,42 @@ describe('MetadataSchema externalRefs github_issue url validation (Codex review,
         expect(schemelessResult.data?.externalRefs?.[0]).toMatchObject({ url: 'https://github.com/heavygee/hapi/issues/235' });
     });
 
-    it('rejects a non-issue-shaped url entirely', () => {
+    it('drops a non-issue-shaped url entirely, instead of rejecting the whole object', () => {
         const result = MetadataSchema.safeParse({
             ...base,
             externalRefs: [{ kind: 'github_issue', url: 'not a url at all', repo: 'heavygee/hapi', number: 235, linkedAt: 1 }]
         });
-        expect(result.success).toBe(false);
+        expect(result.success).toBe(true);
+        expect(result.data?.externalRefs).toEqual([]);
+    });
+});
+
+describe('MetadataSchema preserves the rest of a session\'s metadata around a malformed ref (Codex review, hapi#238)', () => {
+    // A malformed externalRefs element used to fail MetadataSchema.safeParse
+    // entirely, exposing session.metadata as null for that session (hub's
+    // sessionCache.ts `parsed.success ? parsed.data : null` fallback). `hapi
+    // link-issue`/MCP `link_issue`'s own `session.metadata ?? { path: '',
+    // host: '' }` fallback then overwrote the real title/flavor/path/host/
+    // resume-tokens with that near-empty object on the very next link call —
+    // discarding everything just because one unrelated ref didn't parse.
+    it('keeps title, flavor, and other fields intact alongside a dropped malformed ref', () => {
+        const result = MetadataSchema.safeParse({
+            path: '/home/user/project',
+            host: 'oos-linux',
+            name: 'Important session title',
+            flavor: 'claude',
+            externalRefs: [
+                { kind: 'github_issue', url: 'https://github.com/heavygee/hapi/issues/235', repo: 'heavygee/hapi', number: 235, linkedAt: 1 },
+                { kind: 'github_issue' } // malformed: missing url/repo/number/linkedAt
+            ]
+        });
+        expect(result.success).toBe(true);
+        expect(result.data?.name).toBe('Important session title');
+        expect(result.data?.flavor).toBe('claude');
+        expect(result.data?.path).toBe('/home/user/project');
+        expect(result.data?.host).toBe('oos-linux');
+        expect(result.data?.externalRefs).toEqual([
+            { kind: 'github_issue', url: 'https://github.com/heavygee/hapi/issues/235', repo: 'heavygee/hapi', number: 235, linkedAt: 1 }
+        ]);
     });
 });

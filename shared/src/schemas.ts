@@ -539,7 +539,25 @@ export const MetadataSchema = z.object({
     piSelectedModel: z.object({ provider: z.string(), modelId: z.string() }).nullable().optional(),
     // Structured links to external resources (hapi#235/#238) — see
     // ExternalRefSchema above for the "why build fresh, not port driver/" note.
-    externalRefs: z.array(ExternalRefSchema).optional()
+    //
+    // Preprocessed through toValidExternalRefs rather than validated as a
+    // plain z.array(ExternalRefSchema) (Codex review, hapi#238): a bare
+    // array schema fails the WHOLE array the moment a single element is
+    // malformed (legacy row, out-of-band writer), which fails this WHOLE
+    // MetadataSchema.safeParse call — not just the externalRefs field — so
+    // the hub's in-memory session cache exposes `session.metadata` as null
+    // for that session entirely. `hapi link-issue`/MCP `link_issue`'s own
+    // `session.metadata ?? { path: '', host: '' }` fallback then overwrites
+    // the real title/flavor/path/host/resume-tokens with that near-empty
+    // object on the very next link call, discarding everything just because
+    // one unrelated ref element didn't parse. Sanitizing before validating
+    // means a bad element is silently dropped from this field alone, same
+    // as every other externalRefs consumer in the hub already does, instead
+    // of corrupting the entire cached metadata for that session.
+    externalRefs: z.preprocess(
+        value => (value === undefined ? undefined : toValidExternalRefs(value)),
+        z.array(ExternalRefSchema).optional()
+    )
 })
 
 export type Metadata = z.infer<typeof MetadataSchema>
