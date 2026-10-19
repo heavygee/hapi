@@ -1187,6 +1187,39 @@ describe('updateSessionMetadata: protocol resume token preservation', () => {
         expect(metadata?.externalRefs).toEqual([validRef, newValidRef])
     })
 
+    // Codex review (hapi#238): toValidExternalRefs used to filter the raw
+    // array by `.safeParse(item).success` but return the original `item`,
+    // discarding ExternalRefSchema's own canonical-URL transform — the
+    // schema hardening a round earlier was a no-op from this function's own
+    // callers' point of view, since the non-canonical raw url still ended up
+    // persisted.
+    it('persists the schema-canonicalized url, not the raw non-canonical input', () => {
+        const store = makeStore()
+        const session = store.sessions.getOrCreateSession(
+            'persists-canonical-url',
+            { path: '/tmp/project', host: 'example' },
+            null,
+            'default'
+        )
+
+        const result = store.sessions.updateSessionMetadata(
+            session.id,
+            {
+                path: '/tmp/project',
+                host: 'example',
+                externalRefs: [{ kind: 'github_issue', url: 'http://github.com/acme/repo/issues/1', repo: 'acme/repo', number: 1, linkedAt: 1 }]
+            },
+            session.metadataVersion,
+            'default'
+        )
+        expect(result.result).toBe('success')
+
+        const metadata = getMetadata(store, session.id)
+        expect(metadata?.externalRefs).toEqual([
+            { kind: 'github_issue', url: 'https://github.com/acme/repo/issues/1', repo: 'acme/repo', number: 1, linkedAt: 1 }
+        ])
+    })
+
     // Codex review (hapi#238, second finding on this path): identity-only
     // collision handling (plain array-length no-op check) let a stale write
     // silently roll back a field-level update already applied directly to

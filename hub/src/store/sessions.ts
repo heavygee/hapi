@@ -143,13 +143,24 @@ function preserveCursorProtocolPair(
 // comparison and throw (e.g. `b.repo.toLowerCase()` on an element missing
 // `repo`) — caught by updateSessionMetadata's own try/catch, but that
 // collapses the ENTIRE write (every other field in it too) into a generic
-// {result: 'error'} instead of just dropping the one bad ref. Filtering
-// through ExternalRefSchema.safeParse per element keeps the valid ones and
+// {result: 'error'} instead of just dropping the one bad ref. Parsing each
+// element through ExternalRefSchema.safeParse keeps the valid ones and
 // silently drops anything malformed, rather than letting one bad element
 // poison the whole write.
+//
+// Maps to `result.data`, not the original `item` (Codex review, hapi#238):
+// an earlier version used `.safeParse(item).success` purely as a filter
+// predicate and returned the original, pre-parse item — silently discarding
+// ExternalRefSchema's own canonical-URL transform (http:// or scheme-less
+// input rewritten to a canonical https:// URL). That bug made the schema
+// hardening a no-op from this function's callers' point of view: the
+// non-canonical raw url still ended up persisted and rendered.
 function toValidExternalRefs(value: unknown): ExternalRef[] {
     if (!Array.isArray(value)) return []
-    return value.filter((item): item is ExternalRef => ExternalRefSchema.safeParse(item).success)
+    return value.flatMap(item => {
+        const result = ExternalRefSchema.safeParse(item)
+        return result.success ? [result.data] : []
+    })
 }
 
 // Named CONTRIBUTION_FIELDS (matching scripts/tooling/verify-
