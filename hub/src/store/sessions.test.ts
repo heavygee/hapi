@@ -1330,6 +1330,33 @@ describe('updateSessionMetadata: protocol resume token preservation', () => {
         expect(metadata?.externalRefs).toEqual([])
     })
 
+    // priorRefs/nextRefs used to be a bare Array.isArray cast — a non-empty
+    // array of malformed elements (legacy row, out-of-band writer) passed
+    // the cast and reached reconcileExternalRefs, which throws on
+    // `.repo.toLowerCase()` for an element missing `repo` (Codex review,
+    // hapi#238). toValidExternalRefs drops the malformed element instead of
+    // crashing, degrading this to the same no-reconciliation path as an
+    // empty array.
+    it('does not crash when a stored ref array contains a malformed element', () => {
+        const store = makeStore()
+        const ref = { kind: 'github_issue', url: 'https://github.com/acme/repo/issues/1', repo: 'acme/repo', number: 1, linkedAt: 1 }
+        const session = store.sessions.getOrCreateSession(
+            'malformed-ref-in-array',
+            { path: '/tmp/project', host: 'example', externalRefs: [ref] },
+            null,
+            'default'
+        )
+
+        const malformed = { kind: 'github_pr', repo: 'acme/repo', number: 2 }
+        const result = store.sessions.updateSessionMetadata(
+            session.id,
+            { path: '/tmp/project', host: 'example', externalRefs: [malformed] },
+            session.metadataVersion,
+            'default'
+        )
+        expect(result.result).toBe('success')
+    })
+
     // Codex review (hapi#238, second finding on this path): identity-only
     // collision handling (plain array-length no-op check) let a stale write
     // silently roll back a field-level update already applied directly to
@@ -1337,7 +1364,7 @@ describe('updateSessionMetadata: protocol resume token preservation', () => {
     // status updates), since both arrays had the same length and identity.
     it('preserves a newer field-level update on a matching ref instead of rolling it back to a stale copy', () => {
         const store = makeStore()
-        const freshPrRef = { kind: 'github_pr', url: 'https://github.com/acme/repo/pull/9', repo: 'acme/repo', number: 9, linkedAt: 5, status: 'merged', statusCheckedAt: 200 }
+        const freshPrRef = { kind: 'github_pr', url: 'https://github.com/acme/repo/pull/9', repo: 'acme/repo', number: 9, linkedAt: 5, role: 'primary', status: 'merged', statusCheckedAt: 200 }
         const session = store.sessions.getOrCreateSession(
             'preserve-field-update-on-collision',
             { path: '/tmp/project', host: 'example', externalRefs: [freshPrRef] },
@@ -1348,7 +1375,7 @@ describe('updateSessionMetadata: protocol resume token preservation', () => {
         // Simulates a CLI write built from a cache snapshot taken before
         // hapi-meta-daily.sh applied the status update directly to storage —
         // same identity, same linkedAt, but stale status fields.
-        const stalePrRef = { kind: 'github_pr', url: 'https://github.com/acme/repo/pull/9', repo: 'acme/repo', number: 9, linkedAt: 5, status: 'open', statusCheckedAt: 100 }
+        const stalePrRef = { kind: 'github_pr', url: 'https://github.com/acme/repo/pull/9', repo: 'acme/repo', number: 9, linkedAt: 5, role: 'primary', status: 'open', statusCheckedAt: 100 }
         const result = store.sessions.updateSessionMetadata(
             session.id,
             { path: '/tmp/project', host: 'example', externalRefs: [stalePrRef] },
@@ -1370,7 +1397,7 @@ describe('updateSessionMetadata: protocol resume token preservation', () => {
     // leaving the cached chip status stuck forever.
     it('accepts a status refresh arriving as the write itself, even though linkedAt is unchanged', () => {
         const store = makeStore()
-        const stalePrRef = { kind: 'github_pr', url: 'https://github.com/acme/repo/pull/9', repo: 'acme/repo', number: 9, linkedAt: 5, status: 'open', statusCheckedAt: 100 }
+        const stalePrRef = { kind: 'github_pr', url: 'https://github.com/acme/repo/pull/9', repo: 'acme/repo', number: 9, linkedAt: 5, role: 'primary', status: 'open', statusCheckedAt: 100 }
         const session = store.sessions.getOrCreateSession(
             'accept-status-refresh-same-linkedat',
             { path: '/tmp/project', host: 'example', externalRefs: [stalePrRef] },
@@ -1378,7 +1405,7 @@ describe('updateSessionMetadata: protocol resume token preservation', () => {
             'default'
         )
 
-        const freshPrRef = { kind: 'github_pr', url: 'https://github.com/acme/repo/pull/9', repo: 'acme/repo', number: 9, linkedAt: 5, status: 'merged', statusCheckedAt: 200 }
+        const freshPrRef = { kind: 'github_pr', url: 'https://github.com/acme/repo/pull/9', repo: 'acme/repo', number: 9, linkedAt: 5, role: 'primary', status: 'merged', statusCheckedAt: 200 }
         const result = store.sessions.updateSessionMetadata(
             session.id,
             { path: '/tmp/project', host: 'example', externalRefs: [freshPrRef] },

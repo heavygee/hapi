@@ -190,6 +190,28 @@ export type GithubIssueExternalRef = z.infer<typeof GithubIssueExternalRefSchema
 export const ExternalRefsSchema = z.array(ExternalRefSchema)
 export type ExternalRefs = z.infer<typeof ExternalRefsSchema>
 
+/**
+ * Parses an `unknown` value (raw, possibly attacker- or bug-controlled
+ * metadata) into a validated `ExternalRef[]`, silently dropping any element
+ * that doesn't parse — never throwing, never returning a malformed element
+ * (Codex review, hapi#238). Every call site that reads `metadata.externalRefs`
+ * off a stored or incoming session row before passing it to identity-
+ * comparing helpers like `mergeExternalRefs`/`upsertExternalRef`/
+ * `reconcileExternalRefs` (which call `.repo.toLowerCase()` etc. and throw on
+ * a malformed element) must go through this rather than an unchecked
+ * `Array.isArray(...) ? (value as ExternalRef[]) : []` cast — a cast confirms
+ * the value is *an* array, never that its elements are valid refs, and a
+ * single malformed one (legacy row, out-of-band writer, generic
+ * `update-metadata` socket path with `z.unknown()` metadata) can reach that
+ * throw from more than one place in the hub.
+ */
+export function toValidExternalRefs(value: unknown): ExternalRef[] {
+    if (!Array.isArray(value)) return []
+    return value.flatMap(item => {
+        const result = ExternalRefSchema.safeParse(item)
+        return result.success ? [result.data] : []
+    })
+}
 
 /**
  * Accepts the full GitHub issue URL (any host — GHE boards are a real
@@ -554,7 +576,16 @@ lastModelError: z.object({
         retriedAndFailed: z.boolean().optional(),
         acknowledgedAt: z.number().optional()
     }).optional(),
-    externalRefs: z.array(ExternalRefSchema).optional(),
+    // Preprocessed through toValidExternalRefs rather than validated as a
+    // plain z.array(ExternalRefSchema) (Codex review, hapi#238): a bare
+    // z.array fails the entire MetadataSchema.safeParse over a single
+    // malformed element, which then nulls out `session.metadata` wholesale
+    // at every parse call site — silently wiping title/flavor/path/host for
+    // a session whose only problem is one bad externalRef.
+    externalRefs: z.preprocess(
+        value => (value === undefined ? undefined : toValidExternalRefs(value)),
+        z.array(ExternalRefSchema).optional()
+    ),
     codexUsage: CodexUsageSchema.optional()
 })
 
