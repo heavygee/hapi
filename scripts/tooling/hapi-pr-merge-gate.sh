@@ -127,7 +127,35 @@ else
     pass "fork repo — operator docs/plans allowed on $REPO"
 fi
 
-# 7. LANE POLICY — upstream merges need explicit, per-PR, single-use operator authorisation
+# 7. DOGFOODED 48h OPT-OUT WINDOW (tiann/hapi#2082)
+# Attaching `dogfooded` starts a 48h UTC countdown. Merge is blocked until the
+# window elapses — even with a valid lane B grant. low-impact-only PRs skip this.
+# shellcheck source=lib/dogfood-countdown.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/dogfood-countdown.sh"
+LABELS_CSV="$("$REAL_GH" pr view "$PR" --repo "$REPO" --json labels -q '[.labels[].name]|join(",")' 2>/dev/null || echo "")"
+if [ "$REPO" = "$UPSTREAM_REPO" ] && dogfood_has_label "$LABELS_CSV"; then
+    DF_LINE="$(dogfood_status_for_pr "$REPO" "$PR" "$LABELS_CSV")"
+    DF_STATUS="${DF_LINE%%$'\t'*}"
+    case "$DF_STATUS" in
+        waiting)
+            DF_HUMAN="$(printf '%s' "$DF_LINE" | cut -f3)"
+            fail "dogfooded countdown: ${DF_HUMAN} remaining (48h UTC from label; see #2082)"
+            ;;
+        ready)
+            pass "dogfooded window elapsed (48h UTC)"
+            ;;
+        unknown)
+            fail "dogfooded label present but no labeled-at stamp (events API / 'dogfooded since' comment)"
+            ;;
+        *)
+            fail "dogfooded status unreadable: $DF_STATUS"
+            ;;
+    esac
+else
+    pass "no dogfooded label — 48h window N/A"
+fi
+
+# 8. LANE POLICY — upstream merges need explicit, per-PR, single-use operator authorisation
 #
 # The operator may run hapi-laneb-authorise on whichever box they're sitting at
 # (oos-linux or homelab) while the merge itself usually runs from an agent on
