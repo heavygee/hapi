@@ -9,6 +9,11 @@ import {
     withSessionSummaryInstruction
 } from './sessionSummaryInstruction'
 
+const USER_LANGUAGE_INSTRUCTION = [
+    'Use the language used by the user in the current conversation for the',
+    'human-readable "action" and "summary" values.'
+].join('\n')
+
 describe('sessionSummaryInstruction', () => {
     afterEach(() => {
         resetSessionSummaryContractForTests()
@@ -60,9 +65,14 @@ describe('sessionSummaryInstruction', () => {
         expect(SESSION_SUMMARY_CONTRACT_LINE).toContain('spoken answer or outcome')
     })
 
-    it('adds user-language guidance', () => {
+    it('limits summaries to the final answer while preserving language and footer guidance', () => {
         applyHubSessionSummaryContract(true)
         const body = sessionSummaryInstructionOrEmpty({})
+        expect(body).toContain('At the end of each turn, append exactly one')
+        expect(body).toContain('final answer only')
+        expect(body).toContain('Do not emit this line in commentary, progress updates, or before tool calls.')
+        expect(body).toContain(USER_LANGUAGE_INSTRUCTION)
+        expect(body).not.toContain('End every response')
         expect(body).toBe(buildSessionSummaryInstruction())
     })
 
