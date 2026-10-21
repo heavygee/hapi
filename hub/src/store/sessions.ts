@@ -2,7 +2,7 @@ import type { Database } from 'bun:sqlite'
 import { prepareCached } from './statementCache'
 import { bumpSessionDeletionEpoch } from './sessionInvalidation'
 import { randomUUID } from 'node:crypto'
-import { reconcileExternalRefs, type ExternalRef } from '@hapi/protocol/schemas'
+import { reconcileExternalRefs, toValidExternalRefs, type ExternalRef } from '@hapi/protocol/schemas'
 
 import type { StoredSession, VersionedUpdateResult } from './types'
 import { safeJsonParse } from './json'
@@ -154,24 +154,29 @@ function preserveCursorProtocolPair(
     return merged
 }
 
-function isExternalRefArray(value: unknown): value is ExternalRef[] {
-    return Array.isArray(value)
-}
-
 // Named CONTRIBUTION_FIELDS (matching scripts/tooling/verify-
 // externalrefs-preserve.mjs's incident-driven check for this exact field +
 // name). Omitted-key sparse writes use carryForwardIfMissing; present-but-
 // incomplete arrays use reconcileExternalRefs (Codex review, hapi#238).
 // Explicit `[]` clears win (do not resurrect prior refs). Soup then
 // preserves PR status cache on the reconciled set.
+//
+// priorRefs/nextRefs go through toValidExternalRefs rather than a bare
+// Array.isArray cast (Codex review, hapi#238): a cast confirms the value is
+// *an* array, never that its elements are valid refs, and reconcileExternalRefs
+// below calls `.repo.toLowerCase()` on every element — a single malformed one
+// (legacy row, out-of-band writer) threw from here. Validating first also
+// means an all-garbage non-empty array degrades to `[]`, which then correctly
+// falls through the length-based "nothing to reconcile" branch instead of
+// reaching reconcileExternalRefs with invalid elements.
 function mergeContributionFields(
     prior: Record<string, unknown>,
     next: Record<string, unknown>,
     merged: Record<string, unknown> | null
 ): Record<string, unknown> | null {
     merged = carryForwardIfMissing(prior, next, merged, CONTRIBUTION_FIELDS)
-    const priorRefs = isExternalRefArray(prior.externalRefs) ? prior.externalRefs : []
-    const nextRefs = isExternalRefArray(next.externalRefs) ? next.externalRefs : []
+    const priorRefs = toValidExternalRefs(prior.externalRefs)
+    const nextRefs = toValidExternalRefs(next.externalRefs)
     // An explicit `next.externalRefs = []` is a deliberate unlink-to-empty,
     // not a sparse/stale write merely missing some refs it didn't know
     // about yet — those two look identical as "an empty-ish array" without

@@ -1,5 +1,5 @@
 import { SESSION_LIFECYCLE_IDLE, SESSION_LIFECYCLE_RUNNING } from '@hapi/protocol'
-import { mergeExternalRefs, upsertExternalRef, ExternalRefsSchema, type ExternalRef } from '@hapi/protocol/schemas'
+import { mergeExternalRefs, upsertExternalRef, toValidExternalRefs, ExternalRefsSchema, type ExternalRef } from '@hapi/protocol/schemas'
 import { AgentStateSchema, MetadataSchema, SessionPatchSchema, TeamStateSchema } from '@hapi/protocol/schemas'
 import type { CodexCollaborationMode, CopilotAgentMode, PermissionMode, Session, SessionPatch } from '@hapi/protocol/types'
 import type { Store } from '../store'
@@ -83,8 +83,12 @@ export function mergeSessionMetadataForSessionMerge(
 
     // hapi#238: union externalRefs so mergeSessions does not drop issue/PR links
     // that only lived on the deleted old row (Boards tip b615b6155).
-    const oldRefs = Array.isArray(oldObj.externalRefs) ? oldObj.externalRefs as ExternalRef[] : []
-    const newRefs = Array.isArray(newObj.externalRefs) ? newObj.externalRefs as ExternalRef[] : []
+    //
+    // toValidExternalRefs, not a bare Array.isArray cast (Codex review,
+    // hapi#238): mergeExternalRefs below calls `.repo.toLowerCase()` on every
+    // element, which throws on a malformed one a cast alone would wave through.
+    const oldRefs = toValidExternalRefs(oldObj.externalRefs)
+    const newRefs = toValidExternalRefs(newObj.externalRefs)
     if (oldRefs.length > 0) {
         const combinedRefs = mergeExternalRefs(newRefs, oldRefs)
         if (combinedRefs.length !== newRefs.length) {
@@ -1387,9 +1391,7 @@ export class SessionCache {
                 throw new Error('Cannot update external refs while session metadata is invalid')
             }
             const currentMetadata = storedMetadata as Record<string, unknown>
-            const currentRefs = Array.isArray(currentMetadata.externalRefs)
-                ? currentMetadata.externalRefs as ExternalRef[]
-                : []
+            const currentRefs = toValidExternalRefs(currentMetadata.externalRefs)
             const parsedRefs = ExternalRefsSchema.safeParse(mutate(currentRefs))
             if (!parsedRefs.success) {
                 throw new InvalidExternalRefsError(
