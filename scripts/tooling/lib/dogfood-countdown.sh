@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # dogfood-countdown.sh — 48h UTC opt-out window for the `dogfooded` label.
 #
-# Public process: tiann/hapi#2082 (Discussion create was FORBIDDEN for write
-# collaborators; Issue is the standing thread until Announcements is opened).
+# Public process: tiann/hapi discussions #2083 (General). Announcements create is
+# maintainer-restricted for write collaborators.
 #
 # Sourced by hapi-pr-merge-gate.sh and hapi-pr-emoji-batch.sh.
 # Window length: 48 calendar hours from the GitHub "labeled" event timestamp

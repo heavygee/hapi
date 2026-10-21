@@ -1719,7 +1719,7 @@ _print_queue() {
     _print_section "⏳ SKIPPED (⚠️ same-fp exponential backoff):" "${Q_SKIP_BACKOFF[@]:-}"
     _print_section "🟢 WAIT TIANN (✅ green, lane A - upstream maintainer merge):" "${Q_WAIT_TIANN[@]:-}"
     _print_section "🟢 WAIT META/OPERATOR (✅ green, fork PR - never tiann):" "${Q_WAIT_FORK[@]:-}"
-    _print_section "🟢 DOGFOODED COUNTDOWN (✅ green, 48h UTC opt-out; merge after window + laneb auth — #2082):" "${Q_DOGFOOD[@]:-}"
+    _print_section "🟢 DOGFOODED COUNTDOWN (✅ green, 48h UTC opt-out; merge after window + laneb auth — discussions/2083):" "${Q_DOGFOOD[@]:-}"
     _print_section "🟣 SELF-MERGE / META MAY MERGE (✅ green, lane B or fork promote):" "${Q_SELF_MERGE[@]:-}"
     echo ""
     echo "NEXT STEPS:"

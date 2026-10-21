@@ -127,7 +127,7 @@ else
     pass "fork repo — operator docs/plans allowed on $REPO"
 fi
 
-# 7. DOGFOODED 48h OPT-OUT WINDOW (tiann/hapi#2082)
+# 7. DOGFOODED 48h OPT-OUT WINDOW (discussions/2083)
 # Attaching `dogfooded` starts a 48h UTC countdown. Merge is blocked until the
 # window elapses — even with a valid lane B grant. low-impact-only PRs skip this.
 # shellcheck source=lib/dogfood-countdown.sh
@@ -139,7 +139,7 @@ if [ "$REPO" = "$UPSTREAM_REPO" ] && dogfood_has_label "$LABELS_CSV"; then
     case "$DF_STATUS" in
         waiting)
             DF_HUMAN="$(printf '%s' "$DF_LINE" | cut -f3)"
-            fail "dogfooded countdown: ${DF_HUMAN} remaining (48h UTC from label; see #2082)"
+            fail "dogfooded countdown: ${DF_HUMAN} remaining (48h UTC from label; see discussions/2083)"
             ;;
         ready)
             pass "dogfooded window elapsed (48h UTC)"
