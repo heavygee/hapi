@@ -1101,6 +1101,13 @@ layers:
   # Shared+web → remat --build-web + hapi-restart-hub.
   - branch: driver/238-github-pr-schema-reconcile
 
+  # heavygee/hapi#238 follow-on — toValidExternalRefs + MetadataSchema preprocess
+  # so one malformed externalRefs element cannot null session.metadata wholesale.
+  # Thin tip on soup 37b51cf77: driver/238-externalrefs-metadata-preprocess @ 7cc01ffbb
+  # Shared+hub → remat --build-web + hapi-restart-hub (patient).
+  # Deliberately excludes Boards canonicalization / todoBoard port-normalization.
+  - branch: driver/238-externalrefs-metadata-preprocess
+
   # heavygee/hapi#247 — deliberate fleet push + restore upgrade-runner; kill
   # keepalive/startup unattended auto-upgrade. Hub default stays alert; per-machine
   # auto (standalone personal hub) applies only on POST /api/fleet/push-upgrade.
