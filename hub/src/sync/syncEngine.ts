@@ -2113,6 +2113,10 @@ export class SyncEngine {
         await this.sessionCache.updateSessionSummary(sessionId, text)
     }
 
+    async linkIssue(sessionId: string, ref: ExternalRef): Promise<void> {
+        await this.sessionCache.linkIssue(sessionId, ref)
+    }
+
     async deleteSession(sessionId: string): Promise<void> {
         await this.sessionCache.deleteSession(sessionId)
     }

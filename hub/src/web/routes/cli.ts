@@ -414,6 +414,9 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
         }
 
         const ref = parsed.data.ref
+        if (ref.kind !== 'github_pr') {
+            return c.json({ error: 'Invalid body: ref must be a github_pr reference' }, 400)
+        }
         try {
             const externalRefs = await engine.mutateSessionExternalRefs(resolved.sessionId, (current) =>
                 upsertGithubPrIntoExternalRefs(current, ref)

@@ -1,4 +1,5 @@
 import { SESSION_LIFECYCLE_IDLE, SESSION_LIFECYCLE_RUNNING } from '@hapi/protocol'
+import { reconcileExternalRefs, toValidExternalRefs, upsertExternalRef } from '@hapi/protocol/schemas'
 import { AgentStateSchema, ExternalRefsSchema, MetadataSchema, SessionPatchSchema, TeamStateSchema } from '@hapi/protocol/schemas'
 import type { CodexCollaborationMode, CopilotAgentMode, ExternalRef, PermissionMode, Session, SessionPatch } from '@hapi/protocol/types'
 import type { Store } from '../store'
@@ -77,10 +78,54 @@ export function mergeSessionMetadataForSessionMerge(
         changed = true
     }
 
-    // Preserve structured PR links when the replacement row never set them.
-    if (Array.isArray(oldObj.externalRefs) && !Object.prototype.hasOwnProperty.call(newObj, 'externalRefs')) {
-        merged.externalRefs = oldObj.externalRefs
-        changed = true
+    // Preserve structured PR/issue links when the replacement row never set
+    // them. toValidExternalRefs, not an unchecked `Array.isArray(...) ?
+    // (value as ExternalRef[]) : []` cast (Codex review, hapi#238): either
+    // row's externalRefs can contain a malformed element (legacy row,
+    // out-of-band writer) that an unchecked cast would wave through to a
+    // caller expecting valid, kind-tagged refs.
+    if (!Object.prototype.hasOwnProperty.call(newObj, 'externalRefs')) {
+        const oldRefs = toValidExternalRefs(oldObj.externalRefs)
+        if (oldRefs.length > 0) {
+            merged.externalRefs = oldRefs
+            changed = true
+        }
+    } else if (Array.isArray(newObj.externalRefs) && newObj.externalRefs.length === 0) {
+        // An explicit, genuinely empty `externalRefs: []` on the surviving
+        // row is a deliberate clear, not "this row never linked anything
+        // yet" — do not resurrect the old row's refs over it.
+    } else {
+        // The old row is deleted after this merge (`mergeSessions`) — a
+        // link that exists only on old would otherwise be lost for good.
+        // Union by identity (reconcileExternalRefs), not "new wins
+        // outright": unlike a routine metadata write, consolidating two
+        // live sessions means both sides' own independent links are real
+        // and neither should silently vanish just because the other side
+        // also happens to carry one (hapi#238). The one invariant a union
+        // must not violate: ExternalRefsSchema allows at most one primary
+        // github_pr, so if combining would produce two, the new row's own
+        // primary wins and old's is dropped rather than left to fail
+        // downstream schema validation.
+        const oldRefs = toValidExternalRefs(oldObj.externalRefs)
+        const newRefs = toValidExternalRefs(newObj.externalRefs)
+        if (oldRefs.length > 0) {
+            // newRefs as the `prior` argument, oldRefs as `next` (Codex
+            // review, hapi#238): reconcileExternalRefs defaults to keeping
+            // its `prior` argument's entry on a freshness tie, and here the
+            // surviving row's own current state (newRefs) should win a tie
+            // over the about-to-be-discarded old row's, not the other way
+            // around — only a *strictly fresher* old entry should override.
+            let combined = reconcileExternalRefs(newRefs, oldRefs)
+            const primaries = combined.filter(ref => ref.kind === 'github_pr' && ref.role === 'primary')
+            if (primaries.length > 1) {
+                const newPrimary = newRefs.find(ref => ref.kind === 'github_pr' && ref.role === 'primary')
+                combined = combined.filter(ref => !(ref.kind === 'github_pr' && ref.role === 'primary') || ref === newPrimary)
+            }
+            if (combined.length !== newRefs.length || combined.some((ref, i) => ref !== newRefs[i])) {
+                merged.externalRefs = combined
+                changed = true
+            }
+        }
     }
 
     return changed ? merged : newMetadata
@@ -1119,9 +1164,7 @@ export class SessionCache {
                 throw new Error('Cannot update external refs while session metadata is invalid')
             }
             const currentMetadata = storedMetadata as Record<string, unknown>
-            const currentRefs = Array.isArray(currentMetadata.externalRefs)
-                ? currentMetadata.externalRefs as ExternalRef[]
-                : []
+            const currentRefs = toValidExternalRefs(currentMetadata.externalRefs)
             const parsedRefs = ExternalRefsSchema.safeParse(mutate(currentRefs))
             if (!parsedRefs.success) {
                 throw new InvalidExternalRefsError(
@@ -1152,6 +1195,17 @@ export class SessionCache {
         }
 
         throw new Error('Session was modified concurrently. Please try again.')
+    }
+
+    /**
+     * Attach a structured github_issue reference to a session (hapi#235/#238)
+     * — the `hapi link-issue` CLI/MCP write path, parallel to `link_pr`'s
+     * upsert via mutateSessionExternalRefs. Upserts by identity (host+repo+
+     * number) — re-linking the same issue refreshes `linkedAt` in place
+     * rather than appending a duplicate chip.
+     */
+    async linkIssue(sessionId: string, ref: ExternalRef): Promise<ExternalRef[]> {
+        return this.mutateSessionExternalRefs(sessionId, current => upsertExternalRef(current, ref))
     }
 
     async updateSessionSummary(sessionId: string, text: string): Promise<void> {

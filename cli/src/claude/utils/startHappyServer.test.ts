@@ -124,6 +124,7 @@ describe('startHappyServer skill_lookup', () => {
 
         expect(tools.tools.map((tool) => tool.name)).toEqual([
             'change_title',
+            'link_issue',
             'display_image',
             'display_video',
             'display_media',
@@ -198,6 +199,7 @@ describe('startHappyServer skill_lookup', () => {
         const tools = await mcp.listTools()
 
         expect(server.toolNames).toEqual([
+            'link_issue',
             'display_image',
             'display_video',
             'display_media',
@@ -206,6 +208,7 @@ describe('startHappyServer skill_lookup', () => {
             'inspect_peer',
         ])
         expect(tools.tools.map((tool) => tool.name)).toEqual([
+            'link_issue',
             'display_image',
             'display_video',
             'display_media',
@@ -213,6 +216,55 @@ describe('startHappyServer skill_lookup', () => {
             'inspect_peer',
             'list_peers'
         ])
+    })
+
+    it('links a github issue and reports success only after the metadata write is acked', async () => {
+        let metadataState: Record<string, unknown> = {}
+        const sessionClient = {
+            updateMetadata: vi.fn((handler: (current: Record<string, unknown>) => Record<string, unknown>) => {
+                metadataState = handler(metadataState)
+            }),
+            flushMetadata: vi.fn(async () => true),
+            getMetadata: vi.fn(() => metadataState),
+            sendAgentMessage: vi.fn(),
+            sendClaudeSessionMessage: vi.fn()
+        } as unknown as ApiSessionClient
+        const server = await startHappyServer(sessionClient, { enableLinkPr: false })
+        stopServer = server.stop
+        const mcp = new Client({ name: 'hapi-link-issue-test', version: '1.0.0' })
+        client = mcp
+        await mcp.connect(new StreamableHTTPClientTransport(new URL(server.url)))
+
+        const result = await mcp.callTool({
+            name: 'link_issue',
+            arguments: { url: 'heavygee/hapi#235' }
+        }) as ToolResult
+
+        expect(result.isError).toBe(false)
+        expect(result.content?.[0]?.text).toContain('Linked heavygee/hapi#235')
+    })
+
+    it('reports failure instead of a false success when the metadata write never gets acked', async () => {
+        const sessionClient = {
+            updateMetadata: vi.fn(),
+            flushMetadata: vi.fn(async () => false),
+            getMetadata: vi.fn(() => ({})),
+            sendAgentMessage: vi.fn(),
+            sendClaudeSessionMessage: vi.fn()
+        } as unknown as ApiSessionClient
+        const server = await startHappyServer(sessionClient, { enableLinkPr: false })
+        stopServer = server.stop
+        const mcp = new Client({ name: 'hapi-link-issue-fail-test', version: '1.0.0' })
+        client = mcp
+        await mcp.connect(new StreamableHTTPClientTransport(new URL(server.url)))
+
+        const result = await mcp.callTool({
+            name: 'link_issue',
+            arguments: { url: 'heavygee/hapi#235' }
+        }) as ToolResult
+
+        expect(result.isError).toBe(true)
+        expect(result.content?.[0]?.text).toContain('Failed to link issue')
     })
 
 })
@@ -709,6 +761,7 @@ describe('toClaudeAllowedHapiMcpTools', () => {
     it('keeps local-path and peer tools registered but out of Claude --allowedTools', () => {
         expect(toClaudeAllowedHapiMcpTools([
             'change_title',
+            'link_issue',
             'display_image',
             'display_video',
             'display_media',
@@ -718,6 +771,7 @@ describe('toClaudeAllowedHapiMcpTools', () => {
             'skill_lookup'
         ])).toEqual([
             'mcp__hapi__change_title',
+            'mcp__hapi__link_issue',
             'mcp__hapi__display_image',
             'mcp__hapi__list_peers',
             'mcp__hapi__skill_lookup'

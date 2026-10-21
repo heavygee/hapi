@@ -78,7 +78,11 @@ export function getGitHubUrlForRepo(repo: string, number: number, host: string =
     return `https://${host}/${repo}/pull/${number}`
 }
 
-/** Hostname from a PR URL; falls back to github.com on parse failure. */
+export function getGitHubIssueUrlForRepo(repo: string, number: number, host: string = DEFAULT_HOST): string {
+    return `https://${host}/${repo}/issues/${number}`
+}
+
+/** Hostname from a PR or issue URL; falls back to github.com on parse failure. */
 export function hostFromGithubPrUrl(url: string): string {
     try {
         return new URL(url).hostname || DEFAULT_HOST
@@ -96,6 +100,14 @@ export function githubPrIdentityKey(repo: string, number: number, hostOrUrl: str
         ? hostFromGithubPrUrl(hostOrUrl)
         : (hostOrUrl.trim() || DEFAULT_HOST)
     return `github_pr:${host.toLowerCase()}:${repo.toLowerCase()}#${number}`
+}
+
+/** Same shape as githubPrIdentityKey, kept distinct so a PR and an issue sharing owner/repo#N never collide. */
+export function githubIssueIdentityKey(repo: string, number: number, hostOrUrl: string): string {
+    const host = hostOrUrl.includes('://')
+        ? hostFromGithubPrUrl(hostOrUrl)
+        : (hostOrUrl.trim() || DEFAULT_HOST)
+    return `github_issue:${host.toLowerCase()}:${repo.toLowerCase()}#${number}`
 }
 
 /**

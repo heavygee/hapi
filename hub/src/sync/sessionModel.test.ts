@@ -330,7 +330,7 @@ describe('session model', () => {
             source: 'agent' as const,
             linkedAt: 1,
             openState: 'open' as const,
-            checks: 'success' as const,
+            checks: 'pass' as const,
             merge: 'clean' as const,
             estateCode: 'babysit.green'
         }]

@@ -2,6 +2,7 @@ import type { Database } from 'bun:sqlite'
 import { prepareCached } from './statementCache'
 import { bumpSessionDeletionEpoch } from './sessionInvalidation'
 import { randomUUID } from 'node:crypto'
+import { reconcileExternalRefs, toValidExternalRefs } from '@hapi/protocol/schemas'
 
 import type { StoredSession, VersionedUpdateResult } from './types'
 import { safeJsonParse } from './json'
@@ -38,9 +39,18 @@ import { updateVersionedField } from './versionedUpdates'
 //     write-once-keep semantics. Mirror of pickExistingSessionMetadata
 //     in cli/src/agent/sessionFactory.ts.
 //
-//   - CONTRIBUTION_FIELDS: structured session↔PR links (externalRefs).
+//   - CONTRIBUTION_FIELDS: structured session↔PR/issue links (externalRefs).
 //     Sparse resume/bootstrap writes must not wipe a prior primary PR
-//     association. tiann/hapi#1160 / PR #1161.
+//     association. tiann/hapi#1160 / PR #1161. A write reaching this generic
+//     merge path with its own nonempty externalRefs is virtually always a
+//     CLI metadata sync spreading a (possibly stale) local cache snapshot,
+//     not a deliberate "replace with exactly this" call — those go through
+//     the dedicated external-refs routes/sessionCache methods instead, which
+//     never reach this function. So a present-but-incomplete next array is
+//     reconciled (unioned by identity, freshest field-level state per
+//     identity) rather than treated as the new complete truth, matching the
+//     same reasoning `mergeSessionMetadataForSessionMerge` in
+//     hub/src/sync/sessionCache.ts applies (hapi#238).
 //
 // `cursorSessionProtocol` is paired with `cursorSessionId`: protocol is
 // tied to a specific chat id, so a write that explicitly sets a new
@@ -106,6 +116,59 @@ function carryForwardIfMissing(
     return result
 }
 
+// Named CONTRIBUTION_FIELDS (matching scripts/tooling/verify-
+// externalrefs-preserve.mjs's incident-driven check for this exact field +
+// name). Omitted-key sparse writes use carryForwardIfMissing; present-but-
+// incomplete arrays union via reconcileExternalRefs (Codex review, hapi#238).
+// Explicit `[]` clears win (do not resurrect prior refs); a nonempty-but-
+// fully-malformed write preserves prior instead of wiping it. The one
+// invariant a union must not violate: ExternalRefsSchema allows at most one
+// primary github_pr, so if combining would produce two, next's own primary
+// wins and prior's is dropped rather than left to fail downstream validation.
+function mergeContributionFields(
+    prior: Record<string, unknown>,
+    next: Record<string, unknown>,
+    merged: Record<string, unknown> | null
+): Record<string, unknown> | null {
+    merged = carryForwardIfMissing(prior, next, merged, CONTRIBUTION_FIELDS)
+    // Omitted key — carryForwardIfMissing above already handled it.
+    if (next.externalRefs === undefined) {
+        return merged
+    }
+
+    const priorRefs = toValidExternalRefs(prior.externalRefs)
+    // An explicit, genuinely empty `next.externalRefs: []` is a deliberate
+    // unlink-to-empty, not a sparse/stale write merely missing some refs it
+    // didn't know about yet — checked against the raw input, before
+    // sanitization, so it can't be confused with the all-elements-rejected
+    // case below.
+    const isDeliberateClear = Array.isArray(next.externalRefs) && next.externalRefs.length === 0
+    const nextRefs = toValidExternalRefs(next.externalRefs)
+
+    merged = merged ?? { ...next }
+    if (isDeliberateClear) {
+        merged.externalRefs = []
+        return merged
+    }
+    if (nextRefs.length === 0) {
+        // Something nonempty was sent (or next.externalRefs wasn't even an
+        // array), but nothing in it survived validation. Treating this the
+        // same as a deliberate clear would unlink every valid ref over one
+        // malformed element or a wholly garbage payload. Preserve what's
+        // already persisted instead.
+        merged.externalRefs = priorRefs
+        return merged
+    }
+    let combined = reconcileExternalRefs(priorRefs, nextRefs)
+    const primaries = combined.filter(ref => ref.kind === 'github_pr' && ref.role === 'primary')
+    if (primaries.length > 1) {
+        const nextPrimary = nextRefs.find(ref => ref.kind === 'github_pr' && ref.role === 'primary')
+        combined = combined.filter(ref => !(ref.kind === 'github_pr' && ref.role === 'primary') || ref === nextPrimary)
+    }
+    merged.externalRefs = combined
+    return merged
+}
+
 function preserveCursorProtocolPair(
     prior: Record<string, unknown>,
     next: Record<string, unknown>,
@@ -136,7 +199,7 @@ export function mergeSessionMetadata(prior: unknown, next: unknown): unknown {
     merged = carryForwardIfMissing(prior, next, merged, PARSE_IDENTITY_FIELDS)
     merged = carryForwardIfMissing(prior, next, merged, ROUTING_FIELDS)
     merged = carryForwardIfMissing(prior, next, merged, SIMPLE_RESUME_TOKENS)
-    merged = carryForwardIfMissing(prior, next, merged, CONTRIBUTION_FIELDS)
+    merged = mergeContributionFields(prior, next, merged)
     merged = preserveCursorProtocolPair(prior, next, merged)
     return merged ?? next
 }

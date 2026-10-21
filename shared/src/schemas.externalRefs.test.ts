@@ -129,11 +129,15 @@ describe('MetadataSchema.externalRefs', () => {
         }
     })
 
-    it('rejects malformed externalRefs entries', () => {
-        expect(MetadataSchema.safeParse({
+    it('drops a malformed externalRefs entry instead of rejecting the whole object', () => {
+        const parsed = MetadataSchema.safeParse({
             ...base,
             externalRefs: [{ kind: 'github_pr', repo: 'x', number: 1 }]
-        }).success).toBe(false)
+        })
+        expect(parsed.success).toBe(true)
+        if (parsed.success) {
+            expect(parsed.data.externalRefs).toEqual([])
+        }
     })
 
     it('rejects more than one primary GitHub PR', () => {

@@ -4,7 +4,9 @@ import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
 import { ScheduleIcon } from '@/components/icons'
 import { HoverTooltip, SESSION_ROW_TOOLTIP_FOCUS_CLASS, useSessionRowTooltipIds } from '@/components/HoverTooltip'
 import { getAttentionLabel, SessionAttentionIndicator } from '@/components/SessionAttentionIndicator'
+import { IssueRefChip } from '@/components/IssueRefChip'
 import { classifySessionAttention } from '@/lib/sessionAttention'
+import { getLinkedGithubIssue } from '@/lib/externalRefs'
 import { getSessionLastSeenAt, getSessionManualUnreadAt } from '@/lib/sessionLastSeen'
 import { formatRelativeTime } from '@/lib/relativeTime'
 import { formatScheduledTooltipDetail } from '@/lib/scheduledTime'
@@ -131,6 +133,13 @@ export function SessionRowSummary(props: {
     projectLabel?: string
     /** Machine label shown next to the project name (pinned "in progress" rows). */
     machineLabel?: string
+    /**
+     * False when the parent renders the issue chip itself as a sibling of an
+     * enclosing `role="button"` row (ARIA forbids a focusable descendant of
+     * a button role — see SessionList.tsx's row wrapper). Defaults to true
+     * for callers like the mention-chip tooltip, which aren't inside one.
+     */
+    showIssueChip?: boolean
 }) {
     const {
         session: s,
@@ -138,6 +147,7 @@ export function SessionRowSummary(props: {
         showDetailedStatus = true,
         selected = false,
         nestedTooltips = true,
+        showIssueChip = true,
         attentionTooltipId: attentionTooltipIdProp,
         lastSeenVersion,
         scheduleTooltipId: scheduleTooltipIdProp,
@@ -181,6 +191,7 @@ export function SessionRowSummary(props: {
     const primaryPrRef = githubPrAwarenessEnabled
         ? getPrimaryGithubPrRef(s.metadata?.externalRefs)
         : null
+    const linkedIssue = getLinkedGithubIssue(s.metadata)
 
     return (
         <div className={`flex w-full min-w-0 flex-col gap-1 ${className ?? ''}`}>
@@ -193,6 +204,7 @@ export function SessionRowSummary(props: {
                     >
                         {sessionName}
                     </div>
+                    {showIssueChip && linkedIssue ? <IssueRefChip ref={linkedIssue} /> : null}
                     {attention?.kind === 'unread' && nestedTooltips && attentionId ? (
                         <SessionAttentionIndicator
                             attention={attention}

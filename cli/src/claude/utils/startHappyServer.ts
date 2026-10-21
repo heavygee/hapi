@@ -31,6 +31,7 @@ import { buildGithubPrExternalRef, isSameGithubPrIdentity, parseGithubPrInput } 
 import { applySessionDisplayRename, normalizeSessionDisplayTitle } from "@/agent/sessionDisplayRename";
 import { fetchGithubPrAwarenessEnabled } from "@/api/fetchGithubPrAwareness";
 import { upsertSessionExternalRef } from "@/api/upsertSessionExternalRef";
+import { applyLinkIssue } from "@/agent/sessionIssueLink";
 
 type StartHappyServerOptions = {
     /**
@@ -285,7 +286,8 @@ function createHapiMcpServer(
                     throw new Error(response.error ?? `HTTP ${response.status}`)
                 }
                 const persisted = response.externalRefs?.some((candidate) =>
-                    isSameGithubPrIdentity(candidate, ref.repo, ref.number, new URL(ref.url).hostname)
+                    candidate.kind === 'github_pr'
+                    && isSameGithubPrIdentity(candidate, ref.repo, ref.number, new URL(ref.url).hostname)
                     && candidate.role === ref.role
                 )
                 if (!persisted) {
@@ -319,6 +321,40 @@ function createHapiMcpServer(
             };
         }
     }
+
+    // Always-on, no opt-in toggle (hapi#235/#238 operator decision: "unless
+    // someone uses it, they're not gonna see it" — no chrome to gate for
+    // operators who never link an issue).
+    const linkIssueInputSchema: z.ZodTypeAny = z.object({
+        url: z.string().describe('GitHub issue URL (https://github.com/<owner>/<repo>/issues/<n>) or the [host:]<owner>/<repo>#<n> shorthand'),
+    });
+    mcp.registerTool<any, any>('link_issue', {
+        description: 'Attach a GitHub issue reference to the current HAPI session (self-session only). Shows as a chip on the session row/detail. Re-linking the same issue refreshes it rather than duplicating.',
+        title: 'Link GitHub Issue',
+        inputSchema: linkIssueInputSchema,
+    }, async (args: { url: string }) => {
+        const outcome = await applyLinkIssue(client, args.url);
+        if (outcome.ok) {
+            return {
+                content: [
+                    {
+                        type: 'text' as const,
+                        text: `Linked ${outcome.ref.repo}#${outcome.ref.number}`,
+                    },
+                ],
+                isError: false,
+            };
+        }
+        return {
+            content: [
+                {
+                    type: 'text' as const,
+                    text: `Failed to link issue: ${outcome.error}`,
+                },
+            ],
+            isError: true,
+        };
+    });
 
     mcp.registerTool<any, any>('display_image', {
         description: `Display a local image file to the human user inline in the current HAPI chat session. ${DISPLAY_IMAGE_PROMPT_CURSOR}`,
@@ -702,6 +738,7 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
     const toolNames = [
         ...(enableChangeTitle ? ['change_title'] : []),
         ...(linkPrMode !== false ? ['link_pr'] : []),
+        'link_issue',
         'display_image',
         'display_video',
         'display_media',

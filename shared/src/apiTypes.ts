@@ -1009,6 +1009,134 @@ export type UsageSummaryBucket = {
     requests: number
 }
 
+export type BoardSummary = {
+    id: string
+    label: string
+}
+
+export type BoardsResponse = {
+    boards: BoardSummary[]
+}
+
+export type BoardItemActor = {
+    login: string
+    avatarUrl: string
+}
+
+export type BoardItemLabel = {
+    name: string
+    color: string
+}
+
+export type BoardItemMilestone = {
+    title: string
+    dueOn: string | null
+}
+
+/**
+ * One of the project's custom fields (anything besides the dedicated Status
+ * field, which gets its own `status`/`statusOrder` treatment) — generic
+ * single-select/text/number/date values, normalized to a display string.
+ * Write support is Status-only for now; these render read-only.
+ */
+export type BoardItemCustomField = {
+    name: string
+    value: string
+}
+
+export type BoardItem = {
+    id: string
+    title: string
+    url: string | null
+    number: number | null
+    repo: string | null
+    state: 'OPEN' | 'CLOSED' | 'MERGED' | null
+    status: string | null
+    updatedAt: string | null
+    body: string | null
+    /** Draft issues (no linked Issue/PR) have neither a url nor write-action support — close/reopen/comment/status-change all require one. */
+    isPullRequest: boolean
+    createdAt: string | null
+    closedAt: string | null
+    author: BoardItemActor | null
+    assignees: BoardItemActor[]
+    labels: BoardItemLabel[]
+    milestone: BoardItemMilestone | null
+    customFields: BoardItemCustomField[]
+}
+
+export type BoardItemsResponse = {
+    board: BoardSummary
+    statusOrder: string[]
+    doneValues: string[]
+    items: BoardItem[]
+}
+
+export const AddBoardRequestSchema = z.object({
+    url: z.string().min(1)
+})
+
+export type AddBoardRequest = z.infer<typeof AddBoardRequestSchema>
+
+// Write actions all identify the target item by its GitHub issue/PR URL
+// (not a HAPI-side id) — the hub validates it belongs to the board being
+// acted on (same host, well-formed issue/pull path) before shelling out to
+// `gh`, closing the same SSRF-class exposure the board-add host allowlist
+// closed for reads. `isPullRequest` is deliberately NOT part of this wire
+// contract — the hub derives it itself from the validated URL path rather
+// than trusting a client-supplied flag, so a client can't send `isPullRequest:
+// true` for an issue URL (or vice versa) and run the wrong `gh` verb.
+export const BoardItemCloseRequestSchema = z.object({
+    url: z.string().min(1),
+    comment: z.string().optional()
+})
+export type BoardItemCloseRequest = z.infer<typeof BoardItemCloseRequestSchema>
+
+export const BoardItemReopenRequestSchema = z.object({
+    url: z.string().min(1),
+    comment: z.string().optional()
+})
+export type BoardItemReopenRequest = z.infer<typeof BoardItemReopenRequestSchema>
+
+export const BoardItemCommentRequestSchema = z.object({
+    url: z.string().min(1),
+    body: z.string().min(1)
+})
+export type BoardItemCommentRequest = z.infer<typeof BoardItemCommentRequestSchema>
+
+// `status: null` clears the field (`gh project item-edit --clear`) — a
+// project can legitimately move a card back to the unassigned/no-status
+// bucket, and the picker previously had no way to express that once an item
+// already had a status (Codex review, hapi#238).
+export const BoardItemStatusRequestSchema = z.object({
+    url: z.string().min(1),
+    status: z.string().min(1).nullable()
+})
+export type BoardItemStatusRequest = z.infer<typeof BoardItemStatusRequestSchema>
+
+// At least one of addLogins/removeLogins must be non-empty — enforced by the
+// hub route, not the schema, since "both empty" is a no-op worth a clear
+// error rather than a confusing 200 that changed nothing.
+export const BoardItemAssigneesRequestSchema = z.object({
+    url: z.string().min(1),
+    addLogins: z.array(z.string().min(1)).optional(),
+    removeLogins: z.array(z.string().min(1)).optional()
+})
+export type BoardItemAssigneesRequest = z.infer<typeof BoardItemAssigneesRequestSchema>
+
+/** `name` is extra context for the assignee picker (not shown in the existing read-only assignee display, which only ever renders avatar + login). */
+export type BoardAssignableUser = BoardItemActor & { name: string | null }
+
+export type AssignableUsersResponse = {
+    users: BoardAssignableUser[]
+}
+
+export const LinkIssueRequestSchema = z.object({
+    url: z.string().min(1)
+})
+
+export type LinkIssueRequest = z.infer<typeof LinkIssueRequestSchema>
+
 export type UsageSummaryResponse = {
     range: {
         from: number | null
