@@ -1359,7 +1359,4 @@ layers:
   #   --build-web; hard-reload (no hub restart).
   # Must stay ABOVE other SessionList.tsx layers — it deletes the dropdown block.
   # Tip-unique web marker: "session-list-search-scope"
-  # HOLD pending operator go (#2081) — layer is staged + full-suite green,
-  # but :3006 must not pick it up until the operator authorises the rebuild.
-  # Uncomment on go, then: hapi-driver-rebuild --build-web --verify
-  # - branch: driver/2081-search-scope-toggle
+  - branch: driver/2081-search-scope-toggle
