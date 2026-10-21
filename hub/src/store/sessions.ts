@@ -2,6 +2,7 @@ import type { Database } from 'bun:sqlite'
 import { prepareCached } from './statementCache'
 import { bumpSessionDeletionEpoch } from './sessionInvalidation'
 import { randomUUID } from 'node:crypto'
+import { reconcileExternalRefs, toValidExternalRefs, type ExternalRef } from '@hapi/protocol/schemas'
 
 import type { StoredSession, VersionedUpdateResult } from './types'
 import { safeJsonParse } from './json'
@@ -37,6 +38,18 @@ import { updateVersionedField } from './versionedUpdates'
 //   - SIMPLE_RESUME_TOKENS: flavor-specific resume identifiers that are
 //     write-once-keep semantics. Mirror of pickExistingSessionMetadata
 //     in cli/src/agent/sessionFactory.ts.
+//
+//   - externalRefs: issue/PR links written via `hapi link-issue`/the MCP
+//     `link_issue` tool (hub/src/sync/sessionCache.ts linkIssue). Those
+//     writes go through this same updateSessionMetadata/mergeSessionMetadata
+//     path, so a CLI's own routine metadata write — built from a sparse or
+//     stale local cache that predates the link — would otherwise silently
+//     wipe it, the same failure mode PARSE_IDENTITY_FIELDS exists to guard
+//     against (Codex review, hapi#238). Merged, not just carried-forward-if-
+//     missing like the tiers above: a sparse `next.externalRefs` can be a
+//     present-but-incomplete array rather than strictly `undefined`, so
+//     mergeExternalRefs unions both sides instead of only covering the
+//     all-or-nothing case.
 //
 // `cursorSessionProtocol` is paired with `cursorSessionId`: protocol is
 // tied to a specific chat id, so a write that explicitly sets a new
@@ -122,6 +135,73 @@ function preserveCursorProtocolPair(
     return merged
 }
 
+// toValidExternalRefs itself now lives in shared/src/schemas.ts (Codex
+// review, hapi#238) — hub/src/sync/sessionCache.ts needed the same
+// parse-and-drop-malformed-elements behavior for its own, separate
+// session-consolidation merge path, which previously used an unchecked
+// `Array.isArray(...) ? (value as ExternalRef[]) : []` cast that could reach
+// mergeExternalRefs' identity comparison and throw on a malformed element.
+// One shared implementation avoids a third place ever needing to
+// reimplement this same validation.
+
+// Named CONTRIBUTION_FIELDS (matching scripts/tooling/verify-
+// externalrefs-preserve.mjs's incident-driven check for this exact field +
+// name) and carried forward via the same carryForwardIfMissing used by the
+// tiers above — that alone covers the omitted-key sparse-write case. But a
+// sparse write can also include its own stale-but-present externalRefs
+// array — built before an out-of-band `hapi link-issue`/linkIssue write (or
+// the fork's own `hapi-meta-daily.sh` tooling, which writes PR-chip fields
+// directly) landed — which an undefined-only check would miss.
+// mergeContributionFields below reconciles both sides via
+// reconcileExternalRefs (Codex review, hapi#238) as a strict superset of
+// that coverage.
+const CONTRIBUTION_FIELDS = ['externalRefs'] as const
+
+function mergeContributionFields(
+    prior: Record<string, unknown>,
+    next: Record<string, unknown>,
+    merged: Record<string, unknown> | null
+): Record<string, unknown> | null {
+    merged = carryForwardIfMissing(prior, next, merged, CONTRIBUTION_FIELDS)
+    // Omitted key — carryForwardIfMissing above already handled it.
+    if (next.externalRefs === undefined) {
+        return merged
+    }
+
+    const priorRefs = toValidExternalRefs(prior.externalRefs)
+    // An explicit, genuinely empty `next.externalRefs: []` is a deliberate
+    // unlink-to-empty, not a sparse/stale write merely missing some refs it
+    // didn't know about yet (found during a soup absorb by Meta, confirmed
+    // by hand against this exact code, hapi#238) — checked against the raw
+    // input, before sanitization, so it can't be confused with the
+    // all-elements-rejected case below.
+    const isDeliberateClear = Array.isArray(next.externalRefs) && next.externalRefs.length === 0
+    const nextRefs = toValidExternalRefs(next.externalRefs)
+
+    merged = merged ?? { ...next }
+    if (isDeliberateClear) {
+        merged.externalRefs = []
+        return merged
+    }
+    if (nextRefs.length === 0) {
+        // Something nonempty was sent (or next.externalRefs wasn't even an
+        // array), but nothing in it survived validation. Treating this the
+        // same as a deliberate clear would unlink every valid ref over one
+        // malformed element or a wholly garbage payload — removing the PR
+        // chips the fork's own session discovery relies on (Codex review,
+        // hapi#238, fresh regression from the sanitize-unconditionally fix
+        // the round before). Preserve what's already persisted instead.
+        merged.externalRefs = priorRefs
+        return merged
+    }
+    if (priorRefs.length === 0) {
+        merged.externalRefs = nextRefs
+        return merged
+    }
+    merged.externalRefs = reconcileExternalRefs(priorRefs, nextRefs)
+    return merged
+}
+
 export function mergeSessionMetadata(prior: unknown, next: unknown): unknown {
     if (!isPlainObject(prior) || !isPlainObject(next)) {
         return next
@@ -130,6 +210,7 @@ export function mergeSessionMetadata(prior: unknown, next: unknown): unknown {
     merged = carryForwardIfMissing(prior, next, merged, PARSE_IDENTITY_FIELDS)
     merged = carryForwardIfMissing(prior, next, merged, ROUTING_FIELDS)
     merged = carryForwardIfMissing(prior, next, merged, SIMPLE_RESUME_TOKENS)
+    merged = mergeContributionFields(prior, next, merged)
     merged = preserveCursorProtocolPair(prior, next, merged)
     return merged ?? next
 }

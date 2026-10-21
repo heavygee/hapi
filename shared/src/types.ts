@@ -4,6 +4,7 @@ export type {
     AgentStateRequest,
     AttachmentMetadata,
     DecryptedMessage,
+    ExternalRef,
     Metadata,
     Machine,
     MachineHealth,
