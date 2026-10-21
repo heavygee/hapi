@@ -1348,3 +1348,15 @@ layers:
   # Web-only → remat --build-web; hard-reload (no hub restart).
   # Tip-unique: runner-version-applied-banner
   - branch: driver/applied-changelog
+
+  # tiann/hapi#2081 — session search scope: replace the Default/Content dropdown
+  # with a 48x48 two-state toggle (ID-card vs speech-bubble glyph, real-scope
+  # tooltips, mode kept on the collapsed applying chip).
+  # Upstream worktree: ~/coding/hapi/worktrees/search-scope-toggle-2081 @
+  #   feat/2081-search-scope-toggle (based on tiann/hapi#1598 tip aafdc0089).
+  # Soup worktree: ~/coding/hapi/worktrees/search-scope-soup @ driver/2081-search-scope-toggle
+  # Thin tip on soup HEAD 01dfd7da6: 6e37798ff (1 commit). Web-only -> remat
+  #   --build-web; hard-reload (no hub restart).
+  # Must stay ABOVE other SessionList.tsx layers — it deletes the dropdown block.
+  # Tip-unique web marker: "session-list-search-scope"
+  - branch: driver/2081-search-scope-toggle
