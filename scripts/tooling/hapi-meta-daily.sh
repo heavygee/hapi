@@ -68,7 +68,10 @@
 #   HAPI_META_SESSION_NAME — optional chip name (default "meta - PR watcher")
 #   HAPI_META_TOOLING_SESSION_ID — Meta tooling bot session (unlock ping target)
 #   HAPI_META_WAVE_COLLECT_SECS (default 1800) — inbox collect fuse
-#   HAPI_META_MANIFEST — manifest path override (tests)
+#   HAPI_META_MANIFEST — Gate A / wave drop manifest override. Default prefers
+#     ~/.config/hapi/driver-manifest.yaml (runtime recipe mirror) so a dirty
+#     off-main primary checkout cannot re-activate dropped layers and ouroboros
+#     🧹→🔧 (#2034 / 2026-10-15). Remat still uses hapi_manifest_path (repo file).
 #   HAPI_META_DRIVER_STATUS_BIN — hapi-driver-status override (tests)
 # Install/upgrade gh: scripts/tooling/install-gh-official.sh
 set -euo pipefail
@@ -84,6 +87,24 @@ source "$SCRIPT_DIR/lib/meta-wave.sh"
 source "$SCRIPT_DIR/lib/require-gh-version.sh"
 # shellcheck source=lib/hapi-manifest-path.sh
 source "$SCRIPT_DIR/lib/hapi-manifest-path.sh"
+
+# Gate A / wave drop detection: never trust a dirty off-main primary checkout.
+# Remat composition still uses hapi_manifest_path (tracked repo recipe only —
+# do not invert that; see lib/hapi-manifest-path.sh). Meta-daily only needs
+# "is this layer still listed?" truth from the live recipe mirror.
+hapi_meta_gate_a_manifest() {
+    local primary="${1:-${HAPI_PRIMARY:-$HOME/coding/hapi}}"
+    local cfg="${XDG_CONFIG_HOME:-$HOME/.config}/hapi/driver-manifest.yaml"
+    if [[ -n "${HAPI_META_MANIFEST:-}" ]]; then
+        printf '%s\n' "$HAPI_META_MANIFEST"
+        return 0
+    fi
+    if [[ -f "$cfg" ]]; then
+        printf '%s\n' "$cfg"
+        return 0
+    fi
+    hapi_manifest_path "$primary"
+}
 
 UPSTREAM_REPO="${HAPI_PR_REPO:-tiann/hapi}"
 FORK_REPO="${HAPI_FORK_REPO:-heavygee/hapi}"
@@ -928,7 +949,7 @@ main() {
 
     # Manifest once for 🧹 complete promotion (same path as wave-clear).
     local manifest_path_early manifest_text_early
-    manifest_path_early="${HAPI_META_MANIFEST:-$(hapi_manifest_path "$HAPI_PRIMARY")}"
+    manifest_path_early="$(hapi_meta_gate_a_manifest "$HAPI_PRIMARY")"
     if [[ -f "$manifest_path_early" ]]; then
         manifest_text_early="$(cat "$manifest_path_early")"
     else
@@ -1361,7 +1382,7 @@ main() {
     local -a Q_WAVE
     local WAVE_UNLOCK=0 WAVE_DEFER="" WAVE_ID=""
     local manifest_path manifest_text members_json wave_adv prev_wave
-    manifest_path="${HAPI_META_MANIFEST:-$(hapi_manifest_path "$HAPI_PRIMARY")}"
+    manifest_path="$(hapi_meta_gate_a_manifest "$HAPI_PRIMARY")"
     if [[ -f "$manifest_path" ]]; then
         manifest_text="$(cat "$manifest_path")"
     else
