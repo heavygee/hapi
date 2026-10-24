@@ -53,19 +53,62 @@ Treat this like `ping_peer` / `inspect_peer`: it is first-class HAPI tooling, no
 
 ### CLI supervisor (required for process-shaped work)
 
+`hapi job run` registers the job, heartbeats on a timer while the child runs, then marks `completed`/`failed` from the **exit code**. An idle agent **cannot** heartbeat. Heartbeats do **not** advance `--done` / `--total` — those flags on `job run` are **initial meter state only**.
+
+Prefer `"$HAPI_SESSION_ID"` only when it matches the operator chat URL uuid. Remote Cursor runner: pass `/sessions/<id>` explicitly (see "Which session id").
+
+#### Alive-only / indeterminate (no fraction bar)
+
+Plain `job run` **without** `--done` / `--total` / `--remaining`:
+
 ```bash
-# Prefer "$HAPI_SESSION_ID" only when it matches the operator chat URL uuid.
-# Remote Cursor runner: pass /sessions/<id> explicitly (see "Which session id").
 hapi job run "$HAPI_SESSION_ID" beets \
   --label 'beets import' \
-  --remaining 150 --done 1637 --total 1787 --unit units \
-  --detail 'album: …' \
+  --detail 'phase: …' \
   -- ./beets-import.sh
 ```
 
-`hapi job run` registers the job, heartbeats on a timer while the child runs, then marks `completed`/`failed` from the exit code. An idle agent **cannot** heartbeat - set-once + nohup freezes the bar (counts stuck, UI goes stale after ~15m).
+List shows `running · elapsed` + an indeterminate bar. Use this when you do not have a continuous count writer.
 
-Do **not** start long work with MCP `session_job` `set` or a one-shot CLI `set` and then background the process. That is the wardrobe failure mode.
+#### Fraction / display bar (0→100%)
+
+`--done` / `--total` (or `--remaining` + `--total`) only move the bar when something **keeps PATCHing** them for the whole run. **Forbidden** for a display meter:
+
+```bash
+# WRONG — looks like a progress bar; stays frozen at the launch stamp (often 0/N)
+# under live heartbeats while the child actually works.
+hapi job run "$HAPI_SESSION_ID" beets \
+  --label 'beets import' --done 0 --total 1787 -- \
+  ./beets-import.sh
+```
+
+**Required** for a fraction bar — pick one:
+
+1. **Estate helper (when on PATH):** `hapi-job-run-metered` — refuses to start a fraction meter unless the child is piped through a feeder from t=0 (see operator runbook `hapi-session-job-progress` / `hapi-job-feed-jsonl`).
+2. **Portable:** `hapi job run` **without** launch counts, plus a continuous updater (`hapi job update` / MCP `session_job` `update`, or a JSONL feeder) from the first progress event through exit.
+
+```bash
+# Preferred when installed (estate PATH):
+hapi-job-run-metered "$HAPI_SESSION_ID" beets \
+  --label 'beets import' --total 1787 --unit units \
+  -- ./beets-import.sh   # must emit progress the feeder understands
+
+# Portable shape (same contract):
+hapi job run "$HAPI_SESSION_ID" beets --label 'beets import' -- ./beets-import.sh &
+# …and from t=0, something continuously: hapi job update … --done N --total 1787
+```
+
+Non-JSONL children need an adapter (line regex → `job update`, dual writer, or fall back to alive-only). Do not invent a fake percent.
+
+**Exit ≠ semantic failure:** `job run` stamps `failed` on nonzero exit even when the batch mostly succeeded (e.g. indexer `errors > 0` but run `completed`). Prefer the child exiting 0 when the *run* finished and putting item-error counts in `--detail` / logs; do not teach agents to ignore exit codes blindly.
+
+#### Wardrobe failures (frozen / lying bars)
+
+Do **not**:
+
+- MCP `session_job` `set` or one-shot CLI `set` + background the real work (no heartbeat).
+- `hapi job run --done 0 --total N -- cmd` with **no** continuous count writer (**frozen 0/N under a live heartbeat** — the common agent footgun).
+- Claim done / invite archive while a zombie `running` meter remains.
 
 ### Hygiene (list on resume / before done)
 
@@ -81,7 +124,7 @@ Hub does **not** auto-clear silent jobs (quiet legitimate long runners must not 
 
 Tool name: `session_job` (Claude: `mcp__hapi__session_job`; Codex: `functions.hapi__session_job`; OpenCode/ACP: `hapi_session_job`).
 
-**`action=set` is refused** over MCP. Start the meter with Shell + `hapi job run` (above). Then you may:
+**`action=set` is refused** over MCP. Start the meter with Shell + `hapi job run` / `hapi-job-run-metered` (above). Then you may:
 
 ```json
 { "action": "update", "jobKey": "beets", "done": 1638, "total": 1787 }
@@ -125,14 +168,15 @@ Same auth as `hapi ping-peer` (`HAPI_API_URL` / `CLI_API_TOKEN` or `hapi auth lo
 | Countable fraction | `--done N --total M` | `91% · 1637/1787 units · 2d 4h` + bar fill |
 | Stage only / unknown size | `--label` + `--detail` + heartbeats | `running · 2d 4h` + indeterminate bar |
 
-**Bar fill:** the byte/progress bar moves only when `total` is set and you send `--done`/`--total` or `--remaining`/`--total`. `--remaining` alone (without `total`) updates the text label only — it is not a percent and does not tick the bar. Prefer `--done`/`--total` when you want visible byte-style progress.
+**Bar fill:** the byte/progress bar moves only when `total` is set **and** something keeps sending `--done`/`--total` or `--remaining`/`--total` (update/feeder), not when those flags appear only on `job run` launch. `--remaining` alone (without `total`) updates the text label only — it is not a percent and does not tick the bar.
 
 **Elapsed** is always derived from hub `startedAt` (wall clock). It is **not** an ETA and there is no time-remaining field - operators get "how long has this been going" plus whatever honest count/detail you report, without a fake completion estimate.
 
 Rules:
 
-- Prefer **remaining+total** when the operator cares about "how much left" and you know the denominator.
-- Prefer **done+total** when you want the simplest bar fill (byte-style progress).
+- Prefer **remaining+total** (via continuous `update`) when the operator cares about "how much left" and you know the denominator.
+- Prefer **done+total** (via `hapi-job-run-metered` or continuous `update`) when you want visible byte-style progress.
+- Do **not** put `--done`/`--total` on bare `job run` and walk away — that freezes the launch stamp under live heartbeats.
 - Do not send **remaining alone** expecting the bar to move — include `total` or use `done`/`total`.
 - If you only know a stage name, put it in `--detail` and keep heartbeating — do **not** fake `total=100`.
 - There is **no** `--percent` flag and **no** ETA / time-remaining field. Inventing either would train agents to lie.

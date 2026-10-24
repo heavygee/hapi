@@ -47,7 +47,10 @@ ${chalk.bold('When to use:')}
 ${chalk.bold('Agent contract:')}
   Prefer ${chalk.bold('hapi job run')} — it heartbeats for you and marks completed/failed on exit.
   An idle agent cannot heartbeat; set-once jobs go amber after ~15m.
-  Prefer honest --remaining or --done/--total; omit counts if unknown.
+  Alive-only: ${chalk.bold('job run')} with ${chalk.bold('no')} --done/--total/--remaining.
+  Fraction bar: keep PATCHing counts (estate ${chalk.bold('hapi-job-run-metered')}, or
+  job run without launch counts + continuous ${chalk.bold('job update')}). Launch
+  --done/--total on bare job run are stamps only — frozen 0/N under live heartbeats.
   Never invent a fake percent.
 
 ${chalk.bold('Usage:')}

@@ -33,6 +33,7 @@ export const SESSION_JOB_SET_REFUSED_TEXT = [
     'MCP session_job is only for action=update (progress/heartbeat/terminal status),',
     'action=clear, or action=list on a job that job run (or CLI set + self-heartbeat wrapper) already created.',
     'Bare set + nohup freezes the bar when the agent goes idle (wardrobe dogfood).',
+    'Bare job run --done 0 --total N with no continuous update freezes 0/N under live heartbeats.',
 ].join(' ')
 
 /**
@@ -49,7 +50,7 @@ export const SESSION_JOB_TOOL_DESCRIPTION = [
     SESSION_JOB_RUN_RECIPE,
     '(auto-heartbeats + completed/failed on exit). Idle agents cannot heartbeat.',
     'This MCP tool: action=update (progress/status), action=clear, action=list only.',
-    'Prefer honest remaining or done+total; omit counts when unknown.',
+    'Fraction counts need continuous update/feeder (or hapi-job-run-metered); omit counts when unknown.',
     'Never invent a percent or ETA. Not for todos, thinking, or short tool calls.',
 ].join(' ')
 

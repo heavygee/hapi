@@ -17,6 +17,11 @@ describe('sessionJobInstruction', () => {
         expect(SESSION_JOB_INSTRUCTION).toMatch(/action=list on start\/resume/i)
         expect(SESSION_JOB_INSTRUCTION).toMatch(/before done\/archive/i)
         expect(SESSION_JOB_INSTRUCTION).toMatch(/never ask the operator/i)
+        expect(SESSION_JOB_INSTRUCTION).toContain('hapi-job-run-metered')
+        expect(SESSION_JOB_INSTRUCTION).toMatch(/frozen 0\/N under live heartbeats/)
+        expect(SESSION_JOB_INSTRUCTION).toMatch(/FORBIDDEN: hapi job run --done 0 --total N/)
+        expect(SESSION_JOB_INSTRUCTION).toMatch(/Alive-only/)
+        expect(SESSION_JOB_INSTRUCTION).toMatch(/Exit≠semantic failure|Exit!=semantic failure/)
     })
 
     it('appends after an existing prompt block', () => {

@@ -15,20 +15,27 @@ export const SESSION_JOB_INSTRUCTION = [
     'the session list shows progress while you are idle — same class of HAPI',
     'tooling as ping_peer / inspect_peer.',
     'REQUIRED for process-shaped work (idle agents cannot heartbeat):',
-    'Shell → hapi job run <session-id> <job-key> --label <text> -- <cmd>…',
+    'Alive-only / indeterminate: Shell → hapi job run <session-id> <job-key>',
+    '--label <text> -- <cmd>… (no --done/--total/--remaining).',
+    'Fraction / display bar: hapi-job-run-metered when on PATH, or job run',
+    'without launch counts plus continuous hapi job update / feeder from t=0.',
+    'FORBIDDEN: hapi job run --done 0 --total N -- <cmd> with no count writer',
+    '(frozen 0/N under live heartbeats — launch stamps only).',
     'Use "$HAPI_SESSION_ID" only when it matches the operator chat URL uuid;',
     'remote Cursor runner may export a worker-row id — pass /sessions/<id> explicitly.',
-    '(auto-heartbeats + completed/failed on exit). Wrap the real cmd — never a sleep',
+    '(auto-heartbeats + completed/failed on exit code). Wrap the real cmd — never a sleep',
     'stub while work runs elsewhere (SSH/wget/nohup).',
+    'Exit≠semantic failure: nonzero exit stamps failed even if the batch mostly',
+    'succeeded — prefer exit 0 when the run finished; put item errors in detail/logs.',
+    'Non-JSONL children need an adapter or alive-only — do not invent a percent.',
     'HYGIENE: MCP session_job action=list on start/resume AND before done/archive.',
     'Clear or fail zombie running meters (dead process) yourself — never ask the operator.',
     'Leave live jobs with fresh heartbeats alone.',
     'Do NOT use MCP session_job action=set (refused) or bare set+nohup — that freezes the bar.',
     'MCP session_job is only update / clear / list after job run created the meter.',
     'remaining=0 does not finish the job — pass --status completed or job clear when done.',
-    'Prefer honest remaining or done+total; omit counts when unknown',
-    '(UI shows "running" + elapsed). Never invent a fake percent.',
-    'Full contract: hapi job --help.'
+    'Omit counts when unknown (UI shows "running" + elapsed). Never invent a fake percent.',
+    'Full contract: hapi job --help; docs/guide/session-jobs.md.'
 ].join(' ')
 
 /** Append instruction to an existing prompt block (blank line separator). */
