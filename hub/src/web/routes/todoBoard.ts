@@ -8,14 +8,20 @@ import {
     BoardItemCommentRequestSchema,
     BoardItemReopenRequestSchema,
     BoardItemStatusRequestSchema,
+    CreateBoardItemRequestSchema,
     type AssignableUsersResponse,
     type BoardAssignableUser,
     type BoardItem,
     type BoardItemsResponse,
-    type BoardsResponse
+    type BoardsResponse,
+    type CreateBoardItemResponse,
+    type GetIssueTemplatesResponse,
+    type IssueTemplate
 } from '@hapi/protocol'
+import { GithubRepoSlugSchema } from '@hapi/protocol/schemas'
 import type { WebAppEnv } from '../middleware/auth'
 import { getSettingsFile, readSettingsOrThrow, updateSettings, type StoredTodoBoard } from '../../config/settings'
+import { parseIssueFormYaml, parseIssueTemplateConfig, parseLegacyIssueTemplate } from './issueTemplateParser'
 
 /**
  * First shippable slice of the board view (hapi#235): GitHub Projects
@@ -517,6 +523,75 @@ function toAssignableUsers(response: GhAssignableUsersResponse): BoardAssignable
         .map(node => ({ login: node.login, avatarUrl: node.avatarUrl, name: node.name ?? null }))
 }
 
+// `object(expression: "HEAD:<path>")` resolves to null (no error) when the
+// path doesn't exist at all — a repo with zero issue templates reads
+// identically to "directory not found," which is exactly the signal the
+// "blank is the only option" case needs (hapi#238 "create a card" slice). A
+// single GraphQL call fetches the directory listing *and* every file's
+// content in one round trip (`... on Blob { text }`), rather than one `gh
+// api repos/.../contents/<file>` REST call per template file — this repo has
+// no existing "fetch arbitrary repo content" helper, so this is the first
+// one, and it reuses execGhGraphql/GH_HOST the same way every other board
+// query already does instead of introducing a second gh invocation style.
+const ISSUE_TEMPLATE_DIR_QUERY = `
+query($owner: String!, $repo: String!) {
+  repository(owner: $owner, name: $repo) {
+    issueTemplateDir: object(expression: "HEAD:.github/ISSUE_TEMPLATE") {
+      ... on Tree {
+        entries {
+          name
+          object { ... on Blob { text } }
+        }
+      }
+    }
+  }
+}`
+
+type GhIssueTemplateDirResponse = {
+    data?: {
+        repository?: {
+            issueTemplateDir?: {
+                entries?: Array<{ name: string; object?: { text?: string | null } | null } | null>
+            } | null
+        } | null
+    }
+    errors?: Array<{ message: string }>
+}
+
+type IssueTemplateDirTarget = { host: string; owner: string; repo: string }
+
+async function runGhGraphqlIssueTemplateDir(target: IssueTemplateDirTarget): Promise<GhIssueTemplateDirResponse> {
+    const stdout = await execGhGraphql(target.host, ISSUE_TEMPLATE_DIR_QUERY, { owner: target.owner, repo: target.repo })
+    try {
+        return JSON.parse(stdout) as GhIssueTemplateDirResponse
+    } catch {
+        throw new Error('gh api graphql returned non-JSON output')
+    }
+}
+
+// `config.yml`/`config.yaml` is settings, not a template — excluded from the
+// returned list rather than attempted as a form (it has no `body`, so
+// parseIssueFormYaml would correctly mark it unsupported anyway, but
+// filtering it out here keeps a stray "unsupported" entry from ever
+// appearing in the picker for what every repo with a config file has).
+function parseIssueTemplateDirResponse(response: GhIssueTemplateDirResponse): { templates: IssueTemplate[]; blankIssuesEnabled: boolean } {
+    const entries = response.data?.repository?.issueTemplateDir?.entries ?? []
+    const templates: IssueTemplate[] = []
+    let blankIssuesEnabled = true
+    for (const entry of entries) {
+        if (!entry || typeof entry.object?.text !== 'string') continue
+        const lowerName = entry.name.toLowerCase()
+        if (lowerName === 'config.yml' || lowerName === 'config.yaml') {
+            blankIssuesEnabled = parseIssueTemplateConfig(entry.object.text).blankIssuesEnabled
+        } else if (lowerName.endsWith('.yml') || lowerName.endsWith('.yaml')) {
+            templates.push(parseIssueFormYaml(entry.name, entry.object.text))
+        } else if (lowerName.endsWith('.md')) {
+            templates.push(parseLegacyIssueTemplate(entry.name, entry.object.text))
+        }
+    }
+    return { templates, blankIssuesEnabled }
+}
+
 const execFileAsync = promisify(execFile)
 
 type ProjectQueryTarget = {
@@ -600,6 +675,8 @@ async function execGh(args: string[], host: string): Promise<string> {
 
 export type BoardItemActionTarget = { host: string; url: string; isPullRequest: boolean }
 export type BoardItemStatusTarget = { host: string; ownerLogin: string; projectNumber: number; url: string; fieldName: string; status: string | null }
+export type CreateIssueTarget = { host: string; repo: string; title: string; body: string; labels: string[]; assignees: string[] }
+export type AddItemToProjectTarget = { host: string; ownerLogin: string; projectNumber: number; issueUrl: string }
 
 export type BoardItemActions = {
     close: (target: BoardItemActionTarget, comment?: string) => Promise<void>
@@ -607,6 +684,9 @@ export type BoardItemActions = {
     comment: (target: BoardItemActionTarget, body: string) => Promise<void>
     setStatus: (target: BoardItemStatusTarget) => Promise<void>
     setAssignees: (target: BoardItemActionTarget, addLogins: string[], removeLogins: string[]) => Promise<void>
+    /** Returns the created issue's canonical URL, parsed from `gh issue create`'s own stdout. */
+    createIssue: (target: CreateIssueTarget) => Promise<string>
+    addItemToProject: (target: AddItemToProjectTarget) => Promise<void>
 }
 
 export const defaultBoardItemActions: BoardItemActions = {
@@ -659,6 +739,31 @@ export const defaultBoardItemActions: BoardItemActions = {
         if (addLogins.length > 0) args.push('--add-assignee', addLogins.join(','))
         if (removeLogins.length > 0) args.push('--remove-assignee', removeLogins.join(','))
         await execGh(args, target.host)
+    },
+    // `--repo <host>/<owner>/<repo>` (the full `[HOST/]OWNER/REPO` form `gh
+    // issue create --help` documents), not bare `<owner>/<repo>` relying on
+    // GH_HOST: every other write action in this file deliberately never
+    // trusts GH_HOST alone to pick the right host for a non-URL-bearing
+    // command (see execGh's own doc comment on this exact class of
+    // ambiguity) — passing the host explicitly in the flag itself removes
+    // any doubt. `gh issue create` prints the created issue's URL as its
+    // last stdout line on success; nothing else in its non-interactive
+    // output does.
+    createIssue: async (target) => {
+        const args = ['issue', 'create', '--repo', `${target.host}/${target.repo}`, '--title', target.title, '--body', target.body]
+        for (const label of target.labels) args.push('--label', label)
+        for (const assignee of target.assignees) args.push('--assignee', assignee)
+        const stdout = await execGh(args, target.host)
+        const url = stdout.trim().split('\n').pop()?.trim()
+        if (!url) {
+            throw new Error('gh issue create did not return a URL')
+        }
+        return url
+    },
+    // Name-based, same pattern setStatus already uses above — no GraphQL
+    // project node ID needed for `gh project item-add` either.
+    addItemToProject: async (target) => {
+        await execGh(['project', 'item-add', String(target.projectNumber), '--owner', target.ownerLogin, '--url', target.issueUrl], target.host)
     }
 }
 
@@ -1005,7 +1110,8 @@ export function createBoardRoutes(
     runGraphqlView: (target: ProjectViewLookupTarget) => GhProjectViewResponse | Promise<GhProjectViewResponse> = runGhGraphqlView,
     actions: BoardItemActions = defaultBoardItemActions,
     runGraphqlMembership: (target: ProjectMembershipTarget) => GhResourceProjectMembershipResponse | Promise<GhResourceProjectMembershipResponse> = runGhGraphqlProjectMembership,
-    runGraphqlAssignableUsers: (target: AssignableUsersTarget) => GhAssignableUsersResponse | Promise<GhAssignableUsersResponse> = runGhGraphqlAssignableUsers
+    runGraphqlAssignableUsers: (target: AssignableUsersTarget) => GhAssignableUsersResponse | Promise<GhAssignableUsersResponse> = runGhGraphqlAssignableUsers,
+    runGraphqlIssueTemplateDir: (target: IssueTemplateDirTarget) => GhIssueTemplateDirResponse | Promise<GhIssueTemplateDirResponse> = runGhGraphqlIssueTemplateDir
 ): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
@@ -1401,6 +1507,100 @@ export function createBoardRoutes(
         } catch (error) {
             return c.json({ error: error instanceof Error ? error.message : 'Failed to update assignees' }, 502)
         }
+    })
+
+    // A board has no single "the repo" — a Projects-v2 project can span
+    // arbitrary repos on its host — so creation needs an explicit repo,
+    // validated only against `board.host` (same trust boundary every other
+    // write action in this file already uses), not narrowed to
+    // `board.ownerLogin`. Always fetched live, never cached beyond this one
+    // response (operator decision, hapi#238): a stale form is worse than one
+    // extra `gh api graphql` round trip per "New card" open.
+    app.get('/todo-boards/:id/issue-templates', async (c) => {
+        if (c.get('namespace') !== 'default') {
+            return c.json({ error: OWNER_ONLY_ERROR }, 403)
+        }
+        const boards = await loadBoards(dataDir)
+        const board = boards.find(b => b.id === c.req.param('id'))
+        if (!board) {
+            return c.json({ error: 'Unknown board' }, 404)
+        }
+        const repoParam = c.req.query('repo')
+        const repoResult = repoParam ? GithubRepoSlugSchema.safeParse(repoParam) : null
+        if (!repoResult || !repoResult.success) {
+            return c.json({ error: 'Missing or invalid repo query parameter — expected owner/name' }, 400)
+        }
+        const [owner, repo] = repoResult.data.split('/') as [string, string]
+
+        try {
+            const response = await runGraphqlIssueTemplateDir({ host: board.host, owner, repo })
+            if (response.errors?.length) {
+                return c.json({ error: response.errors.map(e => e.message).join('; ') }, 502)
+            }
+            const { templates, blankIssuesEnabled } = parseIssueTemplateDirResponse(response)
+            // `blank_issues_enabled: false` is honored as-is, even when zero
+            // templates parsed as usable (operator ruling, hapi#238,
+            // reversing an earlier default): that flag is the maintainer's
+            // explicit statement that unstructured issues are unwelcome in
+            // their tracker, and "we found no usable template" is often our
+            // parser's limitation, not evidence the repo lacks structure —
+            // falling back to blank would convert our gap into a policy
+            // violation filed under the user's name, silently, in someone
+            // else's repository. `githubNewIssueUrl` gives the web client an
+            // escape hatch to route the user to GitHub's own chooser instead
+            // of a dead end when this makes every option unavailable.
+            const body: GetIssueTemplatesResponse = {
+                templates,
+                blankAllowed: blankIssuesEnabled,
+                githubNewIssueUrl: `https://${board.host}/${owner}/${repo}/issues/new/choose`
+            }
+            return c.json(body)
+        } catch (error) {
+            return c.json({ error: error instanceof Error ? error.message : 'Failed to fetch issue templates' }, 502)
+        }
+    })
+
+    app.post('/todo-boards/:id/items', async (c) => {
+        if (c.get('namespace') !== 'default') {
+            return c.json({ error: OWNER_ONLY_ERROR }, 403)
+        }
+        const boards = await loadBoards(dataDir)
+        const board = boards.find(b => b.id === c.req.param('id'))
+        if (!board) {
+            return c.json({ error: 'Unknown board' }, 404)
+        }
+        const json = await c.req.json().catch(() => null)
+        const parsed = CreateBoardItemRequestSchema.safeParse(json)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body — expected { repo: string, title: string, body: string, labels?: string[], assignees?: string[] }' }, 400)
+        }
+
+        let issueUrl: string
+        try {
+            issueUrl = await actions.createIssue({
+                host: board.host,
+                repo: parsed.data.repo,
+                title: parsed.data.title,
+                body: parsed.data.body,
+                labels: parsed.data.labels,
+                assignees: parsed.data.assignees
+            })
+        } catch (error) {
+            return c.json({ error: error instanceof Error ? error.message : 'Failed to create issue' }, 502)
+        }
+
+        try {
+            await actions.addItemToProject({ host: board.host, ownerLogin: board.ownerLogin, projectNumber: board.projectNumber, issueUrl })
+        } catch (error) {
+            // The issue itself was created — say so explicitly rather than a
+            // bare 502 that reads as "nothing happened," which would invite
+            // a retry that creates a second, duplicate issue.
+            const message = error instanceof Error ? error.message : 'unknown error'
+            return c.json({ error: `Issue created at ${issueUrl} but could not be added to the board: ${message}`, url: issueUrl }, 502)
+        }
+
+        const body: CreateBoardItemResponse = { ok: true, url: issueUrl }
+        return c.json(body)
     })
 
     return app

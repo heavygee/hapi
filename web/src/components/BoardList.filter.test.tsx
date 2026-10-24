@@ -49,6 +49,16 @@ function renderList(items: BoardItem[], statusOrder: string[], overrides: Partia
                 isRefreshing={false}
                 sessions={[]}
                 onOpenSession={vi.fn()}
+                newCardDialogOpen={false}
+                onOpenNewCard={vi.fn()}
+                onCloseNewCard={vi.fn()}
+                issueTemplates={[]}
+                issueTemplatesBlankAllowed={true}
+                issueTemplatesGithubNewIssueUrl={null}
+                isLoadingIssueTemplates={false}
+                issueTemplatesError={null}
+                onNewCardRepoChange={vi.fn()}
+                onCreateCard={vi.fn()}
                 {...overrides}
             />
         </I18nProvider>
@@ -155,6 +165,16 @@ describe('BoardList title filter (operator ask)', () => {
                     isRefreshing={false}
                     sessions={[]}
                     onOpenSession={vi.fn()}
+                    newCardDialogOpen={false}
+                    onOpenNewCard={vi.fn()}
+                    onCloseNewCard={vi.fn()}
+                    issueTemplates={[]}
+                    issueTemplatesBlankAllowed={true}
+                    issueTemplatesGithubNewIssueUrl={null}
+                    isLoadingIssueTemplates={false}
+                    issueTemplatesError={null}
+                    onNewCardRepoChange={vi.fn()}
+                    onCreateCard={vi.fn()}
                 />
             </I18nProvider>
         )

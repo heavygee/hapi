@@ -56,7 +56,9 @@ const UNUSED_ACTIONS: Parameters<typeof createBoardRoutes>[4] = {
     reopen: async () => { throw new Error('reopen action not mocked for this test') },
     comment: async () => { throw new Error('comment action not mocked for this test') },
     setStatus: async () => { throw new Error('setStatus action not mocked for this test') },
-    setAssignees: async () => { throw new Error('setAssignees action not mocked for this test') }
+    setAssignees: async () => { throw new Error('setAssignees action not mocked for this test') },
+    createIssue: async () => { throw new Error('createIssue action not mocked for this test') },
+    addItemToProject: async () => { throw new Error('addItemToProject action not mocked for this test') }
 }
 
 // Matches whichever board is asking — the safe default for tests that
@@ -76,7 +78,8 @@ async function createApp(
     runGraphqlView?: Parameters<typeof createBoardRoutes>[3],
     actions?: Parameters<typeof createBoardRoutes>[4],
     runGraphqlMembership?: Parameters<typeof createBoardRoutes>[5],
-    runGraphqlAssignableUsers?: Parameters<typeof createBoardRoutes>[6]
+    runGraphqlAssignableUsers?: Parameters<typeof createBoardRoutes>[6],
+    runGraphqlIssueTemplateDir?: Parameters<typeof createBoardRoutes>[7]
 ) {
     const dataDir = await mkdtemp(join(tmpdir(), 'hapi-todo-board-'))
     directories.push(dataDir)
@@ -95,7 +98,8 @@ async function createApp(
         runGraphqlView ?? (() => ({ data: { repositoryOwner: {} } })),
         actions ?? UNUSED_ACTIONS,
         runGraphqlMembership ?? ALWAYS_MEMBER,
-        runGraphqlAssignableUsers ?? (() => ({ data: { repository: { assignableUsers: { nodes: [] } } } }))
+        runGraphqlAssignableUsers ?? (() => ({ data: { repository: { assignableUsers: { nodes: [] } } } })),
+        runGraphqlIssueTemplateDir ?? (() => ({ data: { repository: { issueTemplateDir: null } } }))
     ))
     return app
 }
@@ -1379,5 +1383,207 @@ describe('POST /api/todo-boards/:id/items/assignees', () => {
             body: JSON.stringify({ url: VALID_ITEM_URL, addLogins: ['alice'] })
         })
         expect(response.status).toBe(502)
+    })
+})
+
+describe('GET /api/todo-boards/:id/issue-templates', () => {
+    beforeEach(() => {
+        process.env.HAPI_BOARD_OWNER = 'heavygee'
+        process.env.HAPI_BOARD_NUMBER = '6'
+    })
+
+    const BUG_REPORT_YAML = `
+name: Bug report
+body:
+  - type: input
+    id: contact
+    attributes:
+      label: Contact
+    validations:
+      required: false
+`
+
+    it('404s for an unknown board', async () => {
+        const app = await createApp(() => ({ data: {} }))
+        const response = await app.request('/api/todo-boards/unknown/issue-templates?repo=heavygee/hapi')
+        expect(response.status).toBe(404)
+    })
+
+    it('403s for a non-default namespace', async () => {
+        const app = await createApp(() => ({ data: {} }), undefined, 'some-other-namespace')
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/issue-templates?repo=heavygee/hapi`, undefined)
+        expect(response.status).toBe(403)
+    })
+
+    it('400s for a missing or malformed repo query parameter', async () => {
+        const app = await createApp(() => ({ data: {} }))
+        const missing = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/issue-templates`)
+        expect(missing.status).toBe(400)
+        const malformed = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/issue-templates?repo=not-a-slug`)
+        expect(malformed.status).toBe(400)
+    })
+
+    it('returns blankAllowed: true with an empty template list when the repo has no .github/ISSUE_TEMPLATE directory at all', async () => {
+        const app = await createApp(
+            () => ({ data: {} }), undefined, 'default', undefined, UNUSED_ACTIONS, ALWAYS_MEMBER, undefined,
+            () => ({ data: { repository: { issueTemplateDir: null } } })
+        )
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/issue-templates?repo=heavygee/hapi`)
+        expect(response.status).toBe(200)
+        const body = await response.json() as { templates: unknown[]; blankAllowed: boolean; githubNewIssueUrl: string }
+        expect(body.templates).toEqual([])
+        expect(body.blankAllowed).toBe(true)
+        expect(body.githubNewIssueUrl).toBe('https://github.com/heavygee/hapi/issues/new/choose')
+    })
+
+    it('parses .yml forms and .md legacy templates, skips config.yml as a template entry, and reads blank_issues_enabled from it', async () => {
+        const app = await createApp(
+            () => ({ data: {} }), undefined, 'default', undefined, UNUSED_ACTIONS, ALWAYS_MEMBER, undefined,
+            () => ({
+                data: {
+                    repository: {
+                        issueTemplateDir: {
+                            entries: [
+                                { name: 'bug_report.yml', object: { text: BUG_REPORT_YAML } },
+                                { name: 'feature_request.md', object: { text: '---\nname: Feature\n---\nBody text' } },
+                                { name: 'config.yml', object: { text: 'blank_issues_enabled: false' } }
+                            ]
+                        }
+                    }
+                }
+            })
+        )
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/issue-templates?repo=heavygee/hapi`)
+        expect(response.status).toBe(200)
+        const body = await response.json() as { templates: Array<{ id: string; kind: string }>; blankAllowed: boolean; githubNewIssueUrl: string }
+        expect(body.templates.map(t => t.id)).toEqual(['bug_report.yml', 'feature_request.md'])
+        expect(body.templates[0]?.kind).toBe('form')
+        expect(body.templates[1]?.kind).toBe('legacy')
+        expect(body.blankAllowed).toBe(false)
+        expect(body.githubNewIssueUrl).toBe('https://github.com/heavygee/hapi/issues/new/choose')
+    })
+
+    it('honors blank_issues_enabled: false even when every template is unsupported (operator ruling, hapi#238: do not fall back to blank)', async () => {
+        const app = await createApp(
+            () => ({ data: {} }), undefined, 'default', undefined, UNUSED_ACTIONS, ALWAYS_MEMBER, undefined,
+            () => ({
+                data: {
+                    repository: {
+                        issueTemplateDir: {
+                            entries: [
+                                { name: 'weird.yml', object: { text: 'body:\n  - type: some-future-type\n    id: x\n    attributes:\n      label: X' } },
+                                { name: 'config.yml', object: { text: 'blank_issues_enabled: false' } }
+                            ]
+                        }
+                    }
+                }
+            })
+        )
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/issue-templates?repo=heavygee/hapi`)
+        const body = await response.json() as { templates: Array<{ kind: string }>; blankAllowed: boolean; githubNewIssueUrl: string }
+        expect(body.templates[0]?.kind).toBe('unsupported')
+        expect(body.blankAllowed).toBe(false)
+        expect(body.githubNewIssueUrl).toBe('https://github.com/heavygee/hapi/issues/new/choose')
+    })
+
+    it('surfaces a GraphQL-level error as a 502', async () => {
+        const app = await createApp(
+            () => ({ data: {} }), undefined, 'default', undefined, UNUSED_ACTIONS, ALWAYS_MEMBER, undefined,
+            () => ({ errors: [{ message: 'rate limited' }] })
+        )
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/issue-templates?repo=heavygee/hapi`)
+        expect(response.status).toBe(502)
+    })
+})
+
+describe('POST /api/todo-boards/:id/items (create a card)', () => {
+    beforeEach(() => {
+        process.env.HAPI_BOARD_OWNER = 'heavygee'
+        process.env.HAPI_BOARD_NUMBER = '6'
+    })
+
+    it('creates the issue then adds it to the project, in that order, and reports the created url', async () => {
+        const calls: string[] = []
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, {
+            ...UNUSED_ACTIONS,
+            createIssue: async (target) => {
+                calls.push(`createIssue:${target.repo}`)
+                return 'https://github.com/heavygee/hapi/issues/42'
+            },
+            addItemToProject: async (target) => {
+                calls.push(`addItemToProject:${target.issueUrl}`)
+            }
+        })
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items`, {
+            method: 'POST',
+            body: JSON.stringify({ repo: 'heavygee/hapi', title: 'New bug', body: '### What\n\nBroke.', labels: ['bug'], assignees: [] })
+        })
+        expect(response.status).toBe(200)
+        const body = await response.json() as { ok: true; url: string }
+        expect(body.url).toBe('https://github.com/heavygee/hapi/issues/42')
+        expect(calls).toEqual(['createIssue:heavygee/hapi', 'addItemToProject:https://github.com/heavygee/hapi/issues/42'])
+    })
+
+    it('404s for an unknown board', async () => {
+        const app = await createApp(() => ({ data: {} }))
+        const response = await app.request('/api/todo-boards/unknown/items', {
+            method: 'POST',
+            body: JSON.stringify({ repo: 'heavygee/hapi', title: 'T', body: 'B' })
+        })
+        expect(response.status).toBe(404)
+    })
+
+    it('403s for a non-default namespace', async () => {
+        const app = await createApp(() => ({ data: {} }), undefined, 'some-other-namespace')
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items`, {
+            method: 'POST',
+            body: JSON.stringify({ repo: 'heavygee/hapi', title: 'T', body: 'B' })
+        })
+        expect(response.status).toBe(403)
+    })
+
+    it('400s for a malformed body (bad repo slug, missing title)', async () => {
+        const app = await createApp(() => ({ data: {} }))
+        const badRepo = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items`, {
+            method: 'POST',
+            body: JSON.stringify({ repo: 'not-a-slug', title: 'T', body: 'B' })
+        })
+        expect(badRepo.status).toBe(400)
+        const missingTitle = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items`, {
+            method: 'POST',
+            body: JSON.stringify({ repo: 'heavygee/hapi', body: 'B' })
+        })
+        expect(missingTitle.status).toBe(400)
+    })
+
+    it('surfaces a failed createIssue as a 502 without attempting to add anything to the project', async () => {
+        const calls: string[] = []
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, {
+            ...UNUSED_ACTIONS,
+            createIssue: async () => { throw new Error('gh issue create failed: repo not found') },
+            addItemToProject: async () => { calls.push('should-not-be-called') }
+        })
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items`, {
+            method: 'POST',
+            body: JSON.stringify({ repo: 'heavygee/hapi', title: 'T', body: 'B' })
+        })
+        expect(response.status).toBe(502)
+        expect(calls).toEqual([])
+    })
+
+    it('surfaces a created-but-not-added-to-board failure distinctly, including the created url', async () => {
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, {
+            ...UNUSED_ACTIONS,
+            createIssue: async () => 'https://github.com/heavygee/hapi/issues/42',
+            addItemToProject: async () => { throw new Error('gh project item-add failed') }
+        })
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items`, {
+            method: 'POST',
+            body: JSON.stringify({ repo: 'heavygee/hapi', title: 'T', body: 'B' })
+        })
+        expect(response.status).toBe(502)
+        const body = await response.json() as { error: string; url: string }
+        expect(body.error).toContain('https://github.com/heavygee/hapi/issues/42')
+        expect(body.url).toBe('https://github.com/heavygee/hapi/issues/42')
     })
 })
