@@ -4,6 +4,7 @@ import type { DecryptedMessage } from '@/types/api'
 import {
     activateMessageWindow,
     cancelOlderMessageLoad,
+    fetchNewerMessages,
     fetchOlderMessages,
     getMessageWindowState,
     loadMessageContext,
@@ -15,6 +16,7 @@ import {
     syncTailMessages,
     type MessageViewMode,
     type MessageWindowState,
+    type NewerLoadOutcome,
     type OlderLoadOutcome,
 } from '@/lib/message-window-store'
 
@@ -30,6 +32,7 @@ export const EMPTY_STATE: MessageWindowState = {
     warning: null,
     viewMode: 'tail',
     requiresLatestReset: false,
+    hasMoreNewer: false,
     messagesVersion: 0,
     historyVersion: 0,
     tailRevision: 0,
@@ -46,12 +49,14 @@ export function useMessages(
     isSyncingTail: boolean
     isLoadingMore: boolean
     hasMore: boolean
+    hasMoreNewer: boolean
     viewMode: MessageViewMode
     messagesVersion: number
     historyVersion: number
     tailRevision: number
     historySeekActive: boolean
     loadMore: (onBeforeApply?: (historyVersion: number) => boolean) => Promise<OlderLoadOutcome>
+    loadNewer: (preserveMessageId?: string | null) => Promise<NewerLoadOutcome>
     loadMessageContext: (messageId: string) => Promise<boolean>
     cancelLoadMore: () => void
     refetch: () => Promise<void>
@@ -110,6 +115,13 @@ export function useMessages(
             return { kind: 'stopped', reason: 'unavailable' } as const
         }
         return await fetchOlderMessages(api, sessionId, { onBeforeApply })
+    }, [api, sessionId])
+
+    const loadNewer = useCallback(async (preserveMessageId?: string | null) => {
+        if (!api || !sessionId) {
+            return { kind: 'stopped', reason: 'unavailable' } as const
+        }
+        return await fetchNewerMessages(api, sessionId, { preserveMessageId })
     }, [api, sessionId])
 
     const cancelLoadMore = useCallback(() => {
@@ -172,12 +184,14 @@ export function useMessages(
             || (initialSyncKey !== null && initialSyncReadyKey !== initialSyncKey),
         isLoadingMore: state.isLoadingMore,
         hasMore: state.hasMore,
+        hasMoreNewer: state.hasMoreNewer,
         viewMode: state.viewMode,
         messagesVersion: state.messagesVersion,
         historyVersion: state.historyVersion,
         tailRevision: state.tailRevision,
         historySeekActive: state.historySeekActive,
         loadMore,
+        loadNewer,
         loadMessageContext: loadMessageContextForSession,
         cancelLoadMore,
         refetch,
