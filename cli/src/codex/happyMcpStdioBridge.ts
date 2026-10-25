@@ -49,6 +49,8 @@ function parseArgs(argv: string[]): { url: string | null; toolNames: Set<string>
       // wording. See resolveDisplayToolPrompt in displayImagePrompt.ts.
       flavor = argv[i + 1];
       i++;
+    } else if (a.startsWith('--flavor=')) {
+      flavor = a.slice('--flavor='.length);
     } else if (a === '--hapi-session-id' && i + 1 < argv.length) {
       // Orphan-reap stamp only (#2003); consume so the value is not left as a stray argv token.
       i++;

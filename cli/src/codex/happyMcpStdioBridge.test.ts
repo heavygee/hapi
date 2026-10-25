@@ -80,6 +80,19 @@ describe('runHappyMcpStdioBridge tool forwarding', () => {
         expect(description).not.toContain('"display_image"')
     })
 
+    it('accepts --flavor=value form', async () => {
+        await runHappyMcpStdioBridge([
+            '--url',
+            'http://127.0.0.1:43006',
+            '--tools',
+            'display_image',
+            '--flavor=codex'
+        ])
+
+        const description = harness.configs.get('display_image')?.description
+        expect(description).toContain('functions.hapi__display_image')
+    })
+
     it('defaults to the generic hapi-mcp hint text when --flavor is omitted', async () => {
         await runHappyMcpStdioBridge([
             '--url',
