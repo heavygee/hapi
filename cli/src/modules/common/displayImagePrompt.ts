@@ -66,9 +66,33 @@ export const DISPLAY_MEDIA_PROMPT_CURSOR = trimIdent(`
  * reached by Claude) and the stdio proxy (happyMcpStdioBridge.ts, reached by
  * every other flavor via `hapi mcp --flavor <flavor>`).
  */
+export type DisplayToolPromptVariants = { claude: string; codex: string; cursor: string; hapiMcp: string };
+
+/** One shared table per tool so the four-variant mapping is defined once, not re-typed at every call site. */
+export const DISPLAY_IMAGE_PROMPT_VARIANTS: DisplayToolPromptVariants = {
+    claude: DISPLAY_IMAGE_PROMPT_CLAUDE,
+    codex: DISPLAY_IMAGE_PROMPT_CODEX,
+    cursor: DISPLAY_IMAGE_PROMPT_CURSOR,
+    hapiMcp: DISPLAY_IMAGE_PROMPT_HAPI_MCP,
+};
+
+export const DISPLAY_VIDEO_PROMPT_VARIANTS: DisplayToolPromptVariants = {
+    claude: DISPLAY_VIDEO_PROMPT_CLAUDE,
+    codex: DISPLAY_VIDEO_PROMPT_CODEX,
+    cursor: DISPLAY_VIDEO_PROMPT_CURSOR,
+    hapiMcp: DISPLAY_VIDEO_PROMPT_HAPI_MCP,
+};
+
+export const DISPLAY_MEDIA_PROMPT_VARIANTS: DisplayToolPromptVariants = {
+    claude: DISPLAY_MEDIA_PROMPT_CLAUDE,
+    codex: DISPLAY_MEDIA_PROMPT_CODEX,
+    cursor: DISPLAY_MEDIA_PROMPT_CURSOR,
+    hapiMcp: DISPLAY_MEDIA_PROMPT_HAPI_MCP,
+};
+
 export function resolveDisplayToolPrompt(
     flavor: string | undefined,
-    variants: { claude: string; codex: string; cursor: string; hapiMcp: string }
+    variants: DisplayToolPromptVariants
 ): string {
     switch (flavor) {
         case 'claude':

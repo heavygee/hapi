@@ -17,18 +17,9 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { z } from 'zod';
 import {
-  DISPLAY_IMAGE_PROMPT_CLAUDE,
-  DISPLAY_IMAGE_PROMPT_CODEX,
-  DISPLAY_IMAGE_PROMPT_CURSOR,
-  DISPLAY_IMAGE_PROMPT_HAPI_MCP,
-  DISPLAY_MEDIA_PROMPT_CLAUDE,
-  DISPLAY_MEDIA_PROMPT_CODEX,
-  DISPLAY_MEDIA_PROMPT_CURSOR,
-  DISPLAY_MEDIA_PROMPT_HAPI_MCP,
-  DISPLAY_VIDEO_PROMPT_CLAUDE,
-  DISPLAY_VIDEO_PROMPT_CODEX,
-  DISPLAY_VIDEO_PROMPT_CURSOR,
-  DISPLAY_VIDEO_PROMPT_HAPI_MCP,
+  DISPLAY_IMAGE_PROMPT_VARIANTS,
+  DISPLAY_MEDIA_PROMPT_VARIANTS,
+  DISPLAY_VIDEO_PROMPT_VARIANTS,
   resolveDisplayToolPrompt,
 } from '@/modules/common/displayImagePrompt';
 import {
@@ -145,12 +136,7 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
       server.registerTool<any, any>(
         'display_image',
         {
-          description: `Display a local image file to the human user inline in the current HAPI chat session. ${resolveDisplayToolPrompt(flavor, {
-            claude: DISPLAY_IMAGE_PROMPT_CLAUDE,
-            codex: DISPLAY_IMAGE_PROMPT_CODEX,
-            cursor: DISPLAY_IMAGE_PROMPT_CURSOR,
-            hapiMcp: DISPLAY_IMAGE_PROMPT_HAPI_MCP,
-          })}`,
+          description: `Display a local image file to the human user inline in the current HAPI chat session. ${resolveDisplayToolPrompt(flavor, DISPLAY_IMAGE_PROMPT_VARIANTS)}`,
           title: 'Display Image',
           inputSchema: displayImageInputSchema,
         },
@@ -180,12 +166,7 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
       server.registerTool<any, any>(
         'display_video',
         {
-          description: `Display a local mp4 or webm file inline in the current HAPI chat session. ${resolveDisplayToolPrompt(flavor, {
-            claude: DISPLAY_VIDEO_PROMPT_CLAUDE,
-            codex: DISPLAY_VIDEO_PROMPT_CODEX,
-            cursor: DISPLAY_VIDEO_PROMPT_CURSOR,
-            hapiMcp: DISPLAY_VIDEO_PROMPT_HAPI_MCP,
-          })}`,
+          description: `Display a local mp4 or webm file inline in the current HAPI chat session. ${resolveDisplayToolPrompt(flavor, DISPLAY_VIDEO_PROMPT_VARIANTS)}`,
           title: 'Display Video',
           inputSchema: displayVideoInputSchema,
         },
@@ -215,12 +196,7 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
       server.registerTool<any, any>(
         'display_media',
         {
-          description: `Send a local image, video, audio, or other file to the current HAPI chat session. ${resolveDisplayToolPrompt(flavor, {
-            claude: DISPLAY_MEDIA_PROMPT_CLAUDE,
-            codex: DISPLAY_MEDIA_PROMPT_CODEX,
-            cursor: DISPLAY_MEDIA_PROMPT_CURSOR,
-            hapiMcp: DISPLAY_MEDIA_PROMPT_HAPI_MCP,
-          })}`,
+          description: `Send a local image, video, audio, or other file to the current HAPI chat session. ${resolveDisplayToolPrompt(flavor, DISPLAY_MEDIA_PROMPT_VARIANTS)}`,
           title: 'Display Media',
           inputSchema: displayMediaInputSchema,
         },

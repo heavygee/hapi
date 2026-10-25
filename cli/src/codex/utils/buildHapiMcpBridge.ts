@@ -85,6 +85,14 @@ export async function buildHapiMcpBridge(
     // for the two Codex call sites that pass no skillLookup at all
     // (codexLocalLauncher.ts, codexRemoteLauncher.ts's app-server path).
     const flavor = options.skillLookup?.flavor ?? 'codex';
+    // Every caller of this function proxies the model through the stdio bridge
+    // spawned below, not this HTTP server directly, so `flavor` here is NOT
+    // what fixes those callers' display_* wording (that's the `--flavor` CLI
+    // arg a few lines down, read by happyMcpStdioBridge.ts). This keeps the
+    // HTTP server's own tools/list internally correct for `flavor` too, in
+    // case anything ever connects to `happyServer.url` directly — do not
+    // assume removing the `--flavor` arg below is safe just because this
+    // option exists.
     const happyServer = await startHappyServer(client, {
         emitTitleSummary: options.emitTitleSummary,
         enableChangeTitle: options.enableChangeTitle,
@@ -93,10 +101,6 @@ export async function buildHapiMcpBridge(
     });
     // Stamp the hub row id so orphanReap can find MCP helpers after the agent
     // root dies without a full tree kill (#2003 / #1911 follow-up).
-    // --flavor is also consumed by the spawned stdio bridge process itself
-    // (happyMcpStdioBridge.ts) — it registers its own display_image/video/media
-    // tool descriptions independently of startHappyServer's HTTP server, so it
-    // needs the same flavor to pick matching hint text.
     const bridgeCommand = getHappyCliCommand([
         'mcp',
         '--url',
