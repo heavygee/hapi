@@ -30,7 +30,10 @@ import { clearBoardSpawnBriefing, peekBoardSpawnBriefing, stashBoardSpawnBriefin
 import { isBoardItemDetailNavigation, isHistoryPopNavigation, shouldExitBoardsModeForNavigation } from '@/lib/sessionsBoardsModeSync'
 import { isAbandoningSpawnFlow } from '@/lib/spawnFlowAbandonment'
 import { parseIssueUrl } from '@hapi/protocol/schemas'
-import { findSessionLinkedToIssue } from '@/lib/externalRefs'
+import { findBoardItemForIssue, findSessionLinkedToIssue, getLinkedGithubIssue, type BoardItemMatch } from '@/lib/externalRefs'
+import { useLinkedIssueBoardItems } from '@/hooks/queries/useLinkedIssueBoardItems'
+import { IssueBoardLinkContext, useIssueBoardLink } from '@/lib/issueBoardLinkContext'
+import type { ExternalRef } from '@hapi/protocol/types'
 import type { BoardItem } from '@/types/api'
 import { NewSession } from '@/components/NewSession'
 import { WorkspaceBrowser } from '@/components/WorkspaceBrowser'
@@ -386,6 +389,39 @@ function SessionsPage() {
             ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
     }, [navigate, setSessionsMode])
+    // Reverse of linkedBoardSession/handleOpenLinkedBoardSession above — a
+    // session's own linked-issue chip had no way to say "this issue is
+    // tracked on a board," let alone jump there (operator follow-up to
+    // hapi#238, via Fekko). Enabled only when at least one visible session
+    // actually has a linked issue to resolve — most installs never link an
+    // issue to a session at all, so this avoids fetching every configured
+    // board's items on every Sessions-mode page load for nothing.
+    const hasAnyLinkedIssueSession = useMemo(
+        () => sessions.some(session => getLinkedGithubIssue(session.metadata) !== null),
+        [sessions]
+    )
+    const linkedIssueBoardItems = useLinkedIssueBoardItems(api, hasAnyLinkedIssueSession)
+    const getBoardMatchForIssue = useCallback(
+        (ref: ExternalRef): BoardItemMatch | null => findBoardItemForIssue(linkedIssueBoardItems, ref.url),
+        [linkedIssueBoardItems]
+    )
+    const handleOpenIssueBoardItem = useCallback((match: BoardItemMatch) => {
+        // Explicit setSessionsMode + navigate, same reasoning as
+        // handleOpenLinkedBoardSession's own comment above — this must
+        // always surface Boards mode regardless of what the
+        // onBeforeNavigate subscriber would otherwise infer.
+        setSessionsMode('boards')
+        setSelectedBoardId(match.boardId)
+        isOwnBoardItemNavigationRef.current = true
+        navigate({ to: '/sessions', search: { boardItem: match.itemId } })
+    }, [navigate, setSessionsMode, setSelectedBoardId])
+    // Handed down via IssueBoardLinkContext to whatever `<Outlet/>` renders
+    // below (SessionPage -> SessionChat -> SessionHeader) — see that
+    // module's doc comment for why this is a Context and not props.
+    const issueBoardLinkContextValue = useMemo(
+        () => ({ getBoardMatchForIssue, onOpenBoardItem: handleOpenIssueBoardItem }),
+        [getBoardMatchForIssue, handleOpenIssueBoardItem]
+    )
     // Item detail reuses the session-detail right-pane slot, so it needs the
     // same mobile show/hide signal `isSessionsIndex` drives for sessions —
     // but it's local state, not a route, so it has to opt in explicitly here
@@ -492,7 +528,7 @@ function SessionsPage() {
     }, [navigate])
 
     return (
-        <>
+        <IssueBoardLinkContext.Provider value={issueBoardLinkContextValue}>
             <div className="flex h-full min-h-0">
             <div
                 // min-w-0: without it, shrink-0 toolbar icons inflate the flex
@@ -609,6 +645,8 @@ function SessionsPage() {
                         titleSuggestionAvailable={titleSuggestionAvailable}
                         machineLabelsById={machineLabelsById}
                         machinesById={machinesById}
+                        getBoardMatchForIssue={getBoardMatchForIssue}
+                        onOpenBoardItem={handleOpenIssueBoardItem}
                     />
                     )}
                 </div>
@@ -690,7 +728,7 @@ function SessionsPage() {
                 </div>
             </div>
             </div>
-        </>
+        </IssueBoardLinkContext.Provider>
     )
 }
 
@@ -725,6 +763,7 @@ function classifySendError(
 function SessionPage() {
     const { api, titleSuggestionAvailable = false } = useAppContext()
     const { t } = useTranslation()
+    const issueBoardLink = useIssueBoardLink()
     const goBack = useAppGoBack()
     const navigate = useNavigate()
     const queryClient = useQueryClient()
@@ -1172,6 +1211,12 @@ function SessionPage() {
         )
     }
 
+    const linkedIssueBoardMatch = (() => {
+        if (!issueBoardLink) return null
+        const linkedIssue = getLinkedGithubIssue(session.metadata)
+        return linkedIssue ? issueBoardLink.getBoardMatchForIssue(linkedIssue) : null
+    })()
+
     return (
         <SessionChat
             api={api}
@@ -1196,6 +1241,8 @@ function SessionPage() {
             onLoadMore={loadMoreMessages}
             onCancelLoadMore={cancelLoadMoreMessages}
             onSend={sendMessage}
+            linkedIssueBoardMatch={linkedIssueBoardMatch}
+            onOpenBoardItem={issueBoardLink?.onOpenBoardItem}
             resolveSessionIdForUpload={async (id) => (await resolveSessionId(id)).sessionId}
             onUploadSessionResolved={handleSessionResolved}
             onViewModeChange={setViewMode}

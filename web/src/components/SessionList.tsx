@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import * as Popover from '@radix-ui/react-popover'
 import { SessionListScrollAnchor } from './SessionListScrollAnchor'
 import type { SessionSummary } from '@/types/api'
+import type { ExternalRef } from '@hapi/protocol/types'
 import { SESSION_LIFECYCLE_IDLE } from '@hapi/protocol'
 import type { ApiClient } from '@/api/client'
 import {
@@ -118,7 +119,7 @@ import {
 } from '@hapi/protocol'
 import { formatGithubPrChipDetailParts, SessionPrChip } from '@/components/SessionPrChip'
 import { IssueRefChip } from '@/components/IssueRefChip'
-import { getLinkedGithubIssue } from '@/lib/externalRefs'
+import { getLinkedGithubIssue, type BoardItemMatch } from '@/lib/externalRefs'
 import { Spinner } from '@/components/Spinner'
 import { transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
 import { useToast } from '@/lib/toast-context'
@@ -1096,6 +1097,8 @@ function SessionItem(props: {
     projectLabel?: string
     machineLabel?: string
     lastSeenVersion: number
+    getBoardMatchForIssue?: (ref: ExternalRef) => BoardItemMatch | null
+    onOpenBoardItem?: (match: BoardItemMatch) => void
 }) {
     const { t } = useTranslation()
     const { addToast } = useToast()
@@ -1112,7 +1115,9 @@ function SessionItem(props: {
         inRunningSection = false,
         projectLabel,
         machineLabel,
-        lastSeenVersion
+        lastSeenVersion,
+        getBoardMatchForIssue,
+        onOpenBoardItem
     } = props
     const { haptic } = usePlatform()
     const [menuOpen, setMenuOpen] = useState(false)
@@ -1231,6 +1236,7 @@ function SessionItem(props: {
         hasScheduleTooltip
     )
     const linkedIssue = getLinkedGithubIssue(s.metadata)
+    const linkedIssueBoardMatch = linkedIssue ? getBoardMatchForIssue?.(linkedIssue) ?? null : null
     return (
         <>
             {/* The issue chip renders as a sibling of the role="button" div,
@@ -1286,7 +1292,14 @@ function SessionItem(props: {
                         showIssueChip={false}
                     />
                 </div>
-                {linkedIssue ? <IssueRefChip ref={linkedIssue} className="mt-0.5 shrink-0" /> : null}
+                {linkedIssue ? (
+                    <IssueRefChip
+                        ref={linkedIssue}
+                        className="mt-0.5 shrink-0"
+                        boardMatch={linkedIssueBoardMatch}
+                        onOpenBoardItem={onOpenBoardItem}
+                    />
+                ) : null}
                 {githubPrAwarenessEnabled && primaryPrRef ? (
                     <div className="flex shrink-0 items-center self-start py-2 pr-2">
                         <SessionPrChip
@@ -1448,6 +1461,9 @@ export function SessionList(props: {
     machineLabelsById?: Record<string, string>
     machinesById?: Record<string, Machine>
     selectedSessionId?: string | null
+    /** The board item (if any) a session's linked GitHub issue is tracked on — null/absent when Boards isn't configured or the issue isn't on any board. */
+    getBoardMatchForIssue?: (ref: ExternalRef) => BoardItemMatch | null
+    onOpenBoardItem?: (match: BoardItemMatch) => void
 }) {
     const { t } = useTranslation()
     const {
@@ -1871,6 +1887,8 @@ export function SessionList(props: {
                                             projectLabel={getPathDisplayName(s.metadata?.worktree?.basePath ?? s.metadata?.path ?? 'Other')}
                                             machineLabel={resolveMachineLabel(s.metadata?.machineId ?? null)}
                                             lastSeenVersion={lastSeenVersion}
+                                            getBoardMatchForIssue={props.getBoardMatchForIssue}
+                                            onOpenBoardItem={props.onOpenBoardItem}
                                         />
                                     ))}
                                 </div>
@@ -2001,6 +2019,8 @@ export function SessionList(props: {
                                     selected={s.id === selectedSessionId}
                                     showDetailedStatus={showDetailedStatus}
                                     lastSeenVersion={lastSeenVersion}
+                                    getBoardMatchForIssue={props.getBoardMatchForIssue}
+                                    onOpenBoardItem={props.onOpenBoardItem}
                                 />
                             </div>
                         ))}
@@ -2552,6 +2572,8 @@ export function SessionList(props: {
                                             projectLabel={getPathDisplayName(s.metadata?.worktree?.basePath ?? s.metadata?.path ?? 'Other')}
                                             machineLabel={resolveMachineLabel(s.metadata?.machineId ?? null)}
                                             lastSeenVersion={lastSeenVersion}
+                                            getBoardMatchForIssue={props.getBoardMatchForIssue}
+                                            onOpenBoardItem={props.onOpenBoardItem}
                                         />
                                     ))}
                                 </div>

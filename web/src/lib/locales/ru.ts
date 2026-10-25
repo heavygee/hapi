@@ -101,6 +101,7 @@ export default {
   'sessions.modeSwitch.label': 'Переключение между сессиями и досками',
   'sessions.modeSwitch.sessions': 'Сессии',
   'sessions.modeSwitch.boards': 'Доски',
+  'sessions.issueChip.openOnBoard': 'Открыть на доске «{board}»',
   'boards.boardSwitcher.label': 'Фильтр элементов по доске',
   'boards.fueTitle': 'Доски',
   'boards.fueBody': 'Подключает доску GitHub Projects, чтобы видеть её и работать с ней, не покидая HAPI. Выберите доску через переключатель, когда окажетесь здесь.',

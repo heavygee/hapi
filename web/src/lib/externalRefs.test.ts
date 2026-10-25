@@ -1,6 +1,28 @@
 import { describe, expect, it } from 'vitest'
-import type { SessionSummary } from '@/types/api'
-import { findSessionLinkedToIssue, getLinkedGithubIssue } from './externalRefs'
+import type { BoardItem, SessionSummary } from '@/types/api'
+import { findBoardItemForIssue, findSessionLinkedToIssue, getLinkedGithubIssue } from './externalRefs'
+
+function makeBoardItem(overrides: Partial<BoardItem> & { id: string }): BoardItem {
+    return {
+        title: 'An item',
+        url: null,
+        number: null,
+        repo: null,
+        state: 'OPEN',
+        status: 'Todo',
+        updatedAt: null,
+        body: null,
+        isPullRequest: false,
+        createdAt: null,
+        closedAt: null,
+        author: null,
+        assignees: [],
+        labels: [],
+        milestone: null,
+        customFields: [],
+        ...overrides
+    }
+}
 
 function makeSession(overrides: Partial<SessionSummary> & { id: string }): SessionSummary {
     return {
@@ -141,5 +163,46 @@ describe('findSessionLinkedToIssue', () => {
             }
         })
         expect(findSessionLinkedToIssue([session], 'https://ghe.example/acme/widgets/issues/12')).toBeNull()
+    })
+})
+
+describe('findBoardItemForIssue', () => {
+    it('finds the board item matching the given issue URL', () => {
+        const item = makeBoardItem({ id: 'item-1', url: 'https://github.com/a/b/issues/1' })
+        const boards = [{ boardId: 'board-1', boardLabel: 'Board One', items: [item] }]
+        expect(findBoardItemForIssue(boards, 'https://github.com/a/b/issues/1')).toEqual({ boardId: 'board-1', boardLabel: 'Board One', itemId: 'item-1' })
+    })
+
+    it('returns null when no board item matches', () => {
+        const boards = [{ boardId: 'board-1', boardLabel: 'Board One', items: [makeBoardItem({ id: 'item-1', url: 'https://github.com/a/b/issues/2' })] }]
+        expect(findBoardItemForIssue(boards, 'https://github.com/a/b/issues/1')).toBeNull()
+    })
+
+    it('returns null for a null issue URL without scanning boards', () => {
+        const boards = [{ boardId: 'board-1', boardLabel: 'Board One', items: [makeBoardItem({ id: 'item-1', url: 'https://github.com/a/b/issues/1' })] }]
+        expect(findBoardItemForIssue(boards, null)).toBeNull()
+    })
+
+    it('skips items with no url', () => {
+        const boards = [{ boardId: 'board-1', boardLabel: 'Board One', items: [makeBoardItem({ id: 'item-1', url: null })] }]
+        expect(findBoardItemForIssue(boards, 'https://github.com/a/b/issues/1')).toBeNull()
+    })
+
+    it('searches every board, not just the first, since the same issue can sit on more than one board', () => {
+        const boards = [
+            { boardId: 'board-1', boardLabel: 'Board One', items: [makeBoardItem({ id: 'item-1', url: 'https://github.com/a/b/issues/99' })] },
+            { boardId: 'board-2', boardLabel: 'Board Two', items: [makeBoardItem({ id: 'item-2', url: 'https://github.com/a/b/issues/1' })] }
+        ]
+        expect(findBoardItemForIssue(boards, 'https://github.com/a/b/issues/1')).toEqual({ boardId: 'board-2', boardLabel: 'Board Two', itemId: 'item-2' })
+    })
+
+    it('matches case-insensitively on repo, mirroring findSessionLinkedToIssue', () => {
+        const boards = [{ boardId: 'board-1', boardLabel: 'Board One', items: [makeBoardItem({ id: 'item-1', url: 'https://github.com/Acme/Widgets/issues/12' })] }]
+        expect(findBoardItemForIssue(boards, 'https://github.com/acme/widgets/issues/12')).toEqual({ boardId: 'board-1', boardLabel: 'Board One', itemId: 'item-1' })
+    })
+
+    it('does not match the same repo/number on a different host', () => {
+        const boards = [{ boardId: 'board-1', boardLabel: 'Board One', items: [makeBoardItem({ id: 'item-1', url: 'https://github.com/acme/widgets/issues/12' })] }]
+        expect(findBoardItemForIssue(boards, 'https://ghe.example/acme/widgets/issues/12')).toBeNull()
     })
 })

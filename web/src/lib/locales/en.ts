@@ -101,6 +101,7 @@ export default {
   'sessions.modeSwitch.label': 'Switch between sessions and boards view',
   'sessions.modeSwitch.sessions': 'Sessions',
   'sessions.modeSwitch.boards': 'Boards',
+  'sessions.issueChip.openOnBoard': 'Open on the "{board}" board',
   'boards.boardSwitcher.label': 'Filter items by board',
   'boards.fueTitle': 'Boards',
   'boards.fueBody': 'Pulls in a GitHub Projects board so you can see and act on it without leaving HAPI. Pick which board via the switcher once you’re in.',

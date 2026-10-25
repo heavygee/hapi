@@ -1,5 +1,5 @@
 import type { ExternalRef } from '@hapi/protocol/types'
-import type { SessionSummary } from '@/types/api'
+import type { BoardItem, SessionSummary } from '@/types/api'
 
 // Host-agnostic — boards aren't github.com-only (GHE hosts too). Separate
 // from `@hapi/protocol/schemas`' parseIssueUrl (also host-aware now, but
@@ -84,4 +84,39 @@ export function findSessionLinkedToIssue(sessions: SessionSummary[], issueUrl: s
             return refParsed?.host === target.host && refParsed.repo.toLowerCase() === target.repo.toLowerCase()
         })
     ) ?? null
+}
+
+export type BoardItemMatch = { boardId: string; boardLabel: string; itemId: string }
+
+/**
+ * The board item (if any) that represents a session's linked GitHub issue —
+ * the reverse of `findSessionLinkedToIssue` above. Boards -> session already
+ * had a one-click jump (the "session linked" badge on a board card); a
+ * session with a linked issue had no way back to say "this is tracked on a
+ * board" at all (operator follow-up to hapi#238, via Fekko).
+ *
+ * Takes every configured board's already-fetched items (not just the
+ * currently-selected board's — `useLinkedIssueBoardItems` fetches all of
+ * them) since the same issue could be a member of more than one board (an
+ * unfiltered project and one of its saved views), same reasoning
+ * `queryKeys.boardItemsAll` already documents for write-side invalidation.
+ * First match across boards wins, same "don't try to pick a best one"
+ * stance `findSessionLinkedToIssue` takes for the reverse direction.
+ */
+export function findBoardItemForIssue(
+    boardsWithItems: Array<{ boardId: string; boardLabel: string; items: BoardItem[] }>,
+    issueUrl: string | null
+): BoardItemMatch | null {
+    if (!issueUrl) return null
+    const target = parseHostRepoAndNumber(issueUrl)
+    if (!target) return null
+    for (const board of boardsWithItems) {
+        const match = board.items.find(item => {
+            if (!item.url) return false
+            const parsed = parseHostRepoAndNumber(item.url)
+            return parsed !== null && parsed.host === target.host && parsed.repo.toLowerCase() === target.repo.toLowerCase() && parsed.number === target.number
+        })
+        if (match) return { boardId: board.boardId, boardLabel: board.boardLabel, itemId: match.id }
+    }
+    return null
 }

@@ -101,6 +101,7 @@ export default {
   'sessions.modeSwitch.label': '在会话和看板视图之间切换',
   'sessions.modeSwitch.sessions': '会话',
   'sessions.modeSwitch.boards': '看板',
+  'sessions.issueChip.openOnBoard': '在"{board}"看板中打开',
   'boards.boardSwitcher.label': '按看板筛选事项',
   'boards.fueTitle': '看板',
   'boards.fueBody': '接入一个 GitHub Projects 看板，无需离开 HAPI 即可查看和操作。进入后可通过切换器选择要查看的看板。',

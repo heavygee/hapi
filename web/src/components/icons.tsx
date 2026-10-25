@@ -183,3 +183,17 @@ export function SessionLinkedIcon(props: IconProps) {
         2
     )
 }
+
+// A kanban-style board glyph — shared by the reverse "this issue is tracked
+// on a board" affordance (IssueRefChip) wherever it appears, the same way
+// SessionLinkedIcon above is shared across the forward board->session link.
+export function BoardIcon(props: IconProps) {
+    return createIcon(
+        <>
+            <rect x="3" y="4" width="18" height="16" rx="2" />
+            <path d="M9 4v16M15 4v16" />
+        </>,
+        props,
+        2
+    )
+}
