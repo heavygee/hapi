@@ -1398,7 +1398,9 @@ function SessionPage() {
         isSyncingTail: messagesSyncingTail,
         isLoadingMore: messagesLoadingMore,
         hasMore: messagesHasMore,
+        hasMoreNewer: messagesHasMoreNewer,
         loadMore: loadMoreMessages,
+        loadNewer: loadNewerMessages,
         cancelLoadMore: cancelLoadMoreMessages,
         refetch: refetchMessages,
         loadMessageContext: loadMessageContextForSession,
@@ -1414,6 +1416,15 @@ function SessionPage() {
     } = useMessages(api, sessionId, {
         skipInitialTailSync: Boolean(effectiveInitialMessageId?.trim())
     })
+
+    // Must stay above the `if (!session)` early return below: declaring it
+    // after that branch changes the hook count once session data resolves.
+    const handleLoadNewerMessages = useCallback(async (
+        preserveMessageId?: string | null
+    ): Promise<boolean> => {
+        const outcome = await loadNewerMessages(preserveMessageId)
+        return outcome.kind === 'caught-up'
+    }, [loadNewerMessages])
 
     // Tracks the most recent send the hub rejected (4xx/5xx/network), keyed
     // by the session the failed POST actually targeted (post-resolveSessionId).
@@ -1885,6 +1896,7 @@ function SessionPage() {
             messages={messages}
             messagesWarning={messagesWarning}
             hasMoreMessages={messagesHasMore}
+            hasMoreNewerMessages={messagesHasMoreNewer}
             isSyncingTail={messagesSyncingTail}
             isLoadingMoreMessages={messagesLoadingMore}
             isSending={isSending}
@@ -1897,6 +1909,7 @@ function SessionPage() {
             onBack={goBack}
             onRefresh={refreshSelectedSession}
             onLoadMore={loadMoreMessages}
+            onLoadNewer={handleLoadNewerMessages}
             onCancelLoadMore={cancelLoadMoreMessages}
             onSend={sendMessage}
             resolveSessionIdForUpload={async (id) => (await resolveSessionId(id)).sessionId}

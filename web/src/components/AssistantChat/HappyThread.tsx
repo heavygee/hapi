@@ -242,6 +242,17 @@ export function shouldCancelInitialScrollSettling(
         && intent.distanceFromBottom > MANUAL_SCROLL_EPSILON_PX
 }
 
+/**
+ * Anchor ids are rendered DOM ids (`hapi-message-<kind>:<messageId>[:n]`).
+ * Recover the raw message id so the store can protect that row from trimming.
+ */
+function anchorMessageIdFromAnchor(anchor: ScrollAnchor | null): string | null {
+    if (!anchor) return null
+    const withoutPrefix = anchor.id.replace(/^hapi-message-/, '')
+    const parts = withoutPrefix.split(':')
+    return parts.length > 1 ? parts[1]! : null
+}
+
 export function captureScrollAnchor(viewport: HTMLElement): ScrollAnchor | null {
     const viewportRect = viewport.getBoundingClientRect()
     const messages = Array.from(viewport.querySelectorAll<HTMLElement>(MESSAGE_ANCHOR_SELECTOR))
@@ -722,8 +733,12 @@ export function HappyThread(props: {
     isSyncingTail: boolean
     messagesWarning: string | null
     hasMoreMessages: boolean
+    /** A context window still has messages between it and the session head. */
+    hasMoreNewerMessages?: boolean
     isLoadingMoreMessages: boolean
     onLoadMore: (onBeforeApply?: (historyVersion: number) => boolean) => Promise<OlderLoadOutcome>
+    /** Walk a context window one page forward; resolves true once caught up. */
+    onLoadNewer?: (preserveMessageId?: string | null) => Promise<boolean>
     onCancelLoadMore: () => void
     unseenCount: number
     rawMessagesCount: number
@@ -912,6 +927,13 @@ export function HappyThread(props: {
     // after a historical search result has been applied. The lock is released
     // by an explicit jump to the latest messages or by a new session/target.
     const searchTargetHistoryLockRef = useRef(false)
+    const hasMoreNewerRef = useRef(props.hasMoreNewerMessages === true)
+    // A forward page can trim 200 rows off the old end of the window. Message
+    // CSS disables browser scroll anchoring, so without restoring an anchor
+    // the unchanged scrollTop lands ~200 messages later.
+    const pendingForwardAnchorRef = useRef<ScrollAnchor | null>(null)
+    const onLoadNewerRef = useRef(props.onLoadNewer)
+    const loadingNewerRef = useRef(false)
     const searchTargetInputKeyRef = useRef<string | null>(null)
     const searchTargetRetryTimerRef = useRef<number | null>(null)
     const searchTargetQueryRetryCountRef = useRef(0)
@@ -936,6 +958,14 @@ export function HappyThread(props: {
     useLayoutEffect(() => {
         isLoadingMoreRef.current = props.isLoadingMoreMessages
     }, [props.isLoadingMoreMessages])
+
+    useEffect(() => {
+        hasMoreNewerRef.current = props.hasMoreNewerMessages === true
+    }, [props.hasMoreNewerMessages])
+
+    useEffect(() => {
+        onLoadNewerRef.current = props.onLoadNewer
+    }, [props.onLoadNewer])
     useEffect(() => {
         onLoadMoreRef.current = props.onLoadMore
     }, [props.onLoadMore])
@@ -1143,6 +1173,24 @@ export function HappyThread(props: {
                 // reached while the historical search window is being mounted.
                 // Do not let that transient event re-enter tail mode.
                 atBottomRef.current = false
+                // The window stops short of the head, so this bottom is the
+                // end of the loaded context rather than the end of the
+                // conversation. Pull the next page forward instead of
+                // stranding the reader (tiann/hapi#1598 review).
+                if (hasMoreNewerRef.current && !loadingNewerRef.current && onLoadNewerRef.current) {
+                    loadingNewerRef.current = true
+                    const forwardViewport = viewportRef.current
+                    const forwardAnchor = forwardViewport
+                        ? captureScrollAnchor(forwardViewport)
+                        : null
+                    pendingForwardAnchorRef.current = forwardAnchor
+                    // Hand the anchored row to the store so trimming cannot
+                    // evict it while the page is in flight; the refreshed
+                    // anchor is the one that matters if the reader moved.
+                    void onLoadNewerRef.current(
+                        anchorMessageIdFromAnchor(pendingForwardAnchorRef.current ?? forwardAnchor)
+                    ).finally(() => { loadingNewerRef.current = false })
+                }
                 return
             }
             atBottomRef.current = atBottom
@@ -1219,6 +1267,13 @@ export function HappyThread(props: {
                 pending.anchor = captureScrollAnchor(viewport)
                 pending.scrollTop = viewport.scrollTop
                 pending.scrollHeight = viewport.scrollHeight
+            }
+
+            // Same hazard for a pending forward page: restoring the anchor
+            // captured when the request started would drag the user back to
+            // where they were before they scrolled away.
+            if (pendingForwardAnchorRef.current) {
+                pendingForwardAnchorRef.current = captureScrollAnchor(viewport)
             }
 
             const needsCoverage = needsViewportCoverageRef.current()
@@ -2285,6 +2340,17 @@ export function HappyThread(props: {
         needsViewportCoverage,
         scheduleCoverageAfterSettling
     ])
+
+    useLayoutEffect(() => {
+        const forwardAnchor = pendingForwardAnchorRef.current
+        if (forwardAnchor) {
+            const forwardViewport = viewportRef.current
+            if (forwardViewport && restoreScrollAnchor(forwardViewport, forwardAnchor)) {
+                lastScrollTopRef.current = forwardViewport.scrollTop
+            }
+            pendingForwardAnchorRef.current = null
+        }
+    }, [appliedHistoryVersion])
 
     useLayoutEffect(() => {
         const pending = pendingScrollRef.current
