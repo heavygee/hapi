@@ -70,6 +70,7 @@ export async function runAgentSession(opts: {
     const permissionAdapter = new PermissionAdapter(session, backend, () => currentPermissionMode);
 
     const happyServer = await startHappyServer(session, {
+        flavor: opts.agentType,
         skillLookup: {
             workingDirectory,
             flavor: opts.agentType

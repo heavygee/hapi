@@ -82,6 +82,7 @@ export async function buildHapiMcpBridge(
     const happyServer = await startHappyServer(client, {
         emitTitleSummary: options.emitTitleSummary,
         enableChangeTitle: options.enableChangeTitle,
+        flavor: 'codex',
         skillLookup: options.skillLookup
     });
     // Stamp the hub row id so orphanReap can find MCP helpers after the agent

@@ -19,7 +19,20 @@ import {
     registerGeneratedImage,
 } from "@/modules/common/generatedImages";
 import type { InlineMediaSource } from "@/modules/common/inlineMediaSource";
-import { DISPLAY_IMAGE_PROMPT_CURSOR, DISPLAY_MEDIA_PROMPT_CURSOR, DISPLAY_VIDEO_PROMPT_CURSOR } from "@/modules/common/displayImagePrompt";
+import {
+    DISPLAY_IMAGE_PROMPT_CLAUDE,
+    DISPLAY_IMAGE_PROMPT_CODEX,
+    DISPLAY_IMAGE_PROMPT_CURSOR,
+    DISPLAY_IMAGE_PROMPT_HAPI_MCP,
+    DISPLAY_MEDIA_PROMPT_CLAUDE,
+    DISPLAY_MEDIA_PROMPT_CODEX,
+    DISPLAY_MEDIA_PROMPT_CURSOR,
+    DISPLAY_MEDIA_PROMPT_HAPI_MCP,
+    DISPLAY_VIDEO_PROMPT_CLAUDE,
+    DISPLAY_VIDEO_PROMPT_CODEX,
+    DISPLAY_VIDEO_PROMPT_CURSOR,
+    DISPLAY_VIDEO_PROMPT_HAPI_MCP,
+} from "@/modules/common/displayImagePrompt";
 import { resolveSkill } from "@/modules/common/skills";
 import {
     INSPECT_PEER_TOOL_DESCRIPTION,
@@ -37,11 +50,42 @@ type StartHappyServerOptions = {
      */
     emitTitleSummary?: boolean;
     enableChangeTitle?: boolean;
+    /**
+     * Agent flavor calling this bridge (e.g. 'claude', 'codex', 'cursor').
+     * Selects which display_image/display_video/display_media hint text is
+     * baked into each tool's own `description` — distinct from `skillLookup`,
+     * which only gates the `skill_lookup` tool. Omit for flavors with no
+     * dedicated variant; falls back to the generic hapi-mcp-bridge wording.
+     */
+    flavor?: string;
     skillLookup?: {
         workingDirectory: string;
         flavor: string;
     };
 };
+
+/**
+ * Pick the flavor-correct display_image/video/media hint text. Each tool's
+ * own `description` must name the tool the way *that* flavor actually calls
+ * it (`mcp__hapi__x` for Claude, `functions.hapi__x` for Codex, bare `x` for
+ * Cursor's native MCP overlay) — using the wrong variant tells the model to
+ * call a tool name that does not exist for its flavor.
+ */
+function resolveDisplayToolPrompt(
+    flavor: string | undefined,
+    variants: { claude: string; codex: string; cursor: string; hapiMcp: string }
+): string {
+    switch (flavor) {
+        case 'claude':
+            return variants.claude;
+        case 'codex':
+            return variants.codex;
+        case 'cursor':
+            return variants.cursor;
+        default:
+            return variants.hapiMcp;
+    }
+}
 
 /** Registered on the MCP server, but never pre-approved via Claude --allowedTools. */
 const CLAUDE_MANUAL_APPROVAL_HAPI_TOOLS = new Set([
@@ -67,7 +111,8 @@ function createHapiMcpServer(
     client: ApiSessionClient,
     emitTitleSummary: boolean,
     enableChangeTitle: boolean,
-    skillLookup: StartHappyServerOptions['skillLookup']
+    skillLookup: StartHappyServerOptions['skillLookup'],
+    flavor: StartHappyServerOptions['flavor']
 ): McpServer {
     const handler = async (title: string) => {
         logger.debug('[hapiMCP] Changing title to:', title);
@@ -208,7 +253,12 @@ function createHapiMcpServer(
     }
 
     mcp.registerTool<any, any>('display_image', {
-        description: `Display a local image file to the human user inline in the current HAPI chat session. ${DISPLAY_IMAGE_PROMPT_CURSOR}`,
+        description: `Display a local image file to the human user inline in the current HAPI chat session. ${resolveDisplayToolPrompt(flavor, {
+            claude: DISPLAY_IMAGE_PROMPT_CLAUDE,
+            codex: DISPLAY_IMAGE_PROMPT_CODEX,
+            cursor: DISPLAY_IMAGE_PROMPT_CURSOR,
+            hapiMcp: DISPLAY_IMAGE_PROMPT_HAPI_MCP,
+        })}`,
         title: 'Display Image',
         inputSchema: displayImageInputSchema,
     }, async (args: { path: string; title?: string }) => {
@@ -242,7 +292,12 @@ function createHapiMcpServer(
     });
 
     mcp.registerTool<any, any>('display_video', {
-        description: `Display a local mp4 or webm file inline in the current HAPI chat session. ${DISPLAY_VIDEO_PROMPT_CURSOR}`,
+        description: `Display a local mp4 or webm file inline in the current HAPI chat session. ${resolveDisplayToolPrompt(flavor, {
+            claude: DISPLAY_VIDEO_PROMPT_CLAUDE,
+            codex: DISPLAY_VIDEO_PROMPT_CODEX,
+            cursor: DISPLAY_VIDEO_PROMPT_CURSOR,
+            hapiMcp: DISPLAY_VIDEO_PROMPT_HAPI_MCP,
+        })}`,
         title: 'Display Video',
         inputSchema: displayVideoInputSchema,
     }, async (args: { path: string; title?: string }) => {
@@ -276,7 +331,12 @@ function createHapiMcpServer(
     });
 
     mcp.registerTool<any, any>('display_media', {
-        description: `Send a local image, video, audio, or other file to the current HAPI chat session. Recognized media is shown inline; other files use a download card. ${DISPLAY_MEDIA_PROMPT_CURSOR}`,
+        description: `Send a local image, video, audio, or other file to the current HAPI chat session. Recognized media is shown inline; other files use a download card. ${resolveDisplayToolPrompt(flavor, {
+            claude: DISPLAY_MEDIA_PROMPT_CLAUDE,
+            codex: DISPLAY_MEDIA_PROMPT_CODEX,
+            cursor: DISPLAY_MEDIA_PROMPT_CURSOR,
+            hapiMcp: DISPLAY_MEDIA_PROMPT_HAPI_MCP,
+        })}`,
         title: 'Display Media',
         inputSchema: displayMediaInputSchema,
     }, async (args: { path: string; title?: string }) => {
@@ -486,7 +546,7 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
     const mcps = new Map<string, McpServer>();
 
     const createMcpTransport = () => {
-        const mcp = createHapiMcpServer(client, emitTitleSummary, enableChangeTitle, options.skillLookup);
+        const mcp = createHapiMcpServer(client, emitTitleSummary, enableChangeTitle, options.skillLookup, options.flavor);
         const transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => randomUUID(),
             onsessioninitialized: (sessionId) => {
