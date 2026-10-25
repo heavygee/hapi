@@ -204,6 +204,14 @@ function createHapiMcpServer(
             description: 'Change the title of the current HAPI chat session. Call once when the user\'s primary objective is clear; use a concise task title.',
             title: 'Change Chat Title',
             inputSchema: changeTitleInputSchema,
+            // Fires proactively with no user-stated trigger ("call once when the
+            // objective is clear") — unlike citation-triggered tools (ping_peer,
+            // inspect_peer, spawn_peer), there's no salient text in the user's
+            // own message to prompt a ToolSearch call if this were deferred.
+            // Cheap (~90 tokens): keep it resident under Claude Code's Tool
+            // Search so it's still reachable without an extra discovery round
+            // trip. https://docs.claude.com/en/docs/claude-code/mcp (Tool Search).
+            _meta: { 'anthropic/alwaysLoad': true },
         }, async (args: { title: string }) => {
             const response = await handler(args.title);
             logger.debug('[hapiMCP] Response:', response);
@@ -237,6 +245,8 @@ function createHapiMcpServer(
         description: `Display a local image file to the human user inline in the current HAPI chat session. ${DISPLAY_IMAGE_PROMPT_CURSOR}`,
         title: 'Display Image',
         inputSchema: displayImageInputSchema,
+        // Proactive, no user-stated trigger — see change_title's _meta comment above.
+        _meta: { 'anthropic/alwaysLoad': true },
     }, async (args: { path: string; title?: string }) => {
         logger.debug('[hapiMCP] Display image:', args.path);
 
@@ -271,6 +281,8 @@ function createHapiMcpServer(
         description: `Display a local mp4 or webm file inline in the current HAPI chat session. ${DISPLAY_VIDEO_PROMPT_CURSOR}`,
         title: 'Display Video',
         inputSchema: displayVideoInputSchema,
+        // Proactive, no user-stated trigger — see change_title's _meta comment above.
+        _meta: { 'anthropic/alwaysLoad': true },
     }, async (args: { path: string; title?: string }) => {
         logger.debug('[hapiMCP] Display video:', args.path);
 
@@ -305,6 +317,8 @@ function createHapiMcpServer(
         description: `Send a local image, video, audio, or other file to the current HAPI chat session. Recognized media is shown inline; other files use a download card. ${DISPLAY_MEDIA_PROMPT_CURSOR}`,
         title: 'Display Media',
         inputSchema: displayMediaInputSchema,
+        // Proactive, no user-stated trigger — see change_title's _meta comment above.
+        _meta: { 'anthropic/alwaysLoad': true },
     }, async (args: { path: string; title?: string }) => {
         logger.debug('[hapiMCP] Display media:', args.path);
 
