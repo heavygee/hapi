@@ -32,6 +32,7 @@ import {
     DISPLAY_VIDEO_PROMPT_CODEX,
     DISPLAY_VIDEO_PROMPT_CURSOR,
     DISPLAY_VIDEO_PROMPT_HAPI_MCP,
+    resolveDisplayToolPrompt,
 } from "@/modules/common/displayImagePrompt";
 import { resolveSkill } from "@/modules/common/skills";
 import {
@@ -64,28 +65,6 @@ type StartHappyServerOptions = {
     };
 };
 
-/**
- * Pick the flavor-correct display_image/video/media hint text. Each tool's
- * own `description` must name the tool the way *that* flavor actually calls
- * it (`mcp__hapi__x` for Claude, `functions.hapi__x` for Codex, bare `x` for
- * Cursor's native MCP overlay) — using the wrong variant tells the model to
- * call a tool name that does not exist for its flavor.
- */
-function resolveDisplayToolPrompt(
-    flavor: string | undefined,
-    variants: { claude: string; codex: string; cursor: string; hapiMcp: string }
-): string {
-    switch (flavor) {
-        case 'claude':
-            return variants.claude;
-        case 'codex':
-            return variants.codex;
-        case 'cursor':
-            return variants.cursor;
-        default:
-            return variants.hapiMcp;
-    }
-}
 
 /** Registered on the MCP server, but never pre-approved via Claude --allowedTools. */
 const CLAUDE_MANUAL_APPROVAL_HAPI_TOOLS = new Set([

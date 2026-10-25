@@ -16,7 +16,21 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { z } from 'zod';
-import { DISPLAY_IMAGE_PROMPT_CURSOR, DISPLAY_MEDIA_PROMPT_CURSOR, DISPLAY_VIDEO_PROMPT_CURSOR } from '@/modules/common/displayImagePrompt';
+import {
+  DISPLAY_IMAGE_PROMPT_CLAUDE,
+  DISPLAY_IMAGE_PROMPT_CODEX,
+  DISPLAY_IMAGE_PROMPT_CURSOR,
+  DISPLAY_IMAGE_PROMPT_HAPI_MCP,
+  DISPLAY_MEDIA_PROMPT_CLAUDE,
+  DISPLAY_MEDIA_PROMPT_CODEX,
+  DISPLAY_MEDIA_PROMPT_CURSOR,
+  DISPLAY_MEDIA_PROMPT_HAPI_MCP,
+  DISPLAY_VIDEO_PROMPT_CLAUDE,
+  DISPLAY_VIDEO_PROMPT_CODEX,
+  DISPLAY_VIDEO_PROMPT_CURSOR,
+  DISPLAY_VIDEO_PROMPT_HAPI_MCP,
+  resolveDisplayToolPrompt,
+} from '@/modules/common/displayImagePrompt';
 import {
   INSPECT_PEER_TOOL_DESCRIPTION,
   PING_PEER_TOOL_DESCRIPTION,
@@ -25,9 +39,10 @@ import {
 
 const DEFAULT_TOOL_NAMES = ['change_title', 'display_image', 'display_video', 'display_media', 'list_peers', 'ping_peer', 'inspect_peer'];
 
-function parseArgs(argv: string[]): { url: string | null; toolNames: Set<string> } {
+function parseArgs(argv: string[]): { url: string | null; toolNames: Set<string>; flavor: string | undefined } {
   let url: string | null = null;
   let toolNames = new Set(DEFAULT_TOOL_NAMES);
+  let flavor: string | undefined;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--url' && i + 1 < argv.length) {
@@ -36,6 +51,13 @@ function parseArgs(argv: string[]): { url: string | null; toolNames: Set<string>
     } else if (a === '--tools' && i + 1 < argv.length) {
       toolNames = new Set(argv[i + 1].split(',').map((name) => name.trim()).filter(Boolean));
       i++;
+    } else if (a === '--flavor' && i + 1 < argv.length) {
+      // Selects which display_image/video/media hint text to register
+      // (mcp__hapi__x for claude, functions.hapi__x for codex, bare x for
+      // cursor); omitted/unrecognized falls back to the generic hapi-mcp
+      // wording. See resolveDisplayToolPrompt in displayImagePrompt.ts.
+      flavor = argv[i + 1];
+      i++;
     } else if (a === '--hapi-session-id' && i + 1 < argv.length) {
       // Orphan-reap stamp only (#2003); consume so the value is not left as a stray argv token.
       i++;
@@ -43,13 +65,13 @@ function parseArgs(argv: string[]): { url: string | null; toolNames: Set<string>
       // `--hapi-session-id=<uuid>` form — nothing further to consume.
     }
   }
-  return { url, toolNames };
+  return { url, toolNames, flavor };
 }
 
 export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
   try {
     // Resolve target HTTP MCP URL
-    const { url: urlFromArgs, toolNames } = parseArgs(argv);
+    const { url: urlFromArgs, toolNames, flavor } = parseArgs(argv);
     const baseUrl = urlFromArgs || process.env.HAPI_HTTP_MCP_URL || '';
 
     if (!baseUrl) {
@@ -123,7 +145,12 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
       server.registerTool<any, any>(
         'display_image',
         {
-          description: `Display a local image file to the human user inline in the current HAPI chat session. ${DISPLAY_IMAGE_PROMPT_CURSOR}`,
+          description: `Display a local image file to the human user inline in the current HAPI chat session. ${resolveDisplayToolPrompt(flavor, {
+            claude: DISPLAY_IMAGE_PROMPT_CLAUDE,
+            codex: DISPLAY_IMAGE_PROMPT_CODEX,
+            cursor: DISPLAY_IMAGE_PROMPT_CURSOR,
+            hapiMcp: DISPLAY_IMAGE_PROMPT_HAPI_MCP,
+          })}`,
           title: 'Display Image',
           inputSchema: displayImageInputSchema,
         },
@@ -153,7 +180,12 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
       server.registerTool<any, any>(
         'display_video',
         {
-          description: `Display a local mp4 or webm file inline in the current HAPI chat session. ${DISPLAY_VIDEO_PROMPT_CURSOR}`,
+          description: `Display a local mp4 or webm file inline in the current HAPI chat session. ${resolveDisplayToolPrompt(flavor, {
+            claude: DISPLAY_VIDEO_PROMPT_CLAUDE,
+            codex: DISPLAY_VIDEO_PROMPT_CODEX,
+            cursor: DISPLAY_VIDEO_PROMPT_CURSOR,
+            hapiMcp: DISPLAY_VIDEO_PROMPT_HAPI_MCP,
+          })}`,
           title: 'Display Video',
           inputSchema: displayVideoInputSchema,
         },
@@ -183,7 +215,12 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
       server.registerTool<any, any>(
         'display_media',
         {
-          description: `Send a local image, video, audio, or other file to the current HAPI chat session. ${DISPLAY_MEDIA_PROMPT_CURSOR}`,
+          description: `Send a local image, video, audio, or other file to the current HAPI chat session. ${resolveDisplayToolPrompt(flavor, {
+            claude: DISPLAY_MEDIA_PROMPT_CLAUDE,
+            codex: DISPLAY_MEDIA_PROMPT_CODEX,
+            cursor: DISPLAY_MEDIA_PROMPT_CURSOR,
+            hapiMcp: DISPLAY_MEDIA_PROMPT_HAPI_MCP,
+          })}`,
           title: 'Display Media',
           inputSchema: displayMediaInputSchema,
         },

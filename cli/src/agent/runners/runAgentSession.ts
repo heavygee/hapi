@@ -83,6 +83,8 @@ export async function runAgentSession(opts: {
         happyServer.url,
         '--tools',
         happyServer.toolNames.join(','),
+        '--flavor',
+        opts.agentType,
         '--hapi-session-id',
         session.sessionId,
     ]);
