@@ -395,7 +395,9 @@ describe('message tail synchronization', () => {
             oldestPositionSeq: 5,
             newestPositionAt: 5_000,
             newestPositionSeq: 5,
-            epoch: 1
+            epoch: 1,
+            // Modern v2 persists this bit; omit → legacy provisional → PAGE_SIZE 200.
+            requiresLatestReset: false
         }))
         activateMessageWindow(id)
         const getMessages = vi.fn().mockResolvedValueOnce(latestResponse(makeToolMessages(INITIAL_PAGE_SIZE, 10), {
