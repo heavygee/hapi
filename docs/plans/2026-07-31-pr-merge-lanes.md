@@ -60,14 +60,22 @@ When merging lane B: **just merge** (squash). Do **not** leave a trail comment a
 
 ## Label ownership
 
-One promote label: **`low-impact`** on `tiann/hapi`.
+Promote labels on `tiann/hapi`: **`low-impact`** and **`dogfooded`**.
 
-We dropped `self-merge-ok` - it was on-the-nose and redundant. Lane B = `low-impact` (or auto tests/docs) **and** chip `✅` (CI/bot/threads). The health chip already gates "ok to merge"; a second "please merge me" label added no signal.
+We dropped `self-merge-ok` - it was on-the-nose and redundant. Lane B = `low-impact` / `dogfooded` (or auto tests/docs) **and** chip `✅` (CI/bot/threads). The health chip already gates "ok to merge".
 
-**Owner session:** [Issue labelling (tiann/hapi)](/sessions/f3c41205-ba17-465e-8964-8e46f190f208) (`f3c41205-ba17-465e-8964-8e46f190f208`) - daily ~09:00 UTC sweep; apply `low-impact` on focused heavygee PRs by judgment.
+**Owner session (low-impact only):** [Issue labelling (tiann/hapi)](/sessions/f3c41205-ba17-465e-8964-8e46f190f208) (`f3c41205-ba17-465e-8964-8e46f190f208`) - daily ~09:00 UTC sweep; apply `low-impact` on focused heavygee PRs by judgment. **Do not** auto-apply `dogfooded` from that sweep.
 
 | Label | Apply when | Do not |
 |-------|------------|--------|
 | `low-impact` | Focused PR (or issue whose fix PR will be) with small blast radius - product OK if scoped; human judgment | Auto-slap on every "small" bug; never as sole size heuristic; never on others' / `community-pr` without ask |
+| `dogfooded` | Write collaborator has run the change on a **live** HAPI install and is willing to merge after 48h UTC silence unless the label is removed + challenged on [#2083](https://github.com/tiann/hapi/discussions/2083) | Slap without live dogfood; use as a quieter synonym for low-impact |
+
+### Amendment 2026-10-21 — `dogfooded` 48h opt-out
+
+- Public thread: [Discussions #2083](https://github.com/tiann/hapi/discussions/2083) (General; Announcements create is maintainer-restricted). Issue #2082 was a short-lived fallback and is closed.
+- Attaching the label **is** merge intent. Gate: `lib/dogfood-countdown.sh` + check in `hapi-pr-merge-gate.sh`. Meta chip action surfaces `dogfooded countdown (… left)`.
+- After window: still requires **`hapi-laneb-authorise`** (existing dogma). Agents prepare-only.
+- Policy `github_labels`: `["low-impact", "dogfooded"]`.
 
 Policy reads **PR** labels via `pr-merge-policy.sh`. Issue-only labels are advisory until the PR exists. Allowlist (`allow_pr_numbers`) remains the escape hatch if you want B without the public label.
