@@ -82,7 +82,12 @@ export async function buildHapiMcpBridge(
     const happyServer = await startHappyServer(client, {
         emitTitleSummary: options.emitTitleSummary,
         enableChangeTitle: options.enableChangeTitle,
-        flavor: 'codex',
+        // This bridge is shared by every non-Codex-"local"/"shared" launcher too
+        // (Cursor ACP, Copilot, Grok, Kimi, OpenCode) — each already threads its
+        // real flavor through `skillLookup.flavor`. Only fall back to 'codex'
+        // for the two Codex call sites that pass no skillLookup at all
+        // (codexLocalLauncher.ts, codexRemoteLauncher.ts's app-server path).
+        flavor: options.skillLookup?.flavor ?? 'codex',
         skillLookup: options.skillLookup
     });
     // Stamp the hub row id so orphanReap can find MCP helpers after the agent

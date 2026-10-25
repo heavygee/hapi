@@ -64,6 +64,7 @@ describe('buildHapiMcpBridge skill lookup config', () => {
 
         expect(harness.startOptions).toEqual({
             emitTitleSummary: undefined,
+            flavor: 'opencode',
             skillLookup
         })
         expect(harness.cliArgs).toEqual([
