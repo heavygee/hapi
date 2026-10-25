@@ -1360,3 +1360,14 @@ layers:
   # Must stay ABOVE other SessionList.tsx layers — it deletes the dropdown block.
   # Tip-unique web marker: "session-list-search-scope"
   - branch: driver/2081-search-scope-toggle
+
+  # tiann/hapi#1598 — read forward from a search result. Opening a hit left the
+  # window stranded mid-session with only older paging wired, so scrolling down
+  # dead-ended. Tracks the context window's newest row apart from the session
+  # head and walks the gap forward a bounded page at a time.
+  # Worktree: ~/coding/hapi/worktrees/forward-reading-soup @ driver/2081-forward-reading
+  # Thin tip on soup HEAD 2464f9ea5: 3d9607f8a (1 commit). Web-only -> remat
+  #   --build-web; hard-reload (no hub restart).
+  # Must stay ABOVE driver/2081-search-scope-toggle (same SessionList/web surface).
+  # Tip-unique web marker: "fetchNewerMessages"
+  - branch: driver/2081-forward-reading
