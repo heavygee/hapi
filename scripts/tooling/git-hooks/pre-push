@@ -40,9 +40,32 @@ while read -r local_ref local_sha remote_ref remote_sha; do
       range="$local_sha"
       files="$(git ls-tree -r --name-only "$local_sha")"
     fi
-  else
+  elif git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null; then
+    # Normal incremental push: remote_sha is a true ancestor of local_sha, so
+    # this diff is exactly "what my own commits changed" — unchanged from
+    # before this fix.
     range="${remote_sha}..${local_sha}"
     files="$(git diff --name-only "$remote_sha" "$local_sha" 2>/dev/null || true)"
+  else
+    # Force-push after a rebase: remote_sha is NOT an ancestor of local_sha
+    # (history was rewritten), so remote_sha..local_sha is not "my commits" —
+    # it also includes every file any upstream-of-my-branch commit touched
+    # between the old remote tip and the new rebase base, producing false
+    # positives on files a rebase pulled forward unchanged by me (e.g.
+    # docs/operator/AGENTS.md updated on main during a long-lived branch's
+    # lifetime — hit 2026-10-20 rebasing feat/flaky-quarantine). Use the same
+    # merge-base-against-main approach the brand-new-ref case above already
+    # uses instead — this is what the eventual PR diff will actually show.
+    base="$(git merge-base "$local_sha" origin/main 2>/dev/null \
+            || git merge-base "$local_sha" upstream/main 2>/dev/null \
+            || true)"
+    if [[ -n "$base" ]]; then
+      range="${base}..${local_sha}"
+      files="$(git diff --name-only "$base" "$local_sha" 2>/dev/null || true)"
+    else
+      range="${remote_sha}..${local_sha}"
+      files="$(git diff --name-only "$remote_sha" "$local_sha" 2>/dev/null || true)"
+    fi
   fi
 
   [[ -z "$files" ]] && continue
