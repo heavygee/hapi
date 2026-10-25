@@ -13,7 +13,7 @@ import type { SyncEvent } from '../../../sync/syncEngine'
 import { extractTodoWriteTodosFromMessageContent } from '../../../sync/todos'
 import { extractTeamStateFromMessageContent, applyTeamStateDelta } from '../../../sync/teams'
 import { extractBackgroundTaskCount } from '../../../sync/backgroundTasks'
-import { tryPromoteCursorInlineModelErrorFromMessage } from '../../../sync/cursorInlineModelErrorBackstop
+import { tryPromoteCursorInlineModelErrorFromMessage } from '../../../sync/cursorInlineModelErrorBackstop'
 import { shouldRecordSessionActivity } from '../../../sync/sessionActivity'
 import { extractFailingMermaidBlocks, buildMermaidRenderIssueHint } from '../../../sync/mermaid'
 import type { CliSocketWithData } from '../../socketTypes'
