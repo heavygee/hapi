@@ -172,9 +172,24 @@ function preserveCursorProtocolPair(
 function mergeContributionFields(
     prior: Record<string, unknown>,
     next: Record<string, unknown>,
-    merged: Record<string, unknown> | null
+    merged: Record<string, unknown> | null,
+    options?: { replaceExternalRefs?: boolean }
 ): Record<string, unknown> | null {
     merged = carryForwardIfMissing(prior, next, merged, CONTRIBUTION_FIELDS)
+    // Callers that already computed a full authoritative externalRefs array
+    // from a freshly-read current state (setSessionExternalRefs,
+    // mutateSessionExternalRefs's upsert/remove-primary) must bypass the
+    // sparse-write reconcile below entirely. reconcileExternalRefs only
+    // ever adds from next and, on an identity tie (same linkedAt AND
+    // statusCheckedAt — true for a hand-built role-only edit), keeps prior
+    // — so a role demotion or an explicit removal silently no-ops forever
+    // through the generic path (hapi#238, confirmed live: PUT never took
+    // effect, not even transiently, timestamps unchanged before/after).
+    if (options?.replaceExternalRefs) {
+        const result = merged ?? { ...next }
+        result.externalRefs = toValidExternalRefs(next.externalRefs)
+        return result
+    }
     const priorRefs = toValidExternalRefs(prior.externalRefs)
     const nextRefs = toValidExternalRefs(next.externalRefs)
     // An explicit `next.externalRefs = []` is a deliberate unlink-to-empty,
@@ -226,7 +241,7 @@ function preserveExternalRefsStatusCache(
     return base
 }
 
-export function mergeSessionMetadata(prior: unknown, next: unknown): unknown {
+export function mergeSessionMetadata(prior: unknown, next: unknown, options?: { replaceExternalRefs?: boolean }): unknown {
     if (!isPlainObject(prior) || !isPlainObject(next)) {
         return next
     }
@@ -235,7 +250,7 @@ export function mergeSessionMetadata(prior: unknown, next: unknown): unknown {
     merged = carryForwardIfMissing(prior, next, merged, ROUTING_FIELDS)
     merged = carryForwardIfMissing(prior, next, merged, SIMPLE_RESUME_TOKENS)
     merged = carryForwardIfMissing(prior, next, merged, ALERT_STATE_FIELDS)
-    merged = mergeContributionFields(prior, next, merged)
+    merged = mergeContributionFields(prior, next, merged, options)
     merged = preserveExternalRefsStatusCache(prior, next, merged)
     merged = preserveCursorProtocolPair(prior, next, merged)
     return merged ?? next
@@ -530,7 +545,7 @@ export function updateSessionMetadata(
     metadata: unknown,
     expectedVersion: number,
     namespace: string,
-    options?: { touchUpdatedAt?: boolean; allowUnarchive?: boolean }
+    options?: { touchUpdatedAt?: boolean; allowUnarchive?: boolean; replaceExternalRefs?: boolean }
 ): VersionedUpdateResult<unknown | null> {
     const now = Date.now()
     const touchUpdatedAt = options?.touchUpdatedAt !== false
@@ -544,7 +559,7 @@ export function updateSessionMetadata(
             }
 
             const prior = existing.metadata
-            let merged = mergeSessionMetadata(prior, metadata)
+            let merged = mergeSessionMetadata(prior, metadata, { replaceExternalRefs: options?.replaceExternalRefs })
 
             // #1911 M1: unauthorized un-archive of hub-archived rows.
             // Return success + merge-preserved archive fields — NOT version-mismatch

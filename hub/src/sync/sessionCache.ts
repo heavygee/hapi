@@ -1354,7 +1354,11 @@ export class SessionCache {
                 newMetadata,
                 session.metadataVersion,
                 session.namespace,
-                { touchUpdatedAt: false }
+                // Caller already computed the full authoritative externalRefs
+                // array — bypass the sparse-write reconcile, which would keep
+                // prior's role/identity on a tie and never remove an entry
+                // missing from `externalRefs` (hapi#238, confirmed live).
+                { touchUpdatedAt: false, replaceExternalRefs: true }
             )
 
             if (result.result === 'error') {
@@ -1422,7 +1426,12 @@ export class SessionCache {
                 newMetadata,
                 stored.metadataVersion,
                 session.namespace,
-                { touchUpdatedAt: false }
+                // mutate() already produced the full authoritative array from
+                // a freshly-read current state — bypass the sparse-write
+                // reconcile so upsert/remove-primary actually persist
+                // (hapi#238, confirmed live: a role-only change or an
+                // explicit removal was a silent no-op without this).
+                { touchUpdatedAt: false, replaceExternalRefs: true }
             )
 
             if (result.result === 'error') {
