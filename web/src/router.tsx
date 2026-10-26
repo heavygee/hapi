@@ -28,6 +28,7 @@ import { resolveBoardItemDirectory } from '@/lib/resolveBoardItemDirectory'
 import { buildBoardItemSpawnMessage } from '@/lib/boardItemSpawnMessage'
 import { clearBoardSpawnBriefing, peekBoardSpawnBriefing, stashBoardSpawnBriefing } from '@/lib/boardSpawnBriefing'
 import { isBoardItemDetailNavigation, isHistoryPopNavigation, shouldExitBoardsModeForNavigation } from '@/lib/sessionsBoardsModeSync'
+import { consumeExplicitSessionNavigationIntent } from '@/lib/explicitSessionNavigationIntent'
 import { isAbandoningSpawnFlow } from '@/lib/spawnFlowAbandonment'
 import { parseIssueUrl } from '@hapi/protocol/schemas'
 import { findSessionLinkedToIssue } from '@/lib/externalRefs'
@@ -412,6 +413,17 @@ function SessionsPage() {
     // genuine browser/device Back or Forward by its history index replaying
     // one already seen, rather than pushing a fresh one — which a toast or
     // markdown link's plain navigate() call never does.
+    //
+    // That second signal is itself unsound in a case that needs no reload at
+    // all (Codex review, hapi#238, fourth finding — see
+    // isHistoryPopNavigation's corrected doc comment): select X, select Y,
+    // Back to X, then click a toast/link targeting a session. The fresh push
+    // reuses Y's now-truncated index, so `isPop` wrongly comes back true and
+    // this would stay in Boards mode instead of exiting to show the session.
+    // `consumeExplicitSessionNavigationIntent()` is the actual fix — toast
+    // and markdown-link call sites mark their navigate() as an explicit
+    // session-targeting intent immediately beforehand, which overrides the
+    // index heuristic for that one event regardless of what it concludes.
     useEffect(() => {
         return router.subscribe('onBeforeNavigate', (event) => {
             const toIndex = event.toLocation.state.__TSR_index
@@ -422,7 +434,8 @@ function SessionsPage() {
             isOwnBoardItemNavigationRef.current = false
             if (isOwnBoardItemNavigation) return
 
-            if (isPop && isBoardItemDetailNavigation(event.pathChanged, event.fromLocation?.search ?? {}, event.toLocation.search)) {
+            const hasExplicitSessionIntent = consumeExplicitSessionNavigationIntent()
+            if (!hasExplicitSessionIntent && isPop && isBoardItemDetailNavigation(event.pathChanged, event.fromLocation?.search ?? {}, event.toLocation.search)) {
                 return
             }
             if (shouldExitBoardsModeForNavigation(event.toLocation.pathname, sessionsMode)) {

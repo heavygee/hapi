@@ -92,23 +92,26 @@ export function isBoardItemDetailNavigation(
 }
 
 /**
- * Whether a navigation is replaying an already-existing browser history entry
- * (device/browser Back or Forward) rather than pushing a brand-new one (a
- * fresh `navigate()` call from app code — selecting a board item, a toast
- * click, an in-chat session link, ...).
+ * Whether a navigation *looks like* it is replaying an already-existing
+ * browser history entry (device/browser Back or Forward) rather than
+ * pushing a brand-new one. This is a fallback heuristic, not a reliable
+ * signal on its own — see the correction below — and callers should prefer
+ * `explicitSessionNavigationIntent.ts` wherever the navigating code knows
+ * its own intent.
  *
- * TanStack Router stamps every history entry with a monotonically increasing
- * `__TSR_index` at push time; Back/Forward can only ever land on an index
- * that was already stamped by some earlier push, while a brand-new push
- * always gets a fresh index one higher than any seen so far (`REPLACE`
- * keeps the current index, which also counts as "already seen"). Comparing
- * the destination's index against the highest index observed so far is
- * therefore a reliable push-vs-pop signal that plain before/after location
- * diffing (`isBoardItemDetailNavigation` above) cannot provide on its own —
- * two structurally identical transitions (same pathname, `boardItem` only on
- * the origin) can be either a genuine Back-through-history or an unrelated
- * fresh push to a route that happens to look the same, and only the index
- * relationship distinguishes them (Codex review, hapi#238).
+ * TanStack Router stamps every history entry with a `__TSR_index`, but it is
+ * *not* globally monotonically increasing the way an earlier version of this
+ * comment claimed (confirmed by reading `@tanstack/router-core`'s compiled
+ * source, not assumed): a fresh push's index is `(current location's own
+ * stamped index) + 1`. Pushing after a Back therefore reuses whatever index
+ * the Back landed on, plus one — which can easily equal an index this
+ * function has already seen from a *different*, now-truncated forward
+ * branch. Concretely: select card X (index 1), select card Y (index 2),
+ * press Back to X (lands back on index 1, `maxIndexSeen` stays 2), then
+ * click a toast or in-chat link targeting session A — that fresh push lands
+ * at index 2 (1 + 1), identical to Y's now-truncated index, and this
+ * function wrongly reports it as a pop. No reload required; this is not the
+ * narrow reload-only gap a previous version of this comment described.
  *
  * Callers must track `maxIndexSeen` across navigations themselves (it is not
  * global router state) and update it to `Math.max(maxIndexSeen, toIndex)`
@@ -116,31 +119,15 @@ export function isBoardItemDetailNavigation(
  * own index at mount (not a hardcoded 0), so a page reloaded mid-session
  * already knows its real starting position.
  *
- * Known accepted gap (Codex review, hapi#238, investigated in depth — not an
- * oversight): a page *reload* only resets what this ref has personally
- * observed, not the browser's actual history stack. If, before the reload,
- * the user had selected an item (pushing a higher index) and then gone Back,
- * a Forward *after* the reload lands on that pre-existing higher index —
- * which this ref has never seen since remounting — and gets misread as a
- * fresh push. Seeding from `window.history.length` instead was considered
- * and rejected: a genuine fresh push always lands at exactly
- * `currentIndex + 1` regardless of how much (now-truncated) forward history
- * used to exist beyond it, so that seed can just as easily misclassify an
- * unrelated fresh push (a toast click, an in-chat link) as a pop — trading
- * one bug for another, not fixing it. The one signal that *would* resolve
- * this unambiguously — TanStack Router's own internal `HistoryAction` per
- * commit — is recorded in `@tanstack/router-core`'s `locationHistoryActions`
- * WeakMap, but that symbol isn't part of the package's public `exports` map
- * (confirmed: a subpath import throws at resolution, not just at the type
- * level) and the package's public events give no other way to correlate the
- * real action with the specific `onBeforeNavigate` event that needs it
- * (`router.history.subscribe` and raw `popstate` both fire for the *same*
- * commit, but strictly *after* `onBeforeNavigate` has already run for it,
- * since TanStack's own internal history subscriber — the one that actually
- * computes and emits `onBeforeNavigate` — is always registered first). Given
- * no accessible ground truth and no index-only heuristic that doesn't just
- * relocate the ambiguity, this narrow sequence (select → Back → reload →
- * Forward) is an accepted limitation rather than something to keep patching.
+ * Because index comparison alone cannot distinguish these cases, the actual
+ * fix is `explicitSessionNavigationIntent.ts`: call sites that know their
+ * `navigate()` call is a genuine "go to this session" action (ToastContainer,
+ * markdown-text.tsx's SessionPathAnchor) mark that intent immediately before
+ * navigating, and the `onBeforeNavigate` subscriber in router.tsx consumes it
+ * to override whatever this function concludes for that one event. This
+ * function remains the fallback for navigations that don't (or can't) mark
+ * intent — e.g. an actual browser/device Back/Forward, which by definition
+ * never calls `markExplicitSessionNavigationIntent()`.
  */
 export function isHistoryPopNavigation(toIndex: number, maxIndexSeen: number): boolean {
     return toIndex <= maxIndexSeen

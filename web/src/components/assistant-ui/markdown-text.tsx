@@ -17,6 +17,7 @@ import remarkRepairTables from '@/lib/remark-repair-tables'
 import remarkLatexBracketMath from '@/lib/remark-latex-bracket-math'
 import { useNavigate } from '@tanstack/react-router'
 import { PRESERVE_SESSION_SIDEBAR_SCROLL } from '@/lib/sessionNavigation'
+import { markExplicitSessionNavigationIntent } from '@/lib/explicitSessionNavigationIntent'
 import remarkStripCjkAutolink from '@/lib/remark-strip-cjk-autolink'
 import remarkNonHttpsAutolink from '@/lib/remark-non-https-autolink'
 import { cn, encodeBase64 } from '@/lib/utils'
@@ -578,6 +579,10 @@ function SessionPathAnchor(props: ComponentPropsWithoutRef<'a'> & { targetSessio
         if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
 
         event.preventDefault()
+        // Boards mode must exit for this even when it follows a Back whose
+        // reused history index would otherwise make it look like a pop
+        // (hapi#238).
+        markExplicitSessionNavigationIntent()
         void navigate({
             to: '/sessions/$sessionId',
             params: { sessionId: props.targetSessionId },
