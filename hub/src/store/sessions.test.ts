@@ -607,6 +607,118 @@ describe('updateSessionMetadata: protocol resume token preservation', () => {
         store.close()
     })
 
+    // hapi#238, confirmed live on soup: PUT /external-refs never persisted a
+    // role-only demotion, not even transiently — timestamps unchanged before
+    // and after. Root cause: without replaceExternalRefs, a hand-built
+    // role-only edit (same linkedAt + same statusCheckedAt as what's already
+    // stored) is a reconcileExternalRefs "tie", which keeps prior. With
+    // replaceExternalRefs: true, the caller's full array wins outright.
+    it('replaceExternalRefs: true persists a role-only demotion a sparse-write tie would silently keep prior on', () => {
+        const store = makeStore()
+        const prPrimary = {
+            kind: 'github_pr' as const,
+            repo: 'heavygee/hapi',
+            number: 238,
+            url: 'https://github.com/heavygee/hapi/pull/238',
+            role: 'primary' as const,
+            linkedAt: 100,
+            statusCheckedAt: 200
+        }
+        const session = store.sessions.getOrCreateSession(
+            'replace-role-demote',
+            { path: '/tmp/project', host: 'example', externalRefs: [prPrimary] },
+            null,
+            'default'
+        )
+
+        // Same linkedAt/statusCheckedAt as prPrimary — a tie by every
+        // freshness signal reconcileExternalRefs checks. Only the role
+        // differs, which reconcileExternalRefs does not treat as a
+        // tie-breaker at all.
+        const demoted = { ...prPrimary, role: 'secondary' as const }
+        const result = store.sessions.updateSessionMetadata(
+            session.id,
+            { path: '/tmp/project', host: 'example', externalRefs: [demoted] },
+            session.metadataVersion,
+            'default',
+            { replaceExternalRefs: true }
+        )
+        expect(result.result).toBe('success')
+        expect(getMetadata(store, session.id)?.externalRefs).toEqual([demoted])
+        store.close()
+    })
+
+    it('replaceExternalRefs: true persists an explicit removal a sparse-write union would otherwise resurrect', () => {
+        const store = makeStore()
+        const keep = {
+            kind: 'github_pr' as const,
+            repo: 'tiann/hapi',
+            number: 2147,
+            url: 'https://github.com/tiann/hapi/pull/2147',
+            role: 'primary' as const,
+            linkedAt: 100
+        }
+        const remove = {
+            kind: 'github_pr' as const,
+            repo: 'heavygee/hapi',
+            number: 238,
+            url: 'https://github.com/heavygee/hapi/pull/238',
+            role: 'secondary' as const,
+            linkedAt: 100
+        }
+        const session = store.sessions.getOrCreateSession(
+            'replace-explicit-removal',
+            { path: '/tmp/project', host: 'example', externalRefs: [keep, remove] },
+            null,
+            'default'
+        )
+
+        const result = store.sessions.updateSessionMetadata(
+            session.id,
+            { path: '/tmp/project', host: 'example', externalRefs: [keep] },
+            session.metadataVersion,
+            'default',
+            { replaceExternalRefs: true }
+        )
+        expect(result.result).toBe('success')
+        expect(getMetadata(store, session.id)?.externalRefs).toEqual([keep])
+        store.close()
+    })
+
+    // Without replaceExternalRefs, sparse writers (e.g. a CLI routine
+    // metadata sync built from a stale local cache) must keep getting the
+    // existing tie-keeps-prior behavior — this option is opt-in per call
+    // site, not a change to the default merge.
+    it('without replaceExternalRefs, a role-only tie still keeps prior (unchanged default behavior)', () => {
+        const store = makeStore()
+        const prPrimary = {
+            kind: 'github_pr' as const,
+            repo: 'heavygee/hapi',
+            number: 238,
+            url: 'https://github.com/heavygee/hapi/pull/238',
+            role: 'primary' as const,
+            linkedAt: 100,
+            statusCheckedAt: 200
+        }
+        const session = store.sessions.getOrCreateSession(
+            'default-tie-keeps-prior',
+            { path: '/tmp/project', host: 'example', externalRefs: [prPrimary] },
+            null,
+            'default'
+        )
+
+        const demoted = { ...prPrimary, role: 'secondary' as const }
+        const result = store.sessions.updateSessionMetadata(
+            session.id,
+            { path: '/tmp/project', host: 'example', externalRefs: [demoted] },
+            session.metadataVersion,
+            'default'
+        )
+        expect(result.result).toBe('success')
+        expect(getMetadata(store, session.id)?.externalRefs).toEqual([prPrimary])
+        store.close()
+    })
+
     it('preserves Meta status cache when link-pr rewrites the same primary without status', () => {
         const store = makeStore()
         const session = store.sessions.getOrCreateSession(
