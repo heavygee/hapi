@@ -22,6 +22,7 @@ import {
   PING_PEER_TOOL_DESCRIPTION,
   SESSION_ID_PREFIX_PARAM_DESCRIPTION,
 } from '@hapi/protocol/sessionCitation';
+import { isPeerToolsDisabled, PEER_TOOL_NAMES } from '@/modules/common/peerTools';
 import {
   SESSION_JOB_TOOL_DESCRIPTION,
   SESSION_JOB_TOOL_NAME,
@@ -64,6 +65,13 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
   try {
     // Resolve target HTTP MCP URL
     const { url: urlFromArgs, toolNames } = parseArgs(argv);
+
+    // HAPI_DISABLE_PEER_TOOLS=1: drop peer tools even when explicitly listed,
+    // so a wrapped agent cannot re-enable them via a stale --tools value.
+    if (isPeerToolsDisabled()) {
+      for (const name of PEER_TOOL_NAMES) toolNames.delete(name);
+    }
+
     const baseUrl = urlFromArgs || process.env.HAPI_HTTP_MCP_URL || '';
 
     if (!baseUrl) {
@@ -215,6 +223,34 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
       );
     }
 
+    if (toolNames.has(SESSION_JOB_TOOL_NAME)) {
+      server.registerTool<any, any>(
+        SESSION_JOB_TOOL_NAME,
+        {
+          description: SESSION_JOB_TOOL_DESCRIPTION,
+          title: 'Session-Attached Job',
+          inputSchema: sessionJobInputSchema,
+        },
+        async (args: Record<string, unknown>) => {
+          try {
+            const client = await ensureHttpClient();
+            const response = await client.callTool({ name: SESSION_JOB_TOOL_NAME, arguments: args });
+            return response as any;
+          } catch (error) {
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: `Failed to run session_job: ${error instanceof Error ? error.message : String(error)}`,
+                },
+              ],
+              isError: true,
+            };
+          }
+        }
+      );
+    }
+
     const pingPeerInputSchema: z.ZodTypeAny = z.object({
       sessionIdPrefix: z.string().trim().min(1).describe(SESSION_ID_PREFIX_PARAM_DESCRIPTION),
       message: z.string().min(1).describe('Message text to deliver to the target session'),
@@ -300,34 +336,6 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
             return {
               content: [
                 { type: 'text' as const, text: `Failed to list peers: ${error instanceof Error ? error.message : String(error)}` },
-              ],
-              isError: true,
-            };
-          }
-        }
-      );
-    }
-
-    if (toolNames.has(SESSION_JOB_TOOL_NAME)) {
-      server.registerTool<any, any>(
-        SESSION_JOB_TOOL_NAME,
-        {
-          description: SESSION_JOB_TOOL_DESCRIPTION,
-          title: 'Session-Attached Job',
-          inputSchema: sessionJobInputSchema,
-        },
-        async (args: Record<string, unknown>) => {
-          try {
-            const client = await ensureHttpClient();
-            const response = await client.callTool({ name: SESSION_JOB_TOOL_NAME, arguments: args });
-            return response as any;
-          } catch (error) {
-            return {
-              content: [
-                {
-                  type: 'text' as const,
-                  text: `Failed to run session_job: ${error instanceof Error ? error.message : String(error)}`,
-                },
               ],
               isError: true,
             };

@@ -6,7 +6,6 @@ import type { TransferSessionJobsResult } from '../store/sessionJobs'
 import { clampAliveTime } from './aliveTime'
 import { EventPublisher } from './eventPublisher'
 import { extractTodoWriteTodosFromMessageContent, TodosSchema } from './todos'
-import { extractBackgroundTaskDelta } from './backgroundTasks'
 import { resolveSessionIdleTimeoutMs, shouldClearKeepaliveIdle, shouldMarkKeepaliveIdle } from './sessionIdle'
 
 const QUEUED_MESSAGE_THINKING_GRACE_MS = 15_000
@@ -36,7 +35,14 @@ export class SessionCache {
 
     constructor(
         private readonly store: Store,
-        private readonly publisher: EventPublisher
+        private readonly publisher: EventPublisher,
+        private readonly hooks: {
+            /** Fires after a merge deletes a session row. Dedup collisions and
+             *  resume-id rotation both land in `mergeSessionData`, so this is
+             *  the single notification point; owners keyed on the removed id
+             *  (e.g. the hub's enumeration cache) release their entries here. */
+            onSessionMergedAway?: (oldSessionId: string, newSessionId: string) => void
+        } = {}
     ) {
     }
 
@@ -423,7 +429,7 @@ export class SessionCache {
             && this.store.messages.getImmediateQueuedLocalMessages(session.id).length > 0
 
         session.active = true
-        session.activeAt = Math.max(session.activeAt, t)
+        session.activeAt = Math.max(session.activeAt, hubNow)
         session.thinking = requestedThinking || preserveQueuedThinking
         session.thinkingAt = t
         if (!requestedThinking && preserveQueuedThinking && hasUnconsumedPrompt) {
@@ -566,13 +572,10 @@ export class SessionCache {
         }
     }
 
-    applyBackgroundTaskDelta(sessionId: string, delta: { started: number; completed: number }): void {
+    setBackgroundTaskCount(sessionId: string, next: number): void {
         const session = this.sessions.get(sessionId)
         if (!session) return
-
-        const prev = session.backgroundTaskCount ?? 0
-        const next = Math.max(0, prev + delta.started - delta.completed)
-        if (next === prev) return
+        if (next === (session.backgroundTaskCount ?? 0)) return
 
         session.backgroundTaskCount = next
         this.recordAgentProgress(sessionId)
@@ -1598,6 +1601,7 @@ export class SessionCache {
             }
             this.agentProgressAtBySessionId.delete(oldSessionId)
             this.attachedJobEmitVersion.delete(oldSessionId)
+            this.hooks.onSessionMergedAway?.(oldSessionId, newSessionId)
         } else {
             this.refreshSession(oldSessionId)
         }

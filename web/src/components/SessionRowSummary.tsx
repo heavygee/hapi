@@ -1,14 +1,15 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useSyncExternalStore } from 'react'
 import type { SessionSummary } from '@/types/api'
 import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
 import { ScheduleIcon } from '@/components/icons'
 import { HoverTooltip, SESSION_ROW_TOOLTIP_FOCUS_CLASS, useSessionRowTooltipIds } from '@/components/HoverTooltip'
-import { getAttentionLabel, SessionAttentionIndicator } from '@/components/SessionAttentionIndicator'
+import { getAttentionLabel, SessionAttentionIndicator, SessionSpinner } from '@/components/SessionAttentionIndicator'
 import { classifySessionAttention } from '@/lib/sessionAttention'
 import { getSessionLastSeenAt, getSessionManualUnreadAt } from '@/lib/sessionLastSeen'
 import { formatRelativeTime } from '@/lib/relativeTime'
 import { formatScheduledTooltipDetail } from '@/lib/scheduledTime'
-import { getCodexImportedAt } from '@/lib/codexImportedSessions'
+import { getCodexImportedAt, subscribeCodexImportedSessions } from '@/lib/codexImportedSessions'
+import { useMinuteTick } from '@/hooks/useMinuteTick'
 import { getSessionTitle } from '@/lib/sessionTitle'
 import { useTranslation } from '@/lib/use-translation'
 import { getWorktreeSessionLabel } from '@/lib/sessionWorktreeLabel'
@@ -18,6 +19,7 @@ import {
     isAttachedJobStale
 } from '@/lib/attachedJob'
 import { isAgentForegroundThinking } from '@/lib/sessionInProgress'
+
 function LoaderIcon(props: { className?: string }) {
     return (
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={props.className}>
@@ -86,11 +88,9 @@ function formatCodexImportedRelativeTime(
 
 function getSessionTimeLabel(
     session: SessionSummary,
+    importedAt: number | null,
     t: (key: string, params?: Record<string, string | number>) => string
 ): string | null {
-    const importedAt = session.metadata?.flavor === 'codex'
-        ? getCodexImportedAt(session.metadata?.agentSessionId)
-        : null
     if (importedAt !== null) {
         return formatCodexImportedRelativeTime(importedAt, t)
     }
@@ -166,16 +166,13 @@ export function SessionRowSummary(props: {
     )
     const attentionId = attentionTooltipIdProp ?? ownedIds.attentionId
     const scheduleId = scheduleTooltipIdProp ?? ownedIds.scheduleId
-    const timeLabel = getSessionTimeLabel(s, t)
+    // Rows are memoized, so the label keeps itself current (also advances job elapsed).
+    useMinuteTick()
+    const nowMs = Date.now()
+    const codexSessionId = s.metadata?.flavor === 'codex' ? s.metadata?.agentSessionId : null
+    const importedAt = useSyncExternalStore(subscribeCodexImportedSessions, () => getCodexImportedAt(codexSessionId))
+    const timeLabel = getSessionTimeLabel(s, importedAt, t)
     const attachedJob = s.attachedJob?.status === 'running' ? s.attachedJob : null
-    // Tick once a minute so elapsed wall-time advances without waiting for a heartbeat SSE.
-    const [nowMs, setNowMs] = useState(() => Date.now())
-    useEffect(() => {
-        if (!attachedJob) return
-        setNowMs(Date.now())
-        const id = window.setInterval(() => setNowMs(Date.now()), 60_000)
-        return () => window.clearInterval(id)
-    }, [attachedJob?.key, attachedJob?.startedAt])
     const jobStale = attachedJob ? isAttachedJobStale(attachedJob, nowMs) : false
     const jobFraction = attachedJob ? attachedJobFraction(attachedJob) : null
     const jobProgressLabel = attachedJob
@@ -232,22 +229,8 @@ export function SessionRowSummary(props: {
                             label={attentionLabel ?? ''}
                             tooltipId={attentionId}
                         />
-                    ) : showDetailedStatus && attention?.kind === 'background' ? (
-                        <span
-                            className={`inline-flex h-2 w-2 shrink-0 rounded-full ${ATTENTION_DOT_CLASS.background}`}
-                            title={attentionLabel ?? undefined}
-                            aria-label={attentionLabel ?? undefined}
-                        />
-                    ) : s.active && (s.backgroundTaskCount ?? 0) > 0 ? (
-                        <span
-                            className="inline-flex shrink-0 items-center gap-1 text-[var(--app-badge-success-text)]"
-                            title={t('session.item.running')}
-                        >
-                            <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse" aria-hidden="true" />
-                            {!inRunningSection ? (
-                                <span className="text-[11px] font-medium leading-none">{t('session.item.running')}</span>
-                            ) : null}
-                        </span>
+                    ) : (showDetailedStatus && attention?.kind === 'background') || (s.active && (s.backgroundTaskCount ?? 0) > 0) ? (
+                        <SessionSpinner background />
                     ) : s.active && (s.pendingRequestsCount ?? 0) > 0 ? (
                         <span
                             className="inline-flex shrink-0 items-center gap-1 text-[var(--app-badge-warning-text)]"
@@ -301,7 +284,7 @@ export function SessionRowSummary(props: {
                             {todoProgress.completed}/{todoProgress.total}
                         </span>
                     ) : null}
-                    {!attention && s.pendingRequestsCount > 0 ? (
+                    {!attention && s.active && s.pendingRequestsCount > 0 ? (
                         <span className="shrink-0 text-[var(--app-badge-warning-text)]">
                             {t('session.item.pending')} {s.pendingRequestsCount}
                         </span>

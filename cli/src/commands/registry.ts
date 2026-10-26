@@ -21,6 +21,7 @@ import { notifyCommand } from './notify'
 import { hubCommand } from './hub'
 import { pingPeerCommand } from './pingPeer'
 import { inspectPeerCommand } from './inspectPeer'
+import { setModeCommand } from './setMode'
 import { jobCommand } from './job'
 import type { CommandContext, CommandDefinition } from './types'
 
@@ -64,6 +65,7 @@ const COMMANDS: CommandDefinition[] = [
     notifyCommand,
     pingPeerCommand,
     inspectPeerCommand,
+    setModeCommand,
     jobCommand
 ]
 
