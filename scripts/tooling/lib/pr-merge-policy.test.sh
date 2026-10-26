@@ -70,7 +70,11 @@ files=$'docs/guide/foo.md\ndocs/guide/bar.md'
 got="$(pmp_classify "$POL" 1 "$files" 200 50 "" 200 50)"
 eq "fat docs → maintainer" "$got" $'maintainer\ttoo_large_delta:250>120'
 
-eq "action self_merge" "$(pmp_action_for_lane self_merge)" "full green - self-merge eligible (low-impact)"
+eq "action self_merge" "$(pmp_action_for_lane self_merge)" "full green - self-merge eligible (low-impact/dogfooded)"
+
+# dogfooded promote label
+got="$(pmp_classify "$POL" 1598 "$files" 500 60 "dogfooded,enhancement" 500 60)"
+eq "1598 + dogfooded label → self_merge" "$got" $'self_merge\tpromoted_label:dogfooded'
 eq "action maintainer tiann default" "$(pmp_action_for_lane maintainer)" "full green - wait on tiann"
 eq "action maintainer tiann explicit" "$(pmp_action_for_lane maintainer tiann/hapi)" "full green - wait on tiann"
 eq "action maintainer fork" "$(pmp_action_for_lane maintainer heavygee/hapi)" "full green - wait on Meta/operator (fork)"

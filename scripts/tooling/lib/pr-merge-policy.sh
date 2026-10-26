@@ -26,7 +26,7 @@ pmp_default_policy_json() {
   "schema": 1,
   "default_lane": "maintainer",
   "self_merge": {
-    "github_labels": ["low-impact"],
+    "github_labels": ["low-impact", "dogfooded"],
     "allow_pr_numbers": [],
     "auto": {
       "max_changed_files": 8,
@@ -173,7 +173,7 @@ pmp_action_for_lane() {
             if [[ "$fork" -eq 1 ]]; then
                 echo "full green - Meta/operator may merge (fork)"
             else
-                echo "full green - self-merge eligible (low-impact)"
+                echo "full green - self-merge eligible (low-impact/dogfooded)"
             fi
             ;;
         *)

@@ -937,7 +937,7 @@ main() {
 
     # --- per-session: rename + policy ping; build next state ---
     local new_state="$state"
-    local -a Q_WARN Q_MERGED Q_COMPLETE Q_ORPHAN Q_INACTIVE Q_PINGED Q_RENAMED Q_STATUS Q_WAIT_TIANN Q_WAIT_FORK Q_SELF_MERGE Q_SKIP_RUNNING Q_SKIP_BACKOFF Q_HOLD
+    local -a Q_WARN Q_MERGED Q_COMPLETE Q_ORPHAN Q_INACTIVE Q_PINGED Q_RENAMED Q_STATUS Q_WAIT_TIANN Q_WAIT_FORK Q_SELF_MERGE Q_DOGFOOD Q_SKIP_RUNNING Q_SKIP_BACKOFF Q_HOLD
     local -a PLAN_ROWS   # for --json
     MD_EMIT_FAILURES=0
     local now_ms=$(( now * 1000 ))
@@ -1289,7 +1289,10 @@ main() {
             ✅)
                 # Lane overlay: self-merge / Meta-operator vs wait-tiann (chip stays ✅).
                 # Fork chips must not land in WAIT TIANN — no upstream PR exists.
-                if printf '%s' "$acts" | grep -qE 'self-merge eligible|Meta/operator may merge'; then
+                # dogfooded countdown is lane-B intent but not yet mergeable (48h + laneb).
+                if printf '%s' "$acts" | grep -q 'dogfooded countdown'; then
+                    Q_DOGFOOD+=("#$(echo "$prs" | tr ' ' ',') [$sid8] $(echo "$acts" | tr '\n' ' ' | sed 's/ *$//')")
+                elif printf '%s' "$acts" | grep -qE 'self-merge eligible|Meta/operator may merge'; then
                     Q_SELF_MERGE+=("#$(echo "$prs" | tr ' ' ',') [$sid8] $(echo "$acts" | tr '\n' ' ' | sed 's/ *$//')")
                 elif printf '%s' "$acts" | grep -q 'wait on Meta/operator'; then
                     Q_WAIT_FORK+=("#$(echo "$prs" | tr ' ' ',') [$sid8] $(echo "$acts" | tr '\n' ' ' | sed 's/ *$//')")
@@ -1716,6 +1719,7 @@ _print_queue() {
     _print_section "⏳ SKIPPED (⚠️ same-fp exponential backoff):" "${Q_SKIP_BACKOFF[@]:-}"
     _print_section "🟢 WAIT TIANN (✅ green, lane A - upstream maintainer merge):" "${Q_WAIT_TIANN[@]:-}"
     _print_section "🟢 WAIT META/OPERATOR (✅ green, fork PR - never tiann):" "${Q_WAIT_FORK[@]:-}"
+    _print_section "🟢 DOGFOODED COUNTDOWN (✅ green, 48h UTC opt-out; merge after window + laneb auth — discussions/2083):" "${Q_DOGFOOD[@]:-}"
     _print_section "🟣 SELF-MERGE / META MAY MERGE (✅ green, lane B or fork promote):" "${Q_SELF_MERGE[@]:-}"
     echo ""
     echo "NEXT STEPS:"
@@ -1724,7 +1728,8 @@ _print_queue() {
     echo "  - Lane A (WAIT TIANN): prepare only; @tiann merges. Agents never gh pr merge."
     echo "  - Fork WAIT META/OPERATOR: heavygee/hapi chips — Meta/operator merges the"
     echo "    fork stack. Do NOT advise wait-on-tiann (no upstream PR)."
-    echo "  - Lane B (SELF-MERGE, upstream): tests/docs auto or low-impact/allowlist."
+    echo "  - Lane B (SELF-MERGE, upstream): tests/docs auto or low-impact/dogfooded/allowlist."
+    echo "  - dogfooded: 48h UTC from label; gate blocks early; still needs hapi-laneb-authorise."
     echo "    Operator/Meta may merge quietly (no blessing essays on the PR)."
     echo "    Agents still prepare-only (no auto merge yet)."
     echo "    Policy: ~/.hapi/pr-merge-policy.json (example: scripts/tooling/pr-merge-policy.example.json)."

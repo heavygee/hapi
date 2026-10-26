@@ -1092,9 +1092,21 @@ layers:
 
   # heavygee/hapi#235 / PR #238 — Boards view (cards/chips/relative-time,
   # Projects v2 /views/<n> filter capture). Renamed To-Do → Boards.
-  # Re-tip 2026-10-18: driver/235-todo-board-view @ 531479bba thin onto soup
-  # ab3cd07f0 (CTA rip + title-only filter). Fat feat tip 17c2fa61d skipped.
+  # Re-tip 2026-10-18: driver/235-todo-board-view @ d095ceab1 thin onto soup
+  # ab3cd07f0 (CTA + title filter + items pagination). externalRefs validate parked (schema drift).
   - branch: driver/235-todo-board-view
+
+  # heavygee/hapi#238 — GithubPrExternalRefSchema: status enum -> passthrough,
+  # any-host URL match. Thin on soup f516d1a58 @ 03fc0d272.
+  # Shared+web → remat --build-web + hapi-restart-hub.
+  - branch: driver/238-github-pr-schema-reconcile
+
+  # heavygee/hapi#238 follow-on — toValidExternalRefs + MetadataSchema preprocess
+  # so one malformed externalRefs element cannot null session.metadata wholesale.
+  # Thin tip on soup 37b51cf77: driver/238-externalrefs-metadata-preprocess @ 7cc01ffbb
+  # Shared+hub → remat --build-web + hapi-restart-hub (patient).
+  # Deliberately excludes Boards canonicalization / todoBoard port-normalization.
+  - branch: driver/238-externalrefs-metadata-preprocess
 
   # heavygee/hapi#247 — deliberate fleet push + restore upgrade-runner; kill
   # keepalive/startup unattended auto-upgrade. Hub default stays alert; per-machine
@@ -1328,3 +1340,34 @@ layers:
   # hub+cli+shared+web -> remat --build-web + hapi-restart-hub.
   # Tip-unique web marker: "HAPI_RUNNER_WEBHOOK_TIMEOUT_MS keeps"
   - branch: feat/2062-webhook-timeout-settings
+
+  # #296 — post-apply changelog after fleet auto clears skew.
+  # Thin tip on soup HEAD 3fcbdb55c: driver/applied-changelog @ 7f73cae28
+  # Parent pin: driver/applied-changelog-parent @ 3fcbdb55c
+  # PR: heavygee/hapi#297
+  # Web-only → remat --build-web; hard-reload (no hub restart).
+  # Tip-unique: runner-version-applied-banner
+  - branch: driver/applied-changelog
+
+  # tiann/hapi#2081 — session search scope: replace the Default/Content dropdown
+  # with a 48x48 two-state toggle (ID-card vs speech-bubble glyph, real-scope
+  # tooltips, mode kept on the collapsed applying chip).
+  # Upstream worktree: ~/coding/hapi/worktrees/search-scope-toggle-2081 @
+  #   feat/2081-search-scope-toggle (based on tiann/hapi#1598 tip aafdc0089).
+  # Soup worktree: ~/coding/hapi/worktrees/search-scope-soup @ driver/2081-search-scope-toggle
+  # Thin tip on soup HEAD 01dfd7da6: 6e37798ff (1 commit). Web-only -> remat
+  #   --build-web; hard-reload (no hub restart).
+  # Must stay ABOVE other SessionList.tsx layers — it deletes the dropdown block.
+  # Tip-unique web marker: "session-list-search-scope"
+  - branch: driver/2081-search-scope-toggle
+
+  # tiann/hapi#1598 — read forward from a search result. Opening a hit left the
+  # window stranded mid-session with only older paging wired, so scrolling down
+  # dead-ended. Tracks the context window's newest row apart from the session
+  # head and walks the gap forward a bounded page at a time.
+  # Worktree: ~/coding/hapi/worktrees/forward-reading-soup @ driver/2081-forward-reading
+  # Thin tip on soup HEAD 2464f9ea5: 3d9607f8a (1 commit). Web-only -> remat
+  #   --build-web; hard-reload (no hub restart).
+  # Must stay ABOVE driver/2081-search-scope-toggle (same SessionList/web surface).
+  # Tip-unique web marker: "fetchNewerMessages"
+  - branch: driver/2081-forward-reading

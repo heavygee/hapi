@@ -33,6 +33,8 @@ CORE_LIB="$SCRIPT_DIR/lib/pr-emoji-core.sh"
 source "$CORE_LIB"
 # shellcheck source=lib/pr-merge-policy.sh
 source "$SCRIPT_DIR/lib/pr-merge-policy.sh"
+# shellcheck source=lib/dogfood-countdown.sh
+source "$SCRIPT_DIR/lib/dogfood-countdown.sh"
 MERGE_POLICY_JSON="$(pmp_load_policy)"
 # shellcheck source=lib/require-gh-version.sh
 source "$SCRIPT_DIR/lib/require-gh-version.sh"
@@ -179,7 +181,28 @@ _apply_merge_lane() {
     class="$(pmp_classify "${MERGE_POLICY_JSON}" "$n" "$files" "$additions" "$deletions" "$labs" "$prod_add" "$prod_del")"
     lane="${class%%$'\t'*}"
     reason="${class#*$'\t'}"
-    printf '%s\t%s' "$lane" "$(pmp_action_for_lane "$lane" "$REPO") (${reason})"
+    local action
+    action="$(pmp_action_for_lane "$lane" "$REPO") (${reason})"
+    # dogfooded: surface 48h opt-out countdown on the chip action (Meta queue splits on the phrase).
+    if dogfood_has_label "$labs"; then
+        local df_status df_secs df_human
+        IFS=$'\t' read -r df_status df_secs df_human <<<"$(dogfood_status_for_pr "$REPO" "$n" "$labs")"
+        case "$df_status" in
+            waiting)
+                lane="self_merge"
+                action="full green - dogfooded countdown (${df_human} left; merge after window + laneb auth)"
+                ;;
+            ready)
+                lane="self_merge"
+                action="full green - self-merge eligible (dogfooded; window elapsed — needs laneb auth)"
+                ;;
+            unknown)
+                lane="self_merge"
+                action="full green - dogfooded countdown (stamp unknown — check label events / PR comment)"
+                ;;
+        esac
+    fi
+    printf '%s\t%s' "$lane" "$action"
 }
 
 # Derive CI signals. Requires gh >= HAPI_GH_MIN_VERSION (see require-gh-version.sh).
@@ -423,6 +446,7 @@ export -f classify_one gh_t fetch_latest_bot_body _emit_pr_json _apply_merge_lan
     pec_blocked_upstream_action pec_blocked_upstream_dep_from_body \
     pec_default_sticky_ping \
     pmp_classify pmp_action_for_lane pmp_load_policy \
+    dogfood_has_label dogfood_labeled_at dogfood_secs_remaining dogfood_humanize_secs dogfood_status_for_pr \
     pmp_default_policy_json \
     _gh_check_signals _fetch_review_signals _bot_body_findings_clean \
     pec_count_chip_unresolved_threads
