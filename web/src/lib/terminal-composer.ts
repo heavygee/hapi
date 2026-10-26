@@ -7,7 +7,10 @@ export type TerminalTextSource = {
     buffer: {
         active: {
             length: number
-            getLine: (index: number) => { translateToString: (trimRight?: boolean) => string } | undefined
+            getLine: (index: number) => {
+                isWrapped: boolean
+                translateToString: (trimRight?: boolean) => string
+            } | undefined
         }
     }
 }
@@ -19,6 +22,43 @@ export type TerminalExcerpt = {
     text: string
 }
 
+type BufferLine = {
+    isWrapped: boolean
+    translateToString: (trimRight?: boolean) => string
+}
+
+/**
+ * Collapse xterm visual rows into logical lines.
+ *
+ * When output wraps, continuation rows have `isWrapped`. Inserting a newline
+ * between those rows would split paths/commands/JSON. Trailing spaces at a
+ * wrap boundary are kept so identifiers are not glued together wrong.
+ */
+export function extractActiveBufferText(buffer: {
+    length: number
+    getLine: (index: number) => BufferLine | undefined
+}): string {
+    const logical: string[] = []
+    for (let i = 0; i < buffer.length; i++) {
+        const line = buffer.getLine(i)
+        if (!line) continue
+        const next = buffer.getLine(i + 1)
+        const nextContinues = Boolean(next?.isWrapped)
+        // Keep trailing spaces when the next visual row continues this line.
+        const text = line.translateToString(!nextContinues)
+        if (line.isWrapped && logical.length > 0) {
+            logical[logical.length - 1] += text
+        } else {
+            logical.push(text)
+        }
+    }
+
+    while (logical.length > 0 && logical[logical.length - 1]!.trim().length === 0) {
+        logical.pop()
+    }
+    return logical.join('\n')
+}
+
 /** Prefer a nonempty selection; otherwise the active buffer including scrollback. */
 export function extractTerminalExcerpt(terminal: TerminalTextSource): TerminalExcerpt | null {
     if (terminal.hasSelection()) {
@@ -28,28 +68,27 @@ export function extractTerminalExcerpt(terminal: TerminalTextSource): TerminalEx
         }
     }
 
-    const buffer = terminal.buffer.active
-    const lines: string[] = []
-    for (let i = 0; i < buffer.length; i++) {
-        const line = buffer.getLine(i)
-        if (!line) continue
-        lines.push(line.translateToString(true))
-    }
-
-    while (lines.length > 0 && lines[lines.length - 1]!.trim().length === 0) {
-        lines.pop()
-    }
-
-    const text = lines.join('\n')
+    const text = extractActiveBufferText(terminal.buffer.active)
     if (text.trim().length === 0) {
         return null
     }
     return { kind: 'buffer', text }
 }
 
+/** Fence longer than any backtick run in the body so terminal Markdown cannot close it. */
+export function chooseMarkdownFence(text: string): string {
+    const runs = text.match(/`+/gu) ?? []
+    let longest = 0
+    for (const run of runs) {
+        longest = Math.max(longest, run.length)
+    }
+    return '`'.repeat(Math.max(3, longest + 1))
+}
+
 export function formatTerminalExcerpt(excerpt: TerminalExcerpt): string {
     const label = excerpt.kind === 'selection' ? 'Terminal selection' : 'Terminal output'
-    return `### ${label}\n\n\`\`\`text\n${excerpt.text}\n\`\`\``
+    const fence = chooseMarkdownFence(excerpt.text)
+    return `### ${label}\n\n${fence}text\n${excerpt.text}\n${fence}`
 }
 
 /**

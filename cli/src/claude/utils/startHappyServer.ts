@@ -22,6 +22,7 @@ import type { InlineMediaSource } from "@/modules/common/inlineMediaSource";
 import { DISPLAY_IMAGE_PROMPT_CURSOR, DISPLAY_LINKS_PROMPT_CURSOR, DISPLAY_MEDIA_PROMPT_CURSOR, DISPLAY_VIDEO_PROMPT_CURSOR } from "@/modules/common/displayImagePrompt";
 import { buildDisplayLinksPayload, parseDisplayLinksInput } from "@hapi/protocol";
 import { resolveSkill } from "@/modules/common/skills";
+import { isPeerToolsDisabled, PEER_TOOL_NAMES } from "@/modules/common/peerTools";
 import { SESSION_NAME_MAX_LENGTH, toSessionSummaryMetadata } from '@hapi/protocol'
 import {
     ARCHIVE_PEER_TOOL_DESCRIPTION,
@@ -233,6 +234,10 @@ function createHapiMcpServer(
     });
 
     const maxInlineMediaBytes = 25 * 1024 * 1024;
+
+    // HAPI_DISABLE_PEER_TOOLS=1: peer tools are neither registered nor
+    // advertised, so wrapped agents cannot browse or message other sessions.
+    const peerToolsDisabled = isPeerToolsDisabled();
 
     const inspectPeerInputSchema: z.ZodTypeAny = z.object({
         sessionIdPrefix: z.string().trim().min(1).describe(SESSION_ID_PREFIX_PARAM_DESCRIPTION),
@@ -526,6 +531,7 @@ mcp.registerTool<any, any>('display_image', {
         });
     }
 
+    if (!peerToolsDisabled) {
     mcp.registerTool<any, any>('ping_peer', {
         description: PING_PEER_TOOL_DESCRIPTION,
         title: 'Ping Peer Session',
@@ -714,6 +720,7 @@ mcp.registerTool<any, any>('spawn_peer', {
             };
         }
     });
+    }
 
     mcp.registerTool<any, any>(SESSION_JOB_TOOL_NAME, {
         description: SESSION_JOB_TOOL_DESCRIPTION,
@@ -728,6 +735,7 @@ mcp.registerTool<any, any>('spawn_peer', {
         };
     });
 
+    if (!peerToolsDisabled) {
     mcp.registerTool<any, any>('list_peers', {
         description: 'List peer HAPI sessions on the same hub/namespace (id prefix, active, flavor, name). Uses this session\'s hub credentials - works from runner-spawned agents without being on the hub host. Prefer this over shelling `hapi ping-peer --list`. Then call inspect_peer / ping_peer with a listed id, search_peers for keyword inventory beyond the recency window, or spawn_peer to create a new peer with a remit.',
         title: 'List Peer Sessions',
@@ -819,6 +827,7 @@ mcp.registerTool<any, any>('spawn_peer', {
             };
         }
     });
+    }
 
     mcp.registerTool<any, any>('search_content', {
         description: SEARCH_CONTENT_DESCRIPTION,
@@ -992,6 +1001,7 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
         hapiMcpUrl: mcpUrl,
     }));
 
+    const peerToolsDisabled = isPeerToolsDisabled();
     const toolNames = enableChangeTitle
         ? ['change_title', 'set_voice_mode', 'link_issue', 'display_image', 'display_video', 'display_media']
         : ['set_voice_mode', 'link_issue', 'display_image', 'display_video', 'display_media'];
@@ -999,6 +1009,12 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
         toolNames.push('display_links');
     }
     toolNames.push('list_peers', 'search_peers', 'search_content', 'ping_peer', 'inspect_peer', 'spawn_peer', 'archive_peer', SESSION_JOB_TOOL_NAME);
+    if (peerToolsDisabled) {
+        const peerTools = new Set<string>(PEER_TOOL_NAMES);
+        for (let i = toolNames.length - 1; i >= 0; i--) {
+            if (peerTools.has(toolNames[i])) toolNames.splice(i, 1);
+        }
+    }
     if (options.skillLookup) {
         toolNames.push('skill_lookup');
     }

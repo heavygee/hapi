@@ -120,7 +120,14 @@ export class SessionCache {
 
     constructor(
         private readonly store: Store,
-        private readonly publisher: EventPublisher
+        private readonly publisher: EventPublisher,
+        private readonly hooks: {
+            /** Fires after a merge deletes a session row. Dedup collisions and
+             *  resume-id rotation both land in `mergeSessionData`, so this is
+             *  the single notification point; owners keyed on the removed id
+             *  (e.g. the hub's enumeration cache) release their entries here. */
+            onSessionMergedAway?: (oldSessionId: string, newSessionId: string) => void
+        } = {}
     ) {
     }
 
@@ -601,7 +608,7 @@ export class SessionCache {
         const previousActiveTurnStartedAt = session.activeTurnStartedAt
 
         session.active = true
-        session.activeAt = Math.max(session.activeAt, t)
+        session.activeAt = Math.max(session.activeAt, hubNow)
         session.thinking = requestedThinking || preserveQueuedThinking
         session.thinkingAt = t
         if (preserveQueuedThinking && t < (session.activeTurnStartedAt ?? 0)) {
@@ -1992,6 +1999,7 @@ export class SessionCache {
                 this.recordAgentProgress(newSessionId, oldProgressAt)
             }
             this.agentProgressAtBySessionId.delete(oldSessionId)
+            this.hooks.onSessionMergedAway?.(oldSessionId, newSessionId)
         } else {
             this.refreshSession(oldSessionId)
         }

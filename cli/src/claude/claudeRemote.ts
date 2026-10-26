@@ -18,6 +18,13 @@ import { resolveClaudeRemoteResumeTarget } from "./utils/claudeResumeGuard";
 
 export { ClaudeResumeUnavailableError } from "./utils/claudeResumeUnavailableError";
 
+// acceptEdits/bypassPermissions are emulated in canCallTool so they can change
+// mid-session. Launching Claude natively in them skips canCallTool, so a later
+// downgrade (e.g. Yolo -> Default) would never take effect.
+function nativePermissionMode(mode: PermissionMode): PermissionMode {
+    return mode === 'acceptEdits' || mode === 'bypassPermissions' ? 'default' : mode;
+}
+
 export async function claudeRemote(opts: {
 
     // Fixed parameters
@@ -168,7 +175,7 @@ export async function claudeRemote(opts: {
         resume: startFrom ?? undefined,
         forkSession,
         mcpServers: opts.mcpServers,
-        permissionMode: bootstrapMode.permissionMode,
+        permissionMode: nativePermissionMode(bootstrapMode.permissionMode),
         model: bootstrapMode.model,
         effort: bootstrapMode.effort,
         fallbackModel: bootstrapMode.fallbackModel,
@@ -195,7 +202,7 @@ export async function claudeRemote(opts: {
             return;
         }
         initial = first;
-        sdkOptions.permissionMode = first.mode.permissionMode;
+        sdkOptions.permissionMode = nativePermissionMode(first.mode.permissionMode);
         sdkOptions.model = first.mode.model;
         sdkOptions.effort = first.mode.effort;
         sdkOptions.fallbackModel = first.mode.fallbackModel;

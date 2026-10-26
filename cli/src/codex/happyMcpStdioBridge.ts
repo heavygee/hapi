@@ -33,6 +33,7 @@ import {
 import { SESSION_NAME_MAX_LENGTH } from '@hapi/protocol';
 import { CREATABLE_AGENT_FLAVORS } from '@hapi/protocol/modes';
 import { PermissionModeSchema } from '@hapi/protocol/schemas';
+import { isPeerToolsDisabled, PEER_TOOL_NAMES } from '@/modules/common/peerTools';
 
 const DEFAULT_TOOL_NAMES = [
   'change_title',
@@ -75,6 +76,13 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
   try {
     // Resolve target HTTP MCP URL
     const { url: urlFromArgs, toolNames } = parseArgs(argv);
+
+    // HAPI_DISABLE_PEER_TOOLS=1: drop peer tools even when explicitly listed,
+    // so a wrapped agent cannot re-enable them via a stale --tools value.
+    if (isPeerToolsDisabled()) {
+      for (const name of PEER_TOOL_NAMES) toolNames.delete(name);
+    }
+
     const baseUrl = urlFromArgs || process.env.HAPI_HTTP_MCP_URL || '';
 
     if (!baseUrl) {

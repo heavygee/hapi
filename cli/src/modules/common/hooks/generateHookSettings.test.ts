@@ -29,12 +29,14 @@ describe('buildHookSettings', () => {
     });
 
     it('adds permission-mode-carrying hooks when trackPermissionMode is set', () => {
-        const settings = buildHookSettings('forward-cmd', undefined, true);
-        expect(settings.hooks.UserPromptSubmit?.[0].hooks[0].command).toBe('forward-cmd');
-        expect(settings.hooks.PreToolUse?.[0].matcher).toBe('*');
-        expect(settings.hooks.PreToolUse?.[0].hooks[0].command).toBe('forward-cmd');
-    });
-});
+        const settings = buildHookSettings('forward-cmd', undefined, true)
+        expect(settings.hooks.UserPromptSubmit?.[0].hooks[0].command).toBe('forward-cmd')
+        expect(settings.hooks.PreToolUse?.[0].matcher).toBe('*')
+        expect(settings.hooks.PreToolUse?.[0].hooks[0].command).toBe('forward-cmd')
+        expect(settings.hooks.PostModelSwitch?.[0].hooks[0].command).toBe('forward-cmd')
+    })
+})
+
 
 describe('buildHookSettings PTY approvals', () => {
     it('adds a long-lived PreToolUse hook when includePreToolUse is set', () => {

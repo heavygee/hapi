@@ -6,7 +6,8 @@
  */
 
 import { trimIdent } from '@/utils/trimIdent';
-import { buildSessionCitationSteerInstruction } from '@hapi/protocol/sessionCitation';
+import { buildSessionCitationSteerInstruction, SESSION_CITATION_DISABLED_STEER } from '@hapi/protocol/sessionCitation';
+import { isPeerToolsDisabled } from '@/modules/common/peerTools';
 import { HAPI_MCP_BRIDGE_PROMPT } from '@/modules/common/hapiMcpBridgePrompt';
 import {
     DISPLAY_IMAGE_PROMPT_HAPI_MCP,
@@ -23,7 +24,7 @@ import { withVoiceModeInstruction } from '@/modules/common/voiceModeInstruction'
  */
 export const TITLE_INSTRUCTION = trimIdent(`
     ${HAPI_MCP_BRIDGE_PROMPT}
-    ${buildSessionCitationSteerInstruction({
+    ${isPeerToolsDisabled() ? SESSION_CITATION_DISABLED_STEER : buildSessionCitationSteerInstruction({
         inspectTool: 'hapi_inspect_peer',
         pingTool: 'hapi_ping_peer',
         listPeersTool: 'hapi_list_peers',
@@ -49,7 +50,7 @@ export const OPENCODE_NATIVE_TOOL_INSTRUCTION = trimIdent(`
     ${DISPLAY_IMAGE_PROMPT_HAPI_MCP}
     ${DISPLAY_VIDEO_PROMPT_HAPI_MCP}
     ${DISPLAY_MEDIA_PROMPT_HAPI_MCP}
-    ${buildSessionCitationSteerInstruction({
+    ${isPeerToolsDisabled() ? SESSION_CITATION_DISABLED_STEER : buildSessionCitationSteerInstruction({
         inspectTool: 'hapi_inspect_peer',
         pingTool: 'hapi_ping_peer',
         listPeersTool: 'hapi_list_peers',

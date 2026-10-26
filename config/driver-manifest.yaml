@@ -1108,6 +1108,21 @@ layers:
   # Deliberately excludes Boards canonicalization / todoBoard port-normalization.
   - branch: driver/238-externalrefs-metadata-preprocess
 
+  # heavygee/hapi#238 follow-on — cap the externalRefs union at
+  # MAX_EXTERNAL_REFS (32) in both mergeContributionFields (sparse-write
+  # union) and mergeSessionMetadataForSessionMerge (session-consolidation
+  # union); falls back to the already-persisted side instead of ever
+  # writing an over-limit array. Thin tip on soup 729a31689:
+  # driver/238-externalrefs-union-cap @ 801211970. Adds the
+  # MAX_EXTERNAL_REFS constant itself (driver never had it); deliberately
+  # leaves ExternalRefsSchema's own array length unenforced (no schema
+  # .max()) — out of scope for this port. Shared+hub → remat --build-web +
+  # hapi-restart-hub (patient). Open question after absorb: whether this
+  # cap alone stops heavygee/hapi#238's primary-PR-chip demotion from
+  # flapping back (merge-vs-replace race with a concurrent status
+  # enrichment writer), or whether that needs its own follow-on.
+  - branch: driver/238-externalrefs-union-cap
+
   # heavygee/hapi#247 — deliberate fleet push + restore upgrade-runner; kill
   # keepalive/startup unattended auto-upgrade. Hub default stays alert; per-machine
   # auto (standalone personal hub) applies only on POST /api/fleet/push-upgrade.

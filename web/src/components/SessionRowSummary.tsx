@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
 import type { SessionSummary } from '@/types/api'
 import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
 import { ScheduleIcon } from '@/components/icons'
@@ -15,7 +15,8 @@ import { getLinkedGithubIssue } from '@/lib/externalRefs'
 import { getSessionLastSeenAt, getSessionManualUnreadAt } from '@/lib/sessionLastSeen'
 import { formatAbsoluteDateTime, formatRelativeTime } from '@/lib/relativeTime'
 import { formatScheduledTooltipDetail } from '@/lib/scheduledTime'
-import { getCodexImportedAt } from '@/lib/codexImportedSessions'
+import { getCodexImportedAt, subscribeCodexImportedSessions } from '@/lib/codexImportedSessions'
+import { useMinuteTick } from '@/hooks/useMinuteTick'
 import { getSessionTitle } from '@/lib/sessionTitle'
 import { useTranslation } from '@/lib/use-translation'
 import { getWorktreeSessionLabel } from '@/lib/sessionWorktreeLabel'
@@ -77,21 +78,19 @@ function formatCodexImportedRelativeTime(
     return formatRelativeTime(value, t)
 }
 
-function getSessionTimeStamp(session: SessionSummary): number | null {
-    const importedAt = session.metadata?.flavor === 'codex'
-        ? getCodexImportedAt(session.metadata?.agentSessionId)
-        : null
+function getSessionTimeStamp(session: SessionSummary, importedAt: number | null): number | null {
     if (importedAt !== null) return importedAt
     return Number.isFinite(session.updatedAt) ? session.updatedAt : null
 }
 
 function getSessionTimeLabel(
     session: SessionSummary,
+    importedAt: number | null,
     t: (key: string, params?: Record<string, string | number>) => string
 ): string | null {
-    const stamp = getSessionTimeStamp(session)
+    const stamp = getSessionTimeStamp(session, importedAt)
     if (stamp === null) return null
-    if (session.metadata?.flavor === 'codex' && getCodexImportedAt(session.metadata?.agentSessionId) !== null) {
+    if (importedAt !== null) {
         return formatCodexImportedRelativeTime(stamp, t)
     }
     return formatRelativeTime(stamp, t)
@@ -185,8 +184,12 @@ export function SessionRowSummary(props: {
     )
     const attentionId = attentionTooltipIdProp ?? ownedIds.attentionId
     const scheduleId = scheduleTooltipIdProp ?? ownedIds.scheduleId
-    const timeLabel = getSessionTimeLabel(s, t)
-    const timeStamp = getSessionTimeStamp(s)
+    // Rows are memoized, so the label keeps itself current.
+    useMinuteTick()
+    const codexSessionId = s.metadata?.flavor === 'codex' ? s.metadata?.agentSessionId : null
+    const importedAt = useSyncExternalStore(subscribeCodexImportedSessions, () => getCodexImportedAt(codexSessionId))
+    const timeLabel = getSessionTimeLabel(s, importedAt, t)
+    const timeStamp = getSessionTimeStamp(s, importedAt)
     const timeAbsolute = timeStamp !== null ? formatAbsoluteDateTime(timeStamp) : null
     const attachedJob = s.attachedJob?.status === 'running' ? s.attachedJob : null
     // Tick once a minute so elapsed wall-time advances without waiting for a heartbeat SSE.

@@ -1,9 +1,12 @@
 import {
     Children,
     cloneElement,
+    createContext,
     Fragment,
     isValidElement,
+    memo,
     useCallback,
+    useContext,
     useEffect,
     useLayoutEffect,
     useMemo,
@@ -67,6 +70,12 @@ import {
     usePinInProgressSessions,
     type PinInProgressMode
 } from '@/hooks/usePinInProgressSessions'
+import { useFixedSessionOrder } from '@/hooks/useFixedSessionOrder'
+import {
+    compareDescWithKeyTiebreak,
+    compareSessionsByOrderKeyDesc,
+    getSessionOrderKey
+} from '@/lib/sessionOrder'
 import {
     classifySessionAttention,
     getSessionBlockedLabelKey,
@@ -89,7 +98,6 @@ import {
     useSessionLastSeenVersion
 } from '@/lib/sessionLastSeen'
 import { useSessionRowTooltipIds } from '@/components/HoverTooltip'
-import { subscribeCodexImportedSessions } from '@/lib/codexImportedSessions'
 import { formatReopenError } from '@/lib/reopenError'
 import { resolveCursorReopenGate } from '@/lib/sessionResume'
 import { getSessionTitle, hasSessionTitleSignal } from '@/lib/sessionTitle'
@@ -221,6 +229,9 @@ export type SessionGroup = {
     machineId: string | null
     sessions: SessionSummary[]
     latestUpdatedAt: number
+    /** Newest creation-time key in the group. Drives the fixed-order group
+     *  sort: a group only moves when a NEW session is created inside it. */
+    latestCreatedAt: number
     hasActiveSession: boolean
     hasPinnedSession: boolean
 }
@@ -524,6 +535,7 @@ type MachineGroup = {
     totalSessions: number
     hasActiveSession: boolean
     latestUpdatedAt: number
+    latestCreatedAt: number
 }
 
 function usesWindowsSeparators(path: string): boolean {
@@ -855,7 +867,11 @@ export function getPreviousSessionVisibleCount(current: number, step: number): n
     return Math.max(normalizedStep, current - normalizedStep)
 }
 
-export function groupSessionsByDirectory(sessions: SessionSummary[]): SessionGroup[] {
+// Exported for tests. `fixedOrder` ("固定会话顺序") freezes the list:
+// sessions sort by creation time only (manual pins still float) and groups
+// sort by their newest creation time — updates and activity never move
+// anything, a group only moves when a new session is created inside it.
+export function groupSessionsByDirectory(sessions: SessionSummary[], fixedOrder = false): SessionGroup[] {
     const groups = new Map<string, { directory: string; machineId: string | null; sessions: SessionSummary[] }>()
 
     sessions.forEach(session => {
@@ -880,6 +896,9 @@ export function groupSessionsByDirectory(sessions: SessionSummary[]): SessionGro
             const sortedSessions = [...group.sessions].sort((a, b) => {
                 // Project pins stay first inside the folder (#1457 / intra-group only).
                 if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1
+                if (fixedOrder) {
+                    return compareSessionsByOrderKeyDesc(a, b)
+                }
                 const rankA = a.active ? (a.pendingRequestsCount > 0 ? 0 : 1) : 2
                 const rankB = b.active ? (b.pendingRequestsCount > 0 ? 0 : 1) : 2
                 if (rankA !== rankB) return rankA - rankB
@@ -887,6 +906,10 @@ export function groupSessionsByDirectory(sessions: SessionSummary[]): SessionGro
             })
             const latestUpdatedAt = group.sessions.reduce(
                 (max, s) => (s.updatedAt > max ? s.updatedAt : max),
+                -Infinity
+            )
+            const latestCreatedAt = group.sessions.reduce(
+                (max, s) => Math.max(max, getSessionOrderKey(s)),
                 -Infinity
             )
             const hasActiveSession = group.sessions.some(s => s.active)
@@ -900,6 +923,7 @@ export function groupSessionsByDirectory(sessions: SessionSummary[]): SessionGro
                 machineId: group.machineId,
                 sessions: sortedSessions,
                 latestUpdatedAt,
+                latestCreatedAt,
                 hasActiveSession,
                 hasPinnedSession
             }
@@ -907,6 +931,12 @@ export function groupSessionsByDirectory(sessions: SessionSummary[]): SessionGro
         .sort((a, b) => {
             if (a.hasPinnedSession !== b.hasPinnedSession) {
                 return a.hasPinnedSession ? -1 : 1
+            }
+            if (fixedOrder) {
+                return compareDescWithKeyTiebreak(
+                    { key: a.key, order: a.latestCreatedAt },
+                    { key: b.key, order: b.latestCreatedAt }
+                )
             }
             if (a.hasActiveSession !== b.hasActiveSession) {
                 return a.hasActiveSession ? -1 : 1
@@ -933,7 +963,8 @@ export function expandSelectedSessionCollapseOverrides(
 
 function groupByMachine(
     groups: SessionGroup[],
-    resolveMachineLabel: (id: string | null) => string
+    resolveMachineLabel: (id: string | null) => string,
+    fixedOrder = false
 ): MachineGroup[] {
     const map = new Map<string, MachineGroup>()
     for (const g of groups) {
@@ -947,6 +978,7 @@ function groupByMachine(
                 totalSessions: 0,
                 hasActiveSession: false,
                 latestUpdatedAt: 0,
+                latestCreatedAt: -Infinity,
             }
             map.set(key, mg)
         }
@@ -954,8 +986,15 @@ function groupByMachine(
         mg.totalSessions += g.sessions.length
         if (g.hasActiveSession) mg.hasActiveSession = true
         if (g.latestUpdatedAt > mg.latestUpdatedAt) mg.latestUpdatedAt = g.latestUpdatedAt
+        if (g.latestCreatedAt > mg.latestCreatedAt) mg.latestCreatedAt = g.latestCreatedAt
     }
     return [...map.values()].sort((a, b) => {
+        if (fixedOrder) {
+            return compareDescWithKeyTiebreak(
+                { key: a.machineId ?? UNKNOWN_MACHINE_ID, order: a.latestCreatedAt },
+                { key: b.machineId ?? UNKNOWN_MACHINE_ID, order: b.latestCreatedAt }
+            )
+        }
         if (a.hasActiveSession !== b.hasActiveSession) return a.hasActiveSession ? -1 : 1
         return b.latestUpdatedAt - a.latestUpdatedAt
     })
@@ -1798,7 +1837,38 @@ export function SessionListSearch(props: {
     )
 }
 
-function SessionItem(props: {
+// A row with an open menu or dialog holds its collapsed panel mounted.
+const CollapsiblePanelHoldContext = createContext<((held: boolean) => void) | null>(null)
+
+// Collapsed rows unmount after the close transition; mounted-but-hidden rows
+// would otherwise re-render on every session or machine update.
+function CollapsiblePanel(props: { open: boolean; children: ReactNode }) {
+    const [settled, setSettled] = useState(!props.open)
+    const [holds, setHolds] = useState(0)
+    const hold = useCallback((held: boolean) => setHolds((count) => count + (held ? 1 : -1)), [])
+    if (props.open && settled) {
+        setSettled(false)
+    }
+    return (
+        <div
+            className="collapsible-panel"
+            data-open={props.open || undefined}
+            onTransitionEnd={(event) => {
+                if (!props.open && event.target === event.currentTarget) {
+                    setSettled(true)
+                }
+            }}
+        >
+            <div className="collapsible-inner">
+                <CollapsiblePanelHoldContext.Provider value={hold}>
+                    {!settled || holds > 0 ? props.children : null}
+                </CollapsiblePanelHoldContext.Provider>
+            </div>
+        </div>
+    )
+}
+
+const SessionItem = memo(function SessionItem(props: {
     session: SessionSummary
     onSelect: (sessionId: string, targetMessageId?: string, targetMessageQuery?: string) => void
     showPath?: boolean
@@ -1879,6 +1949,13 @@ function SessionItem(props: {
         s.metadata?.flavor ?? null
     )
     const [reopenError, setReopenError] = useState<string | null>(null)
+    const holdPanel = useContext(CollapsiblePanelHoldContext)
+    const overlayOpen = menuOpen || renameOpen || exportOpen || archiveOpen || deleteOpen || reopenError !== null
+    useEffect(() => {
+        if (!overlayOpen || !holdPanel) return
+        holdPanel(true)
+        return () => holdPanel(false)
+    }, [overlayOpen, holdPanel])
 
     const handleSetPinMode = async (mode: 'none' | 'project' | 'global') => {
         try {
@@ -2154,7 +2231,7 @@ function SessionItem(props: {
             ) : null}
         </>
     )
-}
+})
 
 type PullToRefreshState = 'idle' | 'pulling' | 'ready'
 
@@ -2240,7 +2317,11 @@ export function SessionList(props: {
     const [flashBlockedSessionId, setFlashBlockedSessionId] = useState<string | null>(null)
     const [blockedOffscreen, setBlockedOffscreen] = useState<{ above: number; below: number }>({ above: 0, below: 0 })
     const blockedJumpCursorRef = useRef(0)
-    const { pinInProgressMode, pinInProgressSessions } = usePinInProgressSessions()
+    const { pinInProgressMode: configuredPinInProgressMode } = usePinInProgressSessions()
+    const { fixedSessionOrder } = useFixedSessionOrder()
+    // "固定会话顺序": the in-progress buckets are status-driven ordering, which
+    // contradicts a frozen list - fixed order pauses the feature entirely.
+    const pinInProgressMode: PinInProgressMode = fixedSessionOrder ? 'off' : configuredPinInProgressMode
     const { blockedAlertMode } = useBlockedAlertMode()
     const { machineFilter, setMachineFilter } = useSessionListMachineFilter()
     const showDetailedStatus = sessionListStatusMode === 'detailed'
@@ -2314,13 +2395,6 @@ export function SessionList(props: {
         || showWorkingOnly
         || sessionFilters.scratchlist
         || showBlockedOnly
-
-    useEffect(() => {
-        // 中文注释：监听导入标记变化，让列表在“导入完成”或“用户已在 Hapi 中继续会话”后立即刷新时间文案。
-        return subscribeCodexImportedSessions(() => {
-            setCodexImportedSessionsVersion((value) => value + 1)
-        })
-    }, [])
 
     const resolveMachineLabel = (machineId: string | null): string => {
         if (machineId && machineLabelsById[machineId]) {
@@ -2412,12 +2486,12 @@ export function SessionList(props: {
         return messageIds
     }, [contentSearchResponse])
     const allGroups = useMemo(
-        () => groupSessionsByDirectory(allSessions),
-        [allSessions]
+        () => groupSessionsByDirectory(allSessions, fixedSessionOrder),
+        [allSessions, fixedSessionOrder]
     )
     const machineFilters = useMemo(
-        () => groupByMachine(allGroups, resolveMachineLabel),
-        [allGroups, machineLabelsById] // eslint-disable-line react-hooks/exhaustive-deps
+        () => groupByMachine(allGroups, resolveMachineLabel, fixedSessionOrder),
+        [allGroups, fixedSessionOrder, machineLabelsById] // eslint-disable-line react-hooks/exhaustive-deps
     )
     const machineFilterItems = useMemo(
         () => machineFilters.map((mg) => {
@@ -2570,8 +2644,11 @@ export function SessionList(props: {
         if (searchScoreIndex && hasTextQuery) {
             return { pinned: sortSessionsBySearchRelevance(pinned, searchScoreIndex), unpinned }
         }
+        if (fixedSessionOrder) {
+            return { pinned: [...pinned].sort(compareSessionsByOrderKeyDesc), unpinned }
+        }
         return { pinned, unpinned }
-    }, [machineFilteredSessions, searchScoreIndex, hasTextQuery])
+    }, [machineFilteredSessions, searchScoreIndex, hasTextQuery, fixedSessionOrder])
     // Fleet-wide count, deliberately computed BEFORE search / time / unread /
     // machine narrowing: the pill exists to tell the operator how much blocked
     // work exists, and a count that silently shrank behind a filter would be
@@ -2597,8 +2674,8 @@ export function SessionList(props: {
         const now = Date.now()
         return unpinnedMachineSessions
             .filter(session => sessionIsBlocked(session, { now }))
-            .sort((a, b) => b.updatedAt - a.updatedAt)
-    }, [unpinnedMachineSessions])
+            .sort(fixedSessionOrder ? compareSessionsByOrderKeyDesc : (a, b) => b.updatedAt - a.updatedAt)
+    }, [unpinnedMachineSessions, fixedSessionOrder])
     const blockedSectionIds = useMemo(
         () => new Set(blockedSectionSessions.map(session => session.id)),
         [blockedSectionSessions]
@@ -2666,14 +2743,15 @@ export function SessionList(props: {
                     if (pinInProgressMode !== 'off'
                         && isPinnedInProgressSession(session, pinInProgressMode)) return false
                     return true
-                })
+                }),
+                fixedSessionOrder
             )
             if (searchScoreIndex && hasTextQuery) {
                 return rankSessionGroupsBySearchRelevance(grouped, searchScoreIndex)
             }
             return grouped
         },
-        [unpinnedMachineSessions, pinInProgressMode, blockedSectionIds, searchScoreIndex, hasTextQuery]
+        [unpinnedMachineSessions, pinInProgressMode, blockedSectionIds, fixedSessionOrder, searchScoreIndex, hasTextQuery]
     )
     // Destructive group actions must scope to the FULL project group, not the
     // rendered subset: `groups` above drops global-pinned/in-progress rows and
@@ -2693,9 +2771,10 @@ export function SessionList(props: {
     // session-list filters stay consistent.
     const allDirectoryGroups = useMemo(
         () => groupSessionsByDirectory(
-            machineFilteredSessions.filter((session) => !session.globalPinned)
+            machineFilteredSessions.filter((session) => !session.globalPinned),
+            fixedSessionOrder
         ),
-        [machineFilteredSessions]
+        [machineFilteredSessions, fixedSessionOrder]
     )
     const actionOnlyGroups = useMemo(() => {
         // Under the blocked lens the operator asked for blocked rows and
@@ -2843,8 +2922,7 @@ export function SessionList(props: {
                         ({count})
                     </span>
                 </div>
-                <div className="collapsible-panel" data-open={(!collapsed || isFiltering) || undefined}>
-                    <div className="collapsible-inner">
+                <CollapsiblePanel open={!collapsed || isFiltering}>
                     <div className="flex flex-col gap-0.5 ml-3 pl-1 py-1">
                         {bucketKeys.map((bucketKey) => {
                             const bucket = RUNNING_BUCKETS.find((b) => b.key === bucketKey)
@@ -2881,8 +2959,7 @@ export function SessionList(props: {
                             )
                         })}
                     </div>
-                    </div>
-                </div>
+                </CollapsiblePanel>
             </div>
         )
     }
@@ -2943,8 +3020,7 @@ export function SessionList(props: {
                 />
 
                 {/* Sessions */}
-                <div className="collapsible-panel" data-open={!isCollapsed || undefined}>
-                    <div className="collapsible-inner">
+                <CollapsiblePanel open={!isCollapsed}>
                     <div className="flex flex-col gap-0.5 ml-3 pl-1 py-1">
                         {visibleGroupSessions.map((s, index) => (
                             <div key={s.id} className="contents">
@@ -2995,8 +3071,7 @@ export function SessionList(props: {
                             </div>
                         ) : null}
                     </div>
-                    </div>
-                </div>
+                </CollapsiblePanel>
             </div>
         )
     }
@@ -3767,8 +3842,7 @@ export function SessionList(props: {
                                 ({pinnedSessions.length})
                             </span>
                         </div>
-                        <div className="collapsible-panel" data-open={(!pinnedSectionCollapsed || isFiltering) || undefined}>
-                            <div className="collapsible-inner">
+                        <CollapsiblePanel open={!pinnedSectionCollapsed || isFiltering}>
                                 <div className="flex flex-col gap-0.5 ml-3 pl-1 py-1">
                                     {pinnedSessions.map((s) => (
                                         <SessionItem
@@ -3788,8 +3862,7 @@ export function SessionList(props: {
                                         />
                                     ))}
                                 </div>
-                            </div>
-                        </div>
+                        </CollapsiblePanel>
                     </div>
                 ) : null}
 
@@ -3821,8 +3894,7 @@ export function SessionList(props: {
                                 ({blockedSectionSessions.length})
                             </span>
                         </div>
-                        <div className="collapsible-panel" data-open={(!blockedSectionCollapsed || isFiltering) || undefined}>
-                            <div className="collapsible-inner">
+                        <CollapsiblePanel open={!blockedSectionCollapsed || isFiltering}>
                                 <div className="flex flex-col gap-0.5 ml-3 pl-1 py-1">
                                     {blockedSectionSessions.map((s) => (
                                         <SessionItem
@@ -3845,8 +3917,7 @@ export function SessionList(props: {
                                         />
                                     ))}
                                 </div>
-                            </div>
-                        </div>
+                        </CollapsiblePanel>
                     </div>
                 ) : null}
 
