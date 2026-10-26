@@ -27,6 +27,7 @@ import { BoardItemDetail } from '@/components/BoardItemDetail'
 import { resolveBoardItemDirectory } from '@/lib/resolveBoardItemDirectory'
 import { buildBoardItemSpawnMessage } from '@/lib/boardItemSpawnMessage'
 import { clearBoardSpawnBriefing, peekBoardSpawnBriefing, stashBoardSpawnBriefing } from '@/lib/boardSpawnBriefing'
+import { deliverWithActivationRetry } from '@/lib/deliverWithActivationRetry'
 import { isBoardItemDetailNavigation, isHistoryPopNavigation, shouldExitBoardsModeForNavigation } from '@/lib/sessionsBoardsModeSync'
 import { consumeExplicitSessionNavigationIntent } from '@/lib/explicitSessionNavigationIntent'
 import { isAbandoningSpawnFlow } from '@/lib/spawnFlowAbandonment'
@@ -1420,7 +1421,12 @@ function NewSessionPage() {
             // Fire-and-forget: a failed delivery shouldn't block the spawn
             // flow the operator is already mid-navigation through — the
             // session still exists and is usable, just without its briefing.
-            api.sendMessage(sessionId, briefing.message).catch(() => {
+            // Retries through a brief session_inactive window (review
+            // finding): the spawned CLI's socket can connect and send
+            // session-alive slightly after the hub acks the spawn webhook,
+            // so an immediate send can 409 even though the session is about
+            // to be active within a second or two.
+            deliverWithActivationRetry(() => api.sendMessage(sessionId, briefing.message)).catch(() => {
                 addToast({
                     title: t('boards.detail.spawnMessageFailed'),
                     body: t('boards.detail.spawnMessageFailedBody'),

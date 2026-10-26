@@ -107,7 +107,16 @@ export function IssueFormFieldView(props: {
                 </div>
             )
         }
-        const value = selected[0] ?? (field.defaultIndex !== undefined ? field.options[field.defaultIndex] : undefined) ?? ''
+        // An explicit answer (even `selected: []` from picking the empty
+        // option) is authoritative once it exists — falling back to the
+        // template default whenever selected[0] is empty would redisplay a
+        // default the user just explicitly cleared, while canSubmitForm and
+        // formatIssueBody both still (correctly) treat the clear as empty,
+        // so the field would show a selection it does not actually have
+        // (review finding).
+        const value = answer && answer.kind === 'dropdown'
+            ? (selected[0] ?? '')
+            : (field.defaultIndex !== undefined ? field.options[field.defaultIndex] : undefined) ?? ''
         return (
             <div className="flex flex-col gap-1.5">
                 {label}

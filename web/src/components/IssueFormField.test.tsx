@@ -45,6 +45,22 @@ describe('IssueFormFieldView', () => {
         expect(onChange).toHaveBeenCalledWith({ kind: 'dropdown', id: 'version', selected: ['2.0'] })
     })
 
+    it('shows the template default for a single-select dropdown with no answer yet', () => {
+        renderField(
+            { kind: 'dropdown', id: 'version', label: 'Version', options: ['1.0', '2.0'], multiple: false, defaultIndex: 1, required: true },
+            undefined
+        )
+        expect(screen.getByRole('combobox')).toHaveValue('2.0')
+    })
+
+    it('honors an explicitly cleared dropdown answer instead of redisplaying the template default (review finding)', () => {
+        renderField(
+            { kind: 'dropdown', id: 'version', label: 'Version', options: ['1.0', '2.0'], multiple: false, defaultIndex: 1, required: true },
+            { kind: 'dropdown', id: 'version', selected: [] }
+        )
+        expect(screen.getByRole('combobox')).toHaveValue('')
+    })
+
     it('renders a multi-select dropdown as checkboxes and toggles independently', () => {
         const onChange = renderField(
             { kind: 'dropdown', id: 'browsers', label: 'Browsers', options: ['Firefox', 'Chrome'], multiple: true, required: false },
