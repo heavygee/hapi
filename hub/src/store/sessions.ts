@@ -128,11 +128,27 @@ function carryForwardIfMissing(
 function mergeContributionFields(
     prior: Record<string, unknown>,
     next: Record<string, unknown>,
-    merged: Record<string, unknown> | null
+    merged: Record<string, unknown> | null,
+    options?: { replaceExternalRefs?: boolean }
 ): Record<string, unknown> | null {
     merged = carryForwardIfMissing(prior, next, merged, CONTRIBUTION_FIELDS)
     // Omitted key — carryForwardIfMissing above already handled it.
     if (next.externalRefs === undefined) {
+        return merged
+    }
+
+    // Dedicated mutation callers (mutateSessionExternalRefs: link_issue,
+    // link_pr, remove-primary, ...) already read the session's current refs
+    // fresh and apply a pure transform inside the metadata-version retry
+    // loop — the array they pass here IS the full intended result, not a
+    // possibly-sparse snapshot. Routing it through the union-with-prior
+    // logic below would silently resurrect whatever it just removed (review
+    // finding: removing a primary PR while an issue ref is also attached
+    // restored the PR, since the issue-only result looked exactly like a
+    // sparse/stale write missing the PR it didn't know about).
+    if (options?.replaceExternalRefs) {
+        merged = merged ?? { ...next }
+        merged.externalRefs = toValidExternalRefs(next.externalRefs)
         return merged
     }
 
@@ -191,7 +207,11 @@ function preserveCursorProtocolPair(
     return merged
 }
 
-export function mergeSessionMetadata(prior: unknown, next: unknown): unknown {
+export function mergeSessionMetadata(
+    prior: unknown,
+    next: unknown,
+    options?: { replaceExternalRefs?: boolean }
+): unknown {
     if (!isPlainObject(prior) || !isPlainObject(next)) {
         return next
     }
@@ -199,7 +219,7 @@ export function mergeSessionMetadata(prior: unknown, next: unknown): unknown {
     merged = carryForwardIfMissing(prior, next, merged, PARSE_IDENTITY_FIELDS)
     merged = carryForwardIfMissing(prior, next, merged, ROUTING_FIELDS)
     merged = carryForwardIfMissing(prior, next, merged, SIMPLE_RESUME_TOKENS)
-    merged = mergeContributionFields(prior, next, merged)
+    merged = mergeContributionFields(prior, next, merged, options)
     merged = preserveCursorProtocolPair(prior, next, merged)
     return merged ?? next
 }
@@ -483,7 +503,7 @@ export function updateSessionMetadata(
     metadata: unknown,
     expectedVersion: number,
     namespace: string,
-    options?: { touchUpdatedAt?: boolean; allowUnarchive?: boolean }
+    options?: { touchUpdatedAt?: boolean; allowUnarchive?: boolean; replaceExternalRefs?: boolean }
 ): VersionedUpdateResult<unknown | null> {
     const now = Date.now()
     const touchUpdatedAt = options?.touchUpdatedAt !== false
@@ -497,7 +517,7 @@ export function updateSessionMetadata(
             }
 
             const prior = existing.metadata
-            let merged = mergeSessionMetadata(prior, metadata)
+            let merged = mergeSessionMetadata(prior, metadata, { replaceExternalRefs: options?.replaceExternalRefs })
 
             // #1911 M1: unauthorized un-archive of hub-archived rows.
             // Return success + merge-preserved archive fields — NOT version-mismatch

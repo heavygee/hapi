@@ -65,7 +65,7 @@ export class SessionStore {
         metadata: unknown,
         expectedVersion: number,
         namespace: string,
-        options?: { touchUpdatedAt?: boolean; allowUnarchive?: boolean }
+        options?: { touchUpdatedAt?: boolean; allowUnarchive?: boolean; replaceExternalRefs?: boolean }
     ): VersionedUpdateResult<unknown | null> {
         return updateSessionMetadata(this.db, id, metadata, expectedVersion, namespace, options)
     }

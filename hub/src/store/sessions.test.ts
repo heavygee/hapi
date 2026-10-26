@@ -1212,6 +1212,62 @@ describe('updateSessionMetadata: protocol resume token preservation', () => {
         expect(metadata?.externalRefs).toEqual([refOne, refTwo])
     })
 
+    // Review finding: a dedicated mutation (mutateSessionExternalRefs, behind
+    // link_issue/link_pr/remove-primary) computes the full intended result
+    // from a freshly-read current state — it is never a sparse snapshot like
+    // the CLI write above, so unioning it with prior is exactly wrong: an
+    // issue-only array (after removing a primary PR) looks identical to a
+    // stale write that merely doesn't know about the PR yet, and the union
+    // silently resurrected it. `replaceExternalRefs: true` opts out of that
+    // union for this one call.
+    it('replaceExternalRefs: true replaces outright instead of unioning with prior — does not resurrect a removed ref', () => {
+        const store = makeStore()
+        const prRef = { kind: 'github_pr', url: 'https://github.com/tiann/hapi/pull/1163', repo: 'tiann/hapi', number: 1163, role: 'primary', source: 'user', linkedAt: 1 }
+        const issueRef = { kind: 'github_issue', url: 'https://github.com/tiann/hapi/issues/238', repo: 'tiann/hapi', number: 238, linkedAt: 2 }
+        const session = store.sessions.getOrCreateSession(
+            'replace-no-resurrect',
+            { path: '/tmp/project', host: 'example', externalRefs: [prRef, issueRef] },
+            null,
+            'default'
+        )
+
+        // Mirrors remove-primary's own transform: drop the PR, keep the rest.
+        const result = store.sessions.updateSessionMetadata(
+            session.id,
+            { path: '/tmp/project', host: 'example', externalRefs: [issueRef] },
+            session.metadataVersion,
+            'default',
+            { replaceExternalRefs: true }
+        )
+        expect(result.result).toBe('success')
+
+        const metadata = getMetadata(store, session.id)
+        expect(metadata?.externalRefs).toEqual([issueRef])
+    })
+
+    it('replaceExternalRefs: true still honors an explicit empty-array clear', () => {
+        const store = makeStore()
+        const ref = { kind: 'github_issue', url: 'https://github.com/acme/repo/issues/1', repo: 'acme/repo', number: 1, linkedAt: 1 }
+        const session = store.sessions.getOrCreateSession(
+            'replace-clear',
+            { path: '/tmp/project', host: 'example', externalRefs: [ref] },
+            null,
+            'default'
+        )
+
+        const result = store.sessions.updateSessionMetadata(
+            session.id,
+            { path: '/tmp/project', host: 'example', externalRefs: [] },
+            session.metadataVersion,
+            'default',
+            { replaceExternalRefs: true }
+        )
+        expect(result.result).toBe('success')
+
+        const metadata = getMetadata(store, session.id)
+        expect(metadata?.externalRefs).toEqual([])
+    })
+
     // Found by Meta during a soup absorb and independently confirmed by hand
     // against this exact code (not just the test): an explicit
     // `externalRefs: []` is a deliberate unlink-to-empty, not a sparse/stale

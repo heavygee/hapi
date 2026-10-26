@@ -23,8 +23,19 @@ describe('stripExternalRefsWhenAwarenessDisabled', () => {
         })
     })
 
-    it('strips every github_pr ref, leaving an empty array when nothing else is present', () => {
+    it('omits the key (not `[]`) when filtering leaves nothing — a stored PR link must survive, not read as an explicit clear', () => {
+        // A routine write (e.g. a routine CLI metadata sync) that still
+        // echoes a cached PR-only array, after awareness is disabled, has
+        // nothing left to say about external refs — `[]` would read
+        // downstream as "clear everything," wiping a PR link this specific
+        // write never meant to touch (review finding).
         const metadata = { path: '/tmp', externalRefs: [PR_REF] }
+        const result = stripExternalRefsWhenAwarenessDisabled(metadata, false) as Record<string, unknown>
+        expect('externalRefs' in result).toBe(false)
+    })
+
+    it('passes a genuinely empty input array through as `[]` — a real deliberate clear is still honored', () => {
+        const metadata = { path: '/tmp', externalRefs: [] }
         expect(stripExternalRefsWhenAwarenessDisabled(metadata, false)).toEqual({
             path: '/tmp',
             externalRefs: []

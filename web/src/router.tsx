@@ -28,6 +28,7 @@ import { resolveBoardItemDirectory } from '@/lib/resolveBoardItemDirectory'
 import { buildBoardItemSpawnMessage } from '@/lib/boardItemSpawnMessage'
 import { clearBoardSpawnBriefing, peekBoardSpawnBriefing, stashBoardSpawnBriefing } from '@/lib/boardSpawnBriefing'
 import { isBoardItemDetailNavigation, isHistoryPopNavigation, shouldExitBoardsModeForNavigation } from '@/lib/sessionsBoardsModeSync'
+import { consumeExplicitSessionNavigationIntent } from '@/lib/explicitSessionNavigationIntent'
 import { isAbandoningSpawnFlow } from '@/lib/spawnFlowAbandonment'
 import { parseIssueUrl } from '@hapi/protocol/schemas'
 import { findBoardItemForIssue, findSessionLinkedToIssue, getLinkedGithubIssue, type BoardItemMatch } from '@/lib/externalRefs'
@@ -475,7 +476,14 @@ function SessionsPage() {
             isOwnBoardItemNavigationRef.current = false
             if (isOwnBoardItemNavigation) return
 
-            if (isPop && isBoardItemDetailNavigation(event.pathChanged, event.fromLocation?.search ?? {}, event.toLocation.search)) {
+            // Explicit signal wins over the pop/boardItem-search heuristic —
+            // see explicitSessionNavigationIntent.ts's doc comment for why
+            // the heuristic alone is unsound here (TanStack Router reuses
+            // history indices after a Back + fresh push).
+            const hasExplicitSessionIntent = consumeExplicitSessionNavigationIntent()
+            if (!hasExplicitSessionIntent
+                && isPop
+                && isBoardItemDetailNavigation(event.pathChanged, event.fromLocation?.search ?? {}, event.toLocation.search)) {
                 return
             }
             if (shouldExitBoardsModeForNavigation(event.toLocation.pathname, sessionsMode)) {

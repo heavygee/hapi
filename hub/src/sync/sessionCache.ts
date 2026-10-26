@@ -1182,7 +1182,12 @@ export class SessionCache {
                 newMetadata,
                 stored.metadataVersion,
                 session.namespace,
-                { touchUpdatedAt: false }
+                // This call already computed the full intended externalRefs
+                // from a freshly-read current state — authoritative, not a
+                // sparse snapshot. Without this, the generic union-on-write
+                // merge could resurrect a ref this exact mutation just
+                // removed (review finding, hapi#238).
+                { touchUpdatedAt: false, replaceExternalRefs: true }
             )
 
             if (result.result === 'error') {

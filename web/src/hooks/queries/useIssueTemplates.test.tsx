@@ -94,6 +94,34 @@ describe('useIssueTemplates', () => {
         expect(second.result.current.isLoading).toBe(false)
     })
 
+    it('still fetches on reopen within the app\'s 5s global staleTime window, not just once that window has passed (review finding, second pass)', async () => {
+        // Matches the app's real default (web/src/lib/query-client.ts) —
+        // the test above used a bare QueryClient with no staleTime override,
+        // which never exercises this at all: vanilla React Query's own
+        // staleTime defaults to 0, so that test's "reopen" would have
+        // refetched even without this hook's own staleTime/refetchOnMount
+        // override (review finding: the prior regression missed this case).
+        const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 5_000 } } })
+        const githubNewIssueUrl = 'https://github.com/heavygee/hapi/issues/new/choose'
+        const firstResponse: GetIssueTemplatesResponse = { templates: [], blankAllowed: false, githubNewIssueUrl }
+        const secondResponse: GetIssueTemplatesResponse = { templates: [], blankAllowed: true, githubNewIssueUrl }
+        const getIssueTemplates = vi.fn()
+            .mockResolvedValueOnce(firstResponse)
+            .mockResolvedValueOnce(secondResponse)
+        const api = { getIssueTemplates } as unknown as ApiClient
+
+        const first = renderHook(() => useIssueTemplates(api, 'board-1', 'heavygee/hapi', true), { wrapper: createWrapper(queryClient) })
+        await waitFor(() => expect(first.result.current.isLoading).toBe(false))
+        first.unmount()
+
+        // Reopen immediately — well inside the 5s staleTime window. Without
+        // this hook's own staleTime: 0 override, React Query would see
+        // "fresh" cached data and skip the fetch entirely.
+        const second = renderHook(() => useIssueTemplates(api, 'board-1', 'heavygee/hapi', true), { wrapper: createWrapper(queryClient) })
+        await waitFor(() => expect(getIssueTemplates).toHaveBeenCalledTimes(2))
+        await waitFor(() => expect(second.result.current.blankAllowed).toBe(true))
+    })
+
     it('surfaces a thrown error message', async () => {
         const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
         const api = { getIssueTemplates: vi.fn().mockRejectedValue(new Error('rate limited')) } as unknown as ApiClient

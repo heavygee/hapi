@@ -38,6 +38,16 @@ export function useIssueTemplates(
             return await api.getIssueTemplates(boardId, repo)
         },
         enabled: Boolean(api && boardId && repo && enabled),
+        // Overrides the app's global 5s staleTime (web/src/lib/query-client.ts)
+        // — this hook stays mounted at the router level with `enabled`
+        // toggling, not actually unmounting between dialog opens, so without
+        // this a reopen within that window is a cache hit that never even
+        // starts a fetch (isFetching never flips true, stale data shown
+        // forever within the window) — review finding on the first pass at
+        // this bug, which only addressed the "fetch is in flight" display,
+        // not "a fetch gets started at all."
+        staleTime: 0,
+        refetchOnMount: 'always',
     })
 
     return {

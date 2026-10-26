@@ -32,7 +32,23 @@ export function stripExternalRefsWhenAwarenessDisabled(metadata: unknown, awaren
         delete next.externalRefs
         return next
     }
-    next.externalRefs = refs.filter(ref => !(ref && typeof ref === 'object' && (ref as { kind?: unknown }).kind === 'github_pr'))
+    const filtered = refs.filter(ref => !(ref && typeof ref === 'object' && (ref as { kind?: unknown }).kind === 'github_pr'))
+    // A genuinely empty *input* is a deliberate clear — pass it through as-is
+    // (mergeContributionFields honors `[]` as "unlink everything"). But if
+    // filtering *produced* the empty array from a nonempty one (every entry
+    // was a github_pr, now gone), omitting the key instead of sending `[]`
+    // matters: `[]` reads downstream as "explicitly clear everything,"
+    // wiping a *stored* PR link this write never meant to touch — it's just
+    // that this write, under disabled awareness, has nothing to say about
+    // PR refs either way (review finding: a routine CLI snapshot write that
+    // still echoes a cached PR-only array would otherwise delete that link
+    // the moment awareness is toggled off, contrary to #1162's retention
+    // requirement that existing links survive the toggle).
+    if (filtered.length === 0 && refs.length > 0) {
+        delete next.externalRefs
+        return next
+    }
+    next.externalRefs = filtered
     return next
 }
 
