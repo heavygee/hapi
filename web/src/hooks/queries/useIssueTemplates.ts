@@ -41,10 +41,18 @@ export function useIssueTemplates(
     })
 
     return {
+        // `isFetching`, not `isLoading`: the same board+repo pair queried
+        // again within React Query's cache window (e.g. reopening the
+        // dialog shortly after closing it) is a cache *hit* — `isLoading` is
+        // false and `templates`/`blankAllowed` below would show that stale
+        // cached data immediately while a live refetch runs silently in the
+        // background. That's exactly the "silently-stale form" this hook's
+        // own doc comment says never to allow (review finding) — `isFetching`
+        // covers both the cold-cache and warm-cache-revalidating cases.
         templates: query.data?.templates ?? EMPTY_TEMPLATES,
         blankAllowed: query.data?.blankAllowed ?? true,
         githubNewIssueUrl: query.data?.githubNewIssueUrl ?? null,
-        isLoading: query.isLoading,
+        isLoading: query.isFetching,
         error: query.error instanceof Error ? query.error.message : query.error ? 'Failed to load issue templates' : null,
     }
 }

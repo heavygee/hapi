@@ -66,6 +66,34 @@ describe('useIssueTemplates', () => {
         expect(result.current.isLoading).toBe(true)
     })
 
+    it('reports isLoading true on a warm-cache reopen while the live refetch is still in flight (review finding)', async () => {
+        const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        const githubNewIssueUrl = 'https://github.com/heavygee/hapi/issues/new/choose'
+        const staleResponse: GetIssueTemplatesResponse = { templates: [], blankAllowed: false, githubNewIssueUrl }
+        const freshResponse: GetIssueTemplatesResponse = { templates: [], blankAllowed: true, githubNewIssueUrl }
+        let resolveSecondFetch: (value: GetIssueTemplatesResponse) => void = () => {}
+        const getIssueTemplates = vi.fn()
+            .mockResolvedValueOnce(staleResponse)
+            .mockImplementationOnce(() => new Promise(resolve => { resolveSecondFetch = resolve }))
+        const api = { getIssueTemplates } as unknown as ApiClient
+
+        // First open — populates the cache for this exact boardId+repo key.
+        const first = renderHook(() => useIssueTemplates(api, 'board-1', 'heavygee/hapi', true), { wrapper: createWrapper(queryClient) })
+        await waitFor(() => expect(first.result.current.isLoading).toBe(false))
+        expect(first.result.current.blankAllowed).toBe(false)
+        first.unmount()
+
+        // Reopen with the same board+repo — a cache hit, so the stale value
+        // is available immediately, but a live refetch is still in flight.
+        const second = renderHook(() => useIssueTemplates(api, 'board-1', 'heavygee/hapi', true), { wrapper: createWrapper(queryClient) })
+        expect(second.result.current.blankAllowed).toBe(false)
+        expect(second.result.current.isLoading).toBe(true)
+
+        resolveSecondFetch(freshResponse)
+        await waitFor(() => expect(second.result.current.blankAllowed).toBe(true))
+        expect(second.result.current.isLoading).toBe(false)
+    })
+
     it('surfaces a thrown error message', async () => {
         const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
         const api = { getIssueTemplates: vi.fn().mockRejectedValue(new Error('rate limited')) } as unknown as ApiClient

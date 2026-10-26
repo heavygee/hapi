@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { formatIssueBody, isUsableIssueTemplate, type IssueFormField } from './issueTemplates'
+import { formatIssueBody, initialAnswersForFields, isUsableIssueTemplate, type IssueFormField } from './issueTemplates'
 
 describe('formatIssueBody', () => {
     it('skips markdown fields entirely (instructional only, no answer)', () => {
@@ -93,6 +93,38 @@ describe('formatIssueBody', () => {
             { kind: 'input', id: 'b', value: 'two' }
         ])
         expect(body).toBe('### A\n\none\n\n### B\n\ntwo')
+    })
+})
+
+describe('initialAnswersForFields', () => {
+    it('seeds an answer from an input field\'s own default value', () => {
+        const fields: IssueFormField[] = [{ kind: 'input', id: 'contact', label: 'Contact', value: 'me@example.com', required: false }]
+        expect(initialAnswersForFields(fields)).toEqual([{ kind: 'input', id: 'contact', value: 'me@example.com' }])
+    })
+
+    it('seeds an answer from a textarea field\'s own default value', () => {
+        const fields: IssueFormField[] = [{ kind: 'textarea', id: 'logs', label: 'Logs', value: 'nothing yet', required: false }]
+        expect(initialAnswersForFields(fields)).toEqual([{ kind: 'textarea', id: 'logs', value: 'nothing yet' }])
+    })
+
+    it('seeds a single-select dropdown\'s defaultIndex as its selected option', () => {
+        const fields: IssueFormField[] = [{ kind: 'dropdown', id: 'version', label: 'Version', options: ['1.0', '2.0'], multiple: false, defaultIndex: 1, required: true }]
+        expect(initialAnswersForFields(fields)).toEqual([{ kind: 'dropdown', id: 'version', selected: ['2.0'] }])
+    })
+
+    it('does not seed a multi-select dropdown even if defaultIndex is somehow present', () => {
+        const fields: IssueFormField[] = [{ kind: 'dropdown', id: 'browsers', label: 'Browsers', options: ['Firefox', 'Chrome'], multiple: true, defaultIndex: 0, required: false }]
+        expect(initialAnswersForFields(fields)).toEqual([])
+    })
+
+    it('skips fields with no default: markdown, unset input/textarea, dropdown with no defaultIndex, checkboxes', () => {
+        const fields: IssueFormField[] = [
+            { kind: 'markdown', value: 'hi' },
+            { kind: 'input', id: 'a', label: 'A', required: false },
+            { kind: 'dropdown', id: 'b', label: 'B', options: ['x'], multiple: false, required: false },
+            { kind: 'checkboxes', id: 'c', label: 'C', options: [{ label: 'opt', required: false }] }
+        ]
+        expect(initialAnswersForFields(fields)).toEqual([])
     })
 })
 

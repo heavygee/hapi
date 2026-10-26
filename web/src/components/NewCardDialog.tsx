@@ -13,6 +13,7 @@ import { getApiErrorMessage, getApiErrorUrl } from '@/lib/apiErrorMessage'
 import { useTranslation } from '@/lib/use-translation'
 import {
     formatIssueBody,
+    initialAnswersForFields,
     isUsableIssueTemplate,
     type IssueFormAnswer,
     type IssueTemplate,
@@ -132,7 +133,16 @@ export function NewCardDialog(props: NewCardDialogProps) {
 
     const handleTemplatePick = (template: TemplateSelection) => {
         setSelectedTemplate(template)
-        setAnswers({})
+        // Seed answers from the template's own defaults (an input/textarea's
+        // `value:`, a single-select dropdown's `defaultIndex:`) so accepting
+        // a prefilled field counts as answering it — otherwise the field
+        // shows a value on screen that canSubmitForm/formatIssueBody treat
+        // as unanswered until the user re-types it (review finding).
+        setAnswers(
+            template && template.kind === 'form'
+                ? Object.fromEntries(initialAnswersForFields(template.fields).map(answer => [answer.id, answer]))
+                : {}
+        )
         setFreeTextBody(template && template.kind === 'legacy' ? template.body : '')
         setStep('form')
     }

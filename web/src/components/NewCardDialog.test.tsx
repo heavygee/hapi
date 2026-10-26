@@ -38,6 +38,18 @@ const FORM_TEMPLATE: IssueTemplate = {
     ]
 }
 
+const TEMPLATE_WITH_DEFAULTS: IssueTemplate = {
+    id: 'defaults.yml',
+    name: 'Has defaults',
+    labels: [],
+    assignees: [],
+    kind: 'form',
+    fields: [
+        { kind: 'input', id: 'env', label: 'Environment', value: 'production', required: true },
+        { kind: 'dropdown', id: 'severity', label: 'Severity', options: ['Low', 'High'], multiple: false, defaultIndex: 1, required: true }
+    ]
+}
+
 const UNSUPPORTED_TEMPLATE: IssueTemplate = {
     id: 'weird.yml',
     name: 'Weird form',
@@ -80,6 +92,32 @@ describe('NewCardDialog', () => {
             })
             expect(props.onClose).toHaveBeenCalledOnce()
         })
+    })
+
+    it('counts a field\'s own prefilled default as answered — the user never has to re-type it to submit', async () => {
+        const onSubmit = vi.fn().mockResolvedValue('https://github.com/heavygee/hapi/issues/44')
+        renderDialog({ templates: [TEMPLATE_WITH_DEFAULTS], onSubmit })
+
+        fireEvent.change(screen.getByPlaceholderText('owner/repo'), { target: { value: 'heavygee/hapi' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+        fireEvent.click(await screen.findByText('Has defaults'))
+
+        // Both required fields already show their template defaults —
+        // nothing touched yet, but Next must not be disabled.
+        fireEvent.change(screen.getAllByRole('textbox')[0]!, { target: { value: 'A title' } })
+        const nextButton = screen.getByRole('button', { name: 'Next' })
+        expect(nextButton).not.toBeDisabled()
+        fireEvent.click(nextButton)
+
+        expect(screen.getByText(/### Environment/)).toBeInTheDocument()
+        expect(screen.getByText(/production/)).toBeInTheDocument()
+        expect(screen.getByText(/### Severity/)).toBeInTheDocument()
+
+        fireEvent.click(screen.getByRole('button', { name: 'Create issue' }))
+
+        await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+            body: '### Environment\n\nproduction\n\n### Severity\n\nHigh'
+        })))
     })
 
     it('offers "Open a blank issue" when allowed, with a free-text body', async () => {

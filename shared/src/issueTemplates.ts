@@ -133,6 +133,32 @@ export function isUsableIssueTemplate(
 }
 
 /**
+ * The answers a field's own template-declared defaults already represent
+ * before the user has touched anything — an input/textarea's `value:` and a
+ * single-select dropdown's `defaultIndex:` (review finding). Without this,
+ * `IssueFormFieldView` shows the prefilled value on screen, but it's
+ * invisible to both the dialog's required-field check and `formatIssueBody`
+ * below ("_No response_") until the user explicitly edits that field —
+ * accepting a sensible default should count as answering it. Checkboxes
+ * have no analogous "pre-checked" concept in the issue-forms schema, so
+ * there's nothing to seed for that kind.
+ */
+export function initialAnswersForFields(fields: IssueFormField[]): IssueFormAnswer[] {
+    const answers: IssueFormAnswer[] = []
+    for (const field of fields) {
+        if ((field.kind === 'input' || field.kind === 'textarea') && field.value) {
+            answers.push({ kind: field.kind, id: field.id, value: field.value })
+        } else if (field.kind === 'dropdown' && !field.multiple && field.defaultIndex !== undefined) {
+            const option = field.options[field.defaultIndex]
+            if (option !== undefined) {
+                answers.push({ kind: 'dropdown', id: field.id, selected: [option] })
+            }
+        }
+    }
+    return answers
+}
+
+/**
  * Formats a structured template's answers into the markdown body GitHub's
  * own issue-forms UI would produce. `markdown`-kind fields are instructional
  * only (no answer) and are skipped, matching GitHub's own behavior.
