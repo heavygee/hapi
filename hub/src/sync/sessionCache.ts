@@ -1,5 +1,5 @@
 import { SESSION_LIFECYCLE_IDLE, SESSION_LIFECYCLE_RUNNING } from '@hapi/protocol'
-import { mergeExternalRefs, upsertExternalRef, toValidExternalRefs, ExternalRefsSchema, type ExternalRef } from '@hapi/protocol/schemas'
+import { MAX_EXTERNAL_REFS, mergeExternalRefs, upsertExternalRef, toValidExternalRefs, ExternalRefsSchema, type ExternalRef } from '@hapi/protocol/schemas'
 import { AgentStateSchema, MetadataSchema, SessionPatchSchema, TeamStateSchema } from '@hapi/protocol/schemas'
 import type { CodexCollaborationMode, CopilotAgentMode, PermissionMode, Session, SessionPatch } from '@hapi/protocol/types'
 import type { Store } from '../store'
@@ -90,7 +90,19 @@ export function mergeSessionMetadataForSessionMerge(
     const oldRefs = toValidExternalRefs(oldObj.externalRefs)
     const newRefs = toValidExternalRefs(newObj.externalRefs)
     if (oldRefs.length > 0) {
-        const combinedRefs = mergeExternalRefs(newRefs, oldRefs)
+        let combinedRefs = mergeExternalRefs(newRefs, oldRefs)
+        // Two valid sessions can each independently sit near
+        // MAX_EXTERNAL_REFS; their union has no upper bound of its own.
+        // Persisting an over-limit array risks failing MetadataSchema
+        // validation on the *next* read, nulling out the survivor's entire
+        // metadata (name, path, flavor, resume ids, every ref) after the old
+        // row has already been deleted. Falling back to the survivor's own
+        // pre-merge refs loses only the old row's links beyond the cap,
+        // which is recoverable (re-link); losing the whole metadata object
+        // is not.
+        if (combinedRefs.length > MAX_EXTERNAL_REFS) {
+            combinedRefs = newRefs
+        }
         if (combinedRefs.length !== newRefs.length) {
             merged.externalRefs = combinedRefs
             changed = true
