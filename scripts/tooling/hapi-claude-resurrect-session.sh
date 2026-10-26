@@ -276,13 +276,28 @@ if [[ "$NO_ATTACH" -eq 1 ]]; then
     exit 0
 fi
 
-ACTIVE_LINK="$(readlink -f "${HAPI_ACTIVE:-$HOME/coding/hapi/active}" 2>/dev/null || true)"
-DRIVER_CLI="${HAPI_DRIVER_CLI:-${ACTIVE_LINK:-$HOME/coding/hapi/driver}/cli}"
-[[ -d "$DRIVER_CLI" ]] || { log "ERROR: driver cli missing: $DRIVER_CLI"; exit 2; }
+# Prefer explicit driver CLI. Never use a feature worktree as the Claude host —
+# `HAPI_ACTIVE` in agent shells often points at the wrong checkout.
+DRIVER_CLI="${HAPI_DRIVER_CLI:-}"
+if [[ -z "$DRIVER_CLI" || ! -d "$DRIVER_CLI" ]]; then
+    for candidate in \
+        "$HOME/coding/hapi/driver/cli" \
+        "/work/coding/hapi/driver/cli" \
+        "$(readlink -f "$HOME/coding/hapi/active" 2>/dev/null)/cli"
+    do
+        if [[ -n "$candidate" && -f "$candidate/src/ui/tokenInit.ts" ]]; then
+            DRIVER_CLI="$candidate"
+            break
+        fi
+    done
+fi
+[[ -f "$DRIVER_CLI/src/ui/tokenInit.ts" ]] || { log "ERROR: driver cli missing tokenInit under: ${DRIVER_CLI:-unset}"; exit 2; }
 
 export CLI_API_TOKEN
 CLI_API_TOKEN="$(jq -r '.cliApiToken' "$SETTINGS")"
 export HAPI_API_URL="$HUB"
+# Required by the nohup subshell (declare -f does not capture caller locals).
+export FULL_SID WORKDIR DRIVER_CLI
 
 LOG="/tmp/claude-resurrect-${FULL_SID:0:8}.log"
 PIDFILE="/tmp/claude-resurrect-${FULL_SID:0:8}.pid"
@@ -296,8 +311,8 @@ import { runClaude } from './src/claude/runClaude.ts';
 await initializeToken();
 await authAndSetupMachineIfNeeded();
 await runClaude({
-  existingSessionId: '${FULL_SID}',
-  workingDirectory: '${WORKDIR}',
+  existingSessionId: process.env.FULL_SID,
+  workingDirectory: process.env.WORKDIR,
   startedBy: 'runner',
   startingMode: 'remote',
   permissionMode: 'bypassPermissions',
@@ -305,28 +320,57 @@ await runClaude({
 "
 }
 
-log "attaching fresh Claude to $FULL_SID (cwd=$WORKDIR)..."
+log "attaching fresh Claude to $FULL_SID (cwd=$WORKDIR cli=$DRIVER_CLI)..."
 if [[ "$FOREGROUND" -eq 1 ]]; then
     attach_fresh
     exit 0
 fi
 
-nohup bash -c "$(declare -f attach_fresh); attach_fresh" >>"$LOG" 2>&1 &
+: >"$LOG"
+nohup env FULL_SID="$FULL_SID" WORKDIR="$WORKDIR" DRIVER_CLI="$DRIVER_CLI" \
+    CLI_API_TOKEN="$CLI_API_TOKEN" HAPI_API_URL="$HAPI_API_URL" \
+    bash -c "$(declare -f attach_fresh); attach_fresh" >>"$LOG" 2>&1 &
 echo $! >"$PIDFILE"
 log "started pid=$(cat "$PIDFILE") log=$LOG"
 
-# Wait until hub reports active (or timeout)
+# Wait until hub API reports active (sqlite can lag the in-memory cache).
 ok=0
-for _ in $(seq 1 45); do
-    state="$(sqlite3 "$DB" "SELECT active FROM sessions WHERE id='$FULL_SID'")"
-    if [[ "$state" == "1" ]]; then
-        ok=1
-        break
+JWT=""
+if JWT="$(curl -fsS --max-time 10 -X POST "$HUB/api/auth" \
+    -H 'Content-Type: application/json' \
+    -d "$(jq -cn --arg t "$(jq -r .cliApiToken "$SETTINGS")" '{accessToken:$t}')" \
+    | jq -r .token)"; then
+    :
+else
+    JWT=""
+fi
+for _ in $(seq 1 90); do
+    if [[ -n "$JWT" ]]; then
+        state="$(curl -fsS --max-time 5 -H "Authorization: Bearer $JWT" \
+            "$HUB/api/sessions/$FULL_SID" 2>/dev/null \
+            | jq -r '.session.active // empty')"
+        if [[ "$state" == "true" ]]; then
+            ok=1
+            break
+        fi
+    else
+        state="$(sqlite3 "$DB" "SELECT active FROM sessions WHERE id='$FULL_SID'")"
+        if [[ "$state" == "1" ]]; then
+            ok=1
+            break
+        fi
+    fi
+    # Fail fast if attach process already exited
+    if [[ -f "$PIDFILE" ]] && ! kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+        log "ERROR: attach process exited early — see $LOG"
+        tail -20 "$LOG" >&2 || true
+        exit 3
     fi
     sleep 1
 done
 if [[ "$ok" -ne 1 ]]; then
-    log "ERROR: session did not become active within 45s — see $LOG"
+    log "ERROR: session did not become active within 90s — see $LOG"
+    tail -20 "$LOG" >&2 || true
     exit 3
 fi
 log "session active."
