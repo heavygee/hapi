@@ -1,13 +1,18 @@
 # Session resurrection - recovering "dead" HAPI chats
 
 > **Rule:** no HAPI session is ever lost just because the hub thinks it crashed.
-> The conversation lives on disk in three independent stores. This doc shows
-> how to bring an archived session back to life with full context, in one
-> command, and the structural reasons it can die in the first place.
+> Hub scrollback survives. Agent-native resume stores (Cursor chat blob, Claude
+> `.jsonl`) are separate — when those go missing, use the flavor-specific
+> one-command tools below.
+
+**On oos-linux soup hub:** live DB is `/var/lib/hapi/hapi.db` (`HAPI_HOME`),
+not `~/.hapi/hapi.db`. Claude resurrect defaults to `/var/lib/hapi`; Cursor
+resurrect still defaults to `~/.hapi` — set `HAPI_DB` / `HAPI_SETTINGS` when
+needed.
 
 ---
 
-## What "dead" actually means
+## What "dead" actually means (Cursor)
 
 When the HAPI hub marks a session as `lifecycleState: 'archived'` with
 `archiveReason: 'Session crashed'`, it is hiding the session from the UI.
@@ -15,10 +20,10 @@ It is NOT deleting:
 
 | What                          | Where                                                  | Survives crash? |
 |-------------------------------|--------------------------------------------------------|-----------------|
-| Hub chat scrollback           | `~/.hapi/hapi.db` `messages` table (rows by `session_id`) | yes - all of it |
+| Hub chat scrollback           | hub `hapi.db` `messages` table (rows by `session_id`) | yes - all of it |
 | Cursor chat blob store        | `~/.cursor/chats/<md5(workspace-path)>/<chat-uuid>/store.db` | yes - all of it |
 | Cursor display transcript     | `~/.cursor/projects/<path-slug>/agent-transcripts/<uuid>.jsonl` | yes - all of it |
-| Session metadata + linkage    | `~/.hapi/hapi.db` `sessions.metadata` JSON              | **partially lost** - see below |
+| Session metadata + linkage    | hub `sessions.metadata` JSON              | **partially lost** - see below |
 
 The actual failure mode the operator sees is:
 - The session disappears from the web UI's main list (it is in `archived`).
@@ -29,7 +34,7 @@ The data is fine. The pointer is broken.
 
 ---
 
-## One-command recovery
+## One-command recovery (Cursor)
 
 ```bash
 hapi-resurrect-session <hapi-session-id-or-prefix>
@@ -213,9 +218,71 @@ The current fork-only mitigations should be promoted upstream:
 
 ---
 
+## Claude orphans (native transcript gone)
+
+Different failure mode from Cursor. Claude Code stores each thread as:
+
+`~/.claude/projects/<slug-of-cwd>/<claudeSessionId>.jsonl`
+
+HAPI keeps only the pointer `metadata.claudeSessionId`. When that `.jsonl` is
+deleted (cleanup, drawer wipe, manual `rm`) but the hub row still points at it:
+
+- `POST …/resume` and `…/reopen` return **409** `resume_unavailable`
+  ("Claude session transcript is no longer available on the recorded machine")
+- Hub **messages** for the session are still intact
+- A fresh Claude process on that HAPI id starts with **empty model context**
+  (UI history ≠ Claude context)
+
+`hapi-claude-rebind-session` needs a live `--resume <claudeSessionId>` — it
+cannot help when the file is gone.
+
+### One-command recovery (Claude)
+
+```bash
+hapi-claude-resurrect-session <hapi-session-id-or-prefix>
+```
+
+Script: `scripts/tooling/hapi-claude-resurrect-session.sh` (install via
+`install-hapi-local-bin.sh` → `~/.local/bin/hapi-claude-resurrect-session`).
+
+What it does:
+
+1. Confirms `flavor=claude` and that the native jsonl is **missing** (refuses
+   if the file is still present — use hub Resume / rebind instead; override
+   with `--force`).
+2. Patches metadata: clears dead `claudeSessionId` / `hostPid`, un-archives
+   (`lifecycleState=inactive`).
+3. `hapi-restart-hub --no-runner` so the hub cache matches sqlite.
+4. Attaches a **fresh** Claude CLI with `existingSessionId` and **no**
+   `resumeSessionId` (same HAPI URL / scrollback).
+5. Pings a mandatory **context-ingest remit**: the new Claude must pull this
+   session's HAPI transcript, reconstruct state, summarize, then continue.
+
+```bash
+# Plan only
+hapi-claude-resurrect-session 8d7885f7 --dry-run
+
+# Full revive + ingest remit
+hapi-claude-resurrect-session 8d7885f7
+
+# Metadata + hub flush only (operator will attach later)
+hapi-claude-resurrect-session 8d7885f7 --no-attach
+
+# Force fresh Claude even if jsonl still exists
+hapi-claude-resurrect-session 8d7885f7 --force
+```
+
+Estate audit (orphan rate): compare hub `claudeSessionId` values to
+`~/.claude/projects/**/*.jsonl` **on the session's host** (oos vs proxmox vs
+Teemo — do not probe remote hosts from oos disk alone).
+
+---
+
 ## See also
 
-- `scripts/tooling/hapi-resurrect-session.sh` - the script itself
+- `scripts/tooling/hapi-resurrect-session.sh` — Cursor crash/archive revive
+- `scripts/tooling/hapi-claude-resurrect-session.sh` — Claude jsonl-gone revive
+- `scripts/tooling/hapi-claude-rebind-session.sh` — Claude reattach when transcript **still exists**
 - `scripts/attach-agent-chat.{sh,ts}` - the original "attach legacy chat" tool (works for chats that were never linked to HAPI to begin with)
 - `scripts/backfill-agent-transcript.ts` - imports Cursor transcript lines into the HAPI messages table for empty scrollback
 - `localdocs/operator/reconnect-session.sh` - older reconnect helper for sessions that have lost only `cursorSessionId` (this script obsoletes it for the crash-archive case)
