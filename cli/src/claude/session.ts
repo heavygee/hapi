@@ -26,6 +26,8 @@ export class Session extends AgentSessionBase<EnhancedMode> {
     readonly startedBy: 'runner' | 'terminal';
     readonly startingMode: 'local' | 'remote';
     localLaunchFailure: LocalLaunchFailure | null = null;
+    /** Model the local TUI runs, "[1m]" suffix intact: launch seed, then PostModelSwitch. */
+    localContextModel: string | null = null;
     private nativeSkillNames = new Set<string>();
     /**
      * Resume id we asked Claude to continue on this spawn. Cleared after the

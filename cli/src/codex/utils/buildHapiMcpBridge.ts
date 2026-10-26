@@ -9,6 +9,7 @@ import { startHappyServer } from '@/claude/utils/startHappyServer';
 import { getHappyCliCommand } from '@/utils/spawnHappyCLI';
 import type { ApiSessionClient } from '@/api/apiSession';
 import { exportHapiSessionEnv } from '@/agent/hapiSessionEnv';
+import { isPeerToolsDisabled } from '@/modules/common/peerTools';
 import type { CodexMcpServerConfig } from './codexMcpServers';
 
 /**
@@ -112,10 +113,13 @@ export async function buildHapiMcpBridge(
         };
     }
     // Discovery shortlist only - same trust as skill_lookup / change_title.
-    tools.list_peers = {
-        approval_mode: 'approve'
-    };
-    // Transcript fleet search — read-only hub REST.
+    // Skipped under HAPI_DISABLE_PEER_TOOLS (tool is not registered then).
+    if (!isPeerToolsDisabled()) {
+        tools.list_peers = {
+            approval_mode: 'approve'
+        };
+    }
+    // Transcript fleet search — read-only hub REST (kept under peer-tools disable).
     tools.search_content = {
         approval_mode: 'approve'
     };

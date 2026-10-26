@@ -1108,6 +1108,43 @@ layers:
   # Deliberately excludes Boards canonicalization / todoBoard port-normalization.
   - branch: driver/238-externalrefs-metadata-preprocess
 
+  # heavygee/hapi#238 follow-on — cap the externalRefs union at
+  # MAX_EXTERNAL_REFS (32) in both mergeContributionFields (sparse-write
+  # union) and mergeSessionMetadataForSessionMerge (session-consolidation
+  # union); falls back to the already-persisted side instead of ever
+  # writing an over-limit array. Thin tip on soup 729a31689:
+  # driver/238-externalrefs-union-cap @ 801211970. Adds the
+  # MAX_EXTERNAL_REFS constant itself (driver never had it); deliberately
+  # leaves ExternalRefsSchema's own array length unenforced (no schema
+  # .max()) — out of scope for this port. Shared+hub → remat --build-web +
+  # hapi-restart-hub (patient). Resolved post-absorb (see next layer): the
+  # cap alone did NOT stop #238's primary-PR-chip demotion from flapping —
+  # confirmed on live hub it was never a race at all, see
+  # driver/238-externalrefs-replace-semantics below.
+  - branch: driver/238-externalrefs-union-cap
+
+  # heavygee/hapi#238 follow-on — PUT /external-refs (setSessionExternalRefs)
+  # and remove-primary/upsert (mutateSessionExternalRefs) never actually
+  # persisted a role-only demotion or an explicit removal, confirmed live on
+  # soup: polled every 10s for 60s post-demotion-PUT, #238 stayed primary
+  # the whole time, statusCheckedAt/linkedAt byte-identical before/after —
+  # not a race with a concurrent writer, a deterministic no-op. Root cause:
+  # updateSessionMetadata unconditionally re-merges prior+next via
+  # mergeContributionFields/reconcileExternalRefs, which only ever adds
+  # from next and, on an identity-matched tie (same linkedAt AND
+  # statusCheckedAt — true for a hand-built role-only edit), keeps prior.
+  # Adds an opt-in replaceExternalRefs bypass (mergeContributionFields ->
+  # mergeSessionMetadata -> updateSessionMetadata), set on
+  # setSessionExternalRefs's and mutateSessionExternalRefs's own calls,
+  # since both already compute the full desired array from a freshly-read
+  # current state. Sparse writers that don't pass it keep the existing
+  # tie-keeps-prior behavior. Same pattern already shipped on feat/boards;
+  # never previously ported to driver. Thin tip on soup 76327dab2:
+  # driver/238-externalrefs-replace-semantics @ 7c01ec6d5. Deliberately
+  # excludes ExternalRefsSchema's schema .max(32) — separate optional
+  # follow-on. Hub-only → remat + hapi-restart-hub (patient), no --build-web.
+  - branch: driver/238-externalrefs-replace-semantics
+
   # heavygee/hapi#247 — deliberate fleet push + restore upgrade-runner; kill
   # keepalive/startup unattended auto-upgrade. Hub default stays alert; per-machine
   # auto (standalone personal hub) applies only on POST /api/fleet/push-upgrade.

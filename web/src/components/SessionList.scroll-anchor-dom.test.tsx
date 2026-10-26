@@ -57,9 +57,13 @@ describe('SessionList scroll-anchor DOM invariant', () => {
     it('keeps session-list-item and data-session-scroll-anchor on the same element for a session row', () => {
         const session = makeSession({ id: 'session-1', updatedAt: Date.now(), metadata: { path: '/x', name: 'Fix the thing', flavor: 'codex' } })
         renderWithProviders(
+            // selectedSessionId must match this session (not null): the
+            // upstream CollapsiblePanel rewrite genuinely unmounts a
+            // collapsed group's children, and a group starts collapsed
+            // unless it contains the selected session.
             <SessionList
                 sessions={[session]}
-                selectedSessionId={null}
+                selectedSessionId={session.id}
                 onSelect={vi.fn()}
                 onNewSession={vi.fn()}
                 onRefresh={vi.fn()}
