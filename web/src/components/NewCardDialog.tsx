@@ -110,7 +110,11 @@ export function NewCardDialog(props: NewCardDialogProps) {
         return freeTextBody
     }, [selectedTemplate, answers, freeTextBody])
 
-    const finalTitle = `${selectedTemplate?.titlePrefix ?? ''}${title}`.trim()
+    // GitHub's template `title` is a pre-populated DEFAULT, fully editable —
+    // not an unavoidable prefix glued ahead of whatever the user types
+    // (review finding). Seeded into `title` itself in handleTemplatePick, so
+    // this just trims whatever's actually in the input.
+    const finalTitle = title.trim()
     const canSubmitForm = selectedTemplate?.kind !== 'form'
         || selectedTemplate.fields.every(field => {
             if (field.kind === 'markdown') return true
@@ -144,6 +148,11 @@ export function NewCardDialog(props: NewCardDialogProps) {
                 : {}
         )
         setFreeTextBody(template && template.kind === 'legacy' ? template.body : '')
+        // The template's `title` is a pre-populated default the user is free
+        // to replace or clear (review finding) — seeded directly into the
+        // editable input rather than rendered as an unremovable prefix ahead
+        // of it.
+        setTitle(template?.titlePrefix ?? '')
         setStep('form')
     }
 
@@ -324,7 +333,6 @@ export function NewCardDialog(props: NewCardDialogProps) {
                                     type="text"
                                     value={title}
                                     onChange={(event) => setTitle(event.target.value)}
-                                    placeholder={selectedTemplate?.titlePrefix ? `${selectedTemplate.titlePrefix}…` : undefined}
                                     className={FIELD_INPUT_CLASS}
                                     autoFocus
                                 />

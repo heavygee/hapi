@@ -72,6 +72,29 @@ body:
         })
     })
 
+    // Review finding: GitHub's issue-form schema allows labels/assignees as
+    // either a YAML list (covered above) or a comma-delimited string, same
+    // as the legacy .md frontmatter shorthand parseLegacyIssueTemplate
+    // already supports — the structured parser used the stricter array-only
+    // helper for these two fields and silently dropped a template's labels
+    // and assignees whenever either was written as a plain string.
+    it('supports a comma-delimited string form of labels/assignees too', () => {
+        const yaml = `
+name: Bug report
+labels: bug, needs-triage
+assignees: octocat
+body:
+  - type: markdown
+    attributes:
+      value: Thanks!
+`
+        const template = parseIssueFormYaml('bug_report.yml', yaml)
+        expect(template.kind).toBe('form')
+        if (template.kind !== 'form') return
+        expect(template.labels).toEqual(['bug', 'needs-triage'])
+        expect(template.assignees).toEqual(['octocat'])
+    })
+
     it('marks the whole template unsupported for an unrecognized body-element type, not just drops that field', () => {
         const yaml = `
 name: Weird form

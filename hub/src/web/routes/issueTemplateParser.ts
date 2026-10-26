@@ -130,8 +130,12 @@ export function parseIssueFormYaml(id: string, raw: string): IssueTemplate {
         name,
         description: asString(obj.description),
         titlePrefix: asString(obj.title),
-        labels: asStringArray(obj.labels),
-        assignees: asStringArray(obj.assignees),
+        // GitHub's issue-form schema allows labels/assignees as either a
+        // YAML list or a comma-delimited string (review finding) — the same
+        // asStringListField the legacy .md parser below already uses for
+        // these two fields, not the stricter array-only asStringArray.
+        labels: asStringListField(obj.labels),
+        assignees: asStringListField(obj.assignees),
         kind: 'form',
         fields
     }

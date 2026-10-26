@@ -70,7 +70,12 @@ describe('NewCardDialog', () => {
         fireEvent.click(await screen.findByText('Bug report'))
 
         expect(screen.getByText('Thanks for filing!')).toBeInTheDocument()
-        fireEvent.change(screen.getByPlaceholderText('[Bug]: …'), { target: { value: 'Everything is broken' } })
+        // The template's title is seeded directly into the editable input as
+        // a default, not held back as a placeholder behind an unremovable
+        // prefix — the user's full edit replaces it outright.
+        const titleInput = screen.getAllByRole('textbox')[0]! as HTMLInputElement
+        expect(titleInput.value).toBe('[Bug]: ')
+        fireEvent.change(titleInput, { target: { value: '[Bug]: Everything is broken' } })
         fireEvent.change(screen.getAllByRole('textbox')[1]!, { target: { value: 'me@example.com' } })
         fireEvent.click(screen.getByRole('button', { name: 'Next' }))
 
@@ -91,6 +96,34 @@ describe('NewCardDialog', () => {
                 assignees: ['octocat']
             })
             expect(props.onClose).toHaveBeenCalledOnce()
+        })
+    })
+
+    // Review finding: GitHub's template `title` is a pre-populated DEFAULT,
+    // not an unavoidable prefix outside the editable input — the user must
+    // be able to replace it outright or clear it entirely, not just append
+    // after it.
+    it('lets the user replace or clear the template\'s default title entirely', async () => {
+        const onSubmit = vi.fn().mockResolvedValue('https://github.com/heavygee/hapi/issues/42')
+        renderDialog({ templates: [FORM_TEMPLATE], onSubmit })
+
+        fireEvent.change(screen.getByPlaceholderText('owner/repo'), { target: { value: 'heavygee/hapi' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+        fireEvent.click(await screen.findByText('Bug report'))
+
+        const titleInput = screen.getAllByRole('textbox')[0]! as HTMLInputElement
+        expect(titleInput.value).toBe('[Bug]: ')
+        fireEvent.change(titleInput, { target: { value: 'Totally unrelated title' } })
+        expect(titleInput.value).toBe('Totally unrelated title')
+
+        fireEvent.change(screen.getAllByRole('textbox')[1]!, { target: { value: 'me@example.com' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Create issue' }))
+
+        await waitFor(() => {
+            expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+                title: 'Totally unrelated title'
+            }))
         })
     })
 
