@@ -20,6 +20,7 @@ import type {
     ClaudeTranscriptStatus,
     DeleteUploadResponse,
     DirectoryEntry,
+    DshModelsResponse,
     FileReadResponse,
     GeneratedImageResponse,
     ImplementCodexPlanResult,
@@ -46,6 +47,8 @@ import type { RpcRegistry } from '../socket/rpcRegistry'
 
 const DEFAULT_RPC_TIMEOUT_MS = 30_000
 const MODEL_LIST_RPC_TIMEOUT_MS = 120_000
+// Codex can spend 30s awaiting startup after preflight and process creation.
+const CODEX_SPAWN_RPC_TIMEOUT_MS = 60_000
 
 /**
  * tiann/hapi#916: thrown by {@link RpcGateway.rpcCall} when the target CLI is
@@ -121,6 +124,7 @@ export type RpcListKimiModelsResponse = KimiModelsResponse
 export type RpcListGrokReasoningEffortOptionsResponse = GrokReasoningEffortResponse
 export type RpcListOpencodeReasoningEffortOptionsResponse = OpencodeReasoningEffortResponse
 export type RpcListAgyModelsResponse = AgyModelsResponse
+export type RpcListDshModelsResponse = DshModelsResponse
 export type RpcListPiModelsResponse = PiModelsResponse
 
 export class RpcGateway {
@@ -277,7 +281,8 @@ export class RpcGateway {
                     copilotAgentMode,
                     startingMode,
                     forkSession: forkSession === true
-                }
+                },
+                agent === 'codex' ? CODEX_SPAWN_RPC_TIMEOUT_MS : DEFAULT_RPC_TIMEOUT_MS
             )
             if (result && typeof result === 'object') {
                 const obj = result as Record<string, unknown>
@@ -508,6 +513,14 @@ export class RpcGateway {
 
     async listGrokModelsForSession(sessionId: string): Promise<RpcListGrokModelsResponse> {
         return await this.sessionRpc(sessionId, RPC_METHODS.ListGrokModels, {}) as RpcListGrokModelsResponse
+    }
+
+    async listDshModelsForMachine(machineId: string): Promise<RpcListDshModelsResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.ListDshModelsForMachine, {}, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListDshModelsResponse
+    }
+
+    async listDshModelsForSession(sessionId: string): Promise<RpcListDshModelsResponse> {
+        return await this.sessionRpc(sessionId, RPC_METHODS.ListDshModels, {}, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListDshModelsResponse
     }
 
     async listGrokReasoningEffortOptionsForSession(sessionId: string): Promise<RpcListGrokReasoningEffortOptionsResponse> {

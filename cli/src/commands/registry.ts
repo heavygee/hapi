@@ -22,6 +22,8 @@ import { hubCommand } from './hub'
 import { pingPeerCommand } from './pingPeer'
 import { inspectPeerCommand } from './inspectPeer'
 import { searchContentCommand } from './searchContent'
+import { setModeCommand } from './setMode'
+
 import type { CommandContext, CommandDefinition } from './types'
 
 // Gemini CLI was sunset (Google stopped serving the consumer Gemini CLI on
@@ -64,7 +66,9 @@ const COMMANDS: CommandDefinition[] = [
     notifyCommand,
     pingPeerCommand,
     inspectPeerCommand,
-    searchContentCommand
+    searchContentCommand,
+    setModeCommand
+
 ]
 
 const commandMap = new Map<string, CommandDefinition>()
