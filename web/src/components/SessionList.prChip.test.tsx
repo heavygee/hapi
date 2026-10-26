@@ -112,4 +112,55 @@ describe('SessionList PR chip', () => {
         expect(rowButton.className.split(/\s+/)).toContain('group/session-row')
         expect(rowButton.parentElement?.className.split(/\s+/)).not.toContain('group/session-row')
     })
+
+    // Review finding: linkPrOpen was absent from overlayOpen, so a session
+    // group's CollapsiblePanel released its mount hold and unmounted
+    // LinkPrDialog (discarding whatever the operator had typed) the moment
+    // the group collapsed while the dialog was still open.
+    it('keeps a collapsing row mounted while its Link PR dialog is open', () => {
+        render(
+            <QueryClientProvider
+                client={new QueryClient({
+                    defaultOptions: {
+                        queries: { retry: false },
+                        mutations: { retry: false }
+                    }
+                })}
+            >
+                <ToastProvider>
+                    <I18nProvider>
+                        <SessionList
+                            sessions={[makeSession({
+                                id: 'session-link-pr',
+                                updatedAt: 100,
+                                metadata: { path: '/work/link-pr-demo', name: 'Needs a PR link', flavor: 'codex' }
+                            })]}
+                            selectedSessionId={null}
+                            onSelect={vi.fn()}
+                            onNewSession={vi.fn()}
+                            onRefresh={vi.fn()}
+                            isLoading={false}
+                            renderHeader={false}
+                            api={null}
+                        />
+                    </I18nProvider>
+                </ToastProvider>
+            </QueryClientProvider>
+        )
+
+        const header = screen.getByTitle('/work/link-pr-demo')
+        fireEvent.click(header)
+        fireEvent.contextMenu(screen.getByRole('button', { name: /Needs a PR link/ }))
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Link pull request…' }))
+        expect(screen.getByRole('dialog', { name: 'Link pull request' })).toBeInTheDocument()
+
+        fireEvent.click(header)
+        const panel = document.querySelector('.collapsible-panel')!
+        fireEvent.transitionEnd(panel)
+        expect(screen.getByRole('dialog', { name: 'Link pull request' })).toBeInTheDocument()
+
+        fireEvent.keyDown(screen.getByRole('dialog', { name: 'Link pull request' }), { key: 'Escape' })
+        expect(screen.queryByRole('dialog', { name: 'Link pull request' })).toBeNull()
+        expect(screen.queryByRole('button', { name: /Needs a PR link/ })).toBeNull()
+    })
 })

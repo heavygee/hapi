@@ -1228,7 +1228,7 @@ const SessionItem = memo(function SessionItem(props: {
     )
     const [reopenError, setReopenError] = useState<string | null>(null)
     const holdPanel = useContext(CollapsiblePanelHoldContext)
-    const overlayOpen = menuOpen || renameOpen || exportOpen || archiveOpen || deleteOpen || reopenError !== null
+    const overlayOpen = menuOpen || renameOpen || linkPrOpen || exportOpen || archiveOpen || deleteOpen || reopenError !== null
     useEffect(() => {
         if (!overlayOpen || !holdPanel) return
         holdPanel(true)
