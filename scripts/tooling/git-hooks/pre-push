@@ -24,24 +24,31 @@ PUSH_REMOTE="${1:-unknown}"
 FORK_PRIVATE_PATH_RE='^(web/src/garden/)'
 DAILY_REF_RE='^refs/heads/(driver/|garden/)'
 
-# Destination-aware merge-base: a push TO upstream must be compared against
+# Destination-aware merge-base, matching fork_pre_push_path_ok's own dispatch
+# in fork-path-policy.sh EXACTLY (origin -> lenient fork check; everything
+# else, including unknown remote names, -> strict upstream check — "Unknown
+# remotes: strict (treat like upstream)"). A push TO upstream (or to any
+# remote this policy doesn't recognize) must be compared against
 # upstream/main first, not origin/main — otherwise a branch rebased onto
 # fork origin/main (which can legitimately carry fork-only docs/plans/,
-# docs/operator/, etc.) and then force-pushed to upstream would compute its
-# base against origin/main, making fork-only content inherited from origin
-# invisible to the upstream-destination check (cold review, 2026-10-20,
-# PR #300 — reproduced in an isolated scratch repo with docs/plans/private.md
-# added on fork main, then a rebase-forward push to upstream). Falls back to
-# the other remote only if the preferred one can't resolve at all.
+# docs/operator/, etc.) and then force-pushed there would compute its base
+# against origin/main, making fork-only content inherited from origin
+# invisible to the strict check (cold review, 2026-10-20, PR #300 — first
+# reproduced with an "upstream"-named remote; a second wave found the same
+# gap for ANY non-"origin" remote name, e.g. a "mirror" remote, since the
+# first fix's `else` branch only special-cased the literal string
+# "upstream" instead of mirroring the policy's actual origin-vs-everything-
+# else dispatch). Falls back to the other remote only if the preferred one
+# can't resolve at all.
 resolve_push_base() {
     local local_sha="$1" push_remote="$2"
-    if [[ "$push_remote" == "upstream" ]]; then
-        git merge-base "$local_sha" upstream/main 2>/dev/null \
-            || git merge-base "$local_sha" origin/main 2>/dev/null \
-            || true
-    else
+    if [[ "$push_remote" == "origin" ]]; then
         git merge-base "$local_sha" origin/main 2>/dev/null \
             || git merge-base "$local_sha" upstream/main 2>/dev/null \
+            || true
+    else
+        git merge-base "$local_sha" upstream/main 2>/dev/null \
+            || git merge-base "$local_sha" origin/main 2>/dev/null \
             || true
     fi
 }
