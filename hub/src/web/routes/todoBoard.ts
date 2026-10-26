@@ -1555,11 +1555,27 @@ export function createBoardRoutes(
             // disables, or show no templates for a repo that actually has
             // them via its organization's `.github` repo (review finding).
             // Best-effort: a failed or absent `.github` repo just leaves
-            // the original (empty) result in place, not a hard error.
+            // the original (empty) result in place, not a hard error. Most
+            // owners have no `.github` repo at all — `gh api graphql`
+            // treats GitHub's resulting NOT_FOUND as a command failure and
+            // rejects rather than resolving with an `errors` array in the
+            // response body (review finding: this reached the outer 502
+            // handler unguarded, 502ing "New card" for the common case of a
+            // perfectly valid repo that simply has no templates of its own
+            // and whose owner has no `.github` repo either). The mandatory
+            // lookup above for the actual target repo already surfaces a
+            // real auth/transport failure before this optional fallback is
+            // even reached, so swallowing any error here specifically stays
+            // within "best-effort," not a blanket error hider.
             if (repoHasNoIssueTemplateDir(response) && repo.toLowerCase() !== '.github') {
-                const inherited = await runGraphqlIssueTemplateDir({ host: board.host, owner, repo: '.github' })
-                if (!inherited.errors?.length && !repoHasNoIssueTemplateDir(inherited)) {
-                    response = inherited
+                try {
+                    const inherited = await runGraphqlIssueTemplateDir({ host: board.host, owner, repo: '.github' })
+                    if (!inherited.errors?.length && !repoHasNoIssueTemplateDir(inherited)) {
+                        response = inherited
+                    }
+                } catch {
+                    // No .github repo (or it errored) — fall through with
+                    // the target repo's own (empty) result.
                 }
             }
             const { templates, blankIssuesEnabled } = parseIssueTemplateDirResponse(response)

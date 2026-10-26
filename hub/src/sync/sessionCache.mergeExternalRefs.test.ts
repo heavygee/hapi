@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import { mergeSessionMetadataForSessionMerge } from './sessionCache'
+import { ExternalRefsMergeCapExceededError } from './externalRefErrors'
 
 const prRef = {
     kind: 'github_pr' as const,
@@ -72,15 +73,18 @@ describe('mergeSessionMetadataForSessionMerge externalRefs', () => {
         expect(merged.externalRefs).toEqual([])
     })
 
-    // Review finding: two valid sessions can each independently sit at or
-    // near MAX_EXTERNAL_REFS; their union has no cap of its own. Persisting
-    // an over-limit array doesn't just lose the extra refs — it fails
-    // MetadataSchema validation on the *next* read, which nulls out the
-    // whole merged metadata object (name, path, flavor, resume ids,
-    // everything), not just externalRefs — and by then the old row is
-    // already deleted (mergeSessions). Falls back to the surviving row's
-    // own pre-merge refs instead of ever persisting an over-limit array.
-    it('falls back to the surviving row\'s own refs when the union would exceed MAX_EXTERNAL_REFS', () => {
+    // Review finding (hapi#2147): two valid sessions can each independently
+    // sit at or near MAX_EXTERNAL_REFS; their union has no cap of its own.
+    // Persisting an over-limit array doesn't just lose the extra refs — it
+    // fails MetadataSchema validation on the *next* read, nulling out the
+    // whole merged metadata object. Worse, this function is reached from
+    // mergeSessions, which deletes the old row right after this merge
+    // "succeeds" — silently falling back to the surviving row's own refs
+    // would mean the old row's 17 links are gone the instant it's deleted,
+    // with nothing surfaced anywhere. Throws instead, so the caller
+    // (mergeSessionMetadataForTransfer) can abort the whole merge rather
+    // than quietly losing data.
+    it('throws instead of silently dropping the losing side\'s refs when the union would exceed MAX_EXTERNAL_REFS', () => {
         const makeRef = (repo: string, number: number) => ({
             kind: 'github_issue' as const,
             repo,
@@ -93,13 +97,8 @@ describe('mergeSessionMetadataForSessionMerge externalRefs', () => {
         const oldMetadata = { path: '/old', host: 'old-host', externalRefs: oldRefs }
         const newMetadata = { path: '/new', host: 'new-host', externalRefs: newRefs }
 
-        const merged = mergeSessionMetadataForSessionMerge(oldMetadata, newMetadata) as Record<string, unknown> | null
-
-        // Union of 34 distinct refs exceeds the 32 cap — must not persist
-        // it. Either nothing changed (surviving row's own refs stand) or an
-        // explicit externalRefs equal to newRefs; either way, never 34.
-        const externalRefs = (merged?.externalRefs ?? newRefs) as unknown[]
-        expect(externalRefs.length).toBeLessThanOrEqual(32)
-        expect(externalRefs).toEqual(newRefs)
+        // Union of 34 distinct refs exceeds the 32 cap.
+        expect(() => mergeSessionMetadataForSessionMerge(oldMetadata, newMetadata))
+            .toThrow(ExternalRefsMergeCapExceededError)
     })
 })

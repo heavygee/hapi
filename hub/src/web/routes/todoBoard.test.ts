@@ -1507,6 +1507,34 @@ body:
         expect(body.blankAllowed).toBe(true)
     })
 
+    // Review finding: `gh api graphql` treats GitHub's NOT_FOUND for a
+    // nonexistent repo as a command failure and rejects, rather than
+    // resolving with an `errors` array in the response body — the far more
+    // common real-world case than the "resolves with errors" shape the
+    // previous test covers, since most owners have no `.github` repo at
+    // all. Without a dedicated try/catch around the optional fallback, this
+    // rejection reached the route's outer catch and 502'd "New card" for
+    // the ordinary case of a valid repo with no templates of its own.
+    it('still returns the empty result, not a 502, when the .github lookup itself rejects (gh exits nonzero)', async () => {
+        const calls: string[] = []
+        const app = await createApp(
+            () => ({ data: {} }), undefined, 'default', undefined, UNUSED_ACTIONS, ALWAYS_MEMBER, undefined,
+            (target: { repo: string }) => {
+                calls.push(target.repo)
+                if (target.repo === '.github') {
+                    throw new Error("gh api graphql failed: GraphQL: Could not resolve to a Repository with the name '.github'. (repository)")
+                }
+                return { data: { repository: { issueTemplateDir: null } } }
+            }
+        )
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/issue-templates?repo=heavygee/no-local-templates`)
+        expect(response.status).toBe(200)
+        const body = await response.json() as { templates: unknown[]; blankAllowed: boolean }
+        expect(body.templates).toEqual([])
+        expect(body.blankAllowed).toBe(true)
+        expect(calls).toEqual(['no-local-templates', '.github'])
+    })
+
     it('parses .yml forms and .md legacy templates, skips config.yml as a template entry, and reads blank_issues_enabled from it', async () => {
         const app = await createApp(
             () => ({ data: {} }), undefined, 'default', undefined, UNUSED_ACTIONS, ALWAYS_MEMBER, undefined,

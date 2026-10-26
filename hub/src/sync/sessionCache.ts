@@ -6,10 +6,10 @@ import type { Store } from '../store'
 import { clampAliveTime } from './aliveTime'
 import { EventPublisher } from './eventPublisher'
 import { extractTodoWriteTodosFromMessageContent, TodosSchema } from './todos'
-import { InvalidExternalRefsError } from './externalRefErrors'
+import { ExternalRefsMergeCapExceededError, InvalidExternalRefsError } from './externalRefErrors'
 import { resolveSessionIdleTimeoutMs, shouldClearKeepaliveIdle, shouldMarkKeepaliveIdle } from './sessionIdle'
 
-export { InvalidExternalRefsError } from './externalRefErrors'
+export { ExternalRefsMergeCapExceededError, InvalidExternalRefsError } from './externalRefErrors'
 
 const QUEUED_MESSAGE_THINKING_GRACE_MS = 15_000
 // tiann/hapi#919: metadata writers (renameSession, clearSessionArchiveMetadata,
@@ -126,12 +126,22 @@ export function mergeSessionMetadataForSessionMerge(
             // over-limit array doesn't just reject the extra refs — it fails
             // MetadataSchema validation on the *next* read, nulling out the
             // survivor's entire metadata (name, path, flavor, resume ids,
-            // every ref) after the old row has already been deleted. Falling
-            // back to the survivor's own pre-merge refs loses only the old
-            // row's links beyond the cap, which is recoverable (re-link);
-            // losing the whole metadata object is not.
+            // every ref).
+            //
+            // Throwing rather than silently falling back to newRefs (Codex
+            // review, hapi#2147): this function is also reached from
+            // mergeSessions, which deletes the old row right after this
+            // merge succeeds. Falling back here used to look safe — only
+            // the old row's extra links are dropped, not the whole metadata
+            // object — but once that row is deleted those dropped links are
+            // gone for good, silently, with the caller believing the merge
+            // fully succeeded. mergeSessionMetadataForTransfer decides what
+            // this means for its own merge variant: mergeSessions (delete)
+            // lets it abort the whole merge so both sessions and all their
+            // links survive; mergeSessionHistory (old row stays alive)
+            // catches it and proceeds, since nothing is actually lost there.
             if (combined.length > MAX_EXTERNAL_REFS) {
-                combined = newRefs
+                throw new ExternalRefsMergeCapExceededError()
             }
             if (combined.length !== newRefs.length || combined.some((ref, i) => ref !== newRefs[i])) {
                 merged.externalRefs = combined
@@ -1486,7 +1496,9 @@ export class SessionCache {
             throw new Error('Session not found for merge')
         }
 
-        await this.mergeSessionMetadataForTransfer(oldStored.metadata, newSessionId, namespace)
+        await this.mergeSessionMetadataForTransfer(oldStored.metadata, newSessionId, namespace, {
+            deleteOldSession: options.deleteOldSession
+        })
 
         const movedMessages = this.store.messages.mergeSessionMessages(oldSessionId, newSessionId)
         // mergeSessions deletes the source. mergeSessionHistory keeps it alive
@@ -1695,7 +1707,8 @@ export class SessionCache {
     private async mergeSessionMetadataForTransfer(
         oldMetadata: unknown | null,
         newSessionId: string,
-        namespace: string
+        namespace: string,
+        options: { deleteOldSession: boolean }
     ): Promise<void> {
         let metadataMerged = oldMetadata === null
         if (!metadataMerged) {
@@ -1704,7 +1717,33 @@ export class SessionCache {
                 if (!latest) {
                     throw new Error('Merge target disappeared during metadata merge')
                 }
-                const merged = this.mergeSessionMetadata(oldMetadata, latest.metadata)
+                let merged: unknown | null
+                try {
+                    merged = this.mergeSessionMetadata(oldMetadata, latest.metadata)
+                } catch (error) {
+                    if (error instanceof ExternalRefsMergeCapExceededError) {
+                        if (options.deleteOldSession) {
+                            // The old row is about to be deleted — dropping
+                            // its unique links to stay under the cap would be
+                            // unrecoverable the moment that happens. Abort
+                            // the whole merge instead: both sessions and all
+                            // their links stay intact (recoverable; the
+                            // caller can retry or leave the duplicate).
+                            throw error
+                        }
+                        // mergeSessionHistory: the old row stays alive, so
+                        // its own links are never actually lost — just not
+                        // consolidated into the target this time around. The
+                        // throw also abandons this attempt's other
+                        // carry-forward fields (name, summary, worktree,
+                        // ...) along with externalRefs; acceptable here
+                        // since nothing is destroyed, only a consolidation
+                        // opportunity skipped in this rare (34+ refs) case.
+                        metadataMerged = true
+                        break
+                    }
+                    throw error
+                }
                 if (merged === null || merged === latest.metadata) {
                     metadataMerged = true
                     break

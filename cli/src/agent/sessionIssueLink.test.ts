@@ -89,4 +89,57 @@ describe('applyLinkIssue', () => {
         expect(outcome.ok).toBe(false)
         expect(getMetadata().externalRefs).toBeUndefined()
     })
+
+    // Review finding (hapi#2147): at 32 existing refs, the hub's generic
+    // metadata merge doesn't reject the over-cap write — it falls back to
+    // what's already persisted (a clean, single-attempt success ack), so
+    // there's nothing for updateMetadata's socket backoff to usefully retry.
+    // Failing fast on the client's own cached count, before ever touching
+    // the socket, gives an accurate reason and proves this never reaches
+    // (let alone hangs) the metadata lock.
+    it('fails fast on the cap without ever touching the socket or lock', async () => {
+        const existingRefs = Array.from({ length: 32 }, (_, i) => ({
+            kind: 'github_issue' as const, url: `https://github.com/acme/repo/issues/${i + 1}`, repo: 'acme/repo', number: i + 1, linkedAt: i + 1
+        }))
+        const { client } = makeClient({ path: '/tmp/project', host: 'localhost', externalRefs: existingRefs })
+
+        const outcome = await applyLinkIssue(client, 'heavygee/hapi#9999')
+
+        expect(outcome.ok).toBe(false)
+        if (!outcome.ok) expect(outcome.error).toMatch(/maximum allowed/)
+        expect(client.updateMetadata).not.toHaveBeenCalled()
+        expect(client.flushMetadata).not.toHaveBeenCalled()
+    })
+
+    it('still allows re-linking an already-linked issue at the cap (upsert, not a net-new add)', async () => {
+        const existingRefs = Array.from({ length: 32 }, (_, i) => ({
+            kind: 'github_issue' as const, url: `https://github.com/acme/repo/issues/${i + 1}`, repo: 'acme/repo', number: i + 1, linkedAt: i + 1
+        }))
+        const { client, getMetadata } = makeClient({ path: '/tmp/project', host: 'localhost', externalRefs: existingRefs })
+
+        const outcome = await applyLinkIssue(client, 'acme/repo#1')
+
+        expect(outcome.ok).toBe(true)
+        expect(getMetadata().externalRefs).toHaveLength(32)
+        expect(getMetadata().externalRefs?.find((r) => r.number === 1)?.linkedAt).toBeGreaterThan(1)
+    })
+
+    // Proves a cap rejection doesn't leave anything behind to stall a
+    // subsequent, unrelated metadata write (part of the review's suggested
+    // coverage) — the fast-fail path above never touches the lock, so this
+    // is unconditionally true, but assert it explicitly rather than only by
+    // inference from "updateMetadata was not called".
+    it('a subsequent metadata update still completes after a cap rejection', async () => {
+        const existingRefs = Array.from({ length: 32 }, (_, i) => ({
+            kind: 'github_issue' as const, url: `https://github.com/acme/repo/issues/${i + 1}`, repo: 'acme/repo', number: i + 1, linkedAt: i + 1
+        }))
+        const { client } = makeClient({ path: '/tmp/project', host: 'localhost', externalRefs: existingRefs })
+
+        await applyLinkIssue(client, 'heavygee/hapi#9999')
+        const outcome = await applyLinkIssue(client, 'heavygee/hapi#8888')
+
+        expect(outcome.ok).toBe(false)
+        expect(client.updateMetadata).not.toHaveBeenCalled()
+        expect(client.flushMetadata).not.toHaveBeenCalled()
+    })
 })

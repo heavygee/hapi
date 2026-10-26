@@ -1,4 +1,4 @@
-import { parseIssueUrl, upsertExternalRef, type ExternalRef } from '@hapi/protocol/schemas'
+import { MAX_EXTERNAL_REFS, parseIssueUrl, upsertExternalRef, type ExternalRef } from '@hapi/protocol/schemas'
 import type { ApiSessionClient } from '@/api/apiSession'
 import type { Metadata } from '@/api/types'
 
@@ -38,6 +38,23 @@ export async function applyLinkIssue(client: SessionIssueLinkClient, url: string
         repo: target.repo,
         number: target.number,
         linkedAt: Date.now()
+    }
+
+    // Fail fast on the client's own cached refs rather than reaching the
+    // socket at all (review finding, hapi#2147): the hub's generic metadata
+    // merge treats an over-cap sparse write as untrustworthy and falls back
+    // to what's already persisted rather than adding the new ref — a clean,
+    // single-attempt success ack, not a rejection, so there's nothing here
+    // for updateMetadata's backoff loop to usefully retry. Catching it here
+    // first gives an accurate reason instead of the generic post-write
+    // "could not confirm" message below, which would otherwise be the only
+    // signal and wrongly suggests the session was archived mid-write.
+    const currentRefs = client.getMetadata()?.externalRefs ?? []
+    const alreadyLinked = currentRefs.some(
+        (existing) => existing.kind === ref.kind && existing.repo === ref.repo && existing.number === ref.number
+    )
+    if (!alreadyLinked && currentRefs.length >= MAX_EXTERNAL_REFS) {
+        return { ok: false, error: `This session already has ${MAX_EXTERNAL_REFS} linked issues/PRs, the maximum allowed. Remove an existing link before adding another.` }
     }
 
     client.updateMetadata((metadata: Metadata) => ({

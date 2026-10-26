@@ -3,6 +3,7 @@ import type { SyncEvent } from '@hapi/protocol/types'
 import { Store } from '../store'
 import type { EventPublisher } from './eventPublisher'
 import { SessionCache } from './sessionCache'
+import { ExternalRefsMergeCapExceededError } from './externalRefErrors'
 
 /**
  * Regression tests for hapi#238 (Codex review): `mergeSessionMetadata`
@@ -108,5 +109,56 @@ describe('mergeSessions - externalRefs preservation', () => {
 
         const merged = cache.getSession(newSession.id)
         expect(merged?.metadata?.externalRefs ?? []).toEqual([])
+    })
+
+    // Review finding (hapi#2147): mergeSessions deletes the old session
+    // right after the metadata merge "succeeds" — a union that exceeds
+    // MAX_EXTERNAL_REFS used to silently fall back to the surviving row's
+    // own refs, so the old session's 17 unique links were gone the instant
+    // it was deleted, with nothing surfaced anywhere. Must abort the whole
+    // merge instead: both sessions and every link stay intact.
+    it('aborts the merge and preserves both sessions when the union would exceed MAX_EXTERNAL_REFS', async () => {
+        const { cache } = setup()
+        const { oldSession, newSession } = makeSessions(cache)
+
+        for (let i = 1; i <= 17; i += 1) {
+            await cache.linkIssue(oldSession.id, {
+                kind: 'github_issue', url: `https://github.com/acme/old/issues/${i}`, repo: 'acme/old', number: i, linkedAt: i
+            })
+            await cache.linkIssue(newSession.id, {
+                kind: 'github_issue', url: `https://github.com/acme/new/issues/${i}`, repo: 'acme/new', number: i, linkedAt: i
+            })
+        }
+
+        await expect(cache.mergeSessions(oldSession.id, newSession.id, 'default'))
+            .rejects.toThrow(ExternalRefsMergeCapExceededError)
+
+        // Neither session was touched — both still exist with their own
+        // 17 refs, nothing dropped and nothing deleted.
+        expect(cache.getSession(oldSession.id)?.metadata?.externalRefs).toHaveLength(17)
+        expect(cache.getSession(newSession.id)?.metadata?.externalRefs).toHaveLength(17)
+    })
+
+    // Same over-limit union, but mergeSessionHistory keeps the old session
+    // alive (used for resumed-duplicate dedup) — nothing is deleted, so
+    // falling back to the target's own refs for this round is safe: the old
+    // session's links are still right there on its own un-deleted row.
+    it('mergeSessionHistory does not throw on the same over-limit union since the old session survives', async () => {
+        const { cache } = setup()
+        const { oldSession, newSession } = makeSessions(cache)
+
+        for (let i = 1; i <= 17; i += 1) {
+            await cache.linkIssue(oldSession.id, {
+                kind: 'github_issue', url: `https://github.com/acme/old/issues/${i}`, repo: 'acme/old', number: i, linkedAt: i
+            })
+            await cache.linkIssue(newSession.id, {
+                kind: 'github_issue', url: `https://github.com/acme/new/issues/${i}`, repo: 'acme/new', number: i, linkedAt: i
+            })
+        }
+
+        await cache.mergeSessionHistory(oldSession.id, newSession.id, 'default')
+
+        expect(cache.getSession(oldSession.id)?.metadata?.externalRefs).toHaveLength(17)
+        expect(cache.getSession(newSession.id)?.metadata?.externalRefs).toHaveLength(17)
     })
 })
