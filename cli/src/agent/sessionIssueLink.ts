@@ -1,81 +1,48 @@
-import { MAX_EXTERNAL_REFS, parseIssueUrl, upsertExternalRef, type ExternalRef } from '@hapi/protocol/schemas'
-import type { ApiSessionClient } from '@/api/apiSession'
-import type { Metadata } from '@/api/types'
-
-type SessionIssueLinkClient = Pick<ApiSessionClient, 'updateMetadata' | 'flushMetadata' | 'getMetadata'>
+import { parseIssueUrl, type ExternalRef } from '@hapi/protocol/schemas'
+import { linkIssue as linkIssueViaHub } from '@/modules/linkIssue/linkIssue'
 
 export type LinkIssueOutcome =
     | { ok: true; ref: ExternalRef }
     | { ok: false; error: string }
 
 /**
- * MCP `link_issue` tool's write path — socket-based via the already-connected
- * client, mirroring applySessionDisplayRename's `change_title` pattern. The
- * standalone `hapi link-issue` CLI command (fresh process, no live socket)
- * goes through the hub REST route instead (`cli/src/modules/linkIssue`); both
- * share `parseIssueUrl` from `shared/` so they validate identically.
+ * MCP `link_issue` tool's write path. Delegates to the same hub REST route
+ * (`PATCH /api/sessions/:id/link-issue`) as the standalone `hapi link-issue`
+ * CLI command (`cli/src/modules/linkIssue`) rather than the socket-based
+ * `client.updateMetadata`/`flushMetadata` dance this used previously.
  *
- * `updateMetadata` is fire-and-forget by design (hot path for every turn),
- * so without `flushMetadata` this would report success before the write is
- * actually acked. But `flushMetadata` only proves the metadata lock drained
- * — if the session was hub-archived mid-flight, `updateMetadata`'s own
- * backoff loop skips the write entirely (`apiSession.ts`'s hub-archived
- * EXIT branch) and the lock still drains "successfully" with nothing ever
- * sent. So after flushing, re-read `client.metadata` and confirm the ref
- * actually landed before reporting success (hapi#238 Codex review, two
- * passes — first catching the fire-and-forget gap, then this skipped-write
- * gap in the fix for it).
+ * That socket path went through the hub's generic sparse-write metadata
+ * merge, which has no terminal-error concept — an over-cap write (review
+ * finding, hapi#2147) doesn't reject, it falls back to what's already
+ * persisted and acks success, leaving nothing for `updateMetadata`'s own
+ * backoff loop to usefully retry but also nothing clean to report back
+ * either. `engine.linkIssue` behind this REST route instead goes through
+ * `mutateSessionExternalRefs` with `replaceExternalRefs: true` and
+ * `ExternalRefsSchema`'s own cap, which rejects an over-cap array outright
+ * with `InvalidExternalRefsError` — a single HTTP round trip, no retry loop
+ * anywhere in the path, confirmed by direct test (32 existing refs + 1 new:
+ * throws immediately, 32 refs still persisted unchanged).
  */
-export async function applyLinkIssue(client: SessionIssueLinkClient, url: string): Promise<LinkIssueOutcome> {
+export async function applyLinkIssue(sessionId: string, url: string): Promise<LinkIssueOutcome> {
     const target = parseIssueUrl(url)
     if (!target) {
         return { ok: false, error: 'Could not parse a GitHub issue URL (expected e.g. https://github.com/<owner>/<repo>/issues/<n> or [host:]<owner>/<repo>#<n>)' }
     }
 
-    const ref: ExternalRef = {
-        kind: 'github_issue',
-        url: target.url,
-        repo: target.repo,
-        number: target.number,
-        linkedAt: Date.now()
+    try {
+        await linkIssueViaHub(sessionId, url)
+    } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : 'Failed to link issue' }
     }
 
-    // Fail fast on the client's own cached refs rather than reaching the
-    // socket at all (review finding, hapi#2147): the hub's generic metadata
-    // merge treats an over-cap sparse write as untrustworthy and falls back
-    // to what's already persisted rather than adding the new ref — a clean,
-    // single-attempt success ack, not a rejection, so there's nothing here
-    // for updateMetadata's backoff loop to usefully retry. Catching it here
-    // first gives an accurate reason instead of the generic post-write
-    // "could not confirm" message below, which would otherwise be the only
-    // signal and wrongly suggests the session was archived mid-write.
-    const currentRefs = client.getMetadata()?.externalRefs ?? []
-    const alreadyLinked = currentRefs.some(
-        (existing) => existing.kind === ref.kind && existing.repo === ref.repo && existing.number === ref.number
-    )
-    if (!alreadyLinked && currentRefs.length >= MAX_EXTERNAL_REFS) {
-        return { ok: false, error: `This session already has ${MAX_EXTERNAL_REFS} linked issues/PRs, the maximum allowed. Remove an existing link before adding another.` }
+    return {
+        ok: true,
+        ref: {
+            kind: 'github_issue',
+            url: target.url,
+            repo: target.repo,
+            number: target.number,
+            linkedAt: Date.now()
+        }
     }
-
-    client.updateMetadata((metadata: Metadata) => ({
-        ...metadata,
-        externalRefs: upsertExternalRef(metadata.externalRefs ?? [], ref)
-    }))
-
-    const flushed = await client.flushMetadata()
-    if (!flushed) {
-        return { ok: false, error: 'Timed out waiting for the link to be saved. The session may be closed or unreachable — try again.' }
-    }
-
-    // A drained lock alone doesn't prove the write happened: if the session
-    // was hub-archived mid-flight, updateMetadata's own backoff loop skips
-    // the handler entirely and the lock still drains "successfully."
-    const written = client.getMetadata()?.externalRefs?.some(
-        (existing) => existing.kind === ref.kind && existing.repo === ref.repo && existing.number === ref.number && existing.linkedAt === ref.linkedAt
-    )
-    if (!written) {
-        return { ok: false, error: 'Could not confirm the link was saved. The session may have been archived mid-write — try again.' }
-    }
-
-    return { ok: true, ref }
 }

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { Hono } from 'hono'
 import type { BoardItemsResponse, BoardsResponse } from '@hapi/protocol'
 import type { WebAppEnv } from '../middleware/auth'
-import { createBoardRoutes, fetchAllProjectItems, makeBoardId, parseProjectUrl, parseValidatedItemUrl, resolveProjectView } from './todoBoard'
+import { createBoardRoutes, fetchAllProjectItems, GhGraphqlNotFoundError, makeBoardId, parseProjectUrl, parseValidatedItemUrl, resolveProjectView } from './todoBoard'
 
 const ENV_KEYS = [
     'HAPI_BOARD_HOST',
@@ -1515,14 +1515,14 @@ body:
     // all. Without a dedicated try/catch around the optional fallback, this
     // rejection reached the route's outer catch and 502'd "New card" for
     // the ordinary case of a valid repo with no templates of its own.
-    it('still returns the empty result, not a 502, when the .github lookup itself rejects (gh exits nonzero)', async () => {
+    it('still returns the empty result, not a 502, when the .github lookup rejects with NOT_FOUND (gh exits nonzero)', async () => {
         const calls: string[] = []
         const app = await createApp(
             () => ({ data: {} }), undefined, 'default', undefined, UNUSED_ACTIONS, ALWAYS_MEMBER, undefined,
             (target: { repo: string }) => {
                 calls.push(target.repo)
                 if (target.repo === '.github') {
-                    throw new Error("gh api graphql failed: GraphQL: Could not resolve to a Repository with the name '.github'. (repository)")
+                    throw new GhGraphqlNotFoundError("gh api graphql failed: GraphQL: Could not resolve to a Repository with the name '.github'. (repository)")
                 }
                 return { data: { repository: { issueTemplateDir: null } } }
             }
@@ -1533,6 +1533,27 @@ body:
         expect(body.templates).toEqual([])
         expect(body.blankAllowed).toBe(true)
         expect(calls).toEqual(['no-local-templates', '.github'])
+    })
+
+    // Review finding, second pass: the first fix swallowed *every* error from
+    // the .github fallback, which would also hide a genuine auth/rate-limit/
+    // transport failure on that specific call as if it just meant "no
+    // inherited templates" — silently serving the wrong (empty) policy for a
+    // repo whose .github fallback might really have templates. Only
+    // GhGraphqlNotFoundError (the repo genuinely doesn't exist) should be
+    // swallowed; anything else must still 502.
+    it('still 502s when the .github lookup fails for a reason other than NOT_FOUND', async () => {
+        const app = await createApp(
+            () => ({ data: {} }), undefined, 'default', undefined, UNUSED_ACTIONS, ALWAYS_MEMBER, undefined,
+            (target: { repo: string }) => {
+                if (target.repo === '.github') {
+                    throw new Error('gh api graphql failed: HTTP 401: Bad credentials')
+                }
+                return { data: { repository: { issueTemplateDir: null } } }
+            }
+        )
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/issue-templates?repo=heavygee/no-local-templates`)
+        expect(response.status).toBe(502)
     })
 
     it('parses .yml forms and .md legacy templates, skips config.yml as a template entry, and reads blank_issues_enabled from it', async () => {

@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import type { ApiSessionClient } from '@/api/apiSession'
 import { upsertSessionExternalRef } from '@/api/upsertSessionExternalRef'
 import { fetchGithubPrAwarenessEnabled } from '@/api/fetchGithubPrAwareness'
+import { linkIssue as linkIssueViaHub } from '@/modules/linkIssue/linkIssue'
 import { startHappyServer, toClaudeAllowedHapiMcpTools } from './startHappyServer'
 
 vi.mock('@/api/upsertSessionExternalRef', () => ({
@@ -18,8 +19,13 @@ vi.mock('@/api/fetchGithubPrAwareness', () => ({
     fetchGithubPrAwarenessEnabled: vi.fn(async () => false)
 }))
 
+vi.mock('@/modules/linkIssue/linkIssue', () => ({
+    linkIssue: vi.fn()
+}))
+
 const mockUpsertSessionExternalRef = vi.mocked(upsertSessionExternalRef)
 const mockFetchGithubPrAwarenessEnabled = vi.mocked(fetchGithubPrAwarenessEnabled)
+const mockLinkIssueViaHub = vi.mocked(linkIssueViaHub)
 
 type ToolResult = {
     content?: Array<{ type: string; text?: string }>
@@ -218,14 +224,12 @@ describe('startHappyServer skill_lookup', () => {
         ])
     })
 
-    it('links a github issue and reports success only after the metadata write is acked', async () => {
-        let metadataState: Record<string, unknown> = {}
+    it('links a github issue and reports success only after the hub acks the write', async () => {
+        mockLinkIssueViaHub.mockReset()
+        mockLinkIssueViaHub.mockResolvedValue(undefined)
         const sessionClient = {
-            updateMetadata: vi.fn((handler: (current: Record<string, unknown>) => Record<string, unknown>) => {
-                metadataState = handler(metadataState)
-            }),
-            flushMetadata: vi.fn(async () => true),
-            getMetadata: vi.fn(() => metadataState),
+            sessionId: 'session-link-issue-ok',
+            updateMetadata: vi.fn(),
             sendAgentMessage: vi.fn(),
             sendClaudeSessionMessage: vi.fn()
         } as unknown as ApiSessionClient
@@ -242,13 +246,15 @@ describe('startHappyServer skill_lookup', () => {
 
         expect(result.isError).toBe(false)
         expect(result.content?.[0]?.text).toContain('Linked heavygee/hapi#235')
+        expect(mockLinkIssueViaHub).toHaveBeenCalledWith('session-link-issue-ok', 'heavygee/hapi#235')
     })
 
-    it('reports failure instead of a false success when the metadata write never gets acked', async () => {
+    it('reports failure instead of a false success when the hub rejects the write', async () => {
+        mockLinkIssueViaHub.mockReset()
+        mockLinkIssueViaHub.mockRejectedValue(new Error('request failed'))
         const sessionClient = {
+            sessionId: 'session-link-issue-fail',
             updateMetadata: vi.fn(),
-            flushMetadata: vi.fn(async () => false),
-            getMetadata: vi.fn(() => ({})),
             sendAgentMessage: vi.fn(),
             sendClaudeSessionMessage: vi.fn()
         } as unknown as ApiSessionClient

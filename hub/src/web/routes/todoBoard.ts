@@ -636,6 +636,39 @@ function normalizeGhError(error: unknown, prefix?: string): Error {
     return new Error(prefix ? `${prefix}: ${message}` : message)
 }
 
+// Distinguishes "this repository genuinely does not exist" from any other
+// `gh api graphql` failure (auth expired, rate-limited, network drop,
+// malformed query) — review finding: a blanket catch-and-ignore around the
+// optional owner-`.github` fallback would also hide a real failure on that
+// specific call as if it just meant "no inherited templates," which could
+// silently point an operator at the wrong (empty) issue-template policy for
+// a repo whose `.github` fallback actually DOES have templates but errored
+// for an unrelated reason. `gh api graphql` prints the full GraphQL response
+// — including the structured `errors[].type` — to its own stdout even while
+// exiting nonzero (confirmed by hand: `gh api graphql` against a repo that
+// truly doesn't exist exits 1, but execFile's rejected error still carries
+// that JSON on `.stdout`), so this reads the type directly rather than
+// pattern-matching gh's human-readable stderr text, which could change
+// format or differ between github.com and a GHE host.
+function isGhGraphqlNotFoundError(error: unknown): boolean {
+    if (!error || typeof error !== 'object' || !('stdout' in error)) {
+        return false
+    }
+    try {
+        const parsed = JSON.parse(String((error as { stdout: unknown }).stdout)) as { errors?: Array<{ type?: string }> }
+        return Array.isArray(parsed.errors) && parsed.errors.some(e => e?.type === 'NOT_FOUND')
+    } catch {
+        return false
+    }
+}
+
+export class GhGraphqlNotFoundError extends Error {
+    constructor(message: string) {
+        super(message)
+        this.name = 'GhGraphqlNotFoundError'
+    }
+}
+
 // Async (not spawnSync): this runs on the shared hub event loop, and a slow
 // or rate-limited GitHub response must not stall every other request in
 // flight (SSE streams, unrelated API calls) for the duration of the call.
@@ -656,6 +689,9 @@ async function execGhGraphql(host: string, query: string, variables: Record<stri
         const result = await execFileAsync('gh', args, { encoding: 'utf-8', timeout: GH_TIMEOUT_MS, maxBuffer: 20 * 1024 * 1024 })
         return result.stdout
     } catch (error) {
+        if (isGhGraphqlNotFoundError(error)) {
+            throw new GhGraphqlNotFoundError(normalizeGhError(error, 'gh api graphql failed').message)
+        }
         throw normalizeGhError(error, 'gh api graphql failed')
     }
 }
@@ -1554,28 +1590,35 @@ export function createBoardRoutes(
             // could offer a blank issue a repo's real, inherited policy
             // disables, or show no templates for a repo that actually has
             // them via its organization's `.github` repo (review finding).
-            // Best-effort: a failed or absent `.github` repo just leaves
-            // the original (empty) result in place, not a hard error. Most
-            // owners have no `.github` repo at all — `gh api graphql`
-            // treats GitHub's resulting NOT_FOUND as a command failure and
-            // rejects rather than resolving with an `errors` array in the
-            // response body (review finding: this reached the outer 502
-            // handler unguarded, 502ing "New card" for the common case of a
-            // perfectly valid repo that simply has no templates of its own
-            // and whose owner has no `.github` repo either). The mandatory
-            // lookup above for the actual target repo already surfaces a
-            // real auth/transport failure before this optional fallback is
-            // even reached, so swallowing any error here specifically stays
-            // within "best-effort," not a blanket error hider.
+            // Best-effort for a genuinely absent `.github` repo only — falls
+            // through to the target repo's own (empty) result, not a hard
+            // error. Most owners have no `.github` repo at all — `gh api
+            // graphql` treats GitHub's resulting NOT_FOUND as a command
+            // failure and rejects rather than resolving with an `errors`
+            // array in the response body (review finding: this reached the
+            // outer 502 handler unguarded, 502ing "New card" for the common
+            // case of a perfectly valid repo with no templates of its own
+            // and an owner with no `.github` repo either).
+            //
+            // Narrowed to specifically NOT_FOUND (review finding, second
+            // pass): a blanket catch-all here would also hide an actual
+            // auth/rate-limit/transport failure on *this* call as if it just
+            // meant "no inherited templates" — silently serving the wrong
+            // (empty) policy for a repo whose `.github` fallback might
+            // really have templates. Any other failure still propagates to
+            // the outer 502.
             if (repoHasNoIssueTemplateDir(response) && repo.toLowerCase() !== '.github') {
                 try {
                     const inherited = await runGraphqlIssueTemplateDir({ host: board.host, owner, repo: '.github' })
                     if (!inherited.errors?.length && !repoHasNoIssueTemplateDir(inherited)) {
                         response = inherited
                     }
-                } catch {
-                    // No .github repo (or it errored) — fall through with
-                    // the target repo's own (empty) result.
+                } catch (error) {
+                    if (!(error instanceof GhGraphqlNotFoundError)) {
+                        throw error
+                    }
+                    // No .github repo — fall through with the target repo's
+                    // own (empty) result.
                 }
             }
             const { templates, blankIssuesEnabled } = parseIssueTemplateDirResponse(response)
