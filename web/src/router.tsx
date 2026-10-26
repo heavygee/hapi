@@ -517,6 +517,9 @@ function SessionsPage() {
             ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
     }, [navigate, sessions, onlineMachineIds, setSessionsMode])
+    const handleSelectSession = useCallback((sessionId: string) => {
+        navigate(getSessionListSelectionNavigation(sessionId))
+    }, [navigate])
     const handleNewSessionInDirectory = useCallback((args: { machineId: string | null; directory: string }) => {
         navigate({
             to: '/sessions/new',
@@ -599,7 +602,7 @@ function SessionsPage() {
                         key={initializedHub === baseUrl ? 'last-seen-ready' : 'last-seen-pending'}
                         sessions={sessions}
                         selectedSessionId={selectedSessionId}
-                        onSelect={(sessionId) => navigate(getSessionListSelectionNavigation(sessionId))}
+                        onSelect={handleSelectSession}
                         onNewSession={() => navigate({
                             to: '/sessions/new',
                             ...PRESERVE_SESSION_SIDEBAR_SCROLL,

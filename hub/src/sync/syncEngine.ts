@@ -51,6 +51,7 @@ import {
     type RpcListOpencodeModelsResponse,
     type RpcListOpencodeModelVariantsResponse,
     type RpcListGrokModelsResponse,
+    type RpcListDshModelsResponse,
     type RpcListCopilotModelsResponse,
     type RpcListKimiModelsResponse,
     type RpcListGrokReasoningEffortOptionsResponse,
@@ -63,6 +64,7 @@ import {
     type RpcUploadFileResponse
 } from './rpcGateway'
 import { SessionCache } from './sessionCache'
+import { SessionEnumerationCache } from './sessionEnumerationCache'
 import { ingestNotifySummaryFromMessage } from './workGraphNotifyIngest'
 
 type PiResumeAttempt = NonNullable<NonNullable<Session['metadata']>['piResumeAttempt']>
@@ -86,6 +88,7 @@ export type {
     RpcListOpencodeModelsResponse,
     RpcListOpencodeModelVariantsResponse,
     RpcListGrokModelsResponse,
+    RpcListDshModelsResponse,
     RpcListCopilotModelsResponse,
     RpcListKimiModelsResponse,
     RpcListGrokReasoningEffortOptionsResponse,
@@ -203,6 +206,28 @@ export class SyncEngine {
     /** Serialize fork/rewind per session so concurrent native rollbacks cannot stack. */
     private readonly historyActionsInFlight = new Set<string>()
     /**
+     * Single-flight + last-good caches for session enumerations. The backing
+     * RPCs can queue for tens of seconds behind a busy engine (mid-turn or
+     * reconnecting socket) while clients re-fetch on every session open;
+     * enumerations change rarely, so serve cached values and revalidate.
+     */
+    private readonly slashCommandsEnumeration = new SessionEnumerationCache({
+        ttlMs: 30_000,
+        fetchTimeoutMs: 8_000
+    })
+    private readonly skillsEnumeration = new SessionEnumerationCache({
+        ttlMs: 30_000,
+        fetchTimeoutMs: 8_000
+    })
+
+    /** Drop cached enumeration RPCs for a session leaving the active set
+     *  (deleted or archived). The keys are never queried again; without this
+     *  the per-session entries would accumulate for the hub's lifetime. */
+    private releaseSessionEnumerations(sessionId: string): void {
+        this.slashCommandsEnumeration.releaseSession(sessionId)
+        this.skillsEnumeration.releaseSession(sessionId)
+    }
+    /**
      * Hub owner id for accountable work-graph principals (A2A P1/P3).
      * Defaults to "1" for unit tests; startHub overwrites with getOrCreateOwnerId().
      */
@@ -215,7 +240,12 @@ export class SyncEngine {
         sseManager: SSEManager,
     ) {
         this.eventPublisher = new EventPublisher(sseManager, (event) => this.resolveNamespace(event))
-        this.sessionCache = new SessionCache(store, this.eventPublisher)
+        this.sessionCache = new SessionCache(store, this.eventPublisher, {
+            // mergeSessionData is the single choke point that deletes rows for
+            // merges — resume-id rotation here and sessionCache's internal
+            // dedup alike — so enumeration cleanup rides on one hook.
+            onSessionMergedAway: (oldSessionId) => this.releaseSessionEnumerations(oldSessionId)
+        })
         this.eventPublisher.subscribe((event) => {
             if (event.type === 'message-received') {
                 if (!this.sessionCache.getSession(event.sessionId)?.hasConversationContent
@@ -1847,6 +1877,7 @@ export class SyncEngine {
             )
             this.emitCliSessionMetadataUpdate(sessionId)
         }
+        this.releaseSessionEnumerations(sessionId)
         this.handleSessionEnd({ sid: sessionId, time: Date.now() })
     }
 
@@ -2119,6 +2150,7 @@ export class SyncEngine {
 
     async deleteSession(sessionId: string): Promise<void> {
         await this.sessionCache.deleteSession(sessionId)
+        this.releaseSessionEnumerations(sessionId)
     }
 
     async applySessionConfig(
@@ -3522,6 +3554,8 @@ export class SyncEngine {
                 const oldSession = this.sessionCache.getSessionByNamespace(access.sessionId, namespace)
                 if (oldSession) {
                     try {
+                        // Enumeration cleanup for the deleted old row fires via
+                        // the onSessionMergedAway hook wired in the constructor.
                         await this.sessionCache.mergeSessions(access.sessionId, spawnResult.sessionId, namespace)
                     } catch (error) {
                         const message = error instanceof Error ? error.message : 'Failed to merge resumed session'
@@ -4023,7 +4057,10 @@ export class SyncEngine {
         }
         if (session?.active) this.handleSessionEnd({ sid: sessionId, time: Date.now(), reason: 'error' })
         const remaining = this.sessionCache.getSession(sessionId)
-        if (remaining && !remaining.active) await this.sessionCache.deleteSession(sessionId)
+        if (remaining && !remaining.active) {
+            await this.sessionCache.deleteSession(sessionId)
+            this.releaseSessionEnumerations(sessionId)
+        }
         this.piUnexpectedTempOriginalIds.delete(sessionId)
         await this.writePiResumeAttempt(originalSessionId, namespace, null, true).catch(() => {})
         return true
@@ -4183,7 +4220,10 @@ export class SyncEngine {
         if (child?.active) this.handleSessionEnd({ sid: childSessionId, time: Date.now(), reason: 'error' })
         if (childSessionId !== session.id) {
             const remaining = this.sessionCache.getSession(childSessionId)
-            if (remaining && !remaining.active) await this.sessionCache.deleteSession(childSessionId)
+            if (remaining && !remaining.active) {
+                await this.sessionCache.deleteSession(childSessionId)
+                this.releaseSessionEnumerations(childSessionId)
+            }
         }
         await this.writePiResumeAttempt(session.id, session.namespace, null, true)
         this.piResumeQuarantinedIds.delete(session.id)
@@ -4295,7 +4335,11 @@ export class SyncEngine {
     }
 
     async listSlashCommands(sessionId: string, agent: string): Promise<SlashCommandsResponse> {
-        return await this.rpcGateway.listSlashCommands(sessionId, agent)
+        return await this.slashCommandsEnumeration.get(
+            `${sessionId}|${agent}`,
+            () => this.rpcGateway.listSlashCommands(sessionId, agent),
+            (result) => result.success === true && Array.isArray(result.commands)
+        )
     }
 
     async listSkills(sessionId: string, flavor?: string): Promise<{
@@ -4303,7 +4347,11 @@ export class SyncEngine {
         skills?: Array<{ name: string; description?: string }>
         error?: string
     }> {
-        return await this.rpcGateway.listSkills(sessionId, flavor)
+        return await this.skillsEnumeration.get(
+            `${sessionId}|${flavor ?? ''}`,
+            () => this.rpcGateway.listSkills(sessionId, flavor),
+            (result) => result.success === true && Array.isArray(result.skills)
+        )
     }
 
     async listAgyModelsForMachine(
@@ -4363,6 +4411,14 @@ export class SyncEngine {
 
     async listGrokModelsForSession(sessionId: string): Promise<RpcListGrokModelsResponse> {
         return await this.rpcGateway.listGrokModelsForSession(sessionId)
+    }
+
+    async listDshModelsForMachine(machineId: string): Promise<RpcListDshModelsResponse> {
+        return await this.rpcGateway.listDshModelsForMachine(machineId)
+    }
+
+    async listDshModelsForSession(sessionId: string): Promise<RpcListDshModelsResponse> {
+        return await this.rpcGateway.listDshModelsForSession(sessionId)
     }
 
     async listGrokReasoningEffortOptionsForSession(sessionId: string): Promise<RpcListGrokReasoningEffortOptionsResponse> {

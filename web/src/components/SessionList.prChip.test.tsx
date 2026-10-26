@@ -77,7 +77,11 @@ describe('SessionList PR chip', () => {
                                     }]
                                 }
                             })]}
-                            selectedSessionId={null}
+                            // Keeps the directory group's CollapsiblePanel
+                            // expanded — a group with no active/pinned/
+                            // selected session now starts collapsed
+                            // (unmounted children, not just CSS-hidden).
+                            selectedSessionId="sess-pr"
                             onSelect={onSelect}
                             onNewSession={vi.fn()}
                             onRefresh={vi.fn()}

@@ -59,7 +59,10 @@ describe('SessionList scroll-anchor DOM invariant', () => {
         renderWithProviders(
             <SessionList
                 sessions={[session]}
-                selectedSessionId={null}
+                // Keeps the directory group's CollapsiblePanel expanded —
+                // a group with no active/pinned/selected session now starts
+                // collapsed (unmounted children, not just CSS-hidden).
+                selectedSessionId="session-1"
                 onSelect={vi.fn()}
                 onNewSession={vi.fn()}
                 onRefresh={vi.fn()}

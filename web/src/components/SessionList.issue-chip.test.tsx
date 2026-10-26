@@ -58,6 +58,12 @@ function renderWithProviders(children: ReactNode) {
 // also means it never needs to stop event propagation to avoid
 // double-activating the row, since it's no longer inside the element
 // useLongPress binds its handlers to.
+//
+// `selectedSessionId` is set to the fixture's own id in every test below —
+// a directory group with no active/pinned/selected session now starts
+// genuinely collapsed (CollapsiblePanel unmounts its children, not just a
+// CSS `data-open` toggle on always-present DOM), so an inactive, unselected
+// fixture session would otherwise never reach the DOM at all.
 describe('SessionList issue-ref chip isolation', () => {
     it('renders as a DOM sibling of the row, not a descendant of its role="button"', () => {
         const session = makeSession({
@@ -76,7 +82,7 @@ describe('SessionList issue-ref chip isolation', () => {
         renderWithProviders(
             <SessionList
                 sessions={[session]}
-                selectedSessionId={null}
+                selectedSessionId="session-1"
                 onSelect={vi.fn()}
                 onNewSession={vi.fn()}
                 onRefresh={vi.fn()}
@@ -110,7 +116,7 @@ describe('SessionList issue-ref chip isolation', () => {
         renderWithProviders(
             <SessionList
                 sessions={[session]}
-                selectedSessionId={null}
+                selectedSessionId="session-1"
                 onSelect={onSelect}
                 onNewSession={vi.fn()}
                 onRefresh={vi.fn()}
@@ -149,7 +155,7 @@ describe('SessionList issue-ref chip isolation', () => {
         renderWithProviders(
             <SessionList
                 sessions={[session]}
-                selectedSessionId={null}
+                selectedSessionId="session-1"
                 onSelect={onSelect}
                 onNewSession={vi.fn()}
                 onRefresh={vi.fn()}
