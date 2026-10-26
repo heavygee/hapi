@@ -564,6 +564,49 @@ describe('updateSessionMetadata: protocol resume token preservation', () => {
         store.close()
     })
 
+    // Review finding: a sparse-write union (reconcileExternalRefs) has no
+    // cap of its own — two independently-valid sets of refs near the 32
+    // limit can union past it. Persisting that doesn't just lose the
+    // extras: MetadataSchema validation risks failing on the *next* read,
+    // nulling out the whole metadata object (name, path, flavor, resume
+    // ids, every ref), not just externalRefs. Falls back to priorRefs
+    // instead, the same "can't trust this union" response the explicit-[]
+    // branch above already uses for a different trigger.
+    it('falls back to priorRefs when a sparse-write union would exceed MAX_EXTERNAL_REFS', () => {
+        const store = makeStore()
+        const makeRef = (n: number) => ({
+            kind: 'github_issue' as const,
+            url: `https://github.com/acme/repo/issues/${n}`,
+            repo: 'acme/repo',
+            number: n,
+            linkedAt: n
+        })
+        const priorRefs = Array.from({ length: 20 }, (_, i) => makeRef(i + 1))
+        const nextRefs = Array.from({ length: 20 }, (_, i) => makeRef(i + 1000))
+        const session = store.sessions.getOrCreateSession(
+            'union-over-cap',
+            { path: '/tmp/project', host: 'example', externalRefs: priorRefs },
+            null,
+            'default'
+        )
+
+        const result = store.sessions.updateSessionMetadata(
+            session.id,
+            { path: '/tmp/project', host: 'example', externalRefs: nextRefs },
+            session.metadataVersion,
+            'default'
+        )
+        expect(result.result).toBe('success')
+
+        const metadata = getMetadata(store, session.id)
+        // Union of 40 distinct refs exceeds the 32 cap — must not persist
+        // it, and critically must not corrupt the rest of metadata either.
+        expect(metadata?.path).toBe('/tmp/project')
+        expect((metadata?.externalRefs as unknown[] | undefined)?.length).toBeLessThanOrEqual(32)
+        expect(metadata?.externalRefs).toEqual(priorRefs)
+        store.close()
+    })
+
     it('preserves Meta status cache when link-pr rewrites the same primary without status', () => {
         const store = makeStore()
         const session = store.sessions.getOrCreateSession(

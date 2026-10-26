@@ -2,7 +2,7 @@ import type { Database } from 'bun:sqlite'
 import { prepareCached } from './statementCache'
 import { bumpSessionDeletionEpoch } from './sessionInvalidation'
 import { randomUUID } from 'node:crypto'
-import { reconcileExternalRefs, toValidExternalRefs, type ExternalRef } from '@hapi/protocol/schemas'
+import { MAX_EXTERNAL_REFS, reconcileExternalRefs, toValidExternalRefs, type ExternalRef } from '@hapi/protocol/schemas'
 
 import type { StoredSession, VersionedUpdateResult } from './types'
 import { safeJsonParse } from './json'
@@ -189,7 +189,19 @@ function mergeContributionFields(
         return merged
     }
     const result = merged ?? { ...next }
-    result.externalRefs = reconcileExternalRefs(priorRefs, nextRefs)
+    let combined = reconcileExternalRefs(priorRefs, nextRefs)
+    // Two independently-valid writers can each sit near MAX_EXTERNAL_REFS;
+    // their union has no upper bound of its own. Persisting an over-limit
+    // array risks failing MetadataSchema validation on the *next* read,
+    // which would null out the whole metadata object (name, path, flavor,
+    // resume ids, every ref), not just externalRefs. Falling back to
+    // priorRefs — the same "can't trust this union" response the
+    // empty-array branch above already uses — preserves everything already
+    // safely persisted.
+    if (combined.length > MAX_EXTERNAL_REFS) {
+        combined = priorRefs
+    }
+    result.externalRefs = combined
     return result
 }
 

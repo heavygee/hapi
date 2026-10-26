@@ -187,6 +187,7 @@ export const ExternalRefSchema = z.discriminatedUnion('kind', [
 
 export type ExternalRef = z.infer<typeof ExternalRefSchema>
 export type GithubIssueExternalRef = z.infer<typeof GithubIssueExternalRefSchema>
+export const MAX_EXTERNAL_REFS = 32
 export const ExternalRefsSchema = z.array(ExternalRefSchema)
 export type ExternalRefs = z.infer<typeof ExternalRefsSchema>
 
