@@ -840,7 +840,7 @@ describe('NewSession launch preferences', () => {
             { modelId: '["deepseek-official","deepseek-v4-pro"]', name: 'DeepSeek-V4-Pro' },
         ]
         mocks.spawnSession.mockResolvedValue({ type: 'success', sessionId: 'dsh-session' })
-        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        renderWithQuery(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
 
         await waitFor(() => {
             expect(screen.getByTestId('model-options')).toHaveTextContent('DeepSeek-V4-Pro')
@@ -861,7 +861,7 @@ describe('NewSession launch preferences', () => {
         savePreferredAgent('dsh')
         mocks.dshModels = [{ modelId: '["deepseek-official","deepseek-flash"]', name: 'DeepSeek-V41-Flash' }]
         mocks.spawnSession.mockResolvedValue({ type: 'success', sessionId: 'dsh-session' })
-        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        renderWithQuery(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
 
         await waitFor(() => {
             expect(screen.getByTestId('model-options')).toHaveTextContent('DeepSeek-V41-Flash')
@@ -880,7 +880,7 @@ describe('NewSession launch preferences', () => {
         savePreferredLaunchSettings('machine-1', 'dsh', { model: '["deepseek-official","deepseek-flash"]', cursorSelectedBase: 'auto', effort: 'auto', modelReasoningEffort: 'default' })
         mocks.dshModels = [{ modelId: '["deepseek-official","deepseek-flash"]', name: 'DeepSeek-V41-Flash' }]
         mocks.spawnSession.mockResolvedValue({ type: 'success', sessionId: 'dsh-session' })
-        const view = render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        const view = renderWithQuery(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
 
         await waitFor(() => expect(screen.getByTestId('model')).toHaveTextContent('deepseek-flash'))
 
@@ -888,7 +888,7 @@ describe('NewSession launch preferences', () => {
         // launch settings (not just the in-form draft) and survive the
         // catalog validation effect.
         view.unmount()
-        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        renderWithQuery(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
         await waitFor(() => expect(screen.getByTestId('model')).toHaveTextContent('deepseek-flash'))
 
         fireEvent.click(screen.getByTestId('create'))
@@ -904,7 +904,7 @@ describe('NewSession launch preferences', () => {
         savePreferredAgent('dsh')
         savePreferredLaunchSettings('machine-1', 'dsh', { model: '["deepseek-official","removed-model"]', cursorSelectedBase: 'auto', effort: 'auto', modelReasoningEffort: 'default' })
         mocks.dshModels = [{ modelId: '["deepseek-official","deepseek-flash"]', name: 'DeepSeek-V41-Flash' }]
-        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        renderWithQuery(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
 
         await waitFor(() => expect(screen.getByTestId('model')).toHaveTextContent('auto'))
     })

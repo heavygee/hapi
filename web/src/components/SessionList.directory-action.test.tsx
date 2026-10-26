@@ -19,6 +19,12 @@ afterEach(() => {
     vi.unstubAllGlobals()
 })
 
+// Soup group headers toggle through useLongPress (mouse down + up), not onClick.
+function toggleGroupHeader(header: Element) {
+    fireEvent.mouseDown(header, { button: 0, clientX: 10, clientY: 10 })
+    fireEvent.mouseUp(header, { button: 0, clientX: 10, clientY: 10 })
+}
+
 function makeSession(overrides: Partial<SessionSummary> & { id: string }): SessionSummary {
     return {
         active: false,
@@ -194,8 +200,8 @@ describe('SessionList time filter', () => {
         )
 
         // Inactive groups start collapsed and do not mount their rows.
-        fireEvent.click(screen.getByTitle('/work/recent'))
-        fireEvent.click(screen.getByTitle('/work/old'))
+        toggleGroupHeader(screen.getByTitle('/work/recent'))
+        toggleGroupHeader(screen.getByTitle('/work/old'))
         expect(screen.getByRole('button', { name: /Recent session/ })).toBeInTheDocument()
         expect(screen.getByRole('button', { name: /Old session/ })).toBeInTheDocument()
 
@@ -400,7 +406,7 @@ describe('SessionList action menu parity', () => {
         )
 
         if (!active) {
-            fireEvent.click(screen.getByTitle('/home/ubuntu'))
+            toggleGroupHeader(screen.getByTitle('/home/ubuntu'))
         }
         fireEvent.contextMenu(screen.getByRole('button', { name: new RegExp(active ? 'Running session' : 'Closed session') }))
         fireEvent.click(screen.getByRole('menuitem', { name: 'Export conversation' }))
@@ -1019,10 +1025,10 @@ describe('SessionList collapse behavior', () => {
         const header = screen.getByTitle('/work/hapi')
         expect(screen.queryByRole('button', { name: /Closed task/ })).toBeNull()
 
-        fireEvent.click(header)
+        toggleGroupHeader(header)
         const row = screen.getByRole('button', { name: /Closed task/ })
 
-        fireEvent.click(header)
+        toggleGroupHeader(header)
         expect(row).toBeInTheDocument()
         const panel = row.closest('.collapsible-panel')!
         fireEvent.transitionEnd(panel.querySelector('.collapsible-inner')!)
@@ -1040,12 +1046,12 @@ describe('SessionList collapse behavior', () => {
         render(renderSessionList(sessions, null))
 
         const header = screen.getByTitle('/work/hapi')
-        fireEvent.click(header)
+        toggleGroupHeader(header)
         fireEvent.contextMenu(screen.getByRole('button', { name: /Closed task/ }))
         fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }))
         expect(screen.getByRole('dialog', { name: 'Rename Session' })).toBeInTheDocument()
 
-        fireEvent.click(header)
+        toggleGroupHeader(header)
         const panel = document.querySelector('.collapsible-panel')!
         fireEvent.transitionEnd(panel)
         expect(screen.getByRole('dialog', { name: 'Rename Session' })).toBeInTheDocument()
@@ -1068,7 +1074,7 @@ describe('SessionList collapse behavior', () => {
         }))
 
         render(renderSessionList(sessions, null))
-        fireEvent.click(screen.getByTitle('/work/hapi'))
+        toggleGroupHeader(screen.getByTitle('/work/hapi'))
 
         expect(screen.getByRole('button', { name: 'Expand 2' })).toBeInTheDocument()
         expect(screen.queryByRole('button', { name: 'Collapse 2' })).toBeNull()

@@ -24,6 +24,7 @@ ${chalk.bold('Sessions / peers:')}
   hapi resume [id]       Resume a local HAPI session
   hapi ping-peer         Message another session (prefer MCP ping_peer in-session)
   hapi inspect-peer      Read another session (no resume)
+  hapi set-mode          Change a session's permission mode
   hapi spawn-peer        Create a peer session and deliver a remit
   hapi job               Attach outliving process work to a session
   hapi mcp               MCP stdio bridge

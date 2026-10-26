@@ -1,7 +1,5 @@
-import {
-    SESSION_START_TIMEOUT_MS_DEFAULT,
-    clampSessionStartTimeoutMs
-} from '@hapi/protocol/sessionStartTimeout';
+import { clampSessionStartTimeoutMs } from '@hapi/protocol/sessionStartTimeout';
+import { sessionStartupTimeout } from './sessionStartup';
 
 /**
  * How long this runner waits for a freshly spawned session to report back with
@@ -16,17 +14,18 @@ import {
  * 2. The hub-configured value delivered with the spawn request (Settings).
  *    Clamped to the supported range so a bad hub value cannot park a hung
  *    child for a day.
- * 3. The 15s default.
+ * 3. The per-agent default (15s; 30s for Codex, which has a slower startup).
  */
 export function resolveWebhookTimeoutMs(options?: {
     env?: string | undefined
     requestedMs?: number | undefined
+    agent?: string | undefined
 }): number {
     const envValue = Number(options?.env);
     if (Number.isFinite(envValue) && envValue > 0) {
         return envValue;
     }
-    return clampSessionStartTimeoutMs(options?.requestedMs) ?? SESSION_START_TIMEOUT_MS_DEFAULT;
+    return clampSessionStartTimeoutMs(options?.requestedMs) ?? sessionStartupTimeout(options?.agent);
 }
 
 /** `15s` / `1m 30s` — short enough to sit inside an error message. */

@@ -55,7 +55,7 @@ function renderWithProviders(children: ReactNode) {
 // header for anchor purposes. Both must stay on the same element.
 describe('SessionList scroll-anchor DOM invariant', () => {
     it('keeps session-list-item and data-session-scroll-anchor on the same element for a session row', () => {
-        const session = makeSession({ id: 'session-1', updatedAt: Date.now(), metadata: { path: '/x', name: 'Fix the thing', flavor: 'codex' } })
+        const session = makeSession({ id: 'session-1', active: true, updatedAt: Date.now(), metadata: { path: '/x', name: 'Fix the thing', flavor: 'codex' } })
         renderWithProviders(
             <SessionList
                 sessions={[session]}

@@ -623,7 +623,7 @@ describe('message tail synchronization', () => {
             createdAt: 40_000 + index, content: { role: 'agent', content: { type: 'codex', data: { ...data, turn_id: 'round' } } } }))
         sessionStorage.setItem(`hapi:message-window:v2:${id}`, JSON.stringify({
             messages: tail, hasMore: true, oldestPositionAt: 40_000, oldestPositionSeq: 40,
-            newestPositionAt: 40_002, newestPositionSeq: 42, epoch: 3
+            newestPositionAt: 40_002, newestPositionSeq: 42, epoch: 3, requiresLatestReset: false
         }))
         const assertDuration = () => {
             const messages = getMessageWindowState(id).messages

@@ -34,6 +34,7 @@ import {
     type PeerParentIdentity,
 } from '@hapi/protocol/peerParentStamp'
 import { configuration } from '@/configuration'
+import { isPeerToolsDisabled } from '@/modules/common/peerTools'
 import { getAuthToken } from '@/api/auth'
 import { buildHubRequestHeaders } from '@/api/hubExtraHeaders'
 import { readSettings } from '@/persistence'
@@ -60,6 +61,8 @@ export type SpawnPeerErrorCode =
     | 'resume_failed'
     | 'timeout'
     | 'send_failed'
+    | 'disabled'
+    | 'apply_failed'
 
 export class SpawnPeerError extends Error {
     readonly code: SpawnPeerErrorCode
@@ -436,6 +439,14 @@ async function verifySessionRemit(
 }
 
 export async function spawnPeer(options: SpawnPeerOptions): Promise<SpawnPeerResult> {
+    // HAPI_DISABLE_PEER_TOOLS: refuse before creating a child; remit delivery
+    // goes through pingPeer, which would refuse after the spawn already landed.
+    if (isPeerToolsDisabled()) {
+        throw new SpawnPeerError(
+            'disabled',
+            'peer session tools are disabled on this machine (HAPI_DISABLE_PEER_TOOLS is set)'
+        )
+    }
     const rawDirectory = (options.directory ?? '').trim()
     const onProgress = options.onProgress
     if (!rawDirectory) {

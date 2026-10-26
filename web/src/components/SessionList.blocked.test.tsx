@@ -178,7 +178,7 @@ describe('SessionList blocked chrome (#1717)', () => {
     })
 
     it('narrows to blocked work through the combined filter menu', () => {
-        renderList([blocked('stuck-one'), blocked('stuck-two'), makeSession({ id: 'fine-one' })])
+        renderList([blocked('stuck-one'), blocked('stuck-two'), makeSession({ id: 'fine-one', active: true })])
 
         expect(screen.queryByTestId('blocked-lens-toggle')).toBeNull()
         expect(screen.getByText('fine-one')).toBeTruthy()
@@ -253,7 +253,7 @@ describe('SessionList blocked chrome (#1717)', () => {
     })
 
     it('does not offer Mark unblocked on an unblocked row', async () => {
-        renderList([makeSession({ id: 'fine-one' })])
+        renderList([makeSession({ id: 'fine-one', active: true })])
 
         const row = document.querySelector('[data-session-id="fine-one"]') as HTMLElement
         fireEvent.contextMenu(row)

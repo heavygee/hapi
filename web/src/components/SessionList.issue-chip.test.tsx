@@ -62,6 +62,7 @@ describe('SessionList issue-ref chip isolation', () => {
     it('renders as a DOM sibling of the row, not a descendant of its role="button"', () => {
         const session = makeSession({
             id: 'session-1',
+            active: true,
             updatedAt: Date.now(),
             metadata: {
                 path: '/home/ubuntu',
@@ -96,6 +97,7 @@ describe('SessionList issue-ref chip isolation', () => {
         const onSelect = vi.fn()
         const session = makeSession({
             id: 'session-1',
+            active: true,
             updatedAt: Date.now(),
             metadata: {
                 path: '/home/ubuntu',
@@ -135,6 +137,7 @@ describe('SessionList issue-ref chip isolation', () => {
         const onSelect = vi.fn()
         const session = makeSession({
             id: 'session-1',
+            active: true,
             updatedAt: Date.now(),
             metadata: {
                 path: '/home/ubuntu',

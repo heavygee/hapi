@@ -541,12 +541,17 @@ describe('startHappyServer peer tools kill switch', () => {
     it('omits peer tools from registration and toolNames when HAPI_DISABLE_PEER_TOOLS is set', async () => {
         process.env.HAPI_DISABLE_PEER_TOOLS = '1'
         const { toolNames } = await startServer()
-        expect(toolNames).toEqual(['change_title', 'display_image', 'display_video', 'display_media'])
+        for (const peerTool of ['list_peers', 'search_peers', 'ping_peer', 'inspect_peer', 'spawn_peer', 'archive_peer']) {
+            expect(toolNames).not.toContain(peerTool)
+        }
+        // search_content is a transcript search, not a peer tool: it survives the kill switch.
+        expect(toolNames).toEqual(expect.arrayContaining(['change_title', 'display_image', 'display_video', 'display_media', 'search_content']))
         const tools = await client!.listTools()
         const names = tools.tools.map((tool) => tool.name)
-        expect(names).not.toContain('list_peers')
-        expect(names).not.toContain('ping_peer')
-        expect(names).not.toContain('inspect_peer')
+        for (const peerTool of ['list_peers', 'search_peers', 'ping_peer', 'inspect_peer', 'spawn_peer', 'archive_peer']) {
+            expect(names).not.toContain(peerTool)
+        }
+        expect(names).toContain('search_content')
         expect(names).toEqual(expect.arrayContaining(['display_image', 'display_video', 'display_media']))
     })
 })
