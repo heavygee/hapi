@@ -739,6 +739,10 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
         awarenessPollTimer.unref?.();
     }
 
+    // HAPI_DISABLE_PEER_TOOLS=1: peer tools are neither registered nor
+    // advertised, so wrapped agents cannot browse or message other sessions.
+    const peerToolsDisabled = isPeerToolsDisabled();
+
     // Always include link_pr in the stdio --tools shortlist when dynamic so the
     // bridge can register then enable/disable; HTTP listTools still honors the
     // live visibility flag via RegisteredTool.enable/disable.
