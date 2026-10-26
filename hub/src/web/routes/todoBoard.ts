@@ -574,6 +574,14 @@ async function runGhGraphqlIssueTemplateDir(target: IssueTemplateDirTarget): Pro
 // parseIssueFormYaml would correctly mark it unsupported anyway, but
 // filtering it out here keeps a stray "unsupported" entry from ever
 // appearing in the picker for what every repo with a config file has).
+// GitHub resolves `issueTemplateDir` to `null` when the path doesn't exist
+// at all (vs. `{ entries: [] }` for an empty-but-present directory) —
+// exactly the signal needed to know whether this repo has *any* issue
+// templates of its own before considering the owner's `.github` fallback.
+function repoHasNoIssueTemplateDir(response: GhIssueTemplateDirResponse): boolean {
+    return response.data?.repository?.issueTemplateDir == null
+}
+
 function parseIssueTemplateDirResponse(response: GhIssueTemplateDirResponse): { templates: IssueTemplate[]; blankIssuesEnabled: boolean } {
     const entries = response.data?.repository?.issueTemplateDir?.entries ?? []
     const templates: IssueTemplate[] = []
@@ -1533,9 +1541,26 @@ export function createBoardRoutes(
         const [owner, repo] = repoResult.data.split('/') as [string, string]
 
         try {
-            const response = await runGraphqlIssueTemplateDir({ host: board.host, owner, repo })
+            let response = await runGraphqlIssueTemplateDir({ host: board.host, owner, repo })
             if (response.errors?.length) {
                 return c.json({ error: response.errors.map(e => e.message).join('; ') }, 502)
+            }
+            // GitHub inherits issue templates — and config.yml's
+            // blank_issues_enabled — from the owner's special `.github`
+            // repo's own ISSUE_TEMPLATE directory when the target repo has
+            // none of its own at all (a directory-level fallback, not a
+            // per-file merge: a repo with its own directory, even an empty
+            // one, never inherits). Without resolving this, Boards' picker
+            // could offer a blank issue a repo's real, inherited policy
+            // disables, or show no templates for a repo that actually has
+            // them via its organization's `.github` repo (review finding).
+            // Best-effort: a failed or absent `.github` repo just leaves
+            // the original (empty) result in place, not a hard error.
+            if (repoHasNoIssueTemplateDir(response) && repo.toLowerCase() !== '.github') {
+                const inherited = await runGraphqlIssueTemplateDir({ host: board.host, owner, repo: '.github' })
+                if (!inherited.errors?.length && !repoHasNoIssueTemplateDir(inherited)) {
+                    response = inherited
+                }
             }
             const { templates, blankIssuesEnabled } = parseIssueTemplateDirResponse(response)
             // `blank_issues_enabled: false` is honored as-is, even when zero

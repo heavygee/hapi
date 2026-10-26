@@ -1268,6 +1268,44 @@ describe('updateSessionMetadata: protocol resume token preservation', () => {
         expect(metadata?.externalRefs).toEqual([])
     })
 
+    // Review finding: a sparse-write union (the generic, non-replace path)
+    // has no cap of its own even though ExternalRefsSchema does — two
+    // independently-valid sets of refs near the 32 limit can union past it.
+    // Persisting that doesn't just lose the extras: MetadataSchema
+    // validation fails on the *next* read, nulling out the whole metadata
+    // object (name, path, flavor, resume ids, every ref), not just
+    // externalRefs. Falls back to priorRefs instead, the same "can't trust
+    // this union" response the all-malformed-elements case already uses.
+    it('falls back to priorRefs when a sparse-write union would exceed MAX_EXTERNAL_REFS', () => {
+        const store = makeStore()
+        const makeRef = (n: number) => ({
+            kind: 'github_issue', url: `https://github.com/acme/repo/issues/${n}`, repo: 'acme/repo', number: n, linkedAt: n
+        })
+        const priorRefs = Array.from({ length: 20 }, (_, i) => makeRef(i + 1))
+        const nextRefs = Array.from({ length: 20 }, (_, i) => makeRef(i + 1000))
+        const session = store.sessions.getOrCreateSession(
+            'union-over-cap',
+            { path: '/tmp/project', host: 'example', externalRefs: priorRefs },
+            null,
+            'default'
+        )
+
+        const result = store.sessions.updateSessionMetadata(
+            session.id,
+            { path: '/tmp/project', host: 'example', externalRefs: nextRefs },
+            session.metadataVersion,
+            'default'
+        )
+        expect(result.result).toBe('success')
+
+        const metadata = getMetadata(store, session.id)
+        // Union of 40 distinct refs exceeds the 32 cap — must not persist
+        // it, and critically must not corrupt the rest of metadata either.
+        expect(metadata?.path).toBe('/tmp/project')
+        expect((metadata?.externalRefs as unknown[] | undefined)?.length).toBeLessThanOrEqual(32)
+        expect(metadata?.externalRefs).toEqual(priorRefs)
+    })
+
     // Found by Meta during a soup absorb and independently confirmed by hand
     // against this exact code (not just the test): an explicit
     // `externalRefs: []` is a deliberate unlink-to-empty, not a sparse/stale
