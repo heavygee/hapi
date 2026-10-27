@@ -27,9 +27,9 @@ describe('boardSpawnBriefing', () => {
         expect(peekBoardSpawnBriefing('not-a-real-id')).toBeNull()
     })
 
-    it('returns null for a stash missing a title (stale pre-rename-fix entry)', () => {
+    it('still delivers the message/issue-link for a stash missing a title (stale pre-rename-fix entry) — only the rename is skipped', () => {
         const id = 'stale-id'
-        sessionStorage.setItem('hapi:board-spawn-briefing:' + id, JSON.stringify({ message: 'Fix the thing' }))
-        expect(peekBoardSpawnBriefing(id)).toBeNull()
+        sessionStorage.setItem('hapi:board-spawn-briefing:' + id, JSON.stringify({ message: 'Fix the thing', linkIssueUrl: 'https://github.com/heavygee/hapi/issues/235' }))
+        expect(peekBoardSpawnBriefing(id)).toEqual({ message: 'Fix the thing', linkIssueUrl: 'https://github.com/heavygee/hapi/issues/235', title: undefined })
     })
 })
