@@ -42,6 +42,9 @@ function renderDetail(overrides: Partial<Parameters<typeof BoardItemDetail>[0]> 
         onClose: vi.fn().mockResolvedValue(undefined),
         onReopen: vi.fn(),
         onComment: vi.fn(),
+        comments: [],
+        isLoadingComments: false,
+        commentsError: null,
         onSetStatus: vi.fn(),
         assignableUsers: [],
         isLoadingAssignableUsers: false,
@@ -378,5 +381,78 @@ describe('BoardItemDetail affordance treatment', () => {
     it('does not show the status spinner when not changing status', () => {
         renderDetail({ isSettingStatus: false })
         expect(screen.queryByRole('status', { name: 'Changing status…' })).not.toBeInTheDocument()
+    })
+
+    it('renders a comment with author, role badge, and markdown body, linked back to GitHub', () => {
+        renderDetail({
+            comments: [{
+                id: 'IC_1',
+                author: { login: 'octocat', avatarUrl: 'https://example.com/octocat.png' },
+                authorAssociation: 'MEMBER',
+                body: '**bold** body',
+                createdAt: '2026-10-01T09:00:00Z',
+                url: 'https://github.com/acme/widgets/issues/1#issuecomment-1',
+                isMinimized: false,
+                minimizedReason: null
+            }]
+        })
+        expect(screen.getByText('octocat')).toBeInTheDocument()
+        expect(screen.getByText('Member')).toBeInTheDocument()
+        expect(screen.getByText('bold')).toBeInTheDocument()
+        const link = screen.getAllByRole('link').find(a => a.getAttribute('href') === 'https://github.com/acme/widgets/issues/1#issuecomment-1')
+        expect(link).toBeDefined()
+    })
+
+    it('does not show a role badge for NONE association', () => {
+        renderDetail({
+            comments: [{
+                id: 'IC_1',
+                author: { login: 'rando', avatarUrl: 'https://example.com/rando.png' },
+                authorAssociation: 'NONE',
+                body: 'hi',
+                createdAt: '2026-10-01T09:00:00Z',
+                url: 'https://github.com/acme/widgets/issues/1#issuecomment-1',
+                isMinimized: false,
+                minimizedReason: null
+            }]
+        })
+        expect(screen.queryByText('None')).not.toBeInTheDocument()
+    })
+
+    it('shows a placeholder for a deleted comment author', () => {
+        renderDetail({
+            comments: [{
+                id: 'IC_1',
+                author: null,
+                authorAssociation: 'NONE',
+                body: 'hi',
+                createdAt: '2026-10-01T09:00:00Z',
+                url: 'https://github.com/acme/widgets/issues/1#issuecomment-1',
+                isMinimized: false,
+                minimizedReason: null
+            }]
+        })
+        expect(screen.getByText('Deleted user')).toBeInTheDocument()
+    })
+
+    it('shows an empty state when there are no comments', () => {
+        renderDetail({ comments: [] })
+        expect(screen.getByText('No comments yet.')).toBeInTheDocument()
+    })
+
+    it('shows a loading spinner while comments are loading', () => {
+        renderDetail({ isLoadingComments: true, comments: [] })
+        expect(screen.getByRole('status', { name: 'Loading comments…' })).toBeInTheDocument()
+    })
+
+    it('shows an error state when the comments fetch fails, instead of the empty state', () => {
+        renderDetail({ commentsError: 'network down', comments: [] })
+        expect(screen.getByText('Could not load comments: network down')).toBeInTheDocument()
+        expect(screen.queryByText('No comments yet.')).not.toBeInTheDocument()
+    })
+
+    it('does not render the comments section at all when the item has no linked issue/PR (draft, no write actions)', () => {
+        renderDetail({ item: makeItem({ url: null }), comments: [] })
+        expect(screen.queryByText('Comments')).not.toBeInTheDocument()
     })
 })

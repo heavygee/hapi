@@ -119,6 +119,21 @@ describe('useBoardItemActions', () => {
         expect(setBoardItemStatus).not.toHaveBeenCalled()
     })
 
+    it('comments on an item and invalidates both the board items cache and that item\'s own comments cache', async () => {
+        const queryClient = new QueryClient()
+        const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+        const commentOnBoardItem = vi.fn().mockResolvedValue(undefined)
+        const api = { commentOnBoardItem } as unknown as ApiClient
+        const url = 'https://github.com/a/b/issues/1'
+
+        const { result } = renderHook(() => useBoardItemActions(api, 'board-1'), { wrapper: wrapper(queryClient) })
+        await result.current.commentOnItem({ url }, 'hi')
+
+        expect(commentOnBoardItem).toHaveBeenCalledWith('board-1', url, 'hi')
+        expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.boardItemsAll })
+        expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.boardItemComments('board-1', url) })
+    })
+
     it('propagates a failed write without invalidating the query', async () => {
         const queryClient = new QueryClient()
         const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')

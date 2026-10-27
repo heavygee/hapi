@@ -102,10 +102,11 @@ export function useBoardItemActions(api: ApiClient | null, boardId: string | nul
         try {
             await client.commentOnBoardItem(id, url, body)
             await invalidate()
+            await queryClient.invalidateQueries({ queryKey: queryKeys.boardItemComments(id, url) })
         } finally {
             setCommentingUrls(current => removeUrl(current, url))
         }
-    }, [requireTarget, invalidate])
+    }, [requireTarget, invalidate, queryClient])
 
     const setItemStatus = useCallback(async (item: Pick<BoardItem, 'url'>, status: string | null) => {
         const { api: client, boardId: id, url } = requireTarget(item.url)

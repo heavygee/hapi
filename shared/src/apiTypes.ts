@@ -1151,6 +1151,21 @@ export type AssignableUsersResponse = {
     users: BoardAssignableUser[]
 }
 
+export type BoardItemComment = {
+    id: string
+    author: BoardItemActor | null
+    authorAssociation: string
+    body: string
+    createdAt: string
+    url: string
+    isMinimized: boolean
+    minimizedReason: string | null
+}
+
+export type BoardItemCommentsResponse = {
+    comments: BoardItemComment[]
+}
+
 export const LinkIssueRequestSchema = z.object({
     url: z.string().min(1)
 })

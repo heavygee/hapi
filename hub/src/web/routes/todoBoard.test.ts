@@ -79,7 +79,8 @@ async function createApp(
     actions?: Parameters<typeof createBoardRoutes>[4],
     runGraphqlMembership?: Parameters<typeof createBoardRoutes>[5],
     runGraphqlAssignableUsers?: Parameters<typeof createBoardRoutes>[6],
-    runGraphqlIssueTemplateDir?: Parameters<typeof createBoardRoutes>[7]
+    runGraphqlIssueTemplateDir?: Parameters<typeof createBoardRoutes>[7],
+    runGraphqlComments?: Parameters<typeof createBoardRoutes>[8]
 ) {
     const dataDir = await mkdtemp(join(tmpdir(), 'hapi-todo-board-'))
     directories.push(dataDir)
@@ -99,7 +100,8 @@ async function createApp(
         actions ?? UNUSED_ACTIONS,
         runGraphqlMembership ?? ALWAYS_MEMBER,
         runGraphqlAssignableUsers ?? (() => ({ data: { repository: { assignableUsers: { nodes: [] } } } })),
-        runGraphqlIssueTemplateDir ?? (() => ({ data: { repository: { issueTemplateDir: null } } }))
+        runGraphqlIssueTemplateDir ?? (() => ({ data: { repository: { issueTemplateDir: null } } })),
+        runGraphqlComments ?? (() => ({ data: { resource: { comments: { nodes: [] } } } }))
     ))
     return app
 }
@@ -1298,6 +1300,125 @@ describe('GET /api/todo-boards/:id/items/assignable-users', () => {
             errors: [{ message: 'boom' }]
         }))
         const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/assignable-users?url=${encodeURIComponent(VALID_ITEM_URL)}`)
+        expect(response.status).toBe(502)
+    })
+})
+
+describe('GET /api/todo-boards/:id/items/comments', () => {
+    beforeEach(() => {
+        process.env.HAPI_BOARD_OWNER = 'heavygee'
+        process.env.HAPI_BOARD_NUMBER = '6'
+    })
+
+    const makeCommentNode = (overrides: Partial<{
+        id: string
+        author: { login: string; avatarUrl: string } | null
+        authorAssociation: string
+        body: string
+        createdAt: string
+        url: string
+        isMinimized: boolean
+        minimizedReason: string | null
+    }> = {}) => ({
+        id: 'IC_1',
+        author: { login: 'octocat', avatarUrl: 'https://example.com/octocat.png' },
+        authorAssociation: 'MEMBER',
+        body: 'Looks good to me',
+        createdAt: '2026-10-27T00:00:00Z',
+        url: 'https://github.com/heavygee/hapi-demo-board/issues/1#issuecomment-1',
+        isMinimized: false,
+        minimizedReason: null,
+        ...overrides
+    })
+
+    it('fetches comments for the item via a single resource(url:) query, scoped by host + url only', async () => {
+        const calls: unknown[] = []
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, undefined, undefined, undefined, undefined, (target) => {
+            calls.push(target)
+            return { data: { resource: { comments: { nodes: [makeCommentNode()] } } } }
+        })
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/comments?url=${encodeURIComponent(VALID_ITEM_URL)}`)
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({
+            comments: [{
+                id: 'IC_1',
+                author: { login: 'octocat', avatarUrl: 'https://example.com/octocat.png' },
+                authorAssociation: 'MEMBER',
+                body: 'Looks good to me',
+                createdAt: '2026-10-27T00:00:00Z',
+                url: 'https://github.com/heavygee/hapi-demo-board/issues/1#issuecomment-1',
+                isMinimized: false,
+                minimizedReason: null
+            }]
+        })
+        expect(calls).toEqual([{ host: 'github.com', url: VALID_ITEM_URL }])
+    })
+
+    // Same resource(url:) + inline-fragment shape works unchanged for a PR —
+    // no isPullRequest branching needed, unlike a number-keyed
+    // issue(number:)/pullRequest(number:) pair would require.
+    it('reads comments for a PR item the same way, via the PullRequest fragment', async () => {
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, undefined, undefined, undefined, undefined, () => ({
+            data: { resource: { comments: { nodes: [makeCommentNode({ id: 'IC_pr' })] } } }
+        }))
+        const pullUrl = 'https://github.com/heavygee/hapi-demo-board/pull/9'
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/comments?url=${encodeURIComponent(pullUrl)}`)
+        expect(response.status).toBe(200)
+        const body = await response.json() as { comments: Array<{ id: string }> }
+        expect(body.comments.map(c => c.id)).toEqual(['IC_pr'])
+    })
+
+    it('drops a malformed (null) comment node instead of throwing', async () => {
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, undefined, undefined, undefined, undefined, () => ({
+            data: { resource: { comments: { nodes: [makeCommentNode(), null] } } }
+        }))
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/comments?url=${encodeURIComponent(VALID_ITEM_URL)}`)
+        expect(response.status).toBe(200)
+        const body = await response.json() as { comments: unknown[] }
+        expect(body.comments).toHaveLength(1)
+    })
+
+    it('maps a null comment author to null instead of crashing (deleted account)', async () => {
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, undefined, undefined, undefined, undefined, () => ({
+            data: { resource: { comments: { nodes: [makeCommentNode({ author: null })] } } }
+        }))
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/comments?url=${encodeURIComponent(VALID_ITEM_URL)}`)
+        expect(response.status).toBe(200)
+        const body = await response.json() as { comments: Array<{ author: unknown }> }
+        expect(body.comments[0]?.author).toBeNull()
+    })
+
+    it('rejects a missing url query parameter', async () => {
+        const app = await createApp(() => ({ data: {} }))
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/comments`)
+        expect(response.status).toBe(400)
+    })
+
+    it('404s for an unknown board', async () => {
+        const app = await createApp(() => ({ data: {} }))
+        const response = await app.request(`/api/todo-boards/unknown/items/comments?url=${encodeURIComponent(VALID_ITEM_URL)}`)
+        expect(response.status).toBe(404)
+    })
+
+    it('403s for a non-default namespace', async () => {
+        const app = await createApp(() => ({ data: {} }), undefined, 'some-other-namespace')
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/comments?url=${encodeURIComponent(VALID_ITEM_URL)}`)
+        expect(response.status).toBe(403)
+    })
+
+    it('rejects an item URL that is not a member of this board\'s project — same gate as every write action', async () => {
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, undefined, () => ({
+            data: { resource: { projectItems: { nodes: [] } } }
+        }))
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/comments?url=${encodeURIComponent(VALID_ITEM_URL)}`)
+        expect(response.status).toBe(400)
+    })
+
+    it('surfaces a GraphQL-level error as a 502', async () => {
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, undefined, undefined, undefined, undefined, () => ({
+            errors: [{ message: 'boom' }]
+        }))
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items/comments?url=${encodeURIComponent(VALID_ITEM_URL)}`)
         expect(response.status).toBe(502)
     })
 })

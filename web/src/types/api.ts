@@ -58,6 +58,8 @@ export type {
     AssignableUsersResponse,
     BoardAssignableUser,
     BoardItem,
+    BoardItemComment,
+    BoardItemCommentsResponse,
     BoardItemsResponse,
     BoardSummary,
     BoardsResponse,

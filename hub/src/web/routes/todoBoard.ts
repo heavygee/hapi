@@ -12,6 +12,8 @@ import {
     type AssignableUsersResponse,
     type BoardAssignableUser,
     type BoardItem,
+    type BoardItemComment,
+    type BoardItemCommentsResponse,
     type BoardItemsResponse,
     type BoardsResponse,
     type CreateBoardItemResponse,
@@ -521,6 +523,78 @@ function toAssignableUsers(response: GhAssignableUsersResponse): BoardAssignable
     return nodes
         .filter((node): node is { login: string; avatarUrl: string; name?: string | null } => node !== null)
         .map(node => ({ login: node.login, avatarUrl: node.avatarUrl, name: node.name ?? null }))
+}
+
+// Same `resource(url:)` + Issue/PullRequest inline-fragment shape as
+// RESOURCE_PROJECT_MEMBERSHIP_QUERY above, not a number-keyed
+// `repository.issue(number:)`/`pullRequest(number:)` pair — verified by hand
+// that the latter actually 502s here: asking GitHub for `pullRequest(number:)`
+// on an issue number comes back as a top-level GraphQL error (not a null
+// field), and `gh api graphql` treats any such error as a hard CLI failure,
+// discarding the other field's valid data along with it. The polymorphic
+// `resource(url:)` fragment doesn't have that problem — the fragment that
+// doesn't match the node's actual type just resolves to nothing.
+const ITEM_COMMENTS_QUERY = `
+query($url: URI!) {
+  resource(url: $url) {
+    ... on Issue {
+      comments(last: 100) {
+        nodes { id author { login avatarUrl } authorAssociation body createdAt url isMinimized minimizedReason }
+      }
+    }
+    ... on PullRequest {
+      comments(last: 100) {
+        nodes { id author { login avatarUrl } authorAssociation body createdAt url isMinimized minimizedReason }
+      }
+    }
+  }
+}`
+
+type GhCommentNode = {
+    id: string
+    author?: { login: string; avatarUrl: string } | null
+    authorAssociation: string
+    body: string
+    createdAt: string
+    url: string
+    isMinimized: boolean
+    minimizedReason?: string | null
+}
+
+type GhItemCommentsResponse = {
+    data?: {
+        resource?: {
+            comments?: { nodes?: Array<GhCommentNode | null> } | null
+        } | null
+    }
+    errors?: Array<{ message: string }>
+}
+
+type ItemCommentsTarget = { host: string; url: string }
+
+async function runGhGraphqlItemComments(target: ItemCommentsTarget): Promise<GhItemCommentsResponse> {
+    const stdout = await execGhGraphql(target.host, ITEM_COMMENTS_QUERY, { url: target.url })
+    try {
+        return JSON.parse(stdout) as GhItemCommentsResponse
+    } catch {
+        throw new Error('gh api graphql returned non-JSON output')
+    }
+}
+
+function toBoardItemComments(response: GhItemCommentsResponse): BoardItemComment[] {
+    const nodes = response.data?.resource?.comments?.nodes ?? []
+    return nodes
+        .filter((node): node is GhCommentNode => node !== null)
+        .map(node => ({
+            id: node.id,
+            author: node.author ? { login: node.author.login, avatarUrl: node.author.avatarUrl } : null,
+            authorAssociation: node.authorAssociation,
+            body: node.body,
+            createdAt: node.createdAt,
+            url: node.url,
+            isMinimized: node.isMinimized,
+            minimizedReason: node.minimizedReason ?? null
+        }))
 }
 
 // `object(expression: "HEAD:<path>")` resolves to null (no error) when the
@@ -1155,7 +1229,8 @@ export function createBoardRoutes(
     actions: BoardItemActions = defaultBoardItemActions,
     runGraphqlMembership: (target: ProjectMembershipTarget) => GhResourceProjectMembershipResponse | Promise<GhResourceProjectMembershipResponse> = runGhGraphqlProjectMembership,
     runGraphqlAssignableUsers: (target: AssignableUsersTarget) => GhAssignableUsersResponse | Promise<GhAssignableUsersResponse> = runGhGraphqlAssignableUsers,
-    runGraphqlIssueTemplateDir: (target: IssueTemplateDirTarget) => GhIssueTemplateDirResponse | Promise<GhIssueTemplateDirResponse> = runGhGraphqlIssueTemplateDir
+    runGraphqlIssueTemplateDir: (target: IssueTemplateDirTarget) => GhIssueTemplateDirResponse | Promise<GhIssueTemplateDirResponse> = runGhGraphqlIssueTemplateDir,
+    runGraphqlComments: (target: ItemCommentsTarget) => GhItemCommentsResponse | Promise<GhItemCommentsResponse> = runGhGraphqlItemComments
 ): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
@@ -1520,6 +1595,30 @@ export function createBoardRoutes(
             return c.json(body)
         } catch (error) {
             return c.json({ error: error instanceof Error ? error.message : 'Failed to fetch assignable users' }, 502)
+        }
+    })
+
+    app.get('/todo-boards/:id/items/comments', async (c) => {
+        if (c.get('namespace') !== 'default') {
+            return c.json({ error: OWNER_ONLY_ERROR }, 403)
+        }
+        const url = c.req.query('url')
+        if (!url) {
+            return c.json({ error: 'Missing url query parameter' }, 400)
+        }
+        const resolved = await requireBoardAndValidUrl(c.req.param('id'), url)
+        if (!resolved.ok) {
+            return c.json({ error: resolved.error }, resolved.status)
+        }
+        try {
+            const response = await runGraphqlComments({ host: resolved.board.host, url: resolved.url })
+            if (response.errors?.length) {
+                return c.json({ error: response.errors.map(e => e.message).join('; ') }, 502)
+            }
+            const body: BoardItemCommentsResponse = { comments: toBoardItemComments(response) }
+            return c.json(body)
+        } catch (error) {
+            return c.json({ error: error instanceof Error ? error.message : 'Failed to fetch comments' }, 502)
         }
     })
 

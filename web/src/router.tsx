@@ -52,6 +52,7 @@ import { useMachineLabels } from '@/hooks/useMachineLabels'
 import { useBoards } from '@/hooks/queries/useBoards'
 import { useBoardItems } from '@/hooks/queries/useBoardItems'
 import { useBoardAssignableUsers } from '@/hooks/queries/useBoardAssignableUsers'
+import { useBoardItemComments } from '@/hooks/queries/useBoardItemComments'
 import { useIssueTemplates } from '@/hooks/queries/useIssueTemplates'
 import { useBoardSelection } from '@/hooks/useBoardSelection'
 import { useBoardActions } from '@/hooks/mutations/useBoardActions'
@@ -336,6 +337,11 @@ function SessionsPage() {
         isLoading: boardItemAssignableUsersLoading,
         error: boardItemAssignableUsersError,
     } = useBoardAssignableUsers(api, effectiveBoardId, selectedBoardItem?.url ?? null, assigneePickerOpen, assignableUsersSearch)
+    const {
+        comments: boardItemComments,
+        isLoading: boardItemCommentsLoading,
+        error: boardItemCommentsError,
+    } = useBoardItemComments(api, effectiveBoardId, selectedBoardItem?.url ?? null)
     // "New card" dialog state — same boundary as the assignee picker above:
     // BoardList stays presentational, this component owns the live
     // useIssueTemplates query keyed by dialog-open + repo-selection state it
@@ -708,6 +714,9 @@ function SessionsPage() {
                                     throw err
                                 })
                             }}
+                            comments={boardItemComments}
+                            isLoadingComments={boardItemCommentsLoading}
+                            commentsError={boardItemCommentsError}
                             onSetStatus={(status) => {
                                 setBoardItemStatus(selectedBoardItem, status).catch((err) => addToast({
                                     title: t('boards.detail.statusChangeFailed'),
