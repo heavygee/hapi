@@ -183,3 +183,39 @@ describe('BoardList title filter (operator ask)', () => {
         expect(screen.getByText('Something else entirely')).toBeInTheDocument()
     })
 })
+
+// Operator dogfood (hapi#302): Refresh + New card belong on the filter row
+// (card-list chrome), not the board-switcher header — and New card must be
+// an outlined square-plus, not a bare + that collides with "add a board".
+describe('BoardList card-list toolbar (hapi#302)', () => {
+    it('keeps Refresh and New card as siblings of the title filter', () => {
+        const onRefresh = vi.fn()
+        const onOpenNewCard = vi.fn()
+        renderList([makeItem()], ['Todo'], { onRefresh, onOpenNewCard })
+
+        const filter = screen.getByPlaceholderText('Filter by title…')
+        const refresh = screen.getByRole('button', { name: 'Refresh' })
+        const newCard = screen.getByRole('button', { name: 'New card' })
+        expect(refresh).toHaveAttribute('title', 'Refresh')
+        expect(newCard).toHaveAttribute('title', 'New card')
+        // Filter is wrapped in a relative flex-1 shell; buttons are direct
+        // children of the shared toolbar row that owns that shell.
+        const toolbar = filter.parentElement?.parentElement
+        expect(toolbar).toBeTruthy()
+        expect(toolbar).toContainElement(refresh)
+        expect(toolbar).toContainElement(newCard)
+        expect(toolbar?.className).toContain('flex')
+
+        fireEvent.click(refresh)
+        fireEvent.click(newCard)
+        expect(onRefresh).toHaveBeenCalledTimes(1)
+        expect(onOpenNewCard).toHaveBeenCalledTimes(1)
+    })
+
+    it('still exposes Refresh and New card when the board has zero items', () => {
+        renderList([], ['Todo'])
+        expect(screen.getByPlaceholderText('Filter by title…')).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Refresh' })).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'New card' })).toBeInTheDocument()
+    })
+})
