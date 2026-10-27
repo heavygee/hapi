@@ -49,6 +49,7 @@ import { useBoards } from '@/hooks/queries/useBoards'
 import { useBoardItems } from '@/hooks/queries/useBoardItems'
 import { useBoardAssignableUsers } from '@/hooks/queries/useBoardAssignableUsers'
 import { useBoardItemComments } from '@/hooks/queries/useBoardItemComments'
+import { useIssueTemplates } from '@/hooks/queries/useIssueTemplates'
 import { useBoardSelection } from '@/hooks/useBoardSelection'
 import { useBoardActions } from '@/hooks/mutations/useBoardActions'
 import { useBoardItemActions } from '@/hooks/mutations/useBoardItemActions'
@@ -251,7 +252,7 @@ function SessionsPage() {
         error: boardItemsError,
         refetch: refetchBoardItems,
     } = useBoardItems(api, sessionsMode === 'boards' ? effectiveBoardId : null)
-    const { addBoard, removeBoard } = useBoardActions(api)
+    const { addBoard, removeBoard, createBoardItem } = useBoardActions(api)
     const {
         closeItem: closeBoardItem,
         reopenItem: reopenBoardItem,
@@ -339,6 +340,22 @@ function SessionsPage() {
         error: boardItemCommentsError,
         refetch: refetchBoardItemComments,
     } = useBoardItemComments(api, effectiveBoardId, selectedBoardItem?.url ?? null)
+    // "New card" dialog state — same boundary as the assignee picker above:
+    // BoardList stays presentational, this component owns the live
+    // useIssueTemplates query keyed by dialog-open + repo-selection state it
+    // tracks itself (hapi#238).
+    const [newCardDialogOpen, setNewCardDialogOpen] = useState(false)
+    const [newCardRepo, setNewCardRepo] = useState<string | null>(null)
+    useEffect(() => {
+        if (!newCardDialogOpen) setNewCardRepo(null)
+    }, [newCardDialogOpen])
+    const {
+        templates: newCardTemplates,
+        blankAllowed: newCardBlankAllowed,
+        githubNewIssueUrl: newCardGithubNewIssueUrl,
+        isLoading: newCardTemplatesLoading,
+        error: newCardTemplatesError,
+    } = useIssueTemplates(api, effectiveBoardId, newCardRepo, newCardDialogOpen)
     // Hidden behind the board list while in Boards mode with an item
     // selected (mobile *and* desktop, since BoardItemDetail then occupies the
     // right-pane slot) — marking it "seen" there would silently clear unread
@@ -555,6 +572,16 @@ function SessionsPage() {
                             isRefreshing={boardsRefetching || boardItemsRefetching}
                             sessions={sessions}
                             onOpenSession={handleOpenLinkedBoardSession}
+                            newCardDialogOpen={newCardDialogOpen}
+                            onOpenNewCard={() => setNewCardDialogOpen(true)}
+                            onCloseNewCard={() => setNewCardDialogOpen(false)}
+                            issueTemplates={newCardTemplates}
+                            issueTemplatesBlankAllowed={newCardBlankAllowed}
+                            issueTemplatesGithubNewIssueUrl={newCardGithubNewIssueUrl}
+                            isLoadingIssueTemplates={newCardTemplatesLoading}
+                            issueTemplatesError={newCardTemplatesError}
+                            onNewCardRepoChange={setNewCardRepo}
+                            onCreateCard={(payload) => createBoardItem(effectiveBoardId ?? '', payload)}
                         />
                     ) : (
                     <SessionList

@@ -17,3 +17,21 @@ export function getApiErrorMessage(err: unknown, fallback: string): string {
     }
     return err instanceof Error ? err.message : fallback
 }
+
+/**
+ * Extracts an optional `url` the hub attached to an error body — used for
+ * partial-failure writes (e.g. an issue gets created but adding it to the
+ * project then fails) where the orphaned resource's own URL is the most
+ * useful thing to hand the user, not just prose that happens to mention it.
+ */
+export function getApiErrorUrl(err: unknown): string | null {
+    if (err instanceof ApiError && err.body) {
+        try {
+            const parsed = JSON.parse(err.body) as { url?: unknown }
+            if (typeof parsed.url === 'string' && parsed.url.trim()) return parsed.url
+        } catch {
+            // fall through
+        }
+    }
+    return null
+}

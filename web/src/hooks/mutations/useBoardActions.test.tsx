@@ -69,4 +69,31 @@ describe('useBoardActions', () => {
         await expect(result.current.addBoard('https://github.com/users/heavygee/projects/6')).rejects.toThrow('API unavailable')
         await expect(result.current.removeBoard('a')).rejects.toThrow('API unavailable')
     })
+
+    it('createBoardItem returns the created url and invalidates that board\'s items cache', async () => {
+        const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+        const createBoardItem = vi.fn().mockResolvedValue({ ok: true, url: 'https://github.com/heavygee/hapi/issues/42' })
+        const api = { createBoardItem } as unknown as ApiClient
+
+        const { result } = renderHook(() => useBoardActions(api), { wrapper: createWrapper(queryClient) })
+
+        const payload = { repo: 'heavygee/hapi', title: 'New bug', body: 'Broke.', labels: ['bug'], assignees: [] }
+        let url: string | undefined
+        await act(async () => {
+            url = await result.current.createBoardItem('board-1', payload)
+        })
+
+        expect(createBoardItem).toHaveBeenCalledWith('board-1', payload)
+        expect(url).toBe('https://github.com/heavygee/hapi/issues/42')
+        expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.boardItems('board-1') })
+    })
+
+    it('createBoardItem rejects without touching the api client when api is null', async () => {
+        const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        const { result } = renderHook(() => useBoardActions(null), { wrapper: createWrapper(queryClient) })
+
+        await expect(result.current.createBoardItem('board-1', { repo: 'a/b', title: 'T', body: 'B', labels: [], assignees: [] }))
+            .rejects.toThrow('API unavailable')
+    })
 })

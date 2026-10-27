@@ -27,6 +27,9 @@ import type {
     BoardItemCommentsResponse,
     BoardItemsResponse,
     BoardsResponse,
+    CreateBoardItemRequest,
+    CreateBoardItemResponse,
+    GetIssueTemplatesResponse,
     VisibilityPayload,
     HapiSessionExportResponse,
     HubHealthResponse,
@@ -841,6 +844,21 @@ export class ApiClient {
         await this.request(`/api/todo-boards/${encodeURIComponent(boardId)}/items/assignees`, {
             method: 'POST',
             body: JSON.stringify({ url, addLogins, removeLogins })
+        })
+    }
+
+    /** Always a live fetch — never cached hub-side beyond this one response (hapi#238). */
+    async getIssueTemplates(boardId: string, repo: string): Promise<GetIssueTemplatesResponse> {
+        const query = new URLSearchParams({ repo })
+        return await this.request<GetIssueTemplatesResponse>(
+            `/api/todo-boards/${encodeURIComponent(boardId)}/issue-templates?${query.toString()}`
+        )
+    }
+
+    async createBoardItem(boardId: string, payload: CreateBoardItemRequest): Promise<CreateBoardItemResponse> {
+        return await this.request<CreateBoardItemResponse>(`/api/todo-boards/${encodeURIComponent(boardId)}/items`, {
+            method: 'POST',
+            body: JSON.stringify(payload)
         })
     }
 

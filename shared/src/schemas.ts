@@ -52,6 +52,14 @@ export const WorktreeMetadataSchema = z.object({
 
 export type WorktreeMetadata = z.infer<typeof WorktreeMetadataSchema>
 
+/** owner/name — GitHub-style repo slug (no leading slash, exactly one slash). */
+export const GithubRepoSlugSchema = z.string()
+    .max(140, 'owner/name is too long')
+    .regex(
+        /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/,
+        'expected owner/name'
+    )
+
 /**
  * Lightweight external reference attached to a session (hapi#235/#238) — a
  * session is only ever "briefed" by its first composer message unless this

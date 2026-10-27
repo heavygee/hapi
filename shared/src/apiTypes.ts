@@ -4,6 +4,7 @@ import {
     CodexCollaborationModeSchema,
     CopilotAgentModeSchema,
     DecryptedMessageSchema,
+    GithubRepoSlugSchema,
     MachineSchema,
     PermissionModeSchema,
     SessionSchema
@@ -15,6 +16,7 @@ import type {
     Session
 } from './schemas'
 import type { SessionSummary } from './sessionSummary'
+import type { IssueTemplate } from './issueTemplates'
 
 export const CreateOrLoadMachineRequestSchema = z.object({
     id: z.string().min(1),
@@ -1150,6 +1152,40 @@ export type BoardItemComment = {
 
 export type BoardItemCommentsResponse = {
     comments: BoardItemComment[]
+}
+
+/**
+ * `templates` reflects an actual, live `.github/ISSUE_TEMPLATE/` fetch —
+ * never persisted, never cached beyond the lifetime of one hub response
+ * (operator decision, hapi#238: a silently-stale form is worse than one
+ * extra `gh api` round-trip per "New card" open).
+ */
+export type GetIssueTemplatesResponse = {
+    templates: IssueTemplate[]
+    blankAllowed: boolean
+    /** GitHub's own issue-chooser for this repo — the escape hatch offered when `blankAllowed` is false and no usable template covers what the user needs. */
+    githubNewIssueUrl: string
+}
+
+/**
+ * `body` is the already-formatted markdown the web client computed via
+ * `formatIssueBody` (shared/src/issueTemplates.ts) and showed the operator
+ * in the review step — hub persists it verbatim rather than re-deriving it
+ * from template/answer data, so there is no second formatting pass that
+ * could ever disagree with what was reviewed before the write.
+ */
+export const CreateBoardItemRequestSchema = z.object({
+    repo: GithubRepoSlugSchema,
+    title: z.string().min(1),
+    body: z.string(),
+    labels: z.array(z.string().min(1)).default([]),
+    assignees: z.array(z.string().min(1)).default([])
+})
+export type CreateBoardItemRequest = z.infer<typeof CreateBoardItemRequestSchema>
+
+export type CreateBoardItemResponse = {
+    ok: true
+    url: string
 }
 
 export const LinkIssueRequestSchema = z.object({
