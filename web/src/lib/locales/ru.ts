@@ -159,7 +159,7 @@ export default {
   'boards.detail.comments': 'Комментарии',
   'boards.detail.noComments': 'Пока нет комментариев.',
   'boards.detail.loadingComments': 'Загрузка комментариев…',
-  'boards.detail.commentsLoadFailed': 'Не удалось загрузить комментарии',
+  'boards.detail.commentsLoadFailed': 'Не удалось загрузить комментарии: {message}',
   'boards.detail.deletedAuthor': 'Удалённый пользователь',
   'boards.detail.comment': 'Комментарий',
   'boards.detail.commentPlaceholder': 'Оставить комментарий…',

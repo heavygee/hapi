@@ -159,7 +159,7 @@ export default {
   'boards.detail.comments': 'Comments',
   'boards.detail.noComments': 'No comments yet.',
   'boards.detail.loadingComments': 'Loading comments…',
-  'boards.detail.commentsLoadFailed': 'Could not load comments',
+  'boards.detail.commentsLoadFailed': 'Could not load comments: {message}',
   'boards.detail.deletedAuthor': 'Deleted user',
   'boards.detail.comment': 'Comment',
   'boards.detail.commentPlaceholder': 'Leave a comment…',

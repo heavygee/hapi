@@ -449,8 +449,8 @@ describe('BoardItemDetail affordance treatment', () => {
     })
 
     it('shows an error state when the comments fetch fails, instead of the empty state', () => {
-        renderDetail({ commentsError: 'Failed to load comments', comments: [] })
-        expect(screen.getByText('Failed to load comments')).toBeInTheDocument()
+        renderDetail({ commentsError: 'network down', comments: [] })
+        expect(screen.getByText('Could not load comments: network down')).toBeInTheDocument()
         expect(screen.queryByText('No comments yet.')).not.toBeInTheDocument()
     })
 
