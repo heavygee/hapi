@@ -529,15 +529,15 @@ function toAssignableUsers(response: GhAssignableUsersResponse): BoardAssignable
 // other field's valid data along with it. `isPullRequest` is derived fresh
 // from the item's URL on every request (parseValidatedItemUrl), never cached,
 // so there's no stale-flag risk the dual-query would have guarded against.
-const COMMENT_FIELDS = 'comments(last: 100) { nodes { id author { login avatarUrl } authorAssociation body createdAt url isMinimized minimizedReason } }'
+const COMMENT_FIELDS = 'comments(first: 100, after: $after) { nodes { id author { login avatarUrl } authorAssociation body createdAt url isMinimized minimizedReason } pageInfo { hasNextPage endCursor } }'
 const ISSUE_COMMENTS_QUERY = `
-query($owner: String!, $repo: String!, $number: Int!) {
+query($owner: String!, $repo: String!, $number: Int!, $after: String) {
   repository(owner: $owner, name: $repo) {
     issue(number: $number) { ${COMMENT_FIELDS} }
   }
 }`
 const PR_COMMENTS_QUERY = `
-query($owner: String!, $repo: String!, $number: Int!) {
+query($owner: String!, $repo: String!, $number: Int!, $after: String) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) { ${COMMENT_FIELDS} }
   }
@@ -554,11 +554,16 @@ type GhCommentNode = {
     minimizedReason?: string | null
 }
 
+type GhCommentsConnection = {
+    nodes?: Array<GhCommentNode | null>
+    pageInfo?: { hasNextPage?: boolean; endCursor?: string | null } | null
+}
+
 type GhItemCommentsResponse = {
     data?: {
         repository?: {
-            issue?: { comments?: { nodes?: Array<GhCommentNode | null> } | null } | null
-            pullRequest?: { comments?: { nodes?: Array<GhCommentNode | null> } | null } | null
+            issue?: { comments?: GhCommentsConnection | null } | null
+            pullRequest?: { comments?: GhCommentsConnection | null } | null
         } | null
     }
     errors?: Array<{ message: string }>
@@ -566,17 +571,63 @@ type GhItemCommentsResponse = {
 
 type ItemCommentsTarget = { host: string; owner: string; repo: string; number: number; isPullRequest: boolean }
 
-async function runGhGraphqlItemComments(target: ItemCommentsTarget): Promise<GhItemCommentsResponse> {
-    const stdout = await execGhGraphql(target.host, target.isPullRequest ? PR_COMMENTS_QUERY : ISSUE_COMMENTS_QUERY, {
-        owner: target.owner,
-        repo: target.repo,
-        number: target.number
-    })
+// `comments(last: 100)` silently dropped every comment before the newest
+// 100 on any issue/PR with a longer thread, with no truncation indicator
+// anywhere in the response — an operator following a long-running thread
+// could lose the earliest (often most load-bearing) context with no sign
+// anything was missing (Codex review, hapi#238). Pages forward from the
+// oldest comment instead, same `first`/`after`/pageInfo shape as
+// fetchAllProjectItems above, so nothing is silently dropped short of the
+// same kind of pathological-size safety cap that function already has.
+const MAX_COMMENT_PAGES = 10
+
+export async function fetchAllItemComments(execPage: (after: string | undefined) => Promise<string>): Promise<GhItemCommentsResponse> {
+    const firstStdout = await execPage(undefined)
+    let response: GhItemCommentsResponse
     try {
-        return JSON.parse(stdout) as GhItemCommentsResponse
+        response = JSON.parse(firstStdout) as GhItemCommentsResponse
     } catch {
         throw new Error('gh api graphql returned non-JSON output')
     }
+
+    const connection: GhCommentsConnection | null | undefined =
+        response.data?.repository?.issue?.comments ?? response.data?.repository?.pullRequest?.comments
+    if (response.errors?.length || !connection) {
+        return response
+    }
+
+    const allNodes = [...(connection.nodes ?? [])]
+    let pageInfo = connection.pageInfo
+    let pageCount = 1
+    while (pageInfo?.hasNextPage && pageInfo.endCursor && pageCount < MAX_COMMENT_PAGES) {
+        const stdout = await execPage(pageInfo.endCursor)
+        let pageResponse: GhItemCommentsResponse
+        try {
+            pageResponse = JSON.parse(stdout) as GhItemCommentsResponse
+        } catch {
+            throw new Error('gh api graphql returned non-JSON output')
+        }
+        if (pageResponse.errors?.length) {
+            return pageResponse
+        }
+        const pageConnection = pageResponse.data?.repository?.issue?.comments
+            ?? pageResponse.data?.repository?.pullRequest?.comments
+        allNodes.push(...(pageConnection?.nodes ?? []))
+        pageInfo = pageConnection?.pageInfo
+        pageCount += 1
+    }
+
+    connection.nodes = allNodes
+    return response
+}
+
+async function runGhGraphqlItemComments(target: ItemCommentsTarget): Promise<GhItemCommentsResponse> {
+    return fetchAllItemComments(after => execGhGraphql(target.host, target.isPullRequest ? PR_COMMENTS_QUERY : ISSUE_COMMENTS_QUERY, {
+        owner: target.owner,
+        repo: target.repo,
+        number: target.number,
+        after
+    }))
 }
 
 function toBoardItemComments(response: GhItemCommentsResponse): BoardItemComment[] {
