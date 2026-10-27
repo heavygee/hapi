@@ -340,7 +340,9 @@ function SessionsPage() {
     const {
         comments: boardItemComments,
         isLoading: boardItemCommentsLoading,
+        isRefetching: boardItemCommentsRefetching,
         error: boardItemCommentsError,
+        refetch: refetchBoardItemComments,
     } = useBoardItemComments(api, effectiveBoardId, selectedBoardItem?.url ?? null)
     // "New card" dialog state — same boundary as the assignee picker above:
     // BoardList stays presentational, this component owns the live
@@ -692,8 +694,11 @@ function SessionsPage() {
                             onSpawn={() => handleSpawnFromBoardItem(selectedBoardItem)}
                             linkedSessionId={linkedBoardSession?.id ?? null}
                             onOpenLinkedSession={handleOpenLinkedBoardSession}
-                            onRefresh={() => { void refetchBoardItems() }}
-                            isRefreshing={boardItemsRefetching}
+                            onRefresh={() => {
+                                void refetchBoardItems()
+                                refetchBoardItemComments()
+                            }}
+                            isRefreshing={boardItemsRefetching || boardItemCommentsRefetching}
                             onClose={() => closeBoardItem(selectedBoardItem)}
                             onReopen={() => {
                                 reopenBoardItem(selectedBoardItem).catch((err) => addToast({
