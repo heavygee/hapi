@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { BoardItem, BoardSummary } from '@/types/api'
+import type { BoardItem, BoardSummary, IssueTemplate } from '@/types/api'
 import type { SessionSummary } from '@/types/api'
 import { BoardSwitcherBar, BoardSwitcherMenu, type BoardFilterItem } from '@/components/BoardSwitcher'
 import { AddBoardDialog } from '@/components/AddBoardDialog'
+import { NewCardDialog } from '@/components/NewCardDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Button } from '@/components/ui/button'
 import { LoadingState } from '@/components/LoadingState'
-import { CloseIcon, ExternalLinkIcon, RefreshIcon } from '@/components/icons'
+import { CloseIcon, ExternalLinkIcon, PlusIcon, RefreshIcon } from '@/components/icons'
 import { SessionLinkedBadge } from '@/components/SessionLinkedBadge'
 import { chipBaseClass, chipIdleClass } from '@/components/filterChipStyles'
 import { getApiErrorMessage } from '@/lib/apiErrorMessage'
@@ -349,6 +350,21 @@ export function BoardList(props: {
     isRefreshing: boolean
     sessions: SessionSummary[]
     onOpenSession: (sessionId: string) => void
+    // "New card" dialog — data/callbacks owned by the parent (router.tsx),
+    // same boundary useBoardAssignableUsers' assignee picker already keeps:
+    // this component stays presentational, the parent owns the live query
+    // (useIssueTemplates) keyed by dialog-open + repo-selection state it
+    // tracks itself, not state threaded back out of this component.
+    newCardDialogOpen: boolean
+    onOpenNewCard: () => void
+    onCloseNewCard: () => void
+    issueTemplates: IssueTemplate[]
+    issueTemplatesBlankAllowed: boolean
+    issueTemplatesGithubNewIssueUrl: string | null
+    isLoadingIssueTemplates: boolean
+    issueTemplatesError: string | null
+    onNewCardRepoChange: (repo: string | null) => void
+    onCreateCard: (payload: { repo: string; title: string; body: string; labels: string[]; assignees: string[] }) => Promise<string>
 }) {
     const { t } = useTranslation()
     // In-memory cache of explicit user toggles this session, keyed by
@@ -362,6 +378,16 @@ export function BoardList(props: {
     const [removeTarget, setRemoveTarget] = useState<BoardFilterItem | null>(null)
     const [isRemoving, setIsRemoving] = useState(false)
     const boardId = props.selectedBoardId ?? ''
+    // Picker convenience, not a restriction — a board has no single "the
+    // repo" (a Projects-v2 project can span many repos on its host), so
+    // "New card" always offers a free-text fallback too.
+    const knownRepos = useMemo(() => {
+        const seen = new Set<string>()
+        for (const item of props.items) {
+            if (item.repo) seen.add(item.repo)
+        }
+        return [...seen].sort()
+    }, [props.items])
     // Resets on board switch (same self-correcting pattern as the assignee
     // picker's own search box) — a filter left over from a previous board
     // would otherwise read as "this board has no matching items" instead of
@@ -433,6 +459,16 @@ export function BoardList(props: {
                             <div className="flex-1" />
                             <button
                                 type="button"
+                                onClick={props.onOpenNewCard}
+                                disabled={!props.selectedBoardId}
+                                aria-label={t('boards.newCard.openButton')}
+                                title={t('boards.newCard.openButton')}
+                                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] disabled:opacity-50"
+                            >
+                                <PlusIcon className="h-4 w-4" />
+                            </button>
+                            <button
+                                type="button"
                                 onClick={props.onRefresh}
                                 disabled={props.isRefreshing}
                                 aria-label={t('boards.refresh')}
@@ -464,6 +500,19 @@ export function BoardList(props: {
                 isOpen={addDialogOpen}
                 onClose={() => setAddDialogOpen(false)}
                 onAdd={props.onAddBoard}
+            />
+
+            <NewCardDialog
+                isOpen={props.newCardDialogOpen}
+                onClose={props.onCloseNewCard}
+                knownRepos={knownRepos}
+                templates={props.issueTemplates}
+                blankAllowed={props.issueTemplatesBlankAllowed}
+                githubNewIssueUrl={props.issueTemplatesGithubNewIssueUrl}
+                isLoadingTemplates={props.isLoadingIssueTemplates}
+                templatesError={props.issueTemplatesError}
+                onRepoChange={props.onNewCardRepoChange}
+                onSubmit={props.onCreateCard}
             />
 
             {removeTarget ? (

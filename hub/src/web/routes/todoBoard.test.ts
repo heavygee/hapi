@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { Hono } from 'hono'
 import type { BoardItemsResponse, BoardsResponse } from '@hapi/protocol'
 import type { WebAppEnv } from '../middleware/auth'
-import { createBoardRoutes, fetchAllProjectItems, makeBoardId, parseProjectUrl, parseValidatedItemUrl, resolveProjectView } from './todoBoard'
+import { createBoardRoutes, fetchAllProjectItems, GhGraphqlNotFoundError, makeBoardId, parseProjectUrl, parseValidatedItemUrl, resolveProjectView } from './todoBoard'
 
 const ENV_KEYS = [
     'HAPI_BOARD_HOST',
@@ -56,7 +56,9 @@ const UNUSED_ACTIONS: Parameters<typeof createBoardRoutes>[4] = {
     reopen: async () => { throw new Error('reopen action not mocked for this test') },
     comment: async () => { throw new Error('comment action not mocked for this test') },
     setStatus: async () => { throw new Error('setStatus action not mocked for this test') },
-    setAssignees: async () => { throw new Error('setAssignees action not mocked for this test') }
+    setAssignees: async () => { throw new Error('setAssignees action not mocked for this test') },
+    createIssue: async () => { throw new Error('createIssue action not mocked for this test') },
+    addItemToProject: async () => { throw new Error('addItemToProject action not mocked for this test') }
 }
 
 // Matches whichever board is asking — the safe default for tests that
@@ -77,7 +79,8 @@ async function createApp(
     actions?: Parameters<typeof createBoardRoutes>[4],
     runGraphqlMembership?: Parameters<typeof createBoardRoutes>[5],
     runGraphqlAssignableUsers?: Parameters<typeof createBoardRoutes>[6],
-    runGraphqlComments?: Parameters<typeof createBoardRoutes>[7]
+    runGraphqlComments?: Parameters<typeof createBoardRoutes>[7],
+    runGraphqlIssueTemplateDir?: Parameters<typeof createBoardRoutes>[8]
 ) {
     const dataDir = await mkdtemp(join(tmpdir(), 'hapi-todo-board-'))
     directories.push(dataDir)
@@ -97,7 +100,8 @@ async function createApp(
         actions ?? UNUSED_ACTIONS,
         runGraphqlMembership ?? ALWAYS_MEMBER,
         runGraphqlAssignableUsers ?? (() => ({ data: { repository: { assignableUsers: { nodes: [] } } } })),
-        runGraphqlComments ?? (() => ({ data: { repository: { issue: { comments: { nodes: [] } } } } }))
+        runGraphqlComments ?? (() => ({ data: { repository: { issue: { comments: { nodes: [] } } } } })),
+        runGraphqlIssueTemplateDir ?? (() => ({ data: { repository: { issueTemplateDir: null } } }))
     ))
     return app
 }
@@ -1487,5 +1491,327 @@ describe('POST /api/todo-boards/:id/items/assignees', () => {
             body: JSON.stringify({ url: VALID_ITEM_URL, addLogins: ['alice'] })
         })
         expect(response.status).toBe(502)
+    })
+})
+
+describe('GET /api/todo-boards/:id/issue-templates', () => {
+    beforeEach(() => {
+        process.env.HAPI_BOARD_OWNER = 'heavygee'
+        process.env.HAPI_BOARD_NUMBER = '6'
+    })
+
+    const BUG_REPORT_YAML = `
+name: Bug report
+body:
+  - type: input
+    id: contact
+    attributes:
+      label: Contact
+    validations:
+      required: false
+`
+
+    it('404s for an unknown board', async () => {
+        const app = await createApp(() => ({ data: {} }))
+        const response = await app.request('/api/todo-boards/unknown/issue-templates?repo=heavygee/hapi')
+        expect(response.status).toBe(404)
+    })
+
+    it('403s for a non-default namespace', async () => {
+        const app = await createApp(() => ({ data: {} }), undefined, 'some-other-namespace')
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/issue-templates?repo=heavygee/hapi`, undefined)
+        expect(response.status).toBe(403)
+    })
+
+    it('400s for a missing or malformed repo query parameter', async () => {
+        const app = await createApp(() => ({ data: {} }))
+        const missing = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/issue-templates`)
+        expect(missing.status).toBe(400)
+        const malformed = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/issue-templates?repo=not-a-slug`)
+        expect(malformed.status).toBe(400)
+    })
+
+    it('returns blankAllowed: true with an empty template list when the repo has no .github/ISSUE_TEMPLATE directory at all', async () => {
+        const app = await createApp(
+            () => ({ data: {} }), undefined, 'default', undefined, UNUSED_ACTIONS, ALWAYS_MEMBER, undefined, undefined,
+            () => ({ data: { repository: { issueTemplateDir: null } } })
+        )
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/issue-templates?repo=heavygee/hapi`)
+        expect(response.status).toBe(200)
+        const body = await response.json() as { templates: unknown[]; blankAllowed: boolean; githubNewIssueUrl: string }
+        expect(body.templates).toEqual([])
+        expect(body.blankAllowed).toBe(true)
+        expect(body.githubNewIssueUrl).toBe('https://github.com/heavygee/hapi/issues/new/choose')
+    })
+
+    it('inherits templates and blank_issues_enabled from the owner\'s .github repo when the target has no directory of its own', async () => {
+        const calls: string[] = []
+        const app = await createApp(
+            () => ({ data: {} }), undefined, 'default', undefined, UNUSED_ACTIONS, ALWAYS_MEMBER, undefined, undefined,
+            (target: { repo: string }) => {
+                calls.push(target.repo)
+                if (target.repo === '.github') {
+                    return {
+                        data: {
+                            repository: {
+                                issueTemplateDir: {
+                                    entries: [
+                                        { name: 'bug_report.yml', object: { text: BUG_REPORT_YAML } },
+                                        { name: 'config.yml', object: { text: 'blank_issues_enabled: false' } }
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                }
+                return { data: { repository: { issueTemplateDir: null } } }
+            }
+        )
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/issue-templates?repo=heavygee/no-local-templates`)
+        expect(response.status).toBe(200)
+        const body = await response.json() as { templates: Array<{ id: string }>; blankAllowed: boolean }
+        expect(body.templates.map(t => t.id)).toEqual(['bug_report.yml'])
+        expect(body.blankAllowed).toBe(false)
+        expect(calls).toEqual(['no-local-templates', '.github'])
+    })
+
+    it('does not fall back to .github when the target repo has its own directory, even an empty one', async () => {
+        const calls: string[] = []
+        const app = await createApp(
+            () => ({ data: {} }), undefined, 'default', undefined, UNUSED_ACTIONS, ALWAYS_MEMBER, undefined, undefined,
+            (target: { repo: string }) => {
+                calls.push(target.repo)
+                return { data: { repository: { issueTemplateDir: { entries: [] } } } }
+            }
+        )
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/issue-templates?repo=heavygee/hapi`)
+        expect(response.status).toBe(200)
+        expect(calls).toEqual(['hapi'])
+    })
+
+    it('does not recurse when the target repo being queried is already .github', async () => {
+        const calls: string[] = []
+        const app = await createApp(
+            () => ({ data: {} }), undefined, 'default', undefined, UNUSED_ACTIONS, ALWAYS_MEMBER, undefined, undefined,
+            (target: { repo: string }) => {
+                calls.push(target.repo)
+                return { data: { repository: { issueTemplateDir: null } } }
+            }
+        )
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/issue-templates?repo=heavygee/.github`)
+        expect(response.status).toBe(200)
+        expect(calls).toEqual(['.github'])
+    })
+
+    it('falls back to the empty result when the owner has no .github repo either', async () => {
+        const app = await createApp(
+            () => ({ data: {} }), undefined, 'default', undefined, UNUSED_ACTIONS, ALWAYS_MEMBER, undefined, undefined,
+            () => ({ data: { repository: { issueTemplateDir: null } } })
+        )
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/issue-templates?repo=heavygee/no-local-templates`)
+        expect(response.status).toBe(200)
+        const body = await response.json() as { templates: unknown[]; blankAllowed: boolean }
+        expect(body.templates).toEqual([])
+        expect(body.blankAllowed).toBe(true)
+    })
+
+    // Review finding: `gh api graphql` treats GitHub's NOT_FOUND for a
+    // nonexistent repo as a command failure and rejects, rather than
+    // resolving with an `errors` array in the response body — the far more
+    // common real-world case than the "resolves with errors" shape the
+    // previous test covers, since most owners have no `.github` repo at
+    // all. Without a dedicated try/catch around the optional fallback, this
+    // rejection reached the route's outer catch and 502'd "New card" for
+    // the ordinary case of a valid repo with no templates of its own.
+    it('still returns the empty result, not a 502, when the .github lookup rejects with NOT_FOUND (gh exits nonzero)', async () => {
+        const calls: string[] = []
+        const app = await createApp(
+            () => ({ data: {} }), undefined, 'default', undefined, UNUSED_ACTIONS, ALWAYS_MEMBER, undefined, undefined,
+            (target: { repo: string }) => {
+                calls.push(target.repo)
+                if (target.repo === '.github') {
+                    throw new GhGraphqlNotFoundError("gh api graphql failed: GraphQL: Could not resolve to a Repository with the name '.github'. (repository)")
+                }
+                return { data: { repository: { issueTemplateDir: null } } }
+            }
+        )
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/issue-templates?repo=heavygee/no-local-templates`)
+        expect(response.status).toBe(200)
+        const body = await response.json() as { templates: unknown[]; blankAllowed: boolean }
+        expect(body.templates).toEqual([])
+        expect(body.blankAllowed).toBe(true)
+        expect(calls).toEqual(['no-local-templates', '.github'])
+    })
+
+    // Review finding, second pass: the first fix swallowed *every* error from
+    // the .github fallback, which would also hide a genuine auth/rate-limit/
+    // transport failure on that specific call as if it just meant "no
+    // inherited templates" — silently serving the wrong (empty) policy for a
+    // repo whose .github fallback might really have templates. Only
+    // GhGraphqlNotFoundError (the repo genuinely doesn't exist) should be
+    // swallowed; anything else must still 502.
+    it('still 502s when the .github lookup fails for a reason other than NOT_FOUND', async () => {
+        const app = await createApp(
+            () => ({ data: {} }), undefined, 'default', undefined, UNUSED_ACTIONS, ALWAYS_MEMBER, undefined, undefined,
+            (target: { repo: string }) => {
+                if (target.repo === '.github') {
+                    throw new Error('gh api graphql failed: HTTP 401: Bad credentials')
+                }
+                return { data: { repository: { issueTemplateDir: null } } }
+            }
+        )
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/issue-templates?repo=heavygee/no-local-templates`)
+        expect(response.status).toBe(502)
+    })
+
+    it('parses .yml forms and .md legacy templates, skips config.yml as a template entry, and reads blank_issues_enabled from it', async () => {
+        const app = await createApp(
+            () => ({ data: {} }), undefined, 'default', undefined, UNUSED_ACTIONS, ALWAYS_MEMBER, undefined, undefined,
+            () => ({
+                data: {
+                    repository: {
+                        issueTemplateDir: {
+                            entries: [
+                                { name: 'bug_report.yml', object: { text: BUG_REPORT_YAML } },
+                                { name: 'feature_request.md', object: { text: '---\nname: Feature\n---\nBody text' } },
+                                { name: 'config.yml', object: { text: 'blank_issues_enabled: false' } }
+                            ]
+                        }
+                    }
+                }
+            })
+        )
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/issue-templates?repo=heavygee/hapi`)
+        expect(response.status).toBe(200)
+        const body = await response.json() as { templates: Array<{ id: string; kind: string }>; blankAllowed: boolean; githubNewIssueUrl: string }
+        expect(body.templates.map(t => t.id)).toEqual(['bug_report.yml', 'feature_request.md'])
+        expect(body.templates[0]?.kind).toBe('form')
+        expect(body.templates[1]?.kind).toBe('legacy')
+        expect(body.blankAllowed).toBe(false)
+        expect(body.githubNewIssueUrl).toBe('https://github.com/heavygee/hapi/issues/new/choose')
+    })
+
+    it('honors blank_issues_enabled: false even when every template is unsupported (operator ruling, hapi#238: do not fall back to blank)', async () => {
+        const app = await createApp(
+            () => ({ data: {} }), undefined, 'default', undefined, UNUSED_ACTIONS, ALWAYS_MEMBER, undefined, undefined,
+            () => ({
+                data: {
+                    repository: {
+                        issueTemplateDir: {
+                            entries: [
+                                { name: 'weird.yml', object: { text: 'body:\n  - type: some-future-type\n    id: x\n    attributes:\n      label: X' } },
+                                { name: 'config.yml', object: { text: 'blank_issues_enabled: false' } }
+                            ]
+                        }
+                    }
+                }
+            })
+        )
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/issue-templates?repo=heavygee/hapi`)
+        const body = await response.json() as { templates: Array<{ kind: string }>; blankAllowed: boolean; githubNewIssueUrl: string }
+        expect(body.templates[0]?.kind).toBe('unsupported')
+        expect(body.blankAllowed).toBe(false)
+        expect(body.githubNewIssueUrl).toBe('https://github.com/heavygee/hapi/issues/new/choose')
+    })
+
+    it('surfaces a GraphQL-level error as a 502', async () => {
+        const app = await createApp(
+            () => ({ data: {} }), undefined, 'default', undefined, UNUSED_ACTIONS, ALWAYS_MEMBER, undefined, undefined,
+            () => ({ errors: [{ message: 'rate limited' }] })
+        )
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/issue-templates?repo=heavygee/hapi`)
+        expect(response.status).toBe(502)
+    })
+})
+
+describe('POST /api/todo-boards/:id/items (create a card)', () => {
+    beforeEach(() => {
+        process.env.HAPI_BOARD_OWNER = 'heavygee'
+        process.env.HAPI_BOARD_NUMBER = '6'
+    })
+
+    it('creates the issue then adds it to the project, in that order, and reports the created url', async () => {
+        const calls: string[] = []
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, {
+            ...UNUSED_ACTIONS,
+            createIssue: async (target) => {
+                calls.push(`createIssue:${target.repo}`)
+                return 'https://github.com/heavygee/hapi/issues/42'
+            },
+            addItemToProject: async (target) => {
+                calls.push(`addItemToProject:${target.issueUrl}`)
+            }
+        })
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items`, {
+            method: 'POST',
+            body: JSON.stringify({ repo: 'heavygee/hapi', title: 'New bug', body: '### What\n\nBroke.', labels: ['bug'], assignees: [] })
+        })
+        expect(response.status).toBe(200)
+        const body = await response.json() as { ok: true; url: string }
+        expect(body.url).toBe('https://github.com/heavygee/hapi/issues/42')
+        expect(calls).toEqual(['createIssue:heavygee/hapi', 'addItemToProject:https://github.com/heavygee/hapi/issues/42'])
+    })
+
+    it('404s for an unknown board', async () => {
+        const app = await createApp(() => ({ data: {} }))
+        const response = await app.request('/api/todo-boards/unknown/items', {
+            method: 'POST',
+            body: JSON.stringify({ repo: 'heavygee/hapi', title: 'T', body: 'B' })
+        })
+        expect(response.status).toBe(404)
+    })
+
+    it('403s for a non-default namespace', async () => {
+        const app = await createApp(() => ({ data: {} }), undefined, 'some-other-namespace')
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items`, {
+            method: 'POST',
+            body: JSON.stringify({ repo: 'heavygee/hapi', title: 'T', body: 'B' })
+        })
+        expect(response.status).toBe(403)
+    })
+
+    it('400s for a malformed body (bad repo slug, missing title)', async () => {
+        const app = await createApp(() => ({ data: {} }))
+        const badRepo = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items`, {
+            method: 'POST',
+            body: JSON.stringify({ repo: 'not-a-slug', title: 'T', body: 'B' })
+        })
+        expect(badRepo.status).toBe(400)
+        const missingTitle = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items`, {
+            method: 'POST',
+            body: JSON.stringify({ repo: 'heavygee/hapi', body: 'B' })
+        })
+        expect(missingTitle.status).toBe(400)
+    })
+
+    it('surfaces a failed createIssue as a 502 without attempting to add anything to the project', async () => {
+        const calls: string[] = []
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, {
+            ...UNUSED_ACTIONS,
+            createIssue: async () => { throw new Error('gh issue create failed: repo not found') },
+            addItemToProject: async () => { calls.push('should-not-be-called') }
+        })
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items`, {
+            method: 'POST',
+            body: JSON.stringify({ repo: 'heavygee/hapi', title: 'T', body: 'B' })
+        })
+        expect(response.status).toBe(502)
+        expect(calls).toEqual([])
+    })
+
+    it('surfaces a created-but-not-added-to-board failure distinctly, including the created url', async () => {
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, {
+            ...UNUSED_ACTIONS,
+            createIssue: async () => 'https://github.com/heavygee/hapi/issues/42',
+            addItemToProject: async () => { throw new Error('gh project item-add failed') }
+        })
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/items`, {
+            method: 'POST',
+            body: JSON.stringify({ repo: 'heavygee/hapi', title: 'T', body: 'B' })
+        })
+        expect(response.status).toBe(502)
+        const body = await response.json() as { error: string; url: string }
+        expect(body.error).toContain('https://github.com/heavygee/hapi/issues/42')
+        expect(body.url).toBe('https://github.com/heavygee/hapi/issues/42')
     })
 })

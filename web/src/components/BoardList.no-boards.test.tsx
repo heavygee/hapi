@@ -24,6 +24,16 @@ function renderList(onAddBoard = vi.fn(() => Promise.resolve())) {
                 isRefreshing={false}
                 sessions={[]}
                 onOpenSession={vi.fn()}
+                newCardDialogOpen={false}
+                onOpenNewCard={vi.fn()}
+                onCloseNewCard={vi.fn()}
+                issueTemplates={[]}
+                issueTemplatesBlankAllowed={true}
+                issueTemplatesGithubNewIssueUrl={null}
+                isLoadingIssueTemplates={false}
+                issueTemplatesError={null}
+                onNewCardRepoChange={vi.fn()}
+                onCreateCard={vi.fn()}
             />
         </I18nProvider>
     )
