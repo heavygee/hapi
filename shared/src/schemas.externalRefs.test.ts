@@ -418,6 +418,36 @@ describe('upsertGithubPrIntoExternalRefs', () => {
         expect(ghesStored?.checks).toBe('fail')
         expect(ghesStored?.statusCheckedAt).toBe(200)
     })
+
+    // Review finding (hapi#2147): host identity was derived via `.hostname`,
+    // which strips the port — two distinct GHE instances on the same
+    // hostname but different ports collapsed onto one identity, so linking
+    // the second silently replaced the first instead of coexisting like the
+    // different-hosts case above.
+    it('treats same repo#N on different ports of the same host as distinct identities', () => {
+        const port8443 = buildGithubPrExternalRef({
+            repo: 'acme/repo',
+            number: 7,
+            host: 'ghe.example:8443',
+            role: 'secondary',
+            checks: 'pass',
+            statusCheckedAt: 100
+        })
+        const port9443 = buildGithubPrExternalRef({
+            repo: 'acme/repo',
+            number: 7,
+            host: 'ghe.example:9443',
+            role: 'secondary',
+            checks: 'fail',
+            statusCheckedAt: 200
+        })
+        const next = upsertGithubPrIntoExternalRefs([port8443], port9443)
+        expect(next).toHaveLength(2)
+        expect(next).toEqual(expect.arrayContaining([port8443, port9443]))
+        const port9443Stored = next.find((ref) => ref.url.includes(':9443'))
+        expect(port9443Stored?.checks).toBe('fail')
+        expect(port9443Stored?.statusCheckedAt).toBe(200)
+    })
 })
 
 describe('pr chip display profile', () => {
