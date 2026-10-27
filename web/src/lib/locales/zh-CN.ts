@@ -217,7 +217,7 @@ export default {
   'boards.detail.comments': '评论',
   'boards.detail.noComments': '暂无评论。',
   'boards.detail.loadingComments': '正在加载评论…',
-  'boards.detail.commentsLoadFailed': '无法加载评论',
+  'boards.detail.commentsLoadFailed': '无法加载评论：{message}',
   'boards.detail.deletedAuthor': '已删除的用户',
   'boards.detail.comment': '评论',
   'boards.detail.commentPlaceholder': '发表评论…',

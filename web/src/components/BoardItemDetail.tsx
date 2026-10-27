@@ -439,7 +439,7 @@ export function BoardItemDetail(props: {
                         {props.isLoadingComments ? (
                             <Spinner size="sm" label={t('boards.detail.loadingComments')} />
                         ) : props.commentsError ? (
-                            <p className="text-sm text-red-600">{props.commentsError}</p>
+                            <p className="text-sm text-red-600">{t('boards.detail.commentsLoadFailed', { message: props.commentsError })}</p>
                         ) : props.comments.length === 0 ? (
                             <p className="text-sm text-[var(--app-hint)]">{t('boards.detail.noComments')}</p>
                         ) : (
