@@ -65,6 +65,18 @@ export function PlusCircleIcon(props: IconProps) {
     )
 }
 
+/** Lucide square-plus — outlined "new card" affordance (not bare +). */
+export function SquarePlusIcon(props: IconProps) {
+    return createIcon(
+        <>
+            <rect width="18" height="18" x="3" y="3" rx="2" />
+            <path d="M8 12h8m-4-4v8" />
+        </>,
+        props,
+        2
+    )
+}
+
 export function PinIcon(props: IconProps & { filled?: boolean }) {
     const { filled = false, className } = props
     if (filled) {

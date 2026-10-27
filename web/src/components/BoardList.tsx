@@ -7,7 +7,7 @@ import { NewCardDialog } from '@/components/NewCardDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Button } from '@/components/ui/button'
 import { LoadingState } from '@/components/LoadingState'
-import { CloseIcon, ExternalLinkIcon, PlusIcon, RefreshIcon } from '@/components/icons'
+import { CloseIcon, ExternalLinkIcon, RefreshIcon, SquarePlusIcon } from '@/components/icons'
 import { SessionLinkedBadge } from '@/components/SessionLinkedBadge'
 import { chipBaseClass, chipIdleClass } from '@/components/filterChipStyles'
 import { getApiErrorMessage } from '@/lib/apiErrorMessage'
@@ -457,26 +457,6 @@ export function BoardList(props: {
                     <>
                         <div className="flex items-center gap-1 px-2 py-1">
                             <div className="flex-1" />
-                            <button
-                                type="button"
-                                onClick={props.onOpenNewCard}
-                                disabled={!props.selectedBoardId}
-                                aria-label={t('boards.newCard.openButton')}
-                                title={t('boards.newCard.openButton')}
-                                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] disabled:opacity-50"
-                            >
-                                <PlusIcon className="h-4 w-4" />
-                            </button>
-                            <button
-                                type="button"
-                                onClick={props.onRefresh}
-                                disabled={props.isRefreshing}
-                                aria-label={t('boards.refresh')}
-                                title={t('boards.refresh')}
-                                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] disabled:opacity-50"
-                            >
-                                <RefreshIcon className={cn('h-4 w-4', props.isRefreshing && 'animate-spin')} />
-                            </button>
                             <BoardSwitcherMenu
                                 boards={boardFilterItems}
                                 value={props.selectedBoardId}
@@ -561,52 +541,77 @@ export function BoardList(props: {
                     // "boards.empty" state below, which is for a board that
                     // IS configured but happens to have zero items right now.
                     <NoBoardsExplainer onAddBoard={() => setAddDialogOpen(true)} />
-                ) : props.error && props.items.length === 0 ? (
-                    <div className="px-1 py-4 text-sm text-red-600">
-                        {t('boards.error', { message: props.error })}
-                    </div>
-                ) : props.items.length === 0 ? (
-                    <div className="flex flex-col items-center gap-3 px-4 py-10 text-center">
-                        <div className="text-sm font-medium text-[var(--app-fg)]">{t('boards.empty.title')}</div>
-                        <div className="max-w-sm text-sm text-[var(--app-hint)]">{t('boards.empty.body')}</div>
-                        <Button type="button" variant="outline" onClick={() => setAddDialogOpen(true)}>
-                            {t('boards.addBoard.chipLabel')}
-                        </Button>
-                    </div>
                 ) : (
+                    // Card-list chrome (hapi#302): Refresh + New card live with the
+                    // title filter — not up in board-switcher chrome, where a bare
+                    // + read as "add a board" rather than "add a card".
                     <>
-                        {props.error ? (
+                        {props.error && props.items.length > 0 ? (
                             <div className="mb-2 rounded-md border border-amber-600/40 bg-amber-600/10 px-2 py-1.5 text-xs text-amber-700 dark:text-amber-400">
                                 {t('boards.staleError', { message: props.error })}
                             </div>
                         ) : null}
-                        <div className="relative mb-2">
-                            <div className="pointer-events-none absolute inset-y-0 left-2.5 flex items-center text-[var(--app-hint)]">
-                                <SearchIcon className="h-3.5 w-3.5" />
+                        <div className="mb-2 flex items-center gap-1">
+                            <div className="relative min-w-0 flex-1">
+                                <div className="pointer-events-none absolute inset-y-0 left-2.5 flex items-center text-[var(--app-hint)]">
+                                    <SearchIcon className="h-3.5 w-3.5" />
+                                </div>
+                                <input
+                                    type="search"
+                                    value={titleFilter}
+                                    onChange={(event) => setTitleFilter(event.target.value)}
+                                    placeholder={t('boards.filter.placeholder')}
+                                    aria-label={t('boards.filter.placeholder')}
+                                    className={cn(
+                                        'w-full appearance-none rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] py-1.5 pl-8 pr-7 text-sm text-[var(--app-fg)] outline-none transition-colors placeholder:text-[var(--app-hint)] focus:border-[var(--app-link)] [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden'
+                                    )}
+                                />
+                                {titleFilter ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => setTitleFilter('')}
+                                        aria-label={t('boards.filter.clear')}
+                                        title={t('boards.filter.clear')}
+                                        className="absolute inset-y-0 right-1.5 flex items-center justify-center rounded-full p-1 text-[var(--app-hint)] hover:text-[var(--app-fg)]"
+                                    >
+                                        <CloseIcon className="h-3.5 w-3.5" />
+                                    </button>
+                                ) : null}
                             </div>
-                            <input
-                                type="search"
-                                value={titleFilter}
-                                onChange={(event) => setTitleFilter(event.target.value)}
-                                placeholder={t('boards.filter.placeholder')}
-                                aria-label={t('boards.filter.placeholder')}
-                                className={cn(
-                                    'w-full appearance-none rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] py-1.5 pl-8 pr-7 text-sm text-[var(--app-fg)] outline-none transition-colors placeholder:text-[var(--app-hint)] focus:border-[var(--app-link)] [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden'
-                                )}
-                            />
-                            {titleFilter ? (
-                                <button
-                                    type="button"
-                                    onClick={() => setTitleFilter('')}
-                                    aria-label={t('boards.filter.clear')}
-                                    title={t('boards.filter.clear')}
-                                    className="absolute inset-y-0 right-1.5 flex items-center justify-center rounded-full p-1 text-[var(--app-hint)] hover:text-[var(--app-fg)]"
-                                >
-                                    <CloseIcon className="h-3.5 w-3.5" />
-                                </button>
-                            ) : null}
+                            <button
+                                type="button"
+                                onClick={props.onRefresh}
+                                disabled={props.isRefreshing}
+                                aria-label={t('boards.refresh')}
+                                title={t('boards.refresh')}
+                                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] disabled:opacity-50"
+                            >
+                                <RefreshIcon className={cn('h-4 w-4', props.isRefreshing && 'animate-spin')} />
+                            </button>
+                            <button
+                                type="button"
+                                onClick={props.onOpenNewCard}
+                                disabled={!props.selectedBoardId}
+                                aria-label={t('boards.newCard.openButton')}
+                                title={t('boards.newCard.openButton')}
+                                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[var(--app-border)] text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] disabled:opacity-50"
+                            >
+                                <SquarePlusIcon className="h-4 w-4" />
+                            </button>
                         </div>
-                        {filteredItems.length === 0 ? (
+                        {props.error && props.items.length === 0 ? (
+                            <div className="px-1 py-4 text-sm text-red-600">
+                                {t('boards.error', { message: props.error })}
+                            </div>
+                        ) : props.items.length === 0 ? (
+                            <div className="flex flex-col items-center gap-3 px-4 py-10 text-center">
+                                <div className="text-sm font-medium text-[var(--app-fg)]">{t('boards.empty.title')}</div>
+                                <div className="max-w-sm text-sm text-[var(--app-hint)]">{t('boards.empty.body')}</div>
+                                <Button type="button" variant="outline" onClick={() => setAddDialogOpen(true)}>
+                                    {t('boards.addBoard.chipLabel')}
+                                </Button>
+                            </div>
+                        ) : filteredItems.length === 0 ? (
                             <div className="px-1 py-4 text-center text-sm text-[var(--app-hint)]">
                                 {t('boards.filter.noResults', { query: titleFilter })}
                             </div>
