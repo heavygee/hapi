@@ -1092,8 +1092,8 @@ layers:
 
   # heavygee/hapi#235 / PR #238 — Boards view (cards/chips/relative-time,
   # Projects v2 /views/<n> filter capture). Renamed To-Do → Boards.
-  # Re-tip 2026-10-18: driver/235-todo-board-view @ d095ceab1 thin onto soup
-  # ab3cd07f0 (CTA + title filter + items pagination). externalRefs validate parked (schema drift).
+  # Re-tip 2026-10-27: driver/235-todo-board-view @ cab6dda9b thin onto soup
+  # b85837bb0 (hapi#302: Refresh/New card on filter row, outlined square-plus).
   - branch: driver/235-todo-board-view
 
   # heavygee/hapi#238 — GithubPrExternalRefSchema: status enum -> passthrough,
