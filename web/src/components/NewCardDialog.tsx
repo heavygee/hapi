@@ -123,8 +123,17 @@ export function NewCardDialog(props: NewCardDialogProps) {
                 const checked = answer && answer.kind === 'checkboxes' ? answer.checked : []
                 return field.options.every(option => !option.required || checked.includes(option.label))
             }
+            if (field.kind === 'input' || field.kind === 'textarea') {
+                const raw = answer && answer.kind === field.kind ? answer.value.trim() : ''
+                // GitHub enforces min_length as an HTML `minlength` attribute —
+                // it still applies to a non-empty answer on an optional field,
+                // just not to one left blank (review finding: a required
+                // field's min_length was being silently ignored, only
+                // non-emptiness was checked).
+                if (!field.required && raw.length === 0) return true
+                return raw.length >= (field.minLength ?? (field.required ? 1 : 0))
+            }
             if (!field.required) return true
-            if (field.kind === 'input' || field.kind === 'textarea') return answer && answer.kind === field.kind && answer.value.trim().length > 0
             return answer && answer.kind === 'dropdown' && answer.selected.length > 0
         })
 

@@ -15,6 +15,36 @@ function asRecord(value: unknown): Record<string, unknown> {
     return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
 }
 
+function asNumber(value: unknown): number | undefined {
+    return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+// GitHub's issue-forms schema makes a field's own `id` optional (it exists
+// only so GitHub can pre-fill the field from a URL query param) — `id` never
+// reaches the rendered issue body (formatIssueBody keys sections by `label`,
+// not `id`), so a field without one is still fully usable here, just needs a
+// stable *internal* key for the answers map. Generated from the label
+// (GitHub's own fallback source), slugified; a numeric suffix resolves any
+// collision against both explicit and other generated ids in the same
+// template (review finding: rejecting the whole template over a missing id
+// makes an otherwise-valid, GitHub-accepted form unusable in Boards).
+function slugify(label: string): string {
+    const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+    return slug || 'field'
+}
+
+function generateFieldId(label: string, usedIds: Set<string>): string {
+    const base = slugify(label)
+    let candidate = base
+    let suffix = 2
+    while (usedIds.has(candidate)) {
+        candidate = `${base}-${suffix}`
+        suffix += 1
+    }
+    usedIds.add(candidate)
+    return candidate
+}
+
 /**
  * Parses one `.github/ISSUE_TEMPLATE/*.yml` issue form into a normalized
  * `IssueTemplate`, or an `unsupported` marker when the form uses a
@@ -41,6 +71,18 @@ export function parseIssueFormYaml(id: string, raw: string): IssueTemplate {
         return { id, name, kind: 'unsupported', reason: 'Template has no body elements' }
     }
 
+    // Seeded with every EXPLICIT id in the form up front — a field whose id
+    // is generated later in iteration order must not collide with an
+    // explicit id declared further down the body (generateFieldId only
+    // guards against ids it has already handed out, not ones still to come).
+    const usedIds = new Set<string>()
+    for (const element of bodyRaw) {
+        if (element && typeof element === 'object') {
+            const explicitId = asString((element as Record<string, unknown>).id)
+            if (explicitId) usedIds.add(explicitId)
+        }
+    }
+
     const fields: IssueFormField[] = []
     for (const element of bodyRaw) {
         if (!element || typeof element !== 'object') {
@@ -64,13 +106,15 @@ export function parseIssueFormYaml(id: string, raw: string): IssueTemplate {
             continue
         }
 
-        const fieldId = asString(elObj.id)
         const label = asString(attrs.label)
-        if (!fieldId || !label) {
-            return { id, name, kind: 'unsupported', reason: `A "${type}" field is missing an id or label` }
+        if (!label) {
+            return { id, name, kind: 'unsupported', reason: `A "${type}" field is missing a label` }
         }
+        const explicitFieldId = asString(elObj.id)
+        const fieldId = explicitFieldId ?? generateFieldId(label, usedIds)
         const description = asString(attrs.description)
-        const required = asRecord(elObj.validations).required === true
+        const validations = asRecord(elObj.validations)
+        const required = validations.required === true
 
         if (type === 'input') {
             fields.push({
@@ -80,7 +124,8 @@ export function parseIssueFormYaml(id: string, raw: string): IssueTemplate {
                 description,
                 placeholder: asString(attrs.placeholder),
                 value: asString(attrs.value),
-                required
+                required,
+                minLength: asNumber(validations.min_length)
             })
         } else if (type === 'textarea') {
             fields.push({
@@ -91,7 +136,8 @@ export function parseIssueFormYaml(id: string, raw: string): IssueTemplate {
                 placeholder: asString(attrs.placeholder),
                 value: asString(attrs.value),
                 render: asString(attrs.render),
-                required
+                required,
+                minLength: asNumber(validations.min_length)
             })
         } else if (type === 'dropdown') {
             const options = asStringArray(attrs.options)

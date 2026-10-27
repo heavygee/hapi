@@ -34,6 +34,8 @@ export type IssueFormInputField = {
     placeholder?: string
     value?: string
     required: boolean
+    /** `validations.min_length` — GitHub enforces this as an HTML `minlength`, so it still applies to a non-empty optional answer, just not to a blank one. */
+    minLength?: number
 }
 
 export type IssueFormTextareaField = {
@@ -46,6 +48,8 @@ export type IssueFormTextareaField = {
     /** Optional code-fence language (`attributes.render` in the YAML) — e.g. `shell`. */
     render?: string
     required: boolean
+    /** `validations.min_length` — GitHub enforces this as an HTML `minlength`, so it still applies to a non-empty optional answer, just not to a blank one. */
+    minLength?: number
 }
 
 export type IssueFormDropdownField = {

@@ -36,6 +36,17 @@ describe('IssueFormFieldView', () => {
         expect(screen.getByRole('textbox')).toHaveValue('default text')
     })
 
+    it('shows a minimum-length hint and sets the native minlength when the field declares one', () => {
+        renderField({ kind: 'textarea', id: 'repro', label: 'Reproduction steps', required: true, minLength: 100 }, undefined)
+        expect(screen.getByText('Minimum 100 characters')).toBeInTheDocument()
+        expect(screen.getByRole('textbox')).toHaveAttribute('minlength', '100')
+    })
+
+    it('shows no minimum-length hint when the field has none', () => {
+        renderField({ kind: 'input', id: 'contact', label: 'Contact', required: false }, undefined)
+        expect(screen.queryByText(/^Minimum \d/)).not.toBeInTheDocument()
+    })
+
     it('renders a single-select dropdown and fires onChange with a single-element selected array', () => {
         const onChange = renderField(
             { kind: 'dropdown', id: 'version', label: 'Version', options: ['1.0', '2.0'], multiple: false, required: true },

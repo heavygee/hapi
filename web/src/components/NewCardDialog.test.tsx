@@ -153,6 +153,38 @@ describe('NewCardDialog', () => {
         })))
     })
 
+    // Review finding: validations.min_length was parsed but never enforced —
+    // a single character satisfied a required field's non-emptiness check
+    // even when GitHub's own form (and this repo's maintainer) demands a
+    // much longer answer.
+    it('blocks Next until a required field with min_length is long enough', async () => {
+        const template: IssueTemplate = {
+            id: 'repro.yml',
+            name: 'Needs repro',
+            labels: [],
+            assignees: [],
+            kind: 'form',
+            fields: [
+                { kind: 'textarea', id: 'repro', label: 'Reproduction steps', required: true, minLength: 10 }
+            ]
+        }
+        renderDialog({ templates: [template] })
+
+        fireEvent.change(screen.getByPlaceholderText('owner/repo'), { target: { value: 'heavygee/hapi' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+        fireEvent.click(await screen.findByText('Needs repro'))
+
+        fireEvent.change(screen.getAllByRole('textbox')[0]!, { target: { value: 'A title' } })
+        const textarea = screen.getAllByRole('textbox')[1]!
+        const nextButton = screen.getByRole('button', { name: 'Next' })
+
+        fireEvent.change(textarea, { target: { value: 'short' } })
+        expect(nextButton).toBeDisabled()
+
+        fireEvent.change(textarea, { target: { value: 'long enough now' } })
+        expect(nextButton).not.toBeDisabled()
+    })
+
     it('offers "Open a blank issue" when allowed, with a free-text body', async () => {
         const onSubmit = vi.fn().mockResolvedValue('https://github.com/heavygee/hapi/issues/43')
         renderDialog({ templates: [], blankAllowed: true, onSubmit })

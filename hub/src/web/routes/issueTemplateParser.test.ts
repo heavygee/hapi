@@ -124,11 +124,63 @@ body:
         expect(parseIssueFormYaml('empty-body.yml', 'name: Empty\nbody: []').kind).toBe('unsupported')
     })
 
-    it('is unsupported when a non-markdown field is missing an id or label', () => {
-        const missingId = parseIssueFormYaml('x.yml', 'body:\n  - type: input\n    attributes:\n      label: No ID')
-        expect(missingId.kind).toBe('unsupported')
+    it('is unsupported when a non-markdown field is missing a label', () => {
         const missingLabel = parseIssueFormYaml('x.yml', 'body:\n  - type: input\n    id: field\n    attributes: {}')
         expect(missingLabel.kind).toBe('unsupported')
+    })
+
+    // GitHub's issue-forms schema makes `id` optional (the field's rendered
+    // issue-body section is keyed by label, never id) — a field without one
+    // is still a valid, GitHub-accepted form, so it gets a generated id
+    // rather than rejecting the whole template (review finding).
+    it('generates a stable slug id for a field missing one, instead of rejecting the template', () => {
+        const template = parseIssueFormYaml('x.yml', 'body:\n  - type: input\n    attributes:\n      label: Contact Details')
+        expect(template.kind).toBe('form')
+        if (template.kind !== 'form') return
+        expect(template.fields).toEqual([{
+            kind: 'input', id: 'contact-details', label: 'Contact Details', description: undefined,
+            placeholder: undefined, value: undefined, required: false, minLength: undefined
+        }])
+    })
+
+    it('resolves a generated-id collision against another field\'s explicit or generated id', () => {
+        const yaml = `
+body:
+  - type: input
+    attributes:
+      label: Name
+  - type: input
+    id: name
+    attributes:
+      label: Something Else
+  - type: input
+    attributes:
+      label: Name
+`
+        const template = parseIssueFormYaml('x.yml', yaml)
+        expect(template.kind).toBe('form')
+        if (template.kind !== 'form') return
+        const ids = template.fields.map(f => f.kind !== 'markdown' ? f.id : null)
+        expect(ids).toEqual(['name-2', 'name', 'name-3'])
+        expect(new Set(ids).size).toBe(3)
+    })
+
+    it('parses validations.min_length for input/textarea fields', () => {
+        const yaml = `
+body:
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+      min_length: 100
+`
+        const template = parseIssueFormYaml('x.yml', yaml)
+        expect(template.kind).toBe('form')
+        if (template.kind !== 'form') return
+        const field = template.fields[0]
+        expect(field?.kind === 'textarea' && field.minLength).toBe(100)
     })
 
     it('is unsupported when a dropdown or checkboxes field has no options', () => {

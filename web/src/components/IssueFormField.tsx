@@ -44,6 +44,9 @@ export function IssueFormFieldView(props: {
             {field.description ? (
                 <span className="text-xs text-[var(--app-hint)]">{field.description}</span>
             ) : null}
+            {(field.kind === 'input' || field.kind === 'textarea') && field.minLength ? (
+                <span className="text-xs text-[var(--app-hint)]">{t('boards.newCard.minLength', { count: field.minLength })}</span>
+            ) : null}
         </label>
     )
 
@@ -56,6 +59,12 @@ export function IssueFormFieldView(props: {
                     type="text"
                     value={value}
                     placeholder={field.placeholder}
+                    // Native `minlength` is purely advisory here (browsers only
+                    // enforce it on a real <form> submit, which this isn't) —
+                    // `canSubmitForm` is the actual gate; this just gives
+                    // autofill/accessibility tools the same signal GitHub's own
+                    // rendered form would.
+                    minLength={field.minLength}
                     onChange={(event) => onChange({ kind: 'input', id: field.id, value: event.target.value })}
                     className={FIELD_INPUT_CLASS}
                 />
@@ -72,6 +81,7 @@ export function IssueFormFieldView(props: {
                     rows={5}
                     value={value}
                     placeholder={field.placeholder}
+                    minLength={field.minLength}
                     onChange={(event) => onChange({ kind: 'textarea', id: field.id, value: event.target.value })}
                     className={`${FIELD_INPUT_CLASS} resize-y font-mono text-sm`}
                 />

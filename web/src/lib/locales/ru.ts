@@ -196,6 +196,7 @@ export default {
   'boards.newCard.create': 'Создать issue',
   'boards.newCard.creating': 'Создание…',
   'boards.newCard.error': 'Не удалось создать issue.',
+  'boards.newCard.minLength': 'Минимум {count} символов',
   'codexSync.tooltip': 'Импортировать сессии из Codex в Hapi',
   'codexSync.newSessionAction': 'Импорт истории Codex',
   'codexSync.confirm.title': 'Импорт сессий Codex',
