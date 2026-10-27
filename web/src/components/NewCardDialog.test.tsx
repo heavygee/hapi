@@ -300,6 +300,33 @@ describe('NewCardDialog', () => {
         expect(props.onClose).not.toHaveBeenCalled()
     })
 
+    // Operator feedback: onSubmit can now take several seconds (polling for
+    // GitHub Projects v2's own item-add propagation lag) — a bare text swap
+    // reads as "did my click even register" over that kind of wait. The
+    // button needs a visible spinner, not just different words.
+    it('shows a spinner on the Create issue button while the async submit is in flight', async () => {
+        let resolveSubmit: (() => void) | undefined
+        const onSubmit = vi.fn(() => new Promise<string>((resolve) => {
+            resolveSubmit = () => resolve('https://github.com/heavygee/hapi/issues/42')
+        }))
+        renderDialog({ templates: [], blankAllowed: true, onSubmit })
+
+        fireEvent.change(screen.getByPlaceholderText('owner/repo'), { target: { value: 'heavygee/hapi' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+        fireEvent.click(await screen.findByText('Open a blank issue'))
+        fireEvent.change(screen.getAllByRole('textbox')[0]!, { target: { value: 'T' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Create issue' }))
+
+        const button = await screen.findByRole('button', { name: 'Creating…' })
+        expect(button).toBeDisabled()
+        expect(button).toHaveAttribute('aria-busy', 'true')
+        expect(button.querySelector('svg')).not.toBeNull()
+
+        resolveSubmit?.()
+        await waitFor(() => expect(screen.queryByRole('button', { name: 'Creating…' })).not.toBeInTheDocument())
+    })
+
     it('surfaces the orphaned issue\'s own URL as a link when the issue was created but adding it to the board failed', async () => {
         const apiError = new ApiError('HTTP 502', 502, undefined, JSON.stringify({
             error: 'Issue created at https://github.com/heavygee/hapi/issues/42 but could not be added to the board: boom',
