@@ -403,6 +403,40 @@ describe('BoardItemDetail affordance treatment', () => {
         expect(link).toBeDefined()
     })
 
+    // Review finding (hapi#238, ported from the fork): a GitHub absolute-path
+    // link in a comment or issue body (`[related issue](/acme/widgets/issues/9)`)
+    // has no scheme, so the chat-oriented anchor classifier (no `chat`
+    // context here) treats it as an inert/workspace-file candidate instead of
+    // an external link — resolving it against the comment's/item's own host
+    // before rendering sidesteps that classifier entirely.
+    it('resolves a GitHub-relative link in a comment body against the comment\'s own host', () => {
+        renderDetail({
+            comments: [{
+                id: 'IC_1',
+                author: { login: 'octocat', avatarUrl: 'https://example.com/octocat.png' },
+                authorAssociation: 'MEMBER',
+                body: 'See [related issue](/acme/widgets/issues/9) for context',
+                createdAt: '2026-10-01T09:00:00Z',
+                url: 'https://github.com/acme/widgets/issues/12#issuecomment-1',
+                isMinimized: false,
+                minimizedReason: null
+            }]
+        })
+        const link = screen.getByRole('link', { name: 'related issue' })
+        expect(link).toHaveAttribute('href', 'https://github.com/acme/widgets/issues/9')
+    })
+
+    it('resolves a GitHub-relative link in the issue body against the item\'s own host', () => {
+        renderDetail({
+            item: makeItem({
+                url: 'https://github.com/acme/widgets/issues/12',
+                body: 'Blocked by [#9](/acme/widgets/issues/9)'
+            })
+        })
+        const link = screen.getByRole('link', { name: '#9' })
+        expect(link).toHaveAttribute('href', 'https://github.com/acme/widgets/issues/9')
+    })
+
     it('does not show a role badge for NONE association', () => {
         renderDetail({
             comments: [{

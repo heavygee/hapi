@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { Hono } from 'hono'
 import type { BoardItemsResponse, BoardsResponse } from '@hapi/protocol'
 import type { WebAppEnv } from '../middleware/auth'
-import { createBoardRoutes, fetchAllProjectItems, GhGraphqlNotFoundError, makeBoardId, parseProjectUrl, parseValidatedItemUrl, resolveProjectView } from './todoBoard'
+import { createBoardRoutes, fetchAllItemComments, fetchAllProjectItems, GhGraphqlNotFoundError, makeBoardId, parseProjectUrl, parseValidatedItemUrl, resolveProjectView } from './todoBoard'
 
 const ENV_KEYS = [
     'HAPI_BOARD_HOST',
@@ -687,6 +687,63 @@ describe('fetchAllProjectItems (operator-reported dogfood bug: #431 missing afte
             return JSON.stringify({ errors: [{ message: 'rate limited' }] })
         }
         const result = await fetchAllProjectItems(execPage)
+        expect(result.errors).toEqual([{ message: 'rate limited' }])
+    })
+})
+
+describe('fetchAllItemComments (Codex review, hapi#238: comments(last: 100) silently dropped older comments)', () => {
+    function page(ids: string[], hasNextPage: boolean, endCursor: string | null = null): string {
+        const comments = { nodes: ids.map(id => ({ id })), pageInfo: { hasNextPage, endCursor } }
+        return JSON.stringify({ data: { resource: { comments } } })
+    }
+
+    it('returns a single page unchanged when there is nothing more to fetch', async () => {
+        const execPage = async () => page(['a', 'b'], false)
+        const result = await fetchAllItemComments(execPage)
+        expect(result.data?.resource?.comments?.nodes?.map(n => n?.id)).toEqual(['a', 'b'])
+    })
+
+    it('follows pageInfo.endCursor across pages and merges every comment into one list, oldest first', async () => {
+        const calls: Array<string | undefined> = []
+        const execPage = async (after: string | undefined) => {
+            calls.push(after)
+            if (after === undefined) return page(['a', 'b'], true, 'cursor-1')
+            if (after === 'cursor-1') return page(['c'], true, 'cursor-2')
+            return page(['d'], false)
+        }
+        const result = await fetchAllItemComments(execPage)
+        expect(result.data?.resource?.comments?.nodes?.map(n => n?.id)).toEqual(['a', 'b', 'c', 'd'])
+        expect(calls).toEqual([undefined, 'cursor-1', 'cursor-2'])
+    })
+
+    it('stops at the page cap instead of looping forever on a pathological thread', async () => {
+        let calls = 0
+        const execPage = async () => {
+            calls += 1
+            return page([`comment-${calls}`], true, `cursor-${calls}`)
+        }
+        const result = await fetchAllItemComments(execPage)
+        expect(calls).toBe(10)
+        expect(result.data?.resource?.comments?.nodes?.length).toBe(10)
+    })
+
+    it('returns top-level errors from the first page immediately, without paginating further', async () => {
+        let calls = 0
+        const execPage = async () => {
+            calls += 1
+            return JSON.stringify({ errors: [{ message: 'Could not resolve to a ProjectItem' }] })
+        }
+        const result = await fetchAllItemComments(execPage)
+        expect(result.errors).toEqual([{ message: 'Could not resolve to a ProjectItem' }])
+        expect(calls).toBe(1)
+    })
+
+    it('returns errors surfaced on a later page without silently dropping them', async () => {
+        const execPage = async (after: string | undefined) => {
+            if (after === undefined) return page(['a'], true, 'cursor-1')
+            return JSON.stringify({ errors: [{ message: 'rate limited' }] })
+        }
+        const result = await fetchAllItemComments(execPage)
         expect(result.errors).toEqual([{ message: 'rate limited' }])
     })
 })

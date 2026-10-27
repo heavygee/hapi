@@ -21,6 +21,28 @@ function BackIcon() {
     )
 }
 
+// GitHub resolves an absolute-path link (`/owner/repo/issues/5`) against its
+// own domain — our standalone renderer has no `chat` context to tell it
+// that, so `classifyNoSchemeHref` treats it as a workspace-file candidate or
+// inert text instead, and it renders dead (review finding, hapi#238, ported
+// from the fork). Rewriting it to a full `https://<host>/...` URL before the
+// markdown even reaches MarkdownRenderer sidesteps that classifier entirely:
+// by the time it parses the link, it already looks like any other external
+// URL. Scoped to leading-`/` destinations only (what GitHub itself resolves
+// domain-relatively) — a bare relative link with no leading slash is
+// ambiguous outside a real file tree and GitHub doesn't special-case it
+// either.
+function resolveGithubRelativeLinks(markdown: string, referenceUrl: string | null): string {
+    if (!referenceUrl) return markdown
+    let host: string
+    try {
+        host = new URL(referenceUrl).host
+    } catch {
+        return markdown
+    }
+    return markdown.replace(/(!?\[[^\]]*\]\()\/(?!\/)/g, `$1https://${host}/`)
+}
+
 function toEpochMs(iso: string | null): number | null {
     if (!iso) return null
     const ms = new Date(iso).getTime()
@@ -75,7 +97,7 @@ function CommentRow(props: { comment: BoardItemComment; t: (key: string, params?
                 ) : null}
             </div>
             <div className="mt-2">
-                <MarkdownRenderer standalone content={comment.body} />
+                <MarkdownRenderer standalone content={resolveGithubRelativeLinks(comment.body, comment.url)} />
             </div>
         </div>
     )
@@ -413,7 +435,7 @@ export function BoardItemDetail(props: {
 
                 <div className="pt-4">
                     {item.body ? (
-                        <MarkdownRenderer standalone content={item.body} />
+                        <MarkdownRenderer standalone content={resolveGithubRelativeLinks(item.body, item.url)} />
                     ) : (
                         <p className="text-sm text-[var(--app-hint)]">{t('boards.detail.noBody')}</p>
                     )}

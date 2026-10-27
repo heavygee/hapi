@@ -535,16 +535,18 @@ function toAssignableUsers(response: GhAssignableUsersResponse): BoardAssignable
 // `resource(url:)` fragment doesn't have that problem — the fragment that
 // doesn't match the node's actual type just resolves to nothing.
 const ITEM_COMMENTS_QUERY = `
-query($url: URI!) {
+query($url: URI!, $after: String) {
   resource(url: $url) {
     ... on Issue {
-      comments(last: 100) {
+      comments(first: 100, after: $after) {
         nodes { id author { login avatarUrl } authorAssociation body createdAt url isMinimized minimizedReason }
+        pageInfo { hasNextPage endCursor }
       }
     }
     ... on PullRequest {
-      comments(last: 100) {
+      comments(first: 100, after: $after) {
         nodes { id author { login avatarUrl } authorAssociation body createdAt url isMinimized minimizedReason }
+        pageInfo { hasNextPage endCursor }
       }
     }
   }
@@ -561,10 +563,15 @@ type GhCommentNode = {
     minimizedReason?: string | null
 }
 
+type GhCommentsConnection = {
+    nodes?: Array<GhCommentNode | null>
+    pageInfo?: { hasNextPage?: boolean; endCursor?: string | null } | null
+}
+
 type GhItemCommentsResponse = {
     data?: {
         resource?: {
-            comments?: { nodes?: Array<GhCommentNode | null> } | null
+            comments?: GhCommentsConnection | null
         } | null
     }
     errors?: Array<{ message: string }>
@@ -572,13 +579,57 @@ type GhItemCommentsResponse = {
 
 type ItemCommentsTarget = { host: string; url: string }
 
-async function runGhGraphqlItemComments(target: ItemCommentsTarget): Promise<GhItemCommentsResponse> {
-    const stdout = await execGhGraphql(target.host, ITEM_COMMENTS_QUERY, { url: target.url })
+// `comments(last: 100)` silently dropped every comment before the newest
+// 100 on any issue/PR with a longer thread, with no truncation indicator
+// anywhere in the response — an operator following a long-running thread
+// could lose the earliest (often most load-bearing) context with no sign
+// anything was missing (Codex review, hapi#238, ported from the fork).
+// Pages forward from the oldest comment instead, same
+// `first`/`after`/pageInfo shape as fetchAllProjectItems above, so nothing
+// is silently dropped short of the same kind of pathological-size safety
+// cap that function already has.
+const MAX_COMMENT_PAGES = 10
+
+export async function fetchAllItemComments(execPage: (after: string | undefined) => Promise<string>): Promise<GhItemCommentsResponse> {
+    const firstStdout = await execPage(undefined)
+    let response: GhItemCommentsResponse
     try {
-        return JSON.parse(stdout) as GhItemCommentsResponse
+        response = JSON.parse(firstStdout) as GhItemCommentsResponse
     } catch {
         throw new Error('gh api graphql returned non-JSON output')
     }
+
+    const connection = response.data?.resource?.comments
+    if (response.errors?.length || !connection) {
+        return response
+    }
+
+    const allNodes = [...(connection.nodes ?? [])]
+    let pageInfo = connection.pageInfo
+    let pageCount = 1
+    while (pageInfo?.hasNextPage && pageInfo.endCursor && pageCount < MAX_COMMENT_PAGES) {
+        const stdout = await execPage(pageInfo.endCursor)
+        let pageResponse: GhItemCommentsResponse
+        try {
+            pageResponse = JSON.parse(stdout) as GhItemCommentsResponse
+        } catch {
+            throw new Error('gh api graphql returned non-JSON output')
+        }
+        if (pageResponse.errors?.length) {
+            return pageResponse
+        }
+        const pageConnection = pageResponse.data?.resource?.comments
+        allNodes.push(...(pageConnection?.nodes ?? []))
+        pageInfo = pageConnection?.pageInfo
+        pageCount += 1
+    }
+
+    connection.nodes = allNodes
+    return response
+}
+
+async function runGhGraphqlItemComments(target: ItemCommentsTarget): Promise<GhItemCommentsResponse> {
+    return fetchAllItemComments(after => execGhGraphql(target.host, ITEM_COMMENTS_QUERY, { url: target.url, after }))
 }
 
 function toBoardItemComments(response: GhItemCommentsResponse): BoardItemComment[] {
