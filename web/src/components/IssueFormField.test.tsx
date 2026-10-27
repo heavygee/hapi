@@ -103,4 +103,27 @@ describe('IssueFormFieldView', () => {
         fireEvent.click(screen.getByText('Agree'))
         expect(onChange).toHaveBeenCalledWith({ kind: 'checkboxes', id: 'terms', checked: [] })
     })
+
+    // Review finding (hapi#2147): the label was a bare sibling of its
+    // control — no htmlFor/id or aria-labelledby — so a field without a
+    // placeholder had no accessible name for screen readers, and clicking
+    // the label text didn't focus the control. getByLabelText only succeeds
+    // when that association is real.
+    it('associates the label with its control for an input field', () => {
+        renderField({ kind: 'input', id: 'contact', label: 'Contact', required: false }, undefined)
+        expect(screen.getByLabelText('Contact')).toBe(screen.getByRole('textbox'))
+    })
+
+    it('associates the label with its control for a textarea field', () => {
+        renderField({ kind: 'textarea', id: 'logs', label: 'Logs', required: false }, undefined)
+        expect(screen.getByLabelText('Logs')).toBe(screen.getByRole('textbox'))
+    })
+
+    it('associates the label with its control for a single-select dropdown', () => {
+        renderField(
+            { kind: 'dropdown', id: 'version', label: 'Version', options: ['1.0', '2.0'], multiple: false, required: false },
+            undefined
+        )
+        expect(screen.getByLabelText('Version')).toBe(screen.getByRole('combobox'))
+    })
 })

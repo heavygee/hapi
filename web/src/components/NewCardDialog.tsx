@@ -408,10 +408,37 @@ export function NewCardDialog(props: NewCardDialogProps) {
                             ) : null}
 
                             <div className="flex items-center justify-between gap-2">
-                                <Button type="button" variant="secondary" onClick={() => setStep('form')} disabled={isSubmitting}>
+                                <Button
+                                    type="button"
+                                    variant="secondary"
+                                    onClick={() => {
+                                        // A partial failure already created the issue above (its
+                                        // link is still shown) — going Back is the user's one
+                                        // deliberate "I want to try again" action, so this is the
+                                        // only place that clears it and re-arms Create. Leaving it
+                                        // set made the gate below permanent: a disabled button has
+                                        // no other way to run the code that unsets it.
+                                        setOrphanedIssueUrl(null)
+                                        setError(null)
+                                        setStep('form')
+                                    }}
+                                    disabled={isSubmitting}
+                                >
                                     {t('button.back')}
                                 </Button>
-                                <Button type="button" className="gap-2" aria-busy={isSubmitting} onClick={handleSubmit} disabled={isSubmitting}>
+                                <Button
+                                    type="button"
+                                    className="gap-2"
+                                    aria-busy={isSubmitting}
+                                    onClick={handleSubmit}
+                                    // Review finding (hapi#238): once a partial failure has
+                                    // already created the issue (orphanedIssueUrl set), the
+                                    // button re-enabling as soon as isSubmitting clears let a
+                                    // repeat click resubmit the exact same payload and file a
+                                    // second, duplicate issue. Blocked until the user goes Back
+                                    // (a deliberate new attempt) rather than an accidental retry.
+                                    disabled={isSubmitting || orphanedIssueUrl !== null}
+                                >
                                     {isSubmitting ? (
                                         <>
                                             <Spinner size="sm" label={null} className="text-[var(--app-button-text)]" />

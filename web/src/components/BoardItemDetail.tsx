@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState, type ComponentPropsWithoutRef } from 'react'
 import * as Popover from '@radix-ui/react-popover'
 import type { BoardAssignableUser, BoardItem, BoardItemComment } from '@/types/api'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
+import { defaultComponents } from '@/components/assistant-ui/markdown-text'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { SessionLinkedBadge } from '@/components/SessionLinkedBadge'
@@ -25,21 +26,38 @@ function BackIcon() {
 // own domain — our standalone renderer has no `chat` context to tell it
 // that, so `classifyNoSchemeHref` treats it as a workspace-file candidate or
 // inert text instead, and it renders dead (review finding, hapi#238).
-// Rewriting it to a full `https://<host>/...` URL before the markdown even
-// reaches MarkdownRenderer sidesteps that classifier entirely: by the time
-// it parses the link, it already looks like any other external URL. Scoped
-// to leading-`/` destinations only (what GitHub itself resolves domain-
-// relatively) — a bare relative link with no leading slash is ambiguous
-// outside a real file tree and GitHub doesn't special-case it either.
-function resolveGithubRelativeLinks(markdown: string, referenceUrl: string | null): string {
-    if (!referenceUrl) return markdown
-    let host: string
-    try {
-        host = new URL(referenceUrl).host
-    } catch {
-        return markdown
-    }
-    return markdown.replace(/(!?\[[^\]]*\]\()\/(?!\/)/g, `$1https://${host}/`)
+//
+// Operates on the parsed anchor's own `href` prop, not on the raw markdown
+// text: an earlier version did a text-level regex rewrite before handing
+// the markdown to the renderer, which also corrupted any code sample that
+// happened to contain the same-looking literal text inside inline code or a
+// fenced block (review finding, hapi#238/#2147 — independently confirmed by
+// both forks' bots) — `code`/`inlineCode` are separate mdast node types from
+// `link`, so a component override here never sees their contents at all.
+// Scoped to leading-`/` destinations only (what GitHub itself resolves
+// domain-relatively) — a bare relative link with no leading slash is
+// ambiguous outside a real file tree and GitHub doesn't special-case it
+// either. Delegates to the same default anchor for everything else so real
+// external links, custom-scheme confirmation, etc. keep behaving exactly as
+// they already do.
+function useGithubRelativeAnchor(referenceUrl: string | null) {
+    return useMemo(() => {
+        const DefaultAnchor = defaultComponents.a!
+        let host: string | null = null
+        try {
+            host = referenceUrl ? new URL(referenceUrl).host : null
+        } catch {
+            host = null
+        }
+        if (!host) return DefaultAnchor
+        return function GithubRelativeAnchor(props: ComponentPropsWithoutRef<'a'>) {
+            if (typeof props.href === 'string' && /^\/(?!\/)/.test(props.href)) {
+                const { href, ...rest } = props
+                return <a {...rest} href={`https://${host}${href}`} target="_blank" rel="noopener noreferrer" />
+            }
+            return <DefaultAnchor {...props} />
+        }
+    }, [referenceUrl])
 }
 
 function toEpochMs(iso: string | null): number | null {
@@ -85,6 +103,7 @@ function CommentRow(props: { comment: BoardItemComment; t: (key: string, params?
     const { comment, t } = props
     const ms = toEpochMs(comment.createdAt)
     const association = formatAuthorAssociation(comment.authorAssociation)
+    const anchorComponent = useGithubRelativeAnchor(comment.url)
     return (
         <div className="rounded-md border border-[var(--app-border)] p-3">
             <div className="flex flex-wrap items-center gap-1.5 text-xs text-[var(--app-hint)]">
@@ -108,7 +127,7 @@ function CommentRow(props: { comment: BoardItemComment; t: (key: string, params?
                 ) : null}
             </div>
             <div className="mt-2">
-                <MarkdownRenderer standalone content={resolveGithubRelativeLinks(comment.body, comment.url)} />
+                <MarkdownRenderer standalone content={comment.body} components={{ a: anchorComponent }} />
             </div>
         </div>
     )
@@ -281,6 +300,7 @@ export function BoardItemDetail(props: {
     const [closeConfirmOpen, setCloseConfirmOpen] = useState(false)
     const [commentDraft, setCommentDraft] = useState('')
     const canWrite = item.url !== null
+    const bodyAnchorComponent = useGithubRelativeAnchor(item.url)
     const isClosed = item.state === 'CLOSED' || item.state === 'MERGED'
 
     const handleSendComment = async () => {
@@ -446,7 +466,7 @@ export function BoardItemDetail(props: {
 
                 <div className="pt-4">
                     {item.body ? (
-                        <MarkdownRenderer standalone content={resolveGithubRelativeLinks(item.body, item.url)} />
+                        <MarkdownRenderer standalone content={item.body} components={{ a: bodyAnchorComponent }} />
                     ) : (
                         <p className="text-sm text-[var(--app-hint)]">{t('boards.detail.noBody')}</p>
                     )}
