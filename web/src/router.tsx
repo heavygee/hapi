@@ -48,6 +48,7 @@ import { useMachineLabels } from '@/hooks/useMachineLabels'
 import { useBoards } from '@/hooks/queries/useBoards'
 import { useBoardItems } from '@/hooks/queries/useBoardItems'
 import { useBoardAssignableUsers } from '@/hooks/queries/useBoardAssignableUsers'
+import { useBoardItemComments } from '@/hooks/queries/useBoardItemComments'
 import { useBoardSelection } from '@/hooks/useBoardSelection'
 import { useBoardActions } from '@/hooks/mutations/useBoardActions'
 import { useBoardItemActions } from '@/hooks/mutations/useBoardItemActions'
@@ -331,6 +332,11 @@ function SessionsPage() {
         isLoading: boardItemAssignableUsersLoading,
         error: boardItemAssignableUsersError,
     } = useBoardAssignableUsers(api, effectiveBoardId, selectedBoardItem?.url ?? null, assigneePickerOpen, assignableUsersSearch)
+    const {
+        comments: boardItemComments,
+        isLoading: boardItemCommentsLoading,
+        error: boardItemCommentsError,
+    } = useBoardItemComments(api, effectiveBoardId, selectedBoardItem?.url ?? null)
     // Hidden behind the board list while in Boards mode with an item
     // selected (mobile *and* desktop, since BoardItemDetail then occupies the
     // right-pane slot) — marking it "seen" there would silently clear unread
@@ -658,6 +664,9 @@ function SessionsPage() {
                             assignableUsers={boardItemAssignableUsers}
                             isLoadingAssignableUsers={boardItemAssignableUsersLoading}
                             assignableUsersError={boardItemAssignableUsersError}
+                            comments={boardItemComments}
+                            isLoadingComments={boardItemCommentsLoading}
+                            commentsError={boardItemCommentsError}
                             onAssigneePickerOpenChange={setAssigneePickerOpen}
                             onAssignableUsersSearchChange={setAssignableUsersSearch}
                             onSetAssignees={(addLogins, removeLogins) => {

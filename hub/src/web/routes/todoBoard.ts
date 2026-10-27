@@ -11,6 +11,8 @@ import {
     type AssignableUsersResponse,
     type BoardAssignableUser,
     type BoardItem,
+    type BoardItemComment,
+    type BoardItemCommentsResponse,
     type BoardItemsResponse,
     type BoardsResponse
 } from '@hapi/protocol'
@@ -517,6 +519,83 @@ function toAssignableUsers(response: GhAssignableUsersResponse): BoardAssignable
         .map(node => ({ login: node.login, avatarUrl: node.avatarUrl, name: node.name ?? null }))
 }
 
+// Branches on `isPullRequest` rather than querying both `issue(number:)` and
+// `pullRequest(number:)` in one request — unlike a project item's `content`
+// inline fragment (which resolves to null for the wrong type), asking GitHub
+// for `pullRequest(number:)` on an issue number comes back as a top-level
+// GraphQL error ("Could not resolve to a PullRequest..."), and `gh api
+// graphql` treats any top-level error as a hard CLI failure, discarding the
+// other field's valid data along with it. `isPullRequest` is derived fresh
+// from the item's URL on every request (parseValidatedItemUrl), never cached,
+// so there's no stale-flag risk the dual-query would have guarded against.
+const COMMENT_FIELDS = 'comments(last: 100) { nodes { id author { login avatarUrl } authorAssociation body createdAt url isMinimized minimizedReason } }'
+const ISSUE_COMMENTS_QUERY = `
+query($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    issue(number: $number) { ${COMMENT_FIELDS} }
+  }
+}`
+const PR_COMMENTS_QUERY = `
+query($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) { ${COMMENT_FIELDS} }
+  }
+}`
+
+type GhCommentNode = {
+    id: string
+    author?: { login: string; avatarUrl: string } | null
+    authorAssociation: string
+    body: string
+    createdAt: string
+    url: string
+    isMinimized: boolean
+    minimizedReason?: string | null
+}
+
+type GhItemCommentsResponse = {
+    data?: {
+        repository?: {
+            issue?: { comments?: { nodes?: Array<GhCommentNode | null> } | null } | null
+            pullRequest?: { comments?: { nodes?: Array<GhCommentNode | null> } | null } | null
+        } | null
+    }
+    errors?: Array<{ message: string }>
+}
+
+type ItemCommentsTarget = { host: string; owner: string; repo: string; number: number; isPullRequest: boolean }
+
+async function runGhGraphqlItemComments(target: ItemCommentsTarget): Promise<GhItemCommentsResponse> {
+    const stdout = await execGhGraphql(target.host, target.isPullRequest ? PR_COMMENTS_QUERY : ISSUE_COMMENTS_QUERY, {
+        owner: target.owner,
+        repo: target.repo,
+        number: target.number
+    })
+    try {
+        return JSON.parse(stdout) as GhItemCommentsResponse
+    } catch {
+        throw new Error('gh api graphql returned non-JSON output')
+    }
+}
+
+function toBoardItemComments(response: GhItemCommentsResponse): BoardItemComment[] {
+    const nodes = response.data?.repository?.issue?.comments?.nodes
+        ?? response.data?.repository?.pullRequest?.comments?.nodes
+        ?? []
+    return nodes
+        .filter((node): node is GhCommentNode => node !== null)
+        .map(node => ({
+            id: node.id,
+            author: node.author ? { login: node.author.login, avatarUrl: node.author.avatarUrl } : null,
+            authorAssociation: node.authorAssociation,
+            body: node.body,
+            createdAt: node.createdAt,
+            url: node.url,
+            isMinimized: node.isMinimized,
+            minimizedReason: node.minimizedReason ?? null
+        }))
+}
+
 const execFileAsync = promisify(execFile)
 
 type ProjectQueryTarget = {
@@ -667,7 +746,7 @@ export const defaultBoardItemActions: BoardItemActions = {
 // pass an arbitrary URL and have the hub shell out `gh issue close
 // <attacker-controlled-url>` against it, the same SSRF-class exposure the
 // board-add host allowlist closed for reads (hapi#238).
-export type ValidatedItemUrl = { url: string; isPullRequest: boolean; owner: string; repo: string }
+export type ValidatedItemUrl = { url: string; isPullRequest: boolean; owner: string; repo: string; number: number }
 
 // Confirmed by hand: `gh issue/pr close|reopen|comment <url>` dials the URL's
 // own embedded host for the network request regardless of GH_HOST or any
@@ -723,7 +802,8 @@ export function parseValidatedItemUrl(url: string, board: Pick<StoredTodoBoard, 
         url: `https://${parsed.host}/${owner}/${repo}/${kind}/${number}`,
         isPullRequest: kind === 'pull',
         owner: owner!,
-        repo: repo!
+        repo: repo!,
+        number: Number(number)
     }
 }
 
@@ -1005,7 +1085,8 @@ export function createBoardRoutes(
     runGraphqlView: (target: ProjectViewLookupTarget) => GhProjectViewResponse | Promise<GhProjectViewResponse> = runGhGraphqlView,
     actions: BoardItemActions = defaultBoardItemActions,
     runGraphqlMembership: (target: ProjectMembershipTarget) => GhResourceProjectMembershipResponse | Promise<GhResourceProjectMembershipResponse> = runGhGraphqlProjectMembership,
-    runGraphqlAssignableUsers: (target: AssignableUsersTarget) => GhAssignableUsersResponse | Promise<GhAssignableUsersResponse> = runGhGraphqlAssignableUsers
+    runGraphqlAssignableUsers: (target: AssignableUsersTarget) => GhAssignableUsersResponse | Promise<GhAssignableUsersResponse> = runGhGraphqlAssignableUsers,
+    runGraphqlComments: (target: ItemCommentsTarget) => GhItemCommentsResponse | Promise<GhItemCommentsResponse> = runGhGraphqlItemComments
 ): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
@@ -1176,7 +1257,7 @@ export function createBoardRoutes(
         boardId: string,
         url: string
     ): Promise<
-        | { ok: true; board: StoredTodoBoard; url: string; isPullRequest: boolean; owner: string; repo: string }
+        | { ok: true; board: StoredTodoBoard; url: string; isPullRequest: boolean; owner: string; repo: string; number: number }
         | { ok: false; error: string; status: 400 | 404 | 502 }
     > {
         const boards = await loadBoards(dataDir)
@@ -1244,7 +1325,7 @@ export function createBoardRoutes(
                 return { ok: false, error: 'Item is not visible in this board\'s view', status: 400 }
             }
         }
-        return { ok: true, board, url: validated.url, isPullRequest: validated.isPullRequest, owner: validated.owner, repo: validated.repo }
+        return { ok: true, board, url: validated.url, isPullRequest: validated.isPullRequest, owner: validated.owner, repo: validated.repo, number: validated.number }
     }
 
     app.post('/todo-boards/:id/items/close', async (c) => {
@@ -1307,6 +1388,37 @@ export function createBoardRoutes(
             return c.json({ ok: true })
         } catch (error) {
             return c.json({ error: error instanceof Error ? error.message : 'Failed to comment on item' }, 502)
+        }
+    })
+
+    app.get('/todo-boards/:id/items/comments', async (c) => {
+        if (c.get('namespace') !== 'default') {
+            return c.json({ error: OWNER_ONLY_ERROR }, 403)
+        }
+        const url = c.req.query('url')
+        if (!url) {
+            return c.json({ error: 'Missing url query parameter' }, 400)
+        }
+        const resolved = await requireBoardAndValidUrl(c.req.param('id'), url)
+        if (!resolved.ok) {
+            return c.json({ error: resolved.error }, resolved.status)
+        }
+        try {
+            const response = await runGraphqlComments({
+                host: resolved.board.host,
+                owner: resolved.owner,
+                repo: resolved.repo,
+                number: resolved.number,
+                isPullRequest: resolved.isPullRequest
+            })
+            if (response.errors?.length) {
+                return c.json({ error: response.errors.map(e => e.message).join('; ') }, 502)
+            }
+            const comments: BoardItemComment[] = toBoardItemComments(response)
+            const body: BoardItemCommentsResponse = { comments }
+            return c.json(body)
+        } catch (error) {
+            return c.json({ error: error instanceof Error ? error.message : 'Failed to fetch comments' }, 502)
         }
     })
 

@@ -130,6 +130,25 @@ describe('useBoardItemActions', () => {
         expect(invalidateSpy).not.toHaveBeenCalled()
     })
 
+    // Review/operator feedback (2026-10-27): a posted comment must show up on
+    // the page immediately, without a manual refresh. commentOnBoardItem
+    // doesn't return the created comment, so there's nothing to optimistically
+    // insert — invalidating the comments query is what makes the next render
+    // refetch and show it, same contract boardItemsAll already has.
+    it('comments on an item and invalidates both the board items cache and that item\'s own comments cache', async () => {
+        const queryClient = new QueryClient()
+        const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+        const commentOnBoardItem = vi.fn().mockResolvedValue(undefined)
+        const api = { commentOnBoardItem } as unknown as ApiClient
+
+        const { result } = renderHook(() => useBoardItemActions(api, 'board-1'), { wrapper: wrapper(queryClient) })
+        await result.current.commentOnItem({ url: 'https://github.com/a/b/issues/1' }, 'Looks good')
+
+        expect(commentOnBoardItem).toHaveBeenCalledWith('board-1', 'https://github.com/a/b/issues/1', 'Looks good')
+        expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.boardItemsAll })
+        expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.boardItemComments('board-1', 'https://github.com/a/b/issues/1') })
+    })
+
     it('sets status via the API, resolving the board id and item url', async () => {
         const queryClient = new QueryClient()
         const setBoardItemStatus = vi.fn().mockResolvedValue(undefined)
