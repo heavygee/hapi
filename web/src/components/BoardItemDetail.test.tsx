@@ -466,6 +466,50 @@ describe('BoardItemDetail affordance treatment', () => {
         expect(screen.queryByRole('link', { name: 'issue' })).not.toBeInTheDocument()
     })
 
+    // Review finding (hapi#2147): switching the link fix to a component
+    // override only touched `a`, not `img` — a root-relative image
+    // (`![screenshot](/acme/widgets/blob/main/screenshot.png)`) kept its
+    // unresolved src, so the browser requested it from the HAPI origin
+    // instead of GitHub and it rendered broken.
+    it('resolves a GitHub-relative image src in the issue body against the item\'s own host', () => {
+        renderDetail({
+            item: makeItem({
+                url: 'https://github.com/acme/widgets/issues/12',
+                body: '![screenshot](/acme/widgets/blob/main/screenshot.png?raw=true)'
+            })
+        })
+        const image = screen.getByRole('img', { name: 'screenshot' })
+        expect(image).toHaveAttribute('src', 'https://github.com/acme/widgets/blob/main/screenshot.png?raw=true')
+    })
+
+    it('resolves a GitHub-relative image src in a comment body against the comment\'s own host', () => {
+        renderDetail({
+            comments: [{
+                id: 'IC_1',
+                author: { login: 'octocat', avatarUrl: 'https://example.com/octocat.png' },
+                authorAssociation: 'MEMBER',
+                body: '![screenshot](/acme/widgets/blob/main/screenshot.png)',
+                createdAt: '2026-10-01T09:00:00Z',
+                url: 'https://github.com/acme/widgets/issues/12#issuecomment-1',
+                isMinimized: false,
+                minimizedReason: null
+            }]
+        })
+        const image = screen.getByRole('img', { name: 'screenshot' })
+        expect(image).toHaveAttribute('src', 'https://github.com/acme/widgets/blob/main/screenshot.png')
+    })
+
+    it('does not rewrite a root-relative image src that only appears as literal text inside inline code', () => {
+        renderDetail({
+            item: makeItem({
+                url: 'https://github.com/acme/widgets/issues/12',
+                body: 'Example: `![screenshot](/acme/widgets/blob/main/screenshot.png)`'
+            })
+        })
+        expect(screen.getByText('![screenshot](/acme/widgets/blob/main/screenshot.png)')).toBeInTheDocument()
+        expect(screen.queryByRole('img')).not.toBeInTheDocument()
+    })
+
     it('does not show a role badge for NONE association', () => {
         renderDetail({
             comments: [{
