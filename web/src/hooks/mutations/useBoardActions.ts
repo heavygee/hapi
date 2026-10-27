@@ -56,13 +56,25 @@ export function useBoardActions(api: ApiClient | null): {
         // one-shot refetch the operator has no way to know might lose that
         // race. `handleSubmit` keeps the dialog's "Creating…" state up for
         // however long this takes, so there's no silent gap in feedback.
-        const deadline = Date.now() + 20_000
-        let result = await api.getBoardItems(boardId)
-        while (!result.items.some(item => item.url === response.url) && Date.now() < deadline) {
-            await new Promise(resolve => setTimeout(resolve, 2000))
-            result = await api.getBoardItems(boardId)
+        //
+        // Best-effort: the issue and project-add writes already succeeded
+        // above — a transient failure polling for them (network blip, hub
+        // 502) must not surface as a creation failure (review finding,
+        // both forks independently): NewCardDialog would show an error with
+        // no sign the issue already exists, and a retry would file a
+        // duplicate. Fall through to the plain invalidate on any polling
+        // error, same as if polling had simply timed out without finding it.
+        try {
+            const deadline = Date.now() + 20_000
+            let result = await api.getBoardItems(boardId)
+            while (!result.items.some(item => item.url === response.url) && Date.now() < deadline) {
+                await new Promise(resolve => setTimeout(resolve, 2000))
+                result = await api.getBoardItems(boardId)
+            }
+            queryClient.setQueryData(queryKeys.boardItems(boardId), result)
+        } catch {
+            // Best-effort only — the create+add already succeeded.
         }
-        queryClient.setQueryData(queryKeys.boardItems(boardId), result)
         // Still invalidate the all-boards prefix — the same issue can be a
         // member of more than one board (an unfiltered project and one of
         // its saved views), and only this one's cache was just hand-set.
