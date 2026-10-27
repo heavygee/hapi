@@ -17,6 +17,7 @@ export function useBoardItemComments(
 ): {
     comments: BoardItemComment[]
     isLoading: boolean
+    isRefetching: boolean
     error: string | null
     refetch: () => void
 } {
@@ -34,6 +35,7 @@ export function useBoardItemComments(
     return {
         comments: query.data?.comments ?? EMPTY_COMMENTS,
         isLoading: query.isLoading,
+        isRefetching: query.isRefetching,
         error: query.error instanceof Error ? query.error.message : query.error ? 'Failed to load comments' : null,
         refetch: () => { void query.refetch() },
     }

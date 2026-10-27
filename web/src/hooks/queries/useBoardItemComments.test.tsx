@@ -50,6 +50,32 @@ describe('useBoardItemComments', () => {
         expect(result.current.comments).toEqual([])
     })
 
+    it('refetches on demand, reporting isRefetching while the request is in flight', async () => {
+        const queryClient = new QueryClient()
+        const comment = {
+            id: 'IC_1',
+            author: { login: 'octocat', avatarUrl: 'https://example.com/octocat.png' },
+            authorAssociation: 'MEMBER',
+            body: 'Looks good',
+            createdAt: '2026-10-01T09:00:00Z',
+            url: 'https://github.com/a/b/issues/1#issuecomment-1',
+            isMinimized: false,
+            minimizedReason: null
+        }
+        const getBoardItemComments = vi.fn().mockResolvedValue({ comments: [comment] })
+        const api = { getBoardItemComments } as unknown as ApiClient
+
+        const { result } = renderHook(
+            () => useBoardItemComments(api, 'board-1', 'https://github.com/a/b/issues/1'),
+            { wrapper: wrapper(queryClient) }
+        )
+        await waitFor(() => expect(result.current.comments).toEqual([comment]))
+        expect(getBoardItemComments).toHaveBeenCalledTimes(1)
+
+        result.current.refetch()
+        await waitFor(() => expect(getBoardItemComments).toHaveBeenCalledTimes(2))
+    })
+
     it('maps a fetch failure to a readable error message', async () => {
         const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
         const getBoardItemComments = vi.fn().mockRejectedValue(new Error('Item is not part of this board'))

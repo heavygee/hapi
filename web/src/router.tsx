@@ -335,7 +335,9 @@ function SessionsPage() {
     const {
         comments: boardItemComments,
         isLoading: boardItemCommentsLoading,
+        isRefetching: boardItemCommentsRefetching,
         error: boardItemCommentsError,
+        refetch: refetchBoardItemComments,
     } = useBoardItemComments(api, effectiveBoardId, selectedBoardItem?.url ?? null)
     // Hidden behind the board list while in Boards mode with an item
     // selected (mobile *and* desktop, since BoardItemDetail then occupies the
@@ -631,8 +633,11 @@ function SessionsPage() {
                             onSpawn={() => handleSpawnFromBoardItem(selectedBoardItem)}
                             linkedSessionId={linkedBoardSession?.id ?? null}
                             onOpenLinkedSession={handleOpenLinkedBoardSession}
-                            onRefresh={() => { void refetchBoardItems() }}
-                            isRefreshing={boardItemsRefetching}
+                            onRefresh={() => {
+                                void refetchBoardItems()
+                                refetchBoardItemComments()
+                            }}
+                            isRefreshing={boardItemsRefetching || boardItemCommentsRefetching}
                             onClose={() => closeBoardItem(selectedBoardItem)}
                             onReopen={() => {
                                 reopenBoardItem(selectedBoardItem).catch((err) => addToast({
