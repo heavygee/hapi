@@ -22,40 +22,55 @@ function BackIcon() {
     )
 }
 
-// GitHub resolves an absolute-path link (`/owner/repo/issues/5`) against its
-// own domain — our standalone renderer has no `chat` context to tell it
-// that, so `classifyNoSchemeHref` treats it as a workspace-file candidate or
-// inert text instead, and it renders dead (review finding, hapi#238).
+// GitHub resolves an absolute-path link or image src (`/owner/repo/blob/...`)
+// against its own domain — our standalone renderer has no `chat` context to
+// tell it that, so a link falls into `classifyNoSchemeHref`'s workspace-file/
+// inert classification and an image's `src` is forwarded completely
+// unresolved, so the browser requests it from the HAPI origin instead and it
+// renders broken (review finding, hapi#238/#2147).
 //
-// Operates on the parsed anchor's own `href` prop, not on the raw markdown
-// text: an earlier version did a text-level regex rewrite before handing
-// the markdown to the renderer, which also corrupted any code sample that
-// happened to contain the same-looking literal text inside inline code or a
-// fenced block (review finding, hapi#238/#2147 — independently confirmed by
-// both forks' bots) — `code`/`inlineCode` are separate mdast node types from
-// `link`, so a component override here never sees their contents at all.
-// Scoped to leading-`/` destinations only (what GitHub itself resolves
-// domain-relatively) — a bare relative link with no leading slash is
-// ambiguous outside a real file tree and GitHub doesn't special-case it
-// either. Delegates to the same default anchor for everything else so real
-// external links, custom-scheme confirmation, etc. keep behaving exactly as
-// they already do.
-function useGithubRelativeAnchor(referenceUrl: string | null) {
+// Operates on the parsed anchor's/image's own `href`/`src` prop, not on the
+// raw markdown text: an earlier version did a text-level regex rewrite
+// before handing the markdown to the renderer, which also corrupted any
+// code sample that happened to contain the same-looking literal text inside
+// inline code or a fenced block (review finding, hapi#238/#2147 —
+// independently confirmed by both forks' bots) — `code`/`inlineCode` are
+// separate mdast node types from `link`/`image`, so a component override
+// here never sees their contents at all. Scoped to leading-`/` destinations
+// only (what GitHub itself resolves domain-relatively) — a bare relative
+// destination with no leading slash is ambiguous outside a real file tree
+// and GitHub doesn't special-case it either. Delegates to the same default
+// components for everything else so real external links/images, custom-
+// scheme confirmation, etc. keep behaving exactly as they already do.
+function useGithubRelativeMarkdownComponents(referenceUrl: string | null) {
     return useMemo(() => {
         const DefaultAnchor = defaultComponents.a!
+        const DefaultImage = defaultComponents.img!
         let host: string | null = null
         try {
             host = referenceUrl ? new URL(referenceUrl).host : null
         } catch {
             host = null
         }
-        if (!host) return DefaultAnchor
-        return function GithubRelativeAnchor(props: ComponentPropsWithoutRef<'a'>) {
-            if (typeof props.href === 'string' && /^\/(?!\/)/.test(props.href)) {
-                const { href, ...rest } = props
-                return <a {...rest} href={`https://${host}${href}`} target="_blank" rel="noopener noreferrer" />
+        if (!host) return { a: DefaultAnchor, img: DefaultImage }
+        const resolve = (value: string) => (/^\/(?!\/)/.test(value) ? `https://${host}${value}` : null)
+        return {
+            a: function GithubRelativeAnchor(props: ComponentPropsWithoutRef<'a'>) {
+                const resolved = typeof props.href === 'string' ? resolve(props.href) : null
+                if (resolved) {
+                    const { href, ...rest } = props
+                    return <a {...rest} href={resolved} target="_blank" rel="noopener noreferrer" />
+                }
+                return <DefaultAnchor {...props} />
+            },
+            img: function GithubRelativeImage(props: ComponentPropsWithoutRef<'img'>) {
+                const resolved = typeof props.src === 'string' ? resolve(props.src) : null
+                if (resolved) {
+                    const { src, ...rest } = props
+                    return <DefaultImage {...rest} src={resolved} />
+                }
+                return <DefaultImage {...props} />
             }
-            return <DefaultAnchor {...props} />
         }
     }, [referenceUrl])
 }
@@ -103,7 +118,7 @@ function CommentRow(props: { comment: BoardItemComment; t: (key: string, params?
     const { comment, t } = props
     const ms = toEpochMs(comment.createdAt)
     const association = formatAuthorAssociation(comment.authorAssociation)
-    const anchorComponent = useGithubRelativeAnchor(comment.url)
+    const markdownComponents = useGithubRelativeMarkdownComponents(comment.url)
     return (
         <div className="rounded-md border border-[var(--app-border)] p-3">
             <div className="flex flex-wrap items-center gap-1.5 text-xs text-[var(--app-hint)]">
@@ -127,7 +142,7 @@ function CommentRow(props: { comment: BoardItemComment; t: (key: string, params?
                 ) : null}
             </div>
             <div className="mt-2">
-                <MarkdownRenderer standalone content={comment.body} components={{ a: anchorComponent }} />
+                <MarkdownRenderer standalone content={comment.body} components={markdownComponents} />
             </div>
         </div>
     )
@@ -301,7 +316,7 @@ export function BoardItemDetail(props: {
     const [commentDraft, setCommentDraft] = useState('')
     const canWrite = item.url !== null
     const isClosed = item.state === 'CLOSED' || item.state === 'MERGED'
-    const bodyAnchorComponent = useGithubRelativeAnchor(item.url)
+    const bodyMarkdownComponents = useGithubRelativeMarkdownComponents(item.url)
 
     const handleSendComment = async () => {
         const body = commentDraft.trim()
@@ -466,7 +481,7 @@ export function BoardItemDetail(props: {
 
                 <div className="pt-4">
                     {item.body ? (
-                        <MarkdownRenderer standalone content={item.body} components={{ a: bodyAnchorComponent }} />
+                        <MarkdownRenderer standalone content={item.body} components={bodyMarkdownComponents} />
                     ) : (
                         <p className="text-sm text-[var(--app-hint)]">{t('boards.detail.noBody')}</p>
                     )}
