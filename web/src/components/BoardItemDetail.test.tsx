@@ -437,6 +437,35 @@ describe('BoardItemDetail affordance treatment', () => {
         expect(link).toHaveAttribute('href', 'https://github.com/acme/widgets/issues/9')
     })
 
+    // Review finding (hapi#238/#2147, independently confirmed by both forks'
+    // bots): an earlier text-level regex rewrite ran on the raw markdown
+    // before parsing, so it also corrupted matching-looking literal text
+    // inside inline code and fenced code blocks — a code sample showing
+    // `[issue](/acme/repo/issues/1)` as an example string got an
+    // `https://github.com` prefix spliced into it. Resolving on the parsed
+    // anchor's own href (not raw text) means code content is never touched.
+    it('does not rewrite GitHub-relative-looking text inside inline code', () => {
+        renderDetail({
+            item: makeItem({
+                url: 'https://github.com/acme/widgets/issues/12',
+                body: 'Example: `[issue](/acme/widgets/issues/9)`'
+            })
+        })
+        expect(screen.getByText('[issue](/acme/widgets/issues/9)')).toBeInTheDocument()
+        expect(screen.queryByRole('link', { name: 'issue' })).not.toBeInTheDocument()
+    })
+
+    it('does not rewrite GitHub-relative-looking text inside a fenced code block', () => {
+        renderDetail({
+            item: makeItem({
+                url: 'https://github.com/acme/widgets/issues/12',
+                body: '```\nconst link = "[issue](/acme/widgets/issues/9)"\n```'
+            })
+        })
+        expect(screen.getByText('const link = "[issue](/acme/widgets/issues/9)"')).toBeInTheDocument()
+        expect(screen.queryByRole('link', { name: 'issue' })).not.toBeInTheDocument()
+    })
+
     it('does not show a role badge for NONE association', () => {
         renderDetail({
             comments: [{
