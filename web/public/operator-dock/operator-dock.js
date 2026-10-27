@@ -399,6 +399,19 @@
   function pinnedSessionLabelKey() {
     return 'hapiInline.pinnedSessionLabel.' + ((cfg && cfg.appId) || 'unknown-app');
   }
+  // #557: sentinel so clearPinnedSession can suppress host cfg.session tombstones.
+  var PIN_CLEARED = '__cleared__';
+  var pinSuppressed = false;
+  var storageDeniedWarned = false;
+  function noteStorageDenied() {
+    if (storageDeniedWarned) return;
+    storageDeniedWarned = true;
+    // Sticky: routing prefs / pin clear cannot persist; host tombstone may be forced.
+    showBlockingError(
+      'Browser storage is blocked — routing prefs will not stick and the host pin may be forced. '
+      + 'Allow site storage, or pick/spawn each time.',
+    );
+  }
   // #249: operator-supplied spawn targets (host config still wins when set).
   function spawnMachineKey() {
     return 'hapiInline.spawnMachineId.' + ((cfg && cfg.appId) || 'unknown-app');
@@ -521,7 +534,9 @@
       }
       // #342: legacy sticky "pick" collapses to pin (pick is a tool under Pin).
       if (raw === 'pin' || raw === 'pick') return 'pin';
-    } catch (e) {}
+    } catch (e) {
+      noteStorageDenied();
+    }
     // #241/#342: default pin; session picker recovers when nothing is pinned yet.
     return 'pin';
   }
@@ -531,24 +546,32 @@
       toast(spawnUnavailableReason() || 'Spawn per send needs a machine and working directory', 'err');
       next = 'pin';
     }
-    try { localStorage.setItem(routingModeKey(), next); } catch (e) {}
+    try { localStorage.setItem(routingModeKey(), next); } catch (e) { noteStorageDenied(); }
     return next;
   }
   function getPinnedSession() {
+    if (pinSuppressed) return null;
     try {
-      var override = (localStorage.getItem(pinnedSessionKey()) || '').trim();
+      var raw = localStorage.getItem(pinnedSessionKey());
+      if (raw === PIN_CLEARED) return null;
+      var override = (raw || '').trim();
       if (override) return override;
-    } catch (e) {}
+    } catch (e) {
+      noteStorageDenied();
+    }
     return (cfg && cfg.session) || null;
   }
   function getPinnedSessionLabel() {
     try {
       var label = (localStorage.getItem(pinnedSessionLabelKey()) || '').trim();
       if (label) return label;
-    } catch (e) {}
+    } catch (e) {
+      noteStorageDenied();
+    }
     return null;
   }
   function setPinnedSession(id, label) {
+    pinSuppressed = false;
     try {
       if (id) {
         localStorage.setItem(pinnedSessionKey(), String(id));
@@ -558,7 +581,19 @@
         localStorage.removeItem(pinnedSessionKey());
         localStorage.removeItem(pinnedSessionLabelKey());
       }
-    } catch (e) {}
+    } catch (e) {
+      noteStorageDenied();
+    }
+  }
+  /** #557: clear pin including host cfg.session fallback (tombstone suppression). */
+  function clearPinnedSession() {
+    pinSuppressed = true;
+    try {
+      localStorage.setItem(pinnedSessionKey(), PIN_CLEARED);
+      localStorage.removeItem(pinnedSessionLabelKey());
+    } catch (e) {
+      noteStorageDenied();
+    }
   }
   /** Operator-facing labels never use session ids / UUID prefixes (#201). */
   function hostSessionName() {
@@ -828,6 +863,49 @@
     // Still toast once so non-VR operators see the familiar flash.
     toast(text.length > 120 ? text.slice(0, 117) + '…' : text, 'err');
     return card;
+  }
+
+  // #557: deleted / missing pin — sticky parity with #534 stale machineId.
+  var DEAD_PIN_COPY = 'Pinned session was deleted / missing — pick or spawn';
+  function isSessionMissingError(err, st) {
+    var status = st != null ? st : (err && err.status);
+    if (Number(status) === 404) return true;
+    var code = err && err.code != null ? String(err.code) : '';
+    if (code === 'session_not_found') return true;
+    var msg = err && err.message ? String(err.message) : (err && err.error ? String(err.error) : '');
+    if (/session[_ ]?not[_ ]?found|session missing|deleted_sessions/i.test(msg)) return true;
+    return false;
+  }
+  function failClosedDeadPin() {
+    clearPinnedSession();
+    openSessionPicker();
+    showBlockingError(DEAD_PIN_COPY);
+  }
+  /**
+   * #557: liveness for pin target.
+   * browser-hub: GET /api/sessions/:id (404 = dead).
+   * proxy: composed list (GET /api/sessions/:id not allow-listed) — missing row = dead.
+   * Network / auth blips fail open so upload 404 still catches the tombstone.
+   * Resolves: 'alive' | 'dead' | 'unknown'
+   */
+  function probePinnedSessionAlive(secret, sessionId) {
+    var id = sessionId != null ? String(sessionId).trim() : '';
+    if (!id) return Promise.resolve('dead');
+    if (!secret) return Promise.resolve('unknown');
+    if (!composedBaseReady()) return Promise.resolve('unknown');
+    if (cfg && cfg.mode === MODE_BROWSER_HUB) {
+      return hapiGet('/api/sessions/' + encodeURIComponent(id), secret).then(function (res) {
+        if (res && res.status === 404) return 'dead';
+        if (res && res.ok) return 'alive';
+        return 'unknown';
+      }).catch(function () { return 'unknown'; });
+    }
+    return listProjectSessions(secret).then(function (sessions) {
+      for (var i = 0; i < sessions.length; i++) {
+        if (sessions[i] && sessions[i].id === id) return 'alive';
+      }
+      return 'dead';
+    }).catch(function () { return 'unknown'; });
   }
 
   // #254/#268: showModal() inerts the document outside the dialog — including top-layer
@@ -2782,6 +2860,8 @@
                 return null;
               });
             }
+            // #557: missing session on messages — sticky, not toast-only.
+            if (res.status === 404) { failClosedDeadPin(); return null; }
             if (!res.ok) { toast('HAPI error ' + res.status, 'err'); return null; }
             toast('Sent to agent 🎙️', 'ok');
             closeOverlay();
@@ -2792,6 +2872,7 @@
     }).catch(function (e) {
       var st = e && e.status;
       if (st === 401 || st === 403) onAuthRejected(st, e);
+      else if (isSessionMissingError(e, st)) failClosedDeadPin();
       else toast(formatSendError(e, st), 'err');
       return null;
     }).then(function (outcome) {
@@ -2838,6 +2919,8 @@
             return null;
           });
         }
+        // #557: missing session on messages — sticky, not toast-only.
+        if (res.status === 404) { failClosedDeadPin(); return null; }
         if (!res.ok) { toast('HAPI error ' + res.status, 'err'); return null; }
         toast('Sent to agent 🎙️', 'ok');
         setBtnState('idle');
@@ -2847,6 +2930,7 @@
     }).catch(function (e) {
       var st = e && e.status;
       if (st === 401 || st === 403) onAuthRejected(st, e);
+      else if (isSessionMissingError(e, st)) failClosedDeadPin();
       else toast(formatSendError(e, st), 'err');
       return null;
     }).then(function (outcome) {
@@ -3681,102 +3765,114 @@
 
   function startRecording(providedShot) {
     if (refuseNonExecute('startRecording')) return false;
-    if (!ensureRoutableBeforeRecord()) return false;
-    var status = voiceStatus({
-      hasSR: !!(window.SpeechRecognition || window.webkitSpeechRecognition),
-      hasNative: hasNativeHost(),
-      secure: !!window.isSecureContext,
-      hasMedia: canMediaRecorder(),
-      hasStt: !!(cfg && cfg.sttUrl),
-    });
-    if (status.mode === 'warn') {
-      toast(status.text.replace(/^⚠️\s*/, ''), 'err');
-      return false;
-    }
-    liveTranscript = '';
-    liveInterim = '';
-    liveFromSpeech = false;
-    // Keep strokes when markup overlay is open — tap-to-talk must not erase drawings.
-    if (!overlay) strokes = [];
-    recording = true;
-    setBtnState('recording');
-    showRecordLabel(status.text);
-    // #271: satellites stay open — mic becomes Send, H becomes Cancel.
-    openCluster();
-    refreshChromeAffordances();
-
-    function armed(shot) {
-      if (!recording) return;
-      pendingShot = overlay ? null : (shot || null);
-      if (hasNativeHost()) {
-        refreshRecordLabel();
-        try {
-          if (window.AndroidOperator && typeof window.AndroidOperator.startNativeStt === 'function') {
-            window.AndroidOperator.startNativeStt();
-          }
-        } catch (e) {}
-        return;
+    var gate = ensureRoutableBeforeRecord();
+    // Nested arm keeps sliceFn(startRecording) covering mic/STT paths (#271/#308/#375).
+    function arm() {
+      var status = voiceStatus({
+        hasSR: !!(window.SpeechRecognition || window.webkitSpeechRecognition),
+        hasNative: hasNativeHost(),
+        secure: !!window.isSecureContext,
+        hasMedia: canMediaRecorder(),
+        hasStt: !!(cfg && cfg.sttUrl),
+      });
+      if (status.mode === 'warn') {
+        toast(status.text.replace(/^⚠️\s*/, ''), 'err');
+        return false;
       }
-      // #375: Quest starts the recorder first, shows a listening label immediately,
-      // then tries Web Speech for live words. If that kills the tracks, SR is dropped
-      // and MediaRecorder is kept for whisper. Desktop stays startWebStt then recorder.
-      if (preferWhisperCapture()) {
-        refreshRecordLabel();
+      liveTranscript = '';
+      liveInterim = '';
+      liveFromSpeech = false;
+      // Keep strokes when markup overlay is open — tap-to-talk must not erase drawings.
+      if (!overlay) strokes = [];
+      recording = true;
+      setBtnState('recording');
+      showRecordLabel(status.text);
+      // #271: satellites stay open — mic becomes Send, H becomes Cancel.
+      openCluster();
+      refreshChromeAffordances();
+
+      function armed(shot) {
+        if (!recording) return;
+        pendingShot = overlay ? null : (shot || null);
+        if (hasNativeHost()) {
+          refreshRecordLabel();
+          try {
+            if (window.AndroidOperator && typeof window.AndroidOperator.startNativeStt === 'function') {
+              window.AndroidOperator.startNativeStt();
+            }
+          } catch (e) {}
+          return;
+        }
+        // #375: Quest starts the recorder first, shows a listening label immediately,
+        // then tries Web Speech for live words. If that kills the tracks, SR is dropped
+        // and MediaRecorder is kept for whisper. Desktop stays startWebStt then recorder.
+        if (preferWhisperCapture()) {
+          refreshRecordLabel();
+          startMediaCapture().then(function (mediaOk) {
+            if (!recording) return;
+            if (!mediaOk) {
+              var questHint = (!window.isSecureContext && cfg && cfg.sttUrl)
+                ? 'Mic capture needs HTTPS — open this page over its HTTPS (Tailscale) URL, or use the Quest APK.'
+                : 'Mic failed to start';
+              toast(questHint, 'err');
+              recording = false;
+              hideRecordLabel();
+              setBtnState(overlay ? 'markup' : 'idle');
+              return;
+            }
+            attachQuestLiveLabel();
+            refreshRecordLabel();
+          });
+          return;
+        }
+        var webOk = startWebStt();
         startMediaCapture().then(function (mediaOk) {
           if (!recording) return;
-          if (!mediaOk) {
-            var questHint = (!window.isSecureContext && cfg && cfg.sttUrl)
+          if (!webOk && !mediaOk) {
+            // #308: Chromium HTTP often has no mediaDevices — name the real remedy, not "Mic failed".
+            var captureHint = (!window.isSecureContext && cfg && cfg.sttUrl)
               ? 'Mic capture needs HTTPS — open this page over its HTTPS (Tailscale) URL, or use the Quest APK.'
               : 'Mic failed to start';
-            toast(questHint, 'err');
+            toast(captureHint, 'err');
             recording = false;
             hideRecordLabel();
             setBtnState(overlay ? 'markup' : 'idle');
             return;
           }
-          attachQuestLiveLabel();
-          refreshRecordLabel();
-        });
-        return;
-      }
-      var webOk = startWebStt();
-      startMediaCapture().then(function (mediaOk) {
-        if (!recording) return;
-        if (!webOk && !mediaOk) {
-          // #308: Chromium HTTP often has no mediaDevices — name the real remedy, not "Mic failed".
-          var captureHint = (!window.isSecureContext && cfg && cfg.sttUrl)
-            ? 'Mic capture needs HTTPS — open this page over its HTTPS (Tailscale) URL, or use the Quest APK.'
-            : 'Mic failed to start';
-          toast(captureHint, 'err');
-          recording = false;
-          hideRecordLabel();
-          setBtnState(overlay ? 'markup' : 'idle');
-          return;
-        }
-        if (!webOk && mediaOk) {
-          if (!cfg.sttUrl) {
-            toast('Web Speech unavailable — this host has no whisper fallback. Talk will not transcribe.', 'err');
-            showRecordLabel('🎙️ Listening (no server STT)…');
-          } else {
-            showRecordLabel('🎙️ Listening (server STT on stop)…');
+          if (!webOk && mediaOk) {
+            if (!cfg.sttUrl) {
+              toast('Web Speech unavailable — this host has no whisper fallback. Talk will not transcribe.', 'err');
+              showRecordLabel('🎙️ Listening (no server STT)…');
+            } else {
+              showRecordLabel('🎙️ Listening (server STT on stop)…');
+            }
           }
-        }
-        else refreshRecordLabel();
-      });
-    }
+          else refreshRecordLabel();
+        });
+      }
 
-    if (overlay) {
-      armed(null);
+      if (overlay) {
+        armed(null);
+        return true;
+      }
+      if (providedShot) armed(providedShot);
+      else {
+        captureScreenshot().then(function (shot) {
+          if (!recording) return;
+          armed(shot);
+        });
+      }
       return true;
     }
-    if (providedShot) armed(providedShot);
-    else {
-      captureScreenshot().then(function (shot) {
-        if (!recording) return;
-        armed(shot);
+    if (gate && typeof gate.then === 'function') {
+      // #557: pin liveness is async — arm only after probe (or fail closed).
+      gate.then(function (ok) {
+        if (ok) arm();
       });
+      return true;
     }
-    return true;
+    if (!gate) return false;
+    return arm();
   }
 
   function finishRecording() {
@@ -4482,9 +4578,17 @@
       openSessionPicker();
       return Promise.resolve(null);
     }
-    return Promise.resolve(pinned);
+    // #557: do not upload to a deleted host/local pin — probe before send.
+    return probePinnedSessionAlive(secret, pinned).then(function (state) {
+      if (state === 'dead') {
+        failClosedDeadPin();
+        return null;
+      }
+      return pinned;
+    });
   }
   /** #241/#246: block mic-press when routing cannot succeed (before the operator speaks). */
+  /** #557: pin path may return a Promise (liveness probe). */
   function ensureRoutableBeforeRecord() {
     var mode = getRoutingMode();
     if (mode === 'spawn-per-send') {
@@ -4494,10 +4598,21 @@
       openSessionPicker();
       return false;
     }
-    if (getPinnedSession() || (cfg && cfg.session)) return true;
-    toast('Pin a project session before recording', 'err');
-    openSessionPicker();
-    return false;
+    var pinned = getPinnedSession();
+    if (!pinned) {
+      toast('Pin a project session before recording', 'err');
+      openSessionPicker();
+      return false;
+    }
+    var secret = ensureSecret();
+    if (!secret) return false;
+    return probePinnedSessionAlive(secret, pinned).then(function (state) {
+      if (state === 'dead') {
+        failClosedDeadPin();
+        return false;
+      }
+      return true;
+    });
   }
   function stashPendingOutbound(transcript, shotDataUrl, fromMarkup) {
     pendingOutbound = {
@@ -5087,7 +5202,7 @@
     return entries.slice(0, 16);
   }
   /* BEGIN GENERATED bundled-changelog */
-  var BUNDLED_CHANGELOG_FALLBACK = "## [0.22.3](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.22.2...v0.22.3) (2026-10-17)\n\n\n### Bug Fixes\n\n* **dock:** clear Send busy before native dismiss ([#531](https://github.com/Heavygee-Projects/hapi-inline/issues/531)) ([76999cb](https://github.com/Heavygee-Projects/hapi-inline/commit/76999cb92db99f67400eb06cff583a567c6f2def))\n* **dock:** fail closed on stale spawn machineId ([#535](https://github.com/Heavygee-Projects/hapi-inline/issues/535)) ([0f5a5cf](https://github.com/Heavygee-Projects/hapi-inline/commit/0f5a5cfcdd00fcb75114b8f3102b075bd28691ab))\n* **dock:** spinner on Send/mic until replies open ([#528](https://github.com/Heavygee-Projects/hapi-inline/issues/528)) ([985ee42](https://github.com/Heavygee-Projects/hapi-inline/commit/985ee429d1742cd408312fa2a401cdc9eca02ad6)), closes [#527](https://github.com/Heavygee-Projects/hapi-inline/issues/527)\n* **dock:** sweep orphan opdock-send--busy on clear ([#533](https://github.com/Heavygee-Projects/hapi-inline/issues/533)) ([886f453](https://github.com/Heavygee-Projects/hapi-inline/commit/886f45320084ffccd826a747fa56862a7968beb9))\n\n## [0.22.2](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.22.1...v0.22.2) (2026-10-14)\n\n\n### Bug Fixes\n\n* **dock:** clear CodeQL xss-through-dom on location.assign ([#514](https://github.com/Heavygee-Projects/hapi-inline/issues/514)) ([#516](https://github.com/Heavygee-Projects/hapi-inline/issues/516)) ([7eeae37](https://github.com/Heavygee-Projects/hapi-inline/commit/7eeae37c818f7a4d37c6e29ddbb2ed31e487d1c3))\n\n## [0.22.1](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.22.0...v0.22.1) (2026-10-14)\n\n\n### Bug Fixes\n\n* consumer-verify main guard through symlinks ([#507](https://github.com/Heavygee-Projects/hapi-inline/issues/507)) ([5ea33f7](https://github.com/Heavygee-Projects/hapi-inline/commit/5ea33f7c1a25fa350eb05a2385f8d7494c6dfce0)), closes [#506](https://github.com/Heavygee-Projects/hapi-inline/issues/506)\n* **dock:** harden Open in HAPI location.assign for CodeQL XSS ([#508](https://github.com/Heavygee-Projects/hapi-inline/issues/508)) ([1392e22](https://github.com/Heavygee-Projects/hapi-inline/commit/1392e223cc12ff249dee7bc7b025f4e0bce1f41f)), closes [#503](https://github.com/Heavygee-Projects/hapi-inline/issues/503)\n\n## [0.22.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.21.0...v0.22.0) (2026-10-14)\n\n\n### Features\n\n* **dock:** Open in HAPI control on replies header ([#499](https://github.com/Heavygee-Projects/hapi-inline/issues/499)) ([6ef8b10](https://github.com/Heavygee-Projects/hapi-inline/commit/6ef8b10e8738a0812cce865acc3832cdba1becdb))\n\n\n### Bug Fixes\n\n* **dock:** refresh replies title; never strand on New session ([#500](https://github.com/Heavygee-Projects/hapi-inline/issues/500)) ([6471f84](https://github.com/Heavygee-Projects/hapi-inline/commit/6471f84c33cf569c2eef0c13d68d8d68102f46e6))\n\n## [0.21.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.20.2...v0.21.0) (2026-10-13)\n\n\n### Features\n\n* **dock:** search filter on Project Sessions picker ([#493](https://github.com/Heavygee-Projects/hapi-inline/issues/493)) ([29c1654](https://github.com/Heavygee-Projects/hapi-inline/commit/29c1654d4139f5b25b53e8f25208a13197fcfb4f)), closes [#492](https://github.com/Heavygee-Projects/hapi-inline/issues/492)\n\n## [0.20.2](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.20.1...v0.20.2) (2026-10-12)\n\n\n### Bug Fixes\n\n* **android:** remint Compose hub JWT before exp and on STT 401 ([#489](https://github.com/Heavygee-Projects/hapi-inline/issues/489)) ([24741f0](https://github.com/Heavygee-Projects/hapi-inline/commit/24741f0985946b1e17bcae749b8764f9b75c6190)), closes [#488](https://github.com/Heavygee-Projects/hapi-inline/issues/488)\n\n\n### Documentation\n\n* remat tiers R/B/O and batch flush (--due) ([#485](https://github.com/Heavygee-Projects/hapi-inline/issues/485)) ([48669a4](https://github.com/Heavygee-Projects/hapi-inline/commit/48669a48f5c1ef894377e21316fd8af800722294))\n\n## [0.20.1](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.20.0...v0.20.1) (2026-10-12)\n\n\n### Bug Fixes\n\n* **dock:** route markup through AndroidOperator.requestMarkupCapture ([#474](https://github.com/Heavygee-Projects/hapi-inline/issues/474)) ([2c8e191](https://github.com/Heavygee-Projects/hapi-inline/commit/2c8e19172cf339fe317297cbd6830b1f447f6c60)), closes [#473](https://github.com/Heavygee-Projects/hapi-inline/issues/473)\n\n## [0.20.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.6...v0.20.0) (2026-10-12)\n\n\n### Features\n\n* **dock:** mic on replies interrupt composer ([#466](https://github.com/Heavygee-Projects/hapi-inline/issues/466)) ([#467](https://github.com/Heavygee-Projects/hapi-inline/issues/467)) ([5f42620](https://github.com/Heavygee-Projects/hapi-inline/commit/5f42620305d961d2787fb69eb267fa816c292ca3))\n\n## [0.19.6](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.5...v0.19.6) (2026-10-12)\n\n\n### Documentation\n\n* hubJwtProvider / getHubJwt must be hub JWT ([#460](https://github.com/Heavygee-Projects/hapi-inline/issues/460)) ([#461](https://github.com/Heavygee-Projects/hapi-inline/issues/461)) ([2e3d17c](https://github.com/Heavygee-Projects/hapi-inline/commit/2e3d17cfe4eabce680203c1ee096a3499f75ab08))\n\n## [0.19.5](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.4...v0.19.5) (2026-10-12)\n\n\n### Bug Fixes\n\n* **compose:** derive browser-hub STT when sttUrl is null ([#453](https://github.com/Heavygee-Projects/hapi-inline/issues/453)) ([7d51a9c](https://github.com/Heavygee-Projects/hapi-inline/commit/7d51a9c2e6a18e180ce7dcbca7a0c4112973422a))\n\n\n### Documentation\n\n* dock-spawned sessions are workers, not nested routers ([#443](https://github.com/Heavygee-Projects/hapi-inline/issues/443)) ([6337c9e](https://github.com/Heavygee-Projects/hapi-inline/commit/6337c9e0a1d54ae67a3ea122b16b007bc5f677b5)), closes [#442](https://github.com/Heavygee-Projects/hapi-inline/issues/442)\n\n## [0.19.4](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.3...v0.19.4) (2026-10-10)\n\n\n### Bug Fixes\n\n* **dock:** freeze host scroll before markup capture ([#439](https://github.com/Heavygee-Projects/hapi-inline/issues/439)) ([1dffa4d](https://github.com/Heavygee-Projects/hapi-inline/commit/1dffa4dd11a4da95990ea8064edd31feac450cb0)), closes [#437](https://github.com/Heavygee-Projects/hapi-inline/issues/437)\n\n## [0.19.3](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.2...v0.19.3) (2026-10-10)\n\n\n### Bug Fixes\n\n* **dock:** align markup capture to visible viewport ([#432](https://github.com/Heavygee-Projects/hapi-inline/issues/432)) ([bf92ad0](https://github.com/Heavygee-Projects/hapi-inline/commit/bf92ad0202b6f6231b237120806e5af5e3f5708f)), closes [#430](https://github.com/Heavygee-Projects/hapi-inline/issues/430)\n\n## [0.19.2](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.1...v0.19.2) (2026-10-10)\n\n\n### Bug Fixes\n\n* **dock:** keep relative /hapi through requestTarget sync ([#421](https://github.com/Heavygee-Projects/hapi-inline/issues/421)) ([200b9bc](https://github.com/Heavygee-Projects/hapi-inline/commit/200b9bcd02e634f57638ab92010813fc8cb6f561))\n\n## [0.19.1](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.0...v0.19.1) (2026-10-10)\n\n\n### Bug Fixes\n\n* **ci:** no-daemon Gradle + empty browser-hub fail-closed ([#425](https://github.com/Heavygee-Projects/hapi-inline/issues/425)) ([#426](https://github.com/Heavygee-Projects/hapi-inline/issues/426)) ([0239196](https://github.com/Heavygee-Projects/hapi-inline/commit/02391963824587609edb5d255b8ac5f893ab8cfc)), closes [#422](https://github.com/Heavygee-Projects/hapi-inline/issues/422)\n\n## [0.19.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.6...v0.19.0) (2026-10-10)\n\n\n### Features\n\n* **android:** Compose browser-hub remote hub URL ([#422](https://github.com/Heavygee-Projects/hapi-inline/issues/422)) ([#423](https://github.com/Heavygee-Projects/hapi-inline/issues/423)) ([93fa328](https://github.com/Heavygee-Projects/hapi-inline/commit/93fa3289008937f4d32e1a8e1493f9cdb9a569c4))\n\n## [0.18.6](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.5...v0.18.6) (2026-10-06)\n\n\n### Bug Fixes\n\n* **dock:** keep live STT under H fan satellites ([e7610d1](https://github.com/Heavygee-Projects/hapi-inline/commit/e7610d1e9dd138957a6064101b496de1560e4303))\n* **dock:** stop repeating Hide and headings in Settings ([#416](https://github.com/Heavygee-Projects/hapi-inline/issues/416)) ([dfefc6a](https://github.com/Heavygee-Projects/hapi-inline/commit/dfefc6a5a610288a608c09aa57c01e55623114a7))\n\n\n### Documentation\n\n* keep changelog and About free of consumer names ([8e944f7](https://github.com/Heavygee-Projects/hapi-inline/commit/8e944f7f91ce21e113b6f11da1c6745db25fe844))\n* restore 0.18.5 functional notes after history rewrite ([3de9659](https://github.com/Heavygee-Projects/hapi-inline/commit/3de9659f947d11f0cdc2f7f9307894eb42301067))\n";
+  var BUNDLED_CHANGELOG_FALLBACK = "## [0.22.4](https://github.com/heavygee/hapi-inline/compare/v0.22.3...v0.22.4) (2026-10-27)\n\n\n### Bug Fixes\n\n* **dock:** fail closed on deleted pin session ([#558](https://github.com/heavygee/hapi-inline/issues/558)) ([e7abbf9](https://github.com/heavygee/hapi-inline/commit/e7abbf973abad004ac36335fb430f059ecae1990)), closes [#557](https://github.com/heavygee/hapi-inline/issues/557)\n\n\n### Documentation\n\n* remove mic-FAB exception; host shapes by technology ([#553](https://github.com/heavygee/hapi-inline/issues/553)) ([f913726](https://github.com/heavygee/hapi-inline/commit/f913726605bee5309416bb94e8bbdbba3ca761c2))\n\n## [0.22.3](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.22.2...v0.22.3) (2026-10-17)\n\n\n### Bug Fixes\n\n* **dock:** clear Send busy before native dismiss ([#531](https://github.com/Heavygee-Projects/hapi-inline/issues/531)) ([76999cb](https://github.com/Heavygee-Projects/hapi-inline/commit/76999cb92db99f67400eb06cff583a567c6f2def))\n* **dock:** fail closed on stale spawn machineId ([#535](https://github.com/Heavygee-Projects/hapi-inline/issues/535)) ([0f5a5cf](https://github.com/Heavygee-Projects/hapi-inline/commit/0f5a5cfcdd00fcb75114b8f3102b075bd28691ab))\n* **dock:** spinner on Send/mic until replies open ([#528](https://github.com/Heavygee-Projects/hapi-inline/issues/528)) ([985ee42](https://github.com/Heavygee-Projects/hapi-inline/commit/985ee429d1742cd408312fa2a401cdc9eca02ad6)), closes [#527](https://github.com/Heavygee-Projects/hapi-inline/issues/527)\n* **dock:** sweep orphan opdock-send--busy on clear ([#533](https://github.com/Heavygee-Projects/hapi-inline/issues/533)) ([886f453](https://github.com/Heavygee-Projects/hapi-inline/commit/886f45320084ffccd826a747fa56862a7968beb9))\n\n## [0.22.2](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.22.1...v0.22.2) (2026-10-14)\n\n\n### Bug Fixes\n\n* **dock:** clear CodeQL xss-through-dom on location.assign ([#514](https://github.com/Heavygee-Projects/hapi-inline/issues/514)) ([#516](https://github.com/Heavygee-Projects/hapi-inline/issues/516)) ([7eeae37](https://github.com/Heavygee-Projects/hapi-inline/commit/7eeae37c818f7a4d37c6e29ddbb2ed31e487d1c3))\n\n## [0.22.1](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.22.0...v0.22.1) (2026-10-14)\n\n\n### Bug Fixes\n\n* consumer-verify main guard through symlinks ([#507](https://github.com/Heavygee-Projects/hapi-inline/issues/507)) ([5ea33f7](https://github.com/Heavygee-Projects/hapi-inline/commit/5ea33f7c1a25fa350eb05a2385f8d7494c6dfce0)), closes [#506](https://github.com/Heavygee-Projects/hapi-inline/issues/506)\n* **dock:** harden Open in HAPI location.assign for CodeQL XSS ([#508](https://github.com/Heavygee-Projects/hapi-inline/issues/508)) ([1392e22](https://github.com/Heavygee-Projects/hapi-inline/commit/1392e223cc12ff249dee7bc7b025f4e0bce1f41f)), closes [#503](https://github.com/Heavygee-Projects/hapi-inline/issues/503)\n\n## [0.22.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.21.0...v0.22.0) (2026-10-14)\n\n\n### Features\n\n* **dock:** Open in HAPI control on replies header ([#499](https://github.com/Heavygee-Projects/hapi-inline/issues/499)) ([6ef8b10](https://github.com/Heavygee-Projects/hapi-inline/commit/6ef8b10e8738a0812cce865acc3832cdba1becdb))\n\n\n### Bug Fixes\n\n* **dock:** refresh replies title; never strand on New session ([#500](https://github.com/Heavygee-Projects/hapi-inline/issues/500)) ([6471f84](https://github.com/Heavygee-Projects/hapi-inline/commit/6471f84c33cf569c2eef0c13d68d8d68102f46e6))\n\n## [0.21.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.20.2...v0.21.0) (2026-10-13)\n\n\n### Features\n\n* **dock:** search filter on Project Sessions picker ([#493](https://github.com/Heavygee-Projects/hapi-inline/issues/493)) ([29c1654](https://github.com/Heavygee-Projects/hapi-inline/commit/29c1654d4139f5b25b53e8f25208a13197fcfb4f)), closes [#492](https://github.com/Heavygee-Projects/hapi-inline/issues/492)\n\n## [0.20.2](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.20.1...v0.20.2) (2026-10-12)\n\n\n### Bug Fixes\n\n* **android:** remint Compose hub JWT before exp and on STT 401 ([#489](https://github.com/Heavygee-Projects/hapi-inline/issues/489)) ([24741f0](https://github.com/Heavygee-Projects/hapi-inline/commit/24741f0985946b1e17bcae749b8764f9b75c6190)), closes [#488](https://github.com/Heavygee-Projects/hapi-inline/issues/488)\n\n\n### Documentation\n\n* remat tiers R/B/O and batch flush (--due) ([#485](https://github.com/Heavygee-Projects/hapi-inline/issues/485)) ([48669a4](https://github.com/Heavygee-Projects/hapi-inline/commit/48669a48f5c1ef894377e21316fd8af800722294))\n\n## [0.20.1](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.20.0...v0.20.1) (2026-10-12)\n\n\n### Bug Fixes\n\n* **dock:** route markup through AndroidOperator.requestMarkupCapture ([#474](https://github.com/Heavygee-Projects/hapi-inline/issues/474)) ([2c8e191](https://github.com/Heavygee-Projects/hapi-inline/commit/2c8e19172cf339fe317297cbd6830b1f447f6c60)), closes [#473](https://github.com/Heavygee-Projects/hapi-inline/issues/473)\n\n## [0.20.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.6...v0.20.0) (2026-10-12)\n\n\n### Features\n\n* **dock:** mic on replies interrupt composer ([#466](https://github.com/Heavygee-Projects/hapi-inline/issues/466)) ([#467](https://github.com/Heavygee-Projects/hapi-inline/issues/467)) ([5f42620](https://github.com/Heavygee-Projects/hapi-inline/commit/5f42620305d961d2787fb69eb267fa816c292ca3))\n\n## [0.19.6](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.5...v0.19.6) (2026-10-12)\n\n\n### Documentation\n\n* hubJwtProvider / getHubJwt must be hub JWT ([#460](https://github.com/Heavygee-Projects/hapi-inline/issues/460)) ([#461](https://github.com/Heavygee-Projects/hapi-inline/issues/461)) ([2e3d17c](https://github.com/Heavygee-Projects/hapi-inline/commit/2e3d17cfe4eabce680203c1ee096a3499f75ab08))\n\n## [0.19.5](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.4...v0.19.5) (2026-10-12)\n\n\n### Bug Fixes\n\n* **compose:** derive browser-hub STT when sttUrl is null ([#453](https://github.com/Heavygee-Projects/hapi-inline/issues/453)) ([7d51a9c](https://github.com/Heavygee-Projects/hapi-inline/commit/7d51a9c2e6a18e180ce7dcbca7a0c4112973422a))\n\n\n### Documentation\n\n* dock-spawned sessions are workers, not nested routers ([#443](https://github.com/Heavygee-Projects/hapi-inline/issues/443)) ([6337c9e](https://github.com/Heavygee-Projects/hapi-inline/commit/6337c9e0a1d54ae67a3ea122b16b007bc5f677b5)), closes [#442](https://github.com/Heavygee-Projects/hapi-inline/issues/442)\n\n## [0.19.4](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.3...v0.19.4) (2026-10-10)\n\n\n### Bug Fixes\n\n* **dock:** freeze host scroll before markup capture ([#439](https://github.com/Heavygee-Projects/hapi-inline/issues/439)) ([1dffa4d](https://github.com/Heavygee-Projects/hapi-inline/commit/1dffa4dd11a4da95990ea8064edd31feac450cb0)), closes [#437](https://github.com/Heavygee-Projects/hapi-inline/issues/437)\n\n## [0.19.3](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.2...v0.19.3) (2026-10-10)\n\n\n### Bug Fixes\n\n* **dock:** align markup capture to visible viewport ([#432](https://github.com/Heavygee-Projects/hapi-inline/issues/432)) ([bf92ad0](https://github.com/Heavygee-Projects/hapi-inline/commit/bf92ad0202b6f6231b237120806e5af5e3f5708f)), closes [#430](https://github.com/Heavygee-Projects/hapi-inline/issues/430)\n\n## [0.19.2](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.1...v0.19.2) (2026-10-10)\n\n\n### Bug Fixes\n\n* **dock:** keep relative /hapi through requestTarget sync ([#421](https://github.com/Heavygee-Projects/hapi-inline/issues/421)) ([200b9bc](https://github.com/Heavygee-Projects/hapi-inline/commit/200b9bcd02e634f57638ab92010813fc8cb6f561))\n\n## [0.19.1](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.0...v0.19.1) (2026-10-10)\n\n\n### Bug Fixes\n\n* **ci:** no-daemon Gradle + empty browser-hub fail-closed ([#425](https://github.com/Heavygee-Projects/hapi-inline/issues/425)) ([#426](https://github.com/Heavygee-Projects/hapi-inline/issues/426)) ([0239196](https://github.com/Heavygee-Projects/hapi-inline/commit/02391963824587609edb5d255b8ac5f893ab8cfc)), closes [#422](https://github.com/Heavygee-Projects/hapi-inline/issues/422)\n\n## [0.19.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.6...v0.19.0) (2026-10-10)\n\n\n### Features\n\n* **android:** Compose browser-hub remote hub URL ([#422](https://github.com/Heavygee-Projects/hapi-inline/issues/422)) ([#423](https://github.com/Heavygee-Projects/hapi-inline/issues/423)) ([93fa328](https://github.com/Heavygee-Projects/hapi-inline/commit/93fa3289008937f4d32e1a8e1493f9cdb9a569c4))\n";
   /* END GENERATED bundled-changelog */
   function loadBundledChangelog() {
     if (bundledChangelogPromise) return bundledChangelogPromise;
@@ -5640,7 +5755,7 @@
 
   window.HapiInline = {
     init: init,
-    _version: '0.22.3', // x-release-please-version
+    _version: '0.22.4', // x-release-please-version
     openCluster: function () { return openCluster(); },
     /** #287 — host Settings can offer the same hide/show the dock sheet does. */
     hideForThisUser: function () { setUserHidden(true); hideDockChrome(); },
