@@ -1408,3 +1408,12 @@ layers:
   # Must stay ABOVE driver/2081-search-scope-toggle (same SessionList/web surface).
   # Tip-unique web marker: "fetchNewerMessages"
   - branch: driver/2081-forward-reading
+
+  # hapi#247 (operator feedback) — a session spawned from a Boards card kept
+  # the generic "you've been spawned from a Boards card..." briefing text as
+  # its name instead of the card's own title. Renames the session via
+  # api.renameSession right after creation, same fire-and-forget pattern as
+  # the existing briefing-message delivery and issue auto-link.
+  # Thin tip on soup a717c9642: driver/247-board-spawn-rename @ 31ce99324.
+  # Web-only -> remat --build-web; hard-reload (no hub restart).
+  - branch: driver/247-board-spawn-rename
