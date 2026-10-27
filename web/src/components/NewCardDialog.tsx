@@ -411,8 +411,13 @@ export function NewCardDialog(props: NewCardDialogProps) {
                                 <Button type="button" variant="secondary" onClick={() => setStep('form')} disabled={isSubmitting}>
                                     {t('button.back')}
                                 </Button>
-                                <Button type="button" onClick={handleSubmit} disabled={isSubmitting}>
-                                    {isSubmitting ? t('boards.newCard.creating') : t('boards.newCard.create')}
+                                <Button type="button" className="gap-2" aria-busy={isSubmitting} onClick={handleSubmit} disabled={isSubmitting}>
+                                    {isSubmitting ? (
+                                        <>
+                                            <Spinner size="sm" label={null} className="text-[var(--app-button-text)]" />
+                                            {t('boards.newCard.creating')}
+                                        </>
+                                    ) : t('boards.newCard.create')}
                                 </Button>
                             </div>
                         </div>
