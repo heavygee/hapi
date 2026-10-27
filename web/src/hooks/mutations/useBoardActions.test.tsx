@@ -70,11 +70,14 @@ describe('useBoardActions', () => {
         await expect(result.current.removeBoard('a')).rejects.toThrow('API unavailable')
     })
 
-    it('createBoardItem returns the created url and invalidates that board\'s items cache', async () => {
+    it('createBoardItem returns the created url, caches the confirmed item list, and invalidates every board\'s items', async () => {
         const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
         const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
-        const createBoardItem = vi.fn().mockResolvedValue({ ok: true, url: 'https://github.com/heavygee/hapi/issues/42' })
-        const api = { createBoardItem } as unknown as ApiClient
+        const createdUrl = 'https://github.com/heavygee/hapi/issues/42'
+        const createBoardItem = vi.fn().mockResolvedValue({ ok: true, url: createdUrl })
+        const itemsWithCreated = { items: [{ url: createdUrl }], statusOrder: [], doneValues: [] }
+        const getBoardItems = vi.fn().mockResolvedValue(itemsWithCreated)
+        const api = { createBoardItem, getBoardItems } as unknown as ApiClient
 
         const { result } = renderHook(() => useBoardActions(api), { wrapper: createWrapper(queryClient) })
 
@@ -85,8 +88,75 @@ describe('useBoardActions', () => {
         })
 
         expect(createBoardItem).toHaveBeenCalledWith('board-1', payload)
-        expect(url).toBe('https://github.com/heavygee/hapi/issues/42')
-        expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.boardItems('board-1') })
+        expect(url).toBe(createdUrl)
+        expect(getBoardItems).toHaveBeenCalledWith('board-1')
+        expect(queryClient.getQueryData(queryKeys.boardItems('board-1'))).toEqual(itemsWithCreated)
+        expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.boardItemsAll })
+    })
+
+    // GitHub Projects v2 has a real propagation lag between the hub's own
+    // project-add succeeding and the item actually appearing in a
+    // subsequent items query (operator report, hapi#247: created the issue,
+    // it never showed up on the board — confirmed by hand the item really
+    // was added, just not indexed yet). A single invalidate+refetch right
+    // after create can lose that race and silently show the board without
+    // the just-created item.
+    it('polls until the created item actually appears, instead of trusting a single refetch', async () => {
+        vi.useFakeTimers()
+        try {
+            const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+            const createdUrl = 'https://github.com/heavygee/hapi/issues/42'
+            const createBoardItem = vi.fn().mockResolvedValue({ ok: true, url: createdUrl })
+            const staleItems = { items: [], statusOrder: [], doneValues: [] }
+            const freshItems = { items: [{ url: createdUrl }], statusOrder: [], doneValues: [] }
+            const getBoardItems = vi.fn()
+                .mockResolvedValueOnce(staleItems)
+                .mockResolvedValueOnce(staleItems)
+                .mockResolvedValueOnce(freshItems)
+            const api = { createBoardItem, getBoardItems } as unknown as ApiClient
+
+            const { result } = renderHook(() => useBoardActions(api), { wrapper: createWrapper(queryClient) })
+
+            const payload = { repo: 'heavygee/hapi', title: 'New bug', body: 'Broke.', labels: ['bug'], assignees: [] }
+            let url: string | undefined
+            const pending = result.current.createBoardItem('board-1', payload).then(resolved => { url = resolved })
+            await vi.advanceTimersByTimeAsync(2000)
+            await vi.advanceTimersByTimeAsync(2000)
+            await pending
+
+            expect(getBoardItems).toHaveBeenCalledTimes(3)
+            expect(url).toBe(createdUrl)
+            expect(queryClient.getQueryData(queryKeys.boardItems('board-1'))).toEqual(freshItems)
+        } finally {
+            vi.useRealTimers()
+        }
+    })
+
+    it('gives up polling after 20s and still resolves, rather than hanging forever', async () => {
+        vi.useFakeTimers()
+        try {
+            const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+            const createdUrl = 'https://github.com/heavygee/hapi/issues/42'
+            const createBoardItem = vi.fn().mockResolvedValue({ ok: true, url: createdUrl })
+            const neverFound = { items: [], statusOrder: [], doneValues: [] }
+            const getBoardItems = vi.fn().mockResolvedValue(neverFound)
+            const api = { createBoardItem, getBoardItems } as unknown as ApiClient
+
+            const { result } = renderHook(() => useBoardActions(api), { wrapper: createWrapper(queryClient) })
+
+            const payload = { repo: 'heavygee/hapi', title: 'New bug', body: 'Broke.', labels: ['bug'], assignees: [] }
+            let url: string | undefined
+            const pending = result.current.createBoardItem('board-1', payload).then(resolved => { url = resolved })
+            for (let i = 0; i < 11; i++) {
+                await vi.advanceTimersByTimeAsync(2000)
+            }
+            await pending
+
+            expect(url).toBe(createdUrl)
+            expect(queryClient.getQueryData(queryKeys.boardItems('board-1'))).toEqual(neverFound)
+        } finally {
+            vi.useRealTimers()
+        }
     })
 
     it('createBoardItem rejects without touching the api client when api is null', async () => {
