@@ -5,6 +5,10 @@ const STORAGE_PREFIX = 'hapi:board-spawn-briefing:'
 export type BoardSpawnBriefing = {
     message: string
     linkIssueUrl?: string
+    /** The board card's own title — renames the spawned session to it so it
+     *  reflects the actual work instead of staying on the generic "you've
+     *  been spawned from a Boards card" briefing text. */
+    title: string
 }
 
 /**
@@ -45,10 +49,11 @@ export function peekBoardSpawnBriefing(id: string): BoardSpawnBriefing | null {
         if (!raw) return null
         const parsed = JSON.parse(raw) as unknown
         if (!parsed || typeof parsed !== 'object') return null
-        const { message, linkIssueUrl } = parsed as Record<string, unknown>
-        if (typeof message !== 'string') return null
+        const { message, linkIssueUrl, title } = parsed as Record<string, unknown>
+        if (typeof message !== 'string' || typeof title !== 'string') return null
         return {
             message,
+            title,
             linkIssueUrl: typeof linkIssueUrl === 'string' ? linkIssueUrl : undefined
         }
     } catch {

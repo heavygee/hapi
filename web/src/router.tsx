@@ -455,7 +455,8 @@ function SessionsPage() {
         const linkIssueUrl = item.url && parseIssueUrl(item.url) ? item.url : undefined
         const briefingId = stashBoardSpawnBriefing({
             message: buildBoardItemSpawnMessage(item),
-            linkIssueUrl
+            linkIssueUrl,
+            title: item.title
         })
         // `/sessions/new` is a sibling route under the same `/sessions`
         // parent, so SessionsPage never remounts — without switching back to
@@ -1343,6 +1344,20 @@ function NewSessionPage() {
     // inactive, which 400s on the messages route's requireActive guard
     // (Codex review, hapi#238).
     const handleBoardSpawnDelivery = useCallback((sessionId: string) => {
+        if (briefing?.title && api) {
+            // Without this the session keeps whatever default name it got at
+            // creation — which for a board spawn is the generic briefing
+            // instruction text, not the actual work (operator feedback,
+            // 2026-10-27: "ensure that the title ... matches the purpose of
+            // the work"). The agent can still rename it again later via its
+            // own change_title tool; this just gives it a meaningful name
+            // from the moment it's created instead of leaving that to chance.
+            api.renameSession(sessionId, briefing.title).catch(() => {
+                // Cosmetic only — the session is fully usable with its
+                // default name, so this fails silently rather than adding a
+                // third toast on top of the message/issue-link ones below.
+            })
+        }
         if (briefing?.message && api) {
             // Deliver as a real incoming message — same mechanism
             // spawn_peer/hapi-ping-peer use — instead of seeding the
