@@ -102,10 +102,15 @@ export function useBoardItemActions(api: ApiClient | null, boardId: string | nul
         try {
             await client.commentOnBoardItem(id, url, body)
             await invalidate()
+            // Without this the new comment only shows up on a manual refresh
+            // of the detail pane (operator feedback, 2026-10-27) — the
+            // comments list has its own cache entry, separate from the
+            // board-items list boardItemsAll above already covers.
+            await queryClient.invalidateQueries({ queryKey: queryKeys.boardItemComments(id, url) })
         } finally {
             setCommentingUrls(current => removeUrl(current, url))
         }
-    }, [requireTarget, invalidate])
+    }, [requireTarget, invalidate, queryClient])
 
     const setItemStatus = useCallback(async (item: Pick<BoardItem, 'url'>, status: string | null) => {
         const { api: client, boardId: id, url } = requireTarget(item.url)

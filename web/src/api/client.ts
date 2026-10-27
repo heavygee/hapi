@@ -32,6 +32,7 @@ import type {
     SkillsResponse,
     SpawnResponse,
     AssignableUsersResponse,
+    BoardItemCommentsResponse,
     BoardItemsResponse,
     BoardsResponse,
     VisibilityPayload,
@@ -987,6 +988,13 @@ export class ApiClient {
         if (search) query.set('search', search)
         return await this.request<AssignableUsersResponse>(
             `/api/todo-boards/${encodeURIComponent(boardId)}/items/assignable-users?${query.toString()}`
+        )
+    }
+
+    async getBoardItemComments(boardId: string, url: string): Promise<BoardItemCommentsResponse> {
+        const query = new URLSearchParams({ url })
+        return await this.request<BoardItemCommentsResponse>(
+            `/api/todo-boards/${encodeURIComponent(boardId)}/items/comments?${query.toString()}`
         )
     }
 

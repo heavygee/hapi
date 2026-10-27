@@ -46,6 +46,9 @@ function renderDetail(overrides: Partial<Parameters<typeof BoardItemDetail>[0]> 
         assignableUsers: [],
         isLoadingAssignableUsers: false,
         assignableUsersError: null,
+        comments: [],
+        isLoadingComments: false,
+        commentsError: null,
         onAssigneePickerOpenChange: vi.fn(),
         onAssignableUsersSearchChange: vi.fn(),
         onSetAssignees: vi.fn(),
@@ -378,5 +381,93 @@ describe('BoardItemDetail affordance treatment', () => {
     it('does not show the status spinner when not changing status', () => {
         renderDetail({ isSettingStatus: false })
         expect(screen.queryByRole('status', { name: 'Changing status…' })).not.toBeInTheDocument()
+    })
+
+    it('renders each comment with its author, relative time (absolute on hover), and rendered markdown body', () => {
+        renderDetail({
+            comments: [{
+                id: 'IC_1',
+                author: { login: 'octocat', avatarUrl: 'https://example.com/octocat.png' },
+                authorAssociation: 'MEMBER',
+                body: '**Looks good** to me',
+                createdAt: '2026-10-01T09:00:00Z',
+                url: 'https://github.com/acme/widgets/issues/12#issuecomment-1',
+                isMinimized: false,
+                minimizedReason: null
+            }]
+        })
+        expect(screen.getByText('octocat')).toBeInTheDocument()
+        expect(screen.getByText('Member')).toBeInTheDocument()
+        expect(screen.getByText('Looks good')).toBeInTheDocument()
+        const link = screen.getAllByRole('link').find(
+            a => a.getAttribute('href') === 'https://github.com/acme/widgets/issues/12#issuecomment-1'
+        )
+        expect(link).toBeDefined()
+        expect(link).toHaveAttribute('target', '_blank')
+    })
+
+    it('does not show an association badge for a NONE association (matching GitHub\'s own chrome)', () => {
+        renderDetail({
+            comments: [{
+                id: 'IC_1',
+                author: { login: 'rando', avatarUrl: 'https://example.com/rando.png' },
+                authorAssociation: 'NONE',
+                body: 'hi',
+                createdAt: '2026-10-01T09:00:00Z',
+                url: 'https://github.com/acme/widgets/issues/12#issuecomment-1',
+                isMinimized: false,
+                minimizedReason: null
+            }]
+        })
+        expect(screen.queryByText('None')).not.toBeInTheDocument()
+    })
+
+    it('shows a placeholder for a comment whose author account was deleted', () => {
+        renderDetail({
+            comments: [{
+                id: 'IC_1',
+                author: null,
+                authorAssociation: 'NONE',
+                body: 'orphaned comment',
+                createdAt: '2026-10-01T09:00:00Z',
+                url: 'https://github.com/acme/widgets/issues/12#issuecomment-1',
+                isMinimized: false,
+                minimizedReason: null
+            }]
+        })
+        expect(screen.getByText('Deleted user')).toBeInTheDocument()
+    })
+
+    it('shows an empty state when the item has no comments', () => {
+        renderDetail({ comments: [] })
+        expect(screen.getByText('No comments yet.')).toBeInTheDocument()
+    })
+
+    it('shows a loading state while comments are being fetched', () => {
+        renderDetail({ isLoadingComments: true, comments: [] })
+        expect(screen.getByRole('status', { name: 'Loading comments…' })).toBeInTheDocument()
+    })
+
+    it('shows an error state when the comments fetch fails, instead of the empty state', () => {
+        renderDetail({ commentsError: 'Failed to load comments', comments: [] })
+        expect(screen.getByText('Failed to load comments')).toBeInTheDocument()
+        expect(screen.queryByText('No comments yet.')).not.toBeInTheDocument()
+    })
+
+    it('does not render the comments section at all for a draft item with no url', () => {
+        renderDetail({
+            item: makeItem({ url: null }),
+            comments: [{
+                id: 'IC_1',
+                author: { login: 'octocat', avatarUrl: 'https://example.com/octocat.png' },
+                authorAssociation: 'NONE',
+                body: 'should not render',
+                createdAt: '2026-10-01T09:00:00Z',
+                url: 'https://github.com/acme/widgets/issues/12#issuecomment-1',
+                isMinimized: false,
+                minimizedReason: null
+            }]
+        })
+        expect(screen.queryByText('should not render')).not.toBeInTheDocument()
     })
 })

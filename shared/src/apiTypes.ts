@@ -1395,6 +1395,23 @@ export type AssignableUsersResponse = {
     users: BoardAssignableUser[]
 }
 
+export type BoardItemComment = {
+    id: string
+    /** Null for a deleted-account author — GitHub still returns the comment itself. */
+    author: BoardItemActor | null
+    authorAssociation: string
+    body: string
+    createdAt: string
+    /** Deep link to the comment on GitHub itself. */
+    url: string
+    isMinimized: boolean
+    minimizedReason: string | null
+}
+
+export type BoardItemCommentsResponse = {
+    comments: BoardItemComment[]
+}
+
 export const LinkIssueRequestSchema = z.object({
     url: z.string().min(1)
 })

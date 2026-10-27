@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import * as Popover from '@radix-ui/react-popover'
-import type { BoardAssignableUser, BoardItem } from '@/types/api'
+import type { BoardAssignableUser, BoardItem, BoardItemComment } from '@/types/api'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -35,6 +35,60 @@ function TimestampRow(props: { label: string; iso: string | null; t: (key: strin
         <div className="flex items-center gap-1.5 text-xs text-[var(--app-hint)]">
             <span>{props.label}:</span>
             <span title={formatAbsoluteDateTime(ms) ?? undefined}>{relative}</span>
+        </div>
+    )
+}
+
+// GitHub's own UI shows this as a small badge next to the author's name
+// whenever it's meaningful — NONE (most commenters on a public repo) shows
+// nothing, matching GitHub's own chrome rather than labeling every comment
+// "None". Formatted from the enum rather than a locale table: it's account
+// metadata, not prose, and the handful of values (OWNER, MEMBER,
+// COLLABORATOR, CONTRIBUTOR, FIRST_TIME_CONTRIBUTOR, FIRST_TIMER, NONE) read
+// fine in English across every repo regardless of UI locale.
+function formatAuthorAssociation(association: string): string | null {
+    if (association === 'NONE' || association === '') return null
+    return association
+        .toLowerCase()
+        .split('_')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join('-')
+}
+
+// One GitHub comment, rendered with the same markdown pipeline as the issue
+// body itself (operator feedback, 2026-10-27: "all detail from within those
+// comments") — code blocks, images, mentions, and links all work exactly as
+// they do in the issue body above. `url` deep-links to the comment's own
+// anchor on GitHub ("linked appropriately as if on github").
+function CommentRow(props: { comment: BoardItemComment; t: (key: string, params?: Record<string, string | number>) => string }) {
+    const { comment, t } = props
+    const ms = toEpochMs(comment.createdAt)
+    const association = formatAuthorAssociation(comment.authorAssociation)
+    return (
+        <div className="rounded-md border border-[var(--app-border)] p-3">
+            <div className="flex flex-wrap items-center gap-1.5 text-xs text-[var(--app-hint)]">
+                {comment.author ? (
+                    <img src={comment.author.avatarUrl} alt="" className="h-5 w-5 rounded-full" />
+                ) : null}
+                <span className="font-medium text-[var(--app-fg)]">{comment.author?.login ?? t('boards.detail.deletedAuthor')}</span>
+                {association ? (
+                    <span className="rounded-full border border-[var(--app-border)] px-1.5 py-0.5 text-[10px]">{association}</span>
+                ) : null}
+                {ms !== null ? (
+                    <a
+                        href={comment.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={formatAbsoluteDateTime(ms) ?? undefined}
+                        className="ml-auto shrink-0 hover:text-[var(--app-fg)] hover:underline"
+                    >
+                        {formatRelativeTime(ms, t)}
+                    </a>
+                ) : null}
+            </div>
+            <div className="mt-2">
+                <MarkdownRenderer standalone content={comment.body} />
+            </div>
         </div>
     )
 }
@@ -186,6 +240,9 @@ export function BoardItemDetail(props: {
     assignableUsers: BoardAssignableUser[]
     isLoadingAssignableUsers: boolean
     assignableUsersError: string | null
+    comments: BoardItemComment[]
+    isLoadingComments: boolean
+    commentsError: string | null
     onAssigneePickerOpenChange: (open: boolean) => void
     onAssignableUsersSearchChange: (search: string) => void
     onSetAssignees: (addLogins: string[], removeLogins: string[]) => void
@@ -249,7 +306,7 @@ export function BoardItemDetail(props: {
                 </button>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+            <div data-testid="board-item-detail-body" className="min-h-0 flex-1 overflow-y-auto p-4">
                 {/* One unified wrapping flow, not a stack of separately-forced
                     full-width sections — short items (a single assignee, a
                     label, a date) sit side by side on a wide pane and only
@@ -376,6 +433,27 @@ export function BoardItemDetail(props: {
 
                 {canWrite ? (
                     <div className="mt-4 border-t border-[var(--app-border)] pt-4">
+                        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--app-hint)]">
+                            {t('boards.detail.comments')}
+                        </h3>
+                        {props.isLoadingComments ? (
+                            <Spinner size="sm" label={t('boards.detail.loadingComments')} />
+                        ) : props.commentsError ? (
+                            <p className="text-sm text-red-600">{props.commentsError}</p>
+                        ) : props.comments.length === 0 ? (
+                            <p className="text-sm text-[var(--app-hint)]">{t('boards.detail.noComments')}</p>
+                        ) : (
+                            <div className="flex flex-col gap-3">
+                                {props.comments.map(comment => (
+                                    <CommentRow key={comment.id} comment={comment} t={t} />
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                ) : null}
+
+                {canWrite ? (
+                    <div className="mt-4 border-t border-[var(--app-border)] pt-4">
                         <label htmlFor="board-item-comment" className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--app-hint)]">
                             {t('boards.detail.comment')}
                         </label>
@@ -415,7 +493,7 @@ export function BoardItemDetail(props: {
                 comment-submit/status-select above) get the filled/primary
                 treatment instead, so consequence is visually distinguishable
                 from mere navigation (operator affordance audit, hapi#238). */}
-            <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-[var(--app-border)] p-3">
+            <div data-testid="board-item-detail-actions" className="flex shrink-0 flex-wrap items-center gap-2 border-t border-[var(--app-border)] p-3">
                 {item.url ? (
                     <Button asChild variant="outline">
                         <a href={item.url} target="_blank" rel="noopener noreferrer">
