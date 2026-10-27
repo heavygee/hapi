@@ -56,16 +56,21 @@ test.describe('boards card-list toolbar — peer stack (#302)', () => {
     })
 
     test('filter row hosts Refresh + outlined New card', async ({ page }) => {
+        test.setTimeout(120_000)
         mkdirSync(dirname(PNG_TOOLBAR), { recursive: true })
 
         await injectAuth(page)
         await page.setViewportSize({ width: 1280, height: 900 })
         await gotoSessions(page)
 
-        const modeSwitch = page.getByRole('radiogroup', { name: /Switch between sessions and (to-do|boards) view/i })
+        const modeSwitch = page.getByRole('radiogroup', { name: 'Switch between sessions and boards view' })
         await expect(modeSwitch).toBeVisible({ timeout: 60_000 })
-        const boardsButton = modeSwitch.getByRole('radio', { name: /Boards|To-Do/i })
-        await boardsButton.click()
+        await modeSwitch.getByRole('radio', { name: 'Boards' }).click()
+
+        // Fresh peer stack has no boards — add the dull public demo board.
+        await page.getByRole('button', { name: 'Add a board' }).first().click()
+        await page.getByPlaceholder('https://github.com/users/<handle>/projects/<n>').fill('https://github.com/users/heavygee/projects/6')
+        await page.getByRole('button', { name: 'Add', exact: true }).click()
 
         const filter = page.getByPlaceholder(/Filter by title/i)
         await expect(filter).toBeVisible({ timeout: 60_000 })
@@ -86,7 +91,7 @@ test.describe('boards card-list toolbar — peer stack (#302)', () => {
         expect(newCardBox!.x).toBeGreaterThan(refreshBox!.x)
 
         const list = page.getByTestId('board-item-list')
-        await dwellForHuman(900)
+        await dwellForHuman(page, 900)
         await list.screenshot({ path: PNG_TOOLBAR })
     })
 })
