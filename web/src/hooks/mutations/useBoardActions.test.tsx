@@ -166,4 +166,52 @@ describe('useBoardActions', () => {
         await expect(result.current.createBoardItem('board-1', { repo: 'a/b', title: 'T', body: 'B', labels: [], assignees: [] }))
             .rejects.toThrow('API unavailable')
     })
+
+    // Review finding (both forks, independently): the create+add writes
+    // already succeeded by the time polling starts — a transient failure
+    // fetching board items to confirm it must not surface as a creation
+    // failure, or the operator sees an error with no sign the issue already
+    // exists and a retry files a duplicate.
+    it('still resolves with the created url when the very first polling fetch rejects', async () => {
+        const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        const createdUrl = 'https://github.com/heavygee/hapi/issues/42'
+        const createBoardItem = vi.fn().mockResolvedValue({ ok: true, url: createdUrl })
+        const getBoardItems = vi.fn().mockRejectedValue(new Error('HTTP 502'))
+        const api = { createBoardItem, getBoardItems } as unknown as ApiClient
+
+        const { result } = renderHook(() => useBoardActions(api), { wrapper: createWrapper(queryClient) })
+
+        const payload = { repo: 'heavygee/hapi', title: 'New bug', body: 'Broke.', labels: ['bug'], assignees: [] }
+        const url = await result.current.createBoardItem('board-1', payload)
+
+        expect(url).toBe(createdUrl)
+        expect(queryClient.getQueryData(queryKeys.boardItems('board-1'))).toBeUndefined()
+    })
+
+    it('still resolves with the created url when a later polling retry rejects', async () => {
+        vi.useFakeTimers()
+        try {
+            const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+            const createdUrl = 'https://github.com/heavygee/hapi/issues/42'
+            const createBoardItem = vi.fn().mockResolvedValue({ ok: true, url: createdUrl })
+            const staleItems = { items: [], statusOrder: [], doneValues: [] }
+            const getBoardItems = vi.fn()
+                .mockResolvedValueOnce(staleItems)
+                .mockRejectedValueOnce(new Error('network error'))
+            const api = { createBoardItem, getBoardItems } as unknown as ApiClient
+
+            const { result } = renderHook(() => useBoardActions(api), { wrapper: createWrapper(queryClient) })
+
+            const payload = { repo: 'heavygee/hapi', title: 'New bug', body: 'Broke.', labels: ['bug'], assignees: [] }
+            let url: string | undefined
+            const pending = result.current.createBoardItem('board-1', payload).then(resolved => { url = resolved })
+            await vi.advanceTimersByTimeAsync(2000)
+            await pending
+
+            expect(url).toBe(createdUrl)
+            expect(queryClient.getQueryData(queryKeys.boardItems('board-1'))).toBeUndefined()
+        } finally {
+            vi.useRealTimers()
+        }
+    })
 })
