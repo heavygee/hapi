@@ -346,4 +346,55 @@ describe('NewCardDialog', () => {
         expect(link).toHaveAttribute('href', 'https://github.com/heavygee/hapi/issues/42')
         expect(props.onClose).not.toHaveBeenCalled()
     })
+
+    // Review finding (hapi#238): the issue was already created by the first
+    // click (its URL is shown above) — a repeat click on the same button
+    // resubmitted the identical payload and filed a second, duplicate issue,
+    // since the hub has no idea this exact submission already succeeded
+    // partway. Going Back is the one deliberate "try again" action that
+    // re-arms Create.
+    it('disables Create after a partial failure, so a repeat click can\'t file a duplicate issue', async () => {
+        const apiError = new ApiError('HTTP 502', 502, undefined, JSON.stringify({
+            error: 'Issue created at https://github.com/heavygee/hapi/issues/42 but could not be added to the board: boom',
+            url: 'https://github.com/heavygee/hapi/issues/42'
+        }))
+        const onSubmit = vi.fn().mockRejectedValue(apiError)
+        renderDialog({ templates: [], blankAllowed: true, onSubmit })
+
+        fireEvent.change(screen.getByPlaceholderText('owner/repo'), { target: { value: 'heavygee/hapi' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+        fireEvent.click(await screen.findByText('Open a blank issue'))
+        fireEvent.change(screen.getAllByRole('textbox')[0]!, { target: { value: 'T' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Create issue' }))
+
+        await screen.findByRole('link', { name: 'https://github.com/heavygee/hapi/issues/42' })
+        expect(screen.getByRole('button', { name: 'Create issue' })).toBeDisabled()
+        expect(onSubmit).toHaveBeenCalledTimes(1)
+    })
+
+    it('re-arms Create after Back, once the user has deliberately gone to try again', async () => {
+        const apiError = new ApiError('HTTP 502', 502, undefined, JSON.stringify({
+            error: 'Issue created at https://github.com/heavygee/hapi/issues/42 but could not be added to the board: boom',
+            url: 'https://github.com/heavygee/hapi/issues/42'
+        }))
+        const onSubmit = vi.fn().mockRejectedValueOnce(apiError).mockResolvedValueOnce('https://github.com/heavygee/hapi/issues/43')
+        renderDialog({ templates: [], blankAllowed: true, onSubmit })
+
+        fireEvent.change(screen.getByPlaceholderText('owner/repo'), { target: { value: 'heavygee/hapi' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+        fireEvent.click(await screen.findByText('Open a blank issue'))
+        fireEvent.change(screen.getAllByRole('textbox')[0]!, { target: { value: 'T' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Create issue' }))
+        await screen.findByRole('link', { name: 'https://github.com/heavygee/hapi/issues/42' })
+
+        fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+        expect(screen.queryByText('https://github.com/heavygee/hapi/issues/42')).not.toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Create issue' })).toBeEnabled()
+
+        fireEvent.click(screen.getByRole('button', { name: 'Create issue' }))
+        await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2))
+    })
 })

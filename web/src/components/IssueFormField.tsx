@@ -35,8 +35,19 @@ export function IssueFormFieldView(props: {
     // Checkboxes fields have no group-level `required` — each option carries
     // its own (rendered inline per-option below), unlike the other kinds.
     const isRequired = 'required' in field && field.required
+    // `htmlFor`/`id` only make sense where the label maps to exactly one
+    // control (input/textarea/single-select) — the checkboxes and
+    // multi-select cases already associate each option's own label directly
+    // with its own checkbox below, so this top label is more of a group
+    // heading for those and is rendered without htmlFor there (review
+    // finding, hapi#2147: the label was a bare sibling with no htmlFor/id or
+    // aria-labelledby, so a field without a placeholder had no accessible
+    // name and clicking the label text didn't focus its control).
+    const controlId = field.kind === 'input' || field.kind === 'textarea' || (field.kind === 'dropdown' && !field.multiple)
+        ? field.id
+        : undefined
     const label = (
-        <label className="flex flex-col gap-0.5">
+        <label className="flex flex-col gap-0.5" htmlFor={controlId}>
             <span className="text-sm font-medium text-[var(--app-fg)]">
                 {field.label}
                 {isRequired ? <span className="ml-1 text-red-500">*</span> : null}
@@ -56,6 +67,7 @@ export function IssueFormFieldView(props: {
             <div className="flex flex-col gap-1.5">
                 {label}
                 <input
+                    id={field.id}
                     type="text"
                     value={value}
                     placeholder={field.placeholder}
@@ -78,6 +90,7 @@ export function IssueFormFieldView(props: {
             <div className="flex flex-col gap-1.5">
                 {label}
                 <textarea
+                    id={field.id}
                     rows={5}
                     value={value}
                     placeholder={field.placeholder}
@@ -131,6 +144,7 @@ export function IssueFormFieldView(props: {
             <div className="flex flex-col gap-1.5">
                 {label}
                 <SelectControl
+                    id={field.id}
                     value={value}
                     onChange={(event) => onChange({ kind: 'dropdown', id: field.id, selected: event.target.value ? [event.target.value] : [] })}
                     className={`${FIELD_INPUT_CLASS} py-2 pl-3 text-sm`}
