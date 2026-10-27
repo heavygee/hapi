@@ -42,7 +42,16 @@ export function stashBoardSpawnBriefing(briefing: BoardSpawnBriefing): string {
     return id
 }
 
-export function peekBoardSpawnBriefing(id: string): BoardSpawnBriefing | null {
+// `title` is optional on the *read* side even though `stashBoardSpawnBriefing`
+// always provides one — a stash written by a pre-rename-fix build (deploy
+// mid-flight, stale tab) won't have it, and the message/issue-link are still
+// perfectly deliverable without a rename. Treating `title` as part of the
+// same all-or-nothing validation as `message` (an earlier version of this
+// function did) drops the ENTIRE briefing — message and issue-link included
+// — over a missing rename, which is a strictly worse failure than just
+// skipping the rename (operator-reported, hapi#247: spawned with no
+// instruction or issue link at all).
+export function peekBoardSpawnBriefing(id: string): (Omit<BoardSpawnBriefing, 'title'> & { title?: string }) | null {
     if (typeof window === 'undefined') return null
     try {
         const raw = sessionStorage.getItem(STORAGE_PREFIX + id)
@@ -50,10 +59,10 @@ export function peekBoardSpawnBriefing(id: string): BoardSpawnBriefing | null {
         const parsed = JSON.parse(raw) as unknown
         if (!parsed || typeof parsed !== 'object') return null
         const { message, linkIssueUrl, title } = parsed as Record<string, unknown>
-        if (typeof message !== 'string' || typeof title !== 'string') return null
+        if (typeof message !== 'string') return null
         return {
             message,
-            title,
+            title: typeof title === 'string' ? title : undefined,
             linkIssueUrl: typeof linkIssueUrl === 'string' ? linkIssueUrl : undefined
         }
     } catch {
