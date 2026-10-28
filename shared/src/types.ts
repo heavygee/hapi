@@ -7,6 +7,7 @@ export type {
     AttachedJobStatus,
     AttachedJobUpsert,
     AttachmentMetadata,
+    BackgroundTask,
     DecryptedMessage,
     Metadata,
     Machine,

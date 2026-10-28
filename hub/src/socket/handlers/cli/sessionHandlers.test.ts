@@ -441,6 +441,8 @@ describe('cli session handlers', () => {
     it.each([
         ['supersededBySessionId', 'foreign-session'],
         ['opencodeClearOperation', { replacementSessionId: 'foreign-session', state: 'reserved', updatedAt: Date.now() }],
+        ['titleSuggestionAutoAttemptedAt', 1234],
+        ['titleSuggestionTurn', { first: false, completed: true }],
         ['jobsAcceptedFromSessionIds', ['foreign-session']],
         ['jobsTransferredToSessionId', 'foreign-session'],
         ['jobKeyRedirects', { 'foreign-session/beets': 'beets.foreign' }],
@@ -502,6 +504,32 @@ describe('cli session handlers', () => {
             jobsTransferredToSessionId: 'merge-target',
             jobKeyRedirects: { 'old-session/beets': 'beets.oldsess1' },
             lifecycleState: 'archived',
+        })
+    })
+
+    it('preserves the automatic title attempt marker across CLI metadata updates', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('preserve-auto-title-marker', {
+            path: '/tmp/project',
+            titleSuggestionAutoAttemptedAt: 1234,
+            titleSuggestionTurn: { first: true, completed: false }
+        }, null, 'default')
+        const socket = new FakeSocket()
+        registerSessionHandlers(socket as unknown as CliSocketWithData, {
+            store,
+            resolveSessionAccess: () => ({ ok: true, value: session as StoredSession }),
+            emitAccessError: () => { throw new Error('unexpected access error') }
+        })
+
+        socket.trigger('update-metadata', {
+            sid: session.id,
+            expectedVersion: session.metadataVersion,
+            metadata: { path: '/tmp/project', titleSuggestionAutoAttemptedAt: 9999, titleSuggestionTurn: { first: false, completed: true } }
+        }, () => {})
+
+        expect(store.sessions.getSessionByNamespace(session.id, 'default')?.metadata).toMatchObject({
+            titleSuggestionAutoAttemptedAt: 1234,
+            titleSuggestionTurn: { first: true, completed: false }
         })
     })
 })

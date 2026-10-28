@@ -13,7 +13,7 @@ afterEach(() => {
     }
 })
 
-describe('schema migration v22 to v28', () => {
+describe('schema migration v22 to v29', () => {
     it('adds events and event_links tables to a V22 database', () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v23-'))
         tempDirs.push(dir)
@@ -42,8 +42,7 @@ describe('schema migration v22 to v28', () => {
         expect(links?.name).toBe('event_links')
         const columns = internalDb.prepare('PRAGMA table_info(messages)').all() as Array<{ name: string }>
         expect(columns.map((column) => column.name)).toContain('delivery_state')
-        // Tip: upstream V26 heartbeat index + #1404 V27 session_jobs + V28 run_id.
-        expect(version.user_version).toBe(28)
+        expect(version.user_version).toBe(29)
         migrated.close()
     })
 })

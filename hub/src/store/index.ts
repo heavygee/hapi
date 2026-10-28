@@ -45,7 +45,7 @@ export {
     WorkGraphValidationError
 } from './workGraph'
 
-const SCHEMA_VERSION: number = 28
+const SCHEMA_VERSION: number = 29
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -360,7 +360,8 @@ export class Store {
             // Upstream #1115 dual-pin at v21→v22; #1467 A2A events at v22→v23;
             // iOS push_key at v23→v24; steer delivery_state at v24→v25;
             // immediate-queue heartbeat index at v25→v26;
-            // #1404 session_jobs at v26→v27; run_id fence at v27→v28.
+            // upstream future-scheduled index at v26→v27;
+            // #1404 session_jobs at v27→v28; run_id fence at v28→v29.
             21: () => this.migrateFromV21ToV22(),
             22: () => this.migrateFromV22ToV23(),
             23: () => this.migrateFromV23ToV24(),
@@ -368,6 +369,7 @@ export class Store {
             25: () => this.migrateFromV25ToV26(),
             26: () => this.migrateFromV26ToV27(),
             27: () => this.migrateFromV27ToV28(),
+            28: () => this.migrateFromV28ToV29(),
         })
 
         if (currentVersion === 0) {
@@ -482,6 +484,12 @@ export class Store {
                 WHERE invoked_at IS NULL
                   AND local_id IS NOT NULL
                   AND scheduled_at IS NULL
+                  AND delivery_state = 'queued';
+            CREATE INDEX IF NOT EXISTS idx_messages_future_scheduled_queued
+                ON messages(session_id, scheduled_at)
+                WHERE invoked_at IS NULL
+                  AND local_id IS NOT NULL
+                  AND scheduled_at IS NOT NULL
                   AND delivery_state = 'queued';
 
             CREATE TABLE IF NOT EXISTS message_epochs (
@@ -1038,6 +1046,29 @@ export class Store {
     }
 
     /**
+     * v26→v27: make the session-list future-scheduled lookups indexed.
+     * GET /api/sessions runs countFutureScheduledBySessionIds and
+     * minFutureScheduledAtBySessionIds over every session id in the namespace.
+     * Neither the (session_id, seq) indexes nor idx_messages_scheduled_pending
+     * match the full predicate set, so SQLite falls back to probing
+     * idx_messages_local_id — one pass over every local message per call
+     * (O(all local messages), twice per session-list refresh) even though the
+     * matching set is almost always empty. This partial index covers every
+     * constant predicate and exposes (session_id, scheduled_at), so both
+     * queries become a near-empty index range scan.
+     */
+    private migrateFromV26ToV27(): void {
+        this.db.exec(`
+            CREATE INDEX IF NOT EXISTS idx_messages_future_scheduled_queued
+                ON messages(session_id, scheduled_at)
+                WHERE invoked_at IS NULL
+                  AND local_id IS NOT NULL
+                  AND scheduled_at IS NOT NULL
+                  AND delivery_state = 'queued';
+        `)
+    }
+
+    /**
      * A2A Layer 1 / P1 (#1374) + P3 substrate: hub work-graph ledger tables.
      * Namespace + principal_json required on every events row.
      * Bumped as v22→v23 because upstream main already ships schema 22.
@@ -1095,8 +1126,8 @@ export class Store {
         `)
     }
 
-    /** v26→v27: #1404 session-attached long-running jobs. */
-    private migrateFromV26ToV27(): void {
+    /** v27→v28: #1404 session-attached long-running jobs (after upstream v26→v27). */
+    private migrateFromV27ToV28(): void {
         this.db.exec(`
             CREATE TABLE IF NOT EXISTS session_jobs (
                 session_id TEXT NOT NULL,
@@ -1119,8 +1150,8 @@ export class Store {
         `)
     }
 
-    /** v27→v28: supervisor run generation — CAS fence for key reuse (#1424). */
-    private migrateFromV27ToV28(): void {
+    /** v28→v29: supervisor run generation — CAS fence for key reuse (#1424). */
+    private migrateFromV28ToV29(): void {
         const cols = this.db.prepare('PRAGMA table_info(session_jobs)').all() as Array<{ name: string }>
         if (!cols.some((c) => c.name === 'run_id')) {
             this.db.exec('ALTER TABLE session_jobs ADD COLUMN run_id TEXT')
