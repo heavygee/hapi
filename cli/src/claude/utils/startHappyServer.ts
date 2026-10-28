@@ -292,7 +292,12 @@ function createHapiMcpServer(
                 }
                 const persisted = response.externalRefs?.some((candidate) =>
                     candidate.kind === 'github_pr'
-                    && isSameGithubPrIdentity(candidate, ref.repo, ref.number, new URL(ref.url).hostname)
+                    // `.host`, not `.hostname` — isSameGithubPrIdentity compares
+                    // against hostFromGithubPrUrl(candidate.url), which retains a
+                    // non-default port; passing a port-stripped host here would
+                    // report "not persisted" for a successfully-stored
+                    // port-qualified ref (review finding, hapi#2147).
+                    && isSameGithubPrIdentity(candidate, ref.repo, ref.number, new URL(ref.url).host)
                     && candidate.role === ref.role
                 )
                 if (!persisted) {

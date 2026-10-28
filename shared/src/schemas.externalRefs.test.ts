@@ -257,6 +257,21 @@ describe('parseGithubPrInput', () => {
             url: 'https://lhs.ghe.com/lockhouse/lockhouse/pull/42'
         })
     })
+
+    // Review finding (hapi#2147, follow-up on the port-stripping identity
+    // bug): the URL was rebuilt from `url.hostname`, discarding a
+    // non-default port before the identity helpers ever saw it — every
+    // entry point that reaches this parser (LinkPrDialog, `hapi link-pr`,
+    // MCP `link_pr`) stored the port-stripped URL regardless of the
+    // identity fix.
+    it('preserves a non-default port when parsing a GHES PR URL', () => {
+        expect(parseGithubPrInput('https://tenant.ghe.com:8443/acme/repo/pull/7')).toEqual({
+            ok: true,
+            repo: 'acme/repo',
+            number: 7,
+            url: 'https://tenant.ghe.com:8443/acme/repo/pull/7'
+        })
+    })
 })
 
 describe('buildGithubPrExternalRef', () => {
