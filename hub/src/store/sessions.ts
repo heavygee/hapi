@@ -3,6 +3,7 @@ import { prepareCached } from './statementCache'
 import { bumpSessionDeletionEpoch } from './sessionInvalidation'
 import { randomUUID } from 'node:crypto'
 import { MAX_EXTERNAL_REFS, reconcileExternalRefs, toValidExternalRefs } from '@hapi/protocol/schemas'
+import { preserveSessionTitle } from './sessionTitleLock'
 
 import type { StoredSession, VersionedUpdateResult } from './types'
 import { safeJsonParse } from './json'
@@ -82,6 +83,13 @@ const SIMPLE_RESUME_TOKENS = [
 ] as const
 
 const CONTRIBUTION_FIELDS = ['externalRefs'] as const
+
+// Hub-owned metadata that must survive sparse CLI metadata replacements.
+// `null` remains the explicit-clear sentinel handled by carryForwardIfMissing.
+const HUB_OWNED_METADATA_FIELDS = [
+    'titleSuggestionAutoAttemptedAt',
+    'titleSuggestionTurn'
+] as const
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -232,6 +240,7 @@ export function mergeSessionMetadata(
     merged = carryForwardIfMissing(prior, next, merged, ROUTING_FIELDS)
     merged = carryForwardIfMissing(prior, next, merged, SIMPLE_RESUME_TOKENS)
     merged = mergeContributionFields(prior, next, merged, options)
+    merged = carryForwardIfMissing(prior, next, merged, HUB_OWNED_METADATA_FIELDS)
     merged = preserveCursorProtocolPair(prior, next, merged)
     return merged ?? next
 }
@@ -243,6 +252,7 @@ type DbSessionRow = {
     machine_id: string | null
     created_at: number
     updated_at: number
+    last_user_message_at: number | null
     pinned: number
     global_pinned: number
     metadata: string | null
@@ -270,6 +280,7 @@ function toStoredSession(row: DbSessionRow): StoredSession {
         machineId: row.machine_id,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
+        lastUserMessageAt: row.last_user_message_at ?? undefined,
         pinned: row.pinned === 1,
         globalPinned: row.global_pinned === 1,
         metadata: safeJsonParse(row.metadata),
@@ -325,7 +336,7 @@ export function getOrCreateSession(
         }
     }
 
-    const metadataJson = JSON.stringify(metadata)
+    const metadataJson = JSON.stringify(preserveSessionTitle(null, metadata))
     const agentStateJson = agentState === null || agentState === undefined ? null : JSON.stringify(agentState)
 
     prepareCached(db, `
@@ -466,7 +477,7 @@ export function adoptPreallocatedSession(
         }
 
         const now = Date.now()
-        const metadataJson = JSON.stringify(metadata)
+        const metadataJson = JSON.stringify(preserveSessionTitle(existing.metadata, mergeSessionMetadata(existing.metadata, metadata)))
         const agentStateJson = agentState === null || agentState === undefined ? null : JSON.stringify(agentState)
         const stubTag = machineSpawnPreallocTag(id)
 
@@ -515,7 +526,14 @@ export function updateSessionMetadata(
     metadata: unknown,
     expectedVersion: number,
     namespace: string,
-    options?: { touchUpdatedAt?: boolean; allowUnarchive?: boolean; replaceExternalRefs?: boolean }
+    options?: {
+        touchUpdatedAt?: boolean
+        allowUnarchive?: boolean
+        replaceExternalRefs?: boolean
+        allowTitleUpdate?: boolean
+        titleLocked?: boolean
+        inheritTitleLockFrom?: string
+    }
 ): VersionedUpdateResult<unknown | null> {
     const now = Date.now()
     const touchUpdatedAt = options?.touchUpdatedAt !== false
@@ -529,7 +547,15 @@ export function updateSessionMetadata(
             }
 
             const prior = existing.metadata
-            let merged = mergeSessionMetadata(prior, metadata, { replaceExternalRefs: options?.replaceExternalRefs })
+            const sourceTitle = options?.inheritTitleLockFrom
+                ? getSessionByNamespace(db, options.inheritTitleLockFrom, namespace)?.metadata : null
+            const titleOwner = isPlainObject(prior) && prior.titleLocked === true ? prior
+                : isPlainObject(sourceTitle) && sourceTitle.titleLocked === true ? sourceTitle : prior
+            let merged = preserveSessionTitle(
+                titleOwner,
+                mergeSessionMetadata(prior, metadata, { replaceExternalRefs: options?.replaceExternalRefs }),
+                options
+            )
 
             // #1911 M1: unauthorized un-archive of hub-archived rows.
             // Return success + merge-preserved archive fields — NOT version-mismatch
@@ -576,6 +602,7 @@ export function updateSessionMetadata(
             // that is refuse-in-place, not live adopt (#1911 M1).
             if (
                 result.result === 'success'
+                && !options?.allowTitleUpdate
                 && isMachineSpawnPreallocatedStub(existing)
                 && !isHubArchivedSessionMetadata(merged)
             ) {
@@ -614,6 +641,8 @@ export function updateSessionAgentState(
 ): VersionedUpdateResult<unknown | null> {
     const now = Date.now()
     const normalized = agentState ?? null
+    const prior = prepareCached(db, 'SELECT agent_state FROM sessions WHERE id = ? AND namespace = ?')
+        .get(id, namespace) as { agent_state: string | null } | undefined
 
     return updateVersionedField({
         db,
@@ -626,9 +655,26 @@ export function updateSessionAgentState(
         value: normalized,
         encode: (value) => (value === null ? null : JSON.stringify(value)),
         decode: safeJsonParse,
-        setClauses: ['updated_at = @updated_at', 'seq = seq + 1'],
-        params: { updated_at: now }
+        setClauses: [
+            'updated_at = CASE WHEN @touch_updated_at = 1 THEN @updated_at ELSE updated_at END',
+            'seq = seq + 1'
+        ],
+        params: {
+            updated_at: now,
+            touch_updated_at: hasNewAgentStateRequest(safeJsonParse(prior?.agent_state ?? null), normalized) ? 1 : 0
+        }
     })
+}
+
+// Routine agent-state snapshots (usage, controlledByUser, request
+// completion) are not session activity; only a new permission request is.
+function hasNewAgentStateRequest(prior: unknown, next: unknown): boolean {
+    const nextRequests = isPlainObject(next) ? next.requests : undefined
+    if (!isPlainObject(nextRequests)) {
+        return false
+    }
+    const priorRequests = isPlainObject(prior) && isPlainObject(prior.requests) ? prior.requests : {}
+    return Object.keys(nextRequests).some((requestId) => !Object.hasOwn(priorRequests, requestId))
 }
 
 export function setSessionTodos(

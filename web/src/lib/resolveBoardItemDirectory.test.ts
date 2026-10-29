@@ -73,8 +73,8 @@ describe('resolveBoardItemDirectory', () => {
 
     it('picks the most recently active directory when multiple match', () => {
         const sessions = [
-            makeSession({ id: 'old', metadata: { path: '/home/user/hapi-demo-board', machineId: 'm1' }, updatedAt: 100 }),
-            makeSession({ id: 'new', metadata: { path: '/srv/worktrees/hapi-demo-board', machineId: 'm2' }, updatedAt: 999 }),
+            makeSession({ id: 'old', metadata: { path: '/home/user/hapi-demo-board', machineId: 'm1' }, createdAt: 100 }),
+            makeSession({ id: 'new', metadata: { path: '/srv/worktrees/hapi-demo-board', machineId: 'm2' }, createdAt: 999 }),
         ]
         expect(resolveBoardItemDirectory('heavygee/hapi-demo-board', sessions, ALL_ONLINE)).toEqual({
             directory: '/srv/worktrees/hapi-demo-board',
