@@ -827,4 +827,16 @@ describe('session list user-activity ordering', () => {
         expect(bucketRunningSessions(sessions, 'all').working.map(s => s.id)).toEqual(['new', 'old'])
         expect(bucketRunningSessions(sessions.map(s => ({ ...s, updatedAt: 200_000 })), 'all').working.map(s => s.id)).toEqual(['new', 'old'])
     })
+
+    it('fixed created-at order keeps rows and workspaces when lastUserMessageAt moves', () => {
+        const fixedIds = (sessions: SessionSummary[]) =>
+            groupSessionsByDirectory(sessions, { orderBy: 'created' }).flatMap(g => g.sessions.map(s => s.id))
+        const sessions = [session('old', 1_000, '/old'), session('new', 2_000, '/new')]
+        expect(fixedIds(sessions)).toEqual(['new', 'old'])
+        const bumped = sessions.map(s => s.id === 'old'
+            ? { ...s, lastUserMessageAt: 100_000 }
+            : s)
+        expect(fixedIds(bumped)).toEqual(['new', 'old'])
+        expect(groupSessionsByDirectory(bumped, { orderBy: 'created' }).map(g => g.directory)).toEqual(['/new', '/old'])
+    })
 })

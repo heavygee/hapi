@@ -91,7 +91,9 @@ import {
 import { useFixedSessionOrder } from '@/hooks/useFixedSessionOrder'
 import {
     compareDescWithKeyTiebreak,
+    compareSessionsByCreatedAtDesc,
     compareSessionsByOrderKeyDesc,
+    getCreatedAtOrderKey,
     getSessionOrderKey
 } from '@hapi/protocol'
 import { classifySessionAttention, sessionIsUnread } from '@/lib/sessionAttention'
@@ -469,8 +471,16 @@ export function getPreviousSessionVisibleCount(current: number, step: number): n
     return Math.max(normalizedStep, current - normalizedStep)
 }
 
+export type SessionDirectoryOrderBy = 'activity' | 'created'
+
 // Group structure is unchanged; output and liveness never change its order.
-export function groupSessionsByDirectory(sessions: SessionSummary[]): SessionGroup[] {
+export function groupSessionsByDirectory(
+    sessions: SessionSummary[],
+    options?: { orderBy?: SessionDirectoryOrderBy }
+): SessionGroup[] {
+    const orderBy = options?.orderBy ?? 'activity'
+    const compare = orderBy === 'created' ? compareSessionsByCreatedAtDesc : compareSessionsByOrderKeyDesc
+    const orderKey = orderBy === 'created' ? getCreatedAtOrderKey : getSessionOrderKey
     const groups = new Map<string, { directory: string; machineId: string | null; sessions: SessionSummary[] }>()
 
     sessions.forEach(session => {
@@ -491,10 +501,10 @@ export function groupSessionsByDirectory(sessions: SessionSummary[]): SessionGro
         .map(([key, group]) => {
             const sortedSessions = [...group.sessions].sort((a, b) => {
                 if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1
-                return compareSessionsByOrderKeyDesc(a, b)
+                return compare(a, b)
             })
             const latestOrderAt = group.sessions.reduce(
-                (max, s) => Math.max(max, getSessionOrderKey(s)),
+                (max, s) => Math.max(max, orderKey(s)),
                 -Infinity
             )
             const hasActiveSession = group.sessions.some(s => s.active)
@@ -1475,8 +1485,12 @@ export function SessionList(props: {
     const [showUnreadOnly, setShowUnreadOnly] = useState(false)
     const { pinInProgressMode } = usePinInProgressSessions()
     const { fixedSessionOrder } = useFixedSessionOrder()
-    // Fixed session order pauses status-driven float (same as upstream boolean pin).
+    // Fixed session order: creation-time sort + pause status-driven float.
     const effectivePinInProgressMode: PinInProgressMode = fixedSessionOrder ? 'off' : pinInProgressMode
+    const directoryOrderBy: SessionDirectoryOrderBy = fixedSessionOrder ? 'created' : 'activity'
+    const compareByListOrder = fixedSessionOrder
+        ? compareSessionsByCreatedAtDesc
+        : compareSessionsByOrderKeyDesc
     const { machineFilter, setMachineFilter } = useSessionListMachineFilter()
     const showDetailedStatus = sessionListStatusMode === 'detailed'
     const [searchQuery, setSearchQuery] = useState('')
@@ -1607,8 +1621,8 @@ export function SessionList(props: {
         [allSessions, hasTextQuery, isFiltering, normalizedQuery, searchScoreIndex, timeScopedSessions, machineLabelsById] // eslint-disable-line react-hooks/exhaustive-deps
     )
     const allGroups = useMemo(
-        () => groupSessionsByDirectory(allSessions),
-        [allSessions]
+        () => groupSessionsByDirectory(allSessions, { orderBy: directoryOrderBy }),
+        [allSessions, directoryOrderBy]
     )
     const machineFilters = useMemo(
         () => groupByMachine(allGroups, resolveMachineLabel),
@@ -1684,17 +1698,17 @@ export function SessionList(props: {
         if (searchScoreIndex && hasTextQuery) {
             return sortSessionsBySearchRelevance(pinned, searchScoreIndex)
         }
-        return [...pinned].sort(compareSessionsByOrderKeyDesc)
-    }, [machineFilteredSessions, searchScoreIndex, hasTextQuery])
+        return [...pinned].sort(compareByListOrder)
+    }, [machineFilteredSessions, searchScoreIndex, hasTextQuery, compareByListOrder])
     const runningSessions = useMemo(() => {
         const byRelevanceOrRecent = (a: SessionSummary, b: SessionSummary) => {
             if (searchScoreIndex && hasTextQuery) {
                 return compareSessionsBySearchRelevance(a, b, searchScoreIndex)
             }
-            return compareSessionsByOrderKeyDesc(a, b)
+            return compareByListOrder(a, b)
         }
         return bucketRunningSessions(machineFilteredSessions, effectivePinInProgressMode, byRelevanceOrRecent)
-    }, [machineFilteredSessions, effectivePinInProgressMode, searchScoreIndex, hasTextQuery])
+    }, [machineFilteredSessions, effectivePinInProgressMode, searchScoreIndex, hasTextQuery, compareByListOrder])
     const runningSessionTotal = runningSessions.jobs.length
         + runningSessions.working.length
         + runningSessions.pending.length
@@ -1713,14 +1727,15 @@ export function SessionList(props: {
                         return false
                     }
                     return true
-                })
+                }),
+                { orderBy: directoryOrderBy }
             )
             if (searchScoreIndex && hasTextQuery) {
                 return rankSessionGroupsBySearchRelevance(grouped, searchScoreIndex)
             }
             return grouped
         },
-        [machineFilteredSessions, effectivePinInProgressMode, fixedSessionOrder, searchScoreIndex, hasTextQuery]
+        [machineFilteredSessions, effectivePinInProgressMode, directoryOrderBy, searchScoreIndex, hasTextQuery]
     )
     // Directory groups whose rows all floated to the pinned sections still
     // render an action-only header so copy-path / new-session-in-directory
@@ -1729,9 +1744,10 @@ export function SessionList(props: {
     // unread filters stay consistent.
     const allDirectoryGroups = useMemo(
         () => groupSessionsByDirectory(
-            machineFilteredSessions.filter((session) => !session.globalPinned)
+            machineFilteredSessions.filter((session) => !session.globalPinned),
+            { orderBy: directoryOrderBy }
         ),
-        [machineFilteredSessions]
+        [machineFilteredSessions, directoryOrderBy]
     )
     const actionOnlyGroups = useMemo(() => {
         if (effectivePinInProgressMode === 'off') {
