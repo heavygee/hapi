@@ -5,6 +5,7 @@ import { dirname } from 'node:path'
 import { MachineStore } from './machineStore'
 import { MessageStore } from './messageStore'
 import { addMessage } from './messages'
+import { backfillLastUserMessageAt } from './sessionUserActivity'
 import type { StoredMessage } from './types'
 import { PushStore } from './pushStore'
 import { FcmStore } from './fcmStore'
@@ -12,6 +13,7 @@ import { ScratchlistStore } from './scratchlistStore'
 import { SessionJobsStore } from './sessionJobsStore'
 import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
+import { TurnStore } from './turnStore'
 import { UsageStore } from './usageStore'
 import { WorkGraphStore } from './workGraphStore'
 
@@ -37,6 +39,8 @@ export { ScratchlistStore } from './scratchlistStore'
 export { SessionJobsStore } from './sessionJobsStore'
 export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
+export { TurnStore } from './turnStore'
+export type { SessionTurn, SessionTurnEndReason, SessionTurnTrigger } from './turns'
 export { UsageStore } from './usageStore'
 export { WorkGraphStore } from './workGraphStore'
 export {
@@ -45,7 +49,7 @@ export {
     WorkGraphValidationError
 } from './workGraph'
 
-const SCHEMA_VERSION: number = 29
+const SCHEMA_VERSION: number = 31
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -59,7 +63,8 @@ const REQUIRED_TABLES = [
     'usage_events',
     'usage_scan_state',
     'events',
-    'event_links'
+    'event_links',
+    'session_turns'
 ] as const
 
 export class Store {
@@ -76,6 +81,7 @@ export class Store {
     readonly scratchlist: ScratchlistStore
     readonly sessionJobs: SessionJobsStore
     readonly usage: UsageStore
+    readonly turns: TurnStore
     readonly workGraph: WorkGraphStore
 
     /**
@@ -131,6 +137,7 @@ export class Store {
         this.scratchlist = new ScratchlistStore(this.db)
         this.sessionJobs = new SessionJobsStore(this.db)
         this.usage = new UsageStore(this.db)
+        this.turns = new TurnStore(this.db)
         this.workGraph = new WorkGraphStore(this.db)
     }
 
@@ -361,7 +368,9 @@ export class Store {
             // iOS push_key at v23→v24; steer delivery_state at v24→v25;
             // immediate-queue heartbeat index at v25→v26;
             // upstream future-scheduled index at v26→v27;
-            // #1404 session_jobs at v27→v28; run_id fence at v28→v29.
+            // upstream session_turns at v27→v28; last_user_message_at at v28→v29;
+            // #1404 session_jobs at v29→v30; run_id fence at v30→v31
+            // (jobs remapped again after upstream took 28/29).
             21: () => this.migrateFromV21ToV22(),
             22: () => this.migrateFromV22ToV23(),
             23: () => this.migrateFromV23ToV24(),
@@ -370,6 +379,8 @@ export class Store {
             26: () => this.migrateFromV26ToV27(),
             27: () => this.migrateFromV27ToV28(),
             28: () => this.migrateFromV28ToV29(),
+            29: () => this.migrateFromV29ToV30(),
+            30: () => this.migrateFromV30ToV31(),
         })
 
         if (currentVersion === 0) {
@@ -424,6 +435,7 @@ export class Store {
                 machine_id TEXT,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
+                last_user_message_at INTEGER,
                 metadata TEXT,
                 metadata_version INTEGER DEFAULT 1,
                 agent_state TEXT,
@@ -646,6 +658,25 @@ export class Store {
                 ON event_links(namespace, from_event_id);
             CREATE INDEX IF NOT EXISTS idx_event_links_namespace_to
                 ON event_links(namespace, to_event_id);
+
+            CREATE TABLE IF NOT EXISTS session_turns (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                namespace TEXT NOT NULL,
+                started_at INTEGER NOT NULL,
+                ended_at INTEGER,
+                end_reason TEXT,
+                started_by TEXT NOT NULL,
+                recover_until INTEGER,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_session_turns_namespace_started
+                ON session_turns(namespace, started_at);
+            CREATE INDEX IF NOT EXISTS idx_session_turns_session_started
+                ON session_turns(session_id, started_at);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_session_turns_one_open
+                ON session_turns(session_id)
+                WHERE ended_at IS NULL;
         `)
     }
 
@@ -1068,6 +1099,52 @@ export class Store {
         `)
     }
 
+    /** v28→v29: persist a stable, user-input-only list ordering clock. */
+    private migrateFromV28ToV29(): void {
+        const columns = this.getSessionColumnNames()
+        if (columns.size === 0 || columns.has('last_user_message_at')) return
+        this.db.transaction(() => {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN last_user_message_at INTEGER')
+            if (this.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'messages'").get()) {
+                backfillLastUserMessageAt(this.db)
+            }
+        })()
+    }
+
+    /**
+     * v27→v28: persist when agents were working. `thinking` used to live only
+     * in the session cache, so a hub restart forgot it and nothing could say
+     * afterwards how long an agent worked. Each false→true→false stretch is
+     * now a row; at most one per session is open (ended_at IS NULL).
+     * recover_until marks a turn a restart interrupted, which the agent can
+     * still continue until then.
+     */
+    private migrateFromV27ToV28(): void {
+        // In the legacy branch sessions may not exist yet; createSchema adds
+        // the table once it does.
+        if (this.getSessionColumnNames().size === 0) return
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS session_turns (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                namespace TEXT NOT NULL,
+                started_at INTEGER NOT NULL,
+                ended_at INTEGER,
+                end_reason TEXT,
+                started_by TEXT NOT NULL,
+                recover_until INTEGER,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_session_turns_namespace_started
+                ON session_turns(namespace, started_at);
+            CREATE INDEX IF NOT EXISTS idx_session_turns_session_started
+                ON session_turns(session_id, started_at);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_session_turns_one_open
+                ON session_turns(session_id)
+                WHERE ended_at IS NULL;
+        `)
+    }
+
     /**
      * A2A Layer 1 / P1 (#1374) + P3 substrate: hub work-graph ledger tables.
      * Namespace + principal_json required on every events row.
@@ -1126,8 +1203,15 @@ export class Store {
         `)
     }
 
-    /** v27→v28: #1404 session-attached long-running jobs (after upstream v26→v27). */
-    private migrateFromV27ToV28(): void {
+    /**
+     * v29→v30: #1404 session-attached jobs (after upstream took v28/v29).
+     * Also repairs session_turns + last_user_message_at for fork DBs that
+     * previously burned those version numbers on an earlier jobs remap —
+     * both ensures are idempotent.
+     */
+    private migrateFromV29ToV30(): void {
+        this.migrateFromV27ToV28()
+        this.migrateFromV28ToV29()
         this.db.exec(`
             CREATE TABLE IF NOT EXISTS session_jobs (
                 session_id TEXT NOT NULL,
@@ -1150,8 +1234,8 @@ export class Store {
         `)
     }
 
-    /** v28→v29: supervisor run generation — CAS fence for key reuse (#1424). */
-    private migrateFromV28ToV29(): void {
+    /** v30→v31: supervisor run generation — CAS fence for key reuse (#1424). */
+    private migrateFromV30ToV31(): void {
         const cols = this.db.prepare('PRAGMA table_info(session_jobs)').all() as Array<{ name: string }>
         if (!cols.some((c) => c.name === 'run_id')) {
             this.db.exec('ALTER TABLE session_jobs ADD COLUMN run_id TEXT')

@@ -93,7 +93,7 @@ import {
     compareDescWithKeyTiebreak,
     compareSessionsByOrderKeyDesc,
     getSessionOrderKey
-} from '@/lib/sessionOrder'
+} from '@hapi/protocol'
 import { classifySessionAttention, sessionIsUnread } from '@/lib/sessionAttention'
 import {
     hasAgentForegroundWork,
@@ -163,10 +163,7 @@ type SessionGroup = {
     displayName: string
     machineId: string | null
     sessions: SessionSummary[]
-    latestUpdatedAt: number
-    /** Newest creation-time key in the group. Drives the fixed-order group
-     *  sort: a group only moves when a NEW session is created inside it. */
-    latestCreatedAt: number
+    latestOrderAt: number
     hasActiveSession: boolean
     hasPinnedSession: boolean
 }
@@ -201,7 +198,7 @@ export function emptyRunningBuckets(): Record<RunningBucketKey, SessionSummary[]
 export function bucketRunningSessions(
     sessions: SessionSummary[],
     pinInProgressMode: PinInProgressMode,
-    compare: (a: SessionSummary, b: SessionSummary) => number = (a, b) => b.updatedAt - a.updatedAt
+    compare: (a: SessionSummary, b: SessionSummary) => number = compareSessionsByOrderKeyDesc
 ): Record<RunningBucketKey, SessionSummary[]> {
     const buckets = emptyRunningBuckets()
     if (pinInProgressMode === 'off') {
@@ -344,8 +341,7 @@ type MachineGroup = {
     totalSessions: number
     hasActiveSession: boolean
     hasPinnedSession: boolean
-    latestUpdatedAt: number
-    latestCreatedAt: number
+    latestOrderAt: number
 }
 
 export const UNKNOWN_MACHINE_ID = '__unknown__'
@@ -473,11 +469,8 @@ export function getPreviousSessionVisibleCount(current: number, step: number): n
     return Math.max(normalizedStep, current - normalizedStep)
 }
 
-// Exported for tests. `fixedOrder` ("固定会话顺序") freezes the list:
-// sessions sort by creation time only (manual pins still float) and groups
-// sort by their newest creation time — updates and activity never move
-// anything, a group only moves when a new session is created inside it.
-export function groupSessionsByDirectory(sessions: SessionSummary[], fixedOrder = false): SessionGroup[] {
+// Group structure is unchanged; output and liveness never change its order.
+export function groupSessionsByDirectory(sessions: SessionSummary[]): SessionGroup[] {
     const groups = new Map<string, { directory: string; machineId: string | null; sessions: SessionSummary[] }>()
 
     sessions.forEach(session => {
@@ -498,19 +491,9 @@ export function groupSessionsByDirectory(sessions: SessionSummary[], fixedOrder 
         .map(([key, group]) => {
             const sortedSessions = [...group.sessions].sort((a, b) => {
                 if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1
-                if (fixedOrder) {
-                    return compareSessionsByOrderKeyDesc(a, b)
-                }
-                const rankA = a.active ? (a.pendingRequestsCount > 0 ? 0 : 1) : 2
-                const rankB = b.active ? (b.pendingRequestsCount > 0 ? 0 : 1) : 2
-                if (rankA !== rankB) return rankA - rankB
-                return b.updatedAt - a.updatedAt
+                return compareSessionsByOrderKeyDesc(a, b)
             })
-            const latestUpdatedAt = group.sessions.reduce(
-                (max, s) => (s.updatedAt > max ? s.updatedAt : max),
-                -Infinity
-            )
-            const latestCreatedAt = group.sessions.reduce(
+            const latestOrderAt = group.sessions.reduce(
                 (max, s) => Math.max(max, getSessionOrderKey(s)),
                 -Infinity
             )
@@ -524,8 +507,7 @@ export function groupSessionsByDirectory(sessions: SessionSummary[], fixedOrder 
                 displayName,
                 machineId: group.machineId,
                 sessions: sortedSessions,
-                latestUpdatedAt,
-                latestCreatedAt,
+                latestOrderAt,
                 hasActiveSession,
                 hasPinnedSession
             }
@@ -534,16 +516,10 @@ export function groupSessionsByDirectory(sessions: SessionSummary[], fixedOrder 
             if (a.hasPinnedSession !== b.hasPinnedSession) {
                 return a.hasPinnedSession ? -1 : 1
             }
-            if (fixedOrder) {
-                return compareDescWithKeyTiebreak(
-                    { key: a.key, order: a.latestCreatedAt },
-                    { key: b.key, order: b.latestCreatedAt }
-                )
-            }
-            if (a.hasActiveSession !== b.hasActiveSession) {
-                return a.hasActiveSession ? -1 : 1
-            }
-            return b.latestUpdatedAt - a.latestUpdatedAt
+            return compareDescWithKeyTiebreak(
+                { key: a.key, order: a.latestOrderAt },
+                { key: b.key, order: b.latestOrderAt }
+            )
         })
 }
 
@@ -565,8 +541,7 @@ export function expandSelectedSessionCollapseOverrides(
 
 function groupByMachine(
     groups: SessionGroup[],
-    resolveMachineLabel: (id: string | null) => string,
-    fixedOrder = false
+    resolveMachineLabel: (id: string | null) => string
 ): MachineGroup[] {
     const map = new Map<string, MachineGroup>()
     for (const g of groups) {
@@ -580,8 +555,7 @@ function groupByMachine(
                 totalSessions: 0,
                 hasActiveSession: false,
                 hasPinnedSession: false,
-                latestUpdatedAt: 0,
-                latestCreatedAt: -Infinity,
+                latestOrderAt: -Infinity,
             }
             map.set(key, mg)
         }
@@ -589,19 +563,14 @@ function groupByMachine(
         mg.totalSessions += g.sessions.length
         if (g.hasActiveSession) mg.hasActiveSession = true
         if (g.hasPinnedSession) mg.hasPinnedSession = true
-        if (g.latestUpdatedAt > mg.latestUpdatedAt) mg.latestUpdatedAt = g.latestUpdatedAt
-        if (g.latestCreatedAt > mg.latestCreatedAt) mg.latestCreatedAt = g.latestCreatedAt
+        if (g.latestOrderAt > mg.latestOrderAt) mg.latestOrderAt = g.latestOrderAt
     }
     return [...map.values()].sort((a, b) => {
         if (a.hasPinnedSession !== b.hasPinnedSession) return a.hasPinnedSession ? -1 : 1
-        if (fixedOrder) {
-            return compareDescWithKeyTiebreak(
-                { key: a.machineId ?? UNKNOWN_MACHINE_ID, order: a.latestCreatedAt },
-                { key: b.machineId ?? UNKNOWN_MACHINE_ID, order: b.latestCreatedAt }
-            )
-        }
-        if (a.hasActiveSession !== b.hasActiveSession) return a.hasActiveSession ? -1 : 1
-        return b.latestUpdatedAt - a.latestUpdatedAt
+        return compareDescWithKeyTiebreak(
+            { key: a.machineId ?? UNKNOWN_MACHINE_ID, order: a.latestOrderAt },
+            { key: b.machineId ?? UNKNOWN_MACHINE_ID, order: b.latestOrderAt }
+        )
     })
 }
 
@@ -1638,12 +1607,12 @@ export function SessionList(props: {
         [allSessions, hasTextQuery, isFiltering, normalizedQuery, searchScoreIndex, timeScopedSessions, machineLabelsById] // eslint-disable-line react-hooks/exhaustive-deps
     )
     const allGroups = useMemo(
-        () => groupSessionsByDirectory(allSessions, fixedSessionOrder),
-        [allSessions, fixedSessionOrder]
+        () => groupSessionsByDirectory(allSessions),
+        [allSessions]
     )
     const machineFilters = useMemo(
-        () => groupByMachine(allGroups, resolveMachineLabel, fixedSessionOrder),
-        [allGroups, fixedSessionOrder, machineLabelsById] // eslint-disable-line react-hooks/exhaustive-deps
+        () => groupByMachine(allGroups, resolveMachineLabel),
+        [allGroups, machineLabelsById] // eslint-disable-line react-hooks/exhaustive-deps
     )
     const machineFilterItems = useMemo(
         () => machineFilters.map((mg) => {
@@ -1715,17 +1684,14 @@ export function SessionList(props: {
         if (searchScoreIndex && hasTextQuery) {
             return sortSessionsBySearchRelevance(pinned, searchScoreIndex)
         }
-        if (fixedSessionOrder) {
-            return [...pinned].sort(compareSessionsByOrderKeyDesc)
-        }
-        return [...pinned].sort((a, b) => b.updatedAt - a.updatedAt)
-    }, [machineFilteredSessions, searchScoreIndex, hasTextQuery, fixedSessionOrder])
+        return [...pinned].sort(compareSessionsByOrderKeyDesc)
+    }, [machineFilteredSessions, searchScoreIndex, hasTextQuery])
     const runningSessions = useMemo(() => {
         const byRelevanceOrRecent = (a: SessionSummary, b: SessionSummary) => {
             if (searchScoreIndex && hasTextQuery) {
                 return compareSessionsBySearchRelevance(a, b, searchScoreIndex)
             }
-            return b.updatedAt - a.updatedAt
+            return compareSessionsByOrderKeyDesc(a, b)
         }
         return bucketRunningSessions(machineFilteredSessions, effectivePinInProgressMode, byRelevanceOrRecent)
     }, [machineFilteredSessions, effectivePinInProgressMode, searchScoreIndex, hasTextQuery])
@@ -1747,8 +1713,7 @@ export function SessionList(props: {
                         return false
                     }
                     return true
-                }),
-                fixedSessionOrder
+                })
             )
             if (searchScoreIndex && hasTextQuery) {
                 return rankSessionGroupsBySearchRelevance(grouped, searchScoreIndex)
@@ -1764,10 +1729,9 @@ export function SessionList(props: {
     // unread filters stay consistent.
     const allDirectoryGroups = useMemo(
         () => groupSessionsByDirectory(
-            machineFilteredSessions.filter((session) => !session.globalPinned),
-            fixedSessionOrder
+            machineFilteredSessions.filter((session) => !session.globalPinned)
         ),
-        [machineFilteredSessions, fixedSessionOrder]
+        [machineFilteredSessions]
     )
     const actionOnlyGroups = useMemo(() => {
         if (effectivePinInProgressMode === 'off') {
