@@ -24,15 +24,42 @@ PUSH_REMOTE="${1:-unknown}"
 FORK_PRIVATE_PATH_RE='^(web/src/garden/)'
 DAILY_REF_RE='^refs/heads/(driver/|garden/)'
 
+# Destination-aware merge-base, matching fork_pre_push_path_ok's own dispatch
+# in fork-path-policy.sh EXACTLY (origin -> lenient fork check; everything
+# else, including unknown remote names, -> strict upstream check — "Unknown
+# remotes: strict (treat like upstream)"). A push TO upstream (or to any
+# remote this policy doesn't recognize) must be compared against
+# upstream/main first, not origin/main — otherwise a branch rebased onto
+# fork origin/main (which can legitimately carry fork-only docs/plans/,
+# docs/operator/, etc.) and then force-pushed there would compute its base
+# against origin/main, making fork-only content inherited from origin
+# invisible to the strict check (cold review, 2026-10-20, PR #300 — first
+# reproduced with an "upstream"-named remote; a second wave found the same
+# gap for ANY non-"origin" remote name, e.g. a "mirror" remote, since the
+# first fix's `else` branch only special-cased the literal string
+# "upstream" instead of mirroring the policy's actual origin-vs-everything-
+# else dispatch). Falls back to the other remote only if the preferred one
+# can't resolve at all.
+resolve_push_base() {
+    local local_sha="$1" push_remote="$2"
+    if [[ "$push_remote" == "origin" ]]; then
+        git merge-base "$local_sha" origin/main 2>/dev/null \
+            || git merge-base "$local_sha" upstream/main 2>/dev/null \
+            || true
+    else
+        git merge-base "$local_sha" upstream/main 2>/dev/null \
+            || git merge-base "$local_sha" origin/main 2>/dev/null \
+            || true
+    fi
+}
+
 while read -r local_ref local_sha remote_ref remote_sha; do
   [[ -z "${local_ref:-}" || "$local_ref" == *'{'* ]] && continue
 
   branch="${remote_ref#refs/heads/}"
 
   if [[ "$remote_sha" =~ ^0+$ ]]; then
-    base="$(git merge-base "$local_sha" origin/main 2>/dev/null \
-            || git merge-base "$local_sha" upstream/main 2>/dev/null \
-            || true)"
+    base="$(resolve_push_base "$local_sha" "$PUSH_REMOTE")"
     if [[ -n "$base" ]]; then
       range="${base}..${local_sha}"
       files="$(git diff --name-only "$base" "$local_sha" 2>/dev/null || true)"
@@ -40,9 +67,30 @@ while read -r local_ref local_sha remote_ref remote_sha; do
       range="$local_sha"
       files="$(git ls-tree -r --name-only "$local_sha")"
     fi
-  else
+  elif git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null; then
+    # Normal incremental push: remote_sha is a true ancestor of local_sha, so
+    # this diff is exactly "what my own commits changed" — unchanged from
+    # before this fix.
     range="${remote_sha}..${local_sha}"
     files="$(git diff --name-only "$remote_sha" "$local_sha" 2>/dev/null || true)"
+  else
+    # Force-push after a rebase: remote_sha is NOT an ancestor of local_sha
+    # (history was rewritten), so remote_sha..local_sha is not "my commits" —
+    # it also includes every file any upstream-of-my-branch commit touched
+    # between the old remote tip and the new rebase base, producing false
+    # positives on files a rebase pulled forward unchanged by me (e.g.
+    # docs/operator/AGENTS.md updated on main during a long-lived branch's
+    # lifetime — hit 2026-10-20 rebasing feat/flaky-quarantine). Use the same
+    # merge-base-against-main approach the brand-new-ref case above already
+    # uses instead — this is what the eventual PR diff will actually show.
+    base="$(resolve_push_base "$local_sha" "$PUSH_REMOTE")"
+    if [[ -n "$base" ]]; then
+      range="${base}..${local_sha}"
+      files="$(git diff --name-only "$base" "$local_sha" 2>/dev/null || true)"
+    else
+      range="${remote_sha}..${local_sha}"
+      files="$(git diff --name-only "$remote_sha" "$local_sha" 2>/dev/null || true)"
+    fi
   fi
 
   [[ -z "$files" ]] && continue
