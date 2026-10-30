@@ -906,4 +906,66 @@ describe('mergeSessions job redirect through SessionCache (#1404)', () => {
         expect(store.sessionJobs.get(cId, 'batch')?.label).toBe('c-batch')
         expect(store.sessionJobs.get(cId, 'batch.bbbbbbbb')?.label).toBe('a-batch')
     })
+
+    it('second B→C cleanup merge does not clobber composed A redirects on C', async () => {
+        const { store, cache } = setup()
+        const aId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+        const bId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+        const cId = 'cccccccc-cccc-cccc-cccc-cccccccccccc'
+        for (const [tag, id] of [
+            ['tag-cleanup-a', aId],
+            ['tag-cleanup-b', bId],
+            ['tag-cleanup-c', cId]
+        ] as const) {
+            cache.getOrCreateSession(
+                tag,
+                { path: `/${tag}`, host: 'local', flavor: 'codex' },
+                null,
+                'default',
+                undefined,
+                undefined,
+                undefined,
+                id
+            )
+        }
+
+        store.sessionJobs.upsert(aId, 'batch', {
+            label: 'a-batch',
+            status: 'running',
+            runId: 'run-a'
+        }, 1_000)
+        await cache.mergeSessionHistory(aId, bId, 'default', { mergeAgentState: false })
+        expect(cache.refreshSession(bId)?.metadata?.jobKeyRedirects).toEqual({
+            [`${aId}/batch`]: 'batch'
+        })
+
+        store.sessionJobs.upsert(cId, 'batch', {
+            label: 'c-batch',
+            status: 'running',
+            runId: 'run-c'
+        }, 2_000)
+        await cache.mergeSessionHistory(bId, cId, 'default', { mergeAgentState: false })
+        expect(
+            cache.resolveAttachedJobKey(aId, cId, 'batch', 'default')
+        ).toBe('batch.bbbbbbbb')
+        // Retained B still holds the pre-composition identity map.
+        expect(cache.refreshSession(bId)?.metadata?.jobKeyRedirects).toEqual({
+            [`${aId}/batch`]: 'batch'
+        })
+        // Jobs already live on C; B has nothing left to transfer.
+        expect(store.sessionJobs.list(bId)).toEqual([])
+
+        // Cleanup merge of retained B into C again — empty currentRemaps must
+        // not reimport B's stale A/batch→batch over C's composed mapping.
+        await cache.mergeSessionHistory(bId, cId, 'default', { mergeAgentState: false })
+
+        const redirects = cache.refreshSession(cId)?.metadata?.jobKeyRedirects as
+            | Record<string, string>
+            | undefined
+        expect(redirects?.[`${aId}/batch`]).toBe('batch.bbbbbbbb')
+        expect(redirects?.[`${bId}/batch`]).toBe('batch.bbbbbbbb')
+        expect(cache.resolveAttachedJobKey(aId, cId, 'batch', 'default')).toBe('batch.bbbbbbbb')
+        expect(store.sessionJobs.get(cId, 'batch')?.label).toBe('c-batch')
+        expect(store.sessionJobs.get(cId, 'batch.bbbbbbbb')?.label).toBe('a-batch')
+    })
 })

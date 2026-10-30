@@ -2007,6 +2007,9 @@ export class SessionCache {
             // Late PUT registration must NOT inherit: fromSessionId is the
             // requested id and may still hold stale pre-composition maps that
             // would overwrite C's composed A/batch→batch.<B> entry.
+            // Same trap on a second B→C cleanup merge with empty currentRemaps:
+            // retained B still holds A/batch→batch; do not clobber C's composed
+            // mapping unless this merge actually remaps that intermediate key.
             if (inheritSourceRedirects) {
                 const fromMeta = this.store.sessions
                     .getSessionByNamespace(fromSessionId, namespace)
@@ -2017,8 +2020,12 @@ export class SessionCache {
                 const inheritedRaw = fromMeta?.jobKeyRedirects
                 if (inheritedRaw && typeof inheritedRaw === 'object' && !Array.isArray(inheritedRaw)) {
                     for (const [k, v] of Object.entries(inheritedRaw as Record<string, unknown>)) {
-                        if (typeof v === 'string' && v.trim()) {
-                            next[k] = currentRemaps.get(v) ?? v
+                        if (typeof v !== 'string' || !v.trim()) continue
+                        const composed = currentRemaps.get(v)
+                        if (composed !== undefined) {
+                            next[k] = composed
+                        } else if (!(k in next)) {
+                            next[k] = v
                         }
                     }
                 }
