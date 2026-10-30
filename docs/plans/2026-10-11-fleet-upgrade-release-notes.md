@@ -39,6 +39,11 @@ RunnerVersionSkewBanner → <details> plain markdown dump
 
 `driver_soup_single_exe_publish` writes `NOTES.md` using the same `driver_soup_single_exe_release_notes` text mirrored to GitHub Releases. Hub never needs network for notes.
 
+**Fleet channel (primary official notes):** `hapi-fleet-seal` upserts the moving
+`hapi-fleet` release with that tip changelog as the GitHub body **and** uploads
+`NOTES.md` (Layer A downloads it beside `manifest.json`). Tip-dated releases are
+secondary; do not leave `hapi-fleet` on a pointer-only stub.
+
 ### Backfill
 
 Existing tips without `NOTES.md`: banner omits the section. Ops can copy GH release body into `/var/lib/hapi/soup-artifacts/<tag>/NOTES.md` for the current `latest` until the next publish.

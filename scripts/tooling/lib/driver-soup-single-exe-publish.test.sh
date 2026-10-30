@@ -55,13 +55,15 @@ mkdir -p "$fixture/linux-x64-baseline" "$fixture/darwin-arm64"
 printf '{}' >"$fixture/manifest.json"
 printf 'bin' >"$fixture/linux-x64-baseline/hapi"
 printf 'bin' >"$fixture/darwin-arm64/hapi"
+printf '### Changes\n\n- feat: staged notes\n' >"$fixture/NOTES.md"
 stage="$TMP/stage-release"
 files=()
 driver_soup_single_exe_stage_github_assets "$fixture" "$stage" files
-[[ "${#files[@]}" == "3" ]] || { echo "FAIL: expected 3 staged files, got ${#files[@]}"; exit 1; }
-[[ -f "$stage/manifest.json" && -f "$stage/hapi-linux-x64-baseline" && -f "$stage/hapi-darwin-arm64" ]] \
+[[ "${#files[@]}" == "4" ]] || { echo "FAIL: expected 4 staged files (incl NOTES.md), got ${#files[@]}"; exit 1; }
+[[ -f "$stage/manifest.json" && -f "$stage/NOTES.md" && -f "$stage/hapi-linux-x64-baseline" && -f "$stage/hapi-darwin-arm64" ]] \
     || { echo "FAIL: staged asset names missing"; exit 1; }
-echo "OK: stage github assets"
+grep -q 'feat: staged notes' "$stage/NOTES.md" || { echo "FAIL: staged NOTES.md content"; exit 1; }
+echo "OK: stage github assets (incl NOTES.md)"
 
 # Release notes: synthetic repo with two tips (no gh needed for tip-from-short).
 NOTES_REPO="$TMP/notes-git"
@@ -211,6 +213,34 @@ unset HAPI_SKIP_FLEET_GITHUB_CHANNEL
 driver_soup_fleet_seal_github_channel "$SEAL_ROOT/$SEAL_TAG" "$SEAL_TAG" --dry-run \
     || { echo "FAIL: GH channel dry-run should succeed"; exit 1; }
 echo "OK: fleet-seal GH channel dry-run"
+
+# Fleet channel notes = tip changelog (official), not pointer-only stub.
+printf '%s\n' '### Changes since previous soup release
+
+- feat: fleet-first notes (#999)
+' >"$SEAL_ROOT/$SEAL_TAG/NOTES.md"
+channel_notes="$(driver_soup_fleet_seal_channel_notes "$SEAL_ROOT/$SEAL_TAG" "$SEAL_TAG" "$TIP_B")"
+printf '%s\n' "$channel_notes" | grep -q 'feat: fleet-first notes (#999)' \
+    || { echo "FAIL: channel notes missing tip changelog"; printf '%s\n' "$channel_notes"; exit 1; }
+printf '%s\n' "$channel_notes" | grep -q "sealed to \`${SEAL_TAG}\`" \
+    || { echo "FAIL: channel notes missing seal footer"; printf '%s\n' "$channel_notes"; exit 1; }
+printf '%s\n' "$channel_notes" | grep -q 'Fleet seal channel' \
+    && { echo "FAIL: channel notes still use pointer-only opener"; exit 1; }
+echo "OK: fleet channel notes prefer tip NOTES.md"
+
+# Missing NOTES.md → warn-shaped body, still includes seal footer (not silent pointer).
+rm -f "$SEAL_ROOT/$SEAL_TAG/NOTES.md"
+channel_notes="$(driver_soup_fleet_seal_channel_notes "$SEAL_ROOT/$SEAL_TAG" "$SEAL_TAG" "$TIP_B" 2>/dev/null)"
+printf '%s\n' "$channel_notes" | grep -q 'No NOTES.md on sealed tip' \
+    || { echo "FAIL: missing NOTES should be explicit"; printf '%s\n' "$channel_notes"; exit 1; }
+printf '%s\n' "$channel_notes" | grep -q "sealed to \`${SEAL_TAG}\`" \
+    || { echo "FAIL: missing-NOTES path still needs seal footer"; exit 1; }
+echo "OK: fleet channel notes fail soft when tip NOTES.md absent"
+# Restore for any later assertions
+printf '%s\n' '### Changes
+
+- feat: fleet-first notes (#999)
+' >"$SEAL_ROOT/$SEAL_TAG/NOTES.md"
 
 # --- Public URL is part of the seal (tag + digests) ---
 PUB_DIR="$TMP/pub-manifest"

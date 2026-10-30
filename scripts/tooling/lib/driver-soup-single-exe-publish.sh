@@ -190,6 +190,8 @@ driver_soup_single_exe_release_notes() {
 }
 
 # Stage flat release asset filenames under a temp dir for gh upload.
+# Includes NOTES.md when present — Layer A materialize downloads it beside
+# manifest.json from the fleet channel (see hub upgrade/upstreamSeal.ts).
 driver_soup_single_exe_stage_github_assets() {
     local dest="${1:?}"
     local staging="${2:?}"
@@ -202,6 +204,11 @@ driver_soup_single_exe_stage_github_assets() {
     [[ -f "$dest/manifest.json" ]] || return 1
     cp -f "$dest/manifest.json" "$staging/manifest.json"
     out_files+=("$staging/manifest.json")
+
+    if [[ -f "$dest/NOTES.md" ]]; then
+        cp -f "$dest/NOTES.md" "$staging/NOTES.md"
+        out_files+=("$staging/NOTES.md")
+    fi
 
     local platform_dir binary_name asset_name
     for platform_dir in "$dest"/*/; do
@@ -558,14 +565,51 @@ driver_soup_fleet_seal_verify_public() {
     return 0
 }
 
+# Official GitHub release notes for the moving fleet channel.
+# Fork releases exist for the fleet — tip changelog is primary; seal/poll
+# metadata is a short footer. Prefer tip NOTES.md (same text hubs/pets use).
+#
+# Usage: driver_soup_fleet_seal_channel_notes <tip_dir> <sealed_tip_tag> [composed_tip_sha]
+driver_soup_fleet_seal_channel_notes() {
+    local tip_dir="${1:?}"
+    local sealed_tag="${2:?}"
+    local tip_sha="${3:-}"
+    local channel manifest_url body
+    channel="$(driver_soup_fleet_github_channel_tag)"
+    manifest_url="$(driver_soup_fleet_github_manifest_url)"
+
+    if [[ -f "$tip_dir/NOTES.md" ]]; then
+        body="$(cat "$tip_dir/NOTES.md")"
+        # Strip a single trailing newline so we can append the footer cleanly.
+        body="${body%"${body##*[![:space:]]}"}"
+    else
+        body="Soup fleet seal → \`${sealed_tag}\`."
+        if [[ -n "$tip_sha" ]]; then
+            body+=$'\n\n'"**Composed tip:** \`${tip_sha}\`"
+        fi
+        body+=$'\n\n'"_No NOTES.md on sealed tip — changelog missing; fix publish before next seal._"
+        echo "WARN: fleet-seal: tip missing NOTES.md ($tip_dir) — channel notes will be thin" >&2
+    fi
+
+    body+=$'\n\n'"---"
+    body+=$'\n'"**Fleet channel** (\`${channel}\`) sealed to \`${sealed_tag}\`."
+    if [[ -n "$tip_sha" ]]; then
+        body+=$'\n'"**Composed tip:** \`${tip_sha}\`"
+    fi
+    body+=$'\n'"Poll: \`${manifest_url}\` · digest-only newness (tag name alone is not sufficiency)."
+    printf '%s\n' "$body"
+}
+
 # Mirror sealed tip bytes onto the moving GH channel release (mandatory on seal).
 # Kill-criteria: never use releases/latest; digests must match tip; channel ≠ dated tip tag.
+# Official release notes = tip changelog (driver_soup_fleet_seal_channel_notes), not a
+# pointer-only stub — dated tip releases are secondary archives.
 #
 # Upsert (never delete+recreate): GitHub tag deletion is eventually-consistent —
 # delete-then-recreate-same-tag can orphan the new release as a draft so
 # releases/download/<channel>/… 404s (cli/cli#8458). Pattern: force-move the
 # tag ref, create-or-heal a published release with --latest=false, then
-# `gh release upload --clobber` stable asset names.
+# `gh release upload --clobber` stable asset names (incl. NOTES.md).
 #
 # Usage: driver_soup_fleet_seal_github_channel <tip_dir> <sealed_tip_tag> [--dry-run]
 driver_soup_fleet_seal_github_channel() {
@@ -654,12 +698,13 @@ driver_soup_fleet_seal_github_channel() {
     fi
 
     local notes notes_file
-    notes="**Fleet seal channel** (\`${channel}\`) — moving pointer for Layer A / pet installs."
-    notes+=$'\n\n'"**Sealed tip:** \`${sealed_tag}\`"
-    notes+=$'\n'"**Composed tip:** \`${tip_sha}\`"
-    notes+=$'\n\n'"Poll: \`${manifest_url}\`"
-    notes+=$'\n'"Digest-only newness — never treat this channel name alone as sufficiency."
-    notes+=$'\n\n'"FORK-ONLY fleet product (\`heavygee/hapi\`) — not upstream-bound."
+    # Fleet is why this release exists — tip changelog is the official notes.
+    notes="$(driver_soup_fleet_seal_channel_notes "$tip_dir" "$sealed_tag" "$tip_sha")"
+    # Ensure NOTES.md asset matches the channel body (pets download this file).
+    printf '%s\n' "$notes" >"$staging/NOTES.md"
+    if [[ ! " ${files[*]} " =~ " $staging/NOTES.md " ]]; then
+        files+=("$staging/NOTES.md")
+    fi
 
     notes_file="$(mktemp "${TMPDIR:-/tmp}/hapi-fleet-notes.XXXXXX")"
     printf '%s\n' "$notes" >"$notes_file"
@@ -685,14 +730,17 @@ driver_soup_fleet_seal_github_channel() {
 
     if [[ "$gh_rc" -eq 0 ]]; then
         # Stable asset names; --clobber refreshes bytes on each seal.
-        # Prefer deleting manifest.json first — GH CDN can keep stale bytes for
-        # the same download URL after a bare --clobber (oos 2026-10-14 seal).
-        local mid
-        mid="$(gh api "repos/${repo}/releases/tags/${channel}" \
-            --jq '.assets[]|select(.name=="manifest.json").id' 2>/dev/null || true)"
-        if [[ -n "$mid" ]]; then
-            gh api -X DELETE "repos/${repo}/releases/assets/${mid}" >/dev/null 2>&1 || true
-        fi
+        # Prefer deleting manifest.json / NOTES.md first — GH CDN can keep stale
+        # bytes for the same download URL after a bare --clobber (oos 2026-10-14;
+        # NOTES.md stuck on Oct-15 tip until fleet-first notes).
+        local mid asset_name
+        for asset_name in manifest.json NOTES.md; do
+            mid="$(gh api "repos/${repo}/releases/tags/${channel}" \
+                --jq ".assets[]|select(.name==\"${asset_name}\").id" 2>/dev/null || true)"
+            if [[ -n "$mid" ]]; then
+                gh api -X DELETE "repos/${repo}/releases/assets/${mid}" >/dev/null 2>&1 || true
+            fi
+        done
         gh release upload "$channel" \
             --repo "$repo" \
             --clobber \

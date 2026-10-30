@@ -123,6 +123,13 @@ Dated tip releases `hapi-soup-v*` remain immutable archives. The channel is a
 (`--latest=false`) + `gh release upload --clobber`. Never delete-then-recreate
 (async tag GC can orphan drafts → public asset 404s).
 
+**Release notes (fleet-first):** fork GH releases exist for the fleet. On every
+seal, `hapi-fleet` GitHub release body **and** the `NOTES.md` asset must carry
+the sealed tip's changelog (from tip `NOTES.md`), plus a short seal/poll footer.
+Pointer-only stubs are forbidden. Dated tip release bodies are secondary
+archives; Layer A / pets materialize notes from
+`…/releases/download/hapi-fleet/NOTES.md`.
+
 **Do not** poll `releases/latest` or pin forever on
 `HAPI_UPSTREAM_SEAL_TAG=hapi-soup-v…` (proof-only / break-glass).
 
