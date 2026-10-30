@@ -40,9 +40,13 @@ RunnerVersionSkewBanner → <details> plain markdown dump
 `driver_soup_single_exe_publish` writes `NOTES.md` using the same `driver_soup_single_exe_release_notes` text mirrored to GitHub Releases. Hub never needs network for notes.
 
 **Fleet channel (primary official notes):** `hapi-fleet-seal` upserts the moving
-`hapi-fleet` release with that tip changelog as the GitHub body **and** uploads
-`NOTES.md` (Layer A downloads it beside `manifest.json`). Tip-dated releases are
-secondary; do not leave `hapi-fleet` on a pointer-only stub.
+`hapi-fleet` release with the official changelog as the GitHub body **and**
+uploads `NOTES.md` (Layer A downloads it beside `manifest.json`). Tip-dated
+releases are secondary; do not leave `hapi-fleet` on a pointer-only stub.
+
+Changelog rules: **never truncate** (scroll in the banner). Fleet channel notes
+prefer the full range since `fleet-notes-baseline-tag.txt` so a missed NOTES
+publish is caught up on the next seal.
 
 ### Backfill
 

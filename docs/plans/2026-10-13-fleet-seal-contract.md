@@ -125,10 +125,18 @@ Dated tip releases `hapi-soup-v*` remain immutable archives. The channel is a
 
 **Release notes (fleet-first):** fork GH releases exist for the fleet. On every
 seal, `hapi-fleet` GitHub release body **and** the `NOTES.md` asset must carry
-the sealed tip's changelog (from tip `NOTES.md`), plus a short seal/poll footer.
-Pointer-only stubs are forbidden. Dated tip release bodies are secondary
-archives; Layer A / pets materialize notes from
-`…/releases/download/hapi-fleet/NOTES.md`.
+the official changelog, plus a short seal/poll footer. Pointer-only stubs are
+forbidden. Dated tip release bodies are secondary archives; Layer A / pets
+materialize notes from `…/releases/download/hapi-fleet/NOTES.md`.
+
+**No truncation:** commit lists are complete (UI scrolls). Never emit
+`truncated at N` in NOTES / channel body. Count must match `--no-merges` log
+lines (the old `rev-list` vs `--no-merges` mismatch invented fake truncations).
+
+**Catch-up baseline:** `soup-artifacts/fleet-notes-baseline-tag.txt` records the
+last tip whose notes actually landed on the channel. Next seal ranges
+**baseline → sealed tip** (full git subjects) so a missed NOTES upload is not
+lost forever. Successful channel upsert advances the baseline to the sealed tip.
 
 **Do not** poll `releases/latest` or pin forever on
 `HAPI_UPSTREAM_SEAL_TAG=hapi-soup-v…` (proof-only / break-glass).
