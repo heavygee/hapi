@@ -55,8 +55,35 @@ export type {
     SessionTitleSuggestionResponse,
     SessionsResponse,
     SpawnResponse,
+    AssignableUsersResponse,
+    BoardAssignableUser,
+    BoardItem,
+    BoardItemComment,
+    BoardItemCommentsResponse,
+    BoardItemsResponse,
+    BoardSummary,
+    BoardsResponse,
+    CreateBoardItemRequest,
+    CreateBoardItemResponse,
+    GetIssueTemplatesResponse,
     UploadFileResponse
 } from '@hapi/protocol/apiTypes'
+
+export type {
+    IssueFormAnswer,
+    IssueFormCheckboxesField,
+    IssueFormCheckboxOption,
+    IssueFormDropdownField,
+    IssueFormField,
+    IssueFormInputField,
+    IssueFormMarkdownField,
+    IssueFormTextareaField,
+    IssueTemplate,
+    IssueTemplateBase,
+    LegacyIssueTemplate,
+    StructuredIssueTemplate,
+    UnsupportedIssueTemplate
+} from '@hapi/protocol/issueTemplates'
 
 export type {
     AgentState,

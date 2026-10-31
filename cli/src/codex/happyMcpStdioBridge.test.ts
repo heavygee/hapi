@@ -157,6 +157,38 @@ describe('runHappyMcpStdioBridge tool forwarding', () => {
             'inspect_peer'
         ])
     })
+    it('registers and forwards link_issue when included in --tools', async () => {
+        await runHappyMcpStdioBridge([
+            '--url',
+            'http://127.0.0.1:43006',
+            '--tools',
+            'change_title,link_issue'
+        ])
+
+        expect([...harness.tools.keys()]).toEqual(['change_title', 'link_issue'])
+
+        const handler = harness.tools.get('link_issue')
+        await expect(handler?.({ url: 'heavygee/hapi#235' })).resolves.toEqual({
+            content: [{ type: 'text', text: 'forwarded' }],
+            isError: false
+        })
+        expect(harness.callTool).toHaveBeenCalledWith({
+            name: 'link_issue',
+            arguments: { url: 'heavygee/hapi#235' }
+        })
+    })
+
+    it('keeps link_issue hidden when the upstream HTTP server does not enable it', async () => {
+        await runHappyMcpStdioBridge([
+            '--url',
+            'http://127.0.0.1:43006',
+            '--tools',
+            'change_title'
+        ])
+
+        expect([...harness.tools.keys()]).toEqual(['change_title'])
+    })
+
     it('registers list_peers when included in --tools', async () => {
         await runHappyMcpStdioBridge([
             '--url',
@@ -201,12 +233,14 @@ describe('runHappyMcpStdioBridge tool forwarding', () => {
 
         expect([...harness.tools.keys()]).toEqual([
             'change_title',
+            'link_issue',
             'display_image',
             'display_video',
             'display_media',
             'ping_peer',
             'inspect_peer',
-            'list_peers'
+            'list_peers',
+            'search_content'
         ])
 
         harness.tools.clear()
@@ -218,9 +252,11 @@ describe('runHappyMcpStdioBridge tool forwarding', () => {
 
             expect([...harness.tools.keys()]).toEqual([
                 'change_title',
+                'link_issue',
                 'display_image',
                 'display_video',
-                'display_media'
+                'display_media',
+                'search_content'
             ])
         } finally {
             delete process.env.HAPI_DISABLE_PEER_TOOLS

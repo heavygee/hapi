@@ -3,6 +3,7 @@ import { useTranslation, type Locale } from '@/lib/use-translation'
 import { useAppContext } from '@/lib/app-context'
 import { CompanionPairing } from '@/components/settings/CompanionPairing'
 import { SettingsChoiceGroup, SettingsPageContent, SettingsSection, SettingsSwitch } from '@/components/settings/SettingsPrimitives'
+import { isOwnerNamespace } from '@/lib/namespace'
 import { queryKeys } from '@/lib/query-keys'
 
 const locales: ReadonlyArray<{ value: Locale; label: string }> = [
@@ -11,24 +12,11 @@ const locales: ReadonlyArray<{ value: Locale; label: string }> = [
     { value: 'ru', label: 'Русский' },
 ]
 
-function getNamespace(token: string | null): string | null {
-    if (!token) return null
-    try {
-        const payload = token.split('.')[1]
-        if (!payload) return null
-        const base64 = payload.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(payload.length / 4) * 4, '=')
-        const decoded = JSON.parse(atob(base64)) as { ns?: unknown }
-        return typeof decoded.ns === 'string' ? decoded.ns : null
-    } catch {
-        return null
-    }
-}
-
 export default function SettingsGeneralPage() {
     const { t, locale, setLocale } = useTranslation()
     const { api, baseUrl, token } = useAppContext()
     const queryClient = useQueryClient()
-    const isOwner = getNamespace(token) === 'default'
+    const isOwner = isOwnerNamespace(token)
 
     const hubSettingsQuery = useQuery({
         queryKey: queryKeys.hubSettings,

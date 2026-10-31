@@ -52,6 +52,375 @@ export const WorktreeMetadataSchema = z.object({
 
 export type WorktreeMetadata = z.infer<typeof WorktreeMetadataSchema>
 
+/** owner/name — GitHub-style repo slug (no leading slash, exactly one slash). */
+export const GithubRepoSlugSchema = z.string()
+    .max(140, 'owner/name is too long')
+    .regex(
+        /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/,
+        'expected owner/name'
+    )
+
+/**
+ * Lightweight external reference attached to a session (hapi#235/#238) — a
+ * session is only ever "briefed" by its first composer message unless this
+ * exists; this is the actual structured, persisted link. Built fresh here:
+ * `main` has no prior externalRefs mechanism to generalize (that work is
+ * fork-local to `driver/`, tangled with unrelated unmerged features, and
+ * irrelevant to this schema). Self-session write path only (`hapi link-issue`
+ * CLI / MCP `link_issue`), always-on — no opt-in toggle, since nobody sees
+ * this chrome unless they actually link something.
+ */
+// `url` is re-validated against the same canonical issue-URL shape
+// `parseIssueUrl` requires (host/owner/repo/issues/N, matching this ref's own
+// `repo`/`number`) rather than accepted as any string (Codex review, hapi#238):
+// `hapi link-issue`/MCP `link_issue` always go through `parseIssueUrl` first,
+// so every ref produced by this PR's own write paths already satisfies this —
+// but the *generic* CLI `update-metadata` socket path can set
+// `metadata.externalRefs` directly, bypassing that validation entirely. Without
+// this, a crafted `url` like `https://github.com@evil.example/...` (a userinfo
+// component, not the host) renders in `IssueRefChip` as a trustworthy-looking
+// `#N` link to an attacker-controlled host, or `repo`/`number` could point
+// readers at the wrong issue entirely.
+function isValidGithubIssueRef(ref: { url: string; repo: string; number: number }): boolean {
+    const parsed = parseIssueUrl(ref.url)
+    return parsed !== null
+        && parsed.repo.toLowerCase() === ref.repo.toLowerCase()
+        && parsed.number === ref.number
+}
+
+// `parseIssueUrl` itself accepts an optional `http`/`https` scheme and even a
+// scheme-less host (`ISSUE_URL_RE`'s `(?:https?:\/\/)?` group) — fine for a
+// human typing a quick reference, but `isValidGithubIssueRef` above only
+// checks that the *parsed* repo/number match, never that `ref.url` itself
+// equals the parser's own canonical reconstruction. A ref stored (and
+// rendered verbatim by `IssueRefChip`) as `http://github.com/o/r/issues/1`
+// passes validation but renders a cleartext link; one stored as
+// `github.com/o/r/issues/1` (no scheme at all) passes too, but a browser
+// treats that `href` as *relative* to the current page, producing a broken
+// same-origin link instead of the intended issue (Codex review, hapi#238).
+// Rewriting `url` to the parser's own canonical form (always `https://`,
+// always absolute) after validation closes this regardless of what shape the
+// original input took.
+function toCanonicalGithubIssueRef<T extends { url: string }>(ref: T): T {
+    const parsed = parseIssueUrl(ref.url)
+    return parsed ? { ...ref, url: parsed.url } : ref
+}
+
+export const GithubIssueExternalRefSchema = z.object({
+    kind: z.literal('github_issue'),
+    url: z.string(),
+    repo: z.string(),
+    number: z.number(),
+    linkedAt: z.number()
+}).refine(isValidGithubIssueRef, {
+    message: 'url must be a canonical GitHub issue URL matching repo/number',
+    path: ['url']
+}).transform(toCanonicalGithubIssueRef)
+
+// Same canonical-match validation as isValidGithubIssueRef above, for PR
+// URLs instead of issue URLs (operator decision, hapi#238: reconciling this
+// schema with the upstream-shaped one already running in driver/soup —
+// `tiann/hapi#1160`-`#1163` — which independently arrived at the same
+// strict-URL-match requirement). `url`/`repo`/`number` identity is universal
+// regardless of what project this feature runs against; nothing here is
+// HAPI/fork-specific. PR_URL_RE itself is defined further down, alongside
+// ISSUE_URL_RE, since both share GH_NAME_SEGMENT/URL_HOST_SEGMENT (defined
+// there too) — this function is a hoisted declaration, so its own position
+// here doesn't matter, only PR_URL_RE's module-eval-order does.
+function isValidGithubPrRef(ref: { url: string; repo: string; number: number }): boolean {
+    const match = PR_URL_RE.exec(ref.url.trim())
+    if (!match) return false
+    const [, , repo, numberRaw] = match
+    return repo!.toLowerCase() === ref.repo.toLowerCase() && Number(numberRaw) === ref.number
+}
+
+// Same reasoning as toCanonicalGithubIssueRef above — PR_URL_RE's optional
+// scheme also lets a `http://`/scheme-less `url` pass isValidGithubPrRef's
+// repo/number check while the original, non-canonical string is what
+// actually gets stored and rendered (Codex review, hapi#238).
+function toCanonicalGithubPrRef<T extends { url: string; repo: string; number: number }>(ref: T): T {
+    const match = PR_URL_RE.exec(ref.url.trim())
+    if (!match) return ref
+    const host = match[1]!
+    return { ...ref, url: `https://${host}/${ref.repo}/pull/${ref.number}` }
+}
+
+/**
+ * The fork's existing PR-chip mechanism (`scripts/tooling/hapi-meta-daily.sh`
+ * --backfill-refs / md_refs_apply_status) already writes `kind: 'github_pr'`
+ * entries into this same `metadata.externalRefs` array, in production,
+ * today — entirely from bash/jq, independent of this schema.
+ *
+ * `role`/`source`/`linkedAt` are recognized, optional core fields (not
+ * `.passthrough()`-only) — the bash tooling's only ref-creation site
+ * (`hapi-meta-daily.sh:440`) always sets all three, and `role`
+ * (primary/secondary — which PR a session is actually working vs.
+ * incidentally mentions) is a structural concept independent of any
+ * particular project's workflow, not a HAPI-specific one.
+ *
+ * Everything past that — `status`, `statusCheckedAt`, `statusAction`,
+ * `estateCode`, `openState`, `checks`, `merge`, and whatever this fork's own
+ * chip tooling grows next — stays `.passthrough()`, deliberately NOT pinned
+ * to a fixed enum/shape here (operator decision, hapi#238): those are this
+ * *project's* specific PR-workflow vocabulary (which emoji/status means
+ * what), not something every project embedding this schema should be forced
+ * to share. A project-specific config (e.g. a YAML) is the right place for
+ * that vocabulary, not the universal wire schema. A discriminated union
+ * member that validated only `github_issue`'s exact shape would make
+ * `ExternalRefSchema` (and therefore `MetadataSchema`) reject the entire
+ * metadata object for any session already carrying a `github_pr` chip
+ * (Codex review, hapi#238) — passthrough here is what avoids that, same as
+ * before this reconciliation.
+ */
+export const GithubPrExternalRefSchema = z.object({
+    kind: z.literal('github_pr'),
+    url: z.string(),
+    repo: z.string(),
+    number: z.number(),
+    role: z.enum(['primary', 'secondary']).optional(),
+    source: z.enum(['agent', 'user', 'inferred']).optional(),
+    linkedAt: z.number().optional()
+}).passthrough().refine(isValidGithubPrRef, {
+    message: 'url must be a canonical GitHub pull request URL matching repo/number',
+    path: ['url']
+}).transform(toCanonicalGithubPrRef)
+
+export const ExternalRefSchema = z.discriminatedUnion('kind', [
+    GithubIssueExternalRefSchema,
+    GithubPrExternalRefSchema
+])
+
+export type ExternalRef = z.infer<typeof ExternalRefSchema>
+
+/**
+ * Parses an `unknown` value (raw, possibly attacker- or bug-controlled
+ * metadata) into a validated `ExternalRef[]`, silently dropping any element
+ * that doesn't parse — never throwing, never returning a malformed element
+ * (Codex review, hapi#238). Every call site that reads `metadata.externalRefs`
+ * off a stored or incoming session row before passing it to identity-
+ * comparing helpers like `mergeExternalRefs`/`upsertExternalRef`/
+ * `reconcileExternalRefs` (which call `.repo.toLowerCase()` etc. and throw on
+ * a malformed element) must go through this rather than an unchecked
+ * `Array.isArray(...) ? (value as ExternalRef[]) : []` cast — a cast confirms
+ * the value is *an* array, never that its elements are valid refs, and a
+ * single malformed one (legacy row, out-of-band writer, generic
+ * `update-metadata` socket path with `z.unknown()` metadata) can reach that
+ * throw from more than one place in the hub.
+ */
+export function toValidExternalRefs(value: unknown): ExternalRef[] {
+    if (!Array.isArray(value)) return []
+    return value.flatMap(item => {
+        const result = ExternalRefSchema.safeParse(item)
+        return result.success ? [result.data] : []
+    })
+}
+
+/**
+ * Accepts the full GitHub issue URL (any host — GHE boards are a real
+ * board-feature use case, e.g. a view-scoped `lhs.ghe.com` board) and the
+ * `owner/repo#N` shorthand, with an optional `host:` prefix for a non-
+ * github.com issue (`owner/repo#N` alone still defaults to github.com) —
+ * `hapi link-issue <url|[host:]owner/repo#N>`, hapi#235/#238. Before the
+ * `host:` prefix existed, shorthand had no way to express a GHE issue at
+ * all and always resolved to github.com regardless, risking a confidently-
+ * wrong link for anyone guessing at syntax for a GHE item (design-consult
+ * review).
+ *
+ * GHE support was deliberately scoped out of the first cut of this function
+ * ("the issue link is for the operator's own quick reference, not a board
+ * read that already had to handle multiple hosts") — wrong once board items
+ * started feeding their own `item.url` through the same auto-link-on-spawn
+ * gate (`router.tsx`'s `handleSpawnFromBoardItem`): every item from a
+ * GHE-hosted board silently failed to parse, so the gate never even
+ * attempted the link call, with no error surfaced anywhere (operator report,
+ * 2026-10-13, Lockhouse board on `lhs.ghe.com`). Unlike the board-add host
+ * allowlist (`getAllowedBoardHosts`), no allowlist is needed here: the
+ * result is only ever stored as display data in `metadata.externalRefs`,
+ * never used to shell out `gh` against the host, so there's no SSRF-class
+ * exposure to gate.
+ *
+ * Lives in `shared/` (not hub-only) so both the hub REST route and the MCP
+ * tool's socket-based write path (which never touches that route) validate
+ * identically instead of maintaining two copies of the same regex.
+ */
+function finishIssueMatch(host: string, repo: string, numberRaw: string): { url: string; repo: string; number: number } | null {
+    const number = Number(numberRaw)
+    if (!Number.isFinite(number) || number <= 0) return null
+    return { url: `https://${host}/${repo}/issues/${number}`, repo, number }
+}
+
+// GitHub owner/org and repo names are only ever letters, digits, hyphens,
+// underscores, and periods — never URL delimiters. The previous
+// `[^/\s#]+` character class excluded only `/`, whitespace, and `#`, so an
+// input like `owner/repo?tab=x#12` matched with "repo?tab=x" captured as the
+// repo component, producing the malformed
+// `https://github.com/owner/repo?tab=x/issues/12` (the browser treats
+// everything after `?` as a query string, pointing the resulting chip at the
+// repo instead of the issue, and this same string later fails to re-parse
+// for linked-session matching). Restricting to GitHub's actual allowed
+// character set rejects that input outright instead of silently mis-parsing
+// it (Codex review).
+const GH_NAME_SEGMENT = '[A-Za-z0-9_.-]+'
+// Shared by both the full-URL and shorthand matchers below (Codex review,
+// third pass on this file: hardening only the shorthand's host capture and
+// leaving the full-URL one on the old loose `[^/]+` class left the exact
+// same delimiter-injection gap open on the other input form). Restricted to
+// actual hostname characters plus an optional `:port` suffix — not a loose
+// "anything but a path/fragment delimiter" class: that wider class also
+// accepted `?`/`=` (`https://github.com?tab=x/owner/repo/issues/12` /
+// `github.com?tab=x:owner/repo#12` both produce a URL a browser resolves to
+// a bare `https://github.com/` with everything else reduced to a
+// meaningless query string) and `@` (`.../github.com@evil.example/...`,
+// where `github.com` is a *userinfo* component and `evil.example` is the
+// actual host a reader could be deceived into trusting) — display-only data
+// or not, a chip whose link doesn't go where its text implies is still a
+// real trust/correctness bug. `[A-Za-z0-9.-]+` matches real hostname
+// characters only; `(?::\d+)?` optionally captures a numeric port, still
+// supporting a port-qualified GHE host without reopening the
+// delimiter-injection gap.
+const URL_HOST_SEGMENT = '[A-Za-z0-9.-]+(?::\\d+)?'
+const ISSUE_URL_RE = new RegExp(`^(?:https?:\\/\\/)?(${URL_HOST_SEGMENT})\\/(${GH_NAME_SEGMENT}\\/${GH_NAME_SEGMENT})\\/issues\\/(\\d+)\\/?(?:[/?#].*)?$`, 'i')
+// Used by isValidGithubPrRef (defined earlier, above GithubPrExternalRefSchema) — same shape as ISSUE_URL_RE but for /pull/ instead of /issues/.
+const PR_URL_RE = new RegExp(`^(?:https?:\\/\\/)?(${URL_HOST_SEGMENT})\\/(${GH_NAME_SEGMENT}\\/${GH_NAME_SEGMENT})\\/pull\\/(\\d+)\\/?(?:[/?#].*)?$`, 'i')
+// Optional `host:` prefix (design-consult review, hapi#238): the shorthand
+// originally had no way to express a GHE host at all, always resolving to
+// github.com regardless — a session guessing at syntax for a GHE item could
+// end up with a confidently-wrong link.
+const ISSUE_SHORTHAND_RE = new RegExp(`^(?:(${URL_HOST_SEGMENT}):)?(${GH_NAME_SEGMENT}\\/${GH_NAME_SEGMENT})#(\\d+)$`)
+
+export function parseIssueUrl(input: string): { url: string; repo: string; number: number } | null {
+    const trimmed = input.trim()
+
+    const urlMatch = ISSUE_URL_RE.exec(trimmed)
+    if (urlMatch) {
+        const [, host, repo, numberRaw] = urlMatch
+        return finishIssueMatch(host!.toLowerCase(), repo!, numberRaw!)
+    }
+
+    const shorthandMatch = ISSUE_SHORTHAND_RE.exec(trimmed)
+    if (shorthandMatch) {
+        const [, host, repo, numberRaw] = shorthandMatch
+        return finishIssueMatch((host ?? 'github.com').toLowerCase(), repo!, numberRaw!)
+    }
+
+    return null
+}
+
+function externalRefHost(url: string): string {
+    try {
+        return new URL(url).host.toLowerCase()
+    } catch {
+        return ''
+    }
+}
+
+// Identity is host+kind+repo+number, not just kind+repo+number (Codex
+// review): now that parseIssueUrl accepts any host, the same repo path and
+// issue number can legitimately exist on github.com and a GHE host as two
+// different issues — ignoring the host would make linking the second one
+// silently discard the first (same reasoning externalRefs.ts's
+// findSessionLinkedToIssue already documents for its own host-aware match).
+function sameExternalRefIdentity(a: ExternalRef, b: ExternalRef): boolean {
+    return a.kind === b.kind
+        && a.repo.toLowerCase() === b.repo.toLowerCase()
+        && a.number === b.number
+        && externalRefHost(a.url) === externalRefHost(b.url)
+}
+
+/**
+ * Upserts by host+kind+repo+number, case-insensitively on `repo` (GitHub repo
+ * names aren't case-sensitive — `Owner/Repo#5` and `owner/repo#5` are the same
+ * issue). Keeps the first-seen casing rather than normalizing it, since the
+ * stored `repo` is shown to the operator verbatim. Shared by the hub's direct
+ * write path (`sessionCache.linkIssue`) and the CLI/MCP socket write path
+ * (`applyLinkIssue`) so both agree on what counts as a duplicate.
+ */
+export function upsertExternalRef(existing: ExternalRef[], ref: ExternalRef): ExternalRef[] {
+    const withoutMatch = existing.filter(candidate => !sameExternalRefIdentity(candidate, ref))
+    return [...withoutMatch, ref]
+}
+
+/**
+ * Unions two ref arrays by the same host+kind+repo+number identity,
+ * preferring `base`'s entry on a collision — used when merging a resumed
+ * session's metadata into its replacement (hapi#238 Codex review:
+ * mergeSessionMetadata carried over name/summary/worktree/path/host but not
+ * externalRefs, silently dropping issue/PR links — and the fork's own PR
+ * tooling discovers sessions from `github_pr` chips, not titles — whenever
+ * the source session was deleted post-merge). `base` is the surviving/new
+ * session's refs; anything `incoming`-only (the about-to-be-deleted old
+ * session's) is appended.
+ */
+export function mergeExternalRefs(base: ExternalRef[], incoming: ExternalRef[]): ExternalRef[] {
+    let result = base
+    for (const ref of incoming) {
+        if (!result.some(existing => sameExternalRefIdentity(existing, ref))) {
+            result = [...result, ref]
+        }
+    }
+    return result
+}
+
+// Ordered, not combined into one number: `linkedAt` is the primary clock (an
+// actual re-link always bumps it and must win regardless of any other
+// field), `statusCheckedAt` is a secondary tiebreaker for the common case
+// where neither side's `linkedAt` changed at all. `hapi-meta-daily.sh`'s
+// `md_refs_apply_status` (the fork's own out-of-band PR-chip tooling)
+// refreshes `status`/`statusCheckedAt` on every check WITHOUT touching
+// `linkedAt` — comparing `linkedAt` alone made every such refresh a "tie",
+// which this file's own earlier fix defaulted to resolving in favor of
+// `prior` (safe for the scenario it was built for: a stale `next` write
+// shouldn't roll back a fresher out-of-band update already applied to
+// `prior`) but wrong the other way around — a genuinely newer `next` update
+// arriving through the normal write path, with `linkedAt` unchanged because
+// it's a status-only refresh, got discarded too (Codex review, hapi#238,
+// third finding on this path).
+function refFreshnessKey(ref: ExternalRef): readonly [number, number] {
+    const record = ref as Record<string, unknown>
+    const linkedAt = typeof record.linkedAt === 'number' ? record.linkedAt : -Infinity
+    const statusCheckedAt = typeof record.statusCheckedAt === 'number' ? record.statusCheckedAt : -Infinity
+    return [linkedAt, statusCheckedAt]
+}
+
+function isFresher(candidate: readonly [number, number], current: readonly [number, number]): boolean {
+    if (candidate[0] !== current[0]) return candidate[0] > current[0]
+    return candidate[1] > current[1]
+}
+
+/**
+ * Field-level reconciliation for a ref identity present on both sides —
+ * distinct from `mergeExternalRefs`' identity-only union, where "prefer
+ * base unconditionally" is intentional (the surviving session's own current
+ * state should win over a soon-to-be-deleted duplicate's). Built instead for
+ * `hub/src/store/sessions.ts`'s sparse-write carry-forward, where `next` can
+ * be built from a stale local cache that doesn't know about a field-level
+ * update (e.g. a `github_pr` chip's `status`/`statusCheckedAt`) already
+ * applied directly to `prior` by the fork's own out-of-band tooling
+ * (`hapi-meta-daily.sh`). Naively preferring either side unconditionally on
+ * every collision either discards that out-of-band update (always prefer
+ * next) or discards a legitimate same-write upsert like `hapi link-issue`
+ * re-linking the same issue with a bumped `linkedAt` (always prefer prior).
+ *
+ * Reconciles per-identity by `refFreshnessKey` (`linkedAt` then
+ * `statusCheckedAt`) — the side with the fresher key wins; a genuine tie
+ * (neither signal differs, or neither side has either field at all) keeps
+ * `prior`'s entry, the already-persisted, presumed-authoritative state.
+ */
+export function reconcileExternalRefs(prior: ExternalRef[], next: ExternalRef[]): ExternalRef[] {
+    const result = [...prior]
+    for (const nextRef of next) {
+        const idx = result.findIndex(existing => sameExternalRefIdentity(existing, nextRef))
+        if (idx === -1) {
+            result.push(nextRef)
+            continue
+        }
+        if (isFresher(refFreshnessKey(nextRef), refFreshnessKey(result[idx]!))) {
+            result[idx] = nextRef
+        }
+    }
+    return result
+}
+
 export const MetadataSchema = z.object({
     path: z.string(),
     host: z.string(),
@@ -175,7 +544,28 @@ export const MetadataSchema = z.object({
     // field stores only modelId (shared across all flavors); this preserves
     // the provider so web can resolve the exact model when two providers
     // share a modelId.
-    piSelectedModel: z.object({ provider: z.string(), modelId: z.string() }).nullable().optional()
+    piSelectedModel: z.object({ provider: z.string(), modelId: z.string() }).nullable().optional(),
+    // Structured links to external resources (hapi#235/#238) — see
+    // ExternalRefSchema above for the "why build fresh, not port driver/" note.
+    //
+    // Preprocessed through toValidExternalRefs rather than validated as a
+    // plain z.array(ExternalRefSchema) (Codex review, hapi#238): a bare
+    // array schema fails the WHOLE array the moment a single element is
+    // malformed (legacy row, out-of-band writer), which fails this WHOLE
+    // MetadataSchema.safeParse call — not just the externalRefs field — so
+    // the hub's in-memory session cache exposes `session.metadata` as null
+    // for that session entirely. `hapi link-issue`/MCP `link_issue`'s own
+    // `session.metadata ?? { path: '', host: '' }` fallback then overwrites
+    // the real title/flavor/path/host/resume-tokens with that near-empty
+    // object on the very next link call, discarding everything just because
+    // one unrelated ref element didn't parse. Sanitizing before validating
+    // means a bad element is silently dropped from this field alone, same
+    // as every other externalRefs consumer in the hub already does, instead
+    // of corrupting the entire cached metadata for that session.
+    externalRefs: z.preprocess(
+        value => (value === undefined ? undefined : toValidExternalRefs(value)),
+        z.array(ExternalRefSchema).optional()
+    )
 })
 
 export type Metadata = z.infer<typeof MetadataSchema>
