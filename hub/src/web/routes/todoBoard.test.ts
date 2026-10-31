@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { Hono } from 'hono'
 import type { BoardItemsResponse, BoardsResponse } from '@hapi/protocol'
 import type { WebAppEnv } from '../middleware/auth'
-import { createBoardRoutes, fetchAllItemComments, fetchAllProjectItems, GhGraphqlNotFoundError, makeBoardId, parseProjectUrl, parseValidatedItemUrl, resolveProjectView } from './todoBoard'
+import { createBoardRoutes, fetchAllItemComments, fetchAllProjectItems, GhGraphqlNotFoundError, makeBoardId, parseProjectUrl, parseValidatedItemUrl, PROJECT_QUERY, PROJECT_QUERY_FILTERED, resolveProjectView } from './todoBoard'
 
 const ENV_KEYS = [
     'HAPI_BOARD_HOST',
@@ -695,6 +695,28 @@ describe('fetchAllProjectItems (operator-reported dogfood bug: #431 missing afte
         }
         const result = await fetchAllProjectItems(execPage)
         expect(result.errors).toEqual([{ message: 'rate limited' }])
+    })
+})
+
+// "Every status/column is shown" was never a stated requirement for this
+// feature (confirmed against the original design doc and hapi#235's own
+// scope — both require status to be the grouping axis, shown verbatim, with
+// done items folded to the bottom rather than removed; neither says
+// anything about completeness across statuses). The behavior itself is real
+// and already covered by BoardList.test.ts (web) and the item-mapping test
+// above (hub) proving items of every status survive the response. What
+// neither of those tests covers is the *request* itself — operator ruling:
+// lock in, at the query-construction level, that the plain/unfiltered board
+// path never asks GitHub for a subset of items in the first place.
+describe('PROJECT_QUERY (unfiltered board path sends no item/status predicate)', () => {
+    it('does not include an items query/filter argument', () => {
+        expect(PROJECT_QUERY).not.toMatch(/items\([^)]*query:/)
+        expect(PROJECT_QUERY).not.toContain('itemsFilter')
+    })
+
+    it('contrasts with PROJECT_QUERY_FILTERED, which deliberately does carry one — proving the assertion above is actually meaningful, not just an accident of unrelated wording', () => {
+        expect(PROJECT_QUERY_FILTERED).toMatch(/items\([^)]*query:\s*\$itemsFilter/)
+        expect(PROJECT_QUERY_FILTERED).toContain('itemsFilter')
     })
 })
 
