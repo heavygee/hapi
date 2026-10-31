@@ -138,17 +138,66 @@ driver_soup_single_exe_tip_from_release_tag() {
     return 1
 }
 
-# Real release notes: commit subjects between previous soup tip and this tip.
+# Full (never truncated) commit-subject changelog between two tip SHAs.
+# Counts match --no-merges log lines so we never invent a false "and N more".
+# UI scrolls — do not head(1) / HAPI_SOUP_RELEASE_NOTES_MAX this list.
+#
+# Usage: driver_soup_single_exe_changelog_range <driver> <from_sha> <to_sha> <heading>
+# Prints the ### heading + bullet list, or a one-line italic skip reason.
+# Exit 0 always (caller still gets a body fragment).
+driver_soup_single_exe_changelog_range() {
+    local driver="${1:?}"
+    local from_sha="${2:?}"
+    local to_sha="${3:?}"
+    local heading="${4:?}"
+    local range_label log_lines commit_count
+
+    if ! git -C "$driver" merge-base --is-ancestor "$from_sha" "$to_sha" 2>/dev/null; then
+        printf '%s\n' "_Previous tip \`${from_sha:0:12}\` is not an ancestor of this tip on the driver worktree — skipped changelog range._"
+        return 0
+    fi
+
+    range_label="${from_sha:0:12}..${to_sha:0:12}"
+    # Count must match the log filter (no-merges) — mixing rev-list(all) with
+    # log(--no-merges) falsely claimed "truncated at 80" for tiny ranges.
+    commit_count="$(git -C "$driver" rev-list --count --no-merges "${from_sha}..${to_sha}" 2>/dev/null || echo 0)"
+    log_lines="$(git -C "$driver" log --pretty=format:'- %s (%h)' --no-merges "${from_sha}..${to_sha}" 2>/dev/null || true)"
+    if [[ -n "$log_lines" ]]; then
+        printf '%s\n\n%s\n' "### ${heading} (\`${range_label}\`, ${commit_count} commit(s))" "$log_lines"
+    else
+        printf '%s\n' "_No non-merge commits in \`${range_label}\` (merge-only or identical)._"
+    fi
+    return 0
+}
+
+# Resolve a driver worktree for changelog generation (manifest → env → default).
+driver_soup_single_exe_notes_driver() {
+    local tip_dir="${1:-}"
+    local driver=""
+    if [[ -n "$tip_dir" && -f "$tip_dir/manifest.json" ]]; then
+        driver="$(jq -r '.driverPath // empty' "$tip_dir/manifest.json" 2>/dev/null || true)"
+    fi
+    if [[ -z "$driver" || ! -d "$driver" ]]; then
+        driver="${HAPI_DRIVER:-$HOME/coding/hapi/driver}"
+    fi
+    if [[ -d "$driver" ]] && { [[ -d "$driver/.git" ]] || [[ -f "$driver/.git" ]]; }; then
+        printf '%s\n' "$driver"
+        return 0
+    fi
+    return 1
+}
+
+# Real release notes: full commit subjects between previous soup tip and this tip.
 # Soup GitHub tags often target main (tips may be unpublished), so ranges use
 # composed tip SHAs from the driver worktree, not tag^{commit} alone.
+# NEVER truncated — banner / GH release body scroll.
 driver_soup_single_exe_release_notes() {
     local driver="${1:?}"
     local tip_sha="${2:?}"
     local tag="${3:?}"
     local repo="${4:-$(driver_soup_single_exe_github_repo)}"
-    local max_commits="${HAPI_SOUP_RELEASE_NOTES_MAX:-80}"
 
-    local notes prev_tag prev_sha range_label log_lines commit_count truncated=0
+    local notes prev_tag prev_sha range_body
     notes="Soup single-exe fleet artifact \`${tag}\`."
     notes+=$'\n\n'"**Composed tip:** \`${tip_sha}\`"
 
@@ -156,28 +205,9 @@ driver_soup_single_exe_release_notes() {
     if prev_tag="$(driver_soup_single_exe_previous_release_tag "$repo" "$tag")"; then
         notes+=$'\n'"**Previous:** \`${prev_tag}\`"
         if prev_sha="$(driver_soup_single_exe_tip_from_release_tag "$driver" "$repo" "$prev_tag")"; then
-            if git -C "$driver" merge-base --is-ancestor "$prev_sha" "$tip_sha" 2>/dev/null; then
-                range_label="${prev_sha:0:12}..${tip_sha:0:12}"
-                commit_count="$(git -C "$driver" rev-list --count "${prev_sha}..${tip_sha}" 2>/dev/null || echo 0)"
-                log_lines="$(git -C "$driver" log --pretty=format:'- %s (%h)' --no-merges "${prev_sha}..${tip_sha}" 2>/dev/null \
-                    | head -n "$max_commits" || true)"
-                if [[ -n "$log_lines" ]]; then
-                    local shown
-                    shown="$(printf '%s\n' "$log_lines" | grep -c . || true)"
-                    if [[ "${commit_count:-0}" -gt "$shown" ]]; then
-                        truncated=1
-                    fi
-                    notes+=$'\n\n'"### Changes since previous soup release (\`${range_label}\`, ${commit_count} commit(s))"
-                    notes+=$'\n\n'"$log_lines"
-                    if [[ "$truncated" == "1" ]]; then
-                        notes+=$'\n'"- … and $((commit_count - shown)) more (truncated at ${max_commits})"
-                    fi
-                else
-                    notes+=$'\n\n'"_No non-merge commits between previous tip and this tip (merge-only or identical)._"
-                fi
-            else
-                notes+=$'\n\n'"_Previous tip \`${prev_sha:0:12}\` is not an ancestor of this tip on the driver worktree — skipped changelog range._"
-            fi
+            range_body="$(driver_soup_single_exe_changelog_range "$driver" "$prev_sha" "$tip_sha" \
+                "Changes since previous soup release")"
+            notes+=$'\n\n'"$range_body"
         else
             notes+=$'\n\n'"_Could not resolve previous tip SHA from \`${prev_tag}\` on this driver — skipped changelog._"
         fi
@@ -189,7 +219,37 @@ driver_soup_single_exe_release_notes() {
     printf '%s\n' "$notes"
 }
 
+# Tag whose changelog was last successfully published onto the fleet channel.
+# Next seal ranges FROM this tip so a notes miss (pointer-only / stale NOTES.md)
+# is caught up in full on the next fleet release — never silently dropped.
+driver_soup_fleet_notes_baseline_path() {
+    printf '%s/fleet-notes-baseline-tag.txt\n' "$(driver_soup_single_exe_artifacts_root)"
+}
+
+driver_soup_fleet_notes_baseline_tag() {
+    local path tag
+    path="$(driver_soup_fleet_notes_baseline_path)"
+    if [[ -f "$path" ]]; then
+        tag="$(tr -d '[:space:]' <"$path")"
+        if [[ -n "$tag" ]]; then
+            printf '%s\n' "$tag"
+            return 0
+        fi
+    fi
+    return 1
+}
+
+driver_soup_fleet_notes_baseline_write() {
+    local tag="${1:?}"
+    local path
+    path="$(driver_soup_fleet_notes_baseline_path)"
+    printf '%s\n' "$tag" >"$path"
+    echo "fleet-seal: fleet-notes-baseline-tag.txt → $tag"
+}
+
 # Stage flat release asset filenames under a temp dir for gh upload.
+# Includes NOTES.md when present — Layer A materialize downloads it beside
+# manifest.json from the fleet channel (see hub upgrade/upstreamSeal.ts).
 driver_soup_single_exe_stage_github_assets() {
     local dest="${1:?}"
     local staging="${2:?}"
@@ -202,6 +262,11 @@ driver_soup_single_exe_stage_github_assets() {
     [[ -f "$dest/manifest.json" ]] || return 1
     cp -f "$dest/manifest.json" "$staging/manifest.json"
     out_files+=("$staging/manifest.json")
+
+    if [[ -f "$dest/NOTES.md" ]]; then
+        cp -f "$dest/NOTES.md" "$staging/NOTES.md"
+        out_files+=("$staging/NOTES.md")
+    fi
 
     local platform_dir binary_name asset_name
     for platform_dir in "$dest"/*/; do
@@ -558,14 +623,106 @@ driver_soup_fleet_seal_verify_public() {
     return 0
 }
 
+# Official GitHub release notes for the moving fleet channel.
+# Fork releases exist for the fleet — channel notes are the official notes.
+#
+# Prefer a FULL (never truncated) git changelog from the notes baseline tip
+# (last tip whose notes actually landed on the channel) → sealed tip. That way
+# a missed NOTES upload is caught up on the next seal instead of forever lost.
+# Falls back to tip NOTES.md, then a thin stub.
+#
+# Usage: driver_soup_fleet_seal_channel_notes <tip_dir> <sealed_tip_tag> [composed_tip_sha]
+driver_soup_fleet_seal_channel_notes() {
+    local tip_dir="${1:?}"
+    local sealed_tag="${2:?}"
+    local tip_sha="${3:-}"
+    local channel manifest_url body driver baseline_tag baseline_sha root range_body
+    channel="$(driver_soup_fleet_github_channel_tag)"
+    manifest_url="$(driver_soup_fleet_github_manifest_url)"
+    root="$(driver_soup_single_exe_artifacts_root)"
+    body=""
+
+    if [[ -z "$tip_sha" && -f "$tip_dir/manifest.json" ]]; then
+        tip_sha="$(jq -r '.composedTipSha // empty' "$tip_dir/manifest.json")"
+    fi
+
+    if driver="$(driver_soup_single_exe_notes_driver "$tip_dir")" \
+        && [[ -n "$tip_sha" ]] \
+        && baseline_tag="$(driver_soup_fleet_notes_baseline_tag 2>/dev/null || true)" \
+        && [[ -n "$baseline_tag" && "$baseline_tag" != "$sealed_tag" ]]; then
+        if [[ -f "$root/$baseline_tag/manifest.json" ]]; then
+            baseline_sha="$(jq -r '.composedTipSha // empty' "$root/$baseline_tag/manifest.json")"
+        else
+            baseline_sha="$(driver_soup_single_exe_tip_from_release_tag "$driver" \
+                "$(driver_soup_single_exe_github_repo)" "$baseline_tag" 2>/dev/null || true)"
+        fi
+        if [[ -n "$baseline_sha" ]]; then
+            body="Soup fleet channel release → \`${sealed_tag}\`."
+            body+=$'\n\n'"**Composed tip:** \`${tip_sha}\`"
+            body+=$'\n'"**Notes since (catch-up baseline):** \`${baseline_tag}\`"
+            range_body="$(driver_soup_single_exe_changelog_range "$driver" "$baseline_sha" "$tip_sha" \
+                "Changes since last fleet notes")"
+            body+=$'\n\n'"$range_body"
+            body+=$'\n\n'"Download per-platform binaries as \`hapi-<platform-dir>\` (see \`manifest.json\` for sha256)."
+            echo "fleet-seal: channel notes = full changelog ${baseline_tag} → ${sealed_tag} (no truncation)" >&2
+        fi
+    fi
+
+    if [[ -z "$body" && -f "$tip_dir/NOTES.md" ]]; then
+        body="$(cat "$tip_dir/NOTES.md")"
+        body="${body%"${body##*[![:space:]]}"}"
+        # Refuse to ship a historically truncated tip NOTES as the official
+        # fleet body when we can rebuild — strip the false truncate footer if
+        # present and rebuild from git when driver+previous tip are available.
+        if printf '%s\n' "$body" | grep -q 'truncated at'; then
+            if driver="$(driver_soup_single_exe_notes_driver "$tip_dir")" && [[ -n "$tip_sha" ]]; then
+                local prev_tag prev_sha rebuilt
+                prev_tag="$(printf '%s\n' "$body" | sed -nE 's/^\*\*Previous:\*\* `(hapi-soup-v[^`]+)`/\1/p' | head -1)"
+                if [[ -n "$prev_tag" ]] \
+                    && prev_sha="$(driver_soup_single_exe_tip_from_release_tag "$driver" \
+                        "$(driver_soup_single_exe_github_repo)" "$prev_tag" 2>/dev/null || true)" \
+                    && [[ -n "$prev_sha" ]]; then
+                    rebuilt="Soup single-exe fleet artifact \`${sealed_tag}\`."
+                    rebuilt+=$'\n\n'"**Composed tip:** \`${tip_sha}\`"
+                    rebuilt+=$'\n'"**Previous:** \`${prev_tag}\`"
+                    rebuilt+=$'\n\n'"$(driver_soup_single_exe_changelog_range "$driver" "$prev_sha" "$tip_sha" \
+                        "Changes since previous soup release")"
+                    rebuilt+=$'\n\n'"Download per-platform binaries as \`hapi-<platform-dir>\` (see \`manifest.json\` for sha256)."
+                    body="$rebuilt"
+                    echo "fleet-seal: rebuilt truncated tip NOTES.md without truncation" >&2
+                fi
+            fi
+        fi
+    fi
+
+    if [[ -z "$body" ]]; then
+        body="Soup fleet seal → \`${sealed_tag}\`."
+        if [[ -n "$tip_sha" ]]; then
+            body+=$'\n\n'"**Composed tip:** \`${tip_sha}\`"
+        fi
+        body+=$'\n\n'"_No NOTES.md / notes baseline on sealed tip — changelog missing; fix publish before next seal._"
+        echo "WARN: fleet-seal: tip missing NOTES.md ($tip_dir) — channel notes will be thin" >&2
+    fi
+
+    body+=$'\n\n'"---"
+    body+=$'\n'"**Fleet channel** (\`${channel}\`) sealed to \`${sealed_tag}\`."
+    if [[ -n "$tip_sha" ]]; then
+        body+=$'\n'"**Composed tip:** \`${tip_sha}\`"
+    fi
+    body+=$'\n'"Poll: \`${manifest_url}\` · digest-only newness (tag name alone is not sufficiency)."
+    printf '%s\n' "$body"
+}
+
 # Mirror sealed tip bytes onto the moving GH channel release (mandatory on seal).
 # Kill-criteria: never use releases/latest; digests must match tip; channel ≠ dated tip tag.
+# Official release notes = tip changelog (driver_soup_fleet_seal_channel_notes), not a
+# pointer-only stub — dated tip releases are secondary archives.
 #
 # Upsert (never delete+recreate): GitHub tag deletion is eventually-consistent —
 # delete-then-recreate-same-tag can orphan the new release as a draft so
 # releases/download/<channel>/… 404s (cli/cli#8458). Pattern: force-move the
 # tag ref, create-or-heal a published release with --latest=false, then
-# `gh release upload --clobber` stable asset names.
+# `gh release upload --clobber` stable asset names (incl. NOTES.md).
 #
 # Usage: driver_soup_fleet_seal_github_channel <tip_dir> <sealed_tip_tag> [--dry-run]
 driver_soup_fleet_seal_github_channel() {
@@ -654,12 +811,13 @@ driver_soup_fleet_seal_github_channel() {
     fi
 
     local notes notes_file
-    notes="**Fleet seal channel** (\`${channel}\`) — moving pointer for Layer A / pet installs."
-    notes+=$'\n\n'"**Sealed tip:** \`${sealed_tag}\`"
-    notes+=$'\n'"**Composed tip:** \`${tip_sha}\`"
-    notes+=$'\n\n'"Poll: \`${manifest_url}\`"
-    notes+=$'\n'"Digest-only newness — never treat this channel name alone as sufficiency."
-    notes+=$'\n\n'"FORK-ONLY fleet product (\`heavygee/hapi\`) — not upstream-bound."
+    # Fleet is why this release exists — tip changelog is the official notes.
+    notes="$(driver_soup_fleet_seal_channel_notes "$tip_dir" "$sealed_tag" "$tip_sha")"
+    # Ensure NOTES.md asset matches the channel body (pets download this file).
+    printf '%s\n' "$notes" >"$staging/NOTES.md"
+    if [[ ! " ${files[*]} " =~ " $staging/NOTES.md " ]]; then
+        files+=("$staging/NOTES.md")
+    fi
 
     notes_file="$(mktemp "${TMPDIR:-/tmp}/hapi-fleet-notes.XXXXXX")"
     printf '%s\n' "$notes" >"$notes_file"
@@ -685,14 +843,17 @@ driver_soup_fleet_seal_github_channel() {
 
     if [[ "$gh_rc" -eq 0 ]]; then
         # Stable asset names; --clobber refreshes bytes on each seal.
-        # Prefer deleting manifest.json first — GH CDN can keep stale bytes for
-        # the same download URL after a bare --clobber (oos 2026-10-14 seal).
-        local mid
-        mid="$(gh api "repos/${repo}/releases/tags/${channel}" \
-            --jq '.assets[]|select(.name=="manifest.json").id' 2>/dev/null || true)"
-        if [[ -n "$mid" ]]; then
-            gh api -X DELETE "repos/${repo}/releases/assets/${mid}" >/dev/null 2>&1 || true
-        fi
+        # Prefer deleting manifest.json / NOTES.md first — GH CDN can keep stale
+        # bytes for the same download URL after a bare --clobber (oos 2026-10-14;
+        # NOTES.md stuck on Oct-15 tip until fleet-first notes).
+        local mid asset_name
+        for asset_name in manifest.json NOTES.md; do
+            mid="$(gh api "repos/${repo}/releases/tags/${channel}" \
+                --jq ".assets[]|select(.name==\"${asset_name}\").id" 2>/dev/null || true)"
+            if [[ -n "$mid" ]]; then
+                gh api -X DELETE "repos/${repo}/releases/assets/${mid}" >/dev/null 2>&1 || true
+            fi
+        done
         gh release upload "$channel" \
             --repo "$repo" \
             --clobber \
@@ -744,6 +905,10 @@ driver_soup_fleet_seal_github_channel() {
         echo "       API may be fresh; Layer A pollers use the public URL — fix CDN / retry upload" >&2
         return 1
     fi
+
+    # Notes that just landed on the channel become the next seal's catch-up
+    # baseline — so a future miss starts ranging from HERE, not from ancient tip.
+    driver_soup_fleet_notes_baseline_write "$sealed_tag"
 
     echo "fleet-seal: GitHub channel OK (public URL is part of the seal)"
     return 0

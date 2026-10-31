@@ -55,13 +55,15 @@ mkdir -p "$fixture/linux-x64-baseline" "$fixture/darwin-arm64"
 printf '{}' >"$fixture/manifest.json"
 printf 'bin' >"$fixture/linux-x64-baseline/hapi"
 printf 'bin' >"$fixture/darwin-arm64/hapi"
+printf '### Changes\n\n- feat: staged notes\n' >"$fixture/NOTES.md"
 stage="$TMP/stage-release"
 files=()
 driver_soup_single_exe_stage_github_assets "$fixture" "$stage" files
-[[ "${#files[@]}" == "3" ]] || { echo "FAIL: expected 3 staged files, got ${#files[@]}"; exit 1; }
-[[ -f "$stage/manifest.json" && -f "$stage/hapi-linux-x64-baseline" && -f "$stage/hapi-darwin-arm64" ]] \
+[[ "${#files[@]}" == "4" ]] || { echo "FAIL: expected 4 staged files (incl NOTES.md), got ${#files[@]}"; exit 1; }
+[[ -f "$stage/manifest.json" && -f "$stage/NOTES.md" && -f "$stage/hapi-linux-x64-baseline" && -f "$stage/hapi-darwin-arm64" ]] \
     || { echo "FAIL: staged asset names missing"; exit 1; }
-echo "OK: stage github assets"
+grep -q 'feat: staged notes' "$stage/NOTES.md" || { echo "FAIL: staged NOTES.md content"; exit 1; }
+echo "OK: stage github assets (incl NOTES.md)"
 
 # Release notes: synthetic repo with two tips (no gh needed for tip-from-short).
 NOTES_REPO="$TMP/notes-git"
@@ -97,7 +99,32 @@ printf '%s\n' "$notes" | grep -q 'Composed tip' \
     || { echo "FAIL: notes missing composed tip"; exit 1; }
 printf '%s\n' "$notes" | grep -q 'Automated soup single-exe publish' \
     && { echo "FAIL: notes still use boilerplate opener"; exit 1; }
+printf '%s\n' "$notes" | grep -q 'truncated at' \
+    && { echo "FAIL: release notes must never truncate"; printf '%s\n' "$notes"; exit 1; }
 echo "OK: release notes include changelog subjects"
+
+# Many commits + merges: full list, no false "truncated" from merge-count mismatch.
+for i in $(seq 1 12); do
+    echo "c$i" >"$NOTES_REPO/c$i.txt"
+    git -C "$NOTES_REPO" add "c$i.txt"
+    git -C "$NOTES_REPO" commit -qm "feat: bulk tip commit $i (#${i})"
+done
+# A merge commit (excluded from --no-merges) must not invent truncation.
+git -C "$NOTES_REPO" checkout -q -b merge-side
+echo side >"$NOTES_REPO/side.txt"
+git -C "$NOTES_REPO" add side.txt
+git -C "$NOTES_REPO" commit -qm "feat: side branch"
+git -C "$NOTES_REPO" checkout -q master 2>/dev/null || git -C "$NOTES_REPO" checkout -q main
+git -C "$NOTES_REPO" merge -q --no-ff merge-side -m "merge: side into tip"
+BULK_SHA="$(git -C "$NOTES_REPO" rev-parse HEAD)"
+BULK_TAG="hapi-soup-v2099.01.03-${BULK_SHA:0:7}"
+driver_soup_single_exe_previous_release_tag() { printf '%s\n' "$FAKE_PREV_TAG"; }
+bulk_notes="$(driver_soup_single_exe_release_notes "$NOTES_REPO" "$BULK_SHA" "$BULK_TAG" "heavygee/hapi")"
+printf '%s\n' "$bulk_notes" | grep -q 'feat: bulk tip commit 12' \
+    || { echo "FAIL: bulk notes missing last commit"; printf '%s\n' "$bulk_notes"; exit 1; }
+printf '%s\n' "$bulk_notes" | grep -q 'truncated at' \
+    && { echo "FAIL: bulk notes falsely truncated (merge-count bug)"; printf '%s\n' "$bulk_notes"; exit 1; }
+echo "OK: release notes never truncate (incl. merges)"
 
 # Tip-stamp rebuild gate (the silent-stale publish bug, 2026-10).
 STAMP_DRIVER="$TMP/stamp-driver"
@@ -211,6 +238,73 @@ unset HAPI_SKIP_FLEET_GITHUB_CHANNEL
 driver_soup_fleet_seal_github_channel "$SEAL_ROOT/$SEAL_TAG" "$SEAL_TAG" --dry-run \
     || { echo "FAIL: GH channel dry-run should succeed"; exit 1; }
 echo "OK: fleet-seal GH channel dry-run"
+
+# Fleet channel notes = tip changelog (official), not pointer-only stub.
+# Point artifacts root at SEAL_ROOT so baseline helpers resolve here.
+driver_soup_single_exe_artifacts_root() { printf '%s\n' "$SEAL_ROOT"; }
+printf '%s\n' '### Changes since previous soup release
+
+- feat: fleet-first notes (#999)
+' >"$SEAL_ROOT/$SEAL_TAG/NOTES.md"
+# No baseline → fall back to tip NOTES.md
+rm -f "$SEAL_ROOT/fleet-notes-baseline-tag.txt"
+channel_notes="$(driver_soup_fleet_seal_channel_notes "$SEAL_ROOT/$SEAL_TAG" "$SEAL_TAG" "$TIP_B")"
+printf '%s\n' "$channel_notes" | grep -q 'feat: fleet-first notes (#999)' \
+    || { echo "FAIL: channel notes missing tip changelog"; printf '%s\n' "$channel_notes"; exit 1; }
+printf '%s\n' "$channel_notes" | grep -q "sealed to \`${SEAL_TAG}\`" \
+    || { echo "FAIL: channel notes missing seal footer"; printf '%s\n' "$channel_notes"; exit 1; }
+printf '%s\n' "$channel_notes" | grep -q 'Fleet seal channel' \
+    && { echo "FAIL: channel notes still use pointer-only opener"; exit 1; }
+echo "OK: fleet channel notes prefer tip NOTES.md"
+
+# Baseline catch-up: full git range since last notes tip (not tip-local NOTES only).
+BASELINE_TAG="hapi-soup-v2099.11.01-aaaaaaa"
+mkdir -p "$SEAL_ROOT/$BASELINE_TAG"
+jq -n --arg tip "$TIP_A" '{schema:1, tag:"'"$BASELINE_TAG"'", composedTipSha:$tip, binaries:[]}' \
+    >"$SEAL_ROOT/$BASELINE_TAG/manifest.json"
+# TIP_B is ahead of TIP_A on STAMP_DRIVER — use that as notes driver.
+jq --arg path "$STAMP_DRIVER" '.driverPath=$path' \
+    "$SEAL_ROOT/$SEAL_TAG/manifest.json" >"$SEAL_ROOT/$SEAL_TAG/manifest.json.tmp"
+mv "$SEAL_ROOT/$SEAL_TAG/manifest.json.tmp" "$SEAL_ROOT/$SEAL_TAG/manifest.json"
+# Ensure TIP_B has a distinct commit subject after TIP_A.
+echo catchup >"$STAMP_DRIVER/catchup.txt"
+git -C "$STAMP_DRIVER" add catchup.txt
+git -C "$STAMP_DRIVER" commit -qm "feat: catch-up commit for fleet notes (#4242)"
+TIP_B="$(git -C "$STAMP_DRIVER" rev-parse HEAD)"
+jq -n \
+    --arg tag "$SEAL_TAG" \
+    --arg tip "$TIP_B" \
+    --arg sha "$SEAL_SHA" \
+    --arg path "$STAMP_DRIVER" \
+    '{schema:1, tag:$tag, composedTipSha:$tip, driverPath:$path, binaries:[{target:"bun-linux-x64-baseline",platform:"linux",arch:"x64",variant:"baseline",path:"linux-x64-baseline/hapi",sha256:$sha,sizeBytes:13}]}' \
+    >"$SEAL_ROOT/$SEAL_TAG/manifest.json"
+printf '%s\n' "$BASELINE_TAG" >"$SEAL_ROOT/fleet-notes-baseline-tag.txt"
+channel_notes="$(driver_soup_fleet_seal_channel_notes "$SEAL_ROOT/$SEAL_TAG" "$SEAL_TAG" "$TIP_B" 2>/dev/null)"
+printf '%s\n' "$channel_notes" | grep -q 'feat: catch-up commit for fleet notes (#4242)' \
+    || { echo "FAIL: baseline catch-up missing commit"; printf '%s\n' "$channel_notes"; exit 1; }
+printf '%s\n' "$channel_notes" | grep -q 'Notes since (catch-up baseline)' \
+    || { echo "FAIL: catch-up baseline label missing"; printf '%s\n' "$channel_notes"; exit 1; }
+printf '%s\n' "$channel_notes" | grep -q 'truncated at' \
+    && { echo "FAIL: catch-up notes truncated"; printf '%s\n' "$channel_notes"; exit 1; }
+echo "OK: fleet channel notes catch up from baseline (full, no truncate)"
+driver_soup_fleet_notes_baseline_write "$SEAL_TAG"
+[[ "$(tr -d '[:space:]' <"$SEAL_ROOT/fleet-notes-baseline-tag.txt")" == "$SEAL_TAG" ]] \
+    || { echo "FAIL: baseline write"; exit 1; }
+echo "OK: fleet notes baseline write"
+
+# Missing NOTES.md + no usable baseline → warn-shaped body, still includes seal footer.
+rm -f "$SEAL_ROOT/$SEAL_TAG/NOTES.md" "$SEAL_ROOT/fleet-notes-baseline-tag.txt"
+channel_notes="$(driver_soup_fleet_seal_channel_notes "$SEAL_ROOT/$SEAL_TAG" "$SEAL_TAG" "$TIP_B" 2>/dev/null)"
+printf '%s\n' "$channel_notes" | grep -q 'changelog missing' \
+    || { echo "FAIL: missing NOTES should be explicit"; printf '%s\n' "$channel_notes"; exit 1; }
+printf '%s\n' "$channel_notes" | grep -q "sealed to \`${SEAL_TAG}\`" \
+    || { echo "FAIL: missing-NOTES path still needs seal footer"; exit 1; }
+echo "OK: fleet channel notes fail soft when tip NOTES.md absent"
+# Restore for any later assertions
+printf '%s\n' '### Changes
+
+- feat: fleet-first notes (#999)
+' >"$SEAL_ROOT/$SEAL_TAG/NOTES.md"
 
 # --- Public URL is part of the seal (tag + digests) ---
 PUB_DIR="$TMP/pub-manifest"

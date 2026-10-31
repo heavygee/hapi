@@ -819,12 +819,12 @@ layers:
   # Tip: f0803e996
   - branch: fix/claude-mcp-spawn-model-effort
 
-  # heavygee/hapi#120 / Heavygee-Projects/hapi-inline#535 — vendor hapi-inline operator dock (fork-local, not tiann).
-  # Tip: 5a1ea4297 (driver/hapi-inline-revendor-0223) — pin v0.22.3 fail-closed stale machineId (#535/#534).
-  # Replaces driver/hapi-inline-revendor-0222 / operator-dock v0.22.2. Keeps #531/#533/#528/#514/#508/#497/#498/#492.
-  # Worktree: ~/coding/hapi/worktrees/hapi-inline-revendor-0223
+  # heavygee/hapi#120 / heavygee/hapi-inline#557 — vendor hapi-inline operator dock (fork-local, not tiann).
+  # Tip: 08fa59c31 (driver/hapi-inline-revendor-0224) — pin v0.22.4 dead-pin fail-closed + storage-denied (#557/#558).
+  # Replaces driver/hapi-inline-revendor-0223 / operator-dock v0.22.3. Keeps #535/#534/#531/#533/#528/#514/#508/#497/#498/#492.
+  # Worktree: ~/coding/hapi/worktrees/hapi-inline-revendor-0224
   # Hub+web → remat needs --build-web + hapi-restart-hub (embedded web assets).
-  - branch: driver/hapi-inline-revendor-0223
+  - branch: driver/hapi-inline-revendor-0224
 
   # heavygee/hapi#121 — operator-hold chip pulse (🛑 needs_operator / babysit.hold).
   # Soup UI on awareness ancestry (schema enum + SessionPrChip FueDot). Classifier
@@ -1092,8 +1092,8 @@ layers:
 
   # heavygee/hapi#235 / PR #238 — Boards view (cards/chips/relative-time,
   # Projects v2 /views/<n> filter capture). Renamed To-Do → Boards.
-  # Re-tip 2026-10-18: driver/235-todo-board-view @ d095ceab1 thin onto soup
-  # ab3cd07f0 (CTA + title filter + items pagination). externalRefs validate parked (schema drift).
+  # Re-tip 2026-10-31: driver/235-todo-board-view @ 736cf8ae8 thin onto soup
+  # 2ae0c0c10 (test-only: PROJECT_QUERY unfiltered path lock-in).
   - branch: driver/235-todo-board-view
 
   # heavygee/hapi#238 — GithubPrExternalRefSchema: status enum -> passthrough,
@@ -1408,3 +1408,12 @@ layers:
   # Must stay ABOVE driver/2081-search-scope-toggle (same SessionList/web surface).
   # Tip-unique web marker: "fetchNewerMessages"
   - branch: driver/2081-forward-reading
+
+  # hapi#247 (operator feedback) — a session spawned from a Boards card kept
+  # the generic "you've been spawned from a Boards card..." briefing text as
+  # its name instead of the card's own title. Renames the session via
+  # api.renameSession right after creation, same fire-and-forget pattern as
+  # the existing briefing-message delivery and issue auto-link.
+  # Thin tip on soup a717c9642: driver/247-board-spawn-rename @ 31ce99324.
+  # Web-only -> remat --build-web; hard-reload (no hub restart).
+  - branch: driver/247-board-spawn-rename

@@ -15,6 +15,7 @@ describe('runnerCapabilities', () => {
         expect(CURRENT_MACHINE_CAPABILITIES).toEqual(expect.arrayContaining([
             ...REQUIRED_MACHINE_CAPABILITIES,
             MACHINE_CAPABILITIES.ClaudeTranscriptStatus,
+            MACHINE_CAPABILITIES.WorkspaceFileAccess,
         ]))
         // Optional probe (#1933): advertised by current runners, not required
         // (soft-fail on skew like Cursor #1084), so older runners still reopen.
