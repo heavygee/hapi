@@ -243,7 +243,13 @@ const ITEM_FIELDS = `
     }
   }`
 
-const PROJECT_QUERY = `
+// Exported for test visibility only (hapi#238 Gavin ruling: "every status
+// shown" was never a stated requirement, but the guarantee itself should be
+// locked in with a test, not just true by inspection of this literal — the
+// response-mapping tests below prove items of every status survive, but
+// nothing previously asserted the *request* HAPI sends for an unfiltered
+// board carries no status/item predicate at all).
+export const PROJECT_QUERY = `
 query($login: String!, $number: Int!, $statusField: String!, $after: String) {
   repositoryOwner(login: $login) {
     ... on ProjectV2Owner {
@@ -280,7 +286,7 @@ query($login: String!, $number: Int!, $statusField: String!, $after: String) {
 // the variable is passed as null. Only used when a view is actually
 // configured, so the new argument's host requirement is scoped to the new
 // capability, not the existing one.
-const PROJECT_QUERY_FILTERED = `
+export const PROJECT_QUERY_FILTERED = `
 query($login: String!, $number: Int!, $statusField: String!, $itemsFilter: String, $after: String) {
   repositoryOwner(login: $login) {
     ... on ProjectV2Owner {
