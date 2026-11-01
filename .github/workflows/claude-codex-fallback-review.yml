@@ -321,11 +321,10 @@ jobs:
                       arguments — it already knows the pinned base and HEAD)
                       to get the diff, then read files under ./pr-head/ as
                       needed. Do not run `git` directly against ./pr-head —
-                      only this one pinned script. `gh pr view`/`gh pr
-                      comment`/`gh pr review` (metadata/posting, not diffing)
-                      are fine via the API as normal. Do not execute, source,
-                      or `cd` into running anything from ./pr-head/scripts/ or
-                      similar — read it, don't run it.
+                      only this one pinned script. `gh pr view` (metadata, not
+                      diffing) is fine via the API as normal. Do not execute,
+                      source, or `cd` into running anything from
+                      ./pr-head/scripts/ or similar — read it, don't run it.
 
                       Review this pull request for heavygee/hapi, a fork of
                       tiann/hapi (terminal coding-agent session manager).
@@ -340,17 +339,24 @@ jobs:
                       workspace root — trusted) when present for project
                       conventions. Post inline comments on specific lines.
 
-                      Submit a formal pull request review with a summary.
-                      REQUEST_CHANGES is MANDATORY if you found ANY blocking
-                      issue — a real bug, a security problem, a missing test
-                      for materially changed behavior — even one. Use COMMENT
-                      ONLY when you found nothing blocking; do not put a real
-                      finding only in the summary text while leaving the
-                      review state as COMMENT — downstream automation
-                      (hapi-pr-status.sh) treats COMMENT as "no blocking
-                      findings" by construction, so the review STATE itself,
-                      not just the prose, must be accurate. Do not APPROVE or
-                      merge under any circumstances.
+                      Submit a formal pull request review with a summary by
+                      piping your review body text to
+                      `./scripts/tooling/claude-fallback-pr-review.sh
+                      <comment|request-changes> ${{ steps.gate.outputs.pr_number }} ${{ github.repository }}`
+                      (mode is the first argument; the script reads the body
+                      from stdin — do not use `gh pr review` or `gh pr
+                      comment` directly, and never pass a file path for the
+                      body). REQUEST_CHANGES is MANDATORY if you found ANY
+                      blocking issue — a real bug, a security problem, a
+                      missing test for materially changed behavior — even
+                      one. Use COMMENT ONLY when you found nothing blocking;
+                      do not put a real finding only in the summary text
+                      while leaving the review state as COMMENT — downstream
+                      automation (hapi-pr-status.sh) treats COMMENT as "no
+                      blocking findings" by construction, so the review STATE
+                      itself, not just the prose, must be accurate. Do not
+                      APPROVE or merge under any circumstances — the wrapper
+                      script does not even expose that mode.
                   # Narrower than lockhouse/arthur's allowedTools (cold review,
                   # 2026-10-15): arthur reviews internal/trusted PRs; this
                   # workflow exists specifically to review EXTERNAL fork PRs
@@ -358,10 +364,18 @@ jobs:
                   # `Bash(gh pr*)`/`Bash(gh api*)`/`Bash(git*)` would let a
                   # prompt-injection in the reviewed content reach `gh pr merge`,
                   # `gh pr close`, `gh pr edit`, or an arbitrary `gh api` call
-                  # with this job's pull-requests:write token. The prompt's "do
-                  # not approve/merge" instruction is the only defense for
-                  # whatever's still reachable through `gh pr review:*` — this
-                  # list exists to shrink that surface, not eliminate it.
+                  # with this job's pull-requests:write token.
+                  #
+                  # `Bash(gh pr comment:*)` / `Bash(gh pr review:*)` (cold
+                  # review, 2026-10-15, fourth wave) were themselves a hole:
+                  # both commands' `-F/--body-file <path>` flag reads an
+                  # arbitrary file on this persistent runner and publishes its
+                  # contents as a public PR comment/review — a credential-
+                  # exfiltration path independent of subprocess env scrubbing
+                  # (which only scrubs env vars, not files). Replaced with a
+                  # pinned wrapper script that always reads the body from
+                  # stdin and never accepts a file path (cold review,
+                  # 2026-11-01, sixth wave).
                   #
                   # Read/Glob/Grep/LS are explicitly path-scoped to `./*` (cold
                   # review, 2026-10-15, fourth wave) — bare `Read` etc. can read
@@ -390,7 +404,7 @@ jobs:
                   claude_args: |
                       --max-turns 80
                       --add-dir pr-head
-                      --allowedTools "Read(./*),Glob(./*),Grep(./*),LS(./*),mcp__github_inline_comment__create_inline_comment,mcp__github_comment__update_claude_comment,Bash(./scripts/tooling/claude-fallback-pr-diff.sh),Bash(gh pr comment:*),Bash(gh pr view:*),Bash(gh pr review:*)"
+                      --allowedTools "Read(./*),Glob(./*),Grep(./*),LS(./*),mcp__github_inline_comment__create_inline_comment,mcp__github_comment__update_claude_comment,Bash(./scripts/tooling/claude-fallback-pr-diff.sh),Bash(gh pr view:*),Bash(./scripts/tooling/claude-fallback-pr-review.sh *)"
 
             # Says plainly which of the three outcomes happened: checkout
             # failure, review failure, or a real completed review — collapsing
