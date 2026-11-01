@@ -48,12 +48,21 @@ on:
     pull_request_review:
         types: [submitted]
 
-concurrency:
-    group: claude-fallback-review-${{ github.event.issue.number || github.event.pull_request.number }}
-    cancel-in-progress: true
-
 jobs:
     maybe-review:
+        # Job-level, not workflow-level (cold review, 2026-11-01, fifth
+        # wave): workflow-level concurrency evaluates and cancels the
+        # in-progress run BEFORE any job `if:` condition is checked — an
+        # ordinary PR comment or a human review submitted while Claude is
+        # still running would share the group and cancel the active
+        # fallback review, even though that new run's own job is immediately
+        # skipped by the actor filter below. Job-level concurrency only
+        # enters the group (and only then can cancel) once the job itself is
+        # actually going to run, so an ineligible event can no longer
+        # interrupt a real one.
+        concurrency:
+            group: claude-fallback-review-${{ github.event.issue.number || github.event.pull_request.number }}
+            cancel-in-progress: true
         if: |
             github.repository_owner == 'heavygee' &&
             vars.CLAUDE_REVIEW_ENABLED == 'true' &&
@@ -85,7 +94,19 @@ jobs:
                   # this gate step feeding a hard failure into a workflow whose
                   # whole design goal is "never a new false red X" (cold review,
                   # 2026-10-15) would be exactly the incident it exists to avoid.
-                  set -uo pipefail
+                  #
+                  # `set +e` is required, not just omitting `-e`: GitHub's
+                  # default shell for an unspecified Linux run step is `bash -e
+                  # {0}` — the `-e` is already active from the interpreter
+                  # invocation before this script's first line runs, so a bare
+                  # `set -uo pipefail` (which only ever turns options ON) never
+                  # turns it back off. Reproduced directly: with only `set -uo
+                  # pipefail`, the CODEX_REVIEWED_SHA assignment below (its grep
+                  # finding nothing, the exact case when Codex hasn't posted a
+                  # real review yet) kills the script before `run=true` is ever
+                  # written — the job fails outright instead of degrading
+                  # (cold review, 2026-11-01, fifth wave).
+                  set +e -uo pipefail
                   BODY="$COMMENT_BODY"
                   if [[ "$EVENT_NAME" == "pull_request_review" ]]; then BODY="$REVIEW_BODY"; fi
 
@@ -255,6 +276,12 @@ jobs:
                   # `gh pr comment ... --body "$CLAUDE_CODE_OAUTH_TOKEN"`
                   # (cold review, 2026-10-15, second wave).
                   CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
+                  # Read by scripts/tooling/claude-fallback-pr-diff.sh — the
+                  # pinned, no-argument diff helper below. Not a Claude-
+                  # supplied argument: this is how the already-resolved base
+                  # commit reaches the script without giving Claude any argv
+                  # surface to inject into.
+                  BASE_SHA: ${{ steps.gate.outputs.base_sha }}
               with:
                   claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
                   github_token: ${{ github.token }}
@@ -289,16 +316,16 @@ jobs:
                       commit. Do NOT use `gh pr diff` for the diff itself — it
                       shows the PR's CURRENT live state, which may have moved
                       past the commit this review is pinned to and recorded
-                      above. Instead compute the diff from the pinned local
-                      checkout against the PR's ACTUAL base commit (not a
-                      guessed main/master — this PR may target a release,
-                      backport, or stacked branch):
-                      `git -C pr-head diff ${{ steps.gate.outputs.base_sha }} HEAD`,
-                      then read files under ./pr-head/ as needed. `gh pr
-                      view`/`gh pr comment`/`gh pr review` (metadata/posting,
-                      not diffing) are fine via the API as normal. Do not
-                      execute, source, or `cd` into running anything from
-                      ./pr-head/scripts/ or similar — read it, don't run it.
+                      above. Instead run
+                      `./scripts/tooling/claude-fallback-pr-diff.sh` (no
+                      arguments — it already knows the pinned base and HEAD)
+                      to get the diff, then read files under ./pr-head/ as
+                      needed. Do not run `git` directly against ./pr-head —
+                      only this one pinned script. `gh pr view`/`gh pr
+                      comment`/`gh pr review` (metadata/posting, not diffing)
+                      are fine via the API as normal. Do not execute, source,
+                      or `cd` into running anything from ./pr-head/scripts/ or
+                      similar — read it, don't run it.
 
                       Review this pull request for heavygee/hapi, a fork of
                       tiann/hapi (terminal coding-agent session manager).
@@ -349,10 +376,21 @@ jobs:
                   # can see. `(./*)` was verified to still permit reading both
                   # the trusted root and ./pr-head (a subdirectory of the same
                   # workspace) while blocking absolute paths outside it.
+                  #
+                  # `Bash(git -C pr-head*)` (cold review, 2026-10-15, fourth
+                  # wave) was itself a hole: `git -C pr-head -c
+                  # alias.run='!sh scripts/evil.sh' run` matches that prefix,
+                  # and git runs a `!`-prefixed alias as an arbitrary shell
+                  # command — a prompt injection in the reviewed content could
+                  # reach code execution on the runner, not just inspect the
+                  # checkout. Replaced with an exact (no trailing `*`, so no
+                  # argv at all) permission for one pinned, no-argument helper
+                  # script that only ever runs the one diff command this
+                  # review needs (cold review, 2026-11-01, fifth wave).
                   claude_args: |
                       --max-turns 80
                       --add-dir pr-head
-                      --allowedTools "Read(./*),Glob(./*),Grep(./*),LS(./*),mcp__github_inline_comment__create_inline_comment,mcp__github_comment__update_claude_comment,Bash(git -C pr-head*),Bash(gh pr comment:*),Bash(gh pr view:*),Bash(gh pr review:*)"
+                      --allowedTools "Read(./*),Glob(./*),Grep(./*),LS(./*),mcp__github_inline_comment__create_inline_comment,mcp__github_comment__update_claude_comment,Bash(./scripts/tooling/claude-fallback-pr-diff.sh),Bash(gh pr comment:*),Bash(gh pr view:*),Bash(gh pr review:*)"
 
             # Says plainly which of the three outcomes happened: checkout
             # failure, review failure, or a real completed review — collapsing
@@ -375,7 +413,14 @@ jobs:
                   PR_NUMBER: ${{ steps.gate.outputs.pr_number }}
                   HEAD_SHA: ${{ steps.gate.outputs.head_sha }}
               run: |
-                  set -uo pipefail
+                  # `set +e`, same reasoning as the gate step above: GitHub's
+                  # default `bash -e {0}` invocation means a bare `set -uo
+                  # pipefail` never actually disables `-e`, and this step's
+                  # own job (no continue-on-error) would otherwise die on the
+                  # first unguarded nonzero, such as a malformed JSON jq parse,
+                  # before this step's `posted=` output is written and before
+                  # the always()-gated report step can tell an accurate story.
+                  set +e -uo pipefail
                   REVIEWS_JSON=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" --paginate --slurp 2>/dev/null || echo '[]')
                   POSTED=$(printf '%s' "$REVIEWS_JSON" | jq --arg sha "${HEAD_SHA:0:12}" '
                       def pages: if type == "array" and length > 0 and (.[0]|type) == "array" then add else . end;
