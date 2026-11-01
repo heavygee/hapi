@@ -56,6 +56,17 @@ async function loginAndOpenBoard(page: import('@playwright/test').Page) {
     const modeSwitch = page.getByRole('radiogroup', { name: 'Switch between sessions and boards view' })
     await expect(modeSwitch).toBeVisible({ timeout: 60_000 })
     await modeSwitch.getByRole('radio', { name: /Boards/ }).click()
+
+    // A fresh peer stack has no boards configured — loadBoards() returns an
+    // empty list unless HAPI_BOARD_OWNER/HAPI_BOARD_NUMBER seed one, and
+    // scripts/tooling/hapi-peer-stack.sh doesn't set those. Add the public
+    // demo board through the real UI, same as 247-board-create-issue.spec.ts
+    // and 247-board-item-comments.spec.ts (review finding, hapi#238).
+    await page.getByRole('button', { name: 'Add a board' }).first().click()
+    await page.getByPlaceholder('https://github.com/users/<handle>/projects/<n>').fill('https://github.com/users/heavygee/projects/6')
+    await page.getByRole('button', { name: 'Add', exact: true }).click()
+    await expect(page.getByTestId('board-item-list')).toBeVisible({ timeout: 30_000 })
+
     await expect(page.getByText('In Progress (')).toBeVisible({ timeout: 30_000 })
 }
 

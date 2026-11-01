@@ -109,16 +109,31 @@ function formatAuthorAssociation(association: string): string | null {
         .join('-')
 }
 
+// GitHub's own enum values (SPAM, ABUSE, OFF_TOPIC, OUTDATED, DUPLICATE,
+// RESOLVED, CONFUSING) read fine as plain sentence-case English regardless of
+// UI locale — same reasoning as formatAuthorAssociation above.
+function formatMinimizedReason(reason: string): string {
+    const normalized = reason.toLowerCase().replace(/_/g, ' ')
+    return normalized.charAt(0).toUpperCase() + normalized.slice(1)
+}
+
 // One GitHub comment, rendered with the same markdown pipeline as the issue
 // body itself (operator feedback, 2026-10-27: "all detail from within those
 // comments") — code blocks, images, mentions, and links all work exactly as
 // they do in the issue body above. `url` deep-links to the comment's own
 // anchor on GitHub ("linked appropriately as if on github").
+//
+// A comment GitHub minimized (spam, abuse, outdated, …) starts collapsed with
+// its reason shown instead of the body — rendering it unconditionally would
+// surface moderated content Boards has no business showing by default
+// (Codex review, hapi#238).
 function CommentRow(props: { comment: BoardItemComment; t: (key: string, params?: Record<string, string | number>) => string }) {
     const { comment, t } = props
+    const [expanded, setExpanded] = useState(false)
     const ms = toEpochMs(comment.createdAt)
     const association = formatAuthorAssociation(comment.authorAssociation)
     const markdownComponents = useGithubRelativeMarkdownComponents(comment.url)
+    const showBody = !comment.isMinimized || expanded
     return (
         <div className="rounded-md border border-[var(--app-border)] p-3">
             <div className="flex flex-wrap items-center gap-1.5 text-xs text-[var(--app-hint)]">
@@ -141,9 +156,27 @@ function CommentRow(props: { comment: BoardItemComment; t: (key: string, params?
                     </a>
                 ) : null}
             </div>
-            <div className="mt-2">
-                <MarkdownRenderer standalone content={comment.body} components={markdownComponents} />
-            </div>
+            {comment.isMinimized ? (
+                <div className="mt-2 flex items-center gap-2 text-xs text-[var(--app-hint)]">
+                    <span>
+                        {comment.minimizedReason
+                            ? t('boards.detail.commentMinimizedWithReason', { reason: formatMinimizedReason(comment.minimizedReason) })
+                            : t('boards.detail.commentMinimized')}
+                    </span>
+                    <button
+                        type="button"
+                        onClick={() => setExpanded(value => !value)}
+                        className="shrink-0 underline hover:text-[var(--app-fg)]"
+                    >
+                        {expanded ? t('boards.detail.commentMinimizedHide') : t('boards.detail.commentMinimizedShow')}
+                    </button>
+                </div>
+            ) : null}
+            {showBody ? (
+                <div className="mt-2">
+                    <MarkdownRenderer standalone content={comment.body} components={markdownComponents} />
+                </div>
+            ) : null}
         </div>
     )
 }

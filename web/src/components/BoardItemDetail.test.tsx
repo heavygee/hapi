@@ -545,6 +545,49 @@ describe('BoardItemDetail affordance treatment', () => {
         expect(screen.getByText('Deleted user')).toBeInTheDocument()
     })
 
+    // Review finding (Codex, hapi#238): CommentRow ignored isMinimized/
+    // minimizedReason and rendered the full body unconditionally, so comments
+    // GitHub minimized as spam/abuse/outdated appeared indistinguishable from
+    // active discussion.
+    it('collapses a minimized comment behind its reason, expandable on demand', () => {
+        renderDetail({
+            comments: [{
+                id: 'IC_1',
+                author: { login: 'octocat', avatarUrl: 'https://example.com/octocat.png' },
+                authorAssociation: 'MEMBER',
+                body: 'buy now at totally-real-deals.example',
+                createdAt: '2026-10-01T09:00:00Z',
+                url: 'https://github.com/acme/widgets/issues/12#issuecomment-1',
+                isMinimized: true,
+                minimizedReason: 'SPAM'
+            }]
+        })
+        expect(screen.getByText('This comment was minimized as Spam.')).toBeInTheDocument()
+        expect(screen.queryByText('buy now at totally-real-deals.example')).not.toBeInTheDocument()
+
+        fireEvent.click(screen.getByRole('button', { name: 'Show comment' }))
+        expect(screen.getByText('buy now at totally-real-deals.example')).toBeInTheDocument()
+
+        fireEvent.click(screen.getByRole('button', { name: 'Hide comment' }))
+        expect(screen.queryByText('buy now at totally-real-deals.example')).not.toBeInTheDocument()
+    })
+
+    it('shows a generic minimized notice when GitHub reports no reason', () => {
+        renderDetail({
+            comments: [{
+                id: 'IC_1',
+                author: { login: 'octocat', avatarUrl: 'https://example.com/octocat.png' },
+                authorAssociation: 'MEMBER',
+                body: 'hidden body',
+                createdAt: '2026-10-01T09:00:00Z',
+                url: 'https://github.com/acme/widgets/issues/12#issuecomment-1',
+                isMinimized: true,
+                minimizedReason: null
+            }]
+        })
+        expect(screen.getByText('This comment was minimized.')).toBeInTheDocument()
+    })
+
     it('shows an empty state when the item has no comments', () => {
         renderDetail({ comments: [] })
         expect(screen.getByText('No comments yet.')).toBeInTheDocument()
