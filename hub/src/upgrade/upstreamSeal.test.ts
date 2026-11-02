@@ -71,7 +71,7 @@ describe('downloadFleetNotesToTip', () => {
         const dir = mkdtempSync(join(tmpdir(), 'notes-dl-'))
         const originalFetch = globalThis.fetch
         globalThis.fetch = (async () =>
-            new Response('gone', { status: 404 })) as typeof fetch
+            new Response('gone', { status: 404 })) as unknown as typeof fetch
         try {
             await expect(
                 downloadFleetNotesToTip(
@@ -92,7 +92,7 @@ describe('downloadFleetNotesToTip', () => {
         const body = '### Changes\n\n- feat: notes required (#304)\n'
         const originalFetch = globalThis.fetch
         globalThis.fetch = (async () =>
-            new Response(body, { status: 200 })) as typeof fetch
+            new Response(body, { status: 200 })) as unknown as typeof fetch
         try {
             await downloadFleetNotesToTip(
                 'https://github.com/heavygee/hapi/releases/download/hapi-fleet/manifest.json',
