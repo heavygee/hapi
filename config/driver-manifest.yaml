@@ -1386,28 +1386,11 @@ layers:
   # Tip-unique: runner-version-applied-banner
   - branch: driver/applied-changelog
 
-  # tiann/hapi#2081 — session search scope: replace the Default/Content dropdown
-  # with a 48x48 two-state toggle (ID-card vs speech-bubble glyph, real-scope
-  # tooltips, mode kept on the collapsed applying chip).
-  # Upstream worktree: ~/coding/hapi/worktrees/search-scope-toggle-2081 @
-  #   feat/2081-search-scope-toggle (based on tiann/hapi#1598 tip aafdc0089).
-  # Soup worktree: ~/coding/hapi/worktrees/search-scope-soup @ driver/2081-search-scope-toggle
-  # Thin tip on soup HEAD 01dfd7da6: 6e37798ff (1 commit). Web-only -> remat
-  #   --build-web; hard-reload (no hub restart).
-  # Must stay ABOVE other SessionList.tsx layers — it deletes the dropdown block.
-  # Tip-unique web marker: "session-list-search-scope"
-  - branch: driver/2081-search-scope-toggle
-
-  # tiann/hapi#1598 — read forward from a search result. Opening a hit left the
-  # window stranded mid-session with only older paging wired, so scrolling down
-  # dead-ended. Tracks the context window's newest row apart from the session
-  # head and walks the gap forward a bounded page at a time.
-  # Worktree: ~/coding/hapi/worktrees/forward-reading-soup @ driver/2081-forward-reading
-  # Thin tip on soup HEAD 2464f9ea5: 3d9607f8a (1 commit). Web-only -> remat
-  #   --build-web; hard-reload (no hub restart).
-  # Must stay ABOVE driver/2081-search-scope-toggle (same SessionList/web surface).
-  # Tip-unique web marker: "fetchNewerMessages"
-  - branch: driver/2081-forward-reading
+  # DROPPED 2026-11-02: tiann/hapi#1598 merged as 82c5c00a3, carrying #1554
+  # (content search), #2081 (search scope toggle) and the forward-reading work.
+  # Both layers are now in upstream/main; the base supplies them.
+  # Was: - branch: driver/2081-search-scope-toggle
+  # Was: - branch: driver/2081-forward-reading
 
   # hapi#247 (operator feedback) — a session spawned from a Boards card kept
   # the generic "you've been spawned from a Boards card..." briefing text as
@@ -1417,3 +1400,14 @@ layers:
   # Thin tip on soup a717c9642: driver/247-board-spawn-rename @ 31ce99324.
   # Web-only -> remat --build-web; hard-reload (no hub restart).
   - branch: driver/247-board-spawn-rename
+
+  # #304 — require GitHub NOTES.md on Layer A materialize (Ian empty applied banner).
+  # Thin tip on soup HEAD 960e1be58: driver/fix-304-fleet-notes-required @ c00dbd9f4
+  # Hub+web+cli+tooling → remat --build-web + publish + seal (NOTES on hapi-fleet).
+  # Tip-unique: downloadFleetNotesToTip / tipHasReleaseNotes
+  - branch: driver/fix-304-fleet-notes-required
+
+  # #305 — overlay soup tip NOTES on npm-channel Layer A pets (Ian empty banner).
+  # Thin tip on soup HEAD 2a4fcb33a: driver/fix-304-offer-notes-thin @ bbff31dde+
+  # Hub-only → remat + publish + seal; tip-unique: preferFleetLatestPointer
+  - branch: driver/fix-304-offer-notes-thin

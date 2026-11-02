@@ -14,6 +14,12 @@
 # Exit 0 = every condition satisfied. Any non-zero = DO NOT MERGE.
 # Called automatically by gh-wrapper.sh on `gh pr merge`; also runnable alone.
 #
+# WARNING — Lane B grant is single-use and is consumed on every RESULT: PASS,
+# including a standalone preview run. Never pre-run this gate against a live
+# grant "just to check" and then expect `gh pr merge` to still have the token;
+# re-grant with hapi-laneb-authorise, or only run the gate as part of the merge
+# wrapper. (Exit-reflection Promote? from #1598 / 2026-11-02.)
+#
 # Usage:  hapi-pr-merge-gate.sh <pr-number> [--repo owner/name]
 
 set -euo pipefail
@@ -215,11 +221,17 @@ fi
 echo "  RESULT: PASS" >&2
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
 # single-use: consume the lane B token so one grant cannot merge twice — wherever it was granted
+# (standalone preview PASS also consumes — see header WARNING)
 if [ "$REPO" = "$UPSTREAM_REPO" ]; then
     if [ -n "${LANEB_GRANT_HOST:-}" ]; then
+        if ssh -o ConnectTimeout=5 -o BatchMode=yes "$LANEB_GRANT_HOST" \
+            "test -f '$TOKDIR/$PR.auth'" 2>/dev/null; then
+            echo "  note: consuming lane B grant for #$PR (single-use; re-grant if this was only a preview)" >&2
+        fi
         ssh -o ConnectTimeout=5 -o BatchMode=yes "$LANEB_GRANT_HOST" \
             "mv '$TOKDIR/$PR.auth' '$TOKDIR/$PR.auth.used' 2>/dev/null" 2>/dev/null || true
     elif [ -f "$TOKDIR/$PR.auth" ]; then
+        echo "  note: consuming lane B grant for #$PR (single-use; re-grant if this was only a preview)" >&2
         mv "$TOKDIR/$PR.auth" "$TOKDIR/$PR.auth.used" 2>/dev/null || true
     fi
 fi
