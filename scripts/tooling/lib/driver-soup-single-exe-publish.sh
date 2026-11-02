@@ -619,7 +619,26 @@ driver_soup_fleet_seal_verify_public() {
     done
 
     rm -f "$tmp"
-    echo "fleet-seal: public OK → ${url} (tag=${want_tag}; digests match)"
+
+    # NOTES.md is the fleet changelog pets materialize for the skew/applied banner.
+    # Manifest-only public OK left Ian with empty "what's new" when NOTES CDN lagged (#304).
+    local notes_url notes_tmp notes_code
+    notes_url="$(dirname "$url")/NOTES.md"
+    notes_tmp="$(mktemp "${TMPDIR:-/tmp}/hapi-fleet-notes.XXXXXX")"
+    notes_code="$(curl -sL -o "$notes_tmp" -w '%{http_code}' --max-time 60 "$notes_url" 2>/dev/null || echo 000)"
+    if [[ "$notes_code" != "200" ]]; then
+        echo "ERROR: fleet-seal: public NOTES.md HTTP ${notes_code} from ${notes_url}" >&2
+        rm -f "$notes_tmp"
+        return 1
+    fi
+    if [[ ! -s "$notes_tmp" ]]; then
+        echo "ERROR: fleet-seal: public NOTES.md empty from ${notes_url}" >&2
+        rm -f "$notes_tmp"
+        return 1
+    fi
+    rm -f "$notes_tmp"
+
+    echo "fleet-seal: public OK → ${url} (tag=${want_tag}; digests match; NOTES.md present)"
     return 0
 }
 

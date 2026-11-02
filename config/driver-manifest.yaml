@@ -1417,3 +1417,9 @@ layers:
   # Thin tip on soup a717c9642: driver/247-board-spawn-rename @ 31ce99324.
   # Web-only -> remat --build-web; hard-reload (no hub restart).
   - branch: driver/247-board-spawn-rename
+
+  # #304 — require GitHub NOTES.md on Layer A materialize (Ian empty applied banner).
+  # Thin tip on soup HEAD 960e1be58: driver/fix-304-fleet-notes-required @ c00dbd9f4
+  # Hub+web+cli+tooling → remat --build-web + publish + seal (NOTES on hapi-fleet).
+  # Tip-unique: downloadFleetNotesToTip / tipHasReleaseNotes
+  - branch: driver/fix-304-fleet-notes-required
