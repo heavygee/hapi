@@ -312,12 +312,75 @@ async function downloadToFile(url: string, destPath: string): Promise<void> {
         redirect: 'follow',
     })
     if (!res.ok || !res.body) {
-        throw new Error(`upstream binary download failed: HTTP ${res.status} ${url}`)
+        throw new Error(`upstream download failed: HTTP ${res.status} ${url}`)
     }
     const tmp = `${destPath}.partial`
     const nodeBody = Readable.fromWeb(res.body as import('node:stream/web').ReadableStream)
     await pipeline(nodeBody, createWriteStream(tmp))
     renameSync(tmp, destPath)
+}
+
+/** GitHub channel / fleet-latest NOTES.md next to the polled manifest (canon). */
+export function resolveFleetNotesUrl(manifestUrl: string): string {
+    const notesUrl = new URL(manifestUrl)
+    if (notesUrl.hostname === 'github.com' && /\/releases\/download\//.test(notesUrl.pathname)) {
+        const parts = notesUrl.pathname.split('/')
+        parts[parts.length - 1] = 'NOTES.md'
+        notesUrl.pathname = parts.join('/')
+    } else {
+        notesUrl.pathname = `${dirname(notesUrl.pathname)}/NOTES.md`.replace(/\/{2,}/g, '/')
+    }
+    return notesUrl.toString()
+}
+
+export function tipHasReleaseNotes(tipDir: string): boolean {
+    const notesPath = join(tipDir, 'NOTES.md')
+    if (!existsSync(notesPath)) {
+        return false
+    }
+    try {
+        return readFileSync(notesPath, 'utf8').trim().length > 0
+    } catch {
+        return false
+    }
+}
+
+/**
+ * Fleet notes live on GitHub (`hapi-fleet` / sealed tip). Local NOTES.md is a
+ * cache — never optional for a tip that pets will show in the skew/applied banner.
+ * Retries through GH CDN lag (#304 / Ian empty "what's new").
+ */
+export async function downloadFleetNotesToTip(
+    manifestUrl: string,
+    tipDir: string,
+    attempts = 5,
+): Promise<void> {
+    const notesUrl = resolveFleetNotesUrl(manifestUrl)
+    const dest = join(tipDir, 'NOTES.md')
+    let lastErr: unknown
+    for (let i = 1; i <= attempts; i += 1) {
+        try {
+            await downloadToFile(notesUrl, dest)
+            if (!tipHasReleaseNotes(tipDir)) {
+                throw new Error(`NOTES.md empty after download from ${notesUrl}`)
+            }
+            return
+        } catch (err) {
+            lastErr = err
+            console.warn(
+                `[upstream-seal] NOTES.md download failed (try ${i}/${attempts}):`,
+                err instanceof Error ? err.message : err,
+            )
+            if (i < attempts) {
+                await new Promise((r) => setTimeout(r, 1000 * i))
+            }
+        }
+    }
+    throw new Error(
+        `fleet NOTES.md required but unavailable from ${notesUrl}: ${
+            lastErr instanceof Error ? lastErr.message : String(lastErr)
+        }`,
+    )
 }
 
 export async function materializeUpstreamSeal(options: {
@@ -331,19 +394,8 @@ export async function materializeUpstreamSeal(options: {
     mkdirSync(tipDir, { recursive: true })
     writeFileSync(join(tipDir, 'manifest.json'), `${JSON.stringify(options.manifest, null, 2)}\n`)
 
-    try {
-        const notesUrl = new URL(options.manifestUrl)
-        if (notesUrl.hostname === 'github.com' && /\/releases\/download\//.test(notesUrl.pathname)) {
-            const parts = notesUrl.pathname.split('/')
-            parts[parts.length - 1] = 'NOTES.md'
-            notesUrl.pathname = parts.join('/')
-        } else {
-            notesUrl.pathname = `${dirname(notesUrl.pathname)}/NOTES.md`.replace(/\/{2,}/g, '/')
-        }
-        await downloadToFile(notesUrl.toString(), join(tipDir, 'NOTES.md'))
-    } catch {
-        // optional
-    }
+    // NOTES before binary flip — banner reads tip NOTES; GH is source of truth (#304).
+    await downloadFleetNotesToTip(options.manifestUrl, tipDir)
 
     const destBinary = join(tipDir, options.binary.path)
     const downloadUrl = resolveBinaryDownloadUrl(options.manifestUrl, options.binary)
@@ -416,12 +468,31 @@ export async function runUpstreamSealTick(options: {
     })
 
     if (decision.action !== 'new' || !decision.binary) {
+        // Digest-current but NOTES missing (pre-#304 optional download): refill from GH
+        // without re-fetching the binary so applied banners can show the changelog.
+        let notesRefilled = false
+        if (decision.action === 'current' && decision.tag && config.apply) {
+            const tipDir = join(config.artifactsRoot, decision.tag)
+            if (existsSync(tipDir) && !tipHasReleaseNotes(tipDir)) {
+                try {
+                    await downloadFleetNotesToTip(config.manifestUrl, tipDir)
+                    notesRefilled = tipHasReleaseNotes(tipDir)
+                } catch (err) {
+                    console.warn(
+                        '[upstream-seal] NOTES.md refill on current tip failed:',
+                        err instanceof Error ? err.message : err,
+                    )
+                }
+            }
+        }
         return {
             action: decision.action,
-            reason: decision.reason,
+            reason: notesRefilled
+                ? `${decision.reason}; refilled NOTES.md from fleet channel`
+                : decision.reason,
             tag: decision.tag,
             remoteSha256: decision.remoteSha256,
-            materialized: false,
+            materialized: notesRefilled,
         }
     }
 

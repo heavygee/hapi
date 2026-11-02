@@ -554,7 +554,27 @@ driver_soup_fleet_seal_verify_public() {
     done
 
     rm -f "$tmp"
-    echo "fleet-seal: public OK → ${url} (tag=${want_tag}; digests match)"
+
+    # NOTES.md is part of the seal for Layer A banners (#304) — digests alone
+    # are not enough if pets materialize without changelog.
+    local notes_url notes_tmp notes_code notes_bytes
+    notes_url="${url%/manifest.json}/NOTES.md"
+    notes_tmp="$(mktemp "${TMPDIR:-/tmp}/hapi-fleet-notes-pub.XXXXXX")"
+    notes_code="$(curl -sL -o "$notes_tmp" -w '%{http_code}' --max-time 60 "$notes_url" 2>/dev/null || echo 000)"
+    if [[ "$notes_code" != "200" ]]; then
+        echo "ERROR: fleet-seal: public NOTES.md HTTP ${notes_code} from ${notes_url}" >&2
+        rm -f "$notes_tmp"
+        return 1
+    fi
+    notes_bytes="$(wc -c <"$notes_tmp" | tr -d ' ')"
+    if [[ "${notes_bytes:-0}" -lt 1 ]]; then
+        echo "ERROR: fleet-seal: public NOTES.md empty from ${notes_url}" >&2
+        rm -f "$notes_tmp"
+        return 1
+    fi
+    rm -f "$notes_tmp"
+
+    echo "fleet-seal: public OK → ${url} (tag=${want_tag}; digests match; NOTES.md ${notes_bytes}B)"
     return 0
 }
 

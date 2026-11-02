@@ -452,22 +452,22 @@ export function RunnerVersionSkewBanner({
                 >
                     {t('runner.skew.banner.appliedBody')}
                 </p>
-                {offer.releaseNotes ? (
-                    <details
-                        open
-                        className="mt-2 w-full min-w-0 rounded border border-zinc-300 bg-zinc-900 open:bg-zinc-900 dark:border-zinc-600"
-                        data-testid="runner-version-applied-release-notes"
-                    >
-                        <summary className="block w-full cursor-pointer px-2 py-1 text-xs font-medium text-zinc-100">
-                            {offer.soupTag
-                                ? t('runner.skew.banner.whatsNewTag', { tag: offer.soupTag })
-                                : t('runner.skew.banner.whatsNew')}
-                        </summary>
-                        <pre className="max-h-40 w-full min-w-0 overflow-x-auto overflow-y-auto whitespace-pre-wrap break-words border-t border-zinc-700 px-2 py-1.5 font-mono text-[11px] leading-relaxed text-zinc-100">
-                            {offer.releaseNotes}
-                        </pre>
-                    </details>
-                ) : null}
+                <details
+                    open
+                    className="mt-2 w-full min-w-0 rounded border border-zinc-300 bg-zinc-900 open:bg-zinc-900 dark:border-zinc-600"
+                    data-testid="runner-version-applied-release-notes"
+                >
+                    <summary className="block w-full cursor-pointer px-2 py-1 text-xs font-medium text-zinc-100">
+                        {offer.soupTag
+                            ? t('runner.skew.banner.whatsNewTag', { tag: offer.soupTag })
+                            : t('runner.skew.banner.whatsNew')}
+                    </summary>
+                    <pre className="max-h-40 w-full min-w-0 overflow-x-auto overflow-y-auto whitespace-pre-wrap break-words border-t border-zinc-700 px-2 py-1.5 font-mono text-[11px] leading-relaxed text-zinc-100">
+                        {offer.releaseNotes?.trim()
+                            ? offer.releaseNotes
+                            : t('runner.skew.banner.whatsNewEmpty')}
+                    </pre>
+                </details>
             </div>
         )
     }
@@ -546,21 +546,21 @@ export function RunnerVersionSkewBanner({
             {/* Full banner width — must sit outside the title/actions flex row or mobile
                 shrink-wraps NOTES beside Minimize/Snooze (~half width).
                 Dark code-block surface: never amber-on-amber for long NOTES. */}
-            {offer?.releaseNotes ? (
-                <details
-                    className="mt-2 w-full min-w-0 rounded border border-zinc-300 bg-zinc-900 open:bg-zinc-900 dark:border-zinc-600"
-                    data-testid="runner-version-skew-release-notes"
-                >
-                    <summary className="block w-full cursor-pointer px-2 py-1 text-xs font-medium text-zinc-100">
-                        {offer.soupTag
-                            ? t('runner.skew.banner.whatsNewTag', { tag: offer.soupTag })
-                            : t('runner.skew.banner.whatsNew')}
-                    </summary>
-                    <pre className="max-h-40 w-full min-w-0 overflow-x-auto overflow-y-auto whitespace-pre-wrap break-words border-t border-zinc-700 px-2 py-1.5 font-mono text-[11px] leading-relaxed text-zinc-100">
-                        {offer.releaseNotes}
-                    </pre>
-                </details>
-            ) : null}
+            <details
+                className="mt-2 w-full min-w-0 rounded border border-zinc-300 bg-zinc-900 open:bg-zinc-900 dark:border-zinc-600"
+                data-testid="runner-version-skew-release-notes"
+            >
+                <summary className="block w-full cursor-pointer px-2 py-1 text-xs font-medium text-zinc-100">
+                    {offer?.soupTag
+                        ? t('runner.skew.banner.whatsNewTag', { tag: offer.soupTag })
+                        : t('runner.skew.banner.whatsNew')}
+                </summary>
+                <pre className="max-h-40 w-full min-w-0 overflow-x-auto overflow-y-auto whitespace-pre-wrap break-words border-t border-zinc-700 px-2 py-1.5 font-mono text-[11px] leading-relaxed text-zinc-100">
+                    {offer?.releaseNotes?.trim()
+                        ? offer.releaseNotes
+                        : t('runner.skew.banner.whatsNewEmpty')}
+                </pre>
+            </details>
 
             <ul className="mt-2 space-y-2">
                 {skewed.map((machine) => {
