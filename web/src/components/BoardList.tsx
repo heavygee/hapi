@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { BoardItem, BoardSummary, IssueTemplate } from '@/types/api'
+import type { BoardAssignableUser, BoardItem, BoardSummary, IssueTemplate } from '@/types/api'
 import type { SessionSummary } from '@/types/api'
 import { BoardSwitcherBar, BoardSwitcherMenu, type BoardFilterItem } from '@/components/BoardSwitcher'
 import { AddBoardDialog } from '@/components/AddBoardDialog'
@@ -365,6 +365,11 @@ export function BoardList(props: {
     issueTemplatesError: string | null
     onNewCardRepoChange: (repo: string | null) => void
     onCreateCard: (payload: { repo: string; title: string; body: string; labels: string[]; assignees: string[] }) => Promise<string>
+    newCardAssignableUsers: BoardAssignableUser[]
+    isLoadingNewCardAssignableUsers: boolean
+    newCardAssignableUsersError: string | null
+    onNewCardAssigneePickerOpenChange: (open: boolean) => void
+    onNewCardAssignableUsersSearchChange: (search: string) => void
 }) {
     const { t } = useTranslation()
     // In-memory cache of explicit user toggles this session, keyed by
@@ -513,6 +518,11 @@ export function BoardList(props: {
                 templatesError={props.issueTemplatesError}
                 onRepoChange={props.onNewCardRepoChange}
                 onSubmit={props.onCreateCard}
+                assignableUsers={props.newCardAssignableUsers}
+                isLoadingAssignableUsers={props.isLoadingNewCardAssignableUsers}
+                assignableUsersError={props.newCardAssignableUsersError}
+                onAssigneePickerOpenChange={props.onNewCardAssigneePickerOpenChange}
+                onAssignableUsersSearchChange={props.onNewCardAssignableUsersSearchChange}
             />
 
             {removeTarget ? (

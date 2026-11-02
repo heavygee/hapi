@@ -856,6 +856,15 @@ export class ApiClient {
         )
     }
 
+    /** Repo-scoped sibling of getBoardItemAssignableUsers for "New card" — no existing item/url yet. */
+    async getRepoAssignableUsers(boardId: string, repo: string, search?: string): Promise<AssignableUsersResponse> {
+        const query = new URLSearchParams({ repo })
+        if (search) query.set('search', search)
+        return await this.request<AssignableUsersResponse>(
+            `/api/todo-boards/${encodeURIComponent(boardId)}/assignable-users?${query.toString()}`
+        )
+    }
+
     async getBoardItemComments(boardId: string, url: string): Promise<BoardItemCommentsResponse> {
         const query = new URLSearchParams({ url })
         return await this.request<BoardItemCommentsResponse>(

@@ -59,6 +59,11 @@ function renderList(items: BoardItem[], statusOrder: string[], overrides: Partia
                 issueTemplatesError={null}
                 onNewCardRepoChange={vi.fn()}
                 onCreateCard={vi.fn()}
+                newCardAssignableUsers={[]}
+                isLoadingNewCardAssignableUsers={false}
+                newCardAssignableUsersError={null}
+                onNewCardAssigneePickerOpenChange={vi.fn()}
+                onNewCardAssignableUsersSearchChange={vi.fn()}
                 {...overrides}
             />
         </I18nProvider>
@@ -175,6 +180,11 @@ describe('BoardList title filter (operator ask)', () => {
                     issueTemplatesError={null}
                     onNewCardRepoChange={vi.fn()}
                     onCreateCard={vi.fn()}
+                    newCardAssignableUsers={[]}
+                    isLoadingNewCardAssignableUsers={false}
+                    newCardAssignableUsersError={null}
+                    onNewCardAssigneePickerOpenChange={vi.fn()}
+                    onNewCardAssignableUsersSearchChange={vi.fn()}
                 />
             </I18nProvider>
         )

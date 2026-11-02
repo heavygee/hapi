@@ -1712,6 +1712,50 @@ export function createBoardRoutes(
         }
     })
 
+    // Repo-scoped sibling of /items/assignable-users above, for the "New
+    // card" wizard — there's no existing item yet to resolve a URL from, so
+    // this takes `repo` directly (same owner/name + GithubRepoSlugSchema
+    // validation issue-templates already uses below) instead of routing
+    // through requireBoardAndValidUrl. Same trust boundary as issue-templates:
+    // the repo is whatever the user is about to file an issue against in the
+    // same dialog, already fetched via that endpoint before this one is ever
+    // called (operator follow-up to hapi#238/#257 — a template-created issue
+    // with no assignee silently missed the operator's own assignee-filtered
+    // saved view).
+    app.get('/todo-boards/:id/assignable-users', async (c) => {
+        if (c.get('namespace') !== 'default') {
+            return c.json({ error: OWNER_ONLY_ERROR }, 403)
+        }
+        const boards = await loadBoards(dataDir)
+        const board = boards.find(b => b.id === c.req.param('id'))
+        if (!board) {
+            return c.json({ error: 'Unknown board' }, 404)
+        }
+        const repoParam = c.req.query('repo')
+        const repoResult = repoParam ? GithubRepoSlugSchema.safeParse(repoParam) : null
+        if (!repoResult || !repoResult.success) {
+            return c.json({ error: 'Missing or invalid repo query parameter — expected owner/name' }, 400)
+        }
+        const [owner, repo] = repoResult.data.split('/') as [string, string]
+
+        try {
+            const search = c.req.query('search')
+            const response = await runGraphqlAssignableUsers({
+                host: board.host,
+                owner,
+                repo,
+                query: search && search.trim() ? search.trim() : undefined
+            })
+            if (response.errors?.length) {
+                return c.json({ error: response.errors.map(e => e.message).join('; ') }, 502)
+            }
+            const body: AssignableUsersResponse = { users: toAssignableUsers(response) }
+            return c.json(body)
+        } catch (error) {
+            return c.json({ error: error instanceof Error ? error.message : 'Failed to fetch assignable users' }, 502)
+        }
+    })
+
     app.get('/todo-boards/:id/issue-templates', async (c) => {
         if (c.get('namespace') !== 'default') {
             return c.json({ error: OWNER_ONLY_ERROR }, 403)

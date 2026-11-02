@@ -51,6 +51,7 @@ import { useMachineLabels } from '@/hooks/useMachineLabels'
 import { useBoards } from '@/hooks/queries/useBoards'
 import { useBoardItems } from '@/hooks/queries/useBoardItems'
 import { useBoardAssignableUsers } from '@/hooks/queries/useBoardAssignableUsers'
+import { useRepoAssignableUsers } from '@/hooks/queries/useRepoAssignableUsers'
 import { useBoardItemComments } from '@/hooks/queries/useBoardItemComments'
 import { useIssueTemplates } from '@/hooks/queries/useIssueTemplates'
 import { useBoardSelection } from '@/hooks/useBoardSelection'
@@ -388,6 +389,22 @@ function SessionsPage() {
         isLoading: newCardTemplatesLoading,
         error: newCardTemplatesError,
     } = useIssueTemplates(api, effectiveBoardId, newCardRepo, newCardDialogOpen)
+    // Same lazy-on-popover-open boundary as the existing-item assignee picker
+    // above, keyed on the wizard's own repo selection instead of an item url
+    // (operator follow-up, hapi#238/#257).
+    const [newCardAssigneePickerOpen, setNewCardAssigneePickerOpen] = useState(false)
+    const [newCardAssignableUsersSearch, setNewCardAssignableUsersSearch] = useState('')
+    useEffect(() => {
+        if (!newCardDialogOpen) {
+            setNewCardAssigneePickerOpen(false)
+            setNewCardAssignableUsersSearch('')
+        }
+    }, [newCardDialogOpen])
+    const {
+        users: newCardAssignableUsers,
+        isLoading: newCardAssignableUsersLoading,
+        error: newCardAssignableUsersError,
+    } = useRepoAssignableUsers(api, effectiveBoardId, newCardRepo, newCardAssigneePickerOpen, newCardAssignableUsersSearch)
     // Hidden behind the board list while in Boards mode with an item
     // selected (mobile *and* desktop, since BoardItemDetail then occupies the
     // right-pane slot) — marking it "seen" there would silently clear unread
@@ -627,6 +644,11 @@ function SessionsPage() {
                             issueTemplatesError={newCardTemplatesError}
                             onNewCardRepoChange={setNewCardRepo}
                             onCreateCard={(payload) => createBoardItem(effectiveBoardId ?? '', payload)}
+                            newCardAssignableUsers={newCardAssignableUsers}
+                            isLoadingNewCardAssignableUsers={newCardAssignableUsersLoading}
+                            newCardAssignableUsersError={newCardAssignableUsersError}
+                            onNewCardAssigneePickerOpenChange={setNewCardAssigneePickerOpen}
+                            onNewCardAssignableUsersSearchChange={setNewCardAssignableUsersSearch}
                         />
                     ) : (
                     <SessionList

@@ -59,6 +59,11 @@ function renderList(items: BoardItem[], statusOrder: string[], boardId = 'board-
                 issueTemplatesError={null}
                 onNewCardRepoChange={vi.fn()}
                 onCreateCard={vi.fn()}
+                newCardAssignableUsers={[]}
+                isLoadingNewCardAssignableUsers={false}
+                newCardAssignableUsersError={null}
+                onNewCardAssigneePickerOpenChange={vi.fn()}
+                onNewCardAssignableUsersSearchChange={vi.fn()}
             />
         </I18nProvider>
     )

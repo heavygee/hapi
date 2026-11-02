@@ -17,6 +17,11 @@ function renderDialog(overrides: Partial<NewCardDialogProps> = {}) {
         templatesError: null,
         onRepoChange: vi.fn(),
         onSubmit: vi.fn().mockResolvedValue('https://github.com/heavygee/hapi/issues/42'),
+        assignableUsers: [],
+        isLoadingAssignableUsers: false,
+        assignableUsersError: null,
+        onAssigneePickerOpenChange: vi.fn(),
+        onAssignableUsersSearchChange: vi.fn(),
         ...overrides
     }
     return { ...render(<I18nProvider><NewCardDialog {...props} /></I18nProvider>), props }
@@ -97,6 +102,64 @@ describe('NewCardDialog', () => {
             })
             expect(props.onClose).toHaveBeenCalledOnce()
         })
+    })
+
+    // Bug report (operator follow-up, hapi#238/#257): a template-created
+    // issue with no assignee silently missed an assignee-filtered saved
+    // board view. The assignee list is seeded from the template but must
+    // stay freely editable, not just a read-only echo of it.
+    it('lets the user remove a template-seeded assignee before submit', async () => {
+        const onSubmit = vi.fn().mockResolvedValue('https://github.com/heavygee/hapi/issues/42')
+        renderDialog({ templates: [FORM_TEMPLATE], onSubmit })
+
+        fireEvent.change(screen.getByPlaceholderText('owner/repo'), { target: { value: 'heavygee/hapi' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+        fireEvent.click(await screen.findByText('Bug report'))
+
+        expect(screen.getByText('@octocat')).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Remove octocat' }))
+        expect(screen.queryByText('@octocat')).not.toBeInTheDocument()
+
+        fireEvent.change(screen.getAllByRole('textbox')[0]!, { target: { value: 'Title' } })
+        fireEvent.change(screen.getAllByRole('textbox')[1]!, { target: { value: 'me@example.com' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Create issue' }))
+
+        await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ assignees: [] })))
+    })
+
+    it('adds an assignee via the picker, fetched for the repo picked in step 1', async () => {
+        const onSubmit = vi.fn().mockResolvedValue('https://github.com/heavygee/hapi/issues/42')
+        renderDialog({
+            templates: [FORM_TEMPLATE],
+            onSubmit,
+            assignableUsers: [
+                { login: 'octocat', avatarUrl: 'https://example.com/octocat.png', name: 'The Octocat' },
+                { login: 'hubot', avatarUrl: 'https://example.com/hubot.png', name: null }
+            ]
+        })
+
+        fireEvent.change(screen.getByPlaceholderText('owner/repo'), { target: { value: 'heavygee/hapi' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+        fireEvent.click(await screen.findByText('Bug report'))
+
+        fireEvent.click(screen.getByRole('button', { name: 'Add assignee' }))
+        // The picker row's own button is named "@hubot" from its content (no
+        // aria-label) — distinct from the new chip's "Remove hubot" button.
+        fireEvent.click(screen.getByRole('button', { name: '@hubot' }))
+        // The popover stays open after a toggle (so multiple picks don't
+        // require reopening it) — its row still renders "@hubot" alongside
+        // the newly-added chip, so assert the chip via its own remove button.
+        expect(screen.getByRole('button', { name: 'Remove hubot' })).toBeInTheDocument()
+
+        fireEvent.change(screen.getAllByRole('textbox')[0]!, { target: { value: 'Title' } })
+        fireEvent.change(screen.getAllByRole('textbox')[1]!, { target: { value: 'me@example.com' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Create issue' }))
+
+        await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+            assignees: ['octocat', 'hubot']
+        })))
     })
 
     // Review finding: GitHub's template `title` is a pre-populated DEFAULT,

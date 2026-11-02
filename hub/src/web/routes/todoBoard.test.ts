@@ -1611,6 +1611,86 @@ describe('POST /api/todo-boards/:id/items/assignees', () => {
     })
 })
 
+describe('GET /api/todo-boards/:id/assignable-users', () => {
+    beforeEach(() => {
+        process.env.HAPI_BOARD_OWNER = 'heavygee'
+        process.env.HAPI_BOARD_NUMBER = '6'
+    })
+
+    // Repo-scoped sibling of /items/assignable-users for the "New card"
+    // wizard (operator follow-up, hapi#238/#257) — there's no existing item
+    // yet, so this takes `repo` directly instead of resolving one from an
+    // item url.
+    it('fetches assignable users scoped to the repo query parameter', async () => {
+        const calls: unknown[] = []
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, undefined, undefined, (target) => {
+            calls.push(target)
+            return {
+                data: {
+                    repository: {
+                        assignableUsers: {
+                            nodes: [
+                                { login: 'alice', avatarUrl: 'https://example.com/alice.png', name: 'Alice A' },
+                                { login: 'bob', avatarUrl: 'https://example.com/bob.png', name: null }
+                            ]
+                        }
+                    }
+                }
+            }
+        })
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/assignable-users?repo=heavygee/hapi`)
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({
+            users: [
+                { login: 'alice', avatarUrl: 'https://example.com/alice.png', name: 'Alice A' },
+                { login: 'bob', avatarUrl: 'https://example.com/bob.png', name: null }
+            ]
+        })
+        expect(calls).toEqual([{ host: 'github.com', owner: 'heavygee', repo: 'hapi' }])
+    })
+
+    it('forwards a trimmed search term as the GraphQL query filter', async () => {
+        const calls: unknown[] = []
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, undefined, undefined, (target) => {
+            calls.push(target)
+            return { data: { repository: { assignableUsers: { nodes: [] } } } }
+        })
+        const response = await app.request(
+            `/api/todo-boards/${DEFAULT_BOARD_ID}/assignable-users?repo=heavygee/hapi&search=${encodeURIComponent('  alice  ')}`
+        )
+        expect(response.status).toBe(200)
+        expect(calls).toEqual([{ host: 'github.com', owner: 'heavygee', repo: 'hapi', query: 'alice' }])
+    })
+
+    it('400s for a missing or malformed repo query parameter', async () => {
+        const app = await createApp(() => ({ data: {} }))
+        const missing = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/assignable-users`)
+        expect(missing.status).toBe(400)
+        const malformed = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/assignable-users?repo=not-a-slug`)
+        expect(malformed.status).toBe(400)
+    })
+
+    it('404s for an unknown board', async () => {
+        const app = await createApp(() => ({ data: {} }))
+        const response = await app.request(`/api/todo-boards/unknown/assignable-users?repo=heavygee/hapi`)
+        expect(response.status).toBe(404)
+    })
+
+    it('403s for a non-default namespace', async () => {
+        const app = await createApp(() => ({ data: {} }), undefined, 'some-other-namespace')
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/assignable-users?repo=heavygee/hapi`)
+        expect(response.status).toBe(403)
+    })
+
+    it('surfaces a GraphQL error as a 502', async () => {
+        const app = await createApp(() => ({ data: {} }), undefined, 'default', undefined, undefined, undefined, () => ({
+            errors: [{ message: 'boom' }]
+        }))
+        const response = await app.request(`/api/todo-boards/${DEFAULT_BOARD_ID}/assignable-users?repo=heavygee/hapi`)
+        expect(response.status).toBe(502)
+    })
+})
+
 describe('GET /api/todo-boards/:id/issue-templates', () => {
     beforeEach(() => {
         process.env.HAPI_BOARD_OWNER = 'heavygee'

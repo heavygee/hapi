@@ -81,6 +81,11 @@ function renderList(items: BoardItem[], overrides: { onRefresh?: () => void; isR
                 issueTemplatesError={null}
                 onNewCardRepoChange={vi.fn()}
                 onCreateCard={vi.fn()}
+                newCardAssignableUsers={[]}
+                isLoadingNewCardAssignableUsers={false}
+                newCardAssignableUsersError={null}
+                onNewCardAssigneePickerOpenChange={vi.fn()}
+                onNewCardAssignableUsersSearchChange={vi.fn()}
             />
         </I18nProvider>
     )

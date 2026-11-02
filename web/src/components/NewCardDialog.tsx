@@ -9,8 +9,11 @@ import { Button } from '@/components/ui/button'
 import { SelectControl } from '@/components/ui/select-control'
 import { Spinner } from '@/components/Spinner'
 import { IssueFormFieldView } from '@/components/IssueFormField'
+import { AssigneePicker } from '@/components/BoardItemDetail'
+import { CloseIcon } from '@/components/icons'
 import { getApiErrorMessage, getApiErrorUrl } from '@/lib/apiErrorMessage'
 import { useTranslation } from '@/lib/use-translation'
+import type { BoardAssignableUser } from '@/types/api'
 import {
     formatIssueBody,
     initialAnswersForFields,
@@ -47,6 +50,12 @@ export type NewCardDialogProps = {
     templatesError: string | null
     onRepoChange: (repo: string | null) => void
     onSubmit: (payload: { repo: string; title: string; body: string; labels: string[]; assignees: string[] }) => Promise<string>
+    /** Assignable-users picker for the repo picked in step 1 — mirrors BoardItemDetail's existing-item picker, but keyed on repo instead of an item url. */
+    assignableUsers: BoardAssignableUser[]
+    isLoadingAssignableUsers: boolean
+    assignableUsersError: string | null
+    onAssigneePickerOpenChange: (open: boolean) => void
+    onAssignableUsersSearchChange: (search: string) => void
 }
 
 /**
@@ -60,7 +69,10 @@ export type NewCardDialogProps = {
  */
 export function NewCardDialog(props: NewCardDialogProps) {
     const { t } = useTranslation()
-    const { isOpen, onClose, knownRepos, templates, blankAllowed, githubNewIssueUrl, isLoadingTemplates, templatesError, onRepoChange, onSubmit } = props
+    const {
+        isOpen, onClose, knownRepos, templates, blankAllowed, githubNewIssueUrl, isLoadingTemplates, templatesError, onRepoChange, onSubmit,
+        assignableUsers, isLoadingAssignableUsers, assignableUsersError, onAssigneePickerOpenChange, onAssignableUsersSearchChange
+    } = props
 
     const [step, setStep] = useState<Step>('repo')
     const [repoInput, setRepoInput] = useState('')
@@ -69,6 +81,11 @@ export function NewCardDialog(props: NewCardDialogProps) {
     const [title, setTitle] = useState('')
     const [freeTextBody, setFreeTextBody] = useState('')
     const [answers, setAnswers] = useState<Record<string, IssueFormAnswer>>({})
+    // Seeded from the template's own `assignees:` frontmatter on pick, then
+    // freely editable — a template-created issue with no assignee can
+    // silently miss an assignee-filtered saved board view the creator never
+    // thought to check (operator follow-up, hapi#238/#257).
+    const [assignees, setAssignees] = useState<string[]>([])
     const [isSubmitting, setIsSubmitting] = useState(false)
     const [error, setError] = useState<string | null>(null)
     // Set only for a partial-failure write — the issue itself was created but
@@ -87,6 +104,7 @@ export function NewCardDialog(props: NewCardDialogProps) {
         setTitle('')
         setFreeTextBody('')
         setAnswers({})
+        setAssignees([])
         setError(null)
         setOrphanedIssueUrl(null)
         setIsSubmitting(false)
@@ -162,6 +180,7 @@ export function NewCardDialog(props: NewCardDialogProps) {
         // editable input rather than rendered as an unremovable prefix ahead
         // of it.
         setTitle(template?.titlePrefix ?? '')
+        setAssignees(template?.assignees ?? [])
         setStep('form')
     }
 
@@ -175,7 +194,7 @@ export function NewCardDialog(props: NewCardDialogProps) {
                 title: finalTitle,
                 body: formattedBody,
                 labels: selectedTemplate?.labels ?? [],
-                assignees: selectedTemplate?.assignees ?? []
+                assignees
             })
             onClose()
         } catch (err) {
@@ -346,6 +365,43 @@ export function NewCardDialog(props: NewCardDialogProps) {
                                     autoFocus
                                 />
                             </label>
+                            <div className="flex flex-col gap-1.5">
+                                <span className="text-sm font-medium text-[var(--app-fg)]">{t('boards.newCard.assignees')}</span>
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                    {assignees.map((login) => (
+                                        <span
+                                            key={login}
+                                            className="inline-flex items-center gap-1 rounded-full border border-[var(--app-border)] py-0.5 pl-2 pr-1.5 text-xs text-[var(--app-fg)]"
+                                        >
+                                            @{login}
+                                            <button
+                                                type="button"
+                                                onClick={() => setAssignees(prev => prev.filter(existing => existing !== login))}
+                                                aria-label={t('boards.detail.removeAssignee', { login })}
+                                                title={t('boards.detail.removeAssignee', { login })}
+                                                className="text-[var(--app-hint)] hover:text-[var(--app-fg)]"
+                                            >
+                                                <CloseIcon className="h-3 w-3" />
+                                            </button>
+                                        </span>
+                                    ))}
+                                    <AssigneePicker
+                                        currentLogins={new Set(assignees)}
+                                        users={assignableUsers}
+                                        isLoadingUsers={isLoadingAssignableUsers}
+                                        usersError={assignableUsersError}
+                                        isPending={false}
+                                        onOpenChange={onAssigneePickerOpenChange}
+                                        onSearchChange={onAssignableUsersSearchChange}
+                                        onToggle={(login, currentlyAssigned) => {
+                                            setAssignees(prev => currentlyAssigned
+                                                ? prev.filter(existing => existing !== login)
+                                                : [...prev, login])
+                                        }}
+                                        t={t}
+                                    />
+                                </div>
+                            </div>
                             {selectedTemplate && selectedTemplate.kind === 'form' ? (
                                 selectedTemplate.fields.map((field, index) => (
                                     <IssueFormFieldView
@@ -385,8 +441,8 @@ export function NewCardDialog(props: NewCardDialogProps) {
                                 {selectedTemplate?.labels.length ? (
                                     <div><span className="font-medium text-[var(--app-fg)]">{t('boards.newCard.labels')}:</span> <span className="text-[var(--app-hint)]">{selectedTemplate.labels.join(', ')}</span></div>
                                 ) : null}
-                                {selectedTemplate?.assignees.length ? (
-                                    <div><span className="font-medium text-[var(--app-fg)]">{t('boards.newCard.assignees')}:</span> <span className="text-[var(--app-hint)]">{selectedTemplate.assignees.join(', ')}</span></div>
+                                {assignees.length ? (
+                                    <div><span className="font-medium text-[var(--app-fg)]">{t('boards.newCard.assignees')}:</span> <span className="text-[var(--app-hint)]">{assignees.join(', ')}</span></div>
                                 ) : null}
                                 <div className="flex flex-col gap-1">
                                     <span className="font-medium text-[var(--app-fg)]">{t('boards.newCard.bodyPreview')}:</span>

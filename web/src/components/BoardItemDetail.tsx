@@ -200,7 +200,7 @@ const ASSIGNABLE_USERS_SEARCH_DEBOUNCE_MS = 300
 // past the first page permanently unreachable from this picker) forwards
 // the hub's own server-side `assignableUsers(query:)` filter instead of
 // paginating client-side.
-function AssigneePicker(props: {
+export function AssigneePicker(props: {
     currentLogins: ReadonlySet<string>
     users: BoardAssignableUser[]
     isLoadingUsers: boolean
