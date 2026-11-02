@@ -821,4 +821,45 @@ describe('RunnerVersionSkewBanner', () => {
         fireEvent.click(screen.getByTestId('runner-version-applied-dismiss'))
         expect(screen.queryByTestId('runner-version-applied-banner')).not.toBeInTheDocument()
     })
+
+    it('shows whatsNewEmpty when applied tip has no releaseNotes (#304)', () => {
+        const scope = runnerSkewBannerScope('http://localhost', getTokenNamespace('t'))
+        acknowledgeFleetOfferId(scope, 'hapi-soup-v-previous')
+        useUpgradeInfoMock.mockReturnValue({
+            info: {
+                offer: {
+                    ...TEST_OFFER,
+                    channel: 'hub-artifact',
+                    targetVersion: 'hapi-soup-v-next',
+                    targetGeneration: 'hapi-soup-v-next',
+                    soupTag: 'hapi-soup-v-next',
+                    releaseNotes: undefined,
+                },
+                policy: 'auto',
+            },
+            isLoading: false,
+        })
+        useMachinesMock.mockReturnValue({
+            machines: [
+                makeMachine({
+                    id: 'new',
+                    metadata: {
+                        host: 'oos',
+                        platform: 'linux',
+                        happyCliVersion: 'hapi-soup-v-next',
+                        capabilities: [...CURRENT_MACHINE_CAPABILITIES],
+                        cliArtifactGeneration: 'hapi-soup-v-next',
+                    },
+                }),
+            ],
+            isLoading: false,
+            error: null,
+        })
+
+        renderBanner()
+
+        expect(screen.getByTestId('runner-version-applied-release-notes')).toHaveTextContent(
+            /No release notes published for this tip yet/,
+        )
+    })
 })

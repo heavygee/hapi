@@ -10,10 +10,13 @@ import { join } from 'node:path'
 import {
     assertUpstreamSealUrlSafe,
     decideUpstreamSealNewness,
+    downloadFleetNotesToTip,
     ghAssetNameForBinaryPath,
     resolveBinaryDownloadUrl,
+    resolveFleetNotesUrl,
     resolveUpstreamSealConfig,
     runUpstreamSealTick,
+    tipHasReleaseNotes,
     type UpstreamSealConfig,
 } from './upstreamSeal'
 import type { SoupManifest } from './soupArtifact'
@@ -37,6 +40,73 @@ const manifest: SoupManifest = {
         },
     ],
 }
+
+describe('resolveFleetNotesUrl', () => {
+    it('maps GH releases/download manifest to sibling NOTES.md', () => {
+        expect(
+            resolveFleetNotesUrl(
+                'https://github.com/heavygee/hapi/releases/download/hapi-fleet/manifest.json',
+            ),
+        ).toBe('https://github.com/heavygee/hapi/releases/download/hapi-fleet/NOTES.md')
+    })
+})
+
+describe('tipHasReleaseNotes', () => {
+    it('is false when NOTES.md missing or blank', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'notes-check-'))
+        try {
+            expect(tipHasReleaseNotes(dir)).toBe(false)
+            writeFileSync(join(dir, 'NOTES.md'), '  \n')
+            expect(tipHasReleaseNotes(dir)).toBe(false)
+            writeFileSync(join(dir, 'NOTES.md'), '### Changes\n\n- feat\n')
+            expect(tipHasReleaseNotes(dir)).toBe(true)
+        } finally {
+            rmSync(dir, { recursive: true, force: true })
+        }
+    })
+})
+
+describe('downloadFleetNotesToTip', () => {
+    it('fail-closes when NOTES stay unavailable (#304)', async () => {
+        const dir = mkdtempSync(join(tmpdir(), 'notes-dl-'))
+        const originalFetch = globalThis.fetch
+        globalThis.fetch = (async () =>
+            new Response('gone', { status: 404 })) as typeof fetch
+        try {
+            await expect(
+                downloadFleetNotesToTip(
+                    'https://github.com/heavygee/hapi/releases/download/hapi-fleet/manifest.json',
+                    dir,
+                    1,
+                ),
+            ).rejects.toThrow(/NOTES\.md required/)
+            expect(tipHasReleaseNotes(dir)).toBe(false)
+        } finally {
+            globalThis.fetch = originalFetch
+            rmSync(dir, { recursive: true, force: true })
+        }
+    })
+
+    it('writes NOTES.md when the channel serves them', async () => {
+        const dir = mkdtempSync(join(tmpdir(), 'notes-ok-'))
+        const body = '### Changes\n\n- feat: notes required (#304)\n'
+        const originalFetch = globalThis.fetch
+        globalThis.fetch = (async () =>
+            new Response(body, { status: 200 })) as typeof fetch
+        try {
+            await downloadFleetNotesToTip(
+                'https://github.com/heavygee/hapi/releases/download/hapi-fleet/manifest.json',
+                dir,
+                1,
+            )
+            expect(tipHasReleaseNotes(dir)).toBe(true)
+            expect(readFileSync(join(dir, 'NOTES.md'), 'utf8')).toContain('#304')
+        } finally {
+            globalThis.fetch = originalFetch
+            rmSync(dir, { recursive: true, force: true })
+        }
+    })
+})
 
 describe('resolveUpstreamSealConfig', () => {
     it('returns null when unset', () => {
