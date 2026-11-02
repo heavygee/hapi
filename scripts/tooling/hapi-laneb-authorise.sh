@@ -64,8 +64,28 @@ echo "  ttl:   ${TTL_MIN} min, single use"
 echo
 echo "This permits ONE merge of this exact SHA. The pre-merge gate still runs and"
 echo "can still block (unresolved threads, unanswered maintainer comments, red CI)."
-printf 'Type MERGE to authorise: '
-read -r ans
+# Pasting the command often delivers a trailing newline (and pasting a block
+# delivers several). A bare `read` consumes that as an empty answer and aborts,
+# which looked like a typo every time. Skip blank lines instead of treating
+# them as a refusal; a real non-empty answer still decides, and EOF still
+# aborts rather than hanging.
+ans=''
+blanks=0
+while [ -z "$ans" ]; do
+    printf 'Type MERGE to authorise: '
+    if ! IFS= read -r ans; then
+        echo
+        echo "Aborted (no input)."
+        exit 1
+    fi
+    # Tolerate CRLF and padding from a paste.
+    ans="$(printf '%s' "$ans" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    if [ -z "$ans" ]; then
+        blanks=$((blanks + 1))
+        [ "$blanks" -lt 10 ] || { echo "Aborted (no answer)."; exit 1; }
+    fi
+done
+
 [ "$ans" = "MERGE" ] || { echo "Aborted."; exit 1; }
 
 mkdir -p "$TOKDIR"
