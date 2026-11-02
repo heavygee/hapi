@@ -229,10 +229,21 @@ PUB_PID=$!
 cleanup_pub() { kill "$PUB_PID" 2>/dev/null || true; }
 trap cleanup_pub EXIT
 sleep 0.3
+# NOTES.md is required on the public channel (#304) — digests alone insufficient.
+printf '%s\n' '### Changes\n\n- feat: public notes required\n' >"$PUB_DIR/NOTES.md"
 export HAPI_FLEET_PUBLIC_MANIFEST_URL="http://127.0.0.1:${PUB_PORT}/manifest.json"
 driver_soup_fleet_seal_verify_public "$SEAL_ROOT/$SEAL_TAG" "$SEAL_TAG" \
     || { echo "FAIL: public verify should pass on matching object"; exit 1; }
-echo "OK: public verify passes on matching tag+digest"
+echo "OK: public verify passes on matching tag+digest+NOTES"
+
+# Missing NOTES.md → must go RED (#304)
+rm -f "$PUB_DIR/NOTES.md"
+if driver_soup_fleet_seal_verify_public "$SEAL_ROOT/$SEAL_TAG" "$SEAL_TAG"; then
+    echo "FAIL: public verify must fail when NOTES.md missing"
+    exit 1
+fi
+echo "OK: public verify goes RED when NOTES.md missing"
+printf '%s\n' '### Changes\n\n- feat: public notes required\n' >"$PUB_DIR/NOTES.md"
 
 # Deliberately broken public object (wrong tag) → must go RED
 jq -n \
