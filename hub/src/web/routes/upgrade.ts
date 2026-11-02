@@ -48,7 +48,9 @@ function resolveOfferFallback(platform: string, arch: string): HubUpgradeOffer {
         hubPackageRoot: defaultHubPackageRoot(),
         execPath: process.execPath,
     })
-    if (fallback.channel === 'hub-artifact' && preferPublishedSoupTip()) {
+    // Overlay sealed/published tip whenever prefer-soup is on — pets may detect
+    // as npm channel yet still serve hub-artifact tip + NOTES (#304 follow-up).
+    if (preferPublishedSoupTip()) {
         const tip = readPublishedSoupTip()
         if (tip) {
             const soupOffer = soupTipToUpgradeOffer(tip, platform, arch, fallback)
@@ -226,7 +228,7 @@ export function createUpgradeCliRoutes(): Hono<CliEnv> {
             execPath: process.execPath,
         })
         let effectiveOffer = baseOffer
-        if (baseOffer.channel === 'hub-artifact' && preferPublishedSoupTip()) {
+        if (preferPublishedSoupTip()) {
             const tip = readPublishedSoupTip()
             if (tip) {
                 const soupOffer = soupTipToUpgradeOffer(

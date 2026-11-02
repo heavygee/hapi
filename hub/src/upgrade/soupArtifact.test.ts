@@ -104,6 +104,16 @@ describe('readPublishedSoupTip / soupTipToUpgradeOffer', () => {
             })
             expect(offer?.soupTag).toBe(tag)
             expect(offer?.releaseNotes).toContain('#247')
+            // Layer A single-exe pets detect as npm (no monorepo). Overlay must
+            // still promote tip NOTES onto a hub-artifact offer (#304 follow-up).
+            const fromNpm = soupTipToUpgradeOffer(tip!, 'linux', 'x64', {
+                channel: 'npm',
+                targetVersion: '0.31.5',
+                targetCapabilities: ['runner-self-upgrade'],
+                npmPackage: '@twsxtd/hapi',
+            })
+            expect(fromNpm?.channel).toBe('hub-artifact')
+            expect(fromNpm?.releaseNotes).toContain('#247')
         } finally {
             rmSync(root, { recursive: true, force: true })
         }
@@ -114,6 +124,57 @@ describe('readPublishedSoupTip / soupTipToUpgradeOffer', () => {
         try {
             expect(readPublishedSoupTip(root)).toBeNull()
         } finally {
+            rmSync(root, { recursive: true, force: true })
+        }
+    })
+
+    it('Layer A (HAPI_UPSTREAM_SEAL_URL): prefers fleet-latest over diverged latest (#304 follow-up)', () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-soup-fleet-pref-'))
+        const prev = process.env.HAPI_UPSTREAM_SEAL_URL
+        try {
+            const dogfood = 'hapi-soup-v2026.11.01-dogfood0'
+            const sealed = 'hapi-soup-v2026.11.02-sealed01'
+            writeTipFixture(root, dogfood, 'dogfood0000001')
+            const sealedDir = writeTipFixture(root, sealed, 'sealed00000001')
+            writeFileSync(join(sealedDir, 'NOTES.md'), '### Changes\n\n- feat: sealed notes (#304)\n')
+            symlinkSync(dogfood, join(root, 'latest'))
+            symlinkSync(sealed, join(root, 'fleet-latest'))
+            process.env.HAPI_UPSTREAM_SEAL_URL =
+                'https://github.com/heavygee/hapi/releases/download/hapi-fleet/manifest.json'
+
+            const tip = readPublishedSoupTip(root)
+            expect(tip?.tag).toBe(sealed)
+            expect(tip?.releaseNotes).toContain('sealed notes')
+        } finally {
+            if (prev === undefined) {
+                delete process.env.HAPI_UPSTREAM_SEAL_URL
+            } else {
+                process.env.HAPI_UPSTREAM_SEAL_URL = prev
+            }
+            rmSync(root, { recursive: true, force: true })
+        }
+    })
+
+    it('foundry (no seal URL): still prefers latest so dogfood tip wins', () => {
+        const root = mkdtempSync(join(tmpdir(), 'hapi-soup-latest-pref-'))
+        const prev = process.env.HAPI_UPSTREAM_SEAL_URL
+        try {
+            delete process.env.HAPI_UPSTREAM_SEAL_URL
+            const dogfood = 'hapi-soup-v2026.11.01-dogfood0'
+            const sealed = 'hapi-soup-v2026.11.02-sealed01'
+            writeTipFixture(root, dogfood, 'dogfood0000001')
+            writeTipFixture(root, sealed, 'sealed00000001')
+            symlinkSync(dogfood, join(root, 'latest'))
+            symlinkSync(sealed, join(root, 'fleet-latest'))
+
+            const tip = readPublishedSoupTip(root)
+            expect(tip?.tag).toBe(dogfood)
+        } finally {
+            if (prev === undefined) {
+                delete process.env.HAPI_UPSTREAM_SEAL_URL
+            } else {
+                process.env.HAPI_UPSTREAM_SEAL_URL = prev
+            }
             rmSync(root, { recursive: true, force: true })
         }
     })
