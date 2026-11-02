@@ -1406,3 +1406,8 @@ layers:
   # Hub+web+cli+tooling → remat --build-web + publish + seal (NOTES on hapi-fleet).
   # Tip-unique: downloadFleetNotesToTip / tipHasReleaseNotes
   - branch: driver/fix-304-fleet-notes-required
+
+  # #305 — overlay soup tip NOTES on npm-channel Layer A pets (Ian empty banner).
+  # Thin tip on soup HEAD 2a4fcb33a: driver/fix-304-offer-notes-thin @ bbff31dde+
+  # Hub-only → remat + publish + seal; tip-unique: preferFleetLatestPointer
+  - branch: driver/fix-304-offer-notes-thin
