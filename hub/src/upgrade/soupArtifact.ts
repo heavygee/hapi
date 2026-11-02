@@ -85,23 +85,50 @@ export function preferPublishedSoupTip(env: NodeJS.ProcessEnv = process.env): bo
     return value !== '0' && value !== 'false' && value !== 'off' && value !== 'no'
 }
 
+/**
+ * Layer A pets (`HAPI_UPSTREAM_SEAL_URL`) should read the sealed pointer, not
+ * dogfood `latest`. Foundry leaves seal URL unset so remat thrash on `latest`
+ * stays the offer source. (#304 follow-up — Ian empty NOTES with tip on disk)
+ */
+export function preferFleetLatestPointer(env: NodeJS.ProcessEnv = process.env): boolean {
+    const url = env.HAPI_UPSTREAM_SEAL_URL?.trim()
+    return Boolean(url && url.length > 0)
+}
+
+function resolveSoupTipDir(
+    artifactsRoot: string,
+    linkName: 'latest' | 'fleet-latest',
+    tagFileName: 'latest-tag.txt' | 'fleet-latest-tag.txt',
+): string | null {
+    const link = join(artifactsRoot, linkName)
+    const tagFile = join(artifactsRoot, tagFileName)
+    if (existsSync(link)) {
+        try {
+            return realpathSync(link)
+        } catch {
+            return link
+        }
+    }
+    if (existsSync(tagFile)) {
+        const tag = readFileSync(tagFile, 'utf8').trim()
+        if (tag) {
+            return join(artifactsRoot, tag)
+        }
+    }
+    return null
+}
+
 export function readPublishedSoupTip(
     artifactsRoot: string = defaultSoupArtifactsRoot(),
+    env: NodeJS.ProcessEnv = process.env,
 ): PublishedSoupTip | null {
-    const latestLink = join(artifactsRoot, 'latest')
-    const latestTagFile = join(artifactsRoot, 'latest-tag.txt')
     let tipDir: string | null = null
-    if (existsSync(latestLink)) {
-        try {
-            tipDir = realpathSync(latestLink)
-        } catch {
-            tipDir = latestLink
-        }
-    } else if (existsSync(latestTagFile)) {
-        const tag = readFileSync(latestTagFile, 'utf8').trim()
-        if (tag) {
-            tipDir = join(artifactsRoot, tag)
-        }
+    if (preferFleetLatestPointer(env)) {
+        tipDir = resolveSoupTipDir(artifactsRoot, 'fleet-latest', 'fleet-latest-tag.txt')
+            ?? resolveSoupTipDir(artifactsRoot, 'latest', 'latest-tag.txt')
+    } else {
+        tipDir = resolveSoupTipDir(artifactsRoot, 'latest', 'latest-tag.txt')
+            ?? resolveSoupTipDir(artifactsRoot, 'fleet-latest', 'fleet-latest-tag.txt')
     }
     if (!tipDir || !existsSync(tipDir)) {
         return null

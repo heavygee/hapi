@@ -32,6 +32,7 @@ import {
     ensureSoupCliArtifact,
     preferPublishedSoupTip,
     readPublishedSoupTip,
+    readSoupReleaseNotes,
     soupTipToUpgradeOffer,
 } from './upgrade/soupArtifact'
 import {
@@ -159,7 +160,19 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
             && cachedUpgradeOffer.platform === platform
             && cachedUpgradeOffer.arch === arch
         ) {
-            return cachedUpgradeOffer.offer
+            // Bust notes-less cache when tip NOTES appeared after the cache fill
+            // (refill / manual drop / fleet-latest preference) — #304 follow-up.
+            const cached = cachedUpgradeOffer.offer
+            if (!cached.releaseNotes?.trim() && preferPublishedSoupTip()) {
+                const tipNow = readPublishedSoupTip()
+                if (tipNow?.releaseNotes?.trim()) {
+                    cachedUpgradeOffer = null
+                } else {
+                    return cached
+                }
+            } else {
+                return cached
+            }
         }
         const offer = resolveUpgradeOffer({
             hubPackageRoot: defaultHubPackageRoot(),
@@ -168,7 +181,9 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         })
         // Estate soup tip wins over live-tree fingerprint: policy=auto must
         // not stomp a just-published hapi-soup-v* with hapi-0.<semver>-<fp>.
-        if (offer.channel === 'hub-artifact' && preferPublishedSoupTip()) {
+        // Layer A single-exe pets often detect as npm; still overlay the sealed
+        // tip so offer.releaseNotes / soupTag reach the applied banner (#304).
+        if (preferPublishedSoupTip()) {
             const tip = readPublishedSoupTip()
             if (tip) {
                 const soupOffer = soupTipToUpgradeOffer(tip, platform, arch, offer)
@@ -351,8 +366,14 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
                     hubPackageRoot: defaultHubPackageRoot(),
                 })
             retainArtifactOffer(meta.sha256)
+            const tipNotes = tip
+                ? (tip.releaseNotes ?? readSoupReleaseNotes(tip.root))
+                : undefined
             const prepared = {
                 ...offer,
+                // Re-read tip NOTES at prepare time — keepalive may have cached
+                // a notes-less offer before Layer A refill (#304 follow-up).
+                ...(tipNotes?.trim() ? { releaseNotes: tipNotes } : {}),
                 // Soup tip: sourceFingerprint is the soup tag (matches SCP
                 // durable markers). Live-tree compiles: content fingerprint.
                 targetGeneration: meta.sourceFingerprint,
