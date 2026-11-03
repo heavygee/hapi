@@ -139,6 +139,23 @@ Babysitter: [Boards: edit issue title/body](/sessions/9a25e9d0-557c-44b1-b5cd-50
 
 Honest promote read: focused restore of `change_title` + manual precedence — candidate for `low-impact` if labelling session agrees, or `dogfooded` after estate soup dogfood. Not silent auto-B.
 
+### Dogfood + `dogfooded` path (2026-11-03)
+
+Operator: not auto-B → dogfood then assess `dogfooded` merge basis. **Ran.**
+
+| Proof | Result |
+|-------|--------|
+| Peer stack `1672-change-title` on PR tip `0e6266df0` | up → live MCP dogfood → down |
+| Soup `:3006` tip | **not** yet (cherry-pick onto soup HEAD conflicted; soup still `enableChangeTitle: false`) |
+| `tools/list` includes `change_title` | **yes** |
+| `change_title` → `metadata.name` + `acpManualTitle` | **yes** |
+| Later native title sync does not overwrite | **yes** |
+| Tip tests | `acpSessionTitle` + `buildHapiMcpBridge.integration` green |
+
+**Assessment:** **Yes — `dogfooded` is the right lane-B promote** for this PR (focused, community, CLEAN, oversize auto-B). Label + stamp applied; **48h UTC countdown** before merge eligibility. Agents remain prepare-only; merge needs operator TTY + `hapi-laneb-authorise` after the window.
+
+**Not claimed:** production `:3006` soup dogfood (conflicts). Peer-stack live install satisfies the dogfooded “real HAPI install” bar; soup tip still desirable as follow-up.
+
 ## Changelog
 
 - 2026-11-03 — Written from opmic Cursor session incident; dispatched to upstream issue/pr discovery.
