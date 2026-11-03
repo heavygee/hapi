@@ -101,6 +101,8 @@ fi
 #    by a later push. A maintainer's plain comment is blocking even though GitHub
 #    gives it no mechanical weight.
 #    Ignore ChatGPT Codex connector noise (usage-limit replies are not review asks).
+#    Ignore `dogfooded since …` stamps (#2083) — those are merge-intent receipts,
+#    not asks; blocking on them breaks fire-and-forget dogfood merges.
 PUSHED_AT="$("$REAL_GH" api "repos/$REPO/commits/$HEAD" --jq '.commit.committer.date' 2>/dev/null || echo "")"
 CMTS_JSON="$("$REAL_GH" pr view "$PR" --repo "$REPO" --json comments 2>/dev/null || echo "")"
 if [ -z "$CMTS_JSON" ]; then
@@ -112,6 +114,9 @@ else
           | select(.createdAt > $since)
           | select(.author.login != "chatgpt-codex-connector")
           | select(.body | test("usage limits for code reviews") | not)
+          | select(.body | test("dogfooded since"; "i") | not)
+          | select(.body | test("New tracker: #|Related tracker: #"; "i") | not)
+          | select(.body | test("plan to merge this after"; "i") | not)
           | .author.login] | unique | join(", ")' \
         <<<"$CMTS_JSON" 2>/dev/null || echo "ERR")"
 fi
@@ -137,8 +142,18 @@ fi
 # Attaching `dogfooded` starts a 48h UTC countdown. Merge is blocked until the
 # window elapses — even with a valid lane B grant. low-impact-only PRs skip this.
 # shellcheck source=lib/dogfood-countdown.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/dogfood-countdown.sh"
+_GATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_DF_LIB=""
+for _cand in "$_GATE_DIR/lib/dogfood-countdown.sh" \
+             "${HOME}/coding/hapi/scripts/tooling/lib/dogfood-countdown.sh" \
+             "/work/coding/hapi/scripts/tooling/lib/dogfood-countdown.sh"; do
+    if [ -f "$_cand" ]; then _DF_LIB="$_cand"; break; fi
+done
+[ -n "$_DF_LIB" ] || { echo "GATE FAIL: dogfood-countdown.sh not found" >&2; exit 2; }
+# shellcheck source=/dev/null
+source "$_DF_LIB"
 LABELS_CSV="$("$REAL_GH" pr view "$PR" --repo "$REPO" --json labels -q '[.labels[].name]|join(",")' 2>/dev/null || echo "")"
+DF_STATUS=""
 if [ "$REPO" = "$UPSTREAM_REPO" ] && dogfood_has_label "$LABELS_CSV"; then
     DF_LINE="$(dogfood_status_for_pr "$REPO" "$PR" "$LABELS_CSV")"
     DF_STATUS="${DF_LINE%%$'\t'*}"
@@ -161,15 +176,25 @@ else
     pass "no dogfooded label — 48h window N/A"
 fi
 
-# 8. LANE POLICY — upstream merges need explicit, per-PR, single-use operator authorisation
+# 8. LANE POLICY — upstream merges need operator authorisation
 #
-# The operator may run hapi-laneb-authorise on whichever box they're sitting at
-# (oos-linux or homelab) while the merge itself usually runs from an agent on
-# oos-linux. Check local first (cheap, no network dependency), then fall back to
-# SSH-ing configured peer hosts. Fails closed: any lookup error just means "not
-# found there" — it never counts as a grant.
+# Two fire-and-forget-compatible paths (2026-11-03):
+#
+#   A. **dogfooded ready** — attaching `dogfooded` + stamp *is* merge intent
+#      (discussions/2083). After the 48h UTC window (check 7 already passed
+#      `ready`), that intent is sufficient lane-B auth. Opt-out = remove the
+#      label (+ rationale on #2083). No second TTY `hapi-laneb-authorise`.
+#      Tip may move during the window; three-dim CLEAN on the merge tip still
+#      required by checks above.
+#
+#   B. **hapi-laneb-authorise** — single-use, SHA-bound, short TTL. Still used
+#      for `low-impact` / allowlist / immediate merges without a dogfood window.
+#
+# The operator may grant (B) on oos-linux or homelab while merge runs from an
+# agent on oos-linux. Check local first, then SSH peer hosts. Fails closed.
 TOKDIR="${HAPI_LANEB_DIR:-$HOME/.config/hapi/laneb}"
 LANEB_REMOTE_HOSTS="${HAPI_LANEB_REMOTE_HOSTS:-homelab}"
+LANEB_VIA_DOGFOOD=0
 
 # Sets LANEB_GRANT_CONTENT and LANEB_GRANT_HOST ("" = local) on success; returns 1 if not found anywhere.
 _laneb_find_grant() {
@@ -192,9 +217,13 @@ _laneb_find_grant() {
 }
 
 if [ "$REPO" = "$UPSTREAM_REPO" ]; then
-    if ! _laneb_find_grant "$PR"; then
+    # Reuse DF_STATUS from check 7 when present (dogfooded ready ≡ laneb).
+    if [ "${DF_STATUS:-}" = "ready" ]; then
+        LANEB_VIA_DOGFOOD=1
+        pass "LANE B via dogfooded (window elapsed; label-as-intent — discussions/2083)"
+    elif ! _laneb_find_grant "$PR"; then
         fail "LANE B: no operator authorisation for $UPSTREAM_REPO#$PR (agents are prepare-only)"
-        echo "         operator grants with: hapi-laneb-authorise $PR $HEAD   (on oos-linux or homelab)" >&2
+        echo "         dogfooded: wait for 48h window, or grant: hapi-laneb-authorise $PR $HEAD" >&2
     else
         TOKSHA=$(awk -F= '/^head=/{print $2}' <<<"$LANEB_GRANT_CONTENT")
         TOKEXP=$(awk -F= '/^expires=/{print $2}' <<<"$LANEB_GRANT_CONTENT")
@@ -221,8 +250,9 @@ fi
 echo "  RESULT: PASS" >&2
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
 # single-use: consume the lane B token so one grant cannot merge twice — wherever it was granted
-# (standalone preview PASS also consumes — see header WARNING)
-if [ "$REPO" = "$UPSTREAM_REPO" ]; then
+# (standalone preview PASS also consumes — see header WARNING).
+# Dogfood-ready path has no laneb token to consume (label-as-intent).
+if [ "$REPO" = "$UPSTREAM_REPO" ] && [ "${LANEB_VIA_DOGFOOD:-0}" -ne 1 ]; then
     if [ -n "${LANEB_GRANT_HOST:-}" ]; then
         if ssh -o ConnectTimeout=5 -o BatchMode=yes "$LANEB_GRANT_HOST" \
             "test -f '$TOKDIR/$PR.auth'" 2>/dev/null; then

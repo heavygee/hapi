@@ -956,7 +956,8 @@ layers:
   # Tip: bee618daf — re-thin after dogfood bump if tip-forward SKIP.
   - branch: driver/search-peers
 
-  # tiann/hapi#1756 — in-session (open chat) FTS search + jump. Reuses #1554 indexer;
+  # tiann/hapi#1756 — in-session (open chat) FTS search + jump. Reuses the FTS5
+  # indexer shipped with the session-content-search feature (issue 1554);
   # web-only tip (header SessionInChatSearch → ?messageId=&messageQuery=).
   # Worktree: ~/coding/hapi/worktrees/in-session-content-search @ driver/in-session-content-search
   # Tip: 41449e8c0 — 2-line character-window excerpts (+ marks/separators); no schema bump.
@@ -1386,9 +1387,11 @@ layers:
   # Tip-unique: runner-version-applied-banner
   - branch: driver/applied-changelog
 
-  # DROPPED 2026-11-02: tiann/hapi#1598 merged as 82c5c00a3, carrying #1554
-  # (content search), #2081 (search scope toggle) and the forward-reading work.
-  # Both layers are now in upstream/main; the base supplies them.
+  # DROPPED 2026-11-02: tiann/hapi PR 1598 merged as 82c5c00a3, carrying the
+  # content search (issue 1554), the search scope toggle (issue 2081) and the
+  # forward-reading work. Both layers are now in upstream/main; the base
+  # supplies them. Issue numbers written bare on purpose — a literal hash ref
+  # here is read as an active layer by Gate A relatedRefs (see cba15b540).
   # Was: - branch: driver/2081-search-scope-toggle
   # Was: - branch: driver/2081-forward-reading
 
@@ -1411,3 +1414,10 @@ layers:
   # Thin tip on soup HEAD 2a4fcb33a: driver/fix-304-offer-notes-thin @ bbff31dde+
   # Hub-only → remat + publish + seal; tip-unique: preferFleetLatestPointer
   - branch: driver/fix-304-offer-notes-thin
+
+  # tiann/hapi#2267 — silence Cursor finished-shell "Briefly inform…" after
+  # AGENT_NOTIFY_SUMMARY status:done (no second user-visible reply).
+  # Thin tip: fix/2267-post-close-summary-silence @ f14ace9f4 (upstream PR).
+  # Soup union on driver HEAD b72e94e27: driver/2267-post-close-silence @ 302fadd75
+  # CLI-only → remat + hapi-restart-hub; tip-unique: postCloseHarnessSilence
+  - branch: driver/2267-post-close-silence
