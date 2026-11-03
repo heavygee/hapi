@@ -118,7 +118,29 @@ Please:
 - **Reject D-alone.** Related: [#1976](https://github.com/tiann/hapi/pull/1976) (opt-in auto titles, complementary); [#271](https://github.com/tiann/hapi/issues/271) (different ask).
 - Filed: [tiann/hapi#2269](https://github.com/tiann/hapi/issues/2269) (operator surprise preserved). Comment on #1672 linking #2269.
 
+### Path C ownership (2026-11-03)
+
+Operator: Path C is **critical for hapi-inline** (tool FOR HAPI, installed in other apps). Remitted to [hapi-inline ownership oos](/sessions/40da5da5-a8ff-49af-a421-6323e26c2582) — provisional title at dock-spawn; complementary to A; may need hub spawn `name` cooperation.
+
+### Babysit #1672 + lane B assessment (2026-11-03)
+
+Babysitter: [Boards: edit issue title/body](/sessions/9a25e9d0-557c-44b1-b5cd-505c231cbeb6) (this session; chip on #1672).
+
+| Check | Result |
+|-------|--------|
+| `hapi-pr-status` three-dim | **CLEAN** (CI pass, 0 unresolved threads, latest bot Pass) |
+| `mergeable` / mergeState | MERGEABLE / CLEAN |
+| `maintainerCanModify` | true (junmo-kim fork) |
+| Auto lane B size (product files excl. tests) | **10 files**, **Δ123** (88+/35−) — **over** caps (≤8 files, ≤120 Δ) |
+| Labels | `enhancement`, `area:cli`, `community-pr` — **no** `low-impact` / `dogfooded` |
+| `Fixes #2269` in PR body | **not yet** (Discovery asked author; do not edit others' PR bodies) |
+
+**Lane B verdict:** **Not auto-B.** Oversize by 2 product files and ~3 lines of delta. Becomes lane-B **only** via promote (`low-impact` / `dogfooded` + policy) or allowlist. Without promote → **lane A** (wait @tiann). Agents remain prepare-only; merge needs operator TTY + `hapi-laneb-authorise` even after promote.
+
+Honest promote read: focused restore of `change_title` + manual precedence — candidate for `low-impact` if labelling session agrees, or `dogfooded` after estate soup dogfood. Not silent auto-B.
+
 ## Changelog
 
 - 2026-11-03 — Written from opmic Cursor session incident; dispatched to upstream issue/pr discovery.
 - 2026-11-03 — Discovery CONFIRMED; #2269 filed; A via babysit #1672; C deferred.
+- 2026-11-03 — C → hapi-inline ownership; this session babysits #1672; lane B = not auto (need promote).
