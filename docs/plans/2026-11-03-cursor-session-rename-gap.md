@@ -122,6 +122,8 @@ Please:
 
 Operator: Path C is **critical for hapi-inline** (tool FOR HAPI, installed in other apps). Remitted to [hapi-inline ownership oos](/sessions/40da5da5-a8ff-49af-a421-6323e26c2582) — provisional title at dock-spawn; complementary to A; may need hub spawn `name` cooperation.
 
+**Owned + filed:** [heavygee/hapi-inline#566](https://github.com/heavygee/hapi-inline/issues/566) — *Path C — provisional title on opmic / spawn-per-send (no rant-as-title)*. Does **not** block on Path A / #1672 / #2269. If hub must preserve spawn `name` against ACP auto-title, Discovery files a separate `tiann/hapi` half after the package peer confirms.
+
 ### Babysit #1672 + lane B assessment (2026-11-03)
 
 Babysitter: [Boards: edit issue title/body](/sessions/9a25e9d0-557c-44b1-b5cd-505c231cbeb6) (this session; chip on #1672).
@@ -161,3 +163,4 @@ Operator: not auto-B → dogfood then assess `dogfooded` merge basis. **Ran.**
 - 2026-11-03 — Written from opmic Cursor session incident; dispatched to upstream issue/pr discovery.
 - 2026-11-03 — Discovery CONFIRMED; #2269 filed; A via babysit #1672; C deferred.
 - 2026-11-03 — C → hapi-inline ownership; this session babysits #1672; lane B = not auto (need promote).
+- 2026-11-03 — Path C tracker [hapi-inline#566](https://github.com/heavygee/hapi-inline/issues/566); dogfooded stamp on #1672 (48h).
