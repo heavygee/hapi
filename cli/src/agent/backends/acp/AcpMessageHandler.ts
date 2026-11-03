@@ -581,6 +581,16 @@ export class AcpMessageHandler {
         this.flushText();
     }
 
+    /**
+     * Drop buffered speech/reasoning without emitting. Used when a post-done
+     * harness resume was suppressed (#2267): the next prompt()'s pre-swap drain
+     * must not forward previously silenced harness-resume text.
+     */
+    discardBuffers(): void {
+        this.bufferedText = '';
+        this.resetReasoningState();
+    }
+
     private appendTextChunk(text: string): void {
         if (this.textChunkMode === 'delta') {
             if (text) {
