@@ -596,11 +596,13 @@ export class AcpMessageHandler {
      * #2267 / #2268 — if the open text buffer already ends with a done footer,
      * flush it now (before the post-prompt quiet window) so finished-shell
      * harness prose cannot coalesce onto the same segment.
+     *
+     * End-anchored only: destructive truncation of buried harness/steer text
+     * belongs in the Cursor launcher, which knows soft-steer ownership.
      */
     sealDoneNotifySummaryIfPresent(): boolean {
         if (!this.bufferedText) return false;
-        const summary = extractNotifySummary(this.bufferedText);
-        if (summary?.status !== 'done') return false;
+        if (extractNotifySummary(this.bufferedText)?.status !== 'done') return false;
         this.drainBuffers();
         return true;
     }

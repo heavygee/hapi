@@ -1235,6 +1235,30 @@ describe('AcpMessageHandler', () => {
         ]);
     });
 
+    it('sealDoneNotifySummaryIfPresent does not truncate coalesced steer/harness text (launcher owns that)', () => {
+        const messages: AgentMessage[] = [];
+        const handler = new AcpMessageHandler((message) => messages.push(message));
+        const doneFooter =
+            'AGENT_NOTIFY_SUMMARY {"version":1,"agent":"a","project":"hapi","status":"done","summary":"Topic closed"}';
+
+        handler.handleUpdate({
+            sessionUpdate: ACP_SESSION_UPDATE_TYPES.agentMessageChunk,
+            content: {
+                type: 'text',
+                text: `Finished.\n\n${doneFooter}\nSteered follow-up the user asked for.`
+            }
+        });
+
+        expect(handler.sealDoneNotifySummaryIfPresent()).toBe(false);
+        handler.drainBuffers();
+        expect(messages).toEqual([
+            {
+                type: 'text',
+                text: `Finished.\n\n${doneFooter}\nSteered follow-up the user asked for.`
+            }
+        ]);
+    });
+
     it('sealDoneNotifySummaryIfPresent is a no-op without an end-anchored done footer', () => {
         const messages: AgentMessage[] = [];
         const handler = new AcpMessageHandler((message) => messages.push(message));
