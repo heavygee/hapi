@@ -295,11 +295,13 @@ function SessionsPage() {
         closeItem: closeBoardItem,
         reopenItem: reopenBoardItem,
         commentOnItem: commentOnBoardItem,
+        editItem: editBoardItem,
         setItemStatus: setBoardItemStatus,
         setItemAssignees: setBoardItemAssignees,
         closingUrls: closingBoardItemUrls,
         reopeningUrls: reopeningBoardItemUrls,
         commentingUrls: commentingOnBoardItemUrls,
+        editingUrls: editingBoardItemUrls,
         settingStatusUrls: settingBoardItemStatusUrls,
         settingAssigneesUrls: settingBoardItemAssigneesUrls,
     } = useBoardItemActions(api, effectiveBoardId)
@@ -765,6 +767,17 @@ function SessionsPage() {
                                     throw err
                                 })
                             }}
+                            onEditItem={(fields) => {
+                                return editBoardItem(selectedBoardItem, fields).catch((err) => {
+                                    addToast({
+                                        title: t('boards.detail.editFailed'),
+                                        body: getApiErrorMessage(err, t('dialog.error.default')),
+                                        sessionId: '',
+                                        url: ''
+                                    })
+                                    throw err
+                                })
+                            }}
                             onSetStatus={(status) => {
                                 setBoardItemStatus(selectedBoardItem, status).catch((err) => addToast({
                                     title: t('boards.detail.statusChangeFailed'),
@@ -792,6 +805,7 @@ function SessionsPage() {
                             isClosing={selectedBoardItem.url !== null && closingBoardItemUrls.has(selectedBoardItem.url)}
                             isReopening={selectedBoardItem.url !== null && reopeningBoardItemUrls.has(selectedBoardItem.url)}
                             isCommenting={selectedBoardItem.url !== null && commentingOnBoardItemUrls.has(selectedBoardItem.url)}
+                            isEditingItem={selectedBoardItem.url !== null && editingBoardItemUrls.has(selectedBoardItem.url)}
                             isSettingStatus={selectedBoardItem.url !== null && settingBoardItemStatusUrls.has(selectedBoardItem.url)}
                             isSettingAssignees={selectedBoardItem.url !== null && settingBoardItemAssigneesUrls.has(selectedBoardItem.url)}
                         />
