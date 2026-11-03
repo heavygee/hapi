@@ -68,6 +68,11 @@ export function buildSessionSummaryInstruction(): string {
         'Summary is one spoken sentence for phone/voice: if the operator asked a',
         'question this turn, answer it — do not worklog your steps. Process language',
         'only when there was no question. Omit agent and project fields.',
+        // Cross-turn close (#2267): status "done" ends the spoken unit. Redundant
+        // background task-complete / "briefly inform" system pings must be silent
+        // until new user intent — do not open another user-visible reply.
+        'After status "done", do not emit further user-visible replies for redundant',
+        'background task-complete notifications until the user sends new intent.'
     ].join('\n')
 }
 
