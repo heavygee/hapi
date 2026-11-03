@@ -1387,9 +1387,11 @@ layers:
   # Tip-unique: runner-version-applied-banner
   - branch: driver/applied-changelog
 
-  # DROPPED 2026-11-02: tiann/hapi#1598 merged as 82c5c00a3, carrying #1554
-  # (content search), #2081 (search scope toggle) and the forward-reading work.
-  # Both layers are now in upstream/main; the base supplies them.
+  # DROPPED 2026-11-02: tiann/hapi PR 1598 merged as 82c5c00a3, carrying the
+  # content search (issue 1554), the search scope toggle (issue 2081) and the
+  # forward-reading work. Both layers are now in upstream/main; the base
+  # supplies them. Issue numbers written bare on purpose — a literal hash ref
+  # here is read as an active layer by Gate A relatedRefs (see cba15b540).
   # Was: - branch: driver/2081-search-scope-toggle
   # Was: - branch: driver/2081-forward-reading
 
