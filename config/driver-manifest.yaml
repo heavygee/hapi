@@ -957,7 +957,7 @@ layers:
   - branch: driver/search-peers
 
   # tiann/hapi#1756 — in-session (open chat) FTS search + jump. Reuses the FTS5
-  # indexer from issue 1554 (do not write #1554 here — Gate A relatedRefs hitchhike);
+  # indexer shipped with the session-content-search feature (issue 1554);
   # web-only tip (header SessionInChatSearch → ?messageId=&messageQuery=).
   # Worktree: ~/coding/hapi/worktrees/in-session-content-search @ driver/in-session-content-search
   # Tip: 41449e8c0 — 2-line character-window excerpts (+ marks/separators); no schema bump.
