@@ -1414,7 +1414,7 @@ layers:
 
   # tiann/hapi#2267 — silence Cursor finished-shell "Briefly inform…" after
   # AGENT_NOTIFY_SUMMARY status:done (no second user-visible reply).
-  # Thin tip: fix/2267-post-close-summary-silence @ beac40e2d (upstream PR).
-  # Soup union on driver HEAD b72e94e27: driver/2267-post-close-silence @ 7f8343460
+  # Thin tip: fix/2267-post-close-summary-silence @ 1bd826591 (upstream PR).
+  # Soup union on driver HEAD b72e94e27: driver/2267-post-close-silence @ a59c9b699
   # CLI-only → remat + hapi-restart-hub; tip-unique: postCloseHarnessSilence
   - branch: driver/2267-post-close-silence
