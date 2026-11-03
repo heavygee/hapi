@@ -161,12 +161,12 @@ Public process: [tiann/hapi discussions #2083](https://github.com/tiann/hapi/dis
 | Step | Who | What |
 |------|-----|------|
 | 1. Live dogfood | Write collaborator | Run the PR on a real HAPI install (not CI-green alone) |
-| 2. Label + stamp | Same | Apply `dogfooded`; PR comment `dogfooded since <ISO-8601 UTC>` |
-| 3. Countdown | Gate + Meta | **48 calendar hours UTC** from the GitHub labeled event. Chip action: `dogfooded countdown (… left)`. `hapi-pr-merge-gate.sh` **blocks merge** until the window elapses |
+| 2. Label + stamp | Same | Apply `dogfooded`; PR comment `dogfooded since <ISO-8601 UTC>`. **This is merge intent** (fire-and-forget). |
+| 3. Countdown | Gate + Meta + session job | **48 calendar hours UTC** from the labeled event. Chip: `dogfooded countdown (… left)`. Gate **blocks** early merges. Prefer a session `hapi job run … --wake-on-terminal` so an idle babysit wakes when ready. |
 | 4. Opt-out | Anyone | Remove `dogfooded` **and** post rationale on #2083 (or close/draft the PR) |
-| 5. Merge | Operator / Meta with TTY | After window: still need **`hapi-laneb-authorise <pr> <head>`** then merge. Agents remain prepare-only |
+| 5. Merge | Babysit / Meta when woken | After window + still labeled + three-dim CLEAN: **merge quietly**. Elapsed `dogfooded` **satisfies lane-B auth** in `hapi-pr-merge-gate.sh` — **no second** `hapi-laneb-authorise`. `laneb` remains for `low-impact` / immediate merges only. |
 
-`dogfooded` is stronger than `low-impact` (substantial community work a maintainer has actually run). `low-impact` still skips the 48h window. Policy: `scripts/tooling/lib/dogfood-countdown.sh` + `pr-merge-policy` `github_labels` includes both.
+`dogfooded` is stronger than `low-impact` (substantial community work a maintainer has actually run). `low-impact` still skips the 48h window and still needs `hapi-laneb-authorise`. Policy: `scripts/tooling/lib/dogfood-countdown.sh` + `pr-merge-policy` `github_labels` includes both. Amendment 2026-11-03: label-as-intent must be fire-and-forget (incident: wake-then-laneb yanked the operator back).
 
 **Incident #1096** (2026-07-20): first accidental heavygee upstream merge - do not treat write access as "merge anything green."
 
@@ -784,7 +784,7 @@ The gate blocks unless **all** of these hold:
 | 6 | **Zero unanswered comments from anyone but the author since the last push** | **the #1842 case** — a maintainer's plain comment carries no mechanical weight on GitHub, so the gate gives it weight |
 | 7 | No `docs/operator/`, `docs/plans/`, `CLAUDE.md` in the diff | leak scanner parity |
 | 8 | If labeled `dogfooded`: **48h UTC window elapsed** | opt-out merge (#2083); blocks even with a fresh laneb grant |
-| 9 | For `tiann/hapi`: a valid **lane B authorisation** | agents are prepare-only upstream |
+| 9 | For `tiann/hapi`: lane B auth — **elapsed `dogfooded`** (label still present) **or** valid **`hapi-laneb-authorise`** | dogfood is fire-and-forget; laneb for low-impact/immediate |
 
 Checks 5 and 6 **fail closed on API error** — an unreadable thread is treated as blocking, because an
 empty result is not absence.

@@ -156,7 +156,9 @@ Operator: not auto-B → dogfood then assess `dogfooded` merge basis. **Ran.**
 | Later native title sync does not overwrite | **yes** |
 | Tip tests | `acpSessionTitle` + `buildHapiMcpBridge.integration` green |
 
-**Assessment:** **Yes — `dogfooded` is the right lane-B promote** for this PR (focused, community, CLEAN, oversize auto-B). Label + stamp applied; **48h UTC countdown** before merge eligibility. Agents remain prepare-only; merge needs operator TTY + `hapi-laneb-authorise` after the window.
+**Assessment:** **Yes — `dogfooded` is the right lane-B promote** for this PR (focused, community, CLEAN, oversize auto-B). Label + stamp applied; **48h UTC countdown** then fire-and-forget merge when CLEAN.
+
+**Process fix 2026-11-03:** elapsed `dogfooded` **is** lane-B auth (no second `laneb`). Session job `dogfood-1672-countdown` wakes this babysit at window end → verify green → merge quietly.
 
 **Not claimed:** production `:3006` soup dogfood (conflicts). Peer-stack live install satisfies the dogfooded “real HAPI install” bar; soup tip still desirable as follow-up.
 

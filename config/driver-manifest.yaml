@@ -956,7 +956,8 @@ layers:
   # Tip: bee618daf — re-thin after dogfood bump if tip-forward SKIP.
   - branch: driver/search-peers
 
-  # tiann/hapi#1756 — in-session (open chat) FTS search + jump. Reuses #1554 indexer;
+  # tiann/hapi#1756 — in-session (open chat) FTS search + jump. Reuses the FTS5
+  # indexer shipped with the session-content-search feature (issue 1554);
   # web-only tip (header SessionInChatSearch → ?messageId=&messageQuery=).
   # Worktree: ~/coding/hapi/worktrees/in-session-content-search @ driver/in-session-content-search
   # Tip: 41449e8c0 — 2-line character-window excerpts (+ marks/separators); no schema bump.
@@ -1414,7 +1415,7 @@ layers:
 
   # tiann/hapi#2267 — silence Cursor finished-shell "Briefly inform…" after
   # AGENT_NOTIFY_SUMMARY status:done (no second user-visible reply).
-  # Thin tip: fix/2267-post-close-summary-silence @ 1bd826591 (upstream PR).
-  # Soup union on driver HEAD b72e94e27: driver/2267-post-close-silence @ a59c9b699
+  # Thin tip: fix/2267-post-close-summary-silence @ f14ace9f4 (upstream PR).
+  # Soup union on driver HEAD b72e94e27: driver/2267-post-close-silence @ 302fadd75
   # CLI-only → remat + hapi-restart-hub; tip-unique: postCloseHarnessSilence
   - branch: driver/2267-post-close-silence
