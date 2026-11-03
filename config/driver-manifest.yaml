@@ -943,9 +943,10 @@ layers:
   # Tip: fa9a3dbaa
   - branch: fix/cursor-unexpected-stop-blocked-footer
 
-  # DROPPED 2026-10-12: tiann/hapi#1554 / PR #1598 FTS5 session content search (dogfood).
+  # DROPPED 2026-10-12: tiann/hapi issue 1554 / PR 1598 FTS5 session content search (dogfood).
   # Tip ba7b3f96d absorbed into soup (418179d4b + later tips); wt cleaned for /work space relief.
-  # Upstream #1598 still OPEN — feature lives on soup tip ancestry until merge/remat.
+  # Upstream PR 1598 was still OPEN then — feature lives on soup tip ancestry until merge/remat.
+  # Bare issue/PR numbers on purpose (Gate A relatedRefs hitchhike; see cba15b540 / 47eb31380).
   # Was: - branch: driver/session-content-search
 
   # tiann/hapi#1710 / PR #2010 — search_peers review fixes (summary.text match +
