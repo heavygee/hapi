@@ -116,6 +116,7 @@ else
           | select(.body | test("usage limits for code reviews") | not)
           | select(.body | test("dogfooded since"; "i") | not)
           | select(.body | test("New tracker: #|Related tracker: #"; "i") | not)
+          | select(.body | test("plan to merge this after"; "i") | not)
           | .author.login] | unique | join(", ")' \
         <<<"$CMTS_JSON" 2>/dev/null || echo "ERR")"
 fi
