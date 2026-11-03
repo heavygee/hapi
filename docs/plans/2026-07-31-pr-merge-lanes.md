@@ -78,4 +78,15 @@ We dropped `self-merge-ok` - it was on-the-nose and redundant. Lane B = `low-imp
 - After window: still requires **`hapi-laneb-authorise`** (existing dogma). Agents prepare-only.
 - Policy `github_labels`: `["low-impact", "dogfooded"]`.
 
+### Amendment 2026-11-03 — `dogfooded` is fire-and-forget
+
+**Kill criterion:** if the operator must return after 48h to type `hapi-laneb-authorise`, the process failed.
+
+- Attaching `dogfooded` + stamp **is** the merge authorisation (same words as 2026-10-21, now enforced).
+- After the window elapses, with label still present and three-dim CLEAN, `hapi-pr-merge-gate.sh` treats lane B as **satisfied by dogfood** — no second TTY grant.
+- Opt-out unchanged: remove `dogfooded` + rationale on #2083 (or draft/close).
+- `hapi-laneb-authorise` remains for **`low-impact` / allowlist / immediate** merges (short TTL, SHA-bound).
+- Babysit pattern: session job countdown with `--wake-on-terminal`; on wake, verify green and **merge quietly** (no estate jargon on the PR). Meta may also merge when the queue shows dogfood-ready + CLEAN.
+- Tip may move during the window; merge the tip that is CLEAN at fire time (re-dogfood only if the change is no longer what was run).
+
 Policy reads **PR** labels via `pr-merge-policy.sh`. Issue-only labels are advisory until the PR exists. Allowlist (`allow_pr_numbers`) remains the escape hatch if you want B without the public label.
