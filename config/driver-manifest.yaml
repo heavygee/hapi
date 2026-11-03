@@ -1400,3 +1400,21 @@ layers:
   # Thin tip on soup a717c9642: driver/247-board-spawn-rename @ 31ce99324.
   # Web-only -> remat --build-web; hard-reload (no hub restart).
   - branch: driver/247-board-spawn-rename
+
+  # #304 — require GitHub NOTES.md on Layer A materialize (Ian empty applied banner).
+  # Thin tip on soup HEAD 960e1be58: driver/fix-304-fleet-notes-required @ c00dbd9f4
+  # Hub+web+cli+tooling → remat --build-web + publish + seal (NOTES on hapi-fleet).
+  # Tip-unique: downloadFleetNotesToTip / tipHasReleaseNotes
+  - branch: driver/fix-304-fleet-notes-required
+
+  # #305 — overlay soup tip NOTES on npm-channel Layer A pets (Ian empty banner).
+  # Thin tip on soup HEAD 2a4fcb33a: driver/fix-304-offer-notes-thin @ bbff31dde+
+  # Hub-only → remat + publish + seal; tip-unique: preferFleetLatestPointer
+  - branch: driver/fix-304-offer-notes-thin
+
+  # tiann/hapi#2267 — silence Cursor finished-shell "Briefly inform…" after
+  # AGENT_NOTIFY_SUMMARY status:done (no second user-visible reply).
+  # Thin tip: fix/2267-post-close-summary-silence @ 1bd826591 (upstream PR).
+  # Soup union on driver HEAD b72e94e27: driver/2267-post-close-silence @ a59c9b699
+  # CLI-only → remat + hapi-restart-hub; tip-unique: postCloseHarnessSilence
+  - branch: driver/2267-post-close-silence
