@@ -394,11 +394,7 @@ describe('cursorAcpRemoteLauncher', () => {
         harness.failNextInitialize = null;
         harness.failInitializeTimes = 0;
         harness.deferNextInitialize = null;
-<<<<<<< HEAD
-=======
-        harness.spawnAutoReviewFlags = [];
         harness.lastPromptOnUpdate = null;
->>>>>>> 050040f93 (fix(cli): narrow post-done silence to speech; keep soft-steer active)
         legacyLauncher.mockClear();
         process.stdin.isTTY = false;
         process.stdout.isTTY = false;
