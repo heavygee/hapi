@@ -1,6 +1,6 @@
 # Cursor (and ACP) session rename gap — findings (2026-11-03)
 
-**Status:** diagnosis + proposed paths — **not implemented**. Handed to [upstream issue/pr discovery](/sessions/6ce7f124-6240-4479-8dad-f2e27eb880a1) to confirm, search precedents, and recommend issue/PR shape.
+**Status:** diagnosis **CONFIRMED** by [upstream issue/pr discovery](/sessions/6ce7f124-6240-4479-8dad-f2e27eb880a1) (2026-11-03). Tracker [#2269](https://github.com/tiann/hapi/issues/2269). Path **A** rides existing community PR [#1672](https://github.com/tiann/hapi/pull/1672) — do **not** open a duplicate PR. Path **C** deferred as separate follow-up.
 
 **Source session:** [Boards: edit issue title/body](/sessions/9a25e9d0-557c-44b1-b5cd-505c231cbeb6) (Cursor; spawned via hapi-inline `/opmic` “interrupt and continue”).
 
@@ -109,6 +109,16 @@ Please:
 
 ---
 
+## Discovery verdict (2026-11-03)
+
+- **Confirmed** on `upstream/main`: Cursor/OpenCode/Kimi/Copilot `enableChangeTitle: false`; Claude true; no Cursor title prompt inject; hub PATCH `{name}` + #1896/#2072 intact.
+- **Path B rejected** — no agent-callable native Cursor rename (ACP auto-title sync only).
+- **Path A already in flight** via community [#1672](https://github.com/tiann/hapi/pull/1672) (junmo-kim) — re-enable `change_title` + manual precedence. Discovery asked author for `Fixes #2269`.
+- **Path C** = separate follow-up (opmic/bare-spawn provisional title); may touch hub spawn and/or `heavygee/hapi-inline`. File when operator opens that workstream.
+- **Reject D-alone.** Related: [#1976](https://github.com/tiann/hapi/pull/1976) (opt-in auto titles, complementary); [#271](https://github.com/tiann/hapi/issues/271) (different ask).
+- Filed: [tiann/hapi#2269](https://github.com/tiann/hapi/issues/2269) (operator surprise preserved). Comment on #1672 linking #2269.
+
 ## Changelog
 
 - 2026-11-03 — Written from opmic Cursor session incident; dispatched to upstream issue/pr discovery.
+- 2026-11-03 — Discovery CONFIRMED; #2269 filed; A via babysit #1672; C deferred.
