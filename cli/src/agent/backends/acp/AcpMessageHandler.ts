@@ -4,6 +4,7 @@ import type { AgentMessage, PlanItem } from '@/agent/types';
 import { registerGeneratedImageFromAcpBlock } from '@/modules/common/generatedImages';
 import type { InlineMediaSource } from '@/modules/common/inlineMediaSource';
 import { asString, isObject, isDisplayLinksToolName, redactDisplayLinksToolInput } from '@hapi/protocol';
+import { extractNotifySummary } from '@hapi/protocol/messages';
 import { deriveToolNameWithSource, isPlaceholderToolName } from '@/agent/utils';
 import { parseRateLimitText } from '@/agent/rateLimitParser';
 import { isInternalEventJson } from '@/agent/internalEventFilter';
@@ -579,6 +580,29 @@ export class AcpMessageHandler {
     drainBuffers(): void {
         this.flushReasoning();
         this.flushText();
+    }
+
+    /**
+     * Drop buffered speech/reasoning without emitting. Used when a post-done
+     * harness resume was suppressed (#2267): the next prompt()'s pre-swap drain
+     * must not forward previously silenced harness-resume text.
+     */
+    discardBuffers(): void {
+        this.bufferedText = '';
+        this.resetReasoningState();
+    }
+
+    /**
+     * #2267 / #2268 — if the open text buffer already ends with a done footer,
+     * flush it now (before the post-prompt quiet window) so finished-shell
+     * harness prose cannot coalesce onto the same segment.
+     */
+    sealDoneNotifySummaryIfPresent(): boolean {
+        if (!this.bufferedText) return false;
+        const summary = extractNotifySummary(this.bufferedText);
+        if (summary?.status !== 'done') return false;
+        this.drainBuffers();
+        return true;
     }
 
     private appendTextChunk(text: string): void {
