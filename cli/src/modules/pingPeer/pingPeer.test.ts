@@ -1014,67 +1014,8 @@ describe('listSessions query params', () => {
     })
 
 
-    it('attributes + steers Pi without sending deliveryMode on peer-messages', async () => {
-        const targetId = '05d9f0f2-9273-4137-933c-07459a1146a2'
-        const sourceId = '6212dae5-8a60-4284-b7a5-c09aa3571ce4'
-        let peerBody: unknown
-        const http = createHttpMock({
-            post: (url, body, config) => {
-                if (url.endsWith('/api/auth')) {
-                    return { status: 200, data: { token: 'jwt' } }
-                }
-                if (url.endsWith(`/cli/sessions/${sourceId}/peer-messages`)) {
-                    peerBody = body
-                    expect((body as { deliveryMode?: unknown }).deliveryMode).toBeUndefined()
-                    expect(config?.headers?.Authorization).toBe('Bearer tok')
-                    return { status: 200, data: { ok: true } }
-                }
-                if (url.includes('/messages/') && url.endsWith('/steer')) {
-                    return { status: 200, data: { status: 'steered' } }
-                }
-                throw new Error(`unexpected POST ${url}`)
-            },
-            get: (url) => {
-                if (url.endsWith('/api/sessions') || url.endsWith(`/api/sessions/${targetId}`)) {
-                    const session = {
-                        id: targetId,
-                        active: true,
-                        thinking: true,
-                        metadata: {
-                            name: 'Pi Peer',
-                            flavor: 'pi',
-                            // Avoid waitForPiReady polling in this unit test.
-                            piSessionId: 'pi-ready-1'
-                        }
-                    }
-                    return {
-                        status: 200,
-                        data: url.endsWith('/api/sessions')
-                            ? { sessions: [session] }
-                            : { session }
-                    }
-                }
-                throw new Error(`unexpected GET ${url}`)
-            }
-        })
-
-        const result = await pingPeer({
-            sessionIdPrefix: targetId,
-            message: 'mid-turn note',
-            deliveryMode: 'steer',
-            accessToken: 'tok',
-            authenticatedSourceSessionId: sourceId,
-            apiUrl: 'http://127.0.0.1:3006',
-            http: http as never
-        })
-        expect(result.delivery).toBe('steered')
-        expect(peerBody).toMatchObject({
-            targetSessionId: targetId,
-            text: 'mid-turn note'
-        })
-        expect((peerBody as { deliveryMode?: unknown }).deliveryMode).toBeUndefined()
-        expect(http.post.mock.calls.some(([url]) => String(url).endsWith('/steer'))).toBe(true)
-    })
+    // Soup pingPeerOptions has no deliveryMode/steer yet (upstream tip does).
+    // .strict() reject path is covered in hub/src/web/routes/cli.test.ts.
 
 it('resolves by agentSessionId prefix and posts to the current hub id', async () => {
         const hubId = 'cccccccc-3333-3333-3333-333333333333'
