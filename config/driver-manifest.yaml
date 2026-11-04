@@ -908,22 +908,20 @@ layers:
   # Tip: 26c1615ae
   - branch: fix/archive-verify-runner-before-marking-gone
 
-  # SUPERSEDED 2026-11-04 by feat/a2a-peer-handoffs-consolidated (tiann/hapi#2251):
+  # SUPERSEDED 2026-11-04 (tiann/hapi#2251 dogfood absorb):
   # driver/a2a-nametag-attribution (#1618, tip c99b8393f) and
-  # driver/ping-peer-agent-session-id (fork #137, tip 93cae0af5) are both
-  # carried by that consolidated tip. Do not re-add them beside it.
+  # driver/ping-peer-agent-session-id (fork #137, tip 93cae0af5) stay in tip
+  # ancestry; do not re-add them as layers. Upstream feat/a2a-peer-handoffs-
+  # consolidated @ 90b9066d2 is fat vs soup tip-forward (51 files) and conflicted
+  # on absorb — Meta thinned the two cold-review commits onto soup tip instead.
 
-  # tiann/hapi#2251 / Fixes #1203 — consolidated soft peer provenance +
-  # durable agentSessionId resolve. SUPERSEDES driver/a2a-nametag-attribution
-  # (#1618) AND driver/ping-peer-agent-session-id (fork #137).
-  # Carries two cold-review fixes absent from the layers it replaces: attributed
-  # peer-message bodies omit deliveryMode, and CliPeerDeliverRequestSchema is
-  # .strict() -> 400 on a forged peer or a stray deliveryMode. That reject path
-  # is the reason this needs real dogfood rather than inheriting the old layers'.
-  # Rebuild: hub + cli + web + shared (protocol schema) — full remat/seal.
-  # Worktree: ~/coding/hapi/worktrees/overseer-a2a-consolidated
-  # Tip: 90b9066d2
-  - branch: feat/a2a-peer-handoffs-consolidated
+  # tiann/hapi#2251 cold-review delta only — omit deliveryMode on attributed
+  # peer-messages + CliPeerDeliverRequestSchema.strict() (400 on forged peer /
+  # stray deliveryMode). Feature body already in soup via the SUPERSEDED layers.
+  # Rebuild: hub + cli + shared (schema) — full remat/seal for dogfood.
+  # Worktree: ~/coding/hapi/worktrees/a2a-2251-strict
+  # Tip: d9aaef8c7 (cherry-picks of f4d9358f5 + 90b9066d2 onto soup tip)
+  - branch: driver/a2a-2251-strict-delta
 
 
   # tiann/hapi#1717 — loud blocked session-list chrome + off-viewport counter.
