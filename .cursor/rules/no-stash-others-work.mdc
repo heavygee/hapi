@@ -14,11 +14,12 @@ This is not theoretical - it has happened multiple times. The watch-script ourob
 Before you run `git stash` (or any command that invokes it - `git rebase`, `git pull --rebase`, `hapi-sync-fork-main`, `hapi-driver-rebuild`):
 
 1. Run `git status` and `git diff --stat`.
-2. If the dirty files are **yours** (you edited them this turn) - **commit them**, do not stash.
-3. If the dirty files are **not yours** - stop. Either:
-   - Search the agent transcripts for who owns them (`grep -l <filename> ~/.cursor/projects/*/agent-transcripts/*.jsonl`), or
-   - Move to a fresh **worktree** for your work (`hapi-worktree-create` / `git worktree add`), or
-   - Ask the operator before you touch them.
+2. If `MERGE_HEAD` or an in-progress rebase is set — **do not stash**. Stash clears merge/rebase state; a later `git commit` becomes single-parent. Finish the merge, `merge --abort`, or rebuild with `commit-tree` only if you already broke it (see `docs/tooling/git-stash-policy.md`).
+3. If the dirty files are **yours** (you edited them this turn) - **commit them**, do not stash.
+4. If the dirty files are **not yours** - stop. Either:
+ - Search the agent transcripts for who owns them (`grep -l <filename> ~/.cursor/projects/*/agent-transcripts/*.jsonl`), or
+ - Move to a fresh **worktree** for your work (`hapi-worktree-create` / `git worktree add`), or
+ - Ask the operator before you touch them.
 
 ## Why not stash?
 
