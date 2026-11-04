@@ -636,6 +636,9 @@ async function sendAttributedPeerMessage(
 ): Promise<void> {
     const response = await http.post(
         `${apiUrl}/cli/sessions/${encodeURIComponent(sourceSessionId)}/peer-messages`,
+        // Omit deliveryMode: Pi hub-native-steers body deliveryMode=steer on
+        // emit, which races the follow-up /steer confirmation (false send_failed).
+        // Match unattributed JWT sends: queue row + optional /steer ACK.
         { targetSessionId, text: message },
         {
             headers: buildHubRequestHeaders({
