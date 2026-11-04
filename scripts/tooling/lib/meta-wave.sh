@@ -464,6 +464,34 @@ mw_member_complete() {
     return 1
 }
 
+# mw_broom_latch <prev_emoji> <complete_reason>
+# When Gate A is already clean, decide whether the chip should be 🧹 even though
+# mw_member_complete failed (typically not_archived after ping-peer resume).
+# prev_emoji==🧹 holds a good latch; recovery also fires when the *only* complete
+# failures are archival/headRef bookkeeping — otherwise a hitchhike demotion to 🔧
+# can never recover (dogfood #1598, 2026-11-04). Exit 0 = latch to broom.
+mw_broom_latch() {
+    local prev="${1:-}" reason="${2:-}"
+    [[ "$prev" == "🧹" ]] && return 0
+    [[ -z "$reason" || "$reason" == "complete" ]] && return 1
+    # Soup dirt still owed — do not broom. Tokenize on '+' so `no_branch`
+    # (headRef missing) is not mistaken for live `branch` still present.
+    local tok
+    local -a toks=()
+    IFS='+' read -r -a toks <<< "$reason"
+    for tok in "${toks[@]}"; do
+        case "$tok" in
+            layer|worktree|branch) return 1 ;;
+        esac
+    done
+    for tok in "${toks[@]}"; do
+        case "$tok" in
+            not_archived|no_branch) return 0 ;;
+        esac
+    done
+    return 1
+}
+
 # mw_wave_id_from_prs <pr pr pr...> — stable id for a member set
 # Dedupes PR numbers: two sessions both chipping #1821 must not become
 # w-1821-1821 (oscillates vs w-1821 → hourly re-unlock forever).

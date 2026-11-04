@@ -296,7 +296,7 @@ What it does, idempotently:
 | 🔁 `pending` | CI/bot in flight, or thread/CI data momentarily unavailable | wait / retry |
 | ⚠️ `needs_work` | failing CI, **current** open threads, bot findings, rebase, or **closed-unmerged** | fix per action string |
 | 📝 `pre_pr` | tracked number, no open PR upstream yet | file when ready |
-| 🔧 `merged` | merged; cleanup still owed (or Gate A clean, archive pending) | drop soup/wt/branch → **exit reflection** (or `skip:`) → ack + idle; Meta archives (peers: **no mid-turn self-archive**) |
+| 🔧 `merged` | merged; cleanup still owed (or Gate A clean, archive pending) | drop soup → **exit reflection** (or `skip:`) → remove wt/branch → ack + idle; Meta archives (peers: **no mid-turn self-archive**) |
 | 🧹 `complete` | fully cleaned (layer DROPPED, no worktree/branch, session archived) | **never** (babysit ended) |
 | `?` `unknown` | GitHub data unavailable this run | **chip left at last good status; never pinged** |
 
@@ -315,11 +315,14 @@ Chip thread count excludes GraphQL `isOutdated` unresolved threads (#847: leftov
 ```text
 PR #<N> merged (<tip SHA if known>). Chip shows merged / 🔧 — leave the workstream title alone.
 
-Please:
+Please (prefer ONE cleanup turn — never end a turn after rmtree if reflection/ack still owed):
 1. Drop your soup layer(s) from **repo** `config/driver-manifest.yaml` (# DROPPED comment OK); then `hapi-manifest-mirror-to-config.sh` if you use ~/.config
-2. Remove worktree + delete local/remote branch (hapi-branch-audit until clean)
-3. Exit reflection: copy docs/plans/retros/TEMPLATE-exit-reflection.md →
+2. Exit reflection FIRST (cwd still alive): copy docs/plans/retros/TEMPLATE-exit-reflection.md →
    docs/plans/retros/YYYY-MM-DD-<slug>-exit.md (or honest skip: <reason> / skip: timebox)
+3. THEN remove worktree + delete local/remote branch (hapi-branch-audit until clean).
+   After `git worktree remove`, leave an empty cwd husk at the old session path (no `.git`)
+   until Meta archives — Gate A ignores husks; a missing cwd makes Claude spawn look like
+   `posix_spawn '~/.local/bin/claude' ENOENT`.
 4. Ack: "Gate A clean + exit reflection: <path|skip:> — idle for archive."
 5. Idle cleanly — do NOT self-archive mid-turn (orphans tool UI). Meta archives when idle.
 
