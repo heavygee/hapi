@@ -7,8 +7,8 @@ alwaysApply: true
 
 When Meta advises a peer after upstream merge / chip `merged` / 🔧:
 
-1. Use the pasteable **MERGED cleanup brief** in `docs/operator/AGENTS.md` § Meta PR watcher (Gate A soup/wt + **Gate A' exit reflection**).
-2. Do **not** say bare "stand down / archive now" — say **ack cleanup + exit reflection, then idle**; Meta archives from outside when idle.
+1. Use the pasteable **MERGED cleanup brief** in `docs/operator/AGENTS.md` § Meta PR watcher (**exit reflection before rmtree**; leave cwd husk; then ack + idle).
+2. Do **not** say bare "stand down / archive now" — say **ack cleanup + exit reflection, then idle**; Meta archives from outside when idle. Never tell peers to delete the worktree before reflection/ack — a missing cwd breaks Claude spawn (`posix_spawn '…/claude' ENOENT`).
 3. Template: `docs/plans/retros/TEMPLATE-exit-reflection.md`. Honest `skip:` / `skip: timebox` OK — do not block 🧹 forever for a missing retro.
 4. After wave acks: skim `docs/plans/retros/*-exit.md`; apply **only** explicit **Promote?** rows (no essay merges into AGENTS).
 
