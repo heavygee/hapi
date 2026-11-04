@@ -1416,9 +1416,5 @@ layers:
   # Hub-only → remat + publish + seal; tip-unique: preferFleetLatestPointer
   - branch: driver/fix-304-offer-notes-thin
 
-  # tiann/hapi#2267 — silence Cursor finished-shell "Briefly inform…" after
-  # AGENT_NOTIFY_SUMMARY status:done (no second user-visible reply).
-  # Thin tip: fix/2267-post-close-summary-silence @ f14ace9f4 (upstream PR).
-  # Soup union on driver HEAD b72e94e27: driver/2267-post-close-silence @ 302fadd75
-  # CLI-only → remat + hapi-restart-hub; tip-unique: postCloseHarnessSilence
-  - branch: driver/2267-post-close-silence
+  # DROPPED 2026-11-04: driver/2267-post-close-silence MERGED as tiann/hapi#2268
+  # (was #2267 Cursor post-done harness silence; thin fix/2267-post-close-summary-silence)
