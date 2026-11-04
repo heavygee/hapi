@@ -16,7 +16,10 @@
 #      cap 7d — infra stalls must not daily-wake the coding peer;
 #      SKIP if session.thinking — already in a turn / emitting (not merely active).
 #      🧹 complete never pings; 🔧 Gate A clean / archive-pending never hourly
-#      resume — that undoes archive → 🔧 forever; 2026-08-11 e4d152f3)
+#      resume — that undoes archive → 🔧 forever; 2026-08-11 e4d152f3.
+#      Broom latch recovers even after prev_emoji was overwritten to 🔧 when
+#      Gate A is clean and complete fails only not_archived/no_branch
+#      (mw_broom_latch; dogfood #1598 2026-11-04) — hold alone was not enough.)
 #      transition / fingerprint / reminder for greens)
 #   5. Reads GitHub notifications for tiann/hapi + heavygee/hapi since a stored
 #      cursor and folds new human comms into the action queue. Never marks read.
@@ -1014,9 +1017,12 @@ main() {
                         "${PR_BY_REPO_RELATED[$pair_sess]:-${PR_RELATED[$p]:-}}" \
                         "${PR_BY_REPO_HINTS[$pair_sess]:-${PR_HINTS[$p]:-}}")"; then
                         action_sess="Gate A clean — exit reflection (or skip:) then ack + idle; archive pending (Meta archives from outside; do not rematerialize / self-archive mid-turn)"
-                        # Latch 🧹: a Meta/peer resume must not demote complete → merged
-                        # solely because lifecycle is no longer archived (2026-08-11 e4d152f3).
-                        if [[ "$prev_emoji_early" == "🧹" ]]; then
+                        # Latch 🧹: resume must not demote complete → merged solely
+                        # because lifecycle left archived (2026-08-11 e4d152f3).
+                        # Recoverable: if prev_emoji was already overwritten to 🔧
+                        # (hitchhike demotion), still broom when complete_reason is
+                        # only not_archived/no_branch (mw_broom_latch; #1598 2026-11-04).
+                        if mw_broom_latch "$prev_emoji_early" "$complete_reason"; then
                             emoji_sess="🧹"
                             action_sess="fully cleaned — babysit ended"
                         fi

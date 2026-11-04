@@ -304,6 +304,16 @@ eq "complete needs archived" "$reason" "not_archived"
 reason="$(mw_member_complete "$MANIFEST_DROP" "/tmp/no-wt" 1366 archived "$GIT_TMP" "" || true)"
 eq "complete needs headRef" "$reason" "no_branch"
 
+# --- broom latch (recover 🔧 after not_archived demotion) ---
+if mw_broom_latch "🧹" "not_archived"; then ok; else bad "prev broom should latch"; fi
+if mw_broom_latch "🔧" "not_archived"; then ok; else bad "not_archived alone should recover"; fi
+if mw_broom_latch "🔧" "not_archived+no_branch"; then ok; else bad "not_archived+no_branch should recover"; fi
+if mw_broom_latch "🔧" "not_archived+layer"; then bad "layer must not recover"; else ok; fi
+if mw_broom_latch "🔧" "not_archived+worktree"; then bad "worktree must not recover"; else ok; fi
+if mw_broom_latch "🔧" "not_archived+branch"; then bad "branch must not recover"; else ok; fi
+if mw_broom_latch "🔧" "layer+worktree"; then bad "soup dirt must not recover"; else ok; fi
+if mw_broom_latch "" "complete"; then bad "complete reason must not latch here"; else ok; fi
+
 rm -rf "$GIT_TMP"
 
 echo ""
