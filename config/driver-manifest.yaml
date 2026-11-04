@@ -696,11 +696,10 @@ layers:
   - branch: feat/composer-expand-enter-newline
 
   # tiann/hapi#1404 — session-attached long-running jobs (outlive agent; list chrome).
-  # Upstream PR: #1424 (feat/session-attached-jobs @ 67d3a037d). Wake stays #1489 / layer below.
-  # Worktree: ~/coding/hapi/worktrees/session-jobs-rethin @ driver/session-attached-jobs
-  # Soup tip: d8aa34e96 — re-thinned 2026-08-28: one commit porting #1424 delta onto
-  # driver/integration (runId fence, formatJobLine, reconcileAttachedJobs). Replaces stale
-  # e2cb2bd09 (57 commits from Aug merge-base). Drop when upstream #1424 merges.
+  # Upstream PR: #1424 (feat/session-attached-jobs). Wake stays #1489 / layer below.
+  # Worktree: ~/coding/hapi/worktrees/session-jobs-fake-meter-fix @ driver/session-attached-jobs
+  # Soup tip: 46260d195 — drop fake w-1/3 indeterminate job bar (remaining-only = label only).
+  # Drop when upstream #1424 merges.
   - branch: driver/session-attached-jobs
 
   # DROPPED 2026-09-02: driver/cursor-notify-rule-delta — stale fat tip (60 commits from
