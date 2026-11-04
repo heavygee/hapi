@@ -696,11 +696,10 @@ layers:
   - branch: feat/composer-expand-enter-newline
 
   # tiann/hapi#1404 — session-attached long-running jobs (outlive agent; list chrome).
-  # Upstream PR: #1424 (feat/session-attached-jobs @ 67d3a037d). Wake stays #1489 / layer below.
-  # Worktree: ~/coding/hapi/worktrees/session-jobs-rethin @ driver/session-attached-jobs
-  # Soup tip: d8aa34e96 — re-thinned 2026-08-28: one commit porting #1424 delta onto
-  # driver/integration (runId fence, formatJobLine, reconcileAttachedJobs). Replaces stale
-  # e2cb2bd09 (57 commits from Aug merge-base). Drop when upstream #1424 merges.
+  # Upstream PR: #1424 (feat/session-attached-jobs). Wake stays #1489 / layer below.
+  # Worktree: ~/coding/hapi/worktrees/session-jobs-fake-meter-fix @ driver/session-attached-jobs
+  # Soup tip: 11d6c3e2c — thin tip-forward on live soup; drop fake w-1/3 indeterminate bar.
+  # Drop when upstream #1424 merges.
   - branch: driver/session-attached-jobs
 
   # DROPPED 2026-09-02: driver/cursor-notify-rule-delta — stale fat tip (60 commits from
@@ -909,18 +908,20 @@ layers:
   # Tip: 26c1615ae
   - branch: fix/archive-verify-runner-before-marking-gone
 
-  # tiann/hapi#1618 — soft peer nametag (#1203 Layer 0.1). Replaces rejected
-  # #1473 fortress; CLI path attribution via HAPI_SESSION_ID + peer-messages.
-  # Worktree: ~/coding/hapi/worktrees/driver-remat @ driver/a2a-nametag-attribution
-  # Tip: c99b8393f
-  - branch: driver/a2a-nametag-attribution
+  # SUPERSEDED 2026-11-04 (tiann/hapi#2251 dogfood absorb):
+  # driver/a2a-nametag-attribution (#1618, tip c99b8393f) and
+  # driver/ping-peer-agent-session-id (fork #137, tip 93cae0af5) stay in tip
+  # ancestry; do not re-add them as layers. Upstream feat/a2a-peer-handoffs-
+  # consolidated @ 90b9066d2 is fat vs soup tip-forward (51 files) and conflicted
+  # on absorb — Meta thinned the two cold-review commits onto soup tip instead.
 
-  # tiann/hapi#1203 — durable agentSessionId find-key for ping-peer / MCP ping_peer.
-  # Resolves by agentSessionId (exact/prefix/substring), POSTs to current hub id.
-  # Fork PR: heavygee/hapi#137 (feat/ping-peer-agent-session-id still OPEN for upstream prep).
-  # Thin tip on live soup (union with #1618 nametag). Worktree: ping-peer-1203.
-  # Tip: 93cae0af5 — re-thin after dogfood bump if tip-forward SKIP.
-  - branch: driver/ping-peer-agent-session-id
+  # tiann/hapi#2251 cold-review delta only — omit deliveryMode on attributed
+  # peer-messages + CliPeerDeliverRequestSchema.strict() (400 on forged peer /
+  # stray deliveryMode). Feature body already in soup via the SUPERSEDED layers.
+  # Rebuild: hub + cli + shared (schema) — full remat/seal for dogfood.
+  # Worktree: ~/coding/hapi/worktrees/a2a-2251-strict
+  # Tip: 87381a5f6 (cherry-picks of f4d9358f5 + 90b9066d2 onto soup tip; drop steer-only test)
+  - branch: driver/a2a-2251-strict-delta
 
 
   # tiann/hapi#1717 — loud blocked session-list chrome + off-viewport counter.
@@ -943,9 +944,10 @@ layers:
   # Tip: fa9a3dbaa
   - branch: fix/cursor-unexpected-stop-blocked-footer
 
-  # DROPPED 2026-10-12: tiann/hapi#1554 / PR #1598 FTS5 session content search (dogfood).
+  # DROPPED 2026-10-12: tiann/hapi issue 1554 / PR 1598 FTS5 session content search (dogfood).
   # Tip ba7b3f96d absorbed into soup (418179d4b + later tips); wt cleaned for /work space relief.
-  # Upstream #1598 still OPEN — feature lives on soup tip ancestry until merge/remat.
+  # Upstream PR 1598 was still OPEN then — feature lives on soup tip ancestry until merge/remat.
+  # Bare issue/PR numbers on purpose (Gate A relatedRefs hitchhike; see cba15b540 / 47eb31380).
   # Was: - branch: driver/session-content-search
 
   # tiann/hapi#1710 / PR #2010 — search_peers review fixes (summary.text match +
@@ -1415,9 +1417,5 @@ layers:
   # Hub-only → remat + publish + seal; tip-unique: preferFleetLatestPointer
   - branch: driver/fix-304-offer-notes-thin
 
-  # tiann/hapi#2267 — silence Cursor finished-shell "Briefly inform…" after
-  # AGENT_NOTIFY_SUMMARY status:done (no second user-visible reply).
-  # Thin tip: fix/2267-post-close-summary-silence @ f14ace9f4 (upstream PR).
-  # Soup union on driver HEAD b72e94e27: driver/2267-post-close-silence @ 302fadd75
-  # CLI-only → remat + hapi-restart-hub; tip-unique: postCloseHarnessSilence
-  - branch: driver/2267-post-close-silence
+  # DROPPED 2026-11-04: driver/2267-post-close-silence MERGED as tiann/hapi#2268
+  # (was #2267 Cursor post-done harness silence; thin fix/2267-post-close-summary-silence)

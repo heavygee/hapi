@@ -16,7 +16,10 @@
 #      cap 7d — infra stalls must not daily-wake the coding peer;
 #      SKIP if session.thinking — already in a turn / emitting (not merely active).
 #      🧹 complete never pings; 🔧 Gate A clean / archive-pending never hourly
-#      resume — that undoes archive → 🔧 forever; 2026-08-11 e4d152f3)
+#      resume — that undoes archive → 🔧 forever; 2026-08-11 e4d152f3.
+#      Broom latch recovers even after prev_emoji was overwritten to 🔧 when
+#      Gate A is clean and complete fails only not_archived/no_branch
+#      (mw_broom_latch; dogfood #1598 2026-11-04) — hold alone was not enough.)
 #      transition / fingerprint / reminder for greens)
 #   5. Reads GitHub notifications for tiann/hapi + heavygee/hapi since a stored
 #      cursor and folds new human comms into the action queue. Never marks read.
@@ -1014,9 +1017,12 @@ main() {
                         "${PR_BY_REPO_RELATED[$pair_sess]:-${PR_RELATED[$p]:-}}" \
                         "${PR_BY_REPO_HINTS[$pair_sess]:-${PR_HINTS[$p]:-}}")"; then
                         action_sess="Gate A clean — exit reflection (or skip:) then ack + idle; archive pending (Meta archives from outside; do not rematerialize / self-archive mid-turn)"
-                        # Latch 🧹: a Meta/peer resume must not demote complete → merged
-                        # solely because lifecycle is no longer archived (2026-08-11 e4d152f3).
-                        if [[ "$prev_emoji_early" == "🧹" ]]; then
+                        # Latch 🧹: resume must not demote complete → merged solely
+                        # because lifecycle left archived (2026-08-11 e4d152f3).
+                        # Recoverable: if prev_emoji was already overwritten to 🔧
+                        # (hitchhike demotion), still broom when complete_reason is
+                        # only not_archived/no_branch (mw_broom_latch; #1598 2026-11-04).
+                        if mw_broom_latch "$prev_emoji_early" "$complete_reason"; then
                             emoji_sess="🧹"
                             action_sess="fully cleaned — babysit ended"
                         fi
@@ -1282,7 +1288,7 @@ main() {
                 if printf '%s' "$acts" | grep -q 'Gate A clean'; then
                     Q_MERGED+=("#$(echo "$prs" | tr ' ' ',') [$sid8] MERGED - Gate A clean; exit reflection then ack + idle; archive pending")
                 else
-                    Q_MERGED+=("#$(echo "$prs" | tr ' ' ',') [$sid8] MERGED - peer: drop soup/wt + exit reflection, then archive")
+                    Q_MERGED+=("#$(echo "$prs" | tr ' ' ',') [$sid8] MERGED - peer: drop soup → exit reflection → rmtree(+husk) → archive")
                 fi
                 ;;
             🧹) Q_COMPLETE+=("#$(echo "$prs" | tr ' ' ',') [$sid8] COMPLETE - babysit ended (no ping)") ;;
@@ -1642,8 +1648,8 @@ _do_ping() {  # <sid8> <emoji> <prs> <acts>
                 state_desc="MERGED - Gate A clean; exit reflection then ack + idle; archive pending"
                 rouse=$'\n\n**Meta ping window — Gate A already clean.** Write exit reflection (`docs/plans/retros/TEMPLATE-exit-reflection.md`) or `skip:`, then ack + idle. Do not rematerialize. Do not mid-turn self-archive — Meta archives from outside when idle.'
             else
-                state_desc="MERGED - clean up soup/worktree/branch + exit reflection, archive when idle"
-                rouse=$'\n\n**Meta ping window — are you done yet?** Drop soup layer + clean worktree/branch + exit reflection (or `skip:`), then ack. Do not rematerialize mid-wave. Do not mid-turn self-archive.'
+                state_desc="MERGED - drop soup → exit reflection → rmtree(+cwd husk) → ack + idle"
+                rouse=$'\n\n**Meta ping window — are you done yet?** Drop soup layer → exit reflection (or `skip:`) while cwd alive → remove worktree/branch (leave empty cwd husk, no `.git`) → ack. Do not rematerialize mid-wave. Do not mid-turn self-archive.'
             fi
             ;;
         🧹) state_desc="COMPLETE - fully cleaned; babysit ended"; rouse="" ;;
