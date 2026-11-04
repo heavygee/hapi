@@ -920,7 +920,7 @@ layers:
   # stray deliveryMode). Feature body already in soup via the SUPERSEDED layers.
   # Rebuild: hub + cli + shared (schema) — full remat/seal for dogfood.
   # Worktree: ~/coding/hapi/worktrees/a2a-2251-strict
-  # Tip: d9aaef8c7 (cherry-picks of f4d9358f5 + 90b9066d2 onto soup tip)
+  # Tip: 87381a5f6 (cherry-picks of f4d9358f5 + 90b9066d2 onto soup tip; drop steer-only test)
   - branch: driver/a2a-2251-strict-delta
 
 
