@@ -5779,6 +5779,18 @@ export class SyncEngine {
         return await this.rpcGateway.prepareCursorImportForMachine(machineId, uuid, workspacePath)
     }
 
+    async listClaudeSessionsForMachine(machineId: string, cwd?: string | null, sessionIds?: string[]) {
+        return await this.rpcGateway.listClaudeSessionsForMachine(machineId, cwd, sessionIds)
+    }
+
+    async listCursorImportableSessionsForMachine(machineId: string, candidateWorkspacePaths?: string[], limit?: number) {
+        return await this.rpcGateway.listCursorImportableSessionsForMachine(machineId, candidateWorkspacePaths, limit)
+    }
+
+    async prepareCursorImportForMachine(machineId: string, uuid: string, workspacePath?: string | null) {
+        return await this.rpcGateway.prepareCursorImportForMachine(machineId, uuid, workspacePath)
+    }
+
     async archiveCodexSessionForMachine(machineId: string, sessionId: string): Promise<RpcArchiveCodexSessionResponse> {
         return await this.rpcGateway.archiveCodexSessionForMachine(machineId, sessionId)
     }
