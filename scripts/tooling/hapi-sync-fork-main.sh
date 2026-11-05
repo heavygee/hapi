@@ -99,7 +99,51 @@ fi
 if [[ "$CHECK_ONLY" -eq 1 ]]; then
     echo "FAIL: $PRIMARY $MAIN_BRANCH is $behind commit(s) behind $UPSTREAM_REF" >&2
     echo "Run: hapi-sync-fork-main" >&2
+    # Surface an active operator remat-hold so wave-clear does not "just sync".
+    _hold="${HAPI_REMAT_HOLD_FILE:-$HOME/.hapi/remat-hold.json}"
+    if [[ -f "$_hold" ]] && command -v jq >/dev/null 2>&1 \
+        && [[ "$(jq -r '.active // false' "$_hold" 2>/dev/null)" == "true" ]] \
+        && [[ "$(jq -r '.reason // empty' "$_hold" 2>/dev/null)" == operator:* ]]; then
+        echo "NOTE: operator remat-hold ACTIVE — mutating sync is refused until hold lifts:" >&2
+        echo "      $(jq -r '.reason' "$_hold")" >&2
+        echo "      Inspect: hapi-remat-hold status" >&2
+    fi
     exit 1
+fi
+
+# Operator kitchen pin: remat-hold reason starting with "operator:" blocks
+# mutating sync as well as remat (Meta/tooling latch for excluded upstream tips).
+_hold="${HAPI_REMAT_HOLD_FILE:-$HOME/.hapi/remat-hold.json}"
+if [[ -f "$_hold" ]] && command -v jq >/dev/null 2>&1; then
+    if [[ "$(jq -r '.active // false' "$_hold" 2>/dev/null)" == "true" ]]; then
+        _reason="$(jq -r '.reason // empty' "$_hold" 2>/dev/null || true)"
+        if [[ "$_reason" == operator:* ]]; then
+            echo "ERROR: operator remat-hold active — refusing hapi-sync-fork-main" >&2
+            echo "       reason: $_reason" >&2
+            echo "       Inspect: hapi-remat-hold status" >&2
+            echo "       Do NOT sync until operator lifts the hold (would pull excluded upstream tips)." >&2
+            exit 76
+        fi
+    fi
+fi
+
+# Durable SHA exclude pin (survives remat-hold clear until operator removes it).
+_exclude="${HAPI_UPSTREAM_EXCLUDE_FILE:-$HOME/.hapi/operator-upstream-exclude.json}"
+if [[ -f "$_exclude" ]] && command -v jq >/dev/null 2>&1; then
+    _blocked="$(jq -r '.exclude_shas[]? // empty' "$_exclude" 2>/dev/null || true)"
+    if [[ -n "$_blocked" ]]; then
+        while IFS= read -r _sha; do
+            [[ -z "$_sha" ]] && continue
+            if git -C "$PRIMARY" merge-base --is-ancestor "$_sha" "$UPSTREAM_REF" 2>/dev/null \
+                && ! git -C "$PRIMARY" merge-base --is-ancestor "$_sha" "$MAIN_BRANCH" 2>/dev/null; then
+                _why="$(jq -r --arg s "$_sha" '.entries[]? | select(.sha==$s) | .reason // empty' "$_exclude" 2>/dev/null | head -1)"
+                echo "ERROR: upstream exclude pin — refusing sync that would absorb $_sha" >&2
+                [[ -n "$_why" ]] && echo "       reason: $_why" >&2
+                echo "       pin: $_exclude (remove entry only when operator lifts exclude)" >&2
+                exit 76
+            fi
+        done <<<"$_blocked"
+    fi
 fi
 
 if [[ -n "$(git -C "$PRIMARY" status --porcelain)" ]]; then
