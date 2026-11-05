@@ -86,6 +86,11 @@ export type PingPeerOptions = {
     /** When set, skip list+prefix resolve and load this session directly. */
     sessionId?: string
     message: string
+    /**
+     * Resume an inactive target before sending. Default false: inactive
+     * targets are refused so stale/unrelated peers are not relaunched.
+     */
+    wake?: boolean
     waitActiveSecs?: number
     /**
      * Fresh spawn: poll until active instead of POST /resume on the first

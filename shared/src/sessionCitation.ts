@@ -74,6 +74,45 @@ export const SESSION_ID_PREFIX_PARAM_DESCRIPTION =
     'Do not pass invented titles or nicknames - UUID only.'
 
 /**
+ * Who a peer message may go to. Peers carry other agents' work: an unrelated
+ * ping derails that agent, and pinging an inactive peer relaunches it.
+ */
+export const PEER_CONTACT_RULE =
+    'Message only peers tied to your current task: a session the user cited, your Parent, or peers you spawned or were handed off to. ' +
+    'Never broadcast to a list of peers - not for status updates, and not to announce exclusive work (simulator, device, port, branch, release). ' +
+    'For any other peer, call inspect_peer first to see its machine, cwd, and recent work, and message it only when that work actually conflicts with or depends on yours ' +
+    '(e.g. same machine and resource, same checkout). ' +
+    'Do not wake inactive peers for FYI, status, or done notes.'
+
+/** Zod `.describe` for ping_peer `wake`. */
+export const PEER_WAKE_PARAM_DESCRIPTION =
+    'Resume the target if it is inactive. Default false: an inactive target is refused and no message is sent. ' +
+    'Set true only when the user asked you to wake that peer or the work you hand off requires it to act; never for FYI, status, or done notes.'
+
+/** Zod `.describe` for list_peers `includeInactive`. */
+export const LIST_PEERS_INCLUDE_INACTIVE_PARAM_DESCRIPTION =
+    'Also list inactive sessions (default false: active only). Inactive rows are history, not recipients.'
+
+/** MCP `list_peers` tool description. */
+export const LIST_PEERS_TOOL_DESCRIPTION =
+    'Find a specific peer HAPI session on the same hub/namespace: id, active, busy/idle, flavor, machine, cwd, name. ' +
+    'Active sessions only unless includeInactive. Uses this session\'s hub credentials - works from runner-spawned agents without being on the hub host. ' +
+    'Prefer this over shelling `hapi ping-peer --list`. This is a directory, not a recipient list: ' +
+    PEER_CONTACT_RULE
+
+/** Shared delivery guidance for the peer MCP schemas, descriptions, and prompts. */
+export const PEER_DELIVERY_MODE_DESCRIPTION =
+    'auto (default): steer an active Codex turn when steering is available; otherwise queue. ' +
+    'Auto currently queues for other agent flavors. Prefer auto for routine collaboration when queueing is an acceptable fallback. ' +
+    'queue: explicitly defer non-urgent updates that can wait instead of steering. ' +
+    'steer: use for important, time-sensitive findings the peer needs to know now, not after finishing its current turn ' +
+    '(e.g. a correction that invalidates its assumptions, a blocker, or a result that changes its next action). ' +
+    'State why the finding matters now and what the peer should adjust. ' +
+    'Steer requires insertion into an active Claude, Pi, Codex, or Cursor ACP turn; unsupported, idle, or inactive targets are rejected before sending. ' +
+    'Steering does not abort the current turn or guarantee an immediate response. ' +
+    'If send or steer is unconfirmed after submission, inspect the target before retrying; do not resend automatically.'
+
+/**
  * Hub session ids have no dots. Reject dotted tails so source paths like
  * `web/src/routes/sessions/chat.tsx` are not treated as citations.
  */
