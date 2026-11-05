@@ -4,10 +4,9 @@ import type { AcpSdkBackend } from '@/agent/backends/acp';
 import { normalizeNativeSessionTitle } from '@/agent/nativeSessionTitle';
 
 type AcpSessionTitleBackend = Pick<AcpSdkBackend, 'setSessionInfoUpdateListener'>;
-type AcpSessionTitleClient = Pick<
-    ApiSessionClient,
-    'sendClaudeSessionMessage' | 'getMetadata' | 'updateMetadata'
->;
+type AcpSessionTitleClient = Pick<ApiSessionClient, 'sendClaudeSessionMessage' | 'updateMetadata'> & {
+    getMetadata?: ApiSessionClient['getMetadata'];
+};
 
 export interface AcpSessionTitleController {
     syncNativeTitle: (title: unknown) => void;
@@ -19,7 +18,7 @@ export function createAcpSessionTitleSync(client: AcpSessionTitleClient): AcpSes
     let lastTitle: string | null = null;
     // Survives launcher recreation / session resume via session metadata, so a
     // manual change_title rename is not overwritten by later native titles.
-    let manual = client.getMetadata()?.acpManualTitle === true;
+    let manual = client.getMetadata?.()?.acpManualTitle === true;
 
     return {
         syncNativeTitle: (title) => {

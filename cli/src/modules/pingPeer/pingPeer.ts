@@ -3,28 +3,27 @@
  * plus read-only inspectPeer (GET session + messages, never resume)
  * and setPeerPermissionMode (POST /api/sessions/:id/permission-mode).
  *
- * Shared by `hapi ping-peer` / `hapi inspect-peer` / `hapi search-peers` /
- * `hapi set-mode` and MCP `ping_peer` / `inspect_peer` / `list_peers` /
- * `search_peers`. Uses the
- * same hub JWT flow as the web app (`POST /api/auth` with CLI_API_TOKEN),
- * scoped to the token's namespace. Callers must not invent parallel auth or
- * arbitrary hosts.
+ * Shared by `hapi ping-peer` / `hapi inspect-peer` / `hapi set-mode` and MCP
+ * `ping_peer` / `inspect_peer`. Uses the same hub JWT flow as the web app
+ * (`POST /api/auth` with CLI_API_TOKEN), scoped to the token's namespace.
+ * Callers must not invent parallel auth or arbitrary hosts.
  */
 
+import { randomUUID } from 'node:crypto'
 import axios, { type AxiosInstance } from 'axios'
 import {
     extractAssistantPlainText,
-    HAPI_PEER_DELIVERY_HEADER,
-    HAPI_PEER_DELIVERY_HEADER_VALUE,
     getPermissionModesForFlavor,
     isObject,
-    isSessionId
+    isSteeringSupportedForSession,
+    type MessageDeliveryMode,
 } from '@hapi/protocol'
-import { normalizeSessionIdPrefix, extractSessionCitationLabel } from '@hapi/protocol/sessionCitation'
+import { normalizeSessionIdPrefix } from '@hapi/protocol/sessionCitation'
 import { configuration } from '@/configuration'
 import { isPeerToolsDisabled } from '@/modules/common/peerTools'
 import { getAuthToken } from '@/api/auth'
 import { buildHubRequestHeaders } from '@/api/hubExtraHeaders'
+import { PeerDeliveryModeSchema, type PeerDeliveryMode } from './deliveryMode'
 
 export type PingPeerErrorCode =
     | 'bad_args'
@@ -66,6 +65,7 @@ export type PingPeerSessionSummary = {
     id: string
     active: boolean
     thinking?: boolean
+    agentState?: { steeringActive?: boolean; controlledByUser?: boolean } | null
     updatedAt?: number
     metadata?: {
         name?: string
@@ -74,8 +74,8 @@ export type PingPeerSessionSummary = {
         machineId?: string | null
         lifecycleState?: string | null
         piSessionId?: string
-        agentSessionId?: string
-        supersededBySessionId?: string
+        cursorSessionId?: string | null
+        cursorSessionProtocol?: 'acp' | 'stream-json' | null
         summary?: { text?: string } | null
         capabilities?: { concurrentClients?: boolean } | null
     } | null
@@ -86,6 +86,7 @@ export type PingPeerOptions = {
     /** When set, skip list+prefix resolve and load this session directly. */
     sessionId?: string
     message: string
+    deliveryMode?: PeerDeliveryMode
     /**
      * Resume an inactive target before sending. Default false: inactive
      * targets are refused so stale/unrelated peers are not relaunched.
@@ -95,21 +96,17 @@ export type PingPeerOptions = {
     /**
      * Fresh spawn: poll until active instead of POST /resume on the first
      * inactive snapshot. Machine spawn can return before the hub row is
-     * active; resume would launch a second child.
+     * active; resume would launch a second child (no existingSessionId on
+     * the original spawn, so runner dedupe does not coalesce).
      */
     waitForInitialActive?: boolean
     apiUrl?: string
     accessToken?: string
-    /**
-     * Calling session id (MCP / HAPI_SESSION_ID). When set, uses
-     * `POST /cli/sessions/:source/peer-messages` for a soft nametag chip/From
-     * line (#1203). Same namespace-token trust as other CLI session routes —
-     * not a proof. Bare `hapi ping-peer` omits this → unattributed peer rows.
-     */
-    authenticatedSourceSessionId?: string
     http?: AxiosInstance
     sleep?: (ms: number) => Promise<void>
     now?: () => number
+    /** Soft nametag via /cli/.../peer-messages when set (soup). */
+    authenticatedSourceSessionId?: string
     onProgress?: (message: string) => void
 }
 
@@ -117,6 +114,24 @@ export type PingPeerResult = {
     sessionId: string
     name: string
     resumed: boolean
+    delivery: 'accepted' | 'steered' | 'invoked'
+    /**
+     * Known client submit identity for the peer row (`ping-peer-` prefix).
+     * The recipient runtime's consumption ACK is the only delivery proof;
+     * HTTP success below means hub-accepted, which may race that ACK.
+     */
+    localId: string
+}
+
+/**
+ * localId prefix for peer submissions. The recipient hub exempts these rows
+ * from the session-end synthetic sweep, preserving unconsumed peer messages
+ * for replay and keeping invocation timestamps tied to consumption ACKs.
+ */
+export const PEER_MESSAGE_LOCAL_ID_PREFIX = 'ping-peer-'
+
+export function createPeerMessageLocalId(): string {
+    return `${PEER_MESSAGE_LOCAL_ID_PREFIX}${randomUUID()}`
 }
 
 export type ListPeerSessionsOptions = {
@@ -135,15 +150,6 @@ export type PeerSessionListEntry = PingPeerSessionSummary & {
     machineLabel?: string
 }
 
-export type SearchPeerSessionsOptions = {
-    query: string
-    apiUrl?: string
-    accessToken?: string
-    http?: AxiosInstance
-    /** Max matches to return (default 30, hub max 100). */
-    limit?: number
-}
-
 const DEFAULT_WAIT_ACTIVE_SECS = 60
 const POLL_ACTIVE_MS = 2_000
 const POLL_PI_READY_MS = 1_000
@@ -155,9 +161,9 @@ function defaultSleep(ms: number): Promise<void> {
 const AUTH_RECOVERY_HINT =
     'On a remote runner, set HAPI_API_URL to the runner hub, and set CLI_API_TOKEN ' +
     'or run `hapi auth login` to save the token. Inside a HAPI session prefer MCP ' +
-    '`list_peers` / `search_peers` / `ping_peer` / `inspect_peer`, which use the session CLI credentials.'
+    '`list_peers` / `ping_peer` / `inspect_peer`, which use the session CLI credentials.'
 
-function resolveApiUrl(apiUrl?: string): string {
+export function resolveApiUrl(apiUrl?: string): string {
     const raw = (apiUrl ?? configuration.apiUrl).trim().replace(/\/+$/, '')
     if (!raw) {
         throw new PingPeerError(
@@ -170,7 +176,7 @@ function resolveApiUrl(apiUrl?: string): string {
     return raw
 }
 
-function resolveAccessToken(accessToken?: string): string {
+export function resolveAccessToken(accessToken?: string): string {
     let token = ''
     try {
         token = (accessToken ?? getAuthToken()).trim()
@@ -190,7 +196,7 @@ function authFailedMessage(apiUrl: string, detail: string): string {
     return `failed to exchange access token for JWT (${detail}). Hub URL: ${apiUrl}. ${AUTH_RECOVERY_HINT}`
 }
 
-async function exchangeJwt(
+export async function exchangeJwt(
     apiUrl: string,
     accessToken: string,
     http: AxiosInstance
@@ -224,89 +230,13 @@ async function exchangeJwt(
     }
 }
 
-function authHeaders(jwt: string): Record<string, string> {
+export function authHeaders(jwt: string): Record<string, string> {
     return buildHubRequestHeaders({
         Authorization: `Bearer ${jwt}`,
         'Content-Type': 'application/json'
     })
 }
 
-function readAgentSessionId(session: PingPeerSessionSummary): string {
-    const raw = session.metadata?.agentSessionId
-    return typeof raw === 'string' ? raw.trim() : ''
-}
-
-function sortPeersActiveThenUpdated(sessions: PingPeerSessionSummary[]): PingPeerSessionSummary[] {
-    return [...sessions].sort((a, b) => {
-        const aActive = a.active ? 0 : 1
-        const bActive = b.active ? 0 : 1
-        if (aActive !== bActive) {
-            return aActive - bActive
-        }
-        return (b.updatedAt ?? 0) - (a.updatedAt ?? 0)
-    })
-}
-
-function formatPeerResolveHint(session: PingPeerSessionSummary): string {
-    const name = session.metadata?.name?.trim() || resolvePeerSessionLabel(session)
-    const agentSessionId = readAgentSessionId(session)
-    const hubShort = session.id.slice(0, 8)
-    const agentPart = agentSessionId
-        ? ` agentSessionId=${agentSessionId.length > 12 ? `${agentSessionId.slice(0, 12)}…` : agentSessionId}`
-        : ''
-    return `name="${name}" hubId=${hubShort}…${agentPart}`
-}
-
-function throwPeerResolveNotFound(trimmed: string, sessions: PingPeerSessionSummary[]): never {
-    const sample = sessions.slice(0, 3).map(formatPeerResolveHint).join('; ')
-    const hint = sample ? ` Sample: ${sample}.` : ''
-    throw new PingPeerError(
-        'not_found',
-        `no session matching '${trimmed}'. Try a longer hub id prefix or agentSessionId prefix.${hint}`
-    )
-}
-
-function throwPeerResolveAmbiguous(
-    trimmed: string,
-    matches: PingPeerSessionSummary[],
-    kind: string
-): never {
-    const sample = matches.slice(0, 5).map(formatPeerResolveHint).join('; ')
-    throw new PingPeerError(
-        'ambiguous',
-        `'${trimmed}' matches ${matches.length} sessions by ${kind} (${sample}${matches.length > 5 ? '; …' : ''}); use a longer prefix`
-    )
-}
-
-function pickBestPeerMatch(
-    matches: PingPeerSessionSummary[],
-    trimmed: string,
-    kind: string
-): PingPeerSessionSummary {
-    if (matches.length === 0) {
-        throw new PingPeerError('not_found', `no session matching '${trimmed}'`)
-    }
-    if (matches.length === 1) {
-        return matches[0]!
-    }
-    const sorted = sortPeersActiveThenUpdated(matches)
-    const top = sorted[0]!
-    const tied = sorted.filter(
-        (session) =>
-            session.active === top.active
-            && (session.updatedAt ?? 0) === (top.updatedAt ?? 0)
-    )
-    if (tied.length > 1) {
-        throwPeerResolveAmbiguous(trimmed, tied, kind)
-    }
-    return top
-}
-
-/**
- * Resolve a peer session by hub id prefix or durable `metadata.agentSessionId`.
- * Hub ids are ephemeral; agentSessionId survives hub-row churn (#1203).
- * POST/resume always use the resolved hub `id` (current row).
- */
 export function resolveSessionByPrefix(
     sessions: PingPeerSessionSummary[],
     prefix: string
@@ -316,128 +246,23 @@ export function resolveSessionByPrefix(
         throw new PingPeerError('bad_args', 'session id prefix is required')
     }
 
-    const exactHub = sessions.filter((session) => session.id === trimmed)
-    if (exactHub.length === 1) {
-        return exactHub[0]!
+    const exact = sessions.filter((session) => session.id === trimmed)
+    if (exact.length === 1) {
+        return exact[0]!
     }
 
-    const hubPrefixMatches = sessions.filter((session) => session.id.startsWith(trimmed))
-    if (hubPrefixMatches.length === 1) {
-        return hubPrefixMatches[0]!
+    const matches = sessions.filter((session) => session.id.startsWith(trimmed))
+    if (matches.length === 0) {
+        throw new PingPeerError('not_found', `no session matching prefix '${trimmed}'`)
     }
-    if (hubPrefixMatches.length > 1) {
-        throwPeerResolveAmbiguous(trimmed, hubPrefixMatches, 'hub id prefix')
-    }
-
-    const needleLower = trimmed.toLowerCase()
-    const agentExact = sessions.filter(
-        (session) => readAgentSessionId(session).toLowerCase() === needleLower
-    )
-    if (agentExact.length > 0) {
-        return pickBestPeerMatch(agentExact, trimmed, 'agentSessionId')
-    }
-
-    const agentPrefixMatches = sessions.filter((session) =>
-        readAgentSessionId(session).toLowerCase().startsWith(needleLower)
-    )
-    if (agentPrefixMatches.length > 0) {
-        return pickBestPeerMatch(agentPrefixMatches, trimmed, 'agentSessionId prefix')
-    }
-
-    // Overseer `resolve` substring parity for agentSessionId when prefix is too short.
-    const agentContainsMatches = sessions.filter((session) =>
-        readAgentSessionId(session).toLowerCase().includes(needleLower)
-    )
-    if (agentContainsMatches.length > 0) {
-        return pickBestPeerMatch(agentContainsMatches, trimmed, 'agentSessionId')
-    }
-
-    throwPeerResolveNotFound(trimmed, sessions)
-}
-
-function buildPeerSessionNotFoundError(prefix: string, rawCitation?: string): PingPeerError {
-    const label = rawCitation ? extractSessionCitationLabel(rawCitation) : null
-    if (label) {
-        return new PingPeerError(
-            'not_found',
-            `session id '${prefix}' not found (may have been merged or deleted). `
-                + `Citation title '${label}' is not used for auto-routing — call list_peers for the current id.`
+    if (matches.length > 1) {
+        const sample = matches.slice(0, 5).map((session) => session.id.slice(0, 8)).join(', ')
+        throw new PingPeerError(
+            'ambiguous',
+            `prefix '${trimmed}' matches ${matches.length} sessions (${sample}${matches.length > 5 ? ', ...' : ''}); use a longer prefix`
         )
     }
-    return new PingPeerError(
-        'not_found',
-        `no session matching prefix '${prefix}'. The id may have been merged or superseded — try list_peers.`
-    )
-}
-
-async function followSupersessionChain(
-    session: PingPeerSessionSummary,
-    sessions: PingPeerSessionSummary[],
-    fetchSession?: (sessionId: string) => Promise<PingPeerSessionSummary | null>
-): Promise<PingPeerSessionSummary> {
-    let current = session
-    for (let depth = 0; depth < 10; depth += 1) {
-        const replacement = current.metadata?.supersededBySessionId?.trim()
-        if (!replacement || replacement === current.id) {
-            return current
-        }
-        const inList = sessions.find((row) => row.id === replacement)
-        if (inList) {
-            current = inList
-            continue
-        }
-        if (fetchSession) {
-            const fetched = await fetchSession(replacement)
-            if (fetched) {
-                current = fetched
-                continue
-            }
-        }
-        return current
-    }
-    return current
-}
-
-export type ResolvePeerSessionTargetOptions = {
-    rawCitation?: string
-    fetchSession?: (sessionId: string) => Promise<PingPeerSessionSummary | null>
-}
-
-/**
- * Resolve a peer session for inspect_peer / ping_peer: list prefix, direct GET
- * for exact UUIDs, then supersession chain. Name/title matching is intentionally
- * not used — labels are not stable identities.
- */
-export async function resolvePeerSessionTarget(
-    sessions: PingPeerSessionSummary[],
-    prefix: string,
-    options: ResolvePeerSessionTargetOptions = {}
-): Promise<PingPeerSessionSummary> {
-    let matched: PingPeerSessionSummary | null = null
-
-    try {
-        matched = resolveSessionByPrefix(sessions, prefix)
-    } catch (error) {
-        if (!(error instanceof PingPeerError)) {
-            throw error
-        }
-        if (error.code === 'ambiguous') {
-            throw error
-        }
-        if (error.code !== 'not_found') {
-            throw error
-        }
-    }
-
-    if (!matched && isSessionId(prefix) && options.fetchSession) {
-        matched = await options.fetchSession(prefix)
-    }
-
-    if (!matched) {
-        throw buildPeerSessionNotFoundError(prefix, options.rawCitation)
-    }
-
-    return followSupersessionChain(matched, sessions, options.fetchSession)
+    return matches[0]!
 }
 
 async function listSessions(
@@ -508,22 +333,6 @@ async function getSession(
         throw new PingPeerError('not_found', `failed to load session ${sessionId} (${detail})`)
     }
     return response.data.session as PingPeerSessionSummary
-}
-
-async function tryGetSession(
-    apiUrl: string,
-    jwt: string,
-    sessionId: string,
-    http: AxiosInstance
-): Promise<PingPeerSessionSummary | null> {
-    try {
-        return await getSession(apiUrl, jwt, sessionId, http)
-    } catch (error) {
-        if (error instanceof PingPeerError && error.code === 'not_found') {
-            return null
-        }
-        throw error
-    }
 }
 
 async function resumeSession(
@@ -608,72 +417,72 @@ async function waitForPiReady(
     )
 }
 
-/** Unattributed peer send (bare CLI / no session client). Web JWT + peer header. */
-async function sendUnattributedPeerMessage(
-    apiUrl: string,
-    jwt: string,
-    targetSessionId: string,
-    message: string,
-    http: AxiosInstance
-): Promise<void> {
-    const response = await http.post(
-        `${apiUrl}/api/sessions/${encodeURIComponent(targetSessionId)}/messages`,
-        { text: message },
-        {
-            headers: {
-                ...authHeaders(jwt),
-                [HAPI_PEER_DELIVERY_HEADER]: HAPI_PEER_DELIVERY_HEADER_VALUE
-            },
-            timeout: 30_000,
-            validateStatus: () => true
-        }
+function unconfirmedSendError(localId: string, detail: string): PingPeerError {
+    return new PingPeerError(
+        'send_failed',
+        `Send not confirmed (localId=${localId}): ${detail}. ` +
+        'The message may have been accepted; inspect the target before retrying. Do not resend automatically.'
     )
-    if (response.status >= 200 && response.status < 300 && response.data?.ok === true) {
-        return
-    }
-    const detail = typeof response.data?.error === 'string'
-        ? response.data.error
-        : typeof response.data?.code === 'string'
-            ? response.data.code
-            : `HTTP ${response.status}`
-    throw new PingPeerError('send_failed', `send failed: ${detail}`)
 }
 
-/**
- * Attributed peer send: CLI token + path source id. Hub ignores any body
- * sourceSessionId and fills sourceName from the store.
- */
-async function sendAttributedPeerMessage(
+async function sendMessage(
     apiUrl: string,
-    cliToken: string,
-    sourceSessionId: string,
-    targetSessionId: string,
+    jwt: string,
+    sessionId: string,
     message: string,
-    http: AxiosInstance
-): Promise<void> {
+    localId: string,
+    http: AxiosInstance,
+    deliveryMode: MessageDeliveryMode
+): Promise<PingPeerResult['delivery']> {
+    // The existing queued-message steer action accepts localId as well as id.
+    // Both modes retain the peer identity so only runtime ACKs prove delivery.
     const response = await http.post(
-        `${apiUrl}/cli/sessions/${encodeURIComponent(sourceSessionId)}/peer-messages`,
-        // Omit deliveryMode: Pi hub-native-steers body deliveryMode=steer on
-        // emit, which races the follow-up /steer confirmation (false send_failed).
-        // Match unattributed JWT sends: queue row + optional /steer ACK.
-        { targetSessionId, text: message },
+        `${apiUrl}/api/sessions/${encodeURIComponent(sessionId)}/messages`,
+        { text: message, localId },
         {
-            headers: buildHubRequestHeaders({
-                Authorization: `Bearer ${cliToken}`,
-                'Content-Type': 'application/json'
-            }),
+            headers: authHeaders(jwt),
             timeout: 30_000,
             validateStatus: () => true
         }
-    )
+    ).catch((error: unknown) => {
+        if (deliveryMode !== 'steer') throw error
+        const detail = error instanceof Error ? error.message : String(error)
+        throw unconfirmedSendError(localId, detail)
+    })
     if (response.status >= 200 && response.status < 300 && response.data?.ok === true) {
-        return
+        // HTTP success means hub-accepted, not proof the row is still queued:
+        // the recipient runtime's consumption ACK may race this response.
+        if (deliveryMode === 'queue') return 'accepted'
+        try {
+            const steer = await http.post(
+                `${apiUrl}/api/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(localId)}/steer`,
+                {},
+                { headers: authHeaders(jwt), timeout: 30_000, validateStatus: () => true }
+            )
+            if (steer.status >= 200 && steer.status < 300) {
+                if (steer.data?.status === 'steered') return 'steered'
+                // The target consumed the message before the steer request.
+                // Do not claim it was inserted into the active turn.
+                if (steer.data?.status === 'invoked') return 'invoked'
+            }
+            throw new Error(typeof steer.data?.error === 'string' ? steer.data.error : `HTTP ${steer.status}`)
+        } catch (error) {
+            const detail = error instanceof Error ? error.message : String(error)
+            throw new PingPeerError(
+                'send_failed',
+                `Message accepted (localId=${localId}), but steer was not confirmed: ${detail}. ` +
+                'It may remain queued or already be consumed; inspect the target before retrying. Do not resend automatically.'
+            )
+        }
     }
     const detail = typeof response.data?.error === 'string'
         ? response.data.error
         : typeof response.data?.code === 'string'
             ? response.data.code
             : `HTTP ${response.status}`
+    if (deliveryMode === 'steer') {
+        throw unconfirmedSendError(localId, detail)
+    }
     throw new PingPeerError('send_failed', `send failed: ${detail}`)
 }
 
@@ -742,54 +551,6 @@ export async function listPeerSessions(
     }))
 }
 
-/**
- * Keyword search across the hub namespace (name / summary.text / path /
- * agentSessionId / id). Not recency-bounded — finds quiet sessions that fall
- * out of `list_peers`.
- */
-export async function searchPeerSessions(
-    options: SearchPeerSessionsOptions
-): Promise<PingPeerSessionSummary[]> {
-    const query = options.query.trim()
-    if (!query) {
-        throw new PingPeerError('bad_args', 'search query is required')
-    }
-    const apiUrl = resolveApiUrl(options.apiUrl)
-    const accessToken = resolveAccessToken(options.accessToken)
-    const http = options.http ?? axios
-    const jwt = await exchangeJwt(apiUrl, accessToken, http)
-
-    const limit = options.limit ?? 30
-    const response = await http.get(
-        `${apiUrl}/api/sessions/search`,
-        {
-            headers: authHeaders(jwt),
-            params: { q: query, limit },
-            timeout: 15_000,
-            validateStatus: () => true
-        }
-    )
-    if (response.status < 200 || response.status >= 300) {
-        const detail = typeof response.data?.error === 'string'
-            ? response.data.error
-            : `HTTP ${response.status}`
-        throw new PingPeerError(
-            'auth_failed',
-            `failed to search sessions (${detail}). Hub URL: ${apiUrl}. ${AUTH_RECOVERY_HINT}`
-        )
-    }
-    const body = response.data
-    const sessions = Array.isArray(body?.sessions)
-        ? body.sessions
-        : Array.isArray(body)
-            ? body
-            : null
-    if (!sessions) {
-        throw new PingPeerError('auth_failed', 'failed to search sessions (unexpected response)')
-    }
-    return sessions as PingPeerSessionSummary[]
-}
-
 export type FormatPeerSessionsListOptions = {
     /** Max rows to print (default 30). */
     maxRows?: number
@@ -805,20 +566,9 @@ export type FormatPeerSessionsListOptions = {
      * an exact omitted count from the sample.
      */
     hasMore?: boolean
-    /** Keep input order (search rank) instead of sorting by updatedAt. */
-    preserveOrder?: boolean
-    /** Override empty-list copy (e.g. search miss). */
-    emptyMessage?: string
-    /**
-     * Compact MCP/CLI layout for large result pages (search_peers up to 100).
-     * One legend line + `id a|i flavor title` rows (full UUID; no key=value noise).
-     */
-    dense?: boolean
 }
 
 const MAX_PEER_LABEL_CHARS = 255
-/** Dense search rows: keep titles short so 100 hits stay cheap in model context. */
-const MAX_DENSE_PEER_LABEL_CHARS = 72
 
 /**
  * Hub fetch size for peer discovery: enough rows for the requested page, plus
@@ -834,11 +584,7 @@ export function peerListFetchLimit(requestedLimit: number, options?: { excludeCa
  * Web-parity title for peer shortlists: name → summary.text → basename(path) → id prefix.
  * Collapses whitespace so agent-readable rows stay one line each.
  */
-export function resolvePeerSessionLabel(
-    session: PingPeerSessionSummary,
-    options?: { maxChars?: number }
-): string {
-    const maxChars = options?.maxChars ?? MAX_PEER_LABEL_CHARS
+export function resolvePeerSessionLabel(session: PingPeerSessionSummary): string {
     const meta = session.metadata
     const pathLabel = meta?.path?.split(/[\\/]/).filter(Boolean).pop()?.trim()
     const raw = meta?.name?.trim()
@@ -849,8 +595,8 @@ export function resolvePeerSessionLabel(
     if (!collapsed) {
         return session.id.slice(0, 8)
     }
-    return collapsed.length > maxChars
-        ? collapsed.slice(0, maxChars)
+    return collapsed.length > MAX_PEER_LABEL_CHARS
+        ? collapsed.slice(0, MAX_PEER_LABEL_CHARS)
         : collapsed
 }
 
@@ -859,62 +605,72 @@ const PEER_LIST_FOOTER =
     'inspect_peer an unfamiliar peer before messaging it, and never broadcast.'
 
 /**
- * Human/agent-readable shortlist for MCP `list_peers` / `search_peers`
- * and `hapi ping-peer --list` / `hapi search-peers`.
- * Newest `updatedAt` first for list; search results keep hub rank order.
- * Use `dense: true` for search_peers so large pages stay cheap in MCP context.
+ * Human/agent-readable shortlist for MCP `list_peers` and `hapi ping-peer --list`.
+ * Newest `updatedAt` first. Same hub/namespace as the caller credentials.
  */
 export function formatPeerSessionsList(
     sessions: PeerSessionListEntry[],
     options: FormatPeerSessionsListOptions = {}
 ): string {
     const maxRows = options.maxRows ?? 30
-    const dense = options.dense === true
     const excludeId = options.excludeSessionId?.trim() ?? ''
     const caller = excludeId ? sessions.find((session) => session.id === excludeId) : undefined
     const filtered = excludeId
         ? sessions.filter((session) => session.id !== excludeId)
         : sessions
     if (filtered.length === 0) {
-        if (options.emptyMessage) {
-            return options.emptyMessage
-        }
-        return 'No peer sessions found on this hub/namespace.'
+        return options.includeInactive
+            ? 'No peer sessions found on this hub/namespace.'
+            : 'No active peer sessions found on this hub/namespace.'
     }
-    const ordered = options.preserveOrder
-        ? filtered
-        : [...filtered].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
-    const page = ordered.slice(0, Math.max(1, maxRows))
-    const rows = dense
-        ? [
-            '# id a|i flavor title',
-            ...page.map((session) => {
-                const flavor = (session.metadata?.flavor ?? '?').replace(/\s+/g, '')
-                const name = resolvePeerSessionLabel(session, { maxChars: MAX_DENSE_PEER_LABEL_CHARS })
-                const active = session.active ? 'a' : 'i'
-                return `${session.id} ${active} ${flavor} ${name}`
-            })
-        ]
-        : page.map((session) => {
-            const flavor = session.metadata?.flavor ?? '?'
-            const name = resolvePeerSessionLabel(session)
-            return `  ${session.id}  active=${session.active}  flavor=${flavor}  ${name}`
-        })
-    const omitted = ordered.length - page.length
+    const callerMachineId = caller?.metadata?.machineId ?? null
+    const callerPath = caller?.metadata?.path ?? null
+    const sorted = [...filtered].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+    const rows = sorted.slice(0, Math.max(1, maxRows)).map((session) => {
+        const meta = session.metadata
+        const flavor = meta?.flavor ?? '?'
+        const name = resolvePeerSessionLabel(session)
+        const state = session.active ? (session.thinking ? 'busy' : 'idle') : 'inactive'
+        const sameMachine = Boolean(callerMachineId) && meta?.machineId === callerMachineId
+        const machine = session.machineLabel ?? meta?.machineId?.slice(0, 8) ?? '?'
+        const sameCwd = sameMachine && Boolean(callerPath) && meta?.path === callerPath
+        const marks = [sameMachine ? 'same-machine' : null, sameCwd ? 'same-cwd' : null].filter(Boolean)
+        return `  ${session.id}  ${state}  flavor=${flavor}  machine=${machine}  cwd=${meta?.path ?? '?'}`
+            + `${marks.length > 0 ? `  [${marks.join(', ')}]` : ''}  ${name}`
+    })
+    const omitted = sorted.length - rows.length
     if (options.hasMore) {
-        rows.push(dense ? '…+' : '  … more sessions available (narrow with inspect_peer / ping_peer by id)')
+        rows.push('  … more sessions available (narrow with inspect_peer / ping_peer by id)')
     } else if (omitted > 0) {
-        rows.push(dense ? `…+${omitted}` : `  … ${omitted} more (narrow with inspect_peer / ping_peer by id)`)
+        rows.push(`  … ${omitted} more (narrow with inspect_peer / ping_peer by id)`)
     }
     rows.push(PEER_LIST_FOOTER)
     return rows.join('\n')
 }
 
+function getSteeringUnavailableReason(session: PingPeerSessionSummary): string | null {
+    if (!session.active) {
+        return 'Steering requires an active turn; target is inactive, no message sent. Use queue with wake to resume it'
+    }
+    if (!isSteeringSupportedForSession(session.metadata)) {
+        return 'Steering is only supported for Claude, Pi, Codex, and Cursor ACP sessions; no message sent'
+    }
+    if (session.agentState?.controlledByUser && !session.metadata?.capabilities?.concurrentClients) {
+        return 'Steering is only available for remote sessions; no message sent'
+    }
+    const steeringActive = session.metadata?.flavor === 'pi'
+        ? session.thinking
+        : session.agentState?.steeringActive === true
+    if (!steeringActive) {
+        return 'Steering requires an active turn; target is idle, no message sent. Use queue to start a turn'
+    }
+    return null
+}
+
 export async function pingPeer(options: PingPeerOptions): Promise<PingPeerResult> {
     assertPeerToolsEnabled()
     const knownSessionId = (options.sessionId ?? '').trim()
-    const rawCitation = knownSessionId ? '' : (options.sessionIdPrefix ?? '')
-    const prefix = knownSessionId ? '' : normalizeSessionIdPrefix(rawCitation)
+    const prefix = knownSessionId ? '' : normalizeSessionIdPrefix(options.sessionIdPrefix ?? '')
     const message = options.message ?? ''
     if (!knownSessionId && !prefix) {
         throw new PingPeerError('bad_args', 'session id prefix is required')
@@ -922,6 +678,11 @@ export async function pingPeer(options: PingPeerOptions): Promise<PingPeerResult
     if (!message) {
         throw new PingPeerError('bad_args', 'message is required')
     }
+    const parsedDeliveryMode = PeerDeliveryModeSchema.safeParse(options.deliveryMode ?? 'auto')
+    if (!parsedDeliveryMode.success) {
+        throw new PingPeerError('bad_args', 'deliveryMode must be auto, queue or steer')
+    }
+    const requestedDeliveryMode = parsedDeliveryMode.data
 
     const waitActiveSecs = options.waitActiveSecs ?? DEFAULT_WAIT_ACTIVE_SECS
     if (!Number.isFinite(waitActiveSecs) || waitActiveSecs <= 0) {
@@ -936,26 +697,28 @@ export async function pingPeer(options: PingPeerOptions): Promise<PingPeerResult
     const onProgress = options.onProgress
 
     const jwt = await exchangeJwt(apiUrl, accessToken, http)
-    const fetchSession = (sessionId: string) => tryGetSession(apiUrl, jwt, sessionId, http)
     const matched = knownSessionId
         ? await getSession(apiUrl, jwt, knownSessionId, http)
-        : await resolvePeerSessionTarget(
-            await listSessions(apiUrl, jwt, http),
-            prefix,
-            { rawCitation, fetchSession }
-        )
+        : resolveSessionByPrefix(await listSessions(apiUrl, jwt, http), prefix)
     const name = resolvePeerSessionLabel(matched)
-    onProgress?.(
-        matched.id === prefix
-            ? `resolved ${matched.id}  active=${matched.active}  name="${name}"`
-            : `resolved ${matched.id} (from cited ${prefix})  active=${matched.active}  name="${name}"`
-    )
+    onProgress?.(`resolved ${matched.id}  active=${matched.active}  name="${name}"`)
 
     let resumed = false
     const ensureActive = async (progressMessage: string): Promise<PingPeerSessionSummary> => {
         const session = await getSession(apiUrl, jwt, matched.id, http)
         if (session.active) {
             return session
+        }
+        if (requestedDeliveryMode === 'steer') {
+            throw new PingPeerError('bad_args', 'Steering requires an active turn; target is inactive, no message sent. Use queue with wake to resume it')
+        }
+        if (!options.wake) {
+            throw new PingPeerError(
+                'inactive',
+                `target ${matched.id} is inactive; no message sent. `
+                + 'Do not wake peers for FYI, status, or done notes. '
+                + 'Pass wake=true (CLI: --wake) only when the user asked or the handed-off work requires this peer to act.'
+            )
         }
         onProgress?.(progressMessage)
         await resumeSession(apiUrl, jwt, matched.id, http)
@@ -989,27 +752,26 @@ export async function pingPeer(options: PingPeerOptions): Promise<PingPeerResult
         }
     }
 
-    const sourceId = options.authenticatedSourceSessionId?.trim() ?? ''
-    const attributed = Boolean(sourceId && isSessionId(sourceId))
-    onProgress?.(`sending message (${message.length} chars${attributed ? ', attributed' : ', unattributed'})...`)
-    if (attributed) {
-        // CLI token (same credential as ApiSessionClient), not the web JWT.
-        await sendAttributedPeerMessage(
-            apiUrl,
-            accessToken,
-            sourceId,
-            matched.id,
-            message,
-            http
-        )
-    } else {
-        await sendUnattributedPeerMessage(apiUrl, jwt, matched.id, message, http)
+    // Use the live snapshot, not the discovery list. Auto initially steers only
+    // Codex targets; other flavors retain queue unless steer is explicit.
+    const steeringError = getSteeringUnavailableReason(live)
+    const deliveryMode: MessageDeliveryMode = requestedDeliveryMode === 'auto'
+        ? (live.metadata?.flavor === 'codex' && steeringError === null ? 'steer' : 'queue')
+        : requestedDeliveryMode
+    if (deliveryMode === 'steer' && steeringError !== null) {
+        throw new PingPeerError('bad_args', steeringError)
     }
+
+    onProgress?.(`sending message (${message.length} chars, ${deliveryMode}${requestedDeliveryMode === 'auto' ? ' via auto' : ''})...`)
+    const localId = createPeerMessageLocalId()
+    const delivery = await sendMessage(apiUrl, jwt, matched.id, message, localId, http, deliveryMode)
 
     return {
         sessionId: matched.id,
         name,
-        resumed
+        resumed,
+        localId,
+        delivery
     }
 }
 
@@ -1245,8 +1007,7 @@ async function fetchSessionMessages(
  */
 export async function inspectPeer(options: InspectPeerOptions): Promise<InspectPeerResult> {
     assertPeerToolsEnabled()
-    const rawCitation = options.sessionIdPrefix ?? ''
-    const prefix = normalizeSessionIdPrefix(rawCitation)
+    const prefix = normalizeSessionIdPrefix(options.sessionIdPrefix ?? '')
     if (!prefix) {
         throw new PingPeerError('bad_args', 'session id prefix is required')
     }
@@ -1258,8 +1019,7 @@ export async function inspectPeer(options: InspectPeerOptions): Promise<InspectP
 
     const jwt = await exchangeJwt(apiUrl, accessToken, http)
     const sessions = await listSessions(apiUrl, jwt, http)
-    const fetchSession = (sessionId: string) => tryGetSession(apiUrl, jwt, sessionId, http)
-    const matched = await resolvePeerSessionTarget(sessions, prefix, { rawCitation, fetchSession })
+    const matched = resolveSessionByPrefix(sessions, prefix)
     const live = await getSession(apiUrl, jwt, matched.id, http)
     const meta = live.metadata ?? matched.metadata ?? null
     const [fetched, machineLabels] = await Promise.all([
@@ -1366,9 +1126,7 @@ export async function setPeerPermissionMode(options: SetPeerPermissionModeOption
     const live = await getSession(apiUrl, jwt, matched.id, http)
     // Hub treats a missing flavor as claude; mirror it so the allowed list matches.
     const flavor = live.metadata?.flavor ?? matched.metadata?.flavor ?? 'claude'
-    // Shared (concurrentClients) sessions cannot launch with Safe Yolo; same filter as the web picker.
-    const shared = Boolean(live.metadata?.capabilities?.concurrentClients)
-    const allowed: readonly string[] = getPermissionModesForFlavor(flavor).filter((m) => !shared || m !== 'safe-yolo')
+    const allowed: readonly string[] = getPermissionModesForFlavor(flavor)
     if (allowed.length === 0) {
         throw new PingPeerError('bad_args', `${flavor} sessions do not support permission modes`)
     }
