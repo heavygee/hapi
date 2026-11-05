@@ -566,6 +566,9 @@ export type FormatPeerSessionsListOptions = {
      * an exact omitted count from the sample.
      */
     hasMore?: boolean
+    preserveOrder?: boolean
+    dense?: boolean
+    emptyMessage?: string
 }
 
 const MAX_PEER_LABEL_CHARS = 255
@@ -608,6 +611,58 @@ const PEER_LIST_FOOTER =
  * Human/agent-readable shortlist for MCP `list_peers` and `hapi ping-peer --list`.
  * Newest `updatedAt` first. Same hub/namespace as the caller credentials.
  */
+export type SearchPeerSessionsOptions = {
+    query: string
+    apiUrl?: string
+    accessToken?: string
+    http?: AxiosInstance
+    /** Max matches to return (default 30, hub max 100). */
+    limit?: number
+}
+
+export async function searchPeerSessions(
+    options: SearchPeerSessionsOptions
+): Promise<PingPeerSessionSummary[]> {
+    const query = options.query.trim()
+    if (!query) {
+        throw new PingPeerError('bad_args', 'search query is required')
+    }
+    const apiUrl = resolveApiUrl(options.apiUrl)
+    const accessToken = resolveAccessToken(options.accessToken)
+    const http = options.http ?? axios
+    const jwt = await exchangeJwt(apiUrl, accessToken, http)
+
+    const limit = options.limit ?? 30
+    const response = await http.get(
+        `${apiUrl}/api/sessions/search`,
+        {
+            headers: authHeaders(jwt),
+            params: { q: query, limit },
+            timeout: 15_000,
+            validateStatus: () => true
+        }
+    )
+    if (response.status < 200 || response.status >= 300) {
+        const detail = typeof response.data?.error === 'string'
+            ? response.data.error
+            : `HTTP ${response.status}`
+        throw new PingPeerError(
+            'auth_failed',
+            `failed to search sessions (${detail}). Hub URL: ${apiUrl}. ${AUTH_RECOVERY_HINT}`
+        )
+    }
+    const body = response.data
+    const sessions = Array.isArray(body?.sessions)
+        ? body.sessions
+        : Array.isArray(body)
+            ? body
+            : null
+    if (!sessions) {
+        throw new PingPeerError('auth_failed', 'failed to search sessions (unexpected response)')
+    }
+    return sessions as PingPeerSessionSummary[]
+}
+
 export function formatPeerSessionsList(
     sessions: PeerSessionListEntry[],
     options: FormatPeerSessionsListOptions = {}
@@ -625,7 +680,7 @@ export function formatPeerSessionsList(
     }
     const callerMachineId = caller?.metadata?.machineId ?? null
     const callerPath = caller?.metadata?.path ?? null
-    const sorted = [...filtered].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+    const sorted = options.preserveOrder ? filtered : [...filtered].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
     const rows = sorted.slice(0, Math.max(1, maxRows)).map((session) => {
         const meta = session.metadata
         const flavor = meta?.flavor ?? '?'

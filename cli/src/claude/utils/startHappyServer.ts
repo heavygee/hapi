@@ -150,12 +150,12 @@ function createHapiMcpServer(
         logger.debug('[hapiMCP] Changing title to:', title);
         try {
             if (!normalizeSessionDisplayTitle(title)) return { success: false, error: 'Title must not be empty' };
-            if (typeof client.refreshMetadata === 'function') {
-                if (!await client.refreshMetadata()) {
+            if (typeof (client as unknown as { refreshMetadata?: () => Promise<boolean> }).refreshMetadata === 'function') {
+                if (!await (client as unknown as { refreshMetadata: () => Promise<boolean> }).refreshMetadata()) {
                     return { success: false, error: 'Could not read the current title lock from the Hub.' };
                 }
             }
-            if (client.getMetadata?.()?.titleLocked) {
+            if ((client.getMetadata?.() as { titleLocked?: boolean } | null | undefined)?.titleLocked) {
                 return { success: false, error: 'Session title is locked by the user. Only the user can unlock it.' };
             }
             if (!emitTitleSummary) {
@@ -171,7 +171,7 @@ function createHapiMcpServer(
                     return { success: false, error: 'Title update could not be confirmed by the Hub.' };
                 }
             }
-            if (client.getMetadata?.()?.titleLocked) {
+            if ((client.getMetadata?.() as { titleLocked?: boolean } | null | undefined)?.titleLocked) {
                 return { success: false, error: 'Session title is locked by the user. Only the user can unlock it.' };
             }
             if (onChangeTitle) {
@@ -181,7 +181,7 @@ function createHapiMcpServer(
                         return { success: false, error: 'Title update could not be confirmed by the Hub.' };
                     }
                 }
-                if (client.getMetadata?.()?.titleLocked) {
+                if ((client.getMetadata?.() as { titleLocked?: boolean } | null | undefined)?.titleLocked) {
                     return { success: false, error: 'Session title is locked by the user. Only the user can unlock it.' };
                 }
             }
