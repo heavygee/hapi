@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { compareSessionSummaries, mergeReadState } from '@hapi/protocol'
+import { mergeReadState } from '@hapi/protocol'
 import type { ApiClient } from '@/api/client'
 import type { SessionsResponse, SessionSummary } from '@/types/api'
 import { queryKeys } from '@/lib/query-keys'
@@ -28,12 +28,12 @@ export function useSessions(api: ApiClient | null, options: UseSessionsOptions =
                 ...response,
                 sessions: response.sessions.map(session => {
                     const prior = cached.get(session.id)
-                    return { ...session,
-                        lastUserMessageAt: Math.max(prior?.lastUserMessageAt ?? 0, session.lastUserMessageAt ?? 0) || undefined,
+                    return {
+                        ...session,
                         contentRevision: Math.max(prior?.contentRevision ?? 0, session.contentRevision ?? 0),
-                        readState: mergeReadState(prior?.readState, session.readState)
+                        readState: mergeReadState(prior?.readState, session.readState),
                     }
-                }).sort(compareSessionSummaries)
+                })
             }
         },
         enabled: Boolean(api) && (options.enabled ?? true),
