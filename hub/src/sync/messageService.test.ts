@@ -443,11 +443,10 @@ describe('MessageService message pagination', () => {
 
         const context = makeService(store).getMessageContext(session.id, target.id)
 
-        expect(context?.messages.map((message) => message.id)).toEqual(expect.arrayContaining([
-            immediate.id,
-            scheduled.id,
-            target.id
-        ]))
+        const ids = context?.messages.map((message) => message.id) ?? []
+        expect(ids).toContain(immediate.id)
+        expect(ids).toContain(scheduled.id)
+        expect(ids).toContain(target.id)
         expect(context?.page).toMatchObject({
             nextBeforeAt: 35_000,
             nextBeforeSeq: messages[34]!.seq

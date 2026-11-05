@@ -15,11 +15,11 @@ afterEach(() => {
 })
 
 describe('schema migration v30 to v31 (blocked ack)', () => {
-    it('fresh DB is v31 with blocked_ack columns', () => {
+    it('fresh DB is v32 with blocked_ack columns', () => {
         const store = new Store(':memory:')
         const db = (store as unknown as { db: Database }).db
         const version = db.prepare('PRAGMA user_version').get() as { user_version: number }
-        expect(version.user_version).toBe(31)
+        expect(version.user_version).toBe(32)
         const columns = db.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>
         const names = new Set(columns.map((row) => row.name))
         expect(names.has('blocked_ack_at')).toBe(true)
@@ -47,7 +47,7 @@ describe('schema migration v30 to v31 (blocked ack)', () => {
         try {
             const internalDb = (migrated as unknown as { db: Database }).db
             const version = internalDb.prepare('PRAGMA user_version').get() as { user_version: number }
-            expect(version.user_version).toBe(31)
+            expect(version.user_version).toBe(32)
             const columns = internalDb.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>
             const names = new Set(columns.map((row) => row.name))
             expect(names.has('blocked_ack_at')).toBe(true)
