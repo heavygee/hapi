@@ -45,6 +45,7 @@ export function useMessages(
     options: { skipInitialTailSync?: boolean } = {}
 ): {
     messages: DecryptedMessage[]
+    readThroughRevision?: number
     warning: string | null
     isSyncingTail: boolean
     isLoadingMore: boolean
@@ -169,6 +170,7 @@ export function useMessages(
 
     return {
         messages: state.messages,
+        readThroughRevision: state.readThroughRevision,
         warning: state.warning,
         // The store's first isSyncingTail publication can occur after child
         // layout effects. Keep search-target anchoring blocked until the

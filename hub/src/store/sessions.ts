@@ -257,6 +257,10 @@ export function mergeSessionMetadata(prior: unknown, next: unknown, options?: { 
 }
 
 type DbSessionRow = {
+    content_revision: number
+    read_revision: number
+    read_state_version: number
+    manual_unread: number
     id: string
     tag: string | null
     namespace: string
@@ -295,6 +299,8 @@ function toStoredSession(row: DbSessionRow): StoredSession {
         machineId: row.machine_id,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
+        contentRevision: row.content_revision,
+        readState: { readRevision: row.read_revision, version: row.read_state_version, manualUnread: row.manual_unread === 1 },
         pinned: row.pinned === 1,
         globalPinned: row.global_pinned === 1,
         metadata: safeJsonParse(row.metadata),

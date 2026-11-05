@@ -778,11 +778,15 @@ export function filterWorkingSessionsOnly(
 export function filterUnreadSessionsOnly(
     sessions: SessionSummary[],
     selectedSessionId: string | null | undefined,
-    getLastSeenAt: (sessionId: string) => number
+    getLastSeenAt: (sessionId: string) => number,
+    getManualUnreadAt: (sessionId: string, readState?: SessionSummary['readState']) => number | null | undefined = () => undefined,
 ): SessionSummary[] {
     return sessions.filter(session =>
         session.id === selectedSessionId
-        || sessionIsUnread(session, { lastSeenAt: getLastSeenAt(session.id) })
+        || sessionIsUnread(session, {
+            lastSeenAt: getLastSeenAt(session.id),
+            manualUnreadAt: getManualUnreadAt(session.id, session.readState)
+        })
     )
 }
 
@@ -2027,7 +2031,7 @@ const SessionItem = memo(function SessionItem(props: {
             ? classifySessionAttention(s, {
                 selected,
                 lastSeenAt: getSessionLastSeenAt(s.id),
-                manualUnreadAt: getSessionManualUnreadAt(s.id)
+                manualUnreadAt: getSessionManualUnreadAt(s.id, s.readState)
             })
             : null,
         [s, selected, showDetailedStatus, lastSeenVersion]
@@ -2134,7 +2138,7 @@ const SessionItem = memo(function SessionItem(props: {
                 onLinkPr={githubPrAwarenessEnabled ? () => setLinkPrOpen(true) : undefined}
                 linkedPr={linkedPr}
                 onExport={() => setExportOpen(true)}
-                onMarkUnread={() => markSessionUnread(s.id, s.updatedAt)}
+                onMarkUnread={() => markSessionUnread(s.id, s.readState)}
                 onMarkUnblocked={blocked ? () => setUnblockOpen(true) : undefined}
                 onArchive={() => setArchiveOpen(true)}
                 onReopen={cursorReopenDisabledReason ? undefined : handleReopen}

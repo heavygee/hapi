@@ -1,4 +1,5 @@
 import { SESSION_LIFECYCLE_IDLE, SESSION_LIFECYCLE_RUNNING } from '@hapi/protocol'
+import { mergeReadState } from '@hapi/protocol'
 import { MAX_EXTERNAL_REFS, mergeExternalRefs, upsertExternalRef, toValidExternalRefs, ExternalRefsSchema, type ExternalRef } from '@hapi/protocol/schemas'
 import { AgentStateSchema, MetadataSchema, SessionPatchSchema, TeamStateSchema } from '@hapi/protocol/schemas'
 import type { CodexCollaborationMode, CopilotAgentMode, PermissionMode, Session, SessionPatch } from '@hapi/protocol/types'
@@ -320,6 +321,8 @@ export class SessionCache {
             seq: stored.seq,
             createdAt: stored.createdAt,
             updatedAt: stored.updatedAt,
+            contentRevision: stored.contentRevision,
+            readState: stored.readState,
             pinned: stored.pinned,
             globalPinned: stored.globalPinned,
             active: existing?.active ?? stored.active,
@@ -548,6 +551,8 @@ export class SessionCache {
         if (patch.active !== undefined) session.active = patch.active
         if (patch.thinking !== undefined) session.thinking = patch.thinking
         if (patch.activeAt !== undefined) session.activeAt = patch.activeAt
+        if (patch.contentRevision !== undefined) session.contentRevision = Math.max(session.contentRevision ?? 0, patch.contentRevision)
+        if (patch.readState) session.readState = mergeReadState(session.readState, patch.readState)
         if (patch.updatedAt !== undefined) session.updatedAt = Math.max(session.updatedAt, patch.updatedAt)
         if (patch.model !== undefined) session.model = patch.model
         if (patch.modelReasoningEffort !== undefined) session.modelReasoningEffort = patch.modelReasoningEffort
@@ -791,7 +796,20 @@ export class SessionCache {
         })
     }
 
-    recordSessionActivity(sessionId: string, updatedAt: number): void {
+    
+    syncReadState(sessionId: string): void {
+        const stored = this.store.sessions.getSession(sessionId)
+        const session = this.sessions.get(sessionId)
+        if (!stored || !session) return
+        if (session.contentRevision === stored.contentRevision
+            && session.readState?.version === stored.readState?.version) return
+        session.contentRevision = stored.contentRevision
+        session.readState = stored.readState
+        this.publisher.emit({ type: 'session-updated', sessionId, namespace: session.namespace,
+            data: { contentRevision: session.contentRevision, readState: session.readState } })
+    }
+
+recordSessionActivity(sessionId: string, updatedAt: number): void {
         if (!Number.isFinite(updatedAt)) {
             return
         }
@@ -1785,6 +1803,8 @@ export class SessionCache {
         }
 
         const movedMessages = this.store.messages.mergeSessionMessages(oldSessionId, newSessionId)
+        this.syncReadState(newSessionId)
+        if (!options.deleteOldSession) this.syncReadState(oldSessionId)
         // mergeSessions deletes the source. mergeSessionHistory keeps it alive
         // with the original socket, so its notify chain must stay on that id.
         if (options.deleteOldSession) {

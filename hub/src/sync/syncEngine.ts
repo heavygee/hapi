@@ -7,7 +7,7 @@
  * - No E2E encryption; data is stored as JSON in SQLite
  */
 
-import { BLOCKED_NOTIFY_STALE_MS, isKnownFlavor, isLiveLifecycleState, isSteeringSupportedForSession, type LocalResumeTarget, type ResumableSession, type SessionEndReason } from '@hapi/protocol'
+import { type SessionReadStateRequest, BLOCKED_NOTIFY_STALE_MS, isKnownFlavor, isLiveLifecycleState, isSteeringSupportedForSession, type LocalResumeTarget, type ResumableSession, type SessionEndReason } from '@hapi/protocol'
 import {
     cliBinaryUpdatedOnDisk,
     isMachineCapabilitySkewed,
@@ -787,6 +787,7 @@ export class SyncEngine {
             if (!this.getSession(event.sessionId)) {
                 this.sessionCache.refreshSession(event.sessionId)
             }
+            this.sessionCache.syncReadState(event.sessionId)
             const session = this.getSession(event.sessionId)
             if (session && 'message' in event && event.message) {
                 const storedSession = this.store.sessions.getSession(event.sessionId)
@@ -1118,7 +1119,14 @@ export class SyncEngine {
         this.sessionCache.setBackgroundTaskCount(sessionId, count)
     }
 
-    recordSessionActivity(sessionId: string, updatedAt: number): void {
+    
+    updateReadState(sessionId: string, namespace: string, request: SessionReadStateRequest) {
+        const result = this.store.sessions.updateReadState(sessionId, namespace, request)
+        if (result?.status === 'ok') this.sessionCache.syncReadState(sessionId)
+        return result
+    }
+
+recordSessionActivity(sessionId: string, updatedAt: number): void {
         this.sessionCache.recordSessionActivity(sessionId, updatedAt)
     }
 

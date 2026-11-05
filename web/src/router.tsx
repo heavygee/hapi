@@ -78,8 +78,7 @@ import { transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer
 import { getDraftAttachments } from '@/lib/composer-attachment-drafts'
 import { refreshSessionDetailPreservingActive } from '@/lib/session-detail-optimistic'
 import { inactiveSessionCanResume, resolveCursorReopenGate } from '@/lib/sessionResume'
-import { initializeSessionLastSeen } from '@/lib/sessionLastSeen'
-import { useSelectedSessionSeen } from '@/hooks/useSelectedSessionSeen'
+import { configureSessionReadState, observeSessionReadStates } from '@/lib/sessionLastSeen'
 import { useSessionBrowserTitle } from '@/hooks/useSessionBrowserTitle'
 import { clearCodexImportedSession, markCodexSessionsImported } from '@/lib/codexImportedSessions'
 import { clearClaudeImportedSession, markClaudeSessionsImported } from '@/lib/claudeImportedSessions'
@@ -302,14 +301,22 @@ function SessionsPage() {
         () => selectedSessionId ? sessions.find((session) => session.id === selectedSessionId) ?? null : null,
         [selectedSessionId, sessions]
     )
+    const readStateScope = api?.getReadStateScope()
+    useEffect(() => {
+        const scope = readStateScope
+        if (!api || !scope) return
+        return configureSessionReadState(scope, (id, request) => {
+            if (api.getReadStateScope() !== scope) return Promise.reject(new Error('Read-state identity changed'))
+            return api.updateSessionReadState(id, request)
+        })
+    }, [api, readStateScope])
     useEffect(() => {
         if (isLoading || error) {
             return
         }
-        initializeSessionLastSeen(baseUrl, sessions)
+        observeSessionReadStates(sessions)
         setInitializedHub(baseUrl)
     }, [baseUrl, error, isLoading, sessions])
-    useSelectedSessionSeen(selectedSessionId, selectedSession?.updatedAt)
     const currentCodexSessionId = selectedSession?.metadata?.flavor === 'codex'
         ? (selectedSession.metadata.agentSessionId ?? null)
         : null
@@ -495,10 +502,6 @@ function SessionsPage() {
     // seen-tracking while the chat was genuinely hidden behind Boards mode;
     // this one caught the desktop-split case where it's hidden on mobile only).
     const isBoardChatVisibleInSplitView = sessionsMode === 'boards' && selectedBoardItem === null && isSplitViewport
-    useSelectedSessionSeen(
-        sessionsMode === 'sessions' || isBoardChatVisibleInSplitView ? selectedSessionId : null,
-        selectedSession?.updatedAt
-    )
     const linkedBoardSession = useMemo(
         () => findSessionLinkedToIssue(sessions, selectedBoardItem?.url ?? null),
         [sessions, selectedBoardItem]
@@ -1455,6 +1458,7 @@ function SessionPage() {
         seekToMessage,
         returnToLatest,
         jumpToTail,
+        readThroughRevision,
     } = useMessages(api, sessionId, {
         skipInitialTailSync: Boolean(effectiveInitialMessageId?.trim())
     })
@@ -1930,6 +1934,7 @@ function SessionPage() {
 
     return (
         <SessionChat
+            readThroughRevision={readThroughRevision}
             api={api}
             session={session}
             cursorChatOnDisk={cursorChatStoreStatus?.onDisk}

@@ -1,4 +1,5 @@
 import type { AgentState, AttachedJob, ExternalRef, Metadata, Session, TodoItem, WorktreeMetadata } from './schemas'
+import type { SessionReadState } from './sessionReadState'
 import { isKnownFlavor } from './flavors'
 import type { SessionBlockedAck, SessionNotifySignal } from './notifyAttention'
 import type { AgentFlavor } from './modes'
@@ -61,6 +62,8 @@ export type SessionSummaryMetadata = {
 }
 
 export type SessionSummary = {
+    contentRevision?: number
+    readState?: SessionReadState
     hasConversationContent?: boolean
     id: string
     active: boolean
@@ -256,6 +259,8 @@ export function toSessionSummary(
         thinking: session.thinking,
         activeAt: session.activeAt,
         updatedAt: session.updatedAt,
+        contentRevision: session.contentRevision,
+        readState: session.readState,
         createdAt: session.createdAt,
         pinned: session.pinned ?? false,
         globalPinned: session.globalPinned ?? false,
