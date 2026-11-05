@@ -127,7 +127,10 @@ if [[ -f "$_hold" ]] && command -v jq >/dev/null 2>&1; then
     fi
 fi
 
-# Durable SHA exclude pin (survives remat-hold clear until operator removes it).
+# Durable SHA exclude / require-together pin (survives remat-hold clear).
+# schema 1: exclude_shas — refuse sync that would absorb listed SHAs.
+# schema 2+: require_together — if any SHA in a group is on main∪upstream,
+#            all must be present after sync (refuse incomplete companion sets).
 _exclude="${HAPI_UPSTREAM_EXCLUDE_FILE:-$HOME/.hapi/operator-upstream-exclude.json}"
 if [[ -f "$_exclude" ]] && command -v jq >/dev/null 2>&1; then
     _blocked="$(jq -r '.exclude_shas[]? // empty' "$_exclude" 2>/dev/null || true)"
@@ -143,6 +146,35 @@ if [[ -f "$_exclude" ]] && command -v jq >/dev/null 2>&1; then
                 exit 76
             fi
         done <<<"$_blocked"
+    fi
+    # If any SHA in a require_together group is on main∪upstream, every SHA in
+    # the group must be on main∪upstream (else sync cannot complete the set).
+    _n="$(jq -r '.require_together | length // 0' "$_exclude" 2>/dev/null || echo 0)"
+    if [[ "${_n:-0}" =~ ^[0-9]+$ && "$_n" -gt 0 ]]; then
+        for (( _i=0; _i<_n; _i++ )); do
+            _why="$(jq -r --argjson i "$_i" '.require_together[$i].reason // empty' "$_exclude")"
+            _any=0
+            while IFS= read -r _sha; do
+                [[ -z "$_sha" ]] && continue
+                if git -C "$PRIMARY" merge-base --is-ancestor "$_sha" "$MAIN_BRANCH" 2>/dev/null \
+                    || git -C "$PRIMARY" merge-base --is-ancestor "$_sha" "$UPSTREAM_REF" 2>/dev/null; then
+                    _any=1
+                    break
+                fi
+            done < <(jq -r --argjson i "$_i" '.require_together[$i].all_of[]?' "$_exclude")
+            if [[ "$_any" -eq 1 ]]; then
+                while IFS= read -r _sha; do
+                    [[ -z "$_sha" ]] && continue
+                    if ! git -C "$PRIMARY" merge-base --is-ancestor "$_sha" "$MAIN_BRANCH" 2>/dev/null \
+                        && ! git -C "$PRIMARY" merge-base --is-ancestor "$_sha" "$UPSTREAM_REF" 2>/dev/null; then
+                        echo "ERROR: require_together — refusing sync; companion $_sha missing from main and $UPSTREAM_REF" >&2
+                        [[ -n "$_why" ]] && echo "       reason: $_why" >&2
+                        echo "       pin: $_exclude" >&2
+                        exit 76
+                    fi
+                done < <(jq -r --argjson i "$_i" '.require_together[$i].all_of[]?' "$_exclude")
+            fi
+        done
     fi
 fi
 
