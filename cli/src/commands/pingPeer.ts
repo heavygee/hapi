@@ -15,6 +15,8 @@ import type { CommandDefinition } from './types'
 type ParsedPingPeerArgs = {
     help: boolean
     list: boolean
+    all: boolean
+    wake: boolean
     sessionIdPrefix?: string
     message?: string
     messageFile?: string
@@ -23,13 +25,13 @@ type ParsedPingPeerArgs = {
 
 function showHelp(): void {
     console.log(`
-${chalk.bold('hapi ping-peer')} - Resume a HAPI session (if needed) and send it a message
+${chalk.bold('hapi ping-peer')} - Send a message to another HAPI session
 
 ${chalk.bold('Usage:')}
   hapi ping-peer <session-id-prefix> <message-text>
   hapi ping-peer <session-id-prefix> --message-file <path>
   hapi ping-peer <session-id-prefix> --message-file -   # read message from stdin
-  hapi ping-peer --list
+  hapi ping-peer --list [--all]   # active sessions; --all includes inactive
 
 ${chalk.bold('Notes:')}
   Do not reinvent JWT + curl for peer handoffs. Prefer this command or MCP ping_peer / list_peers.
@@ -50,7 +52,9 @@ ${chalk.bold('Env:')}
 export function parsePingPeerArgs(args: string[]): ParsedPingPeerArgs {
     const result: ParsedPingPeerArgs = {
         help: false,
-        list: false
+        list: false,
+        all: false,
+        wake: false
     }
 
     for (let i = 0; i < args.length; i++) {
@@ -141,14 +145,19 @@ function envWaitActiveSecs(): number | undefined {
     return value
 }
 
-async function handleList(): Promise<void> {
+async function handleList(includeInactive: boolean): Promise<void> {
     const maxRows = 30
+    const callerSessionId = process.env[HAPI_SESSION_ID_ENV]?.trim() || undefined
     const sessions = await listPeerSessions({
-        limit: peerListFetchLimit(maxRows)
+        limit: peerListFetchLimit(maxRows, { excludeCaller: Boolean(callerSessionId) }),
+        includeInactive
     })
+    const peerCount = sessions.filter((session) => session.id !== callerSessionId).length
     console.log(formatPeerSessionsList(sessions, {
         maxRows,
-        hasMore: sessions.length > maxRows
+        hasMore: peerCount > maxRows,
+        excludeSessionId: callerSessionId,
+        includeInactive
     }))
 }
 
@@ -162,7 +171,7 @@ export async function handlePingPeerCommand(args: string[]): Promise<void> {
     await initializeToken()
 
     if (parsed.list) {
-        await handleList()
+        await handleList(parsed.all)
         return
     }
 

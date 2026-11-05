@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import ReactDOM from 'react-dom/client'
 import '../src/index.css'
 import { ShareTurnDialog } from '../src/components/AssistantChat/ShareTurnDialog'
@@ -106,6 +106,31 @@ function App() {
         updatedAt: { text: `${headerMetadata.showLabels ? 'Updated: ' : ''}Aug 2, 2026, 10:30 AM` },
         worktree: { text: `${headerMetadata.showLabels ? 'Worktree: ' : ''}feat/share-turn-polish` },
     })
+
+    useEffect(() => {
+        if (!includeBlobImage) {
+            setBlobImageSrc(null)
+            return undefined
+        }
+        if (blobImageAsDataUrl) {
+            setBlobImageSrc(blobExportFixture)
+            return undefined
+        }
+
+        let objectUrl: string | null = null
+        let disposed = false
+        void fetch(blobExportFixture)
+            .then((response) => response.blob())
+            .then((blob) => {
+                if (disposed) return
+                objectUrl = URL.createObjectURL(blob)
+                setBlobImageSrc(objectUrl)
+            })
+        return () => {
+            disposed = true
+            if (objectUrl) URL.revokeObjectURL(objectUrl)
+        }
+    }, [blobImageAsDataUrl, includeBlobImage])
 
     const openShare = () => {
         const searchParams = new URLSearchParams(window.location.search)

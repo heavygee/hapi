@@ -22,7 +22,8 @@ export const INSPECT_PEER_TOOL_DESCRIPTION =
     'Fires when the user cites a peer via markdown [title](/sessions/<id>), Copy-reference prose ' +
     'See session "…" (/sessions/<id>) for context, or a bare /sessions/<id>. ' +
     'Extract <id> and pass it as sessionIdPrefix. /sessions/<id> is a hub path - do NOT Grep, Glob, or Read it as a local filesystem path. ' +
-    'Read-only: does not resume. Prefer this (or `hapi inspect-peer`) over JWT+curl. ' +
+    'Read-only: does not resume. Shows machine, cwd, and recent work - call it before messaging a peer you are not already working with. ' +
+    'Prefer this (or `hapi inspect-peer`) over JWT+curl. ' +
     'Never invent peer titles; always use the /sessions/<uuid> from the citation.'
 
 /**
@@ -230,8 +231,8 @@ export function buildSessionCitationSteerInstruction(tools: SessionCitationSteer
         `Prefer these over JWT+curl. Shell fallbacks: hapi inspect-peer <id> / hapi ping-peer <id> <message>.`
     if (tools.listPeersTool) {
         text +=
-            ` To discover peers without a citation, call "${tools.listPeersTool}" ` +
-            `(same hub/namespace; works from runner-spawned sessions). ` +
+            ` To find a specific peer without a citation, call "${tools.listPeersTool}" ` +
+            `(active sessions on the same hub/namespace; works from runner-spawned sessions) - it is a directory, not a recipient list. ` +
             `Shell fallback: hapi ping-peer --list.`
     }
     if (tools.searchPeersTool) {

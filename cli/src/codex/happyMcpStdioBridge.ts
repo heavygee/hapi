@@ -439,6 +439,7 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
       limit: z.number().int().min(1).max(100).optional().describe(
         'Max sessions to return (default 30, max 100). Newest updatedAt first.'
       ),
+      includeInactive: z.boolean().optional().describe(LIST_PEERS_INCLUDE_INACTIVE_PARAM_DESCRIPTION),
     });
 
     if (toolNames.has('list_peers')) {

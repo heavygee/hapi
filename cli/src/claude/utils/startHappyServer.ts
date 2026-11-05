@@ -68,6 +68,7 @@ type StartHappyServerOptions = {
      */
     emitTitleSummary?: boolean;
     enableChangeTitle?: boolean;
+    onChangeTitle?: (title: string) => void;
     /**
      * Cursor-only (#1516): doubled-letter URL recall is a Cursor-routed failure mode.
      * Defaults on when skillLookup.flavor === 'cursor'.
@@ -254,6 +255,7 @@ function createHapiMcpServer(
         limit: z.number().int().min(1).max(100).optional().describe(
             'Max sessions to return (default 30, max 100). Newest updatedAt first.'
         ),
+        includeInactive: z.boolean().optional().describe(LIST_PEERS_INCLUDE_INACTIVE_PARAM_DESCRIPTION),
     });
 
     const searchPeersInputSchema: z.ZodTypeAny = z.object({

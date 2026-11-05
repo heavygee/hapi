@@ -10,7 +10,7 @@ const harness = vi.hoisted(() => ({
     promptCount: 0,
     promptContents: [] as unknown[],
     refreshSessionInfoCalls: [] as Array<{ sessionId: string; cwd: string }>,
-    bridgeOptions: null as { enableChangeTitle?: boolean; skillLookup?: { workingDirectory: string; flavor: string } } | null,
+    bridgeOptions: null as { onChangeTitle?: () => void; skillLookup?: { workingDirectory: string; flavor: string } } | null,
     events: [] as string[],
     cleanupEvents: [] as string[],
     setModelImpl: null as null | ((sessionId: string, modelId: string) => Promise<void>),
@@ -182,7 +182,7 @@ vi.mock('./utils/opencodeBackend', () => ({
     }),}));
 
 vi.mock('@/codex/utils/buildHapiMcpBridge', () => ({
-    buildHapiMcpBridge: async (_client: unknown, options?: { enableChangeTitle?: boolean; skillLookup?: { workingDirectory: string; flavor: string } }) => {
+    buildHapiMcpBridge: async (_client: unknown, options?: { onChangeTitle?: () => void; skillLookup?: { workingDirectory: string; flavor: string } }) => {
         harness.bridgeOptions = options ?? null;
         return {
             server: { stop: () => { harness.cleanupEvents.push('cleanup:server-stop'); if (harness.serverStopError) throw harness.serverStopError; } },
@@ -1735,7 +1735,7 @@ describe('opencodeRemoteLauncher inline model switch', () => {
         expect(JSON.stringify(harness.promptContents[0])).toContain('$name');
         expect(JSON.stringify(harness.promptContents[0])).toContain('skill_lookup');
         expect(JSON.stringify(harness.promptContents[0])).toContain('hapi_display_image');
-        expect(JSON.stringify(harness.promptContents[0])).not.toContain('hapi_change_title');
+        expect(JSON.stringify(harness.promptContents[0])).toContain('hapi_change_title');
         expect(JSON.stringify(harness.promptContents[1])).not.toContain('skill_lookup');
     });
 
@@ -1845,7 +1845,7 @@ describe('opencodeRemoteLauncher inline model switch', () => {
         await opencodeRemoteLauncher(session as never);
 
         expect(harness.bridgeOptions).toEqual({
-            enableChangeTitle: false,
+            onChangeTitle: expect.any(Function),
             skillLookup: { workingDirectory: '/tmp/hapi-opencode-test', flavor: 'opencode' }
         });
         expect(harness.refreshSessionInfoCalls).toEqual([
@@ -2071,7 +2071,7 @@ describe('opencodeRemoteLauncher inline model switch', () => {
         expect(content[0]?.text).toContain('You are in plan mode');
         expect(content[0]?.text).toContain('Do not execute tools');
         expect(content[0]?.text).toContain('design the fix');
-        expect(content[0]?.text).not.toContain('hapi_change_title');
+        expect(content[0]?.text).toContain('hapi_change_title');
     });
 
     it('registers a listOpencodeModels RPC handler that returns the backend cache', async () => {
@@ -2523,6 +2523,8 @@ describe('opencodeRemoteLauncher v2 flavor wiring', () => {
         harness.servePid = null;
         harness.servePidCalls = [];
         harness.events = [];
+        harness.eventStreamOptions = [];
+        harness.eventStreamCloseCount = 0;
         harness.sessionModelsMetadata = undefined;
         harness.promptCount = 0;
         harness.promptImpl = null;

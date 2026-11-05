@@ -856,6 +856,15 @@ export function shouldLabelGroupMachine(
     return (groupMachineId ?? UNKNOWN_MACHINE_ID) !== activeMachineFilter
 }
 
+// "Unread only" view: same rule as above, the open session always stays visible.
+export function filterUnreadSessionsOnly<T extends Pick<SessionSummary, 'id'>>(
+    sessions: T[],
+    isUnread: (session: T) => boolean,
+    selectedSessionId?: string | null
+): T[] {
+    return sessions.filter(session => session.id === selectedSessionId || isUnread(session))
+}
+
 // Paginated session previews move one batch at a time in either direction.
 // Counts always stay within the configured preview floor and the group total.
 export function getNextSessionVisibleCount(current: number, step: number, total: number): number {

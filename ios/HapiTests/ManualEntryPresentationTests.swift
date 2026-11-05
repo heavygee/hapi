@@ -222,7 +222,7 @@ final class ManualEntryPresentationTests: XCTestCase {
         try await settle()
         XCTAssertNil(driver.failure)
         driver.isPairing = true
-        try await settle()
+        try await waitForEnabled(false, in: [address, token])
         XCTAssertFalse(address.isEnabled)
         XCTAssertFalse(token.isEnabled)
         XCTAssertEqual(address.delegate?.textField?(address, shouldChangeCharactersIn: NSRange(location: 0, length: 0), replacementString: "late"), false)
