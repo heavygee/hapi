@@ -574,7 +574,8 @@ it('resolves relative directory against cwd (MCP session working directory)', as
         expect(spawnedBody).not.toHaveProperty('text')
         expect(spawnedBody).not.toHaveProperty('yolo')
         expect(spawnedBody).toHaveProperty('permissionMode', 'yolo')
-        expect(delivered).toEqual({ text: 'do the work' })
+        expect(delivered).toMatchObject({ text: 'do the work' })
+        expect(delivered).toHaveProperty('localId')
         expect(http.patch).toHaveBeenCalledTimes(1)
     })
 
