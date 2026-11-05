@@ -2526,7 +2526,8 @@ export function SessionList(props: {
             ? filterUnreadSessionsOnly(
                 timeFiltered,
                 selectedSessionId,
-                id => lastSeenById?.[id] ?? 0
+                id => lastSeenById?.[id] ?? 0,
+                (id, readState) => getSessionManualUnreadAt(id, readState)
             )
             : timeFiltered
         return activeMachineFilter === null
@@ -2599,7 +2600,8 @@ export function SessionList(props: {
             filtered = filterUnreadSessionsOnly(
                 filtered,
                 selectedSessionId,
-                id => lastSeenById[id] ?? 0
+                id => lastSeenById[id] ?? 0,
+                (id, readState) => getSessionManualUnreadAt(id, readState)
             )
         }
         // Active / Working are AND-composed with the other lenses (#2002).

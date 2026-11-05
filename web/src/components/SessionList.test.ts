@@ -695,13 +695,13 @@ describe('filterUnreadSessionsOnly', () => {
 
     it('keeps only sessions newer than lastSeen; drops seen and selected-only quiet rows stay when selected', () => {
         const sessions = [
-            makeSession({ id: 'unread', updatedAt: 5000, metadata: { path: '/p' } }),
-            makeSession({ id: 'seen', updatedAt: 1000, metadata: { path: '/p' } }),
+            makeSession({ id: 'unread', contentRevision: 5000, metadata: { path: '/p' } }),
+            makeSession({ id: 'seen', contentRevision: 1000, metadata: { path: '/p' } }),
             makeSession({
                 id: 'permission-but-seen',
                 pendingRequestKinds: ['permission'],
                 pendingRequestsCount: 1,
-                updatedAt: 1000,
+                contentRevision: 1000,
                 metadata: { path: '/p' },
             }),
         ]
@@ -711,8 +711,8 @@ describe('filterUnreadSessionsOnly', () => {
 
     it('keeps the selected session visible even when it would otherwise filter out', () => {
         const sessions = [
-            makeSession({ id: 'unread', updatedAt: 5000, metadata: { path: '/p' } }),
-            makeSession({ id: 'selected-quiet', updatedAt: 1000, metadata: { path: '/p' } }),
+            makeSession({ id: 'unread', contentRevision: 5000, metadata: { path: '/p' } }),
+            makeSession({ id: 'selected-quiet', contentRevision: 1000, metadata: { path: '/p' } }),
         ]
         expect(filterUnreadSessionsOnly(sessions, 'selected-quiet', lastSeen).map(s => s.id))
             .toEqual(['unread', 'selected-quiet'])
@@ -724,12 +724,12 @@ describe('filterUnreadSessionsOnly', () => {
         const sessions = [
             makeSession({
                 id: 'unread-a',
-                updatedAt: 5000,
+                contentRevision: 5000,
                 metadata: { path: '/a', machineId: 'machine-a' },
             }),
             makeSession({
                 id: 'seen-b',
-                updatedAt: 1000,
+                contentRevision: 1000,
                 metadata: { path: '/b', machineId: 'machine-b' },
             }),
         ]

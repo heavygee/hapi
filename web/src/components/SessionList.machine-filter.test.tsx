@@ -6,6 +6,7 @@ import type { ApiClient } from '@/api/client'
 import type { SessionSummary } from '@/types/api'
 import { I18nProvider } from '@/lib/i18n-context'
 import { ToastProvider } from '@/lib/toast-context'
+import { markSessionSeen } from '@/lib/sessionLastSeen'
 import { SessionList } from './SessionList'
 
 const SEARCH_LABEL = 'Search sessions (title, path, Agent, machine name, ID, and more)'
@@ -38,6 +39,7 @@ function makeSession(overrides: Partial<SessionSummary> & { id: string }): Sessi
         attachedJob: null,
         model: null,
         effort: null,
+        contentRevision: overrides.updatedAt ?? 0,
         ...overrides
     }
 }
@@ -253,11 +255,9 @@ describe('SessionList session filter menu', () => {
     })
 
     it('allows unread and scratchlist filters to be selected together', async () => {
-        window.localStorage.setItem('hapi.sessionLastSeen.v1', JSON.stringify({
-            'draft-unread': 0,
-            'draft-seen': 1_000,
-            'plain-unread': 0
-        }))
+        markSessionSeen('draft-unread', 0)
+        markSessionSeen('draft-seen', 1_000)
+        markSessionSeen('plain-unread', 0)
         const getScratchlistSessionIds = vi.fn().mockResolvedValue(['draft-unread', 'draft-seen'])
         const api = {
             getScratchlistSessionIds,
@@ -283,10 +283,8 @@ describe('SessionList session filter menu', () => {
     })
 
     it('keeps the existing unread filter behavior behind the unified menu', () => {
-        window.localStorage.setItem('hapi.sessionLastSeen.v1', JSON.stringify({
-            'session-unread': 100,
-            'session-seen': 1_000
-        }))
+        markSessionSeen('session-unread', 100)
+        markSessionSeen('session-seen', 1_000)
         renderSessionList([
             makeSession({ id: 'session-unread', updatedAt: 500, metadata: { path: '/work/unread', name: 'Unread session' } }),
             makeSession({ id: 'session-seen', updatedAt: 500, metadata: { path: '/work/seen', name: 'Seen session' } })
@@ -300,11 +298,9 @@ describe('SessionList session filter menu', () => {
     })
 
     it('ANDs text search with the unread lens instead of replacing it', () => {
-        window.localStorage.setItem('hapi.sessionLastSeen.v1', JSON.stringify({
-            'home-unread': 0,
-            'other-unread': 0,
-            'home-seen': 2_000
-        }))
+        markSessionSeen('home-unread', 0)
+        markSessionSeen('other-unread', 0)
+        markSessionSeen('home-seen', 2_000)
         renderSessionList([
             makeSession({
                 id: 'home-unread',
