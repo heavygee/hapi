@@ -1,7 +1,7 @@
 import React from "react";
 import { Session } from "./session";
 import { RemoteModeDisplay } from "@/ui/ink/RemoteModeDisplay";
-import { claudeRemote, type CompactSummaryPayload } from "./claudeRemote";
+import { claudeRemote, type ClaudeSteerTarget, type CompactSummaryPayload } from "./claudeRemote";
 import { ClaudeResumeUnavailableError } from "./utils/claudeResumeUnavailableError";
 import { resolveClaudeRemoteResumeTarget } from "./utils/claudeResumeGuard";
 import { convertAgentMessage } from "@/agent/messageConverter";

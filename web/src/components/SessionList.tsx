@@ -116,6 +116,8 @@ import { useSessionListMachineFilter } from '@/hooks/useSessionListMachineFilter
 import { useTransientScrollbar } from '@/hooks/useTransientScrollbar'
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
 import { SessionRowSummary } from '@/components/SessionRowSummary'
+import { IssueRefChip } from '@/components/IssueRefChip'
+import { getLinkedGithubIssue } from '@/lib/externalRefs'
 import { Spinner } from '@/components/Spinner'
 import { transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
 import { useToast } from '@/lib/toast-context'
@@ -151,7 +153,7 @@ export type SessionToolbarExtra = {
 
 export { getWorktreeSessionLabel } from '@/lib/sessionWorktreeLabel'
 
-type SessionGroup = {
+export type SessionGroup = {
     key: string
     directory: string
     displayName: string
@@ -1150,17 +1152,57 @@ const SessionItem = memo(function SessionItem(props: {
         Boolean(attention),
         hasScheduleTooltip
     )
+    const linkedIssue = getLinkedGithubIssue(s.metadata)
     return (
         <>
+            {/* The issue chip renders as a sibling of the role="button" div,
+                not a descendant — WAI-ARIA disallows a focusable descendant
+                of a button role (hiding-semantics guidance), which a merely
+                non-native `<button>` tag doesn't exempt. Two prior fixes here
+                addressed the *native*-button keyboard-trap case (switching
+                `<button>` to `<div role="button">`) but left this ARIA
+                validity gap open (hapi#238 Codex review, third pass). The
+                chip no longer needs its own stopPropagation handlers now
+                that it's outside the row's long-press-bound element.
+                Visible side effect, not just internal restructuring: the
+                chip moves from inline-beside-the-title (inside
+                SessionRowSummary's own layout) to the row's trailing edge,
+                top-aligned — true DOM sibling-hood and "still sitting
+                exactly where it used to, mid-title-row" aren't both
+                achievable without SessionRowSummary exposing its title row
+                as a separate slot, which is more surface area than this fix
+                warrants. The quick-archive button (upstream #2264) is a
+                sibling here too, for the same reason. */}
+            {/* `session-list-item` and `data-session-scroll-anchor` must stay
+                on this same outer element — SessionListScrollAnchor queries
+                by the attribute, then checks the class on that SAME element
+                to decide a row (vs. a group header) tolerates being
+                partially scrolled off the viewport top and still anchoring.
+                Splitting them across the outer/inner divs silently broke
+                that distinction for every session row. `session-list-row`
+                (upstream, quick-archive hover/focus CSS) lives on the same
+                element too, not a separate wrapper — its own `:hover >
+                .session-list-item` rule becomes a no-op here, but the plain
+                `.session-list-item:hover` rule already covers it since the
+                quick-archive button is a descendant of this element.
+                Right padding grows to reserve the archive button's own
+                footprint (not the `session-row-trailing`/visibility:hidden
+                trick SessionRowSummary's own non-interactive trailing
+                cluster uses) whenever a quick-archive button can appear —
+                the issue chip is a real link, and hiding it on hover/focus
+                to avoid the overlap made it unreachable exactly when a
+                pointer or keyboard user was approaching the row to use it
+                (bot review, hapi#2147, second pass). */}
             <div
-                className="session-list-row relative"
+                data-session-scroll-anchor
+                className={`session-list-item session-list-row relative flex w-full items-start gap-1 rounded-lg py-2 pl-2.5 transition-colors ${showQuickArchive ? 'pr-10' : 'pr-2'} ${selected ? 'bg-[var(--app-secondary-bg)]' : ''}`}
                 data-quick-action-pending={quickArchivePending ? '' : undefined}
             >
-                <button
-                    type="button"
+                <div
+                    role="button"
+                    tabIndex={0}
                     {...longPressHandlers}
-                    data-session-scroll-anchor
-                    className={`session-list-item group/session-row flex w-full flex-col gap-1 py-2 pl-2.5 pr-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none rounded-lg ${selected ? 'bg-[var(--app-secondary-bg)]' : ''}`}
+                    className="flex min-w-0 flex-1 flex-col gap-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none rounded-lg cursor-pointer"
                     style={{ WebkitTouchCallout: 'none' }}
                     aria-current={selected ? 'page' : undefined}
                     aria-describedby={describedBy}
@@ -1177,11 +1219,18 @@ const SessionItem = memo(function SessionItem(props: {
                         inRunningSection={inRunningSection}
                         projectLabel={projectLabel}
                         machineLabel={machineLabel}
+                        showIssueChip={false}
                         contentSnippet={contentSnippet}
                         contentSearchTruncated={contentSearchTruncated}
                         trailingClassName={showQuickArchive ? 'session-row-trailing' : undefined}
                     />
-                </button>
+                </div>
+                {linkedIssue ? (
+                    <IssueRefChip
+                        ref={linkedIssue}
+                        className="mt-0.5 shrink-0"
+                    />
+                ) : null}
                 {showQuickArchive ? (
                     <button
                         type="button"

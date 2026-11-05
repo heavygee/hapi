@@ -22,6 +22,7 @@ import { hubCommand } from './hub'
 import { pingPeerCommand } from './pingPeer'
 import { inspectPeerCommand } from './inspectPeer'
 import { searchContentCommand } from './searchContent'
+import { linkIssueCommand } from './linkIssue'
 import { usageCommand } from './usage'
 import { setModeCommand } from './setMode'
 
@@ -68,6 +69,7 @@ const COMMANDS: CommandDefinition[] = [
     pingPeerCommand,
     inspectPeerCommand,
     searchContentCommand,
+    linkIssueCommand,
     setModeCommand,
     usageCommand
 ]

@@ -5,6 +5,7 @@ export type {
     AttachmentMetadata,
     BackgroundTask,
     DecryptedMessage,
+    ExternalRef,
     Metadata,
     Machine,
     MachineHealth,

@@ -4,7 +4,9 @@ import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
 import { InfoIcon, ScheduleIcon } from '@/components/icons'
 import { HoverTooltip, SESSION_ROW_TOOLTIP_FOCUS_CLASS, useSessionRowTooltipIds } from '@/components/HoverTooltip'
 import { getAttentionLabel, SessionAttentionIndicator, SessionRequestIcon } from '@/components/SessionAttentionIndicator'
+import { IssueRefChip } from '@/components/IssueRefChip'
 import { classifySessionAttention } from '@/lib/sessionAttention'
+import { getLinkedGithubIssue } from '@/lib/externalRefs'
 import { getSessionLastSeenAt, getSessionManualUnreadAt } from '@/lib/sessionLastSeen'
 import { formatRelativeTime } from '@/lib/relativeTime'
 import { formatScheduledTooltipDetail } from '@/lib/scheduledTime'
@@ -98,6 +100,13 @@ export function SessionRowSummary(props: {
     projectLabel?: string
     /** Machine label shown next to the project name (pinned "in progress" rows). */
     machineLabel?: string
+    /**
+     * False when the parent renders the issue chip itself as a sibling of an
+     * enclosing `role="button"` row (ARIA forbids a focusable descendant of
+     * a button role — see SessionList.tsx's row wrapper). Defaults to true
+     * for callers like the mention-chip tooltip, which aren't inside one.
+     */
+    showIssueChip?: boolean
     /** Context returned by the opt-in session message-content search. */
     contentSnippet?: string
     /** The indexed message exceeded the search index budget. */
@@ -111,6 +120,7 @@ export function SessionRowSummary(props: {
         showDetailedStatus = true,
         selected = false,
         nestedTooltips = true,
+        showIssueChip = true,
         attentionTooltipId: attentionTooltipIdProp,
         lastSeenVersion,
         scheduleTooltipId: scheduleTooltipIdProp,
@@ -154,6 +164,7 @@ export function SessionRowSummary(props: {
     const codexSessionId = s.metadata?.flavor === 'codex' ? s.metadata?.agentSessionId : null
     const importedAt = useSyncExternalStore(subscribeCodexImportedSessions, () => getCodexImportedAt(codexSessionId))
     const timeLabel = getSessionTimeLabel(s, importedAt, t)
+    const linkedIssue = getLinkedGithubIssue(s.metadata)
 
     // Presence lives on the agent icon (pulsing while a turn or background
     // work runs) instead of dimming disconnected rows or adding spinners.
@@ -201,6 +212,7 @@ export function SessionRowSummary(props: {
                         >
                             {sessionName}
                         </div>
+                        {showIssueChip && linkedIssue ? <IssueRefChip ref={linkedIssue} /> : null}
                         {isUnread ? (
                             <span id={nestedTooltips ? attentionId : undefined} className="sr-only">
                                 {attentionLabel}

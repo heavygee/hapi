@@ -21,7 +21,6 @@ Prefer progressive loading: **[feature-work-lifecycle.md](../tooling/feature-wor
 | Peer close-the-loop / status | **Spawn parent only** — never CC Meta PR watcher | § quieter Meta (2026-08-10); intake §0 + spawn-peer skill |
 | Local soup / remat / kitchen / process feedback | Ping **tooling meta-bot** (`HAPI_META_TOOLING_SESSION_ID` / `config/remat-escalate.yaml`) — **never** PR watcher | § Two Meta sessions (2026-08-15) |
 | Read another HAPI session | Same — no JWT+curl | `hapi inspect-peer <id>` / MCP `inspect_peer` (read-only, no resume). Citations: `[title](/sessions/<id>)` → pass `<id>` |
-| Cursor session won't reopen ("chat data no longer available") **or** about to switch Cursor accounts / rotate creds / bulk-change models | **Census first** — `hapi-cursor-store-census.sh [--all-hosts]` (read-only; exit 1 if any session would fail resume). `never_persisted` = agent never completed a turn, **nothing to recover**; `removed` = store existed and is gone → resurrection doc applies | [`session-resurrection.md`](./session-resurrection.md) § First: check there is something to resurrect. Product gap: [#2184](https://github.com/tiann/hapi/issues/2184) (misleading message, no fresh-spawn fallback, stays `running`) |
 | Proof / screenshots / clips for operator | **Inline into HAPI chat** — do not only paste paths | **Estate default (this host only):** `~/coding/server-setup/docs/operator-visible-proof.md`. Off-host / other-repo peers: skill **`localize-estate-guidance`**. HAPI deep dive: lifecycle [§ Proof tiers](../tooling/feature-work-lifecycle.md#proof-tiers-images-and-video). **Playwright videos:** annotated pointer + `clickForHuman` (dwell on result) — raw `recordVideo` is a fail. Default branch language: **main**. MCP `display_image` / `display_video`, or `bun scripts/tooling/hapi-display-image.mjs <session-prefix> <abs-path> [title]` |
 | Stale Cursor `mcp.json` / hub-move MCP panic | **Hub ≠ MCP URL.** Strip project `hapi`/`hapi-*` sidecars; never rewrite `--url` to `:3006`. Live HAPI Cursor sessions overlay **user-level** `~/.cursor/mcp.json` → loopback `hapiMcpUrl`. **Live multiplex:** N `hapi-<uuid>` keys ⇒ N `ping_peer` tools; model may invoke a *foreign* session sidecar (chip shows wrong session). Fix: [#1613](https://github.com/tiann/hapi/pull/1613) project `hapi` isolation — not nametag / #1618 | [`cursor-hapi-mcp.md`](../tooling/cursor-hapi-mcp.md); prune: `hapi-prune-stale-cursor-mcp` |
 | Cursor ACP `Authentication required` / account flip on proxmox (or after auth switch) | **oos `~/.config/cursor/auth.json` is source of truth** — derive `api-key.env` + `~/.hapi/cursor.env`, `chattr +i`, restart **runner only**; no commented dual-key museums | [`cursor-auth-fleet-sync.md`](../tooling/cursor-auth-fleet-sync.md) |
@@ -146,27 +145,13 @@ Chip status stays **PR health only** (`✅` / `🔁` / `⚠️` / …). Merge au
 | Lane | Who merges | How you get there | Agents |
 |------|------------|-------------------|--------|
 | **A** maintainer | **@tiann** | Default when over size caps and not promoted (**upstream only**) | Prepare only - never `gh pr merge` on `tiann/hapi` |
-| **B** self-merge | Operator / Meta tooling (not agents) | Auto: size caps on **product files** (≤8 files, ≤120 delta; `*.test.*` / `*.spec.*` / `__tests__` excluded); **or** human promote via GitHub label `low-impact` **or** `dogfooded` (48h UTC opt-out — see below) **or** `allow_pr_numbers` in policy (**upstream only**) | Prepare only - no auto merge yet |
+| **B** self-merge | Operator / Meta tooling (not agents) | Auto: size caps on **product files** (≤8 files, ≤120 delta; `*.test.*` / `*.spec.*` / `__tests__` excluded); **or** human promote via GitHub label `low-impact` **or** `allow_pr_numbers` in policy (**upstream only**) | Prepare only - no auto merge yet |
 | **C** forbidden | Nobody here | Others' PRs, direct push to `tiann/hapi:main`, settings, force-push | Hard no |
 | *(fork)* | Operator / Meta | Any green (or operator-directed) PR on **`heavygee/hapi`** | Still prepare-only unless operator directs a fork merge; lanes A/B do not apply |
 
 **Blessing:** after heavygee self-merged test-only [#1268](https://github.com/tiann/hapi/pull/1268), @tiann replied ([comment](https://github.com/tiann/hapi/pull/1268#issuecomment-5141575753)): *"Sounds great! Thanks for helping out."* That authorizes taking **low-impact** PRs off tiann's plate - not a blank check for every green PR.
 
-**Path kind is not a lane reject.** "Because product" was retired 2026-08-09 - touching `cli/`/`hub/`/`web/`/`shared/` does **not** force lane A. Auto-B is size-capped; oversized focused fixes promote with `low-impact` / `dogfooded` / allowlist. Salience + history: `docs/plans/2026-07-31-pr-merge-lanes.md`.
-
-### `dogfooded` label (48h opt-out merge)
-
-Public process: [tiann/hapi discussions #2083](https://github.com/tiann/hapi/discussions/2083) (**General** category — Announcements create is restricted to maintainers for write collaborators).
-
-| Step | Who | What |
-|------|-----|------|
-| 1. Live dogfood | Write collaborator | Run the PR on a real HAPI install (not CI-green alone) |
-| 2. Label + stamp | Same | Apply `dogfooded`; PR comment `dogfooded since <ISO-8601 UTC>`. **This is merge intent** (fire-and-forget). |
-| 3. Countdown | Gate + Meta + session job | **48 calendar hours UTC** from the labeled event. Chip: `dogfooded countdown (… left)`. Gate **blocks** early merges. Prefer a session `hapi job run … --wake-on-terminal` so an idle babysit wakes when ready. |
-| 4. Opt-out | Anyone | Remove `dogfooded` **and** post rationale on #2083 (or close/draft the PR) |
-| 5. Merge | Babysit / Meta when woken | After window + still labeled + three-dim CLEAN: **merge quietly**. Elapsed `dogfooded` **satisfies lane-B auth** in `hapi-pr-merge-gate.sh` — **no second** `hapi-laneb-authorise`. `laneb` remains for `low-impact` / immediate merges only. |
-
-`dogfooded` is stronger than `low-impact` (substantial community work a maintainer has actually run). `low-impact` still skips the 48h window and still needs `hapi-laneb-authorise`. Policy: `scripts/tooling/lib/dogfood-countdown.sh` + `pr-merge-policy` `github_labels` includes both. Amendment 2026-11-03: label-as-intent must be fire-and-forget (incident: wake-then-laneb yanked the operator back).
+**Path kind is not a lane reject.** "Because product" was retired 2026-08-09 - touching `cli/`/`hub/`/`web/`/`shared/` does **not** force lane A. Auto-B is size-capped; oversized focused fixes promote with `low-impact` / allowlist. Salience + history: `docs/plans/2026-07-31-pr-merge-lanes.md`.
 
 **Incident #1096** (2026-07-20): first accidental heavygee upstream merge - do not treat write access as "merge anything green."
 
@@ -186,9 +171,9 @@ Default remains **fork-contributor discipline** for product work (PRs from `upst
 
 **What we self-permit:**
 
-- **Label management** on `tiann/hapi` issues and PRs - including applying `low-impact` for lane B promote **and** `dogfooded` after live dogfood (operator-directed or Discovery). Daily taxonomy owner for `low-impact`: HAPI session **Issue labelling (tiann/hapi)** (`f3c41205…`); see `docs/plans/2026-07-31-pr-merge-lanes.md` § Label ownership. Do **not** auto-slap `dogfooded` from the labelling sweep — only after real live use.
-- **Lane B self-merge** when policy says eligible (operator/Meta; agents prepare-only until merge automation is explicitly enabled). Includes our PRs **and** others' auto-B / `low-impact` / `dogfooded` (post-window) PRs. **Merge quietly** on `low-impact` / auto-B - no PR comments explaining estate lanes. For `dogfooded`, the stamp comment + #2083 thread are the public paper trail; still no estate jargon on merge.
-- **Pushing to PR branches via `maintainerCanModify`** when (a) the PR has `maintainerCanModify: true`, and (b) either we coordinated with the author first **or** the operator explicitly directed an amend (e.g. dogfood follow-up onto a community tip). Never force-push over the author's commits — fast-forward / cherry-pick on top. Stays attributed: author's commits keep their authorship; our commits add `Co-authored-by:` when co-writing
+- **Label management** on `tiann/hapi` issues and PRs - including applying `low-impact` for lane B promote. Daily taxonomy owner: HAPI session **Issue labelling (tiann/hapi)** (`f3c41205…`); see `docs/plans/2026-07-31-pr-merge-lanes.md` § Label ownership.
+- **Lane B self-merge** when policy says eligible (operator/Meta; agents prepare-only until merge automation is explicitly enabled). Includes our PRs **and** others' auto-B / `low-impact` PRs. **Merge quietly** - no PR comments explaining estate lanes, the #1268 blessing, or why we are allowed to merge. Policy + chip are the paper trail; the merge commit is enough.
+- **Pushing to PR branches via `maintainerCanModify`** *only when* (a) the PR has `maintainerCanModify: true`, (b) we have coordinated with the PR author first (comment + reasonable response window), and (c) we are addressing a clear stall (conflicts, no author iteration, no maintainer review). Stays attributed: author's commits keep their authorship; our rebase / fix commits add `Co-authored-by:` lines
 
 **What we explicitly do NOT do (lane C):**
 
@@ -296,7 +281,7 @@ What it does, idempotently:
 | 🔁 `pending` | CI/bot in flight, or thread/CI data momentarily unavailable | wait / retry |
 | ⚠️ `needs_work` | failing CI, **current** open threads, bot findings, rebase, or **closed-unmerged** | fix per action string |
 | 📝 `pre_pr` | tracked number, no open PR upstream yet | file when ready |
-| 🔧 `merged` | merged; cleanup still owed (or Gate A clean, archive pending) | drop soup → **exit reflection** (or `skip:`) → remove wt/branch → ack + idle; Meta archives (peers: **no mid-turn self-archive**) |
+| 🔧 `merged` | merged; cleanup still owed (or Gate A clean, archive pending) | drop soup/wt/branch → **exit reflection** (or `skip:`) → ack + idle; Meta archives (peers: **no mid-turn self-archive**) |
 | 🧹 `complete` | fully cleaned (layer DROPPED, no worktree/branch, session archived) | **never** (babysit ended) |
 | `?` `unknown` | GitHub data unavailable this run | **chip left at last good status; never pinged** |
 
@@ -315,14 +300,11 @@ Chip thread count excludes GraphQL `isOutdated` unresolved threads (#847: leftov
 ```text
 PR #<N> merged (<tip SHA if known>). Chip shows merged / 🔧 — leave the workstream title alone.
 
-Please (prefer ONE cleanup turn — never end a turn after rmtree if reflection/ack still owed):
+Please:
 1. Drop your soup layer(s) from **repo** `config/driver-manifest.yaml` (# DROPPED comment OK); then `hapi-manifest-mirror-to-config.sh` if you use ~/.config
-2. Exit reflection FIRST (cwd still alive): copy docs/plans/retros/TEMPLATE-exit-reflection.md →
+2. Remove worktree + delete local/remote branch (hapi-branch-audit until clean)
+3. Exit reflection: copy docs/plans/retros/TEMPLATE-exit-reflection.md →
    docs/plans/retros/YYYY-MM-DD-<slug>-exit.md (or honest skip: <reason> / skip: timebox)
-3. THEN remove worktree + delete local/remote branch (hapi-branch-audit until clean).
-   After `git worktree remove`, leave an empty cwd husk at the old session path (no `.git`)
-   until Meta archives — Gate A ignores husks; a missing cwd makes Claude spawn look like
-   `posix_spawn '~/.local/bin/claude' ENOENT`.
 4. Ack: "Gate A clean + exit reflection: <path|skip:> — idle for archive."
 5. Idle cleanly — do NOT self-archive mid-turn (orphans tool UI). Meta archives when idle.
 
@@ -786,8 +768,7 @@ The gate blocks unless **all** of these hold:
 | 5 | **Zero unresolved review threads** | status APIs hide these |
 | 6 | **Zero unanswered comments from anyone but the author since the last push** | **the #1842 case** — a maintainer's plain comment carries no mechanical weight on GitHub, so the gate gives it weight |
 | 7 | No `docs/operator/`, `docs/plans/`, `CLAUDE.md` in the diff | leak scanner parity |
-| 8 | If labeled `dogfooded`: **48h UTC window elapsed** | opt-out merge (#2083); blocks even with a fresh laneb grant |
-| 9 | For `tiann/hapi`: lane B auth — **elapsed `dogfooded`** (label still present) **or** valid **`hapi-laneb-authorise`** | dogfood is fire-and-forget; laneb for low-impact/immediate |
+| 8 | For `tiann/hapi`: a valid **lane B authorisation** | agents are prepare-only upstream |
 
 Checks 5 and 6 **fail closed on API error** — an unreadable thread is treated as blocking, because an
 empty result is not absence.
