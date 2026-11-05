@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -35,22 +35,16 @@ describe('pinned tunwg digests', () => {
         try {
             const path = join(dir, TUNWG_PINS['x64-linux'].filename)
             writeFileSync(path, 'stale-cached-bytes')
-            // Will download the pinned release (network). Skip if offline by
-            // asserting the replace-on-mismatch path at least deletes stale first:
-            // call ensure with a tiny mock via digest-only path — we only verify
-            // that assertTunwgDigest fails then unlink would run. Full download
-            // is covered in CI when network is available.
             expect(() => assertTunwgDigest(path, TUNWG_PINS['x64-linux'].sha256)).toThrow(/digest mismatch/)
-            // Runtime builder must not leave the stale file as a permanent brick.
-            // Re-import ensure and confirm it attempts replacement (exists after
-            // successful pin download, or throws a download error — not digest).
-            try {
-                await ensurePinnedTunwgBinary({ toolsDir: dir, platformKey: 'x64-linux' })
-                assertTunwgDigest(path, TUNWG_PINS['x64-linux'].sha256)
-            } catch (error) {
-                const message = error instanceof Error ? error.message : String(error)
-                expect(message).not.toMatch(/digest mismatch for .*stale/)
-            }
+            // Contract under test: unlink stale cache before download. Cap the
+            // fetch so remat verify is not gated on GitHub CDN latency (5s
+            // bun:test default previously timed out mid-download).
+            await expect(ensurePinnedTunwgBinary({
+                toolsDir: dir,
+                platformKey: 'x64-linux',
+                timeoutMs: 50,
+            })).rejects.toThrow()
+            expect(existsSync(path)).toBe(false)
         } finally {
             rmSync(dir, { recursive: true, force: true })
         }
