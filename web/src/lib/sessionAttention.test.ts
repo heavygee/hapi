@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionSummary } from '@/types/api'
+import { BLOCKED_NOTIFY_STALE_MS } from '@hapi/protocol'
 import {
     classifySessionAttention,
+    getSessionBlockedState,
+    sessionBlockedIsError,
     sessionIsUnread,
 } from './sessionAttention'
 import { followSessionTail } from './sessionLastSeen'
