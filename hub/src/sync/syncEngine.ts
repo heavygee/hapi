@@ -2400,7 +2400,7 @@ recordSessionActivity(sessionId: string, updatedAt: number): void {
             return { status: 'failed', error: 'Session not found', localId: null }
         }
         if (!isSteeringSupportedForSession(session.metadata)) {
-            return { status: 'failed', error: 'Steering is only supported for Pi, Codex, and Cursor ACP sessions', localId: null }
+            return { status: 'failed', error: 'Steering is only supported for Claude, Pi, Codex, OpenCode, and Cursor ACP sessions', localId: null }
         }
         if (session.agentState?.controlledByUser === true && !session.metadata?.capabilities?.concurrentClients) {
             return { status: 'failed', error: 'Steering is only available for remote sessions', localId: null }

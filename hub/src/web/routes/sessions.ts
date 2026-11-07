@@ -2070,6 +2070,13 @@ export function createSessionsRoutes(
             const result = await engine.listCodexModelsForSession(sessionResult.sessionId)
             return c.json(result)
         } catch (error) {
+            if (error instanceof RpcTargetMissingError) {
+                return c.json({
+                    success: false,
+                    error: error.message,
+                    code: RPC_TARGET_MISSING_ERROR_CODE
+                }, 503)
+            }
             return c.json({
                 success: false,
                 error: error instanceof Error ? error.message : 'Failed to list Codex models'
