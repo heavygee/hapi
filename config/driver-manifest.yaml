@@ -698,7 +698,7 @@ layers:
   # tiann/hapi#1404 — session-attached long-running jobs (outlive agent; list chrome).
   # Upstream PR: #1424 (feat/session-attached-jobs). Wake stays #1489 / layer below.
   # Worktree: ~/coding/hapi/worktrees/session-jobs-fake-meter-fix @ driver/session-attached-jobs
-  # Soup tip: 0fab2aa52 — quiet CSS-Tricks-style striped indeterminate; re-thin after dogfood bump.
+  # Soup tip: 157667ff2 — quiet CSS-Tricks-style striped indeterminate; re-thin after dogfood bump.
   # Drop when upstream #1424 merges.
   - branch: driver/session-attached-jobs
 
