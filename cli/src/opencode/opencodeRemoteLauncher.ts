@@ -13,6 +13,7 @@ import { OpencodeDisplay } from '@/ui/ink/OpencodeDisplay';
 import type { OpencodeSession } from './session';
 import type { OpencodeMode, PermissionMode } from './types';
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
+import { captureOpencodeRoundSnapshot, fetchOpencodeRoundSummary, type OpencodeRoundSnapshot } from './utils/opencodeRoundSummary';
 import {
     allocateFreePort,
     createOpencodeBackend,
@@ -76,6 +77,29 @@ export type AbortStatusDecision = {
 };
 
 type CompactOperationPhase = 'idle' | 'snapshot' | 'summarize' | 'post-summarize' | 'verification';
+type RoundSummaryPhase = 'idle' | 'snapshot' | 'prompt' | 'settle';
+
+const ROUND_SUMMARY_SETTLE_TIMEOUT_MS = 1_000;
+
+async function settleRoundSummary<T>(promise: Promise<T>, controller: AbortController): Promise<T | null> {
+    return await new Promise<T | null>((resolve) => {
+        let settled = false;
+        const settle = (value: T | null) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeout);
+            controller.signal.removeEventListener('abort', onAbort);
+            resolve(value);
+        };
+        const onAbort = () => settle(null);
+        const timeout = setTimeout(() => {
+            controller.abort();
+            settle(null);
+        }, ROUND_SUMMARY_SETTLE_TIMEOUT_MS);
+        controller.signal.addEventListener('abort', onAbort, { once: true });
+        void promise.then((summary) => settle(summary), () => settle(null));
+    });
+}
 
 /**
  * Pure decision logic for handleAbort()'s final step: which status message
@@ -134,6 +158,11 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
     // deliberately unbounded (see triggerOpencodeCompact's doc comment) and
     // the launcher stays wedged until it eventually settles on its own.
     private compactAbortController: AbortController | null = null;
+    private roundSummaryAbortController: AbortController | null = null;
+    /** Distinguishes an active prompt from read-only post-prompt work for Stop semantics. */
+    private roundSummaryPhase: RoundSummaryPhase = 'idle';
+    /** Validated ID boundary returned by the previous post-prompt fetch; explicit history mutations clear it. */
+    private nextRoundSnapshot: OpencodeRoundSnapshot | null = null;
     // A plain Stop must keep waiting only while the summarize POST is
     // actually in flight. That POST can outlive a client-side abort while
     // continuing to mutate the shared OpenCode session, so advancing to a
@@ -727,6 +756,7 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
                     continue;
                 }
 
+                this.nextRoundSnapshot = null;
                 session.onThinkingChange(true);
                 try {
                     await this.runCompactOperation(acpSessionId, compactAbortController, compactLocalId);
@@ -744,32 +774,122 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
             if (batch.mode.permissionMode === 'plan') {
                 messageText = `${PLAN_MODE_INSTRUCTION}\n\n${messageText}`;
             }
-            if (!this.instructionsSent) {
-                messageText = `${getOpencodeNativeToolInstruction()}\n\n${messageText}`;
-                this.instructionsSent = true;
+
+            this.stallErrorReportedForPrompt = false;
+            const roundSummaryAbortController = new AbortController();
+            this.roundSummaryAbortController = roundSummaryAbortController;
+            this.roundSummaryPhase = 'snapshot';
+            const roundApi = this.v2RestInfo
+                ? { baseUrl: this.v2RestInfo.baseUrl, api: { version: 'v2' as const, password: this.v2RestInfo.password } }
+                : this.baseUrl ? { baseUrl: this.baseUrl } : null;
+            const roundSnapshot = this.nextRoundSnapshot ?? (roundApi
+                ? await captureOpencodeRoundSnapshot({
+                    ...roundApi,
+                    sessionId: acpSessionId,
+                    signal: roundSummaryAbortController.signal
+                }).catch((error) => {
+                    logger.debug('[opencode-remote] round snapshot unavailable', error);
+                    return null;
+                })
+                : null);
+            this.nextRoundSnapshot = null;
+            if (
+                this.roundSummaryAbortController !== roundSummaryAbortController
+                || roundSummaryAbortController.signal.aborted
+                || this.shouldExit
+            ) {
+                if (this.roundSummaryAbortController === roundSummaryAbortController) {
+                    this.roundSummaryAbortController = null;
+                    this.roundSummaryPhase = 'idle';
+                }
+                session.onThinkingChange(false);
+                if (session.queue.size() === 0 && !this.shouldExit) {
+                    sendReady();
+                }
+                continue;
             }
 
+            if (!this.instructionsSent) {
+                messageText = `${getOpencodeNativeToolInstruction()}
+
+${messageText}`;
+                this.instructionsSent = true;
+            }
             const promptContent: PromptContent[] = [{
                 type: 'text',
                 text: messageText,
             }];
 
-            this.stallErrorReportedForPrompt = false;
+            const promptStartedAt = performance.now();
+            let promptDurationMs = 0;
+            this.roundSummaryPhase = 'prompt';
             session.onThinkingChange(true);
 
             try {
-                await backend.prompt(acpSessionId, promptContent, (message: AgentMessage) => {
-                    this.handleAgentMessage(message);
-                });
+                try {
+                    await backend.prompt(acpSessionId, promptContent, (message: AgentMessage) => {
+                        this.handleAgentMessage(message);
+                    });
+                } finally {
+                    promptDurationMs = performance.now() - promptStartedAt;
+                    this.roundSummaryPhase = 'settle';
+                }
+                this.completeNativeInput(nativeInput);
+                await this.nativeTranscript?.refresh();
                 void backend.refreshSessionInfo(acpSessionId, session.path);
             } catch (error) {
                 logger.warn('[opencode-remote] prompt failed', error);
                 this.reportPromptFailure(error);
             } finally {
-                session.onThinkingChange(false);
-                await this.permissionHandler?.cancelAll('Prompt finished');
-                if (session.queue.size() === 0 && !this.shouldExit) {
-                    sendReady();
+                // Close the steer gate synchronously, before the first await:
+                // any steer still parked on its durable-state await must see
+                // the turn as gone and restore its row instead of injecting
+                // into a turn that has already returned.
+                this.promptInFlight = false;
+                this.activePromptModeHash = null;
+                // Publish "not steerable" together with the gate, *before* the
+                // drain: a steer whose completion is still pending would keep
+                // the web's Steer button visible for the whole drain, and every
+                // click in that window is a guaranteed rejection.
+                this.setSteeringActive(false);
+                // Drain before ready / thinking=false / the next batch, so a
+                // steer that settled (or is still restoring) cannot cross the
+                // turn boundary into the next prompt or a /compact.
+                await this.drainSteerOperations();
+                if (
+                    this.roundSummaryAbortController === roundSummaryAbortController
+                    && !roundSummaryAbortController.signal.aborted
+                    && !this.shouldExit
+                    && roundApi
+                    && roundSnapshot
+                ) {
+                    const result = await settleRoundSummary(
+                        fetchOpencodeRoundSummary({
+                            ...roundApi,
+                            sessionId: acpSessionId,
+                            promptText: messageText,
+                            snapshot: roundSnapshot,
+                            durationMs: promptDurationMs,
+                            signal: roundSummaryAbortController.signal
+                        }),
+                        roundSummaryAbortController
+                    );
+                    if (result) {
+                        this.nextRoundSnapshot = result.snapshot;
+                        if (result.summary) this.handleAgentMessage({ type: 'round_summary', summary: result.summary });
+                    }
+                }
+                if (this.roundSummaryAbortController === roundSummaryAbortController) {
+                    this.roundSummaryAbortController = null;
+                }
+                try {
+                    session.onThinkingChange(false);
+                    await this.permissionHandler?.cancelAll('Prompt finished');
+                    if (session.queue.size() === 0 && !this.shouldExit) {
+                        sendReady();
+                    }
+                } finally {
+                    this.roundSummaryPhase = 'idle';
                 }
             }
         }
@@ -1324,6 +1444,8 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
             case 'turn_complete':
                 this.messageBuffer.addMessage('Turn complete', 'status');
                 break;
+            case 'round_summary':
+                break;
             default: {
                 const _exhaustive: never = message;
                 return _exhaustive;
@@ -1353,59 +1475,123 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
      * disconnects the ACP subprocess right after.
      */
     private async handleAbort(leavingRemote = false): Promise<void> {
-        // A hostile-review sweep found that a plain Stop during an in-flight
-        // compact — which deliberately leaves the operation running for real
-        // (see compactResultSuppressed's doc comment) — still unconditionally
-        // flipped `thinking` off and reported "Turn aborted" below, telling
-        // the user the turn had stopped while the dequeue loop was actually
-        // still blocked inside runCompactOperation() for however long the
-        // real server-side compaction takes (potentially minutes). Track
-        // that specific case so the messaging stays honest: nothing has
-        // actually stopped yet from the user's perspective, and the dequeue
-        // loop's own `finally` (once runCompactOperation() genuinely
-        // returns) remains the sole source of truth for when this turn is
-        // done.
-        const compactAbortController = this.compactAbortController;
-        if (compactAbortController) {
-            this.compactResultSuppressed = true;
-            // Only summarize can still mutate the shared OpenCode session.
-            // Plain Stop aborts snapshot/verification reads, but deliberately
-            // waits for an in-flight POST to complete server-side.
-            if (
-                leavingRemote
-                || this.compactOperationPhase === 'snapshot'
-                || this.compactOperationPhase === 'post-summarize'
-                || this.compactOperationPhase === 'verification'
-            ) {
-                compactAbortController.abort();
+    private async handleAbort(leavingRemote = false): Promise<void> {
+        this.roundSummaryAbortController?.abort();
+        // Only abandon metadata when no steer or cancellation still owns work.
+        if (
+            !leavingRemote
+            && this.roundSummaryPhase === 'settle'
+            && this.pendingSteerOperations.size === 0
+            && this.v2Steers.size === 0
+            && !Array.from(this.backendSoftSteerOwnership).some(entry =>
+                entry.backend === this.backend && entry.turnEpoch === this.steerTurnEpoch
+            )
+            && !this.v2AbortInProgress
+        ) return;
+
+        if (this.majorVersion !== 'v2') return this.performAbort(leavingRemote);
+        if (this.v2AbortInProgress) {
+            // One overlapping Stop/switch owns queue.reset. A later reset
+            // must not erase an input the first cancellation just restored.
+            if (leavingRemote) {
+                this.closeSteerGate({ detachStrandedSteers: true });
+                this.compactResultSuppressed = true;
+                this.compactAbortController?.abort();
             }
+            return this.v2AbortInProgress;
         }
-        const backend = this.backend;
-        if (backend && this.session.sessionId) {
-            await backend.cancelPrompt(this.session.sessionId);
+        let resolve!: () => void;
+        let reject!: (error: unknown) => void;
+        const abort = new Promise<void>((ok, failed) => { resolve = ok; reject = failed; });
+        this.v2AbortInProgress = abort;
+        void this.performAbort(leavingRemote).then(resolve, reject);
+        try { await abort; }
+        finally { if (this.v2AbortInProgress === abort) this.v2AbortInProgress = null; }
+    }
+
+    private async performAbort(leavingRemote: boolean): Promise<void> {
+        let resolveReset!: () => void;
+        const resetFinished = new Promise<void>(resolve => { resolveReset = resolve; });
+        if (this.majorVersion === 'v2') this.v2ResetInProgress = resetFinished;
+        const finishReset = () => {
+            if (this.v2ResetInProgress === resetFinished) this.v2ResetInProgress = null;
+            resolveReset();
+        };
+        const v2Cancellations = Array.from(this.v2Steers.values(), entry => entry.cancel('stop', resetFinished));
+        let resetDone = false;
+        try {
+            // Synchronous, before any await: a steer parked on its durable-state
+            // await must observe the turn as invalid immediately, so it restores
+            // its row instead of injecting into a cancelled turn or a new one.
+            this.closeSteerGate({ detachStrandedSteers: true });
+            // A plain Stop during an in-flight compact deliberately leaves the
+            // operation running for real. Its dequeue-loop finally remains
+            // the boundary for thinking=false while the native POST can mutate
+            // this session; Stop must not report completion before that boundary.
+            const compactAbortController = this.compactAbortController;
+            if (compactAbortController) {
+                this.compactResultSuppressed = true;
+                // Only summarize can still mutate the shared OpenCode session.
+                // Plain Stop aborts snapshot/verification reads, but deliberately
+                // waits for an in-flight POST to complete server-side.
+                if (
+                    leavingRemote
+                    || this.compactOperationPhase === 'snapshot'
+                    || this.compactOperationPhase === 'post-summarize'
+                    || this.compactOperationPhase === 'verification'
+                ) {
+                    compactAbortController.abort();
+                }
+            }
+            const backend = this.backend;
+            if (backend && this.session.sessionId) {
+                try {
+                    await backend.cancelPrompt(this.session.sessionId);
+                } finally {
+                    // A soft steer this turn dispatched can still be pending after
+                    // an Abort and its ACP request may never answer, which would
+                    // hold both the next turn's message handler and the inter-turn
+                    // model/effort switches that wait for response-complete. Only
+                    // settle counters this backend genuinely owns, so an ordinary
+                    // Stop with no steer keeps the cancelled turn's trailing
+                    // tool_result/text (abortSoftSteers deactivates the shared
+                    // foreground handler).
+                    this.settleBackendSoftSteers(backend, this.steerTurnEpoch, 'abort');
+                }
+            }
+            await this.permissionHandler?.cancelAll('User aborted');
+            // A steer that was already dispatched may still complete after the
+            // abort; preserve its reservation so the completion callback can
+            // still commit it (or mark it indeterminate) instead of losing the
+            // input.
+            this.session.queue.reset({ preserveDispatchingReservations: true });
+            resetDone = true;
+            finishReset();
+            await Promise.all(v2Cancellations);
+            this.abortController.abort();
+            this.abortController = new AbortController();
+            // Re-read here (not the snapshot taken above, before the awaits) in
+            // case a concurrent leavingRemote=true call for the same compact
+            // interleaved with this one and already aborted it — RPC dispatch
+            // doesn't serialize handleAbort() calls against each other, so a
+            // Stop immediately followed by a switch-to-local can genuinely
+            // overlap. Without this, the (now-stale) plain-Stop continuation
+            // could append its "still waiting" message after the switch's
+            // "Turn aborted" already ran, showing the two in a confusing order.
+            const activeCompactAbortController = this.compactAbortController;
+            const decision = selectAbortStatusMessage({
+                hasCompactInFlight: activeCompactAbortController !== null && this.compactOperationPhase === 'summarize',
+                leavingRemote,
+                compactAborted: activeCompactAbortController?.signal.aborted ?? false
+            });
+            if (decision.shouldClearThinking) {
+                this.session.onThinkingChange(false);
+            }
+            this.messageBuffer.addMessage(decision.message, 'status');
+        } finally {
+            if (!resetDone) for (const entry of this.v2Steers.values()) void entry.cancel('teardown');
+            finishReset();
         }
-        await this.permissionHandler?.cancelAll('User aborted');
-        this.session.queue.reset();
-        this.abortController.abort();
-        this.abortController = new AbortController();
-        // Re-read here (not the snapshot taken above, before the awaits) in
-        // case a concurrent leavingRemote=true call for the same compact
-        // interleaved with this one and already aborted it — RPC dispatch
-        // doesn't serialize handleAbort() calls against each other, so a
-        // Stop immediately followed by a switch-to-local can genuinely
-        // overlap. Without this, the (now-stale) plain-Stop continuation
-        // could append its "still waiting" message after the switch's
-        // "Turn aborted" already ran, showing the two in a confusing order.
-        const activeCompactAbortController = this.compactAbortController;
-        const decision = selectAbortStatusMessage({
-            hasCompactInFlight: activeCompactAbortController !== null && this.compactOperationPhase === 'summarize',
-            leavingRemote,
-            compactAborted: activeCompactAbortController?.signal.aborted ?? false
-        });
-        if (decision.shouldClearThinking) {
-            this.session.onThinkingChange(false);
-        }
-        this.messageBuffer.addMessage(decision.message, 'status');
     }
 
     private async handleExitFromUi(): Promise<void> {

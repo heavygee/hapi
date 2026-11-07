@@ -222,6 +222,151 @@ describe('startHappyServer skill_lookup', () => {
         expect(displayImage?.description).toContain('cannot be used to read, inspect, or analyze image contents')
     })
 
+    it.each([
+        [undefined, 'accepted'],
+        [undefined, 'steered'],
+        ['auto', 'accepted'],
+        ['auto', 'steered'],
+        ['auto', 'invoked'],
+        ['queue', 'accepted'],
+        ['steer', 'steered'],
+        ['steer', 'invoked']
+    ] as const)('forwards ping_peer mode %s and reports %s through MCP', async (deliveryMode, delivery) => {
+        const ping = vi.spyOn(peerMessages, 'pingPeer').mockResolvedValue({
+            sessionId: 'peer-id', name: 'Peer', resumed: false,
+            localId: 'ping-peer-test', delivery
+        })
+        try {
+            const mcp = await connect(false)
+            const tools = await mcp.listTools()
+            const tool = tools.tools.find((entry) => entry.name === 'ping_peer')
+            expect(tool?.inputSchema.properties?.deliveryMode).toMatchObject({ enum: ['auto', 'queue', 'steer'] })
+            expect(tool?.description).toContain('auto (default)')
+            const result = await mcp.callTool({
+                name: 'ping_peer',
+                arguments: { sessionIdPrefix: 'peer-id', message: 'hello', ...(deliveryMode ? { deliveryMode } : {}) }
+            }) as ToolResult
+            expect(result.isError).toBe(false)
+            expect(ping).toHaveBeenCalledWith({ sessionIdPrefix: 'peer-id', message: 'hello', deliveryMode, wake: false })
+            expect(result.content?.[0]?.text).toBe(delivery === 'accepted'
+                ? 'Accepted for peer-id (Peer) localId=ping-peer-test — delivery shows in the recipient chat when its runtime consumes it'
+                : `${delivery} to peer-id (Peer) localId=ping-peer-test`)
+        } finally {
+            ping.mockRestore()
+        }
+    })
+
+    it.each([
+        'steer not attempted: target is idle',
+        'steer rejected by hub: Session not found',
+        'steer not confirmed; delivery unresolved: Steer outcome is being reconciled'
+    ])('appends the auto steer note to an accepted ping_peer receipt without claiming nothing was sent: %s', async (steerNote) => {
+        const ping = vi.spyOn(peerMessages, 'pingPeer').mockResolvedValue({
+            sessionId: 'peer-id', name: 'Peer', resumed: false,
+            localId: 'ping-peer-test', delivery: 'accepted', steerNote
+        })
+        try {
+            const mcp = await connect(false)
+            const result = await mcp.callTool({
+                name: 'ping_peer', arguments: { sessionIdPrefix: 'peer-id', message: 'hello' }
+            }) as ToolResult
+            expect(result.isError).toBe(false)
+            expect(result.content?.[0]?.text).toBe(
+                `Accepted for peer-id (Peer) localId=ping-peer-test — delivery shows in the recipient chat when its runtime consumes it (${steerNote})`)
+            expect(result.content?.[0]?.text).not.toMatch(/no message sent/i)
+        } finally {
+            ping.mockRestore()
+        }
+    })
+
+    it('forwards ping_peer wake only when explicitly requested', async () => {
+        const ping = vi.spyOn(peerMessages, 'pingPeer').mockResolvedValue({
+            sessionId: 'peer-id', name: 'Peer', resumed: true,
+            localId: 'ping-peer-test', delivery: 'accepted'
+        })
+        try {
+            const mcp = await connect(false)
+            const tools = await mcp.listTools()
+            const tool = tools.tools.find((entry) => entry.name === 'ping_peer')
+            expect(tool?.inputSchema.properties?.wake).toMatchObject({ type: 'boolean' })
+            expect(tool?.description).toContain('Never broadcast')
+            const result = await mcp.callTool({
+                name: 'ping_peer',
+                arguments: { sessionIdPrefix: 'peer-id', message: 'take over the build', wake: true }
+            }) as ToolResult
+            expect(result.isError).toBe(false)
+            expect(ping).toHaveBeenCalledWith({
+                sessionIdPrefix: 'peer-id', message: 'take over the build', deliveryMode: undefined, wake: true
+            })
+            expect(result.content?.[0]?.text).toContain('(resumed)')
+        } finally {
+            ping.mockRestore()
+        }
+    })
+
+    it('lists active peers by default and forwards includeInactive', async () => {
+        const list = vi.spyOn(peerMessages, 'listPeerSessions').mockResolvedValue([])
+        try {
+            const mcp = await connect(false)
+            await mcp.callTool({ name: 'list_peers', arguments: {} })
+            expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ includeInactive: false }))
+            await mcp.callTool({ name: 'list_peers', arguments: { includeInactive: true } })
+            expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ includeInactive: true }))
+        } finally {
+            list.mockRestore()
+        }
+    })
+
+    it('rejects invalid ping_peer delivery modes at the MCP boundary', async () => {
+        const ping = vi.spyOn(peerMessages, 'pingPeer')
+        try {
+            const mcp = await connect(false)
+            const result = await mcp.callTool({
+                name: 'ping_peer', arguments: { sessionIdPrefix: 'peer-id', message: 'hello', deliveryMode: 'interrupt' }
+            }) as ToolResult
+            expect(result.isError).toBe(true)
+            expect(ping).not.toHaveBeenCalled()
+        } finally {
+            ping.mockRestore()
+        }
+    })
+
+    it('forwards cross-machine spawn settings with the calling session identity and cwd', async () => {
+        const spawn = vi.spyOn(peerSpawn, 'spawnPeer').mockResolvedValue({
+            sessionId: 'child-id', name: 'Worker'
+        })
+        try {
+            const mcp = await connect(false)
+            const result = await mcp.callTool({
+                name: 'spawn_peer',
+                arguments: {
+                    directory: '/srv/project',
+                    message: 'Run the tests',
+                    machine: 'remote-host',
+                    agent: 'codex',
+                    model: 'gpt-5.6-sol',
+                    effort: 'high',
+                    permissionMode: 'default',
+                },
+            }) as ToolResult
+            expect(result.isError).toBe(false)
+            expect(spawn).toHaveBeenCalledWith(expect.objectContaining({
+                directory: '/srv/project',
+                cwd: workingDirectory,
+                message: 'Run the tests',
+                machine: 'remote-host',
+                agent: 'codex',
+                model: 'gpt-5.6-sol',
+                effort: 'high',
+                permissionMode: 'default',
+                parent: { sessionId: 'parent-id', name: 'Parent', agentSessionId: null },
+                requireParent: true,
+            }))
+        } finally {
+            spawn.mockRestore()
+        }
+    })
+
     it('displays audio through display_media and emits a generated media message', async () => {
         const path = join(sandboxDir, 'sample.wav')
         await writeFile(path, Buffer.from('RIFFxxxxWAVE'))

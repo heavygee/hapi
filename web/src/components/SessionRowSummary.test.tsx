@@ -166,6 +166,16 @@ describe('SessionRowSummary background status', () => {
         )
 
         expect(screen.getByRole('tooltip', { hidden: true })).toHaveTextContent('New activity')
+        expect(screen.getByTestId('session-unread')).toBeInTheDocument()
+    })
+
+    it('shows and clears the unread dot in standard session rows', () => {
+        const session = makeSummary({ id: 'standard-unread', backgroundTaskCount: 0, contentRevision: 5 })
+        const view = render(<I18nProvider><SessionRowSummary session={session} showDetailedStatus={false} lastSeenVersion={0} /></I18nProvider>)
+        expect(screen.getByTestId('session-unread')).toBeInTheDocument()
+        markSessionSeen(session.id, 5)
+        view.rerender(<I18nProvider><SessionRowSummary session={session} showDetailedStatus={false} lastSeenVersion={1} /></I18nProvider>)
+        expect(screen.queryByTestId('session-unread')).toBeNull()
     })
 
     it('renders an issue chip linking to the latest-linked GitHub issue', () => {

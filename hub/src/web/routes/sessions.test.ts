@@ -70,6 +70,8 @@ function createApp(session: Session, opts?: {
     setSessionExternalRefs?: SyncEngine['setSessionExternalRefs']
     githubPrAwarenessEnabled?: boolean
     listCodexModelsForSession?: SyncEngine['listCodexModelsForSession']
+    listDshModelsForSession?: SyncEngine['listDshModelsForSession']
+    listPiModelsForSession?: SyncEngine['listPiModelsForSession']
     forkConversation?: SyncEngine['forkConversation']
     clearConversation?: SyncEngine['clearConversation']
     implementCodexPlan?: SyncEngine['implementCodexPlan']
@@ -160,6 +162,15 @@ function createApp(session: Session, opts?: {
         listCodexModelsForSession: opts?.listCodexModelsForSession ?? (async () => ({
             success: true,
             models: []
+        })),
+        listDshModelsForSession: opts?.listDshModelsForSession ?? (async () => ({
+            success: true,
+            models: []
+        })),
+        listPiModelsForSession: opts?.listPiModelsForSession ?? (async () => ({
+            success: true,
+            availableModels: [],
+            currentModelId: null
         })),
         listOpencodeModelsForSession,
         listOpencodeReasoningEffortOptionsForSession,
@@ -482,6 +493,71 @@ describe('sessions routes', () => {
         expect(await response.json()).toEqual({
             success: true,
             models: [{ id: 'gpt-5.5', displayName: 'GPT-5.5', isDefault: true }]
+        })
+    })
+
+    it('returns a stable code when the Codex session model RPC target is absent', async () => {
+        const session = createSession()
+        const { app } = createApp(session, {
+            listCodexModelsForSession: async () => {
+                throw new RpcTargetMissingError('session-1:listCodexModels', 'handler-not-registered')
+            }
+        })
+
+        const response = await app.request('/api/sessions/session-1/codex-models')
+
+        expect(response.status).toBe(503)
+        expect(await response.json()).toEqual({
+            success: false,
+            error: 'RPC handler not registered: session-1:listCodexModels',
+            code: 'rpc_target_missing'
+        })
+    })
+
+    it('returns a stable code when the DSH session model RPC target is absent', async () => {
+        const session = createSession({
+            metadata: { path: '/tmp/project', host: 'localhost', flavor: 'dsh' }
+        })
+        const { app } = createApp(session, {
+            listDshModelsForSession: async () => {
+                throw new RpcTargetMissingError('session-1:listDshModels', 'handler-not-registered')
+            }
+        })
+
+        const response = await app.request('/api/sessions/session-1/dsh-models')
+
+        expect(response.status).toBe(503)
+        expect(await response.json()).toEqual({
+            success: false,
+            error: 'RPC handler not registered: session-1:listDshModels',
+            code: 'rpc_target_missing'
+        })
+    })
+
+    it('serves Pi session model lists through the engine cache wrapper', async () => {
+        const session = createSession({
+            metadata: { path: '/tmp/project', host: 'localhost', flavor: 'pi' }
+        })
+        const captured: string[] = []
+        const { app } = createApp(session, {
+            listPiModelsForSession: async (sessionId) => {
+                captured.push(sessionId)
+                return {
+                    success: true,
+                    availableModels: [{ provider: 'openai-codex', modelId: 'gpt-5.6-sol' }],
+                    currentModelId: 'gpt-5.6-sol'
+                }
+            }
+        })
+
+        const response = await app.request('/api/sessions/session-1/pi-models')
+
+        expect(response.status).toBe(200)
+        expect(captured).toEqual(['session-1'])
+        expect(await response.json()).toEqual({
+            success: true,
+            availableModels: [{ provider: 'openai-codex', modelId: 'gpt-5.6-sol' }],
+            currentModelId: 'gpt-5.6-sol'
         })
     })
 

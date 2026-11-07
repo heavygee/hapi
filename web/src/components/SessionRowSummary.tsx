@@ -8,7 +8,8 @@ import {
     classifySessionAttention,
     getSessionBlockedLabelKey,
     getSessionBlockedState,
-    sessionBlockedIsError
+    sessionBlockedIsError,
+    sessionIsUnread
 } from '@/lib/sessionAttention'
 import { IssueRefChip } from '@/components/IssueRefChip'
 import { getLinkedGithubIssue } from '@/lib/externalRefs'
@@ -98,7 +99,9 @@ function getSessionTimeLabel(
 
 /**
  * Presentational session row — same chrome as the sidebar SessionItem body
- * (flavor, title, thinking/attention, schedule, todos, relative time, path).
+ * (flavor icon with presence badge, title, request/schedule symbols, todos,
+ * relative time, path). Visual language matches the native apps: no dimmed
+ * rows or spinners; unread sessions have a separate accent dot.
  * Used by the session list and by rich-composer mention chip tooltips.
  */
 export function SessionRowSummary(props: {
@@ -205,13 +208,18 @@ export function SessionRowSummary(props: {
     const jobProgressLabel = attachedJob ? formatAttachedJobProgress(attachedJob, nowMs) : null
     const linkedIssue = getLinkedGithubIssue(s.metadata)
 
+    const isUnread = sessionIsUnread(s, {
+        lastSeenAt: getSessionLastSeenAt(s.id),
+        manualUnreadAt: getSessionManualUnreadAt(s.id, s.readState),
+    })
+
     return (
         <div className={`flex w-full min-w-0 flex-col gap-1 ${className ?? ''}`}>
             <div className={`grid grid-cols-[minmax(9rem,1fr)_minmax(0,max-content)] items-center gap-2 ${!s.active && !attachedJob ? 'opacity-50' : ''}`}>
                 <div className="flex min-w-0 items-center gap-2">
                     <AgentFlavorIcon flavor={s.metadata?.flavor} className="h-4 w-4 shrink-0 -translate-y-px" />
                     <div
-                        className={`min-w-0 flex-1 truncate text-sm font-medium ${s.active || attachedJob ? 'text-[var(--app-fg)]' : 'text-[var(--app-hint)]'}`}
+                        className={`min-w-0 flex-1 truncate text-sm ${isUnread ? 'font-semibold' : 'font-medium'} ${s.active || attachedJob ? 'text-[var(--app-fg)]' : 'text-[var(--app-hint)]'}`}
                         title={sessionName}
                     >
                         {sessionName}
@@ -233,6 +241,14 @@ export function SessionRowSummary(props: {
                         </span>
                     ) : null}
                     {showIssueChip && linkedIssue ? <IssueRefChip ref={linkedIssue} /> : null}
+                    {isUnread ? (
+                        <>
+                            <span data-testid="session-unread" className="h-2 w-2 shrink-0 rounded-full bg-blue-500" aria-hidden="true" />
+                            <span id={attention?.kind === 'unread' && nestedTooltips ? attentionId : undefined} className="sr-only">
+                                {t('session.item.newActivity')}
+                            </span>
+                        </>
+                    ) : null}
                     {attention?.kind === 'unread' && nestedTooltips && attentionId ? (
                         <SessionAttentionIndicator
                             attention={attention}
@@ -333,7 +349,9 @@ export function SessionRowSummary(props: {
                     {trailing}
                     {timeLabel ? (
                         <span
-                            className="min-w-0 truncate whitespace-nowrap tabular-nums text-[var(--app-hint)]"
+                            className={`min-w-0 truncate whitespace-nowrap tabular-nums ${
+                                isUnread ? 'font-semibold text-[var(--app-link)]' : 'text-[var(--app-hint)]'
+                            }`}
                             title={timeAbsolute ?? undefined}
                             data-testid="session-row-age"
                         >

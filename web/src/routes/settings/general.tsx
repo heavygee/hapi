@@ -14,6 +14,7 @@ import { useAppContext } from '@/lib/app-context'
 import { isDefaultNamespaceToken } from '@/lib/tokenNamespace'
 import { useFeatures, usePatchFeatures } from '@/hooks/queries/useFeatures'
 import { CompanionPairing } from '@/components/settings/CompanionPairing'
+import { PushNotificationsControl } from '@/components/settings/PushNotificationsControl'
 import { SettingsChoiceGroup, SettingsLinkRow, SettingsPageContent, SettingsRow, SettingsSection, SettingsSwitch } from '@/components/settings/SettingsPrimitives'
 import { disableAllFue, enableAllFue, isFueDisabledGlobally } from '@/lib/use-fue'
 import { isOwnerNamespace } from '@/lib/namespace'
@@ -125,6 +126,9 @@ export default function SettingsGeneralPage() {
                         void setGithubPrAwareness(checked)
                     }}
                 />
+            </SettingsSection>
+            <SettingsSection title={t('settings.notifications.title')}>
+                <PushNotificationsControl />
             </SettingsSection>
             {isOwner ? (
                 <SettingsSection

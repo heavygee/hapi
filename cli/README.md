@@ -50,6 +50,52 @@ Choose a supported coding agent from your terminal and control its sessions remo
 - `hapi archive-peer <session-id-or-prefix>` - Soft stand-down (archive only, never delete). Prefer this or MCP `archive_peer` over hand JWT+curl. Peer Done / idle ghosts should succeed; WORKING (thinking) peers may still refuse.
 - `hapi set-mode <session-id-or-prefix> <mode>` - Change the permission mode of an existing session, like the web permission picker. Active sessions switch immediately; inactive ones use it on next resume. An invalid mode prints the modes allowed for that agent.
 
+Peer messages default to `auto`: use the target's live capabilities and turn
+state to steer an active, eligible turn; otherwise queue. Inactive peers require explicit `wake: true`; awakened peers enter the ordinary queue. This applies to every steering-supported
+flavor: remote Claude, Pi, Codex, OpenCode, and Cursor ACP. Unsupported agents and
+legacy Cursor sessions queue instead. Prefer auto for routine collaboration
+when queueing is an acceptable fallback.
+
+Use explicit `queue` for non-urgent updates that can wait. Use `steer` for
+important, time-sensitive findings the peer needs to know now, not after its
+current turn: a correction that invalidates its assumptions, a blocker, or a
+result that changes its next action. State why it matters now and what the peer
+should adjust.
+Explicit steer rejects unsupported agents, idle targets, and inactive targets
+before sending. It does not abort the current turn or guarantee an immediate
+response. MCP `ping_peer` accepts the same optional
+`deliveryMode: "auto" | "queue" | "steer"` field. Auto is a peer-sender policy;
+ordinary web/native chat delivery is unchanged.
+
+Peer messages never wake an inactive session by default: `ping_peer` refuses
+with `inactive` and sends nothing. Pass MCP `wake: true` (CLI `--wake`) only
+when the user asked or the handed-off work requires that peer to act. Agents
+should message only peers tied to their task (a cited session, their Parent,
+peers they spawned or were handed off to), `inspect_peer` an unfamiliar peer's
+machine, cwd, and recent work before messaging it, and never broadcast.
+`list_peers` returns active sessions only unless `includeInactive: true`.
+
+```bash
+hapi ping-peer <session-id> 'The dependency is ready' --delivery-mode auto
+hapi ping-peer <session-id> 'Run the next check' --delivery-mode queue
+hapi ping-peer <session-id> 'Use the corrected input path' --delivery-mode steer
+```
+
+Every submission retains one `ping-peer-` localId. Auto first stores an ordinary
+queued message, then tries the existing queued-message Steer action when the
+live target is eligible. A steer rejection or unconfirmed steer response retains
+that same accepted message without resending or retrying the action. The
+receipt and progress output say whether steering was not attempted, rejected by
+the Hub, or not confirmed with delivery unresolved. An
+`accepted` receipt proves Hub acceptance, not whether the message remains queued
+or has already been consumed. Actual runtime acknowledgements determine delivery.
+
+Steer success reports `steered`, or `invoked` when consumption won the race.
+Explicit steer still reports an error if steering cannot be confirmed after
+acceptance, including the original localId. Initial send failures or ACK loss
+are never converted into successful auto fallback. Inspect the target before
+retrying an unconfirmed send; do not automatically resend the prompt.
+
 The picker lists agents alphabetically by command name. Use Up/Down and Enter
 to choose; Esc or Ctrl-C cancels. It appears on every bare invocation, even
 when only one agent is available. No default agent or selection is saved.

@@ -7,6 +7,7 @@ import { getTerminalFontSizeOptions, useTerminalFontSize } from '@/hooks/useTerm
 import { getSessionListStatusModeOptions, useSessionListStatusMode } from '@/hooks/useSessionListStatusMode'
 import { getBlockedAlertModeOptions, useBlockedAlertMode } from '@/hooks/useBlockedAlertMode'
 import { useShowActiveSessionsOnly } from '@/hooks/useShowActiveSessionsOnly'
+import { useKeepUnreadSessionsVisible } from '@/hooks/useKeepUnreadSessionsVisible'
 import { usePinInProgressSessions } from '@/hooks/usePinInProgressSessions'
 import { useFixedSessionOrder } from '@/hooks/useFixedSessionOrder'
 import { MAX_SESSION_PREVIEW_LIMIT, MIN_SESSION_PREVIEW_LIMIT, normalizeSessionPreviewLimit, useSessionPreviewLimit } from '@/hooks/useSessionPreviewLimit'
@@ -144,6 +145,7 @@ export default function SettingsDisplayPage() {
     const { showActiveSessionsOnly, setShowActiveSessionsOnly } = useShowActiveSessionsOnly()
     const { pinInProgressMode, setPinInProgressMode } = usePinInProgressSessions()
     const { fixedSessionOrder, setFixedSessionOrder } = useFixedSessionOrder()
+    const { keepUnreadSessionsVisible, setKeepUnreadSessionsVisible } = useKeepUnreadSessionsVisible()
     const { appBadgeEnabled, setAppBadgeEnabled } = useAppBadgePreference()
     const { openExternalLinksInNewTab, setOpenExternalLinksInNewTab } = useOpenExternalLinksInNewTab()
     const { preferences: sessionHeaderMetadata, setPreference: setSessionHeaderMetadata } = useSessionHeaderMetadata()
@@ -196,6 +198,7 @@ export default function SettingsDisplayPage() {
                     onChange={setPinInProgressMode}
                 />
                 <SettingsSwitch label={t('settings.display.fixedSessionOrder')} description={t('settings.display.fixedSessionOrder.desc')} checked={fixedSessionOrder} onChange={setFixedSessionOrder} />
+                <SettingsSwitch label={t('settings.display.keepUnreadSessionsVisible')} description={t('settings.display.keepUnreadSessionsVisible.desc')} checked={keepUnreadSessionsVisible} onChange={setKeepUnreadSessionsVisible} />
                 <SettingsSwitch label={t('settings.display.appBadge')} description={t('settings.display.appBadge.desc')} checked={appBadgeEnabled} onChange={setAppBadgeEnabled} />
                 <SettingsChoiceGroup
                     label={t('settings.display.sessionListStatus')}

@@ -141,6 +141,37 @@ afterEach(() => {
 })
 
 describe('mobile initial scroll settling', () => {
+    it('shows the jump control during continuous upward scrolling and hides it at the bottom', () => {
+        const { viewport, queryByRole } = renderThread()
+        act(() => { vi.advanceTimersByTime(3_000) })
+        viewport.scrollTop = 702
+        fireEvent.scroll(viewport)
+        expect(queryByRole('button', { name: /scroll to bottom/i })).toBeNull()
+
+        viewport.scrollTop = 600
+        fireEvent.scroll(viewport)
+        expect(queryByRole('button', { name: /scroll to bottom/i })).not.toBeNull()
+        viewport.scrollTop = 400
+        fireEvent.scroll(viewport)
+        expect(queryByRole('button', { name: /scroll to bottom/i })).not.toBeNull()
+
+        viewport.scrollTop = 702
+        fireEvent.scroll(viewport)
+        expect(queryByRole('button', { name: /scroll to bottom/i })).toBeNull()
+    })
+
+    it('uses the explicit tail transition when a send requests a forced scroll', () => {
+        const onViewModeChange = vi.fn()
+        const onJumpToTail = vi.fn()
+        const { rerenderThread } = renderThread(onViewModeChange, 0, onJumpToTail)
+        onViewModeChange.mockClear()
+
+        rerenderThread(1)
+
+        expect(onJumpToTail).toHaveBeenCalledTimes(1)
+        expect(onViewModeChange).not.toHaveBeenCalledWith('tail')
+    })
+
     it('checks the final keyboard position before clearing intent at scrollend', () => {
         const { container, viewport } = renderThread()
         const sentinel = container.querySelector('.chat-scroll-content > [aria-hidden="true"]')!

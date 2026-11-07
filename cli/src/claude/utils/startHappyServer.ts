@@ -564,48 +564,51 @@ mcp.registerTool<any, any>('display_image', {
     }
 
     if (!peerToolsDisabled) {
-    mcp.registerTool<any, any>('ping_peer', {
-        description: PING_PEER_TOOL_DESCRIPTION,
-        title: 'Ping Peer Session',
-        inputSchema: pingPeerInputSchema,
-    }, async (args: { sessionIdPrefix: string; message: string }) => {
-        logger.debug('[hapiMCP] ping_peer:', args.sessionIdPrefix);
-        try {
-            const result = await pingPeer({
-                sessionIdPrefix: args.sessionIdPrefix,
-                message: args.message,
-                // Soft nametag via /cli/.../peer-messages using this session id (#1203).
-                authenticatedSourceSessionId: client.sessionId,
-            });
-            return {
-                content: [
-                    {
-                        type: 'text' as const,
-                        text: `Delivered to ${result.sessionId}${result.resumed ? ' (resumed)' : ''} (${result.name})`,
-                    },
-                ],
-                isError: false,
-            };
-        } catch (error) {
-            const message = error instanceof PingPeerError
-                ? error.message
-                : error instanceof Error
+        mcp.registerTool<any, any>('ping_peer', {
+            description: PING_PEER_TOOL_DESCRIPTION,
+            title: 'Ping Peer Session',
+            inputSchema: pingPeerInputSchema,
+        }, async (args: { sessionIdPrefix: string; message: string; deliveryMode?: PeerDeliveryMode; wake?: boolean }) => {
+            logger.debug('[hapiMCP] ping_peer:', args.sessionIdPrefix);
+            try {
+                const result = await pingPeer({
+                    sessionIdPrefix: args.sessionIdPrefix,
+                    message: args.message,
+                    deliveryMode: args.deliveryMode,
+                    wake: args.wake === true,
+                    // Soft nametag via /cli/.../peer-messages using this session id (#1203).
+                    authenticatedSourceSessionId: client.sessionId,
+                });
+                return {
+                    content: [
+                        {
+                            type: 'text' as const,
+                            text: result.delivery === 'accepted'
+                                ? `Accepted for ${result.sessionId}${result.resumed ? ' (resumed)' : ''} (${result.name}) localId=${result.localId} — delivery shows in the recipient chat when its runtime consumes it${result.steerNote ? ` (${result.steerNote})` : ''}`
+                                : `${result.delivery} to ${result.sessionId}${result.resumed ? ' (resumed)' : ''} (${result.name}) localId=${result.localId}`,
+                        },
+                    ],
+                    isError: false,
+                };
+            } catch (error) {
+                const message = error instanceof PingPeerError
                     ? error.message
-                    : String(error);
-            logger.debug('[hapiMCP] ping_peer failed:', message);
-            return {
-                content: [
-                    {
-                        type: 'text' as const,
-                        text: `Failed to ping peer: ${message}`,
-                    },
-                ],
-                isError: true,
-            };
-        }
-    });
+                    : error instanceof Error
+                        ? error.message
+                        : String(error);
+                logger.debug('[hapiMCP] ping_peer failed:', message);
+                return {
+                    content: [
+                        {
+                            type: 'text' as const,
+                            text: `Failed to ping peer: ${message}`,
+                        },
+                    ],
+                    isError: true,
+                };
+            }
+        });
 
-    
     mcp.registerTool<any, any>('archive_peer', {
         description: ARCHIVE_PEER_TOOL_DESCRIPTION,
         title: 'Archive Peer Session',

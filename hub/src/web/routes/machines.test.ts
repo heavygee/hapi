@@ -5,6 +5,7 @@ import type { WebAppEnv } from '../middleware/auth'
 import { createMachinesRoutes } from './machines'
 import { RpcTargetMissingError } from '../../sync/rpcGateway'
 import { MACHINE_CAPABILITIES } from '@hapi/protocol'
+import { RPC_TARGET_MISSING_ERROR_CODE } from '@hapi/protocol/rpcMethods'
 
 function createMachine(overrides?: Partial<Machine>): Machine {
     return {
@@ -974,25 +975,63 @@ describe('machines routes', () => {
     })
 
     it('exposes POST /machines/:id/upgrade-runner as a deliberate one-shot', async () => {
-        const machine = createMachine()
-        const engine = {
-            getMachine: () => machine,
-            getMachineByNamespace: () => machine,
-            upgradeMachineRunner: async () => ({
-                type: 'success' as const,
-                message: 'Upgrade started',
-                response: { status: 'started' as const, message: 'Upgrade started', channel: 'hub-artifact' as const },
-            }),
-        } as unknown as Partial<SyncEngine>
-        const app = new Hono<WebAppEnv>()
-        app.use('*', async (c, next) => { c.set('namespace', 'default'); await next() })
-        app.route('/api', createMachinesRoutes(() => engine as SyncEngine))
+            const machine = createMachine()
+            const engine = {
+                getMachine: () => machine,
+                getMachineByNamespace: () => machine,
+                upgradeMachineRunner: async () => ({
+                    type: 'success' as const,
+                    message: 'Upgrade started',
+                    response: { status: 'started' as const, message: 'Upgrade started', channel: 'hub-artifact' as const },
+                }),
+            } as unknown as Partial<SyncEngine>
+            const app = new Hono<WebAppEnv>()
+            app.use('*', async (c, next) => { c.set('namespace', 'default'); await next() })
+            app.route('/api', createMachinesRoutes(() => engine as SyncEngine))
 
-        const response = await app.request('/api/machines/machine-1/upgrade-runner', { method: 'POST' })
-        expect(response.status).toBe(200)
-        expect(await response.json()).toEqual({
-            message: 'Upgrade started',
-            response: { status: 'started', message: 'Upgrade started', channel: 'hub-artifact' },
+            const response = await app.request('/api/machines/machine-1/upgrade-runner', { method: 'POST' })
+            expect(response.status).toBe(200)
+            expect(await response.json()).toEqual({
+                message: 'Upgrade started',
+                response: { status: 'started', message: 'Upgrade started', channel: 'hub-artifact' },
+            })
         })
-    })
+
+    it('returns a stable code when the DSH machine RPC target is absent', async () => {
+            const machine = createMachine()
+            const engine = {
+                getMachine: () => machine,
+                getMachineByNamespace: () => machine,
+                listDshModelsForMachine: async () => {
+                    throw new RpcTargetMissingError('machine-1:listDshModels', 'handler-not-registered')
+                }
+            } as Partial<SyncEngine>
+            const app = new Hono<WebAppEnv>()
+            app.use('*', async (c, next) => { c.set('namespace', 'default'); await next() })
+            app.route('/api', createMachinesRoutes(() => engine as SyncEngine))
+
+            const response = await app.request('/api/machines/machine-1/dsh-models')
+
+            expect(response.status).toBe(503)
+            expect(await response.json()).toMatchObject({ success: false, code: RPC_TARGET_MISSING_ERROR_CODE })
+        })
+
+    it('returns a stable code when the agy machine RPC target is absent', async () => {
+            const machine = createMachine()
+            const engine = {
+                getMachine: () => machine,
+                getMachineByNamespace: () => machine,
+                listAgyModelsForMachine: async () => {
+                    throw new RpcTargetMissingError('machine-1:listAgyModels', 'handler-not-registered')
+                }
+            } as Partial<SyncEngine>
+            const app = new Hono<WebAppEnv>()
+            app.use('*', async (c, next) => { c.set('namespace', 'default'); await next() })
+            app.route('/api', createMachinesRoutes(() => engine as SyncEngine))
+
+            const response = await app.request('/api/machines/machine-1/agy-models')
+
+            expect(response.status).toBe(503)
+            expect(await response.json()).toMatchObject({ success: false, code: RPC_TARGET_MISSING_ERROR_CODE })
+        })
 })

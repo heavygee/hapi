@@ -80,7 +80,7 @@ Yes. Telegram is optional. You can use a native iOS/Android app, open the web ap
 
 HAPI supports these notification channels:
 
-1. **PWA Push Notifications** - Enable when prompted, works even when app is closed
+1. **PWA Push Notifications** - Enable in Settings → General; works even when the app is closed
 2. **Telegram Bot** - See [Telegram Setup](./notifications.md#telegram-setup)
 3. **Native app notifications** - Official Android and iOS apps use encrypted push delivery; pair your hub and allow notifications, with no push-provider setup required
 4. **ServerChan (Server酱)** - Send notifications to WeChat and other channels; see [ServerChan Setup](./notifications.md#serverchan-server酱-setup)

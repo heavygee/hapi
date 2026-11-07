@@ -70,6 +70,7 @@ import {
     usePinInProgressSessions,
     type PinInProgressMode
 } from '@/hooks/usePinInProgressSessions'
+import { useKeepUnreadSessionsVisible } from '@/hooks/useKeepUnreadSessionsVisible'
 import { useFixedSessionOrder } from '@/hooks/useFixedSessionOrder'
 import {
     compareDescWithKeyTiebreak,
@@ -2327,6 +2328,21 @@ export function SessionList(props: {
     // contradicts a frozen list - fixed order pauses the feature entirely.
     const pinInProgressMode: PinInProgressMode = fixedSessionOrder ? 'off' : configuredPinInProgressMode
     const { blockedAlertMode } = useBlockedAlertMode()
+
+    // Unread rows stay visible without a filter: collapsed project groups still
+    // show them, and the preview limit never hides them.
+    const isSessionUnread = useCallback(
+        (session: SessionSummary) => sessionIsUnread(session, {
+            lastSeenAt: getSessionLastSeenAt(session.id),
+            manualUnreadAt: getSessionManualUnreadAt(session.id, session.readState)
+        }),
+        [lastSeenVersion] // eslint-disable-line react-hooks/exhaustive-deps
+    )
+    const { keepUnreadSessionsVisible } = useKeepUnreadSessionsVisible()
+    // When off, unread rows are treated like any other: collapsed projects fold
+    // completely and the preview limit may hide them.
+    const previewIsUnread = keepUnreadSessionsVisible ? isSessionUnread : undefined
+    const { pinInProgressSessions } = usePinInProgressSessions()
     const { machineFilter, setMachineFilter } = useSessionListMachineFilter()
     const showDetailedStatus = sessionListStatusMode === 'detailed'
     const [searchQuery, setSearchQuery] = useState('')
@@ -2843,7 +2859,8 @@ export function SessionList(props: {
             )
             const currentVisibleCount = getVisibleSessionPreview(group.sessions, {
                 selectedSessionId,
-                limit: currentLimit
+                limit: currentLimit,
+                isUnread: previewIsUnread
             }).length
             next.set(group.key, getNextSessionVisibleCount(
                 Math.max(currentLimit, currentVisibleCount),
@@ -2876,7 +2893,8 @@ export function SessionList(props: {
             group.sessions,
             {
                 selectedSessionId,
-                limit: getGroupVisibleCount(group)
+                limit: getGroupVisibleCount(group),
+                isUnread: previewIsUnread
             }
         )
     }
@@ -2994,6 +3012,9 @@ export function SessionList(props: {
 
     const renderDirectoryGroup = (group: SessionGroup) => {
         const isCollapsed = isGroupCollapsed(group)
+        // A collapsed group still shows its unread rows, so new output in a
+        // quiet project is never folded out of sight.
+        const collapsedUnreadSessions = isCollapsed && keepUnreadSessionsVisible ? group.sessions.filter(isSessionUnread) : []
         const visibleGroupSessions = getVisibleGroupSessions(group)
         const hiddenSessionCount = group.sessions.length - visibleGroupSessions.length
         const currentLimit = Math.min(
@@ -3003,7 +3024,8 @@ export function SessionList(props: {
         const previousLimit = getPreviousSessionVisibleCount(currentLimit, sessionPreviewLimit)
         const previousGroupSessions = getVisibleSessionPreview(group.sessions, {
             selectedSessionId,
-            limit: previousLimit
+            limit: previousLimit,
+            isUnread: previewIsUnread
         })
         const collapseCount = visibleGroupSessions.length - previousGroupSessions.length
         const canShowFewerSessions = previousLimit < currentLimit && collapseCount > 0
@@ -3024,6 +3046,29 @@ export function SessionList(props: {
                     onNewSessionInDirectory={onNewSessionInDirectory}
                     api={api}
                 />
+
+
+                {collapsedUnreadSessions.length > 0 ? (
+                    <div data-testid="session-group-unread-peek" className="flex flex-col gap-0.5 ml-3 pl-1 py-1">
+                        {collapsedUnreadSessions.map((s) => (
+                            <div key={s.id} className="contents">
+                                <SessionItem
+                                    session={s}
+                                    onSelect={props.onSelect}
+                                    showPath={false}
+                                    api={api}
+                                    titleSuggestionAvailable={titleSuggestionAvailable}
+                                    selected={s.id === selectedSessionId}
+                                    showDetailedStatus={showDetailedStatus}
+                                    contentSnippet={contentSnippetBySessionId.get(s.id)}
+                                    targetMessageId={contentTargetMessageIdBySessionId.get(s.id)}
+                                    targetMessageQuery={contentSearchActive ? normalizedQuery : undefined}
+                                    lastSeenVersion={lastSeenVersion}
+                                />
+                            </div>
+                        ))}
+                    </div>
+                ) : null}
 
                 {/* Sessions */}
                 <CollapsiblePanel open={!isCollapsed}>
