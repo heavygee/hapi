@@ -15,13 +15,21 @@
  *                    later enriched by CursorTask on the same callId
  */
 export function isSubagentToolName(name: string): boolean {
-    return (
+    // Cursor ACP uses title case / CursorTask; OpenCode uses lowercase task:/agent:.
+    if (
         name === 'Task'
         || name === 'Agent'
         || name === 'CursorTask'
         || name.startsWith('Agent:')
         || name.startsWith('Task:')
-    )
+    ) {
+        return true
+    }
+    const normalized = name.trim().toLowerCase()
+    return normalized === 'task'
+        || normalized === 'agent'
+        || normalized.startsWith('agent:')
+        || normalized.startsWith('task:')
 }
 
 /** Human label for a subagent tool (prefers CursorTask title/description). */

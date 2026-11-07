@@ -86,7 +86,7 @@ describe('SessionList unread visibility', () => {
         expect(screen.getByRole('button', { name: /Unread row/ })).toBeInTheDocument()
         expect(screen.queryByRole('button', { name: /Read row/ })).toBeNull()
 
-        fireEvent.click(screen.getByTitle('/work/quiet'))
+        fireEvent.keyDown(screen.getByTitle('/work/quiet'), { key: 'Enter' })
         expect(screen.queryByTestId('session-group-unread-peek')).toBeNull()
         expect(screen.getByRole('button', { name: /Unread row/ })).toBeInTheDocument()
         expect(screen.getByRole('button', { name: /Read row/ })).toBeInTheDocument()
@@ -152,7 +152,7 @@ describe('SessionList toolbar order', () => {
             <button type="button">Settings</button>
         )
 
-        expect(slotIds()).toEqual(['view', 'new', 'header-actions', 'mark-all'])
+        expect(slotIds()).toEqual(['filter', 'mark-all', 'new', 'header-actions'])
     })
 
     it('keeps the other controls in place when there is nothing unread', () => {
@@ -162,6 +162,6 @@ describe('SessionList toolbar order', () => {
             <button type="button">Settings</button>
         )
 
-        expect(slotIds()).toEqual(['view', 'new', 'header-actions'])
+        expect(slotIds()).toEqual(['filter', 'new', 'header-actions'])
     })
 })

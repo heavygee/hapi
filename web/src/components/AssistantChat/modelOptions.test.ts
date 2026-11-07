@@ -64,7 +64,7 @@ describe('getModelOptionsForFlavor', () => {
         expect(options.some((o) => o.value === 'opus')).toBe(true)
     })
 
-    it('keeps Claude presets when explicit options only include Sonnet models', () => {
+    it('uses the Claude catalog as the whole list, as the CLI picker shows it', () => {
         const options = getModelOptionsForFlavor('claude', null, [
             { value: null, label: 'Default' },
             { value: 'sonnet', label: 'Sonnet' },
@@ -73,27 +73,17 @@ describe('getModelOptionsForFlavor', () => {
         expect(options).toEqual([
             { value: null, label: 'Default' },
             { value: 'sonnet', label: 'Sonnet' },
-            { value: 'sonnet[1m]', label: 'Sonnet 1M' },
-            { value: 'opus', label: 'Opus' },
-            { value: 'opus[1m]', label: 'Opus 1M' },
-            { value: 'fable', label: 'Fable' },
-            { value: 'fable[1m]', label: 'Fable 1M' }
+            { value: 'sonnet[1m]', label: 'Sonnet 1M' }
         ])
     })
 
-    it('adds non-preset Claude options without hiding Opus presets', () => {
+    it('keeps a non-preset Claude catalog entry without blending in built-in presets', () => {
         const options = getModelOptionsForFlavor('claude', null, [
             { value: 'claude-opus-4-1-20250805', label: 'Claude Opus 4.1' }
         ])
         expect(options).toEqual([
             { value: null, label: 'Default' },
-            { value: 'claude-opus-4-1-20250805', label: 'Claude Opus 4.1' },
-            { value: 'sonnet', label: 'Sonnet' },
-            { value: 'sonnet[1m]', label: 'Sonnet 1M' },
-            { value: 'opus', label: 'Opus' },
-            { value: 'opus[1m]', label: 'Opus 1M' },
-            { value: 'fable', label: 'Fable' },
-            { value: 'fable[1m]', label: 'Fable 1M' }
+            { value: 'claude-opus-4-1-20250805', label: 'Claude Opus 4.1' }
         ])
     })
 
@@ -275,12 +265,12 @@ describe('getNextModelForFlavor', () => {
         expect(next).not.toBeNull()
     })
 
-    it('cycles through Claude presets when explicit options only include Sonnet models', () => {
+    it('cycles within the Claude catalog when presets are not blended in', () => {
         const next = getNextModelForFlavor('claude', 'sonnet[1m]', [
             { value: 'sonnet', label: 'Sonnet' },
             { value: 'sonnet[1m]', label: 'Sonnet 1M' }
         ])
-        expect(next).toBe('opus')
+        expect(next).toBe(null)
     })
 
     it('cycles explicit model options', () => {
