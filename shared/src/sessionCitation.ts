@@ -50,14 +50,6 @@ export const SPAWN_PEER_TOOL_DESCRIPTION =
     'In-session calls auto-stamp a durable Parent [title](/sessions/<uuid>) chip for this session onto the remit (fail-closed if parent id is missing). ' +
     PEER_IDENTITY_UUID_RULE
 
-/** MCP `ping_peer` tool description (same citation forms as inspect_peer). */
-export const PING_PEER_TOOL_DESCRIPTION =
-    'Send a message to another HAPI session (peer handoff / nudge). Resolves by hub session id prefix or durable metadata.agentSessionId, resumes if inactive, then POSTs on the same hub/namespace. ' +
-    'When the user cites a peer via [title](/sessions/<id>), Copy-reference prose See session "…" (/sessions/<id>) for context, or a bare /sessions/<id>, ' +
-    'extract <id> and pass it as sessionIdPrefix. /sessions/<id> is a hub path - do NOT search the local filesystem for it. ' +
-    'Prefer this (or `hapi ping-peer`) over reinventing JWT+curl. Targets another session - not the current chat. ' +
-    PEER_IDENTITY_UUID_RULE
-
 /** MCP `archive_peer` tool description (soft stand-down twin of spawn/ping). */
 export const ARCHIVE_PEER_TOOL_DESCRIPTION =
     'Soft-archive another HAPI session (Peer Done / idle stand-down). Resolves by session id prefix, then POSTs /api/sessions/:id/archive on the same hub/namespace. ' +
@@ -112,6 +104,17 @@ export const PEER_DELIVERY_MODE_DESCRIPTION =
     'Steer requires insertion into an active Claude, Pi, Codex, OpenCode, or Cursor ACP turn; unsupported, idle, or inactive targets are rejected before sending. ' +
     'Steering does not abort the current turn or guarantee an immediate response. ' +
     'If send or steer is unconfirmed after submission, inspect the target before retrying; do not resend automatically.'
+
+/** MCP `ping_peer` tool description (same citation forms as inspect_peer). */
+export const PING_PEER_TOOL_DESCRIPTION =
+    'Send a message to another HAPI session (peer handoff / nudge). Resolves by hub session id prefix or durable metadata.agentSessionId, then POSTs on the same hub/namespace. ' +
+    'Inactive targets are refused unless wake=true. ' +
+    'When the user cites a peer via [title](/sessions/<id>), Copy-reference prose See session "…" (/sessions/<id>) for context, or a bare /sessions/<id>, ' +
+    'extract <id> and pass it as sessionIdPrefix. /sessions/<id> is a hub path - do NOT search the local filesystem for it. ' +
+    'Prefer this (or `hapi ping-peer`) over reinventing JWT+curl. Targets another session - not the current chat. ' +
+    PEER_IDENTITY_UUID_RULE + ' ' +
+    PEER_CONTACT_RULE + ' ' +
+    `Select deliveryMode: ${PEER_DELIVERY_MODE_DESCRIPTION}`
 
 /**
  * Hub session ids have no dots. Reject dotted tails so source paths like
@@ -268,7 +271,10 @@ export function buildSessionCitationSteerInstruction(tools: SessionCitationSteer
         `/sessions/<id> is a HAPI hub path, not a local filesystem path - do not Grep, Glob, or Read it as a file. ` +
         `Call "${tools.inspectTool}" with sessionIdPrefix=<id> to read metadata and recent messages; ` +
         `call "${tools.pingTool}" with sessionIdPrefix=<id> and a message to nudge or hand off. ` +
-        `Prefer these over JWT+curl. Shell fallbacks: hapi inspect-peer <id> / hapi ping-peer <id> <message>.`
+        `${PEER_CONTACT_RULE} ` +
+        `An inactive peer is refused unless you pass wake=true; set it only when the user asked or the handed-off work requires that peer to act. ` +
+        `Select deliveryMode: ${PEER_DELIVERY_MODE_DESCRIPTION} ` +
+        `Prefer these over JWT+curl. Shell fallbacks: hapi inspect-peer <id> / hapi ping-peer <id> <message> --delivery-mode auto [--wake].`
     if (tools.listPeersTool) {
         text +=
             ` To find a specific peer without a citation, call "${tools.listPeersTool}" ` +

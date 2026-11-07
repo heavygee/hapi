@@ -113,13 +113,18 @@ describe('startHappyServer skill_lookup', () => {
 
         expect(tools.tools.map((tool) => tool.name)).toEqual([
             'change_title',
+            'set_voice_mode',
+            'link_issue',
             'display_image',
             'display_video',
             'display_media',
             'ping_peer',
+            'archive_peer',
             'spawn_peer',
             'inspect_peer',
+            'session_job',
             'list_peers',
+            'search_peers',
             'search_content',
         ])
     })
@@ -240,7 +245,13 @@ describe('startHappyServer skill_lookup', () => {
                 arguments: { sessionIdPrefix: 'peer-id', message: 'hello', ...(deliveryMode ? { deliveryMode } : {}) }
             }) as ToolResult
             expect(result.isError).toBe(false)
-            expect(ping).toHaveBeenCalledWith({ sessionIdPrefix: 'peer-id', message: 'hello', deliveryMode, wake: false })
+            expect(ping).toHaveBeenCalledWith({
+                sessionIdPrefix: 'peer-id',
+                message: 'hello',
+                deliveryMode,
+                wake: false,
+                authenticatedSourceSessionId: 'parent-id',
+            })
             expect(result.content?.[0]?.text).toBe(delivery === 'accepted'
                 ? 'Accepted for peer-id (Peer) localId=ping-peer-test — delivery shows in the recipient chat when its runtime consumes it'
                 : `${delivery} to peer-id (Peer) localId=ping-peer-test`)
@@ -289,7 +300,11 @@ describe('startHappyServer skill_lookup', () => {
             }) as ToolResult
             expect(result.isError).toBe(false)
             expect(ping).toHaveBeenCalledWith({
-                sessionIdPrefix: 'peer-id', message: 'take over the build', deliveryMode: undefined, wake: true
+                sessionIdPrefix: 'peer-id',
+                message: 'take over the build',
+                deliveryMode: undefined,
+                wake: true,
+                authenticatedSourceSessionId: 'parent-id',
             })
             expect(result.content?.[0]?.text).toContain('(resumed)')
         } finally {
@@ -414,15 +429,34 @@ describe('startHappyServer skill_lookup', () => {
         await mcp.connect(new StreamableHTTPClientTransport(new URL(server.url)))
         const tools = await mcp.listTools()
 
-        expect(server.toolNames).toEqual(['display_image', 'display_video', 'display_media', 'list_peers', 'search_content', 'ping_peer', 'inspect_peer'])
+        expect(server.toolNames).toEqual([
+            'set_voice_mode',
+            'link_issue',
+            'display_image',
+            'display_video',
+            'display_media',
+            'list_peers',
+            'search_peers',
+            'search_content',
+            'ping_peer',
+            'inspect_peer',
+            'spawn_peer',
+            'archive_peer',
+            'session_job',
+        ])
         expect(tools.tools.map((tool) => tool.name)).toEqual([
+            'set_voice_mode',
+            'link_issue',
             'display_image',
             'display_video',
             'display_media',
             'ping_peer',
+            'archive_peer',
             'spawn_peer',
             'inspect_peer',
+            'session_job',
             'list_peers',
+            'search_peers',
             'search_content',
         ])
     })
@@ -734,13 +768,33 @@ describe('startHappyServer peer tools kill switch', () => {
     it('omits peer tools from registration and toolNames when HAPI_DISABLE_PEER_TOOLS is set', async () => {
         process.env.HAPI_DISABLE_PEER_TOOLS = '1'
         const { toolNames } = await startServer()
-        expect(toolNames).toEqual(['change_title', 'display_image', 'display_video', 'display_media'])
+        expect(toolNames).toEqual([
+            'change_title',
+            'set_voice_mode',
+            'link_issue',
+            'display_image',
+            'display_video',
+            'display_media',
+            'search_content',
+            'session_job',
+        ])
         const tools = await client!.listTools()
         const names = tools.tools.map((tool) => tool.name)
         expect(names).not.toContain('list_peers')
         expect(names).not.toContain('ping_peer')
         expect(names).not.toContain('inspect_peer')
         expect(names).not.toContain('spawn_peer')
-        expect(names).toEqual(expect.arrayContaining(['display_image', 'display_video', 'display_media']))
+        expect(names).not.toContain('search_peers')
+        expect(names).not.toContain('archive_peer')
+        expect(names).toEqual(expect.arrayContaining([
+            'change_title',
+            'set_voice_mode',
+            'link_issue',
+            'display_image',
+            'display_video',
+            'display_media',
+            'search_content',
+            'session_job',
+        ]))
     })
 })

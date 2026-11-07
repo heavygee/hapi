@@ -28,6 +28,8 @@ import {
     ARCHIVE_PEER_TOOL_DESCRIPTION,
     INSPECT_PEER_TOOL_DESCRIPTION,
     LIST_PEERS_INCLUDE_INACTIVE_PARAM_DESCRIPTION,
+    PEER_DELIVERY_MODE_DESCRIPTION,
+    PEER_WAKE_PARAM_DESCRIPTION,
     PING_PEER_TOOL_DESCRIPTION,
     SESSION_ID_PREFIX_PARAM_DESCRIPTION,
     SPAWN_PEER_TOOL_DESCRIPTION,
@@ -233,6 +235,8 @@ function createHapiMcpServer(
     const pingPeerInputSchema: z.ZodTypeAny = z.object({
         sessionIdPrefix: z.string().trim().min(1).describe(SESSION_ID_PREFIX_PARAM_DESCRIPTION),
         message: z.string().min(1).describe('Message text to deliver to the target session'),
+        deliveryMode: PeerDeliveryModeSchema.optional().describe(PEER_DELIVERY_MODE_DESCRIPTION),
+        wake: z.boolean().optional().describe(PEER_WAKE_PARAM_DESCRIPTION),
     });
 
     const archivePeerInputSchema: z.ZodTypeAny = z.object({
@@ -776,22 +780,25 @@ mcp.registerTool<any, any>('spawn_peer', {
         description: 'List peer HAPI sessions on the same hub/namespace (id prefix, active, flavor, name). Uses this session\'s hub credentials - works from runner-spawned agents without being on the hub host. Prefer this over shelling `hapi ping-peer --list`. Then call inspect_peer / ping_peer with a listed id, search_peers for keyword inventory beyond the recency window, or spawn_peer to create a new peer with a remit.',
         title: 'List Peer Sessions',
         inputSchema: listPeersInputSchema,
-    }, async (args: { limit?: number }) => {
+    }, async (args: { limit?: number; includeInactive?: boolean }) => {
         logger.debug('[hapiMCP] list_peers');
         try {
             const limit = args.limit ?? 30;
+            const includeInactive = args.includeInactive === true;
             const sessions = await listPeerSessions({
                 limit: peerListFetchLimit(limit, { excludeCaller: true }),
+                includeInactive,
             });
-            const peers = sessions.filter((session) => session.id !== client.sessionId);
-            const hasMore = peers.length > limit;
+            const peerCount = sessions.filter((session) => session.id !== client.sessionId).length;
             return {
                 content: [
                     {
                         type: 'text' as const,
-                        text: formatPeerSessionsList(peers, {
+                        text: formatPeerSessionsList(sessions, {
                             maxRows: limit,
-                            hasMore,
+                            hasMore: peerCount > limit,
+                            excludeSessionId: client.sessionId,
+                            includeInactive,
                         }),
                     },
                 ],

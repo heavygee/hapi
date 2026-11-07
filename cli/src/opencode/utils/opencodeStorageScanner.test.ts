@@ -122,10 +122,15 @@ describe('OpenCode compaction storage scans', () => {
         } });cleanup.push(() => scanner.cleanup());events.length = 0;
         let release!: () => void;const wait = new Promise<void>(resolve => { release = resolve; });const entered = vi.fn();reads.set(file, { wait, entered });
         try {
+            // Fast machines can rewrite with the same mtimeMs; bump above the
+            // already-recorded version so the scanner re-enters readFile.
+            const base = Date.now() + 60_000;
             await f.write('part/summary/one.json', f.part('one', 'Stale A'));
+            await utimes(file, new Date(base), new Date(base));
             await vi.waitFor(() => expect(entered).toHaveBeenCalledTimes(1));
             scanner.onNewSession('other');await vi.waitFor(() => expect(found).toHaveBeenCalledWith('other'));
             await f.write('part/summary/one.json', f.part('one', 'Current A'));
+            await utimes(file, new Date(base + 60_000), new Date(base + 60_000));
             scanner.onNewSession('ses');await vi.waitFor(() => expect(entered).toHaveBeenCalledTimes(2));
             release();await vi.waitFor(() => expect(events).toContain('Current A'));
             expect(events).not.toContain('Stale A');
