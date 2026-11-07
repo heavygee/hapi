@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import { Hono } from 'hono'
 import { parseIssueUrl } from '@hapi/protocol/schemas'
 import { SessionArchiveUncontrollableError, type Session, type SyncEngine } from '../../sync/syncEngine'
+import { RpcTargetMissingError } from '../../sync/rpcGateway'
 import type { WebAppEnv } from '../middleware/auth'
 import { createSessionsRoutes } from './sessions'
 

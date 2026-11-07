@@ -38,6 +38,9 @@ export type OpencodeEventStreamOptions = {
      * web timeline folds), not as a failure — see its call site.
      */
     onRetry: (retry: OpencodeRetryStatus) => void;
+    /** Native transcript consumer; receives normalized, session-scoped events. */
+    onEvent?: (type: string, properties: Record<string, unknown>, eventId?: string) => void;
+    onConnected?: () => void;
     /**
      * Extra request headers merged into every (re)connect attempt. Required
      * for opencode v2: the internal server is Basic-auth protected, and a
@@ -388,7 +391,7 @@ export function subscribeToOpencodeEvents(options: OpencodeEventStreamOptions): 
         // carries its fields directly (no v1 `properties` wrapper), so the
         // body becomes `properties`.
         if (mode === 'v2' && isObject(payload) && isObject(payload.data)) {
-            payload = { type: payload.type, properties: payload.data };
+            payload = { id: payload.id, type: payload.type, properties: payload.data };
         }
         // Dispatched outside the parse guard on purpose: everything
         // downstream of handleEvent is HAPI's own code (the launcher's
@@ -504,6 +507,7 @@ export function subscribeToOpencodeEvents(options: OpencodeEventStreamOptions): 
                 continue;
             }
 
+            options.onConnected?.();
             framesThisConnection = 0;
             try {
                 await consumeStream(response.body);

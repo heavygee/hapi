@@ -14,6 +14,7 @@ import {
 import type {
     AgyModelsResponse,
     AgentAvailabilityResponse,
+    ClaudeModelsResponse,
     CodexModelSummary,
     CodexModelsResponse,
     CommandResponse,
@@ -132,6 +133,7 @@ export type RpcListOpencodeReasoningEffortOptionsResponse = OpencodeReasoningEff
 export type RpcListAgyModelsResponse = AgyModelsResponse
 export type RpcListDshModelsResponse = DshModelsResponse
 export type RpcListPiModelsResponse = PiModelsResponse
+export type RpcListClaudeModelsResponse = ClaudeModelsResponse
 
 export class RpcGateway {
     constructor(

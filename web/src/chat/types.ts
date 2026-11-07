@@ -336,6 +336,7 @@ export type DisplayLinksBlock = {
     invokedAt?: number | null
     urls: DisplayLinkItem[]
     texts?: DisplayTextItem[]
+    roundSummary?: RoundSummary
     meta?: unknown
 }
 

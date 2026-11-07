@@ -30,6 +30,7 @@ import { filterConciseChatBlocks } from '@/chat/conciseView'
 import { getAssistantResponseGroups, hasUnambiguousResponseOwner, responseBlockKey, responseBlockIdentity, responseGroupIdentity } from '@/chat/responseGroups'
 import { useUnseenBlockCount } from '@/hooks/useUnseenBlockCount'
 import { useCodexExplorationCollapse } from '@/hooks/useCodexExplorationCollapse'
+import { getToolCardDisplayPresentation, useToolCardDisplayMode } from '@/hooks/useToolCardDisplayMode'
 import { isQueuedForInvocation } from '@/lib/messages'
 import { inactiveSessionCanResume } from '@/lib/sessionResume'
 import {
@@ -720,6 +721,8 @@ function SessionChatInner(props: SessionChatProps) {
     const { t } = useTranslation()
     const { codexExplorationCollapsed } = useCodexExplorationCollapse()
     const navigate = useNavigate()
+    const { toolCardDisplayMode } = useToolCardDisplayMode()
+    const { groupingMode: toolGroupingMode } = getToolCardDisplayPresentation(toolCardDisplayMode)
     const [historyActionPending, setHistoryActionPending] = useState(false)
     const [rewindForkFallback, setRewindForkFallback] = useState<string | null>(null)
 
@@ -1677,9 +1680,11 @@ function SessionChatInner(props: SessionChatProps) {
         () => buildVisibleChatBlocks(reconciled.blocks, {
             hasMoreMessages: props.hasMoreMessages,
             previousGroups: visibleGroupsRef.current,
+            previousGroupingMode: visibleGroupsModeRef.current,
+            groupingMode: toolGroupingMode,
             codexExplorationCollapsed
         }),
-        [reconciled.blocks, props.hasMoreMessages, codexExplorationCollapsed]
+        [reconciled.blocks, props.hasMoreMessages, toolGroupingMode, codexExplorationCollapsed]
     )
 
     // Fork-current must compare against assistant-ui message ids (`kind:id`),
@@ -1725,8 +1730,9 @@ function SessionChatInner(props: SessionChatProps) {
     }, [latestCompletedBoundaryId])
 
     useEffect(() => {
+        visibleGroupsModeRef.current = toolGroupingMode
         visibleGroupsRef.current = visibleBlocks.filter(isToolGroupBlock)
-    }, [visibleBlocks])
+    }, [toolGroupingMode, visibleBlocks])
 
     // "N new messages" counts rendered blocks, not raw messages: a subagent run
     // is dozens of sidechain messages but a single Task card, and a tool_use +

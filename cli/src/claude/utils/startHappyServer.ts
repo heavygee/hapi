@@ -38,6 +38,7 @@ import { applySessionDisplayRename, normalizeSessionDisplayTitle } from "@/agent
 import { applySessionVoiceMode } from "@/agent/sessionVoiceMode";
 import { ArchivePeerError, archivePeer } from "@/modules/archivePeer/archivePeer";
 import { PingPeerError, formatInspectPeerReport, formatPeerSessionsList, inspectPeer, listPeerSessions, peerListFetchLimit, pingPeer, searchPeerSessions } from "@/modules/pingPeer/pingPeer";
+import { PeerDeliveryModeSchema, type PeerDeliveryMode } from "@/modules/pingPeer/deliveryMode";
 import {
     SearchContentError,
     formatSearchContentMatches,

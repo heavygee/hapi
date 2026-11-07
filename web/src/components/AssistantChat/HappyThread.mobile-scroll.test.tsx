@@ -46,7 +46,11 @@ class TestResizeObserver {
     disconnect() {}
 }
 
-function renderThread(onViewModeChange = vi.fn(), unseenCount = 0) {
+function renderThread(
+    onViewModeChange = vi.fn(),
+    unseenCount = 0,
+    onJumpToTail?: () => void
+) {
     const queryClient = new QueryClient({
         defaultOptions: { queries: { retry: false } }
     })
@@ -61,6 +65,7 @@ function renderThread(onViewModeChange = vi.fn(), unseenCount = 0) {
                     disabled={false}
                     onRefresh={vi.fn()}
                     onViewModeChange={onViewModeChange}
+                    onJumpToTail={onJumpToTail}
                     isSyncingTail={false}
                     messagesWarning={null}
                     hasMoreMessages={false}

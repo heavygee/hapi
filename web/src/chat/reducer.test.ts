@@ -4,7 +4,7 @@ import { reconcileChatBlocks } from './reconcile'
 import { buildVisibleChatBlocks, type VisibleChatBlock } from './toolGroups'
 import { aggregateResponseGroups, assignThreadMessageIdsWithStableWrappers, type BlockWithThreadMessageId } from '@/lib/assistant-runtime'
 import { normalizeDecryptedMessage } from './normalize'
-import type { NormalizedMessage } from './types'
+import type { AgentTextBlock, NormalizedMessage } from './types'
 import type { DecryptedMessage } from '@/types/api'
 import type { AgentState, ThreadGoal, ThreadGoalStatus } from '@/types/api'
 

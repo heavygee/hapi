@@ -5,6 +5,8 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ApiSessionClient } from '@/api/apiSession'
+import * as peerMessages from '@/modules/pingPeer/pingPeer'
+import * as peerSpawn from '@/modules/spawnPeer/spawnPeer'
 import { startHappyServer, toClaudeAllowedHapiMcpTools } from './startHappyServer'
 
 type ToolResult = {
@@ -41,26 +43,23 @@ describe('startHappyServer skill_lookup', () => {
         await rm(sandboxDir, { recursive: true, force: true })
     })
 
-    async function connect(enableSkillLookup = true, extra: { enableDisplayLinks?: boolean; flavor?: string } = {}): Promise<Client> {
+    async function connect(enableSkillLookup = true): Promise<Client> {
         sendAgentMessage = vi.fn()
         const sessionClient = {
-            sessionId: 'test-session-id',
+            sessionId: 'parent-id',
+            getMetadata: () => ({ name: 'Parent', path: workingDirectory, flavor: 'codex' }),
             updateMetadata: vi.fn(),
             sendAgentMessage,
             sendClaudeSessionMessage: vi.fn()
         } as unknown as ApiSessionClient
-        const { flavor, enableDisplayLinks } = extra
-        const server = await startHappyServer(sessionClient, {
-            ...(enableSkillLookup
-                ? {
-                    skillLookup: {
-                        workingDirectory,
-                        flavor: flavor ?? 'opencode'
-                    }
+        const server = await startHappyServer(sessionClient, enableSkillLookup
+            ? {
+                skillLookup: {
+                    workingDirectory,
+                    flavor: 'opencode'
                 }
-                : {}),
-            ...(enableDisplayLinks !== undefined ? { enableDisplayLinks } : {}),
-        })
+            }
+            : {})
         stopServer = server.stop
 
         client = new Client(
@@ -112,23 +111,17 @@ describe('startHappyServer skill_lookup', () => {
         const mcp = await connect(false)
         const tools = await mcp.listTools()
 
-        expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
+        expect(tools.tools.map((tool) => tool.name)).toEqual([
             'change_title',
-            'set_voice_mode',
-            'link_issue',
             'display_image',
             'display_video',
             'display_media',
+            'ping_peer',
+            'spawn_peer',
             'inspect_peer',
             'list_peers',
             'search_content',
-            'search_peers',
-            'ping_peer',
-            'session_job',
-            'spawn_peer',
-            'archive_peer',
-        ].sort())
-        expect(tools.tools.map((tool) => tool.name)).not.toContain('display_links')
+        ])
     })
 
     it('invokes onChangeTitle when change_title succeeds', async () => {
@@ -387,49 +380,6 @@ describe('startHappyServer skill_lookup', () => {
         }))
     })
 
-    it('does not expose display_links for non-cursor flavors', async () => {
-        const mcp = await connect(true, { flavor: 'opencode' })
-        const tools = await mcp.listTools()
-        expect(tools.tools.map((tool) => tool.name)).not.toContain('display_links')
-    })
-
-    it('exposes display_links for cursor flavor', async () => {
-        const mcp = await connect(true, { flavor: 'cursor' })
-        const tools = await mcp.listTools()
-        expect(tools.tools.map((tool) => tool.name)).toContain('display_links')
-    })
-
-    it('paints display_links via sendAgentMessage with concatenated href bytes', async () => {
-        const mcp = await connect(false, { enableDisplayLinks: true })
-        const href = 'https://github.com/tia' + 'nn' + '/hapi/issues/1516'
-
-        const result = await mcp.callTool({
-            name: 'display_links',
-            arguments: { urls: [{ href, title: 'Issue 1516' }] }
-        }) as ToolResult
-
-        expect(result.isError).toBe(false)
-        expect(result.content?.[0]?.text).toContain('Displayed 1 link')
-        expect(sendAgentMessage).toHaveBeenCalledWith(expect.objectContaining({
-            type: 'display-links',
-            urls: [{ href: 'https://github.com/tiann/hapi/issues/1516', title: 'Issue 1516' }],
-        }))
-        const payload = sendAgentMessage.mock.calls[0]?.[0] as { urls: Array<{ href: string }> }
-        expect(payload.urls[0]?.href).toBe(href)
-        expect(payload.urls[0]?.href).not.toContain('tian/hapi')
-    })
-
-    it('rejects javascript hrefs without emitting an agent message', async () => {
-        const mcp = await connect(false, { enableDisplayLinks: true })
-        const result = await mcp.callTool({
-            name: 'display_links',
-            arguments: { urls: [{ href: 'javascript:alert(1)' }] }
-        }) as ToolResult
-
-        expect(result.isError).toBe(true)
-        expect(sendAgentMessage).not.toHaveBeenCalled()
-    })
-
     it('preserves the source extension when display_media title omits one', async () => {
         const path = join(sandboxDir, 'plan-a.zip')
         await writeFile(path, Buffer.from([0x50, 0x4b, 0x03, 0x04]))
@@ -452,7 +402,6 @@ describe('startHappyServer skill_lookup', () => {
 
     it('does not expose change_title when native ACP titles are enabled', async () => {
         const sessionClient = {
-            sessionId: 'test-session-id',
             updateMetadata: vi.fn(),
             sendAgentMessage: vi.fn(),
             sendClaudeSessionMessage: vi.fn()
@@ -465,36 +414,17 @@ describe('startHappyServer skill_lookup', () => {
         await mcp.connect(new StreamableHTTPClientTransport(new URL(server.url)))
         const tools = await mcp.listTools()
 
-        expect(server.toolNames).toEqual([
-            'set_voice_mode',
-            'link_issue',
+        expect(server.toolNames).toEqual(['display_image', 'display_video', 'display_media', 'list_peers', 'search_content', 'ping_peer', 'inspect_peer'])
+        expect(tools.tools.map((tool) => tool.name)).toEqual([
             'display_image',
             'display_video',
             'display_media',
-            'list_peers',
-            'search_peers',
-            'search_content',
             'ping_peer',
-            'inspect_peer',
             'spawn_peer',
-            'archive_peer',
-            'session_job',
+            'inspect_peer',
+            'list_peers',
+            'search_content',
         ])
-        expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
-            'display_image',
-            'display_media',
-            'display_video',
-            'inspect_peer',
-            'list_peers',
-            'search_content',
-            'search_peers',
-            'ping_peer',
-            'session_job',
-            'set_voice_mode',
-            'link_issue',
-            'spawn_peer',
-            'archive_peer',
-        ].sort())
     })
 
 })
@@ -526,6 +456,9 @@ describe('startHappyServer change_title', () => {
         const sendClaudeSessionMessage = vi.fn()
         const sessionClient = {
             updateMetadata,
+            refreshMetadata: vi.fn(async () => true),
+            getMetadata: vi.fn(() => null),
+            flushMetadata: vi.fn(async () => true),
             sendAgentMessage: vi.fn(),
             sendClaudeSessionMessage
         } as unknown as ApiSessionClient
@@ -567,10 +500,93 @@ describe('startHappyServer change_title', () => {
         expect(sendClaudeSessionMessage).not.toHaveBeenCalled()
     })
 
+    it.each([false, true])('reports a user lock, including one acquired while the title write is pending (%s)', async (inFlight) => {
+        let locked = !inFlight
+        const updateMetadata = vi.fn()
+        const sessionClient = {
+            updateMetadata,
+            refreshMetadata: vi.fn(async () => true),
+            getMetadata: () => ({ path: '/tmp', host: 'localhost', name: 'Pinned', titleLocked: locked }),
+            flushMetadata: vi.fn(async () => { locked = true; return true }),
+            sendAgentMessage: vi.fn()
+        } as unknown as ApiSessionClient
+        const onChangeTitle = vi.fn()
+        const mcp = await connectChangeTitleServer(sessionClient, { onChangeTitle })
+        updateMetadata.mockClear()
+        const result = await mcp.callTool({ name: 'change_title', arguments: { title: 'Agent' } }) as ToolResult
+        expect(result.isError).toBe(true)
+        expect(result.content?.[0]?.text).toContain('locked by the user')
+        expect(updateMetadata).toHaveBeenCalledTimes(inFlight ? 1 : 0)
+        expect(onChangeTitle).not.toHaveBeenCalled()
+    })
+
+    it.each([1, 2])('does not acknowledge a rename when metadata flush %s fails', async (failedFlush) => {
+        const onChangeTitle = vi.fn()
+        let flushes = 0
+        const sessionClient = {
+            updateMetadata: vi.fn(),
+            refreshMetadata: vi.fn(async () => true),
+            getMetadata: () => null,
+            flushMetadata: vi.fn(async () => {
+                flushes++
+                if (flushes === 2) expect(onChangeTitle).toHaveBeenCalledWith('Manual Title')
+                return flushes !== failedFlush
+            })
+        } as unknown as ApiSessionClient
+        const mcp = await connectChangeTitleServer(sessionClient, { onChangeTitle })
+        const result = await mcp.callTool({ name: 'change_title', arguments: { title: 'Manual Title' } }) as ToolResult
+        expect(result.isError).toBe(true)
+        expect(flushes).toBe(failedFlush)
+        expect(onChangeTitle).toHaveBeenCalledTimes(failedFlush === 1 ? 0 : 1)
+    })
+
+    it('reports a user lock acquired while flushing manual-title precedence', async () => {
+        let locked = false
+        let flushes = 0
+        const onChangeTitle = vi.fn()
+        const sessionClient = {
+            updateMetadata: vi.fn(),
+            refreshMetadata: vi.fn(async () => true),
+            getMetadata: () => ({ path: '/tmp', host: 'localhost', titleLocked: locked }),
+            flushMetadata: vi.fn(async () => { locked = ++flushes === 2; return true })
+        } as unknown as ApiSessionClient
+        const mcp = await connectChangeTitleServer(sessionClient, { onChangeTitle })
+        const result = await mcp.callTool({ name: 'change_title', arguments: { title: 'Manual' } }) as ToolResult
+        expect(result.isError).toBe(true)
+        expect(result.content?.[0]?.text).toContain('locked by the user')
+        expect(onChangeTitle).toHaveBeenCalledTimes(1)
+    })
+
+    it('refreshes a stale cached lock before allowing an explicit rename', async () => {
+        let locked = true
+        const sessionClient = {
+            updateMetadata: vi.fn(), refreshMetadata: vi.fn(async () => { locked = false; return true }),
+            getMetadata: () => ({ path: '/tmp', host: 'localhost', titleLocked: locked }),
+            flushMetadata: vi.fn(async () => true), sendAgentMessage: vi.fn()
+        } as unknown as ApiSessionClient
+        const mcp = await connectChangeTitleServer(sessionClient)
+        const result = await mcp.callTool({ name: 'change_title', arguments: { title: 'Unlocked' } }) as ToolResult
+        expect(result.isError).toBe(false)
+        expect(sessionClient.refreshMetadata).toHaveBeenCalled()
+    })
+
+    it('fails without mutating when the Hub lock cannot be read', async () => {
+        const updateMetadata = vi.fn()
+        const sessionClient = { updateMetadata, refreshMetadata: vi.fn(async () => false), sendAgentMessage: vi.fn() } as unknown as ApiSessionClient
+        const mcp = await connectChangeTitleServer(sessionClient)
+        updateMetadata.mockClear()
+        const result = await mcp.callTool({ name: 'change_title', arguments: { title: 'Unknown' } }) as ToolResult
+        expect(result.isError).toBe(true)
+        expect(updateMetadata).not.toHaveBeenCalled()
+    })
+
     it('returns an error for blank titles instead of claiming success', async () => {
         const updateMetadata = vi.fn()
         const sessionClient = {
             updateMetadata,
+            refreshMetadata: vi.fn(async () => true),
+            getMetadata: vi.fn(() => null),
+            flushMetadata: vi.fn(async () => true),
             sendAgentMessage: vi.fn(),
             sendClaudeSessionMessage: vi.fn()
         } as unknown as ApiSessionClient
@@ -593,6 +609,9 @@ describe('startHappyServer change_title', () => {
         const sendClaudeSessionMessage = vi.fn()
         const sessionClient = {
             updateMetadata,
+            refreshMetadata: vi.fn(async () => true),
+            getMetadata: vi.fn(() => null),
+            flushMetadata: vi.fn(async () => true),
             sendAgentMessage: vi.fn(),
             sendClaudeSessionMessage
         } as unknown as ApiSessionClient
@@ -611,80 +630,28 @@ describe('startHappyServer change_title', () => {
         expect(sendClaudeSessionMessage).not.toHaveBeenCalled()
     })
 })
-
-describe('startHappyServer set_voice_mode', () => {
-    let stopServer: (() => void) | null
-    let client: Client | null
-
-    afterEach(async () => {
-        await client?.close()
-        stopServer?.()
-        client = null
-        stopServer = null
-    })
-
-    it('writes metadata.voiceMode via updateMetadata', async () => {
-        const updateMetadata = vi.fn()
-        const sessionClient = {
-            updateMetadata,
-            sendAgentMessage: vi.fn(),
-            sendClaudeSessionMessage: vi.fn()
-        } as unknown as ApiSessionClient
-
-        const server = await startHappyServer(sessionClient)
-        stopServer = server.stop
-        const mcp = new Client({ name: 'hapi-voice-mode-test', version: '1.0.0' })
-        client = mcp
-        await mcp.connect(new StreamableHTTPClientTransport(new URL(server.url)))
-        updateMetadata.mockClear()
-
-        const result = await mcp.callTool({
-            name: 'set_voice_mode',
-            arguments: { enabled: true }
-        }) as ToolResult
-
-        expect(result.isError).toBe(false)
-        expect(result.content?.[0]?.text).toContain('Voice mode enabled')
-        expect(updateMetadata).toHaveBeenCalledTimes(1)
-        const handler = updateMetadata.mock.calls[0]?.[0] as (metadata: {
-            path: string
-            host: string
-            voiceMode?: boolean
-        }) => { path: string; host: string; voiceMode?: boolean }
-        expect(handler({ path: '/tmp', host: 'localhost' }).voiceMode).toBe(true)
-    })
-})
-
 describe('toClaudeAllowedHapiMcpTools', () => {
     it('keeps local-path and peer tools registered but out of Claude --allowedTools', () => {
         expect(toClaudeAllowedHapiMcpTools([
             'change_title',
-            'set_voice_mode',
-            'link_issue',
             'display_image',
             'display_video',
             'display_media',
             'list_peers',
-            'search_peers',
+            'search_content',
             'ping_peer',
             'inspect_peer',
             'spawn_peer',
-            'archive_peer',
-            'session_job',
             'skill_lookup'
         ])).toEqual([
             'mcp__hapi__change_title',
-            'mcp__hapi__set_voice_mode',
-            'mcp__hapi__link_issue',
             'mcp__hapi__display_image',
             'mcp__hapi__list_peers',
-            'mcp__hapi__search_peers',
-            'mcp__hapi__session_job',
+            'mcp__hapi__search_content',
             'mcp__hapi__skill_lookup'
         ])
         expect(toClaudeAllowedHapiMcpTools(['display_video'])).not.toContain('mcp__hapi__display_video')
         expect(toClaudeAllowedHapiMcpTools(['display_media'])).not.toContain('mcp__hapi__display_media')
-        expect(toClaudeAllowedHapiMcpTools(['archive_peer'])).not.toContain('mcp__hapi__archive_peer')
     })
 })
 
@@ -758,26 +725,22 @@ describe('startHappyServer peer tools kill switch', () => {
     it('registers peer tools by default', async () => {
         delete process.env.HAPI_DISABLE_PEER_TOOLS
         const { toolNames } = await startServer()
-        expect(toolNames).toEqual(expect.arrayContaining(['list_peers', 'ping_peer', 'inspect_peer']))
+        expect(toolNames).toEqual(expect.arrayContaining(['list_peers', 'ping_peer', 'inspect_peer', 'spawn_peer']))
         const tools = await client!.listTools()
         const names = tools.tools.map((tool) => tool.name)
-        expect(names).toEqual(expect.arrayContaining(['list_peers', 'ping_peer', 'inspect_peer']))
+        expect(names).toEqual(expect.arrayContaining(['list_peers', 'ping_peer', 'inspect_peer', 'spawn_peer']))
     })
 
     it('omits peer tools from registration and toolNames when HAPI_DISABLE_PEER_TOOLS is set', async () => {
         process.env.HAPI_DISABLE_PEER_TOOLS = '1'
         const { toolNames } = await startServer()
-        for (const peerTool of ['list_peers', 'search_peers', 'ping_peer', 'inspect_peer', 'spawn_peer', 'archive_peer']) {
-            expect(toolNames).not.toContain(peerTool)
-        }
-        // search_content is a transcript search, not a peer tool: it survives the kill switch.
-        expect(toolNames).toEqual(expect.arrayContaining(['change_title', 'display_image', 'display_video', 'display_media', 'search_content']))
+        expect(toolNames).toEqual(['change_title', 'display_image', 'display_video', 'display_media'])
         const tools = await client!.listTools()
         const names = tools.tools.map((tool) => tool.name)
-        for (const peerTool of ['list_peers', 'search_peers', 'ping_peer', 'inspect_peer', 'spawn_peer', 'archive_peer']) {
-            expect(names).not.toContain(peerTool)
-        }
-        expect(names).toContain('search_content')
+        expect(names).not.toContain('list_peers')
+        expect(names).not.toContain('ping_peer')
+        expect(names).not.toContain('inspect_peer')
+        expect(names).not.toContain('spawn_peer')
         expect(names).toEqual(expect.arrayContaining(['display_image', 'display_video', 'display_media']))
     })
 })

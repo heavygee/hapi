@@ -1339,6 +1339,7 @@ export function getVisibleSessionPreview(
         expanded?: boolean
         selectedSessionId?: string | null
         limit?: number
+        isUnread?: (session: SessionSummary) => boolean
     } = {}
 ): SessionSummary[] {
     const limit = options.limit ?? GROUP_SESSION_PREVIEW_LIMIT
@@ -1347,6 +1348,7 @@ export function getVisibleSessionPreview(
     const requiredIds = new Set<string>()
     for (const session of sessions) {
         if (session.active && session.pendingRequestsCount > 0) requiredIds.add(session.id)
+        else if (options.isUnread?.(session)) requiredIds.add(session.id)
     }
     if (options.selectedSessionId && sessions.some(session => session.id === options.selectedSessionId)) {
         requiredIds.add(options.selectedSessionId)

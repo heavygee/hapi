@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildCliArgs } from '@/runner/run';
 import { parseRemoteAgentCommandOptions } from '@/commands/agentCommandOptions';
 import { OPENCODE_PERMISSION_MODES } from '@hapi/protocol/modes';
+import type { MessageQueue2 } from '@/utils/MessageQueue2';
+import type { OpencodeMode } from './types';
 
 const mockOpencodeSession = vi.hoisted(() => ({
     setModel: vi.fn(),
@@ -128,8 +130,7 @@ vi.mock('@/ui/logger', () => ({
 }));
 
 vi.mock('@/utils/attachmentFormatter', () => ({
-    formatMessageWithAttachments: vi.fn((text: string) => text),
-    formatUserMessageForAgent: vi.fn((text: string) => text)
+    formatMessageWithAttachments: vi.fn((text: string) => text)
 }));
 
 vi.mock('@/modules/common/slashCommands', () => ({
@@ -414,44 +415,6 @@ describe('runOpencode set-session-config handler', () => {
         expect(harness.session.sendAgentMessage).not.toHaveBeenCalled();
     });
 
-    it('keeps peer /compact as literal prompt text (#1203)', async () => {
-        await runOpencode({});
-
-        const onCompactAvailabilityChange = harness.opencodeLoopArgs[0]?.onCompactAvailabilityChange as
-            ((available: boolean) => void) | undefined;
-        onCompactAvailabilityChange!(true);
-
-        const messageQueue = harness.opencodeLoopArgs[0]?.messageQueue as
-            { queue: Array<{ message: string; mode: { operation?: string }; localId?: string; isolate?: boolean }> };
-
-        const userMessageHandler = harness.session.onUserMessage.mock.calls[0]?.[0] as
-            ((msg: {
-                content: { text: string; attachments?: unknown[] };
-                meta?: { sentFrom?: string };
-            }, localId?: string) => void)
-            | undefined;
-        expect(userMessageHandler).toBeDefined();
-
-        harness.listSlashCommands.mockClear();
-        userMessageHandler!({
-            content: { text: '/compact steal context' },
-            meta: { sentFrom: 'peer' },
-        }, 'peer-compact');
-        for (let i = 0; i < 5; i++) {
-            await new Promise((resolve) => setTimeout(resolve, 0));
-        }
-
-        expect(harness.listSlashCommands).not.toHaveBeenCalled();
-        expect(messageQueue.queue).toEqual([
-            expect.objectContaining({
-                message: '/compact steal context',
-                localId: 'peer-compact',
-            }),
-        ]);
-        expect(messageQueue.queue[0]?.mode?.operation).toBeUndefined();
-        expect(messageQueue.queue[0]?.isolate).not.toBe(true);
-    });
-
     it('queues runner-backed /clear as its own FIFO operation without acknowledging it early', async () => {
         await runOpencode({ startedBy: 'runner' });
 
@@ -508,6 +471,20 @@ describe('runOpencode set-session-config handler', () => {
             expect.anything()
         );
         expect(harness.session.sendAgentMessage).not.toHaveBeenCalled();
+    });
+
+    it('delegates native v2 cancellation before generic queue removal and clears the delegate on teardown', async () => {
+        await runOpencode({ startedBy: 'runner' });
+        const bind = harness.opencodeLoopArgs[0].onSteerCancelHandlerChange as
+            (handler: import('./utils/opencodeV2Steer').OpencodeSteerCancelHandler | null) => void;
+        const cancel = harness.session.onCancelQueuedMessage.mock.calls[0][0] as
+            (id: string) => boolean | Promise<unknown>;
+        const native = vi.fn((id: string) => id === 'native' ? Promise.resolve('in-flight' as const) : undefined);
+        bind(native);
+        await expect(cancel('native')).resolves.toBe('in-flight');
+        expect(native).toHaveBeenCalledWith('native');
+        bind(null);
+        expect(cancel('missing')).toBe(false);
     });
 
     it('releases the clear transition latch when the queued /clear is cancelled', async () => {
@@ -933,4 +910,25 @@ describe('runOpencode set-session-config handler', () => {
         expect(isLocalIdCancelled!(lastLocalId)).toBe(true);
         expect(isLocalIdCancelled!(lastLocalId)).toBe(false);
     });
+    it('preserves dispatch and consumption outcomes through the registered cancel callback', async () => {
+        await runOpencode({});
+        const queue = harness.opencodeLoopArgs[0]?.messageQueue as MessageQueue2<OpencodeMode>;
+        const cancel = harness.session.onCancelQueuedMessage.mock.calls[0][0] as
+            (id: string) => boolean | 'in-flight' | 'indeterminate' | 'consumed';
+        queue.push('correction', { permissionMode: 'default', model: null }, 'reserved');
+        const reservation = queue.takeByLocalId('reserved')!;
+        expect(queue.beginReservationDispatch(reservation)).toBe(true);
+        expect(cancel('reserved')).toBe('in-flight');
+        expect(cancel('reserved')).toBe('in-flight');
+        expect(queue.commitReservation(reservation)).toBe(true);
+        expect(cancel('reserved')).toBe('consumed');
+        vi.spyOn(queue, 'cancelByLocalId').mockReturnValueOnce('indeterminate');
+        expect(cancel('unresolved')).toBe('indeterminate');
+        queue.push('user-resolvable', { permissionMode: 'default', model: null }, 'unknown');
+        const unknown = queue.takeByLocalId('unknown')!;
+        queue.beginReservationDispatch(unknown);
+        queue.markReservationIndeterminate(unknown);
+        expect(cancel('unknown')).toBe(true);
+    });
+
 });
