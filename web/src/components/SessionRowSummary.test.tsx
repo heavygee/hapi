@@ -91,7 +91,7 @@ describe('SessionRowSummary background status', () => {
             </I18nProvider>
         )
 
-        expect(screen.queryByRole('tooltip', { hidden: true })).not.toBeInTheDocument()
+        expect(screen.queryByTestId('session-unread')).not.toBeInTheDocument()
 
         markSessionUnread(session.id)
         view.rerender(
@@ -104,7 +104,7 @@ describe('SessionRowSummary background status', () => {
             </I18nProvider>
         )
 
-        expect(screen.getByRole('tooltip', { hidden: true })).toHaveTextContent('New activity')
+        expectUnreadOnce()
     })
 
     it('shows an explicit unread dot for the selected session only', () => {
@@ -128,7 +128,7 @@ describe('SessionRowSummary background status', () => {
             </I18nProvider>
         )
 
-        expect(screen.getByRole('tooltip', { hidden: true })).toHaveTextContent('New activity')
+        expectUnreadOnce()
 
         // Manual unread persists across newer content revisions.
         view.rerender(
@@ -142,7 +142,7 @@ describe('SessionRowSummary background status', () => {
             </I18nProvider>
         )
 
-        expect(screen.getByRole('tooltip', { hidden: true })).toHaveTextContent('New activity')
+        expectUnreadOnce()
     })
 
     it('shows an explicit unread dot before the thinking spinner', () => {
@@ -165,8 +165,9 @@ describe('SessionRowSummary background status', () => {
             </I18nProvider>
         )
 
-        expect(screen.getByRole('tooltip', { hidden: true })).toHaveTextContent('New activity')
-        expect(screen.getByTestId('session-unread')).toBeInTheDocument()
+        expectUnreadOnce()
+        // Thinking spinner is a second chrome element — not a second unread dot.
+        expect(document.querySelectorAll('[data-testid="session-unread"]')).toHaveLength(1)
     })
 
     it('shows and clears the unread dot in standard session rows', () => {
@@ -230,6 +231,16 @@ describe('SessionRowSummary background status', () => {
         expect(screen.queryByTestId('issue-ref-chip')).not.toBeInTheDocument()
     })
 })
+
+/** #2303 unread channel: one blue-500 dot + sr-only label — never a second attention tooltip. */
+function expectUnreadOnce() {
+    expect(screen.getByTestId('session-unread')).toBeInTheDocument()
+    expect(screen.getByText('New activity')).toHaveClass('sr-only')
+    expect(document.querySelectorAll('[data-testid="session-unread"]')).toHaveLength(1)
+    expect(screen.queryAllByRole('tooltip', { hidden: true }).filter(node =>
+        node.textContent?.includes('New activity')
+    )).toHaveLength(0)
+}
 
 describe('SessionRowSummary time label', () => {
     beforeEach(() => {

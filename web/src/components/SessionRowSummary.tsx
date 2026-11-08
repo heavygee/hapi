@@ -53,7 +53,6 @@ const ATTENTION_DOT_CLASS = {
     permission: 'bg-amber-500 animate-pulse',
     input: 'bg-blue-500',
     background: 'bg-blue-400',
-    unread: 'bg-[var(--app-link)]',
 } as const
 
 function getTodoProgress(session: SessionSummary): { completed: number; total: number } | null {
@@ -243,26 +242,18 @@ export function SessionRowSummary(props: {
                     {showIssueChip && linkedIssue ? <IssueRefChip ref={linkedIssue} /> : null}
                     {isUnread ? (
                         <>
+                            {/* #2303 unread accent — single channel. Do not also
+                                paint SessionAttentionIndicator kind=unread
+                                (--app-link); that was the post-absorb double blue. */}
                             <span data-testid="session-unread" className="h-2 w-2 shrink-0 rounded-full bg-blue-500" aria-hidden="true" />
                             <span id={attention?.kind === 'unread' && nestedTooltips ? attentionId : undefined} className="sr-only">
                                 {t('session.item.newActivity')}
                             </span>
                         </>
                     ) : null}
-                    {attention?.kind === 'unread' && nestedTooltips && attentionId ? (
-                        <SessionAttentionIndicator
-                            attention={attention}
-                            summary={s}
-                            label={attentionLabel ?? ''}
-                            tooltipId={attentionId}
-                        />
-                    ) : attention?.kind === 'unread' ? (
-                        <span
-                            className={`inline-flex h-2 w-2 shrink-0 rounded-full ${ATTENTION_DOT_CLASS.unread}`}
-                            title={attentionLabel ?? undefined}
-                            aria-label={attentionLabel ?? undefined}
-                        />
-                    ) : isAgentForegroundThinking(s) ? (
+                    {/* Unread is drawn above; remaining attention is permission /
+                        input / background / thinking only. */}
+                    {attention?.kind === 'unread' ? null : isAgentForegroundThinking(s) ? (
                         <SessionSpinner />
                     ) : urgentAttention && nestedTooltips && attentionId ? (
                         <SessionAttentionIndicator
@@ -296,19 +287,6 @@ export function SessionRowSummary(props: {
                                 <span className="text-[11px] font-medium leading-none">{t('session.item.pending')}</span>
                             ) : null}
                         </span>
-                    ) : attention && nestedTooltips && attentionId ? (
-                        <SessionAttentionIndicator
-                            attention={attention}
-                            summary={s}
-                            label={attentionLabel ?? ''}
-                            tooltipId={attentionId}
-                        />
-                    ) : attention ? (
-                        <span
-                            className={`inline-flex h-2 w-2 shrink-0 rounded-full ${ATTENTION_DOT_CLASS[attention.kind]}`}
-                            title={attentionLabel ?? undefined}
-                            aria-label={attentionLabel ?? undefined}
-                        />
                     ) : null}
                     {hasScheduleTooltip && nestedTooltips && scheduleId ? (
                         <HoverTooltip
