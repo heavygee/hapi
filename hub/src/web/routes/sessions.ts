@@ -29,7 +29,7 @@ import {
     toSessionSummary,
     UploadFileRequestSchema
 } from '@hapi/protocol'
-import { RPC_METHODS, RPC_TARGET_MISSING_ERROR_CODE } from '@hapi/protocol/rpcMethods'
+import { RPC_TARGET_MISSING_ERROR_CODE } from '@hapi/protocol/rpcMethods'
 import { parseIssueUrl } from '@hapi/protocol/schemas'
 import type { SlashCommand } from '@hapi/protocol/apiTypes'
 import { Hono, type Context } from 'hono'
@@ -100,8 +100,11 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             ? Math.min(500, Math.max(1, Math.floor(parsedLimit)))
             : null
         const order = c.req.query('order')
+        // Peer discovery lists live sessions only, filtered before limit truncation.
+        const activeOnly = c.req.query('active') === 'true'
 
         let sessionRecords = engine.getSessionsByNamespace(namespace)
+            .filter((session) => !activeOnly || session.active)
             .sort((a, b) => {
                 // Peer discovery wants newest activity first before limit truncation.
                 if (order === 'updatedAt') {
@@ -1734,6 +1737,13 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         try {
             return c.json(await engine.listDshModelsForSession(sessionResult.sessionId))
         } catch (error) {
+            if (error instanceof RpcTargetMissingError) {
+                return c.json({
+                    success: false,
+                    error: error.message,
+                    code: RPC_TARGET_MISSING_ERROR_CODE
+                }, 503)
+            }
             return c.json({
                 success: false,
                 error: error instanceof Error ? error.message : 'Failed to list DSH models'
@@ -1854,7 +1864,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
     // --- Pi models ---
     app.get('/sessions/:id/pi-models', (c) =>
         withPiSession(c, async ({ sessionId, engine }) =>
-            c.json(await engine.callPiRpc(sessionId, RPC_METHODS.ListPiModels, {}, 120_000))
+            c.json(await engine.listPiModelsForSession(sessionId))
         )
     )
 
