@@ -36,6 +36,7 @@ describe('sessionJobMcp', () => {
         expect(SESSION_JOB_TOOL_DESCRIPTION).toMatch(/do NOT use action=set/i)
         expect(SESSION_JOB_TOOL_DESCRIPTION).toContain('hapi job run')
         expect(SESSION_JOB_TOOL_DESCRIPTION).toMatch(/Own-session only/i)
+        expect(SESSION_JOB_TOOL_DESCRIPTION).toMatch(/pass null to clear that field/i)
     })
 
     it('hard-refuses action=set and never calls setSessionJob', async () => {
