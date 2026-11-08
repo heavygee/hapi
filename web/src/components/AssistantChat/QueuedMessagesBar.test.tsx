@@ -47,6 +47,17 @@ vi.mock('@/lib/message-window-store', () => ({
     getMessageWindowState: () => mocks.messageWindowState,
     subscribeMessageWindow: () => () => {},
     markMessagesConsumed: mocks.markMessagesConsumed,
+    markMessagesDispatching: (_sessionId: string, ids: string[]) => {
+        mocks.messageWindowState = { messages: mocks.messageWindowState.messages.map(item => {
+            const message = item as DecryptedMessage
+            return message.localId && ids.includes(message.localId)
+                ? { ...message, deliveryState: 'indeterminate', deliveryPending: true }
+                : message
+        }) }
+    },
+    markMessagesIndeterminate: vi.fn(),
+    markMessagesRequeued: vi.fn(),
+    reconcileQueuedLocalIds: vi.fn(),
 }))
 
 vi.mock('@/hooks/mutations/useCancelQueuedMessage', () => ({
