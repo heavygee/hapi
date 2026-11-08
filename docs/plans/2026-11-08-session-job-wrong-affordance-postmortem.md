@@ -112,10 +112,11 @@ Alive-only stripes remain legitimate for **unknown-size** batches (beets without
 |------|--------|
 | PATCH live `dogfood-1424-48h` with `remaining`+`total`+`unit=s` (no sleep restart) | done (babysit) |
 | Peer ACK: future countdowns use remaining+total | done |
-| Remaining still freezes without updater | **open** — fill class fixed, honesty of % still soft |
-| `--until` / auto-tick OR sleep refuse | **owed** before calling countdown UX merge-ready |
-| Skill + `SESSION_JOB_RUN_RECIPE` + guide: countdown section; remaining alone ≠ determinate | **owed** |
-| Dogfood checklist: assert determinate on window meters | **owed** |
+| Required `--progress unknown\|fraction\|until` on run/set + `--until` auto-stamp | **landed** on tip (CLI) |
+| `job run --progress until` heartbeats re-stamp remaining | **landed** |
+| Skill + recipe + guide + system instruction | **landed** |
+| Dogfood checklist: assert determinate on window meters | still owed (process) |
+| Hub-persisted `endsAt` (survive supervisor restart) | optional follow-up |
 
 ## Not this incident
 
