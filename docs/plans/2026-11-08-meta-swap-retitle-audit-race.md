@@ -223,6 +223,8 @@ Handed to [upstream issue/pr discovery](/sessions/04c8e16c-4cf3-40f2-a76b-944bfc
 
 ## Follow-up 4 — both of our archive readings were right, at different times; `archivedBy` is the tell (kitchen, 2026-11-08)
 
+> ⚠️ **Superseded in part by Follow-ups 5 and 6.** The sampling point below stands. The *attribution* does not: this section reads the missing `archivedBy: 'hub'` as a hub archive that applied and was erased. Discovery proved the three hub-archive guards are byte-identical across soup, `upstream/main` and `feat/archive-peer-2020`, so an applied hub archive could not have been erased — **the hub never authored one.** The absence is the proof, not the symptom. Read 5 and 6 for the live mechanism.
+
 Triage corrected the kitchen's changelog line (`028d0a86` recorded as `archived`/`archivedBy: cli`) on the grounds that it reads `running` with no `archivedBy`. Re-probed three times, three seconds apart, with `lifecycleStateSince` to catch churn:
 
 ```
@@ -258,6 +260,80 @@ Triage reached the same attribution independently (`archivedBy: cli` / *User ter
 
 So the issue must stand on the code chain in Follow-up 3 (`postArchive` requires `ok: true` → `markSessionArchivedFromHub` writes `archivedBy: 'hub'` → `sessionFactory.ts:587` rebuilds from a `running` base with no archive fields preserved) plus the recorded observations here, and should say outright that the symptom is **not reproducible by inspection after the fact**. A repro has to archive a session that is actively turning and re-read within its next metadata push. Expect "works for me" otherwise.
 
+## Follow-up 5 — Bug A's mechanism is also wrong; hub archives *are* protected (triage, 2026-11-08)
+
+[Discovery](/sessions/04c8e16c-4cf3-40f2-a76b-944bfc7e7da8) checked this against `upstream/main` @ `ee1e6ae7c` and corrected it. **Everything above that says a hub archive was applied and then erased by the session's metadata rebuild is wrong.** Verified independently in the driver before accepting:
+
+- `hub/src/store/sessions.ts:449` `preserveHubArchiveOnMerged()`, called at `:581`, **re-stamps** `lifecycleState`/`archivedBy`/`archiveReason` onto any CLI metadata write that would clear a hub archive. `:441` defines hub-archived as `lifecycleState === 'archived' && archivedBy === 'hub'`.
+- `cli/src/api/apiSession.ts:867,1411,1438,1462,1471` — the CLI detects a hub archive and stands down rather than fighting it.
+- `sessionFactory.ts:575` refuses `--existing-session-id` reopen of a hub-archived row.
+
+So `archivedBy: 'hub'` **is** durable, in three layers. The omission of `lifecycleState`/`archivedBy` from `pickExistingSessionMetadata()` that Follow-up 3 called the defect is **deliberate tiering**: `archivedBy: 'cli'` is a clean-exit death marker that reopen must clear, and every guard is narrowed to `'hub'` with comments saying so. The "obvious fix" a reader would take from Follow-up 3 — add the three fields to the preserve list — **would break reopen**. Do not file it. Fix direction 1 in Follow-up 3 is withdrawn.
+
+**The real defect is one line further on**, in `syncEngine`'s archive tail (driver `syncEngine.ts:3143`, upstream ~2290):
+
+```ts
+// If the row is still not archived, hub-author the metadata …
+const lifecycleState = this.sessionCache.getSession(sessionId)?.metadata?.lifecycleState
+if (lifecycleState !== 'archived') { this.sessionCache.markSessionArchivedFromHub(…) }
+```
+
+The hub treats *any* `archived` as "archive took" — including an `archivedBy: 'cli'` marker it has itself established is **not** durable. When a CLI self-archive marker is present but the process did not actually die, the hub authors **no** hub marker, `preserveHubArchiveOnMerged()` has nothing to preserve, the row legitimately returns to `running`, and the caller already holds `ok: true`. The guard should test `archivedBy === 'hub'`, not `lifecycleState === 'archived'`. That is `028d0a86`'s shape, and it explains the flap — a hub-authored archive could not have flapped.
+
+**Bug B is independently falsified too.** Nothing outside in-process `markManualTitle()` ever writes `acpManualTitle` (sole writer `acpSessionTitle.ts:47`; hub rename takes `{name, titleLocked}`), so the stale read has no path to effect. Cross-process manual-title precedence is `titleLocked`, which *is* re-read at call time. Already retracted as the incident cause; now retracted as a defect.
+
+**Two corrections to the record here, both mine.** Follow-up 3 asserted a mechanism from a real code chain without checking whether a protection existed downstream — the same error as Bug B, twice in one day. Reading code until a story coheres is not verification; the missing step both times was *looking for the guard that would falsify it*.
+
+Also worth stating plainly, since the whole thread rests on it: **`archive_peer` does not exist on `upstream/main` or on fork `main`.** It ships only on the driver (soup `c5a182a12`) and upstream branch `feat/archive-peer-2020`. The tool that produced every observation here is unmerged, which is why this is review input on [#2020](https://github.com/tiann/hapi/issues/2020) rather than a new issue. Nearest prior art is [#1705](https://github.com/tiann/hapi/issues/1705), **closed `not_planned`** — same family, declined; read it before writing anything shaped like "archive doesn't confirm death".
+
+Discovery's full verdict to be appended by discovery in its own words.
+
+---
+
+## Follow-up 6 — the sequence, and why the missing `archivedBy: 'hub'` is the proof rather than the symptom (discovery, 2026-11-08)
+
+Follow-up 5 states the defect correctly. This section records the step ordering behind it, the parity check that rules out fork drift, and what I would and would not file. Checked against `upstream/main` @ `ee1e6ae7c`, fork `origin/main`, upstream branch `feat/archive-peer-2020` @ `de758a55b`, and the running driver (soup `c5a182a12`).
+
+### The three guards are in every build, which is what falsifies the erasure story
+
+`preserveHubArchiveOnMerged` / `isHubArchivedSessionMetadata` are present and identical in **soup `c5a182a12`** (`hub/src/store/sessions.ts:439,449,577,581`), **`upstream/main`**, and **`feat/archive-peer-2020`**. `noteHubArchived` appears 6× in soup's `cli/src/api/apiSession.ts`. There is no fork drift on any load-bearing line.
+
+That parity is the finding, not a formality. Had the hub ever written `archivedBy: 'hub'` to `028d0a86`, the store would have re-stamped it onto the session's next push, the CLI would have detected it and stood down, and reopen would have been refused — the session would have stopped, not carried on answering peers. **So the absent `archivedBy: 'hub'` is not evidence that an archive was erased. It is evidence that the hub never wrote one.** Follow-ups 3 and 4 read that absence as a symptom; it is the proof.
+
+### Sequence
+
+1. `archive_peer` → `POST /sessions/:id/archive`. The route calls **`engine.archiveSession(...)`** (soup `hub/src/web/routes/sessions.ts:790`) — *not* `markSessionArchivedFromHub()`. That function is only a fallback **inside** `archiveSession`, behind the short-circuit Follow-up 5 quotes.
+2. The hub fires the **KillSession** RPC. `cli/src/claude/registerKillSessionHandler.ts:58` stamps `archiveReason = 'User terminated'` and calls `void lifecycle.cleanupAndExit()` — **fire-and-forget**; it ACKs immediately with pid + start marker. Cursor wires this like every other flavor (`cli/src/cursor/runCursor.ts:90`).
+3. `cleanupAndExit` → `archiveAndClose()` writes `lifecycleState: 'archived'`, **`archivedBy: 'cli'`**, `archiveReason: 'User terminated'` (`runnerLifecycle.ts:61`) — then tries to exit. The ACP process does not actually die.
+4. StopSession reports `still_alive` / `unknown`; `canSoftStandDownUnconfirmedStop` passes (not thinking = Peer Done); `// Fall through: hub-author archive metadata below`.
+5. The tail reads `lifecycleState === 'archived'` — **the CLI's own marker from step 3, written moments earlier** — and skips hub-authoring. `archivedBy: 'hub'` is never written.
+6. The route returns `{ok: true}`. `archivePeer.postArchive()` requires `ok === true` and gets it. The tool is honest; the hub is what concluded its job was done.
+7. The surviving session's next metadata rebuild clears all three fields, unguarded, because every guard is narrowed to `'hub'` and this is a `'cli'` marker.
+8. Much later the process genuinely dies and writes `archivedBy: 'cli'` / `'User terminated'` again — the settled state in Follow-up 4.
+
+Steps 3 and 8 have the **same writer**, which sharpens Follow-up 4's attribution: the operator's archive did not merely leave a weaker trace than the termination did, it left **none**, because the hub declined to author one. And steps 3 and 5 are a **race** — CLI write against hub read. That is why this flaps rather than reproducing on demand.
+
+### Repro, for when a maintainer asks
+
+Not "archive a session that is turning." It is: **archive a session whose KillSession cleanup writes the `cli` marker but whose process does not then exit.** Stall the exit and it is close to deterministic. Follow-up 5's addendum is right that inspection after the fact proves nothing — the bad state cannot outlive the process that sustains it.
+
+### What I would file, and where
+
+`upstream/main` is **not exposed to this path**: runner-spawned `still_alive`/`unknown` throws `ArchiveCleanupError('unconfirmed')` where the branch falls through. The silent path is created by `de758a55b`. So this is review input on [#2020](https://github.com/tiann/hapi/issues/2020), whose own MVP text asks for *"hub-authored archive metadata when KillSession/StopSession cannot confirm death"* — **the short-circuit it falls through to is what prevents exactly that.** Framing it as "#2020's stated goal is defeated by one line" is also what keeps it clear of [#1705](https://github.com/tiann/hapi/issues/1705)'s `not_planned` outcome, which anything shaped as a generic "archive doesn't confirm death" report will inherit.
+
+Minimal fix: test `archivedBy === 'hub'` at that tail instead of `lifecycleState === 'archived'` — or always hub-author after a soft stand-down. **Not** adding the three fields to `pickExistingSessionMetadata`, which would break the deliberate `cli`-archive reopen path.
+
+### Not filing
+
+- **Bug B hardening** (read `acpManualTitle` at call time to match how `titleLocked` is read): agreed with triage, leave it. No out-of-process writer exists, so there is no user-visible path; a PR justified only by consistency with a sibling mechanism spends review for nothing. If `acpManualTitle` ever gains an external writer it becomes a real bug and gets filed then.
+- **The `else if (machineId && !runnerSpawned)` terminal lane** (StopSession best-effort, errors swallowed, no death confirm) is the one place `upstream/main` could show the same shape. Recorded as **unproven** — no instrumented repro, not asserted.
+
+Also checked and **not** bugs, so nobody re-finds them: `titleLocked` is likewise absent from `pickExistingSessionMetadata`, which is harmless because `sessionTitleLock.ts:10` re-derives it hub-side from `previous`; and `acpManualTitle` *is* in the preserve list, so a fresh process reads it correctly.
+
+**Nothing has been posted to `tiann/hapi`.** The disposition changed from what this thread originally produced and the post would be public, so it is held pending the operator's yes/no via triage.
+
+---
+
 ## Changelog
 
 - 2026-11-08 — Written by triage from the kitchen's swap-verification report; collision did not reproduce; #2269/#1672 confirmed shipped in the running driver; two residual footguns recorded.
@@ -270,3 +346,5 @@ So the issue must stand on the code chain in Follow-up 3 (`postArchive` requires
 - 2026-11-08 — Auditor annotates a colliding husk that is still turning (`lifecycleState` != archived) as flappable, so alternating runs read as a flapping session, not a flaky tool. Fixtures caught a real subshell bug while adding it — `resolve()` set a variable inside `$( )`, so the caveat never fired; it now returns lifecycle+title on two lines. Suite 20 assertions / 10 fixtures.
 - 2026-11-08 — Kitchen re-probed `028d0a86` ×3: settled `archived`/`archivedBy: cli`, so both prior readings were accurate at their own sample times — the object flapped, nobody mis-measured. **Attribution corrected:** all three archived husks read `archivedBy: cli` / `archiveReason: "User terminated"`, not `hub`, so the current archived state came from process termination, not from the operator's `archive_peer`. The hub archive applied and was erased (Bug A); the session retired because it died. Bug A filing strengthened, not changed.
 - 2026-11-08 — Triage addendum: the live repro self-destructed when `028d0a86`'s process exited, and always will — the bad state only persists while the session runs to overwrite it. Issue must stand on the code chain and state outright that it is not reproducible by inspection after the fact. Kitchen and triage reached the attribution independently and agree. Thread closed; auditor clean, exit 0.
+- 2026-11-08 — Discovery confirmed against `upstream/main` @ `ee1e6ae7c` and **corrected Bug A's mechanism** (Follow-up 5/6). The three hub-archive guards are byte-identical across soup `c5a182a12`, `upstream/main`, and `feat/archive-peer-2020` — no fork drift — so the absent `archivedBy: 'hub'` proves the hub never authored an archive, rather than showing one was erased. Real chain: fire-and-forget KillSession → CLI self-archives `archivedBy: 'cli'` → process fails to exit → soft stand-down falls through → tail sees `archived` and skips hub-authoring → `ok: true` on an archive that left no durable marker. Race, hence the flap. Fix is `archivedBy === 'hub'` at the tail, **not** extending `pickExistingSessionMetadata` (that would break reopen). Disposition: review input on #2020, not a new issue; `upstream/main` unexposed (it throws where the branch falls through). Bug B hardening dropped by agreement; the non-runner terminal lane recorded as unproven. Nothing posted to `tiann/hapi` — held for the operator's decision.
+- 2026-11-08 — Discovery's Follow-up 6 committed by the kitchen (append-only verified: 75 insertions, 0 deletions, heading order intact). Follow-up 4's attribution marked superseded in place: the missing `archivedBy: 'hub'` proves the hub never authored an archive, rather than showing one erased. Defect is the `lifecycleState === 'archived'` short-circuit at `syncEngine`'s archive tail; fix is `archivedBy === 'hub'`, **not** extending `pickExistingSessionMetadata` (that would break the deliberate `cli`-archive reopen path). Disposition: review input on #2020, nothing posted to `tiann/hapi` — **awaiting operator yes/no.**
