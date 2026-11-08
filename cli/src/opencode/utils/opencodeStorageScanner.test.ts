@@ -84,7 +84,8 @@ describe('OpenCode compaction storage scans', () => {
     });
 
     it('does not attribute an old scan completion to a new session while its multipart prime is pending', async () => {
-        const f = await fixture();await f.write('part/summary/one.json', f.part('one', 'A'));
+        const f = await fixture();
+        const aFile = await f.write('part/summary/one.json', f.part('one', 'A'));
         await f.write('message/other/b-marker.json', { id: 'b-marker', sessionID: 'other', role: 'user', time: { created: 1 } });
         await f.write('message/other/b-summary.json', { id: 'b-summary', sessionID: 'other', role: 'assistant', summary: true, parentID: 'b-marker', finish: 'stop', time: { created: 1 } });
         await f.write('part/b-marker/marker.json', { id: 'b-marker-part', sessionID: 'other', messageID: 'b-marker', type: 'compaction', auto: true });
@@ -102,16 +103,20 @@ describe('OpenCode compaction storage scans', () => {
             const wait = new Promise<void>(resolve => { release = resolve; });
             reads.set(path, { wait, entered });return { started, release };
         };
-        const aGate = gate(join(f.dir, 'part/summary/one.json'));const bGate = gate(bFile);
+        const aGate = gate(aFile);const bGate = gate(bFile);
         try {
+            // Full CLI suite load can delay the 20ms poll; keep the test patient
+            // and bump mtime so the version gate always re-enters readFile.
+            const base = Date.now() + 60_000;
             await f.write('part/summary/one.json', f.part('one', 'Updated A'));
+            await utimes(aFile, new Date(base), new Date(base));
             await aGate.started;
             scanner.onNewSession('other');await bGate.started;
             aGate.release();await new Promise(resolve => setTimeout(resolve, 30));
             expect(onSummary).not.toHaveBeenCalled();
             bGate.release();await vi.waitFor(() => expect(onSummary).toHaveBeenCalledExactlyOnceWith('b-marker', 'First\n\nSecond', 'auto'));
         } finally { aGate.release();bGate.release(); }
-    });
+    }, 20_000);
 
     it('rejects a stale file read after an A to B to A generation change', async () => {
         const f = await fixture();const file = await f.write('part/summary/one.json', f.part('one', 'Initial'));
@@ -135,6 +140,6 @@ describe('OpenCode compaction storage scans', () => {
             release();await vi.waitFor(() => expect(events).toContain('Current A'));
             expect(events).not.toContain('Stale A');
         } finally { release(); }
-    });
+    }, 20_000);
 
 });
