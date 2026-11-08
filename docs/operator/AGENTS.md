@@ -72,7 +72,7 @@ The operator often hears `AGENT_NOTIFY_SUMMARY.action` (TTS) and reads `summary`
 [upstream issue/pr discovery](/sessions/<full-session-id>)
 ```
 
-That is what rich composer serializes for `@` picks (`[title](/sessions/<id>)`). Do not use bare hashes, bare `/sessions/<id>`, or plain-name-only prose when a chip is possible.
+That is what rich composer serializes for `@` picks (`[title](/sessions/<id>)`). Do not use bare hashes, bare `/sessions/<id>`, or plain-name-only prose when a chip is possible. Live Meta/specialist UUIDs: [`config/meta-sessions.yaml`](../../config/meta-sessions.yaml) (tooling/meta, PR watcher, triage, discovery). The registry is hand-maintained — audit it with **`hapi-meta-sessions-audit`** (live title == `name:`, `superseded:` husk archived or titled `SUPERSEDED…`, `env:` agrees with `~/.hapi/meta-daily.env`; exit 1 on drift).
 
 **In `AGENT_NOTIFY_SUMMARY` `action`/`summary`:** chips do not render on TTS/FCM - use the **spoken display name** (same title string). Never a naked hash.
 
@@ -96,9 +96,17 @@ Canon also in `.cursor/rules/hapi-session.mdc` (alwaysApply).
 | Mechanism | What the recipient sees |
 |-----------|-------------------------|
 | MCP `ping_peer` inside a wrapped session | Attributed nametag via `POST /cli/sessions/:source/peer-messages` (`HAPI_SESSION_ID` / MCP client session id). Still open pings with `From:` for text-only agents. |
-| `hapi ping-peer` inside a wrapped session | Same. Script auto-stamps `From:` when `HAPI_SESSION_ID` is set (skip with `HAPI_PING_PEER_SKIP_FROM=1` if body already has it). |
+| `hapi ping-peer` inside a wrapped session | Same. Script auto-stamps `From:` when `HAPI_SESSION_ID` is set (skip with `HAPI_PING_PEER_SKIP_FROM=1` if body already has it). A body-supplied `From: /sessions/<id>` that does **not** match `HAPI_SESSION_ID` now warns (`HAPI_PING_PEER_STRICT_FROM=1` to refuse the send) — see § Void chips below. |
 | systemd timers (`hapi-meta-daily.timer`) | Estate helper POSTs `/cli/sessions/:source/peer-messages` for `HAPI_META_SESSION_ID` in `~/.hapi/meta-daily.env` — **operator automation only**; agents must not copy the mint pattern. |
 | CLI outside a session | Unattributed peer row only (no invented source id). |
+
+### Void chips — hand-written `From:` ids (2026-11-08)
+
+**The id in `From:` must be your *hub session* id, not your agent-runtime id.** Meta PR watcher hand-prepended its **Cursor agent id** (`CURSOR_SESSION_ID`) into MCP `ping_peer` bodies; its env `HAPI_SESSION_ID` was correct the whole time. The id resolved to nothing — `inspect_peer` errored, `search_peers` returned zero rows (and that search covers name/path/`agentSessionId`/id, so there was no row to find). Anyone replying to that chip would have sent into the void.
+
+- A hand-written `From:` **suppresses** the `hapi-ping-peer` auto-stamp (`^From:` short-circuit), so a wrong id rides every ping unchecked. The script now compares the claimed id against `HAPI_SESSION_ID` and warns; `HAPI_PING_PEER_STRICT_FROM=1` makes it a hard failure.
+- **MCP `ping_peer` bypasses the script entirely** — the guard does not cover that path, which is the one that actually failed here. For MCP, the fix is agent discipline: stamp `HAPI_SESSION_ID`, or omit `From:` and let the attributed nametag carry routing.
+- Cheapest self-check before trusting a remembered id: `inspect_peer <your-own-id>` should resolve to *you*.
 
 **Agents: do not describe nametags as "verified", "trusted provenance", or "capability-bound".** That was the rejected #1473 direction. Historical postmortems under `docs/plans/*1473*` are archaeology, not current product.
 
@@ -187,7 +195,7 @@ Default remains **fork-contributor discipline** for product work (PRs from `upst
 
 **What we self-permit:**
 
-- **Label management** on `tiann/hapi` issues and PRs - including applying `low-impact` for lane B promote **and** `dogfooded` after live dogfood (operator-directed or Discovery). Daily taxonomy owner for `low-impact`: HAPI session **Issue labelling (tiann/hapi)** (`f3c41205…`); see `docs/plans/2026-07-31-pr-merge-lanes.md` § Label ownership. Do **not** auto-slap `dogfooded` from the labelling sweep — only after real live use.
+- **Label management** on `tiann/hapi` issues and PRs - including applying `low-impact` for lane B promote **and** `dogfooded` after live dogfood (operator-directed or Discovery). Daily taxonomy owner for `low-impact`: HAPI session **Issue labelling (tiann/hapi)** (`22fc4ba7…`); see `docs/plans/2026-07-31-pr-merge-lanes.md` § Label ownership. Do **not** auto-slap `dogfooded` from the labelling sweep — only after real live use.
 - **Lane B self-merge** when policy says eligible (operator/Meta; agents prepare-only until merge automation is explicitly enabled). Includes our PRs **and** others' auto-B / `low-impact` / `dogfooded` (post-window) PRs. **Merge quietly** on `low-impact` / auto-B - no PR comments explaining estate lanes. For `dogfooded`, the stamp comment + #2083 thread are the public paper trail; still no estate jargon on merge.
 - **Pushing to PR branches via `maintainerCanModify`** when (a) the PR has `maintainerCanModify: true`, and (b) either we coordinated with the author first **or** the operator explicitly directed an amend (e.g. dogfood follow-up onto a community tip). Never force-push over the author's commits — fast-forward / cherry-pick on top. Stays attributed: author's commits keep their authorship; our commits add `Co-authored-by:` when co-writing
 
@@ -215,8 +223,8 @@ If @tiann narrows or expands scope, revise this section.
 
 | Session | Role | Agents ping? |
 |---------|------|--------------|
-| **Tooling meta-bot** (`HAPI_META_TOOLING_SESSION_ID`; remat owner in `config/remat-escalate.yaml`, currently prefix `05d9f0f2`) | **Local kitchen:** soup remat, manifest hygiene, remat-hold escalation, wave-clear **execution**, fork tooling | **Yes** — for any local soup/kitchen/remat/process-feedback |
-| **PR watcher** (`HAPI_META_SESSION_ID`; `meta - PR watcher`, currently prefix `9f5f7e1d`) | **Upstream/outward:** `tiann/hapi` PR health, chips, CI/threads, merge timeliness, hourly classify queue | **No** — agents must **not** consult or ping PR watcher |
+| **Tooling meta-bot** (`HAPI_META_TOOLING_SESSION_ID`; remat owner in `config/remat-escalate.yaml`, currently prefix `cbd1073e`) | **Local kitchen:** soup remat, manifest hygiene, remat-hold escalation, wave-clear **execution**, fork tooling | **Yes** — for any local soup/kitchen/remat/process-feedback |
+| **PR watcher** (`HAPI_META_SESSION_ID`; `meta - PR watcher`, currently prefix `1e32daba`) | **Upstream/outward:** `tiann/hapi` PR health, chips, CI/threads, merge timeliness, hourly classify queue | **No** — agents must **not** consult or ping PR watcher |
 
 **One line:** tooling meta-bot owns all **local soup orchestration**; PR watcher is **upstream-facing** and must **not** be described as kitchen controller.
 

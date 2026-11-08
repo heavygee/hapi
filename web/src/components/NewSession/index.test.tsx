@@ -1544,6 +1544,113 @@ describe('NewSession launch preferences', () => {
         expect(screen.getByTestId('create')).not.toBeDisabled()
     })
 
+    it.each([
+        { agent: 'codex', permissionMode: 'read-only', cached: true },
+        { agent: 'codex', permissionMode: 'read-only', cached: false },
+        { agent: 'claude', permissionMode: 'plan', cached: true },
+        { agent: 'cursor', permissionMode: 'plan', cached: true }
+    ] as const)(
+        'preserves hub $agent/$permissionMode after cancel and remount (cached: $cached)',
+        async ({ agent, permissionMode, cached }) => {
+            localStorage.clear()
+            const settings = {
+                sessionSummaryContract: false,
+                sessionSummaryInChat: false,
+                peerSpawnDefaults: { agent, permissionMode, models: {} }
+            }
+            const sharedClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+            if (cached) sharedClient.setQueryData(queryKeys.hubSettings, settings)
+            const onCancel = vi.fn()
+            mocks.spawnSession.mockResolvedValue({ type: 'success', sessionId: 'session-1' })
+
+            for (const reopen of [false, true]) {
+                let resolveSettings!: (value: typeof settings) => void
+                const deferred = new Promise<typeof settings>((resolve) => {
+                    resolveSettings = resolve
+                })
+                const hubApi = {
+                    getHubSettings: vi.fn(() => cached ? Promise.resolve(settings) : deferred)
+                } as unknown as ApiClient
+                const client = cached
+                    ? sharedClient
+                    : new QueryClient({ defaultOptions: { queries: { retry: false } } })
+                const view = render(
+                    <QueryClientProvider client={client}>
+                        <NewSession
+                            api={hubApi}
+                            machines={[machine]}
+                            initialMachineId="machine-1"
+                            initialDirectory="C:\\repo"
+                            onSuccess={mocks.onSuccess}
+                            onCancel={onCancel}
+                        />
+                    </QueryClientProvider>
+                )
+                if (!cached) {
+                    expect(screen.getByTestId('create')).toBeDisabled()
+                    await act(async () => {
+                        resolveSettings(settings)
+                        await deferred
+                    })
+                }
+                await waitFor(() => {
+                    expect(screen.getByDisplayValue(agent)).toBeChecked()
+                    expect(screen.getByTestId('permission-mode')).toHaveTextContent(permissionMode)
+                    expect(screen.getByTestId('create')).toBeEnabled()
+                })
+                if (!reopen) {
+                    fireEvent.click(screen.getByTestId('cancel'))
+                    expect(onCancel).toHaveBeenCalledOnce()
+                    expect(mocks.spawnSession).not.toHaveBeenCalled()
+                    expect(loadPreferredLaunchSettings('machine-1', agent)).toBeNull()
+                    view.unmount()
+                } else {
+                    fireEvent.click(screen.getByTestId('create'))
+                    await waitFor(() => expect(mocks.onSuccess).toHaveBeenCalledWith('session-1'))
+                    expect(mocks.spawnSession).toHaveBeenCalledWith(expect.objectContaining({
+                        agent,
+                        permissionMode
+                    }))
+                }
+            }
+            expect(localStorage.getItem('hapi:newSession:yolo')).toBeNull()
+        }
+    )
+
+    it('starts Antigravity on request-review and spawns it with the chosen mode', async () => {
+        savePreferredAgent('agy')
+        mocks.spawnSession.mockResolvedValue({ type: 'success', sessionId: 'agy-session' })
+        renderWithQuery(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        await waitFor(() => expect(screen.getByTestId('permission-mode')).toHaveTextContent('request-review'))
+
+        fireEvent.click(screen.getByTestId('permission-mode-plan'))
+        fireEvent.click(screen.getByTestId('create'))
+
+        await waitFor(() => expect(mocks.onSuccess).toHaveBeenCalledWith('agy-session'))
+        expect(mocks.spawnSession).toHaveBeenCalledWith(expect.objectContaining({
+            agent: 'agy',
+            permissionMode: 'plan',
+            yolo: undefined
+        }))
+        expect(loadPreferredLaunchSettings('machine-1', 'agy')).toMatchObject({ permissionMode: 'plan' })
+    })
+
+    it.each([
+        ['true', 'always-proceed'],
+        ['false', 'request-review']
+    ] as const)('carries a stored YOLO toggle (%s) into the Antigravity mode %s', async (stored, expected) => {
+        savePreferredAgent('agy')
+        localStorage.setItem('hapi:newSession:yolo', stored)
+        mocks.spawnSession.mockResolvedValue({ type: 'success', sessionId: 'agy-session' })
+        renderWithQuery(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        await waitFor(() => expect(screen.getByTestId('permission-mode')).toHaveTextContent(expected))
+        fireEvent.click(screen.getByTestId('create'))
+        await waitFor(() => expect(mocks.spawnSession).toHaveBeenCalledWith(expect.objectContaining({
+            agent: 'agy',
+            permissionMode: expected
+        })))
+    })
+
     it('keeps Create disabled while getHubSettings is pending', async () => {
         localStorage.clear()
         const deferred = new Promise(() => {})

@@ -19,7 +19,7 @@ export const CREATABLE_AGENT_FLAVORS: readonly AgentFlavor[] = AGENT_FLAVORS.fil
     (flavor) => flavor !== 'gemini'
 )
 
-export const AGY_PERMISSION_MODES = ['request-review', 'always-proceed'] as const
+export const AGY_PERMISSION_MODES = ['request-review', 'acceptEdits', 'plan', 'always-proceed'] as const
 export type AgyPermissionMode = typeof AGY_PERMISSION_MODES[number]
 
 export const CLAUDE_PERMISSION_MODES = ['default', 'acceptEdits', 'auto', 'bypassPermissions', 'plan'] as const
@@ -193,6 +193,7 @@ type SteeringSessionMetadata = {
     flavor?: string | null
     cursorSessionId?: string | null
     cursorSessionProtocol?: 'acp' | 'stream-json' | null
+    agyProtocol?: 'acp' | null
 }
 
 type SteeringSessionState = {
@@ -216,17 +217,26 @@ type SteeringCapability = {
  * - Cursor ACP: concurrent `session/prompt` soft-send (no cancel). Legacy
  *   stream-json Cursor sessions are NOT steerable — gate with
  *   {@link isSteeringSupportedForSession}.
+ * - Claude: stream-json stdin write during the turn (TUI Ctrl+X Ctrl+S);
+ *   Claude folds it in at the next tool boundary. Remote mode only.
+ * - Antigravity: concurrent ACP `session/prompt` (`agy acp`); agy answers the
+ *   interrupted request at once and folds the steer in after any running
+ *   tool call finishes. Only sessions marked `agyProtocol: 'acp'` steer.
  *
  * Claude (#2259) and OpenCode (#1981) join Codex / Cursor ACP / Pi.
  * Non-listed flavors: UI hides Steer.
  */
-export const STEERING_SUPPORTED_FLAVORS = ['claude', 'codex', 'cursor', 'opencode', 'pi'] as const
+export const STEERING_SUPPORTED_FLAVORS = ['agy', 'claude', 'codex', 'cursor', 'opencode', 'pi'] as const
 
 type SteeringFlavor = typeof STEERING_SUPPORTED_FLAVORS[number]
 
 // Keep protocol restrictions and the runtime's active-turn signal together so
 // peer senders and the waiting queue do not need their own flavor branches.
 const STEERING_CAPABILITIES = {
+    agy: {
+        activeTurnState: 'steeringActive',
+        supportsSession: (metadata: SteeringSessionMetadata) => metadata.agyProtocol === 'acp'
+    },
     claude: { activeTurnState: 'steeringActive' },
     codex: { activeTurnState: 'steeringActive' },
     cursor: {

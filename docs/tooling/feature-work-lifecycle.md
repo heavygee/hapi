@@ -80,7 +80,7 @@ Intake step numbers (handoff template, playback, gates): [`new-feature-intake.md
 
 ### Bare-spawn backstop (transport-only peers)
 
-Spawn-per-send, bare machine spawn, and other transports that deliver a remit **without** a filled §0 handoff do **not** get a separate workflow. The arriving peer runs the same intake bar: [**self-name** + **GitHub precedents**](./new-feature-intake.md#0-backstop--unnamed--bare-spawn-peers-fail-closed) before code. Orchestrator handoffs with steps marked **DONE** skip redundant work. Dedicated discovery stays with **[upstream issue/pr discovery](/sessions/6ce7f124-6240-4479-8dad-f2e27eb880a1)**; this rule is the fail-closed backstop for peers that arrive without that parent.
+Spawn-per-send, bare machine spawn, and other transports that deliver a remit **without** a filled §0 handoff do **not** get a separate workflow. The arriving peer runs the same intake bar: [**self-name** + **GitHub precedents**](./new-feature-intake.md#0-backstop--unnamed--bare-spawn-peers-fail-closed) before code. Orchestrator handoffs with steps marked **DONE** skip redundant work. Dedicated discovery stays with **[upstream issue/pr discovery](/sessions/04c8e16c-4cf3-40f2-a76b-944bfc7e7da8)**; this rule is the fail-closed backstop for peers that arrive without that parent.
 
 ---
 

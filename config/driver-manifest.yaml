@@ -944,9 +944,10 @@ layers:
   # Tip: fa9a3dbaa
   - branch: fix/cursor-unexpected-stop-blocked-footer
 
-  # DROPPED 2026-10-12: tiann/hapi#1554 / PR #1598 FTS5 session content search (dogfood).
+  # DROPPED 2026-10-12: tiann/hapi issue 1554 / PR 1598 FTS5 session content search (dogfood).
   # Tip ba7b3f96d absorbed into soup (418179d4b + later tips); wt cleaned for /work space relief.
-  # Upstream #1598 still OPEN — feature lives on soup tip ancestry until merge/remat.
+  # Upstream PR 1598 was still OPEN then — feature lives on soup tip ancestry until merge/remat.
+  # Bare issue/PR numbers on purpose (Gate A relatedRefs hitchhike; see cba15b540 / 47eb31380).
   # Was: - branch: driver/session-content-search
 
   # tiann/hapi#1710 / PR #2010 — search_peers review fixes (summary.text match +
@@ -1094,8 +1095,8 @@ layers:
 
   # heavygee/hapi#235 / PR #238 — Boards view (cards/chips/relative-time,
   # Projects v2 /views/<n> filter capture). Renamed To-Do → Boards.
-  # Re-tip 2026-10-27: driver/235-todo-board-view @ cab6dda9b thin onto soup
-  # b85837bb0 (hapi#302: Refresh/New card on filter row, outlined square-plus).
+  # Re-tip 2026-10-31: driver/235-todo-board-view @ 736cf8ae8 thin onto soup
+  # 2ae0c0c10 (test-only: PROJECT_QUERY unfiltered path lock-in).
   - branch: driver/235-todo-board-view
 
   # heavygee/hapi#238 — GithubPrExternalRefSchema: status enum -> passthrough,
@@ -1388,9 +1389,11 @@ layers:
   # Tip-unique: runner-version-applied-banner
   - branch: driver/applied-changelog
 
-  # DROPPED 2026-11-02: tiann/hapi#1598 merged as 82c5c00a3, carrying #1554
-  # (content search), #2081 (search scope toggle) and the forward-reading work.
-  # Both layers are now in upstream/main; the base supplies them.
+  # DROPPED 2026-11-02: tiann/hapi PR 1598 merged as 82c5c00a3, carrying the
+  # content search (issue 1554), the search scope toggle (issue 2081) and the
+  # forward-reading work. Both layers are now in upstream/main; the base
+  # supplies them. Issue numbers written bare on purpose — a literal hash ref
+  # here is read as an active layer by Gate A relatedRefs (see cba15b540).
   # Was: - branch: driver/2081-search-scope-toggle
   # Was: - branch: driver/2081-forward-reading
 
@@ -1414,9 +1417,12 @@ layers:
   # Hub-only → remat + publish + seal; tip-unique: preferFleetLatestPointer
   - branch: driver/fix-304-offer-notes-thin
 
-  # tiann/hapi#2267 — silence Cursor finished-shell "Briefly inform…" after
-  # AGENT_NOTIFY_SUMMARY status:done (no second user-visible reply).
-  # Thin tip: fix/2267-post-close-summary-silence @ f14ace9f4 (upstream PR).
-  # Soup union on driver HEAD b72e94e27: driver/2267-post-close-silence @ 302fadd75
-  # CLI-only → remat + hapi-restart-hub; tip-unique: postCloseHarnessSilence
-  - branch: driver/2267-post-close-silence
+  # heavygee/hapi#308 / PR #309 — Claude Code Tool Search alwaysLoad for proactive
+  # HAPI MCP tools (change_title + display_image/video/media). Fork-only.
+  # Thin tip on soup HEAD c5a182a12: driver/mcp-always-load-meta @ d4d16dd65
+  # cli-only → remat --build-web --verify + hapi-restart-hub (MCP server lives in CLI).
+  # Tip-unique: anthropic/alwaysLoad on change_title/display_*
+  - branch: driver/mcp-always-load-meta
+
+  # DROPPED 2026-11-04: driver/2267-post-close-silence MERGED as tiann/hapi#2268
+  # (was #2267 Cursor post-done harness silence; thin fix/2267-post-close-summary-silence)

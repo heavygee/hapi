@@ -76,7 +76,7 @@ When a peer arrives **without** a filled §0 handoff — bare machine spawn, **s
    - HAPI consumer re-vendor → note package issues; do **not** lasting-edit vendored `operator-dock.*`
    Note matches in your next operator/orchestrator update; reference priors if filing new ([§3](#3--playback-mandatory)). **Do not implement** until precedents are searched and noted — even when the parent did not run discovery.
 
-Orchestrator-led spawns with a completed §0 block may skip steps marked **DONE** in the handoff. **[Upstream issue/pr discovery](/sessions/6ce7f124-6240-4479-8dad-f2e27eb880a1)** remains the specialist for dedicated discovery passes; this backstop covers peers that arrive without that parent.
+Orchestrator-led spawns with a completed §0 block may skip steps marked **DONE** in the handoff. **[Upstream issue/pr discovery](/sessions/04c8e16c-4cf3-40f2-a76b-944bfc7e7da8)** remains the specialist for dedicated discovery passes; this backstop covers peers that arrive without that parent.
 
 ### 0-closure — salvage audit (reverse handoff)
 

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
+import { PassThrough, Writable } from 'node:stream';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { logger } from '@/ui/logger';
 import { buildAgyHeadlessArgs, AgyHeadlessDriver } from './agyHeadlessDriver';
@@ -7,12 +8,20 @@ import { AgySession } from '../session';
 import { MessageQueue2 } from '@/utils/MessageQueue2';
 import type { AgyMode, PermissionMode } from '../types';
 
+// Record transcript entries on the fake client instead of building wire messages.
+vi.mock('./agyTranscript', () => ({
+    sendAgyTranscriptEntry: (client: { agyTranscript: (...args: unknown[]) => void }, ...args: unknown[]) =>
+        client.agyTranscript(...args),
+}));
+
 // A fake agy binary: emits a fixed NDJSON stream for one turn, then exits 0.
 function fakeAgyProcess(lines: string[], exitCode = 0): ChildProcessWithoutNullStreams {
     const child = spawn(process.execPath, ['-e', `
         const lines = ${JSON.stringify(lines)};
-        for (const line of lines) process.stdout.write(line + '\\n');
-        process.exit(${exitCode});
+        require('node:readline').createInterface({ input: process.stdin }).once('line', () => {
+            for (const line of lines) process.stdout.write(line + '\\n');
+            process.exit(${exitCode});
+        });
     `], { stdio: ['pipe', 'pipe', 'pipe'] }) as ChildProcessWithoutNullStreams;
     return child;
 }
@@ -26,18 +35,30 @@ function scriptableFakeChild(chunks: string[], exitCode = 0): ChildProcessWithou
     run: () => void;
     feedStdout: (chunk: string) => void;
 } {
-    const stdout = new EventEmitter() as unknown as ChildProcessWithoutNullStreams['stdout'];
-    const stderr = new EventEmitter() as unknown as ChildProcessWithoutNullStreams['stderr'];
-    for (const stream of [stdout, stderr]) {
-        (stream as unknown as { setEncoding: () => void }).setEncoding = () => {};
-    }
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
     let killed = false;
+    let closed = false;
     const child = new EventEmitter() as unknown as ChildProcessWithoutNullStreams;
+    const close = (code: number | null, signal: string | null = null) => {
+        if (!closed) child.emit('close', code, signal);
+    };
+    const stdin = new Writable({
+        write(_chunk, _encoding, callback) { callback(); },
+        final(callback) { callback(); queueMicrotask(() => close(0)); },
+    });
     Object.assign(child, {
-        stdout,
-        stderr,
+        stdin, stdout, stderr, exitCode: null, signalCode: null,
         get killed() { return killed; },
-        kill: () => { killed = true; },
+        kill: (signal = 'SIGTERM') => {
+            killed = true;
+            queueMicrotask(() => close(null, signal));
+            return true;
+        },
+    });
+    child.on('close', (code, signal) => {
+        closed = true;
+        Object.assign(child, { exitCode: code, signalCode: signal });
     });
     let chunkIndex = 0;
     const run = () => {
@@ -52,10 +73,16 @@ function scriptableFakeChild(chunks: string[], exitCode = 0): ChildProcessWithou
     return Object.assign(child as ChildProcessWithoutNullStreams, { run, feedStdout });
 }
 
+function cancelQueued(client: { onCancelQueuedMessage: ReturnType<typeof vi.fn> }, localId: string): unknown {
+    const handler = client.onCancelQueuedMessage.mock.calls.at(-1)?.[0] as ((id: string) => unknown) | undefined;
+    return handler?.(localId);
+}
+
 function createSession(clientOverrides: Record<string, unknown> = {}) {
     const sent: unknown[] = [];
     const client = {
-        sendAgySessionMessage: (...args: unknown[]) => { sent.push(args); },
+        agyTranscript: (...args: unknown[]) => { sent.push(args); },
+        onCancelQueuedMessage: vi.fn(),
         emitMessagesConsumed: vi.fn(),
         emitSessionReady: vi.fn(),
         sendSessionEvent: vi.fn(),
@@ -91,13 +118,12 @@ const FULL_TURN = [
 ];
 
 describe('buildAgyHeadlessArgs', () => {
-    it('builds the per-turn print-mode args', () => {
+    it('builds persistent stream args without placing the prompt on the command line', () => {
         const args = buildAgyHeadlessArgs({
-            prompt: 'hello',
             permissionMode: 'request-review',
         });
         expect(args).toEqual([
-            '-p', 'hello',
+            '--input-format', 'stream-json',
             '--output-format', 'stream-json',
             '--print-timeout', '30m',
         ]);
@@ -105,9 +131,8 @@ describe('buildAgyHeadlessArgs', () => {
 
     it('adds resume/model/mode/effort/skip-permissions flags', () => {
         const args = buildAgyHeadlessArgs({
-            prompt: 'hi',
             conversationId: 'conv-1',
-            model: 'gemini-3.5-flash-medium',
+            model: 'gemini-3.5-flash',
             permissionMode: 'always-proceed',
             mode: 'plan',
             effort: 'high',
@@ -115,7 +140,7 @@ describe('buildAgyHeadlessArgs', () => {
         expect(args).toContain('--conversation');
         expect(args).toContain('conv-1');
         expect(args).toContain('--model');
-        expect(args).toContain('gemini-3.5-flash-medium');
+        expect(args).toContain('gemini-3.5-flash');
         expect(args).toContain('--mode');
         expect(args).toContain('plan');
         expect(args).toContain('--effort');
@@ -124,12 +149,49 @@ describe('buildAgyHeadlessArgs', () => {
     });
 
     it('omits --dangerously-skip-permissions for request-review', () => {
-        const args = buildAgyHeadlessArgs({ prompt: 'hi', permissionMode: 'request-review' });
+        const args = buildAgyHeadlessArgs({ permissionMode: 'request-review' });
         expect(args).not.toContain('--dangerously-skip-permissions');
+    });
+
+    it('rejects a conflicting unnormalized variant instead of spawning an invalid selection', () => {
+        expect(() => buildAgyHeadlessArgs({
+            permissionMode: 'request-review', model: 'gemini-4-argon-medium', effort: 'high',
+        })).toThrow('conflicts with effort high');
+    });
+
+    it('avoids redundant effort flags for an exact variant', () => {
+        const args = buildAgyHeadlessArgs({
+            permissionMode: 'request-review', model: 'gemini-4-argon-medium', effort: 'medium',
+        });
+        expect(args).toContain('gemini-4-argon-medium');
+        expect(args).not.toContain('--effort');
+    });
+
+    it.each(['xhigh', 'max'] as const)('passes native %s effort', (effort) => {
+        const args = buildAgyHeadlessArgs({
+            permissionMode: 'request-review', model: 'gemini-4-argon', effort,
+        });
+        expect(args[args.indexOf('--effort') + 1]).toBe(effort);
     });
 });
 
 describe('AgyHeadlessDriver', () => {
+    it('restores a conflicting legacy selection without spawning or retrying', async () => {
+        const { session, queue, client } = createSession();
+        const spawnAgy = vi.fn();
+        const driver = new AgyHeadlessDriver({ session, spawnAgy });
+        queue.push('hello', { permissionMode: 'request-review', model: 'gemini-4-argon-medium', effort: 'high' }, 'local-1');
+        queue.close();
+        await driver.launch();
+        session.stopKeepAlive();
+        expect(spawnAgy).not.toHaveBeenCalled();
+        expect(client.emitMessagesConsumed).toHaveBeenCalledWith(['local-1']);
+        expect(client.sendSessionEvent).toHaveBeenCalledWith({ type: 'abort-restore', text: 'hello' });
+        expect(client.sendSessionEvent).toHaveBeenCalledWith({
+            type: 'error', message: expect.stringContaining('conflicts with effort high'),
+        });
+    });
+
     it('maps a full NDJSON turn onto the transcript-entry channel and adopts the conversation id', async () => {
         const { session, queue, client, sent } = createSession();
         const driver = new AgyHeadlessDriver({
@@ -260,7 +322,7 @@ describe('AgyHeadlessDriver', () => {
         await new Promise((r) => setTimeout(r, 20));
         child.run();
         await new Promise((r) => setTimeout(r, 20));
-        child.run(); // fourth run: no chunks left → emits close (the turn boundary)
+        child.run(); // fourth run: no chunks left → closes the process after its result
         await new Promise((r) => setTimeout(r, 200));
         queue.close();
         session.stopKeepAlive();
@@ -296,6 +358,33 @@ describe('AgyHeadlessDriver', () => {
         expect(spawnedArgs.length).toBe(1);
         // The turn must NOT gain --dangerously-skip-permissions from the later
         // mode flip; the queued snapshot (request-review) governs this spawn.
+        expect(spawnedArgs[0]).not.toContain('--dangerously-skip-permissions');
+    });
+
+    it.each([
+        ['acceptEdits', 'accept-edits'],
+        ['plan', 'plan'],
+    ] as const)('starts agy with --mode for the %s permission mode', async (permissionMode, agyMode) => {
+        const { session, queue } = createSession();
+        const spawnedArgs: string[][] = [];
+        const driver = new AgyHeadlessDriver({
+            session,
+            spawnAgy: (args) => {
+                spawnedArgs.push(args);
+                return fakeAgyProcess(FULL_TURN);
+            },
+        });
+
+        queue.push('hello', { permissionMode }, 'local-1');
+        const launchPromise = driver.launch();
+        await new Promise((r) => setTimeout(r, 500));
+        queue.close();
+        session.stopKeepAlive();
+        await launchPromise;
+
+        expect(spawnedArgs.length).toBe(1);
+        const at = spawnedArgs[0]!.indexOf('--mode');
+        expect(spawnedArgs[0]![at + 1]).toBe(agyMode);
         expect(spawnedArgs[0]).not.toContain('--dangerously-skip-permissions');
     });
 
@@ -341,6 +430,76 @@ describe('AgyHeadlessDriver', () => {
         expect(client.emitMessagesConsumed).toHaveBeenCalledWith(['local-1']);
         expect(client.sendSessionEvent).toHaveBeenCalledWith(
             expect.objectContaining({ type: 'error', message: expect.stringContaining('agy turn failed') })
+        );
+    });
+
+    it('reports the failure reason instead of echoing the answer', async () => {
+        const { session, queue, client } = createSession();
+        // A failed envelope still carries the answer in `response` (agy fills it
+        // from the completed buffer). Surfacing that as the failure text repeats
+        // the whole answer in the chat; the reason lives in `error`.
+        const stream = [
+            '{"event":"init","conversation_id":"c-e","init":{}}',
+            '{"event":"step_update","step_update":{"conversation_id":"c-e","step_index":2,"state":"ACTIVE","step_type":"agent_response","text_delta":"the answer"}}',
+            '{"event":"step_update","step_update":{"conversation_id":"c-e","step_index":2,"state":"DONE","step_type":"agent_response","text_delta":""}}',
+            '{"event":"result","result":{"conversation_id":"c-e","status":"ERROR","response":"the answer","error":"quota exceeded"}}',
+        ];
+        const driver = new AgyHeadlessDriver({ session, spawnAgy: () => fakeAgyProcess(stream) });
+
+        queue.push('hello', { permissionMode: 'request-review' }, 'local-1');
+        const launchPromise = driver.launch();
+        await new Promise((r) => setTimeout(r, 500));
+        queue.close();
+        session.stopKeepAlive();
+        await launchPromise;
+
+        expect(client.sendSessionEvent).toHaveBeenCalledWith(
+            expect.objectContaining({ type: 'error', message: 'quota exceeded' })
+        );
+        const echoed = client.sendSessionEvent.mock.calls
+            .filter(([e]) => e.type === 'error' && typeof e.message === 'string' && e.message.includes('the answer'));
+        expect(echoed).toHaveLength(0);
+    });
+
+    it('falls back to the status when a failed envelope carries no reason', async () => {
+        const { session, queue, client } = createSession();
+        const stream = [
+            '{"event":"init","conversation_id":"c-n","init":{}}',
+            '{"event":"step_update","step_update":{"conversation_id":"c-n","step_index":2,"state":"ACTIVE","step_type":"agent_response","text_delta":"the answer"}}',
+            '{"event":"step_update","step_update":{"conversation_id":"c-n","step_index":2,"state":"DONE","step_type":"agent_response","text_delta":""}}',
+            '{"event":"result","result":{"conversation_id":"c-n","status":"ERROR","response":"the answer"}}',
+        ];
+        const driver = new AgyHeadlessDriver({ session, spawnAgy: () => fakeAgyProcess(stream) });
+
+        queue.push('hello', { permissionMode: 'request-review' }, 'local-1');
+        const launchPromise = driver.launch();
+        await new Promise((r) => setTimeout(r, 500));
+        queue.close();
+        session.stopKeepAlive();
+        await launchPromise;
+
+        expect(client.sendSessionEvent).toHaveBeenCalledWith(
+            expect.objectContaining({ type: 'error', message: 'agy turn failed: ERROR' })
+        );
+    });
+
+    it('surfaces a timeout reason from a failed envelope', async () => {
+        const { session, queue, client } = createSession();
+        const stream = [
+            '{"event":"init","conversation_id":"c-t","init":{}}',
+            '{"event":"result","result":{"conversation_id":"c-t","status":"ERROR","response":"","error":"timeout waiting for response"}}',
+        ];
+        const driver = new AgyHeadlessDriver({ session, spawnAgy: () => fakeAgyProcess(stream) });
+
+        queue.push('hello', { permissionMode: 'request-review' }, 'local-1');
+        const launchPromise = driver.launch();
+        await new Promise((r) => setTimeout(r, 500));
+        queue.close();
+        session.stopKeepAlive();
+        await launchPromise;
+
+        expect(client.sendSessionEvent).toHaveBeenCalledWith(
+            expect.objectContaining({ type: 'error', message: 'timeout waiting for response' })
         );
     });
 
@@ -615,14 +774,19 @@ describe('AgyHeadlessDriver', () => {
         expect(plannerEntries.map((e) => e!.content)).toEqual(['Let me check', 'Done: listed']);
     });
 
-    it('carries the queued model (display label) on emitted planner entries', async () => {
+    it.each([
+        { model: 'gemini-3.5-flash-medium', effort: undefined, label: 'Gemini 3.5 Flash (Medium)' },
+        { model: 'gemini-3.5-flash', effort: 'high', label: 'Gemini 3.5 Flash (High)' },
+        { model: 'gemini-4-argon', effort: 'high', label: 'gemini-4-argon-high' },
+        { model: 'custom-high', effort: 'medium', label: 'custom-high' },
+    ])('carries the queued model (display label) on emitted planner entries: $model / $effort', async ({ model, effort, label }) => {
         const { session, queue, sent } = createSession();
         const driver = new AgyHeadlessDriver({
             session,
             spawnAgy: () => fakeAgyProcess(FULL_TURN),
         });
 
-        queue.push('hello', { permissionMode: 'request-review', model: 'gemini-3.5-flash-medium' }, 'local-1');
+        queue.push('hello', { permissionMode: 'request-review', model, effort }, 'local-1');
         const launchPromise = driver.launch();
         await new Promise((r) => setTimeout(r, 500));
         queue.close();
@@ -635,7 +799,7 @@ describe('AgyHeadlessDriver', () => {
         expect(plannerEntries.length).toBeGreaterThan(0);
         // Display label, not the raw wire id.
         for (const entry of plannerEntries) {
-            expect(entry!.model).toBe('Gemini 3.5 Flash (Medium)');
+            expect(entry!.model).toBe(label);
         }
     });
 
@@ -698,7 +862,7 @@ describe('AgyHeadlessDriver', () => {
         await new Promise((r) => setTimeout(r, 30));
         child.run(); // one chunk
         await new Promise((r) => setTimeout(r, 20));
-        child.run(); // no chunks left → close (the turn boundary)
+        child.run(); // no chunks left → close after the result
         await new Promise((r) => setTimeout(r, 500));
         queue.close();
         session.stopKeepAlive();
@@ -1001,7 +1165,7 @@ describe('AgyHeadlessDriver', () => {
         // retry backoff: the queue has nothing (batch is outside it), but the
         // driver-owned retry state must remove it so the retry never spawns.
         const removed = session.queue.cancelByLocalId('local-1');
-        const retryRemoved = session.cancelRetryDelivery?.( 'local-1') ?? false;
+        const retryRemoved = cancelQueued(client, 'local-1');
         await new Promise((r) => setTimeout(r, 2000));
         queue.close();
         session.stopKeepAlive();
@@ -1054,7 +1218,7 @@ describe('AgyHeadlessDriver', () => {
         await new Promise((r) => setTimeout(r, 400));
         // Cancel the only retry item: the session must stay alive (not break) and
         // accept a later prompt.
-        session.cancelRetryDelivery?.('local-1');
+        cancelQueued(client, 'local-1');
         await new Promise((r) => setTimeout(r, 2000));
         // A newer message queued after the cancel must still be processed.
         queue.push('second', { permissionMode: 'request-review' }, 'local-2');
@@ -1373,9 +1537,9 @@ describe('AgyHeadlessDriver', () => {
         session.stopKeepAlive();
         await launchPromise;
 
-        // The prompt must never be written to logs — only <redacted> markers.
+        // The prompt travels over stdin and must never be written to debug logs.
         const allLogs = debugSpy.mock.calls.map((c) => c.join(' ')).join('\n');
-        expect(allLogs).toContain('<redacted>');
+        expect(allLogs).toContain('--input-format stream-json');
         expect(allLogs).not.toContain('super-secret-prompt-text');
         debugSpy.mockRestore();
     });

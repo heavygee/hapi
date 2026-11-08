@@ -888,7 +888,7 @@ check "pet setup banner uses normalized oauth export" \
 check "pet leftover retire chmod 600 on standalone path" \
     "python3 -c 'from pathlib import Path; t=Path(\"$ROOT/scripts/install-hapi-pet.sh\").read_text(); a=t.find(\"could not retire leftover legacy\"); b=t.find(\"Migrated Claude OAuth token\"); raise SystemExit(0 if 0<=a and \"chmod 600\" in t[a:b] else 1)'"
 check "remat escalate ping_cmd matches rotated owner" \
-    "python3 -c 'from pathlib import Path; t=Path(\"$ROOT/config/remat-escalate.yaml\").read_text(); raise SystemExit(0 if \"owner_session_prefix: \\\"028d0a86\\\"\" in t and \"hapi-ping-peer 028d0a86\" in t and \"hapi-ping-peer 05d9f0f2\" not in t else 1)'"
+    "python3 -c 'from pathlib import Path; t=Path(\"$ROOT/config/remat-escalate.yaml\").read_text(); raise SystemExit(0 if \"owner_session_prefix: \\\"cbd1073e\\\"\" in t and \"hapi-ping-peer cbd1073e\" in t and \"hapi-ping-peer 028d0a86\" not in t else 1)'"
 check "meta-daily advances backoff only after successful ping" \
     "grep -q 'if _do_ping' \"$ROOT/scripts/tooling/hapi-meta-daily.sh\" && grep -q 'return 1' \"$ROOT/scripts/tooling/hapi-meta-daily.sh\""
 check "meta-daily preserves fingerprint when thinking skips due ping" \

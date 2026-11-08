@@ -1,4 +1,5 @@
 import type { ToolViewComponent, ToolViewProps } from '@/components/ToolCard/views/_all'
+import type { ToolCallBlock } from '@/chat/types'
 import type { ReactNode } from 'react'
 import { isObject, safeStringify, stripAgentContract } from '@hapi/protocol'
 import { CodeBlock } from '@/components/CodeBlock'
@@ -9,6 +10,8 @@ import { getInputStringAny } from '@/lib/toolInputUtils'
 import { useShowAgentContract } from '@/hooks/useShowAgentContract'
 import { isSubagentToolName } from '@/chat/subagentTool'
 import { isGoalToolName, parseGoalToolResult } from '@/components/ToolCard/goalTools'
+import { resolveToolNameAlias } from '@/components/ToolCard/toolNameAliases'
+import { isTerminalToolBlock } from '@/chat/toolGroups'
 import { GoalView } from '@/components/ToolCard/views/GoalView'
 import {
     getCodexAgentActivity,
@@ -1087,23 +1090,9 @@ const GoalResultView: ToolViewComponent = (props) => {
         : <GenericResultView {...props} />
 }
 
-// OpenCode reports its built-in tools by lowercase id. Map the ones whose
-// result is plain text onto the equivalent view registered under the
-// Claude-style name. Skill, todowrite, patch and question are left out: their
+// Skill, todowrite, patch and question deliberately stay unaliased: their
 // dedicated views read Claude-shaped input or result fields.
-const OPENCODE_RESULT_VIEW_ALIASES: Readonly<Record<string, string>> = {
-    bash: 'Bash',
-    glob: 'Glob',
-    grep: 'Grep',
-    list: 'LS',
-    write: 'Write',
-    edit: 'Edit',
-    webfetch: 'WebFetch',
-    websearch: 'WebSearch',
-    task: 'Task'
-}
-
-export function getToolResultViewComponent(toolName: string): ToolViewComponent {
+export function getToolResultViewComponent(toolName: string, block?: ToolCallBlock): ToolViewComponent {
     if (isGoalToolName(toolName)) return GoalResultView
     if (toolName.startsWith('mcp__')) {
         return GenericResultView
@@ -1113,10 +1102,18 @@ export function getToolResultViewComponent(toolName: string): ToolViewComponent 
     if (isSubagentToolName(toolName)) {
         return MarkdownResultView
     }
+    // Fork opencode aliases resolve before the upstream alias table.
     const aliased = Object.hasOwn(OPENCODE_RESULT_VIEW_ALIASES, toolName)
         ? OPENCODE_RESULT_VIEW_ALIASES[toolName]
         : undefined
-    return toolResultViewRegistry[toolName]
+    const resolved = toolResultViewRegistry[toolName]
         ?? (aliased ? toolResultViewRegistry[aliased] : undefined)
-        ?? GenericResultView
+        ?? toolResultViewRegistry[resolveToolNameAlias(toolName)]
+    if (resolved) return resolved
+    // Generic markdown would collapse the output lines and autolink file
+    // names; shell output reads as a terminal code block instead.
+    if (block && isTerminalToolBlock(block)) {
+        return toolResultViewRegistry.Bash ?? GenericResultView
+    }
+    return GenericResultView
 }
