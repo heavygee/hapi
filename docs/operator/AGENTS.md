@@ -96,9 +96,17 @@ Canon also in `.cursor/rules/hapi-session.mdc` (alwaysApply).
 | Mechanism | What the recipient sees |
 |-----------|-------------------------|
 | MCP `ping_peer` inside a wrapped session | Attributed nametag via `POST /cli/sessions/:source/peer-messages` (`HAPI_SESSION_ID` / MCP client session id). Still open pings with `From:` for text-only agents. |
-| `hapi ping-peer` inside a wrapped session | Same. Script auto-stamps `From:` when `HAPI_SESSION_ID` is set (skip with `HAPI_PING_PEER_SKIP_FROM=1` if body already has it). |
+| `hapi ping-peer` inside a wrapped session | Same. Script auto-stamps `From:` when `HAPI_SESSION_ID` is set (skip with `HAPI_PING_PEER_SKIP_FROM=1` if body already has it). A body-supplied `From: /sessions/<id>` that does **not** match `HAPI_SESSION_ID` now warns (`HAPI_PING_PEER_STRICT_FROM=1` to refuse the send) — see § Void chips below. |
 | systemd timers (`hapi-meta-daily.timer`) | Estate helper POSTs `/cli/sessions/:source/peer-messages` for `HAPI_META_SESSION_ID` in `~/.hapi/meta-daily.env` — **operator automation only**; agents must not copy the mint pattern. |
 | CLI outside a session | Unattributed peer row only (no invented source id). |
+
+### Void chips — hand-written `From:` ids (2026-11-08)
+
+**The id in `From:` must be your *hub session* id, not your agent-runtime id.** Meta PR watcher hand-prepended its **Cursor agent id** (`CURSOR_SESSION_ID`) into MCP `ping_peer` bodies; its env `HAPI_SESSION_ID` was correct the whole time. The id resolved to nothing — `inspect_peer` errored, `search_peers` returned zero rows (and that search covers name/path/`agentSessionId`/id, so there was no row to find). Anyone replying to that chip would have sent into the void.
+
+- A hand-written `From:` **suppresses** the `hapi-ping-peer` auto-stamp (`^From:` short-circuit), so a wrong id rides every ping unchecked. The script now compares the claimed id against `HAPI_SESSION_ID` and warns; `HAPI_PING_PEER_STRICT_FROM=1` makes it a hard failure.
+- **MCP `ping_peer` bypasses the script entirely** — the guard does not cover that path, which is the one that actually failed here. For MCP, the fix is agent discipline: stamp `HAPI_SESSION_ID`, or omit `From:` and let the attributed nametag carry routing.
+- Cheapest self-check before trusting a remembered id: `inspect_peer <your-own-id>` should resolve to *you*.
 
 **Agents: do not describe nametags as "verified", "trusted provenance", or "capability-bound".** That was the rejected #1473 direction. Historical postmortems under `docs/plans/*1473*` are archaeology, not current product.
 

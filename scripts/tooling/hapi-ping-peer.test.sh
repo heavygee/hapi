@@ -92,5 +92,50 @@ else
     ok
 fi
 
+# --- From: id guard (2026-11-08 void-chip: Cursor agent id pasted as hub id) ---
+FOREIGN='33333333-3333-3333-3333-333333333333'
+
+# Mismatched hand-written From: warns loudly but still delivers (non-strict).
+if out="$("$SCRIPT" "$TARGET" "From: /sessions/${FOREIGN}
+
+body" 2>&1)"; then
+    ok
+else
+    bad "mismatched From: should still send in non-strict mode: $out"
+fi
+if printf '%s' "$out" | grep -q "body claims From: /sessions/${FOREIGN:0:8}"; then
+    ok
+else
+    bad "no mismatch warning for foreign From: id ($out)"
+fi
+
+# Strict mode refuses to send a foreign From: id.
+if out="$(HAPI_PING_PEER_STRICT_FROM=1 "$SCRIPT" "$TARGET" "From: /sessions/${FOREIGN}
+
+body" 2>&1)"; then
+    bad "strict mode should have failed on foreign From: id"
+else
+    ok
+fi
+if printf '%s' "$out" | grep -q "From: mismatch"; then
+    ok
+else
+    bad "strict mode died without the mismatch reason ($out)"
+fi
+
+# A correct self-stamped From: is silent — no false alarm on the common path.
+if out="$(HAPI_PING_PEER_STRICT_FROM=1 "$SCRIPT" "$TARGET" "From: /sessions/${SID}
+
+body" 2>&1)"; then
+    ok
+else
+    bad "own From: id must not trip the guard: $out"
+fi
+if printf '%s' "$out" | grep -q "body claims From:"; then
+    bad "warned on a matching From: id ($out)"
+else
+    ok
+fi
+
 echo "hapi-ping-peer estate tests: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]]

@@ -122,6 +122,22 @@ if [[ "$LIST_ONLY" != "1" ]]; then
 
     estate_try_attribute || true
 
+    # A hand-written From: line suppresses the auto-stamp below, so a wrong id
+    # rides every ping unchecked (2026-11-08: a peer pasted its *Cursor agent*
+    # id as the hub session — inspect_peer/search_peers found nothing, replies
+    # routed nowhere). Validate the claim instead of trusting the body.
+    if [[ -n "${HAPI_SESSION_ID:-}" ]] \
+        && [[ "$MESSAGE" =~ ^[Ff]rom:[[:space:]]*/sessions/([0-9a-fA-F-]+) ]]; then
+        _claimed="${BASH_REMATCH[1]}"
+        if [[ "$_claimed" != "$HAPI_SESSION_ID" ]]; then
+            err "WARNING: body claims From: /sessions/${_claimed:0:8}… but HAPI_SESSION_ID is ${HAPI_SESSION_ID:0:8}…"
+            err "  Recipients reply to the From: id; a foreign id is an unreplyable chip."
+            err "  Fix the body, or drop the From: line and let this script stamp from env."
+            [[ "${HAPI_PING_PEER_STRICT_FROM:-0}" != "1" ]] \
+                || die "From: mismatch (HAPI_PING_PEER_STRICT_FROM=1)"
+        fi
+    fi
+
     # Interim peer identity stamp (docs/operator/AGENTS.md § Peer message identity)
     # Skip when hub-attributed: verified chip keeps From: lines in the bubble.
     if [[ "$ESTATE_ATTR" != "1" ]] \
