@@ -72,7 +72,7 @@ The operator often hears `AGENT_NOTIFY_SUMMARY.action` (TTS) and reads `summary`
 [upstream issue/pr discovery](/sessions/<full-session-id>)
 ```
 
-That is what rich composer serializes for `@` picks (`[title](/sessions/<id>)`). Do not use bare hashes, bare `/sessions/<id>`, or plain-name-only prose when a chip is possible. Live Meta/specialist UUIDs: [`config/meta-sessions.yaml`](../../config/meta-sessions.yaml) (tooling/meta, PR watcher, triage, discovery).
+That is what rich composer serializes for `@` picks (`[title](/sessions/<id>)`). Do not use bare hashes, bare `/sessions/<id>`, or plain-name-only prose when a chip is possible. Live Meta/specialist UUIDs: [`config/meta-sessions.yaml`](../../config/meta-sessions.yaml) (tooling/meta, PR watcher, triage, discovery). The registry is hand-maintained — audit it with **`hapi-meta-sessions-audit`** (live title == `name:`, `superseded:` husk archived or titled `SUPERSEDED…`, `env:` agrees with `~/.hapi/meta-daily.env`; exit 1 on drift).
 
 **In `AGENT_NOTIFY_SUMMARY` `action`/`summary`:** chips do not render on TTS/FCM - use the **spoken display name** (same title string). Never a naked hash.
 
