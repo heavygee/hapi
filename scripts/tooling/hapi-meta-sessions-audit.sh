@@ -74,6 +74,13 @@ fi
 # scan would decay toward false-clean on exactly the check that exists to catch
 # a husk still wearing a live title. Verified 2026-11-08: archived 403411de is
 # absent from `?limit=2000` yet returns 200 here; a nonexistent id returns 404.
+# Prints TWO lines — lifecycleState, then the title — because callers run this
+# in a command substitution, where any variable it set would die with the
+# subshell. Title goes last so a multi-line name still round-trips.
+#
+# There is no top-level `archived` field: archive state lives in
+# metadata.lifecycleState == 'archived' (+ archivedBy/archiveReason). Reading a
+# nonexistent `.archived` returns null for every session and proves nothing.
 resolve() {
     local id="$1"
     if [[ "$MODE" == "json" ]]; then
@@ -81,7 +88,8 @@ resolve() {
         local n
         n="$(jq -r --arg id "$id" '[.sessions[] | select(.id == $id)] | length' <<<"$SESSIONS")"
         [[ "$n" != "0" ]] || return 1
-        jq -r --arg id "$id" '.sessions[] | select(.id == $id) | (.metadata.name // "")' <<<"$SESSIONS"
+        jq -r --arg id "$id" '.sessions[] | select(.id == $id)
+            | ((.metadata.lifecycleState // "") + "\n" + (.metadata.name // ""))' <<<"$SESSIONS"
         return 0
     fi
     local tmp code
@@ -89,10 +97,18 @@ resolve() {
     code="$(curl -sS -o "$tmp" -w '%{http_code}' --max-time 10 \
         -H "Authorization: Bearer $JWT" "$HAPI_HOST/api/sessions/$id" || echo 000)"
     case "$code" in
-        200) jq -r '.session.metadata.name // ""' "$tmp"; rm -f "$tmp"; return 0 ;;
+        200)
+            jq -r '.session.metadata | ((.lifecycleState // "") + "\n" + (.name // ""))' "$tmp"
+            rm -f "$tmp"; return 0 ;;
         404) rm -f "$tmp"; return 1 ;;
         *)   rm -f "$tmp"; die "GET /api/sessions/${id:0:8}… → HTTP $code" ;;
     esac
+}
+
+# split "<lifecycle>\n<title>" into $R_LIFECYCLE / $R_TITLE
+split_resolved() {
+    R_LIFECYCLE="${1%%$'\n'*}"
+    R_TITLE="${1#*$'\n'}"
 }
 
 FAIL=0
@@ -109,22 +125,31 @@ while IFS= read -r key; do
     [[ -n "$id" ]] || { report_fail "$key: no id in registry"; continue; }
 
     # A — live session wears the registry title
-    if ! live_title="$(resolve "$id")"; then
+    if ! resolved="$(resolve "$id")"; then
         report_fail "$key: live id ${id:0:8}… not found on hub (404)"
-    elif [[ "$live_title" != "$name" ]]; then
-        report_fail "$key: live title \"$live_title\" != registry name \"$name\""
+    elif split_resolved "$resolved"; [[ "$R_TITLE" != "$name" ]]; then
+        report_fail "$key: live title \"$R_TITLE\" != registry name \"$name\""
     else
         say "ok   $key: live ${id:0:8}… titled \"$name\""
     fi
 
     # B — husk is archived, or at least visibly SUPERSEDED
     if [[ -n "$sup" ]]; then
-        if ! sup_title="$(resolve "$sup")"; then
+        if ! resolved="$(resolve "$sup")"; then
             say "ok   $key: superseded ${sup:0:8}… absent from hub (404 — deleted)"
-        elif [[ "$sup_title" == SUPERSEDED* ]]; then
+        elif split_resolved "$resolved"; [[ "$R_TITLE" == SUPERSEDED* ]]; then
             say "ok   $key: superseded ${sup:0:8}… marked SUPERSEDED"
         else
-            report_fail "$key: superseded ${sup:0:8}… still titled \"$sup_title\" — collides with live"
+            # A husk that is still turning can flap: `name` survives re-register
+            # but a long-lived ACP controller caches acpManualTitle at
+            # construction, so its next native title push can overwrite a rename
+            # made by anyone else. Say so, or alternating runs read as a flaky
+            # tool rather than a flapping session.
+            case "$R_LIFECYCLE" in
+                archived|"") flap="" ;;
+                *) flap=" [husk still live: lifecycleState=$R_LIFECYCLE — this can flap; re-check once it stops turning]" ;;
+            esac
+            report_fail "$key: superseded ${sup:0:8}… still titled \"$R_TITLE\" — collides with live$flap"
         fi
     fi
 

@@ -123,20 +123,57 @@ Suite now 16 assertions over 8 fixtures; the two new cases cover `env_file:` hon
 
 ---
 
-## Resolved: the title. Still open: the archive that reported success (2026-11-08)
+## Resolved: the title. The archive claim was mis-measured — see correction (2026-11-08)
 
 The husk answered and **re-applied the name**; the auditor independently confirms it — all five pairs clean, exit 0. Cause was **agent discipline, not a runtime loop**: `028d0a86` called `change_title → tooling/meta bot` twice during the issue-labelling cutover, out of habit. #1672 / `acpManualTitle` are not implicated, and triage's "#2269 is shipped" verdict stands untouched.
 
-**The archive half is not explained and remains open.** `archive_peer` returned `Archived 028d0a86-…` — a success string — yet the hub still reports, after the retitle landed:
+**The archive half — this paragraph was wrong, corrected below (kitchen, same day).**
 
-```
-{ "active": true, "archived": null, "lifecycle": "running",
-  "name": "SUPERSEDED tooling/meta (Cursor) — use Claude cbd1073e" }
-```
+What was originally written here: that `archive_peer` returned success while the hub reported `"archived": null`, therefore the archive "returned success without taking". **The evidence was a field that does not exist.** Archive state is `metadata.lifecycleState === 'archived'` (+ `archivedBy` / `archiveReason`); there is no top-level `archived` key, so `jq '.archived'` yields `null` for every session on the hub including ones nobody ever touched. Triage caught it — see Follow-up 2. A null from a key that was never there is not a measurement.
 
-So the name mutation persisted and the archive mutation did not. Two candidates, not distinguished here: a session that keeps transacting is un-archived when it next reports in, or the archive never applied and the tool reported success anyway. Either way the operator-visible behaviour is the same and is the problem — **an archive that returns success without taking leaves the operator believing a session is retired while it is still live and still answering peers.** That is strictly worse than a visible failure.
+Re-probed correctly, per-id:
 
-Not filed upstream from the kitchen: it is a product observation in triage's lane, and it wants one more probe (archive a genuinely idle session, confirm `archived` is set, then confirm a resumed session clears it) before anyone writes an issue.
+| Husk | lifecycleState | archivedBy |
+|------|----------------|------------|
+| `028d0a86` | `archived` | `cli` |
+| `9f5f7e1d` | `archived` | `cli` |
+| `6ce7f124` | `archived` | `cli` |
+| `a833f693` | `idle` | — (never archived) |
+
+So `028d0a86` **is** archived now. The archive did take — it just could not hold while the session was still re-registering, which is triage's Bug A (`pickExistingSessionMetadata` preserves `name` but not `lifecycleState`/`archivedBy`, and `sessionFactory.ts:146` rebuilds fresh metadata as `running`). Verified in the driver: the preserve list mentions `name` and never mentions the lifecycle fields.
+
+The narrower true statement, worth keeping: **archiving a session that is still turning silently does not hold**, because the next re-register rebuilds it as `running`. The operator sees a success string and a session that stays live. That is still worth filing — but as "not durable while running", not "never applied".
+
+---
+
+## Follow-up 2 — the husk is flapping, and it is two product bugs, not one (triage, 2026-11-08)
+
+The kitchen reported `028d0a86` reverted to `tooling/meta bot` with "`archived: null`", concluding the retitle **and** the archive both failed to stick, as one phenomenon. Re-measured per id:
+
+| id | active | `metadata.lifecycleState` | `archivedBy` | `acpManualTitle` | name |
+|----|--------|---------------------------|--------------|------------------|------|
+| `028d0a86` | true | **`running`** | — | true | `SUPERSEDED tooling/meta (Cursor) — use Claude cbd1073e` |
+| `9f5f7e1d` | false | `archived` | `cli` (*User terminated*) | true | `SUPERSEDED meta - PR watcher …` |
+| `a833f693` | true | `idle` | — | — | `SUPERSEDED meta HAPI triage …` |
+| `6ce7f124` | false | `archived` | `cli` (*User terminated*) | — | `SUPERSEDED upstream discovery …` |
+
+Three corrections:
+
+**There is no `archived` field.** Archive state is `metadata.lifecycleState === 'archived'` plus `archivedBy` / `archiveReason` (`hub/src/sync/syncEngine.ts`). `archived: null` reads null for every session including ones never archived, so it is not evidence either way. The archive genuinely did not stick — but the proof is `lifecycleState: running` with no `archivedBy`, contrasted against `9f5f7e1d`/`6ce7f124` which *are* `archived` because those processes stopped.
+
+**The title reverted, so the collision is intermittent, not resolved or permanent.** At the kitchen's sample the husk wore the live title; at this sample it wears `SUPERSEDED…` again (re-applied on request). It flaps on session activity. Both "fixed" and "broken" are true depending on when you look — which is footgun 1 again, now as a property of the system rather than of our discipline.
+
+**They are two independent bugs, not one metadata blob reverting.** `name` *is* in the preserved set, so a re-register does not clobber it. The two have different mechanisms:
+
+### Bug A — archiving a running session is not durable by construction
+
+`cli/src/agent/sessionFactory.ts`: fresh metadata hardcodes `lifecycleState: 'running'` (line 146), and `pickExistingSessionMetadata()` preserves ~25 fields (`name`, `summary`, `acpManualTitle`, per-flavor session ids, `tools`, `worktree`, …) but **not** `lifecycleState`, `archivedBy`, or `archiveReason`. So when a still-running session re-registers, it rebuilds itself as `running` and drops the archive marker. Archive only sticks on a session that has stopped. The UI offers archive on a running session and silently loses it.
+
+### Bug B — `acpManualTitle` precedence is read once, at construction
+
+`cli/src/agent/acpSessionTitle.ts:21` — `let manual = client.getMetadata?.()?.acpManualTitle === true`, captured when the controller is built, and thereafter flipped only by in-process `markManualTitle()`. A rename performed by any other party (hub `PATCH`, another process, a peer) sets `acpManualTitle: true` in metadata but the long-lived process never re-reads it, so its `manual` guard stays `false` and the next native `session_info_update` pushes the old title back through as a summary. `028d0a86` shows exactly that shape: metadata says `manual=true`, yet the title still reverted. This is [#1672](https://github.com/tiann/hapi/pull/1672)'s manual-title precedence holding *within* a process and failing *across* one — hypothesis, consistent with the evidence, not yet proven by instrumented repro.
+
+Both are generic HAPI, not fork policy → upstream candidates. Dispatched to [upstream issue/pr discovery](/sessions/04c8e16c-4cf3-40f2-a76b-944bfc7e7da8) to confirm against `upstream/main` before filing, per the confirm-don't-rubber-stamp pattern in [`2026-11-03-cursor-session-rename-gap.md`](2026-11-03-cursor-session-rename-gap.md). **Do not re-open [#2269](https://github.com/tiann/hapi/issues/2269)** — the rename *tool* is shipped and working; these are a lifecycle-preservation bug and a stale-guard bug that merely surface through the same symptom.
 
 ---
 
@@ -144,5 +181,8 @@ Not filed upstream from the kitchen: it is a product observation in triage's lan
 
 - 2026-11-08 — Written by triage from the kitchen's swap-verification report; collision did not reproduce; #2269/#1672 confirmed shipped in the running driver; two residual footguns recorded.
 - 2026-11-08 — Kitchen built `scripts/tooling/hapi-meta-sessions-audit.sh` (`bc9c0380b`); triage adjudicated its check-B widening — reasoning accepted, implementation rejected: `/api/sessions` caps at 500 rows with `offset` ignored, so "absent" means "older than ~22 days". Fix specified: per-id `GET /api/sessions/:id` (404 = absent).
+- 2026-11-08 — Kitchen applied the per-id fix (`e3b26f214`) and reported `028d0a86` reverted. Triage re-measured: no `archived` field exists (archive is `metadata.lifecycleState`); the husk is **flapping**, not reverted-once; and it is **two independent product bugs** — `lifecycleState` not preserved across re-register (archive on a running session cannot stick), and `acpManualTitle` read once at controller construction (rename by another party never suppresses native title sync). Both dispatched to discovery as upstream candidates; #2269 stays closed.
 - 2026-11-08 — Kitchen applied the per-id fix + per-entry `env_file:`. First live run found `028d0a86` reverted to the live title with `archived: null` — retitle and archive both failed to stick on a still-running session. Collision is live again; auditor exits 1.
 - 2026-11-08 — Husk re-applied the SUPERSEDED title (cause: it called `change_title` twice during the labelling cutover — agent discipline, not a runtime reassert). Auditor confirms clean, exit 0. **`archived: null` persists** despite `archive_peer` reporting success — open, triage lane.
+- 2026-11-08 — Triage corrected the kitchen's archive evidence: no top-level `archived` field exists (state is `metadata.lifecycleState`), and the husk *flaps* rather than having reverted once. Re-probed: `028d0a86`/`9f5f7e1d`/`6ce7f124` all `lifecycleState: archived, archivedBy: cli`; `a833f693` `idle`, never archived. Bug A mechanism verified in-driver (`pickExistingSessionMetadata` preserves `name`, not `lifecycleState`/`archivedBy`; `sessionFactory.ts:146` rebuilds `running`).
+- 2026-11-08 — Auditor annotates a colliding husk that is still turning (`lifecycleState` != archived) as flappable, so alternating runs read as a flapping session, not a flaky tool. Fixtures caught a real subshell bug while adding it — `resolve()` set a variable inside `$( )`, so the caveat never fired; it now returns lifecycle+title on two lines. Suite 20 assertions / 10 fixtures.

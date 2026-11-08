@@ -29,11 +29,11 @@ sessions:
 EOF
 }
 
-write_sessions() {  # $1 = husk title
-    jq -n --arg live "$LIVE" --arg husk "$HUSK" --arg ht "$1" \
+write_sessions() {  # $1 = husk title, $2 = husk lifecycleState (default archived)
+    jq -n --arg live "$LIVE" --arg husk "$HUSK" --arg ht "$1" --arg lc "${2:-archived}" \
         '{sessions:[
             {id:$live, metadata:{name:"meta - PR watcher"}},
-            {id:$husk, metadata:{name:$ht}}
+            {id:$husk, metadata:{name:$ht, lifecycleState:$lc}}
         ]}' >"$WORK/sessions.json"
 }
 
@@ -115,6 +115,19 @@ if printf '%s' "$out" | grep -q "HAPI_OTHER_SESSION_ID agrees"; then ok; else ba
 rm -f "$WORK/other.env"
 if out="$(run)"; then bad "missing env_file must fail"; else ok; fi
 if printf '%s' "$out" | grep -q "env file not found: $WORK/other.env"; then ok; else bad "no missing-env_file line ($out)"; fi
+
+# 9. A colliding husk that is still running flaps — the output must say so,
+#    or alternating red/green runs read as a flaky tool, not a flapping session.
+write_config "$LIVE" "$HUSK"
+write_env "$LIVE"
+write_sessions "meta - PR watcher" "running"
+if out="$(run)"; then bad "running colliding husk must still fail"; else ok; fi
+if printf '%s' "$out" | grep -q "this can flap"; then ok; else bad "no flap caveat for running husk ($out)"; fi
+
+# 10. An archived colliding husk is a stable finding — no flap caveat.
+write_sessions "meta - PR watcher" "archived"
+if out="$(run)"; then bad "archived colliding husk must still fail"; else ok; fi
+if printf '%s' "$out" | grep -q "this can flap"; then bad "flap caveat on a settled husk ($out)"; else ok; fi
 
 echo "hapi-meta-sessions-audit tests: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]]
