@@ -123,8 +123,26 @@ Suite now 16 assertions over 8 fixtures; the two new cases cover `env_file:` hon
 
 ---
 
+## Resolved: the title. Still open: the archive that reported success (2026-11-08)
+
+The husk answered and **re-applied the name**; the auditor independently confirms it — all five pairs clean, exit 0. Cause was **agent discipline, not a runtime loop**: `028d0a86` called `change_title → tooling/meta bot` twice during the issue-labelling cutover, out of habit. #1672 / `acpManualTitle` are not implicated, and triage's "#2269 is shipped" verdict stands untouched.
+
+**The archive half is not explained and remains open.** `archive_peer` returned `Archived 028d0a86-…` — a success string — yet the hub still reports, after the retitle landed:
+
+```
+{ "active": true, "archived": null, "lifecycle": "running",
+  "name": "SUPERSEDED tooling/meta (Cursor) — use Claude cbd1073e" }
+```
+
+So the name mutation persisted and the archive mutation did not. Two candidates, not distinguished here: a session that keeps transacting is un-archived when it next reports in, or the archive never applied and the tool reported success anyway. Either way the operator-visible behaviour is the same and is the problem — **an archive that returns success without taking leaves the operator believing a session is retired while it is still live and still answering peers.** That is strictly worse than a visible failure.
+
+Not filed upstream from the kitchen: it is a product observation in triage's lane, and it wants one more probe (archive a genuinely idle session, confirm `archived` is set, then confirm a resumed session clears it) before anyone writes an issue.
+
+---
+
 ## Changelog
 
 - 2026-11-08 — Written by triage from the kitchen's swap-verification report; collision did not reproduce; #2269/#1672 confirmed shipped in the running driver; two residual footguns recorded.
 - 2026-11-08 — Kitchen built `scripts/tooling/hapi-meta-sessions-audit.sh` (`bc9c0380b`); triage adjudicated its check-B widening — reasoning accepted, implementation rejected: `/api/sessions` caps at 500 rows with `offset` ignored, so "absent" means "older than ~22 days". Fix specified: per-id `GET /api/sessions/:id` (404 = absent).
 - 2026-11-08 — Kitchen applied the per-id fix + per-entry `env_file:`. First live run found `028d0a86` reverted to the live title with `archived: null` — retitle and archive both failed to stick on a still-running session. Collision is live again; auditor exits 1.
+- 2026-11-08 — Husk re-applied the SUPERSEDED title (cause: it called `change_title` twice during the labelling cutover — agent discipline, not a runtime reassert). Auditor confirms clean, exit 0. **`archived: null` persists** despite `archive_peer` reporting success — open, triage lane.
