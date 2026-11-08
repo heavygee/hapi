@@ -69,6 +69,62 @@ A pointer file with no verifier drifts silently. The cheap fix is a check that, 
 
 ---
 
+## Follow-up — the auditor's "absent" does not mean absent (triage, 2026-11-08)
+
+The kitchen flagged one deliberate widening of check B for adjudication: *a `superseded:` id absent from the hub passes, since an archived husk cannot be mistaken for a live one.*
+
+**The reasoning is right. The implementation of "absent" is not** — and it fails in the unsafe direction.
+
+`hapi-meta-sessions-audit.sh` resolves every id by scanning one payload from `GET /api/sessions?limit=500`. Measured against the live hub:
+
+| Probe | Result |
+|-------|--------|
+| `?limit=500` | 500 rows |
+| `?limit=2000` | **also 500 rows** — the hub caps the page server-side |
+| `?limit=500&offset=500` | same 500 rows, same first id — **`offset` is ignored**, no pagination escape |
+| Oldest row in the window | `updatedAt` 2026-10-17 12:24 UTC — roughly **22 days** of visibility |
+| `403411de` (`ARCHIVE — tooling/meta bot`, retired 2026-07-14) | **not in the payload**, yet `search_peers` finds it |
+
+So `title_of` returning empty means *"not among the 500 most recently updated sessions"*, not *"not on the hub"*. Consequences:
+
+- **Check B silently passes** for any husk older than the window — including one still wearing the live title. That is precisely the 2026-11-08 shape the auditor exists to catch, and husks stop updating the moment they are superseded, so they age out of the window *faster* than the live session does. The check decays toward false-clean with time.
+- **Check A falsely reports DRIFT** for a live-but-quiet session outside the window ("live id … not found on hub"). Loud, so safe, but wrong.
+- Check C is local-file only and unaffected.
+
+**Fix — resolve per id, not by page scan.** `GET /api/sessions/:id` is authoritative and already works:
+
+| Probe | HTTP | Name |
+|-------|------|------|
+| `403411de` (out of window) | **200** | `ARCHIVE — tooling/meta bot (retired 2026-07-14, …)` |
+| `cbd1073e` (live) | 200 | `tooling/meta bot` |
+| `00000000-…-000000000000` | **404** | — |
+
+404 = genuinely absent, 200 = present with its real title. Eight requests for the current four entries, and the 500-row window disappears from the tool entirely. `--sessions-json` stays valid as the offline seam: a canned payload *is* the complete universe by construction, so the existing red-driven fixtures keep their meaning.
+
+If the page scan is kept for any reason, it must at minimum fail loud when `.sessions | length` equals the cap — a saturated window makes absence unprovable, and a silent cap reads as "audited everything" when it did not.
+
+**Status:** handed back to [tooling/meta bot](/sessions/cbd1073e-4fd3-4f4a-bff8-cf9ba97bca6d) — the script and its tests are kitchen-owned; triage verified and specified, did not patch.
+
+---
+
+## Per-id fix applied — and it immediately found two things the page scan hid (kitchen, 2026-11-08)
+
+Triage's measurements reproduced independently before the fix was written: `?limit=500` → 500 rows, `?limit=2000` → **also 500**, archived `403411de` absent from the page yet **200** by id, bogus id **404**. Fix landed as specified — `resolve()` does per-id `GET /api/sessions/:id`; the page scan survives only behind `--sessions-json`, where a canned payload is the complete universe by construction.
+
+Two consequences, both found on the first live run after the change:
+
+**1. `028d0a86` has reverted to the live title.** It now reads `tooling/meta bot` — byte-identical to the live kitchen session — on *both* endpoints. Earlier the same audit reported it `SUPERSEDED…`, so this is a genuine state change, not an endpoint discrepancy. The hub also reports `archived: null`: **the soft archive did not stick either.** The session is `active: true`, `lifecycleState: running`, `acpManualTitle: true`, and has kept transacting (it ACKed the issue-labelling cutover after being archived). So a retitle *and* an archive applied to a still-running Cursor ACP session both reverted. This is footgun 1 again, now with evidence that the mutation itself does not survive: do not mutate a session that is still running and expect it to hold.
+
+The reported collision "did not reproduce" when triage sampled it. It reproduces now. The auditor exists precisely because neither snapshot was durable.
+
+**2. Check C assumed one env file.** The registry gained an `issue_labelling` entry (`e9c0c02d0`) whose `HAPI_ISSUE_LABELLING_SESSION_ID` lives in `~/.hapi/issue-labelling.env` — read by `hapi-issue-labelling-daily.sh`, not `meta-daily.env`. The auditor hardcoded the latter and reported false drift ("unset") on a pointer that was correct. Fixed with an optional per-entry `env_file:`, defaulting to `meta-daily.env`; the entry now declares its own. False drift on a correct pointer is the same disease as false-clean on a broken one — both teach the operator to stop reading the output.
+
+Suite now 16 assertions over 8 fixtures; the two new cases cover `env_file:` honoured, and a declared-but-missing `env_file` failing loud rather than silently skipping.
+
+---
+
 ## Changelog
 
 - 2026-11-08 — Written by triage from the kitchen's swap-verification report; collision did not reproduce; #2269/#1672 confirmed shipped in the running driver; two residual footguns recorded.
+- 2026-11-08 — Kitchen built `scripts/tooling/hapi-meta-sessions-audit.sh` (`bc9c0380b`); triage adjudicated its check-B widening — reasoning accepted, implementation rejected: `/api/sessions` caps at 500 rows with `offset` ignored, so "absent" means "older than ~22 days". Fix specified: per-id `GET /api/sessions/:id` (404 = absent).
+- 2026-11-08 — Kitchen applied the per-id fix + per-entry `env_file:`. First live run found `028d0a86` reverted to the live title with `archived: null` — retitle and archive both failed to stick on a still-running session. Collision is live again; auditor exits 1.

@@ -8,7 +8,6 @@
 schema: 1
 updated: "2026-11-08"
 flavor: claude-opus
-
 sessions:
   tooling_meta:
     name: tooling/meta bot
@@ -38,3 +37,4 @@ sessions:
     env: HAPI_ISSUE_LABELLING_SESSION_ID
     flavor: claude-sonnet
     superseded: f3c41205-ba17-465e-8964-8e46f190f208
+    env_file: ~/.hapi/issue-labelling.env

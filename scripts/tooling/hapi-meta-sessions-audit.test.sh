@@ -93,5 +93,28 @@ jq -n --arg live "$LIVE" --arg husk "$HUSK" \
 if out="$(run)"; then bad "retitled live session must fail (ADR D8 emoji drift)"; else ok; fi
 if printf '%s' "$out" | grep -q "!= registry name"; then ok; else bad "no title drift line ($out)"; fi
 
+# 7. Per-entry env_file: specialists with their own env file (issue labelling
+#    reads ~/.hapi/issue-labelling.env, not meta-daily.env) must not be audited
+#    against the default file — that read as "unset" and reported false drift.
+cat >"$WORK/meta-sessions.yaml" <<EOF
+schema: 1
+sessions:
+  issue_labelling:
+    name: meta - PR watcher
+    id: $LIVE
+    env: HAPI_OTHER_SESSION_ID
+    env_file: $WORK/other.env
+EOF
+write_sessions "SUPERSEDED x"
+write_env "$GONE"                                   # default file disagrees...
+printf 'HAPI_OTHER_SESSION_ID=%s\n' "$LIVE" >"$WORK/other.env"   # ...own file agrees
+if out="$(run)"; then ok; else bad "per-entry env_file should pass: $out"; fi
+if printf '%s' "$out" | grep -q "HAPI_OTHER_SESSION_ID agrees"; then ok; else bad "env_file not consulted ($out)"; fi
+
+# 8. A declared env_file that does not exist is drift, not a silent skip.
+rm -f "$WORK/other.env"
+if out="$(run)"; then bad "missing env_file must fail"; else ok; fi
+if printf '%s' "$out" | grep -q "env file not found: $WORK/other.env"; then ok; else bad "no missing-env_file line ($out)"; fi
+
 echo "hapi-meta-sessions-audit tests: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]]
