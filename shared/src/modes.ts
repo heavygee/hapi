@@ -217,7 +217,8 @@ type SteeringCapability = {
  *   stream-json Cursor sessions are NOT steerable — gate with
  *   {@link isSteeringSupportedForSession}.
  *
- * Claude / others: not supported (no reachable soft-steer path) — UI hides Steer.
+ * Claude (#2259) and OpenCode (#1981) join Codex / Cursor ACP / Pi.
+ * Non-listed flavors: UI hides Steer.
  */
 export const STEERING_SUPPORTED_FLAVORS = ['claude', 'codex', 'cursor', 'opencode', 'pi'] as const
 
