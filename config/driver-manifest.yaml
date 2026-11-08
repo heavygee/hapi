@@ -697,10 +697,10 @@ layers:
 
   # tiann/hapi#1404 — session-attached long-running jobs (outlive agent; list chrome).
   # Upstream PR: #1424 (feat/session-attached-jobs). Wake stays #1489 / layer below.
-  # Worktree: ~/coding/hapi/worktrees/slim-session-job-mcp @ driver/slim-session-job-mcp
-  # Soup tip: stacked on 659b91bab — hoist session_job "pass null to clear" once (heavygee/hapi#310).
+  # Worktree: ~/coding/hapi/worktrees/session-jobs-fake-meter-fix @ driver/session-attached-jobs
+  # Soup tip: 659b91bab — seamless striped indeterminate (8px tile loop); re-thin after dogfood bump.
   # Drop when upstream #1424 merges.
-  - branch: driver/slim-session-job-mcp
+  - branch: driver/session-attached-jobs
 
   # DROPPED 2026-09-02: driver/cursor-notify-rule-delta — stale fat tip (60 commits from
   # Aug merge-base). Notify overlay + session_job instanceof + omit-action-key fixes

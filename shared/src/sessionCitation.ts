@@ -40,13 +40,13 @@ export const SPAWN_PEER_TOOL_DESCRIPTION =
     'Spawn a new HAPI session and deliver a required first user message (the remit). ' +
     'Optional machine selects the target runner (UUID or hostname from GET /api/machines); omit to use this host. ' +
     'directory must exist on the target machine (local existence is not required for cross-host spawns). ' +
-    'Creates the session, optionally names it, then delivers the remit via the same path as ping_peer. ' +
-    'Fails if the remit does not land (a sessionId with 0 user messages is a failed spawn). ' +
+    'Creates the session, optionally names it, then uses the same delivery path as ping_peer. ' +
+    'Returns the new sessionId + name. Fails if the remit does not land (a sessionId with 0 user messages is a failed spawn). ' +
     'Do not call POST /api/machines/.../spawn with a message field - the hub rejects it. Use spawn_peer to create and deliver the remit. ' +
-    'Prefer this (or `hapi spawn-peer`) over JWT+curl. ' +
-    'Default permissionMode is yolo via hub peerSpawnDefaults / stock - omit the field so peers skip approval prompts; ' +
-    'pass only to tighten (e.g. default/plan) or when the operator names a mode; do not clone the parent session\'s mode. ' +
-    'When agent/model are omitted, resolves from hub peerSpawnDefaults then stock (claude + sonnet). ' +
+    'Prefer this (or `hapi spawn-peer`) over JWT+curl. Same hub/namespace as this session. ' +
+    'Default permissionMode is yolo via hub peerSpawnDefaults / stock - omit the field to keep that default so peers work without approval prompts. ' +
+    'Pass permissionMode only to tighten (e.g. default/plan) or when the operator names a mode; do not clone the parent session\'s mode. ' +
+    'When agent/model are omitted, resolves from hub peerSpawnDefaults (Settings → General → Agents), then stock (claude + sonnet). ' +
     'In-session calls auto-stamp a durable Parent [title](/sessions/<uuid>) chip for this session onto the remit (fail-closed if parent id is missing). ' +
     PEER_IDENTITY_UUID_RULE
 
