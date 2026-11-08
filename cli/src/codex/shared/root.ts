@@ -6,7 +6,7 @@ import type { ApiSessionClient } from '@/api/apiSession';
 import { logger } from '@/ui/logger';
 import { listSlashCommands } from '@/modules/common/slashCommands';
 import { normalizeCodexModel } from '@/modules/common/codexModels';
-import { formatMessageWithAttachments } from '@/utils/attachmentFormatter';
+import { formatUserMessageForAgent } from '@/utils/attachmentFormatter';
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
 import { ImplementCodexPlanRequestSchema, type ImplementCodexPlanResult } from '@hapi/protocol/apiTypes';
 import { CodexAppServerClient, isIndeterminateError } from '../codexAppServerClient';
@@ -122,7 +122,13 @@ export class SharedCodexRoot {
                 await this.bound;
                 if (this.closed || this.stopping) return;
                 const id = localId ?? randomUUID();
-                const text = formatMessageWithAttachments(message.content.text, message.content.attachments);
+                // Peer deliveries need From:/Name: (#1203); bare attachments path
+                // dropped attribution after tip-forward absorb of wake/steer pingPeer.
+                const text = formatUserMessageForAgent(
+                    message.content.text,
+                    message.content.attachments,
+                    message.meta
+                );
                 const resolved = text.trim().startsWith('/') ? await this.queue.command(id, () => this.command(text)) : text;
                 if (resolved === null) { this.session.emitMessagesConsumed([id], { clearQueuedThinkingGrace: true }); return; }
                 await this.queue.enqueue(id, buildUserInputFromMessage(resolved), this.interrupted);

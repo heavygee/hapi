@@ -1,12 +1,15 @@
 /**
- * Opt-in resume (wake) + wait-active + POST /api/sessions/:id/messages,
- * plus read-only inspectPeer (GET session + messages, never resume)
- * and setPeerPermissionMode (POST /api/sessions/:id/permission-mode).
+ * Opt-in resume (wake) + peer delivery, plus read-only inspectPeer and
+ * setPeerPermissionMode.
  *
- * Shared by `hapi ping-peer` / `hapi inspect-peer` / `hapi set-mode` and MCP
- * `ping_peer` / `inspect_peer`. Uses the same hub JWT flow as the web app
- * (`POST /api/auth` with CLI_API_TOKEN), scoped to the token's namespace.
- * Callers must not invent parallel auth or arbitrary hosts.
+ * Attributed (preferred): when `authenticatedSourceSessionId` is set (MCP /
+ * `HAPI_SESSION_ID`), POST `/cli/sessions/:source/peer-messages` so the hub
+ * stamps `meta.sentFrom=peer` + `meta.peer.sourceSessionId` and the recipient
+ * CLI prepends `From: /sessions/<id>` (#1203). Bare CLI omits the source →
+ * unattributed peer header on `/api/sessions/:id/messages` (never `webapp`).
+ *
+ * Shared by `hapi ping-peer` / MCP `ping_peer`. Same namespace-token trust as
+ * other `/cli/sessions/:id/*` routes — soft nametag, not a crypto proof.
  */
 
 import { randomUUID } from 'node:crypto'
@@ -14,6 +17,8 @@ import axios, { type AxiosInstance } from 'axios'
 import {
     extractAssistantPlainText,
     getPermissionModesForFlavor,
+    HAPI_PEER_DELIVERY_HEADER,
+    HAPI_PEER_DELIVERY_HEADER_VALUE,
     isObject,
     isSteeringSupportedForSession,
     hasActiveSteeringTurn,
@@ -106,7 +111,12 @@ export type PingPeerOptions = {
     http?: AxiosInstance
     sleep?: (ms: number) => Promise<void>
     now?: () => number
-    /** Soft nametag via /cli/.../peer-messages when set (soup). */
+    /**
+     * Calling session id (MCP client / `HAPI_SESSION_ID`). When set, uses
+     * `POST /cli/sessions/:source/peer-messages` for a soft nametag chip +
+     * agent `From:` line (#1203). Bare `hapi ping-peer` outside a session
+     * omits this → unattributed peer rows (still `sentFrom: peer`, never webapp).
+     */
     authenticatedSourceSessionId?: string
     onProgress?: (message: string) => void
 }
@@ -435,24 +445,46 @@ function unconfirmedSendError(localId: string, detail: string): PingPeerError {
 async function sendMessage(
     apiUrl: string,
     jwt: string,
+    cliToken: string,
     sessionId: string,
     message: string,
     localId: string,
     http: AxiosInstance,
     deliveryMode: MessageDeliveryMode,
     autoSteerFallback = false,
-    onProgress?: (message: string) => void
+    onProgress?: (message: string) => void,
+    authenticatedSourceSessionId?: string
 ): Promise<{ delivery: PingPeerResult['delivery']; steerNote?: string }> {
     // The existing queued-message steer action accepts localId as well as id.
     // Both modes retain the peer identity so only runtime ACKs prove delivery.
-    const response = await http.post(
-        `${apiUrl}/api/sessions/${encodeURIComponent(sessionId)}/messages`,
-        { text: message, localId },
-        {
-            headers: authHeaders(jwt),
-            timeout: 30_000,
-            validateStatus: () => true
-        }
+    const sourceId = authenticatedSourceSessionId?.trim() ?? ''
+    const response = await (sourceId
+        ? http.post(
+            // Soft nametag: hub stamps meta.peer from path :source (not body).
+            `${apiUrl}/cli/sessions/${encodeURIComponent(sourceId)}/peer-messages`,
+            { targetSessionId: sessionId, text: message, localId },
+            {
+                headers: buildHubRequestHeaders({
+                    Authorization: `Bearer ${cliToken}`,
+                    'Content-Type': 'application/json'
+                }),
+                timeout: 30_000,
+                validateStatus: () => true
+            }
+        )
+        : http.post(
+            // Outside a session: still mark as peer, never operator webapp.
+            `${apiUrl}/api/sessions/${encodeURIComponent(sessionId)}/messages`,
+            { text: message, localId },
+            {
+                headers: {
+                    ...authHeaders(jwt),
+                    [HAPI_PEER_DELIVERY_HEADER]: HAPI_PEER_DELIVERY_HEADER_VALUE
+                },
+                timeout: 30_000,
+                validateStatus: () => true
+            }
+        )
     ).catch((error: unknown) => {
         if (deliveryMode !== 'steer') throw error
         const detail = error instanceof Error ? error.message : String(error)
@@ -862,7 +894,19 @@ export async function pingPeer(options: PingPeerOptions): Promise<PingPeerResult
 
     onProgress?.(`sending message (${message.length} chars, ${deliveryMode}${requestedDeliveryMode === 'auto' ? ' via auto' : ''})...`)
     const localId = createPeerMessageLocalId()
-    const sent = await sendMessage(apiUrl, jwt, matched.id, message, localId, http, deliveryMode, requestedDeliveryMode === 'auto', onProgress)
+    const sent = await sendMessage(
+        apiUrl,
+        jwt,
+        accessToken,
+        matched.id,
+        message,
+        localId,
+        http,
+        deliveryMode,
+        requestedDeliveryMode === 'auto',
+        onProgress,
+        options.authenticatedSourceSessionId
+    )
     // Auto queued without trying: say why, so a caller can tell it from a steer that failed.
     const steerNote = sent.steerNote ?? (requestedDeliveryMode === 'auto' && deliveryMode === 'queue'
         ? `steer not attempted: ${resumed ? 'target was just resumed' : !matched.active ? 'target was not active' : ineligibility ? AUTO_NOT_ATTEMPTED[ineligibility] : 'steering unavailable'}`

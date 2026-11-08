@@ -567,7 +567,9 @@ describe('pingPeer delivery modes', () => {
                 : { status: 200, data: { session } },
             post: (url) => {
                 if (url.endsWith('/api/auth')) return { status: 200, data: { token: 'jwt' } }
-                if (url.endsWith('/messages')) return { status: 200, data: { ok: true } }
+                if (url.includes('/peer-messages') || url.endsWith('/messages')) {
+                    return { status: 200, data: { ok: true } }
+                }
                 if (url.endsWith('/steer')) {
                     if (steerResult instanceof Error) throw steerResult
                     return steerResult
@@ -598,6 +600,28 @@ describe('pingPeer delivery modes', () => {
             'http://hub.test/api/auth', `http://hub.test/api/sessions/${sessionId}/messages`
         ])
         expect(http.post.mock.calls[1]?.[1]).toEqual({ text: options.message, localId: result.localId })
+        // Bare CLI: unattributed peer header — never silent webapp.
+        expect(http.post.mock.calls[1]?.[2]?.headers?.['x-hapi-peer-delivery']).toBe('1')
+    })
+
+    it('uses /cli/.../peer-messages when authenticatedSourceSessionId is set', async () => {
+        const sourceId = '6212dae5-8a60-4284-b7a5-c09aa3571ce4'
+        const { http, options } = setup()
+        const result = await pingPeer({
+            ...options,
+            deliveryMode: 'queue',
+            authenticatedSourceSessionId: sourceId,
+        })
+        expect(result.delivery).toBe('accepted')
+        expect(http.post.mock.calls.map(([url]) => url)).toEqual([
+            'http://hub.test/api/auth',
+            `http://hub.test/cli/sessions/${sourceId}/peer-messages`,
+        ])
+        expect(http.post.mock.calls[1]?.[1]).toEqual({
+            targetSessionId: sessionId,
+            text: options.message,
+            localId: result.localId,
+        })
     })
 
     it.each([undefined, 'auto'] as const)('steers an active Codex peer with %s delivery', async (deliveryMode) => {
