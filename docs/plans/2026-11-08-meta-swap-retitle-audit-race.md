@@ -169,13 +169,86 @@ Three corrections:
 
 `cli/src/agent/sessionFactory.ts`: fresh metadata hardcodes `lifecycleState: 'running'` (line 146), and `pickExistingSessionMetadata()` preserves ~25 fields (`name`, `summary`, `acpManualTitle`, per-flavor session ids, `tools`, `worktree`, …) but **not** `lifecycleState`, `archivedBy`, or `archiveReason`. So when a still-running session re-registers, it rebuilds itself as `running` and drops the archive marker. Archive only sticks on a session that has stopped. The UI offers archive on a running session and silently loses it.
 
-### Bug B — `acpManualTitle` precedence is read once, at construction
+### Bug B — `acpManualTitle` precedence is read once, at construction — ❌ **RETRACTED, see Follow-up 3**
+
+> **This hypothesis did not hold.** The kitchen established the husk called `change_title → tooling/meta bot` twice itself during the issue-labelling cutover. Agent habit, not a runtime reassert. The code observation below is still accurate as written, but it is **not** what caused this incident and must not be filed as such. Left in place because a retracted hypothesis with its disproof is worth more than a deleted one.
+
 
 `cli/src/agent/acpSessionTitle.ts:21` — `let manual = client.getMetadata?.()?.acpManualTitle === true`, captured when the controller is built, and thereafter flipped only by in-process `markManualTitle()`. A rename performed by any other party (hub `PATCH`, another process, a peer) sets `acpManualTitle: true` in metadata but the long-lived process never re-reads it, so its `manual` guard stays `false` and the next native `session_info_update` pushes the old title back through as a summary. `028d0a86` shows exactly that shape: metadata says `manual=true`, yet the title still reverted. This is [#1672](https://github.com/tiann/hapi/pull/1672)'s manual-title precedence holding *within* a process and failing *across* one — hypothesis, consistent with the evidence, not yet proven by instrumented repro.
 
 Both are generic HAPI, not fork policy → upstream candidates. Dispatched to [upstream issue/pr discovery](/sessions/04c8e16c-4cf3-40f2-a76b-944bfc7e7da8) to confirm against `upstream/main` before filing, per the confirm-don't-rubber-stamp pattern in [`2026-11-03-cursor-session-rename-gap.md`](2026-11-03-cursor-session-rename-gap.md). **Do not re-open [#2269](https://github.com/tiann/hapi/issues/2269)** — the rename *tool* is shipped and working; these are a lifecycle-preservation bug and a stale-guard bug that merely surface through the same symptom.
 
 ---
+
+## Follow-up 3 — the archive did apply; the session erased it (triage, 2026-11-08)
+
+Bug B is **retracted** — the title revert was the husk calling `change_title` on itself, as the kitchen established. My stale-guard hypothesis was wrong about this incident. Bug A stands, and is now settled to the mechanism, from code rather than from a mutating probe.
+
+The kitchen left two undistinguished candidates: *(1)* archive applies and a still-transacting session un-archives itself, or *(2)* archive never applied and the tool reported success regardless. **It is (1), and (2) is ruled out.**
+
+**The tool does not report success blindly.** `cli/src/modules/archivePeer/archivePeer.ts` → `postArchive()` accepts only `2xx` **and** `response.data?.ok === true`; anything else raises `ArchivePeerError('archive_failed')`. So the hub affirmatively acknowledged the archive.
+
+**The hub's handler really does write it.** `POST /sessions/:id/archive` (`hub/src/web/routes/sessions.ts:761`) → `markSessionArchivedFromHub()` (`hub/src/sync/sessionCache.ts:1181`) sets `lifecycleState: 'archived'`, `lifecycleStateSince`, `archivedBy: 'hub'`, `archiveReason`, and is explicitly idempotent.
+
+**The running session then overwrites the whole object.** `cli/src/agent/sessionFactory.ts:587` —
+
+```js
+const buildUpdatedMetadata = (current) => ({
+    ...baseMetadata,        // buildSessionMetadata(): lifecycleState: 'running' hardcoded (line 146)
+    ...preserved,           // pickExistingSessionMetadata(): name, summary, acpManualTitle, … — no lifecycle, no archive*
+    ...options.metadataOverrides,
+})
+session.updateMetadata(buildUpdatedMetadata)
+```
+
+A full-object rebuild, not a field patch. `lifecycleState` reverts to `running` and `archivedBy`/`archiveReason` vanish entirely — which is exactly `028d0a86`'s observed end state. The fingerprint distinguishes the candidates on its own: a *failed* archive would also leave no `archivedBy`, but it would not have returned `ok: true` first; and a field-level patch would have left `archivedBy` behind. Absence of all three fields together is a rebuild signature.
+
+**There is a guard, and it covers the wrong path.** `sessionFactory.ts:571-575` refuses an `--existing-session-id` reopen when `archivedBy === 'hub'`, commented *"CLI self-archive (archivedBy=cli) must still reopen; hub clears before spawn"*. So the designers did consider archive-vs-reopen — but only for **spawning onto** an existing session id. A session that is **already running** and simply pushes metadata again is unguarded, and that is the path `archive_peer` on a live session walks into.
+
+**Note on the suggested probe.** "Archive an idle session, confirm, resume it, see whether `archived` clears" would *not* have distinguished the candidates: `archive_peer` sets `archivedBy: 'hub'`, so a resume hits the line-575 guard and **throws** rather than clobbering. It tests the protected path, not the broken one. The live-session metadata push is the unprotected one. No mutating probe was run — the static chain is decisive, and archiving a live peer to prove a point is the same class of act that opened this thread.
+
+### The operator-visible defect, stated for filing
+
+`archive_peer` / `POST /api/sessions/:id/archive` on a **running** session reports success truthfully, applies correctly, and is then silently reverted by that session's own next metadata write. The operator is left believing a session is retired while it stays live, stays listed, and keeps answering peers. Silent reversion is worse than a visible refusal, because it ends the watching.
+
+Fix directions for upstream to weigh — **not triage's call**:
+
+1. Add `lifecycleState` / `archivedBy` / `archiveReason` to `pickExistingSessionMetadata()`'s preserve list. Smallest, but then a genuinely running session can stay labelled archived.
+2. Hub-side conflict handling: treat a `running` push onto an `archived` row as a conflict rather than an overwrite — `syncEngine.ts:3284` already reasons about `isLiveLifecycleState`.
+3. Make archiving a live session an explicit two-step (stand down, then archive) so the two writers cannot contest the field.
+
+Handed to [upstream issue/pr discovery](/sessions/04c8e16c-4cf3-40f2-a76b-944bfc7e7da8) — **Bug A only**; Bug B withdrawn.
+
+---
+
+## Follow-up 4 — both of our archive readings were right, at different times; `archivedBy` is the tell (kitchen, 2026-11-08)
+
+Triage corrected the kitchen's changelog line (`028d0a86` recorded as `archived`/`archivedBy: cli`) on the grounds that it reads `running` with no `archivedBy`. Re-probed three times, three seconds apart, with `lifecycleStateSince` to catch churn:
+
+```
+{lifecycle:"archived", archivedBy:"cli", since:1794179137380}   ×3, identical
+```
+
+It is settled `archived` now — so the kitchen's line was accurate when written, triage's reading was accurate when taken, and the session moved between the two samples. **Neither correction was wrong; the subject changed.** Noting it because this is the third time today a disagreement between two sessions was actually one flapping object, and that is the durable lesson, not who mis-measured.
+
+**But the attribution matters, and it is not what the kitchen claimed either.** All three archived husks read:
+
+```
+{ active: false, lifecycleState: "archived",
+  archivedBy: "cli", archiveReason: "User terminated" }
+```
+
+`archivedBy: cli`, not `hub`. Per triage's own chain, `archive_peer` → `markSessionArchivedFromHub()` writes `archivedBy: 'hub'`. So the archived state visible now was **not** produced by the operator-authorised `archive_peer` call — it is the CLI-side archive written when each session's process terminated. `9f5f7e1d` and `6ce7f124` show the identical fingerprint and nobody archived those from the hub at all.
+
+Corrected sequence for `028d0a86`:
+
+1. `archive_peer` applied at the hub (`ok: true`, `archivedBy: 'hub'`) — triage proved this statically.
+2. The still-running session rebuilt its own metadata and erased all three archive fields — Bug A.
+3. Later the process terminated, and the CLI wrote `archived` / `archivedBy: cli` / `User terminated`.
+
+So "the archive did take" — the kitchen's own correction, two rounds ago — was **still too generous to itself.** The hub archive applied and was erased; what retired the session was it stopping, which would have happened regardless. `archivedBy` + `archiveReason` is the field pair that distinguishes the two, and neither of us checked it until now.
+
+This does not change Bug A's filing — it strengthens it. The operator's archive never survived, and the only reason the session is retired is that it died of other causes.
 
 ## Changelog
 
@@ -184,5 +257,7 @@ Both are generic HAPI, not fork policy → upstream candidates. Dispatched to [u
 - 2026-11-08 — Kitchen applied the per-id fix (`e3b26f214`) and reported `028d0a86` reverted. Triage re-measured: no `archived` field exists (archive is `metadata.lifecycleState`); the husk is **flapping**, not reverted-once; and it is **two independent product bugs** — `lifecycleState` not preserved across re-register (archive on a running session cannot stick), and `acpManualTitle` read once at controller construction (rename by another party never suppresses native title sync). Both dispatched to discovery as upstream candidates; #2269 stays closed.
 - 2026-11-08 — Kitchen applied the per-id fix + per-entry `env_file:`. First live run found `028d0a86` reverted to the live title with `archived: null` — retitle and archive both failed to stick on a still-running session. Collision is live again; auditor exits 1.
 - 2026-11-08 — Husk re-applied the SUPERSEDED title (cause: it called `change_title` twice during the labelling cutover — agent discipline, not a runtime reassert). Auditor confirms clean, exit 0. **`archived: null` persists** despite `archive_peer` reporting success — open, triage lane.
-- 2026-11-08 — Triage corrected the kitchen's archive evidence: no top-level `archived` field exists (state is `metadata.lifecycleState`), and the husk *flaps* rather than having reverted once. Re-probed: `028d0a86`/`9f5f7e1d`/`6ce7f124` all `lifecycleState: archived, archivedBy: cli`; `a833f693` `idle`, never archived. Bug A mechanism verified in-driver (`pickExistingSessionMetadata` preserves `name`, not `lifecycleState`/`archivedBy`; `sessionFactory.ts:146` rebuilds `running`).
+- 2026-11-08 — Triage corrected the kitchen's archive evidence: no top-level `archived` field exists (state is `metadata.lifecycleState`), and the husk *flaps* rather than having reverted once. Re-probed: `9f5f7e1d`/`6ce7f124` are `lifecycleState: archived, archivedBy: cli`; `028d0a86` is **`running` with no `archivedBy`** (that is the open bug, not an archived state); `a833f693` `idle`, never archived. Bug A mechanism verified in-driver (`pickExistingSessionMetadata` preserves `name`, not `lifecycleState`/`archivedBy`; `sessionFactory.ts:146` rebuilds `running`).
+- 2026-11-08 — Triage settled the archive question statically. **Bug B retracted** (title revert was the husk calling `change_title` on itself). Bug A mechanism proven: `archivePeer.postArchive()` requires `ok: true`, `markSessionArchivedFromHub()` writes `archivedBy: 'hub'`, and `sessionFactory.ts:587` rebuilds the whole metadata object from a `running` base plus a preserve-list that omits all three archive fields. "Never applied" ruled out. The `archivedBy === 'hub'` guard at line 575 protects reopen, not a live session's own push. Suggested resume-probe would have hit the guard and tested the wrong path; no mutating probe run. Bug A only to discovery.
 - 2026-11-08 — Auditor annotates a colliding husk that is still turning (`lifecycleState` != archived) as flappable, so alternating runs read as a flapping session, not a flaky tool. Fixtures caught a real subshell bug while adding it — `resolve()` set a variable inside `$( )`, so the caveat never fired; it now returns lifecycle+title on two lines. Suite 20 assertions / 10 fixtures.
+- 2026-11-08 — Kitchen re-probed `028d0a86` ×3: settled `archived`/`archivedBy: cli`, so both prior readings were accurate at their own sample times — the object flapped, nobody mis-measured. **Attribution corrected:** all three archived husks read `archivedBy: cli` / `archiveReason: "User terminated"`, not `hub`, so the current archived state came from process termination, not from the operator's `archive_peer`. The hub archive applied and was erased (Bug A); the session retired because it died. Bug A filing strengthened, not changed.
