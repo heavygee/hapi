@@ -250,6 +250,14 @@ So "the archive did take" — the kitchen's own correction, two rounds ago — w
 
 This does not change Bug A's filing — it strengthens it. The operator's archive never survived, and the only reason the session is retired is that it died of other causes.
 
+### Addendum (triage): the live repro is gone — say so in the issue
+
+Triage reached the same attribution independently (`archivedBy: cli` / *User terminated* is `runnerLifecycle.archiveAndClose()`, set by the KillSession RPC handler or SIGINT — `registerKillSessionHandler.ts:46,58`, `runnerLifecycle.ts:196`; `archivedBy: 'hub'` is the only `archive_peer` fingerprint). Nothing to add to the sequence above; it is correct as written. One thing it does not cover, and whoever files needs it:
+
+**`028d0a86` is now a cleanly archived session.** A reviewer who opens it to check this report will see `archived`, correct title, nothing anomalous, and reasonably conclude there is no bug. The live evidence destroyed itself when the process exited — and by the mechanism's own logic it always will, because the only way the bad state persists is while the session is running to keep overwriting it.
+
+So the issue must stand on the code chain in Follow-up 3 (`postArchive` requires `ok: true` → `markSessionArchivedFromHub` writes `archivedBy: 'hub'` → `sessionFactory.ts:587` rebuilds from a `running` base with no archive fields preserved) plus the recorded observations here, and should say outright that the symptom is **not reproducible by inspection after the fact**. A repro has to archive a session that is actively turning and re-read within its next metadata push. Expect "works for me" otherwise.
+
 ## Changelog
 
 - 2026-11-08 — Written by triage from the kitchen's swap-verification report; collision did not reproduce; #2269/#1672 confirmed shipped in the running driver; two residual footguns recorded.
@@ -261,3 +269,4 @@ This does not change Bug A's filing — it strengthens it. The operator's archiv
 - 2026-11-08 — Triage settled the archive question statically. **Bug B retracted** (title revert was the husk calling `change_title` on itself). Bug A mechanism proven: `archivePeer.postArchive()` requires `ok: true`, `markSessionArchivedFromHub()` writes `archivedBy: 'hub'`, and `sessionFactory.ts:587` rebuilds the whole metadata object from a `running` base plus a preserve-list that omits all three archive fields. "Never applied" ruled out. The `archivedBy === 'hub'` guard at line 575 protects reopen, not a live session's own push. Suggested resume-probe would have hit the guard and tested the wrong path; no mutating probe run. Bug A only to discovery.
 - 2026-11-08 — Auditor annotates a colliding husk that is still turning (`lifecycleState` != archived) as flappable, so alternating runs read as a flapping session, not a flaky tool. Fixtures caught a real subshell bug while adding it — `resolve()` set a variable inside `$( )`, so the caveat never fired; it now returns lifecycle+title on two lines. Suite 20 assertions / 10 fixtures.
 - 2026-11-08 — Kitchen re-probed `028d0a86` ×3: settled `archived`/`archivedBy: cli`, so both prior readings were accurate at their own sample times — the object flapped, nobody mis-measured. **Attribution corrected:** all three archived husks read `archivedBy: cli` / `archiveReason: "User terminated"`, not `hub`, so the current archived state came from process termination, not from the operator's `archive_peer`. The hub archive applied and was erased (Bug A); the session retired because it died. Bug A filing strengthened, not changed.
+- 2026-11-08 — Triage addendum: the live repro self-destructed when `028d0a86`'s process exited, and always will — the bad state only persists while the session runs to overwrite it. Issue must stand on the code chain and state outright that it is not reproducible by inspection after the fact. Kitchen and triage reached the attribution independently and agree. Thread closed; auditor clean, exit 0.
