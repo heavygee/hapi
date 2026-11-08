@@ -17,15 +17,23 @@ type MockResponse = {
 }
 
 function createHttpMock(handlers: {
-    post?: (url: string, body?: unknown) => MockResponse | Promise<MockResponse>
+    post?: (
+        url: string,
+        body?: unknown,
+        config?: { headers?: Record<string, string> }
+    ) => MockResponse | Promise<MockResponse>
     get?: (url: string, config?: { params?: Record<string, unknown> }) => MockResponse | Promise<MockResponse>
 }) {
     return {
-        post: vi.fn(async (url: string, body?: unknown) => {
+        post: vi.fn(async (
+            url: string,
+            body?: unknown,
+            config?: { headers?: Record<string, string> }
+        ) => {
             if (!handlers.post) {
                 throw new Error(`unexpected POST ${url}`)
             }
-            return handlers.post(url, body)
+            return handlers.post(url, body, config)
         }),
         get: vi.fn(async (url: string, config?: { params?: Record<string, unknown> }) => {
             if (!handlers.get) {
