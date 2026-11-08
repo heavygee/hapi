@@ -1,0 +1,32 @@
+# Durable Meta / specialist session pointers (fork-local).
+# Session UUIDs rotate on reconnect / flavor swap — update this file +
+# ~/.hapi/meta-daily.env together. Prefer chips with full UUIDs in chat.
+#
+# 2026-11-08: Cursor → Claude Opus (lockhouse Max) for all four.
+
+schema: 1
+updated: "2026-11-08"
+flavor: claude-opus
+
+sessions:
+  tooling_meta:
+    name: tooling/meta bot
+    id: cbd1073e-4fd3-4f4a-bff8-cf9ba97bca6d
+    role: local kitchen / remat owner
+    superseded: 028d0a86-262e-4538-a735-92247d17cb5f
+  pr_watcher:
+    name: meta - PR watcher
+    id: 1e32daba-7b7e-4955-9264-dde6e78723f3
+    role: upstream chips / Ready YES / MERGED briefs / wave unlock source
+    env: HAPI_META_SESSION_ID
+    superseded: 9f5f7e1d-d1d8-4d17-a668-0a0fdf4af685
+  triage:
+    name: meta HAPI triage/problems
+    id: 5225a255-2bcf-4750-a9b4-3387303b7ef2
+    role: estate/HAPI problem triage
+    superseded: a833f693-0b59-4913-b895-f010cbb311fa
+  discovery:
+    name: upstream issue/pr discovery
+    id: 04c8e16c-4cf3-40f2-a76b-944bfc7e7da8
+    role: upstream issue/PR discovery specialist
+    superseded: 6ce7f124-6240-4479-8dad-f2e27eb880a1
