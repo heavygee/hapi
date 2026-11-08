@@ -1417,5 +1417,12 @@ layers:
   # Hub-only → remat + publish + seal; tip-unique: preferFleetLatestPointer
   - branch: driver/fix-304-offer-notes-thin
 
+  # heavygee/hapi#308 / PR #309 — Claude Code Tool Search alwaysLoad for proactive
+  # HAPI MCP tools (change_title + display_image/video/media). Fork-only.
+  # Thin tip on soup HEAD c5a182a12: driver/mcp-always-load-meta @ d4d16dd65
+  # cli-only → remat --build-web --verify + hapi-restart-hub (MCP server lives in CLI).
+  # Tip-unique: anthropic/alwaysLoad on change_title/display_*
+  - branch: driver/mcp-always-load-meta
+
   # DROPPED 2026-11-04: driver/2267-post-close-silence MERGED as tiann/hapi#2268
   # (was #2267 Cursor post-done harness silence; thin fix/2267-post-close-summary-silence)
