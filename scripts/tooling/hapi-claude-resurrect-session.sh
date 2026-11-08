@@ -32,12 +32,23 @@
 #   HAPI_HUB_URL     default http://127.0.0.1:3006
 #   HAPI_ACTIVE / HAPI_DRIVER_CLI  driver cli for bun runClaude
 #
+# Single-instance guard (2026-11-04, post-incident hardening — see
+# docs/plans/2026-11-03-oos-linux-oom-orphaned-session-trees-postmortem.md):
+# a prior resurrect attach for this exact session that is still alive
+# (lockfile /tmp/claude-resurrect-<id8>.pid, pid verified alive AND bound to
+# this FULL_SID via /proc/<pid>/environ) refuses a second attach outright,
+# and a session the hub already reports active=1 is left alone. Repeated
+# invocations against the same target — by any caller, for any reason — can
+# therefore no longer leak more than one orphaned process per target.
+#
 # Exit codes:
 #   0  resurrected (or dry-run / already-resumable reported)
 #   1  session not found / not claude / working dir missing
 #   2  usage / settings / db error
 #   3  attach or ingest failed
 #   4  transcript still on disk (refused without --force)
+#   5  nothing to do — hub already reports this session active=1
+#   6  refused — a resurrect attach for this session is already in flight
 #
 set -euo pipefail
 export PATH="/home/heavygee/.bun/bin:/home/heavygee/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}"
@@ -165,6 +176,53 @@ md = json.loads(raw_meta or "{}")
 if md.get("flavor") != "claude":
     die(1, f"session {sid[:8]} flavor={md.get('flavor')!r} (want claude)")
 
+# Single-instance guard: refuse a second resurrect attach while one is
+# already live, and refuse entirely if the hub already sees this session
+# active. Read-only checks — run unconditionally, dry-run included, so a
+# dry-run accurately reports what a real run would do.
+PIDFILE = f"/tmp/claude-resurrect-{sid[:8]}.pid"
+
+
+def resurrect_in_flight(pidfile: str, target_sid: str):
+    try:
+        pid = int(Path(pidfile).read_text().strip())
+    except (FileNotFoundError, ValueError):
+        return None
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return None  # stale lockfile — pid is dead, safe to proceed
+    except PermissionError:
+        return pid  # alive under another uid; treat as in-flight, don't guess
+    try:
+        environ = Path(f"/proc/{pid}/environ").read_bytes()
+    except (FileNotFoundError, PermissionError):
+        return pid  # can't confirm which session it's bound to; a live pid under this lockfile is enough
+    if f"FULL_SID={target_sid}".encode() in environ:
+        return pid
+    return None  # pid reused by something unrelated since the lockfile was written
+
+
+live_pid = resurrect_in_flight(PIDFILE, sid)
+if live_pid is not None:
+    plan = {
+        "sessionId": sid,
+        "action": "resurrect_in_flight",
+        "pid": live_pid,
+        "hint": f"A resurrect attach for this session is already running (pid {live_pid}, lock {PIDFILE}). Refusing to start a second one.",
+    }
+    print(json.dumps(plan, indent=2))
+    sys.exit(6)
+
+if active:
+    plan = {
+        "sessionId": sid,
+        "action": "already_active",
+        "hint": "Hub already reports this session active=1 — nothing to resurrect.",
+    }
+    print(json.dumps(plan, indent=2))
+    sys.exit(5)
+
 workdir = DIR_OVERRIDE or md.get("path") or ""
 if not workdir:
     die(1, "session has no metadata.path; pass --dir")
@@ -243,13 +301,23 @@ set -e
 if [[ -n "$PLAN_JSON" ]]; then
     echo "$PLAN_JSON"
 fi
-if [[ "$PY_RC" -ne 0 && "$PY_RC" -ne 4 ]]; then
+if [[ "$PY_RC" -ne 0 && "$PY_RC" -ne 4 && "$PY_RC" -ne 5 && "$PY_RC" -ne 6 ]]; then
     exit "$PY_RC"
 fi
 
 ACTION="$(echo "$PLAN_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("action",""))')"
 FULL_SID="$(echo "$PLAN_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["sessionId"])')"
 WORKDIR="$(echo "$PLAN_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("workingDirectory") or "")')"
+
+if [[ "$ACTION" == "resurrect_in_flight" || "$PY_RC" -eq 6 ]]; then
+    log "refusing: a resurrect attach for this session is already in flight (single-instance guard)"
+    exit 6
+fi
+
+if [[ "$ACTION" == "already_active" || "$PY_RC" -eq 5 ]]; then
+    log "nothing to do: hub already reports this session active=1"
+    exit 5
+fi
 
 if [[ "$ACTION" == "refuse_transcript_present" || "$PY_RC" -eq 4 ]]; then
     log "refusing: transcript still on disk (pass --force to override)"
