@@ -215,7 +215,7 @@ If @tiann narrows or expands scope, revise this section.
 
 | Session | Role | Agents ping? |
 |---------|------|--------------|
-| **Tooling meta-bot** (`HAPI_META_TOOLING_SESSION_ID`; remat owner in `config/remat-escalate.yaml`, currently prefix `05d9f0f2`) | **Local kitchen:** soup remat, manifest hygiene, remat-hold escalation, wave-clear **execution**, fork tooling | **Yes** — for any local soup/kitchen/remat/process-feedback |
+| **Tooling meta-bot** (`HAPI_META_TOOLING_SESSION_ID`; remat owner in `config/remat-escalate.yaml`, currently prefix `cbd1073e`) | **Local kitchen:** soup remat, manifest hygiene, remat-hold escalation, wave-clear **execution**, fork tooling | **Yes** — for any local soup/kitchen/remat/process-feedback |
 | **PR watcher** (`HAPI_META_SESSION_ID`; `meta - PR watcher`, currently prefix `9f5f7e1d`) | **Upstream/outward:** `tiann/hapi` PR health, chips, CI/threads, merge timeliness, hourly classify queue | **No** — agents must **not** consult or ping PR watcher |
 
 **One line:** tooling meta-bot owns all **local soup orchestration**; PR watcher is **upstream-facing** and must **not** be described as kitchen controller.
