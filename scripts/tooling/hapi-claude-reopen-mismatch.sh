@@ -37,6 +37,7 @@ echo "active=$ACTIVE want_sha12=$WANT"
 
 python3 - "$DRY" "$ALL" "$HAPI_HOST" "$HAPI_PROXMOX_SSH" "$WANT" "$SCRIPT_DIR/lib" <<'PY'
 import hashlib, json, os, subprocess, sys, time, urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 dry, do_all = sys.argv[1] == "1", sys.argv[2] == "1"
 host, proxmox_ssh, want = sys.argv[3], sys.argv[4], sys.argv[5]
@@ -195,33 +196,47 @@ while read -r pid; do
 done <<'PIDLIST'
 {pid_block}
 PIDLIST
+echo KILLVERIFY_DONE
 """
 
 def kill_verify(pids, ssh_target=None):
     """Run the shared kill-verify algorithm for real (local bash or over SSH).
-    On ANY failure to even run the check (crashed ssh, missing bash, timeout),
-    treat every requested pid as an unverified survivor — fail closed, never
-    silently skip verification and proceed to archive+reopen anyway."""
+    Fails closed on ANYTHING short of clean completion — a crashed ssh, a
+    timeout, a dropped connection mid-batch, or a nonzero exit all treat
+    every requested pid as an unverified survivor. The explicit
+    KILLVERIFY_DONE marker (not just returncode==0) is what proves the
+    script actually finished every pid in the batch rather than exiting
+    partway through with only some SURVIVOR lines printed — a partial run
+    that silently excluded some unprocessed pids from the survivor set
+    would recreate the exact 'two agents on one session id' bug this
+    function exists to prevent."""
     if not pids:
         return set()
+    # One bash-level SIGTERM wait + one SIGKILL wait per pid, sequential;
+    # size the subprocess bound to the batch instead of a fixed guess so a
+    # legitimately large --all run doesn't get marked all-survivors by an
+    # unrelated timeout.
+    budget = max(60, len(pids) * 2 * (KILL_VERIFY_TIMEOUT_S + KILL_VERIFY_POLL_S) + 20)
     script = kill_verify_script(pids)
     try:
         if ssh_target:
             result = subprocess.run(
                 ["ssh", "-o", "BatchMode=yes", ssh_target, "bash", "-s"],
-                input=script, text=True, capture_output=True, timeout=60,
+                input=script, text=True, capture_output=True, timeout=budget,
             )
         else:
             result = subprocess.run(
-                ["bash", "-c", script], text=True, capture_output=True, timeout=60,
+                ["bash", "-c", script], text=True, capture_output=True, timeout=budget,
             )
     except Exception as e:
         print(f"FATAL kill-verify run failed ({ssh_target or 'local'}): {e} — treating all {len(pids)} pid(s) as unverified survivors", file=sys.stderr)
         return set(pids)
-    if result.returncode not in (0, None):
-        print(f"WARN kill-verify script exited {result.returncode} ({ssh_target or 'local'}): {(result.stderr or '').strip()[:200]}", file=sys.stderr)
+    stdout = result.stdout or ""
+    if result.returncode not in (0, None) or "KILLVERIFY_DONE" not in stdout:
+        print(f"FATAL kill-verify script did not complete cleanly ({ssh_target or 'local'}, rc={result.returncode}): {(result.stderr or '').strip()[:200]} — treating all {len(pids)} pid(s) as unverified survivors", file=sys.stderr)
+        return set(pids)
     survivors = set()
-    for line in (result.stdout or "").splitlines():
+    for line in stdout.splitlines():
         if line.startswith("SURVIVOR "):
             survivors.add(line.split(" ", 1)[1].strip())
     return survivors
@@ -229,8 +244,13 @@ def kill_verify(pids, ssh_target=None):
 oos_kill = [str(pid) for sid, name, hname, pid, sha, alive in targets if hname == "oos-linux" and pid and alive]
 prox_kill = [str(pid) for sid, name, hname, pid, sha, alive in targets if hname == "proxmox" and pid and alive]
 
-oos_survivors = kill_verify(oos_kill)
-prox_survivors = kill_verify(prox_kill, ssh_target=proxmox_ssh)
+# Independent pid sets on independent hosts — run concurrently so the two
+# grace-period waits overlap instead of serializing.
+with ThreadPoolExecutor(max_workers=2) as pool:
+    oos_future = pool.submit(kill_verify, oos_kill)
+    prox_future = pool.submit(kill_verify, prox_kill, ssh_target=proxmox_ssh)
+    oos_survivors = oos_future.result()
+    prox_survivors = prox_future.result()
 
 survivor_sids = set()
 for sid, name, hname, pid, sha, alive in targets:
