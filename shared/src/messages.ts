@@ -733,16 +733,57 @@ export type NotifySummary = {
 /**
  * Match a well-formed `AGENT_NOTIFY_SUMMARY {...}` footer on a single line.
  *
- * Allows an optional *glued* prose prefix on the same line (agents sometimes
- * omit the newline: `Done.AGENT_NOTIFY_SUMMARY {...}`). Whitespace-delimited
- * mentions (`Example: AGENT_NOTIFY_SUMMARY {...}`) are not treated as footers.
- * Scans left-to-right and returns the first token occurrence whose remainder
- * is valid JSON through end of line - so a literal `AGENT_NOTIFY_SUMMARY `
- * inside a JSON string value does not steal the match from the real footer.
+ * Allows glued prose on the same line on EITHER side of the footer, because
+ * agents omit the newline in both directions:
+ *
+ *   Done.AGENT_NOTIFY_SUMMARY {...}              (glued prefix)
+ *   AGENT_NOTIFY_SUMMARY {...}Shell finished.    (glued suffix)
+ *
+ * The suffix case used to fail. The old guard required the trimmed remainder
+ * to END with `}`, so a single missing newline meant no match at all: the
+ * summary was not extracted, the footer was not stripped, and the raw JSON
+ * blob was rendered to the user with prose welded onto it. Agents emit this
+ * shape in practice; the parser has to be tolerant of it rather than the
+ * other way round.
+ *
+ * Whitespace-delimited mentions (`Example: AGENT_NOTIFY_SUMMARY {...}`) are
+ * still not treated as footers. Scans left-to-right and returns the first
+ * token occurrence whose `{` opens a valid JSON object - so a literal
+ * `AGENT_NOTIFY_SUMMARY ` inside a JSON string value does not steal the match.
  */
 type NotifySummaryLineMatch = {
     jsonPart: string
     start: number
+    /** Index just past the footer's closing `}` - prose after this is visible. */
+    endExclusive: number
+}
+
+/**
+ * Index of the `}` closing the object that opens at `braceAt`, or -1.
+ *
+ * String- and escape-aware: a `{` or `}` inside a JSON string value (an agent
+ * summarising "fixed the {foo} handler") must not move the depth counter.
+ */
+function findJsonObjectEnd(line: string, braceAt: number): number {
+    let depth = 0
+    let inString = false
+    let escape = false
+    for (let i = braceAt; i < line.length; i += 1) {
+        const ch = line[i]!
+        if (inString) {
+            if (escape) { escape = false; continue }
+            if (ch === '\\') { escape = true; continue }
+            if (ch === '"') inString = false
+            continue
+        }
+        if (ch === '"') { inString = true; continue }
+        if (ch === '{') depth += 1
+        else if (ch === '}') {
+            depth -= 1
+            if (depth === 0) return i
+        }
+    }
+    return -1
 }
 
 function matchNotifySummaryLine(line: string): NotifySummaryLineMatch | null {
@@ -756,10 +797,20 @@ function matchNotifySummaryLine(line: string): NotifySummaryLineMatch | null {
         // (`Example: AGENT_NOTIFY_SUMMARY ...`).
         const prefix = line.slice(0, idx)
         if (prefix.trim().length > 0 && /\s/.test(line[idx - 1]!)) continue
-        const jsonPart = line.slice(idx + NOTIFY_SUMMARY_PREFIX.length).trim()
-        if (!jsonPart.startsWith('{') || !jsonPart.endsWith('}')) continue
+        // Inline-code example: `AGENT_NOTIFY_SUMMARY {...}` in a sentence.
+        if (idx > 0 && line[idx - 1] === '`') continue
+        const braceAt = line.indexOf('{', idx + NOTIFY_SUMMARY_PREFIX.length)
+        if (braceAt < 0) continue
+        // Only whitespace may sit between the token and the `{`.
+        if (line.slice(idx + NOTIFY_SUMMARY_PREFIX.length, braceAt).trim().length > 0) continue
+        const end = findJsonObjectEnd(line, braceAt)
+        if (end < 0) continue
+        if (line[end + 1] === '`') continue
+        const jsonPart = line.slice(braceAt, end + 1)
         try {
-            if (isObject(JSON.parse(jsonPart))) return { jsonPart, start: idx }
+            if (isObject(JSON.parse(jsonPart))) {
+                return { jsonPart, start: idx, endExclusive: end + 1 }
+            }
         } catch {
             // Try the next occurrence (e.g. token mentioned inside a value).
         }
@@ -847,9 +898,14 @@ export function splitNotifySummary(text: unknown): NotifySummaryDisplay | null {
     const found = findNotifySummary(text)
     if (found === null) return null
 
+    // Prose can be welded to either side of the footer. Strip only the footer
+    // itself and keep both sides visible - dropping the suffix would silently
+    // delete content the agent wrote for the user.
     const prefix = found.line.slice(0, found.match.start).trimEnd()
+    const suffix = found.line.slice(found.match.endExclusive).trim()
+    const remainder = [prefix, suffix].filter((part) => part.length > 0).join(' ')
     const visibleLines = found.lines.slice(0, found.lastIdx)
-    if (prefix.length > 0) visibleLines.push(prefix)
+    if (remainder.length > 0) visibleLines.push(remainder)
 
     return {
         visibleText: visibleLines.join('\n').trimEnd(),

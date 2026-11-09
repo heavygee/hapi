@@ -842,3 +842,56 @@ describe('hasConversationMessageContent', () => {
         expect(hasConversationMessageContent(content)).toBe(false)
     })
 })
+
+describe('AGENT_NOTIFY_SUMMARY footers with prose glued after the JSON', () => {
+    // Reported by an operator 2026-11-09: Happy rendered a session's closing
+    // blob as `...}Dark-mode capture finished cleanly - ...` — the raw JSON
+    // visible to the user, because the trimmed line did not end with `}` so
+    // nothing matched and nothing was stripped. A missing newline must not
+    // defeat the parser.
+    const glued = 'AGENT_NOTIFY_SUMMARY {"version":1,"status":"needs_decision","summary":"Do you want these cuts?"}Dark-mode capture finished cleanly.'
+
+    test('extracts the summary despite trailing prose', () => {
+        const got = extractNotifySummary(glued)
+        expect(got).not.toBeNull()
+        expect(got?.status).toBe('needs_decision')
+        expect(got?.summary).toBe('Do you want these cuts?')
+    })
+
+    test('strips the footer and KEEPS the trailing prose visible', () => {
+        const visible = stripNotifySummaryFooter(glued)
+        expect(visible).toBe('Dark-mode capture finished cleanly.')
+        expect(visible).not.toContain('AGENT_NOTIFY_SUMMARY')
+        expect(visible).not.toContain('needs_decision')
+    })
+
+    test('keeps prose glued on BOTH sides', () => {
+        const both = 'Done.AGENT_NOTIFY_SUMMARY {"status":"done","summary":"s"}And more.'
+        expect(extractNotifySummary(both)?.status).toBe('done')
+        expect(stripNotifySummaryFooter(both)).toBe('Done. And more.')
+    })
+
+    test('is not confused by braces inside a summary string', () => {
+        const braces = 'AGENT_NOTIFY_SUMMARY {"status":"done","summary":"fixed the {foo} handler"}trailing'
+        expect(extractNotifySummary(braces)?.summary).toBe('fixed the {foo} handler')
+        expect(stripNotifySummaryFooter(braces)).toBe('trailing')
+    })
+
+    test('still rejects a prose mention rather than eating the sentence', () => {
+        const mention = 'See the AGENT_NOTIFY_SUMMARY {"status":"done"} docs for details.'
+        expect(extractNotifySummary(mention)).toBeNull()
+        expect(stripNotifySummaryFooter(mention)).toBe(mention)
+    })
+
+    test('still rejects an inline-code example', () => {
+        const code = 'Emit `AGENT_NOTIFY_SUMMARY {"status":"done"}` at the end.'
+        expect(extractNotifySummary(code)).toBeNull()
+        expect(stripNotifySummaryFooter(code)).toBe(code)
+    })
+
+    test('leaves a truncated object unmatched', () => {
+        const broken = 'AGENT_NOTIFY_SUMMARY {"status":"done","summary":"unterminated'
+        expect(extractNotifySummary(broken)).toBeNull()
+        expect(stripNotifySummaryFooter(broken)).toBe(broken)
+    })
+})
