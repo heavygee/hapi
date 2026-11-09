@@ -24,6 +24,11 @@ sessions:
     # 8e339eb83). Ping it with wake=true before inferring role behaviour
     # from prose — docs described the prohibition, it described the practice.
     consult_on_surprise: 028d0a86-262e-4538-a735-92247d17cb5f
+    # Operator 2026-11-09: this seat is swapped periodically. EVERY note from an
+    # outgoing holder gets encoded as POLICY or recorded as PRACTICE in
+    # docs/operator/tooling-meta-role.md before the handover closes. The seat's
+    # knowledge must not live in a session.
+    handbook: docs/operator/tooling-meta-role.md
   pr_watcher:
     name: meta - PR watcher
     id: 1e32daba-7b7e-4955-9264-dde6e78723f3

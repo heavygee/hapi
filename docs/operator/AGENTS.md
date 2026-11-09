@@ -230,6 +230,10 @@ If @tiann narrows or expands scope, revise this section.
 
 PR watcher **may** ping tooling meta-bot outbound (wave-clear unlock, merged-cleanup nudge when a peer failed Gate A). That is PR watcher → tooling meta-bot only. **Reverse pings are forbidden:** feature peers, dogfood peers, and remat escalation must **never** `ping_peer` PR watcher for soup status, remat acks, process feedback, drain updates, or "thanks".
 
+### The seat's own handbook: [`tooling-meta-role.md`](./tooling-meta-role.md)
+
+**This role is swapped periodically.** Standing authority, restart cadence, the wave-clear order, the archive line, and the flavour-coupling audit live in [`tooling-meta-role.md`](./tooling-meta-role.md), marked POLICY vs PRACTICE. Every note from an outgoing holder gets encoded there — the seat's knowledge must not live in a session.
+
 ### After a flavour swap: keep the predecessor as consultant (operator, 2026-11-09)
 
 **Do not hard-archive the superseded husk.** Retitle it `SUPERSEDED …`, leave it reachable, and `ping_peer … wake=true` it whenever role behaviour surprises you. `config/meta-sessions.yaml` records it as `consult_on_surprise:`.
