@@ -1435,14 +1435,14 @@ layers:
   # tooling-only → no build-web required; remat picks it up.
   - branch: chore/claude-orphan-resurrect
 
-  # Dogfood upstream tiann/hapi#2296 (IanMStevenson, OPEN/dirty vs upstream/main
-  # as of 2026-11-06) — every session presence state gets its own badge mark
-  # (working=solid pulse, waiting=ring, stopped=power mark) instead of a badge
-  # only while active. Merged IanMStevenson/hapi@f67e13905 onto upstream 0.34.4;
-  # the only real conflict was the isUnread computation in SessionRowSummary.tsx,
-  # kept HEAD's sessionIsUnread()-based calc alongside Ian's presence taxonomy.
-  # Worktree: ~/coding/hapi/worktrees/2296-presence-badges
-  # Thin tip: driver/2296-presence-badges @ 5baf98fd5
-  # Web-only → remat --build-web; hard-reload (no hub restart).
-  # Tip-unique: PRESENCE_BADGE_CLASS / StoppedBadgeIcon / data-presence
-  - branch: driver/2296-presence-badges
+  # PARKED 2026-11-09: driver/2296-presence-badges (tiann/hapi#2296, IanMStevenson)
+  # does not re-thin onto live soup — SessionRowSummary.tsx's icon-corner presence
+  # badge (data-testid="session-presence") that Ian's PR patches no longer exists
+  # on the soup tip; it was replaced by fork-only opacity-dimming + SessionSpinner +
+  # blocked/issue chips (attachedJob, SessionSpinner, opacity-50: 0 on upstream
+  # 0.34.4, present on soup). Not a mechanical re-thin — a product call on whether
+  # the fork's row redesign upstreams (converging with Ian's taxonomy) or stays a
+  # deliberate fork-only divergence. Escalated to operator via tooling/meta.
+  # Branch left pushed at driver/2296-presence-badges @ 5baf98fd5 (harmless, not
+  # in soup). Worktree: ~/coding/hapi/worktrees/2296-presence-badges
+  # Upstream review of #2296 does not require this layer — proceeds independently.
