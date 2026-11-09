@@ -225,6 +225,14 @@ export type ChatToolCall = {
     startedAt: number | null
     completedAt: number | null
     /**
+     * A result-only command has no observed invocation timestamp (upstream).
+     * NOTE: only the *consumer* is absorbed here (ToolCard reads it). The
+     * producers — reducerTimeline's result-only branch and reconcile's
+     * equality check — are NOT in this tree, so the field is never set and
+     * behaviour is unchanged. Absorb those before relying on it.
+     */
+    startUnavailable?: boolean
+    /**
      * Execution-machine timestamps (from `NormalizedMessage.agentTimestamp`)
      * for the tool_use/tool_result entries, when available. Kept separate
      * from `startedAt`/`completedAt` (rather than replacing them) because the

@@ -266,10 +266,6 @@ export function NewSession(props: {
     }, [agent])
 
     useEffect(() => {
-        savePreferredYoloMode(yoloMode)
-    }, [yoloMode])
-
-    useEffect(() => {
         if (props.initialDirectory !== undefined) {
             setDirectory(props.initialDirectory)
         }
@@ -2273,6 +2269,7 @@ export function NewSession(props: {
                 onYoloToggle={(value) => {
                     editedPermissionRef.current = true
                     setYoloMode(value)
+                    savePreferredYoloMode(value)
                 }}
             />
             <CollaborationModeSelector
