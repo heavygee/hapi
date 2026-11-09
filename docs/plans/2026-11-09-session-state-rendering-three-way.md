@@ -1,142 +1,123 @@
 # Session row state rendering — three-way comparison
 
 **Date:** 2026-11-09
-**Why:** Operator asked for a definitive list of the states a session can be in, and what each
-of the three codebases actually draws for them. Prompted by `tiann/hapi#2296` (IanMStevenson)
-looking like it overlapped fork work when it does not.
+**Why:** Definitive list of the states a session can be in, and what each of three codebases
+draws for them. Prompted by comparing `tiann/hapi#2296` (IanMStevenson) against current
+upstream and the dogfood tree that has been running the attention work.
 
 **Sources read directly (no inference):**
 - Upstream: `tiann/hapi@main` `web/src/components/SessionRowSummary.tsx` (post `832c5922f`, 2026-11-01)
 - Ian: `IanMStevenson/hapi@f67e13905308` same file
-- Fork soup: `ff7e86490` same file
+- Dogfood tip: `ff7e86490` same file
 
 ---
 
-## The axes a session actually varies on
+## Axes a session varies on
 
-1. **Runner presence** — `s.active`. The runner holds the session. *Not* "doing work".
+1. **Runner presence** — `s.active`. The runner holds the session. Not the same as "doing work".
 2. **Agent activity** — `s.thinking` (foreground), `backgroundTaskCount > 0`.
 3. **Needs a human** — `pendingRequestsCount`, `attention.kind` (permission / input / background / unread).
 4. **Lifecycle** — `metadata.lifecycleState === 'archived'`.
-5. **Fork-only work state** — `attachedJob`, `getSessionBlockedState`, `getLinkedGithubIssue`.
+5. **Work / attention chrome** — attached job progress; blocked-with-reason from the last status
+   summary. (Landing via the coordinated attention submission; not a separate taxonomy.)
 
-## The display-mode axis (easy to miss, and it changes every answer below)
+## Session list status mode
 
-`sessionListStatusMode: 'standard' | 'detailed'`, **default `standard`** — Settings → Display →
-"Session list status". Defined in `web/src/hooks/useSessionListStatusMode.ts` and present in
-**both upstream and fork** (not a fork invention). It feeds `showDetailedStatus`, which gates
-parts of the fork's marker slot:
+`sessionListStatusMode: 'standard' | 'detailed'`, default `standard` — Settings → Display →
+"Session list status". Defined in `web/src/hooks/useSessionListStatusMode.ts`. Present on
+upstream. It feeds `showDetailedStatus`, which gates some marker-slot chrome in the dogfood tip:
 
 - `:182` schedule tooltip — gated
 - `:271` background attention indicator — gated
-- `:278` background spinner — **half gated**: `(showDetailedStatus && attention==='background') || (s.active && bgCount>0)`
+- `:278` background spinner — half gated:
+  `(showDetailedStatus && attention==='background') || (s.active && bgCount>0)`
 
-So in the **default** mode a fork user sees *fewer* markers than the table below implies.
-Neither upstream's presence dot nor Ian's badge is mode-gated — both render unconditionally.
-**Consequence: upstream/Ian put liveness in an always-on surface; the fork put parts of it behind
-a setting that defaults to off.** That asymmetry is a big part of why the two designs feel
-incomparable.
+Upstream's presence dot and Ian's badge are not mode-gated; both render in `standard`.
 
 ## What each codebase draws
 
-| State | Condition | Upstream `main` | Ian #2296 | Fork soup `ff7e86490` |
+| State | Condition | Upstream `main` | Ian #2296 | Dogfood tip `ff7e86490` |
 |---|---|---|---|---|
 | Working | `active && thinking` | green dot on icon, pulsing | green dot, pulsing (`working`) | inline spinner, marker slot |
 | Background work | `active && !thinking && bgCount>0` | blue dot, pulsing | blue dot, pulsing (`background`) | blue spinner |
-| Idle / waiting | `active && !thinking && !bgCount` | green dot, **solid** | **hollow ring** (`waiting`) | **nothing rendered** |
-| Not held by runner | `!active` | **no dot**, row normal | **power mark** (`stopped`) | row **`opacity-50`** + muted title |
-| Archived | `lifecycleState==='archived'` | not modelled → reads as `!active` | **folded into `stopped`** by his own comment | not modelled → reads as `!active` |
+| Idle / waiting | `active && !thinking && !bgCount` | green dot, solid | hollow ring (`waiting`) | nothing rendered |
+| Not held by runner | `!active` | no dot, row normal | power mark (`stopped`) | row `opacity-50` + muted title |
+| Archived | `lifecycleState==='archived'` | not modelled → reads as `!active` | folded into `stopped` (per his comment) | not modelled → reads as `!active` |
 | Needs permission/input | pending / urgent attention | request icon | unchanged from upstream | amber pulsing dot + "pending" label |
-| Blocked, with reason | `getSessionBlockedState` | — | — | blocked chip |
-| Running attached job | `attachedJob.status==='running'` | — | — | **exempts row from dimming** |
-| Linked GitHub issue | `getLinkedGithubIssue` | — | — | issue chip |
+| Blocked, with reason | last status summary → blocked | — | — | blocked chip + Blocked section |
+| Running attached job | `attachedJob.status==='running'` | — | — | job label + progress meter (row still dims when `!active`) |
 | Unread | `sessionIsUnread` | semibold title | semibold title (source changed to `attention.kind`) | semibold title + accent time |
+
+Linked GitHub-issue chips are tracked separately and omitted here.
 
 ---
 
 ## Findings
 
-1. **Different surfaces, which is why they collide.** Upstream and Ian both put presence on the
-   **agent icon** as a corner dot. The fork puts activity in a **marker slot** beside the title and
-   uses **row opacity** for not-held. Same concept, three different places in the DOM.
+1. **Different surfaces.** Upstream and Ian put presence on the agent icon as a corner dot. The
+   dogfood tip puts activity in a marker slot beside the title and uses row opacity for not-held.
+   Same concepts, three places in the DOM.
 
-2. **Ian's genuinely new marks are two**, measured against current upstream — not four:
-   - `waiting` → hollow ring, where upstream already draws a solid green dot.
+2. **Ian's new marks vs current upstream are two**, not four:
+   - `waiting` → hollow ring, where upstream draws a solid green dot.
    - `stopped` → power mark, where upstream draws nothing.
-   His `working` and `background` are upstream's existing dot states, unchanged.
+   His `working` and `background` match upstream's existing dot states.
 
-3. **Nobody separates archived from not-held.** Ian's own code comment reads
-   *"power mark = stopped or archived"* — he folds them deliberately. Upstream doesn't model
-   archived in this file. The fork doesn't either: `SessionRowSummary.tsx` and
-   `SessionAttentionIndicator.tsx` contain **zero** references to `lifecycleState`. The fork's dim
-   is driven purely by `!s.active && !attachedJob`.
+3. **Nobody separates archived from not-held.** Ian's comment: *"power mark = stopped or
+   archived"*. Upstream and the dogfood tip do not model `lifecycleState` in this file; dimming
+   follows `!s.active`.
 
-4. **The fork models three things neither upstream nor Ian does:** blocked-with-reason, attached
-   jobs, linked issues. These do not exist in upstream or in our own 0.34.4 base
-   (`attachedJob` 16 hits on soup / 0 on base; `getSessionBlockedState` 2/0; `IssueRefChip` 2/0).
+4. **Blocked-with-reason and attached jobs** appear in the dogfood tip and are the subject of the
+   coordinated upstream submission. They are absent from upstream `main` and from Ian's branch
+   today.
 
-5. **The fork's one liveness signal carries two meanings.** `opacity-50` is gated on
-   `!s.active && !attachedJob`, so a not-held session with a running job renders full-opacity —
-   i.e. "undimmed" means *held by a runner **or** carrying live work*.
+5. **Residency fade means not held.** Live tip dims on `!s.active` only. A running attached job
+   does not keep the row bright; job chrome is its own signal. A job with wake-on-complete brings
+   the session back when the work finishes, so RAM is not held for the idle wait.
 
-## Consequence
+## Change that landed, and the ask
 
-`SessionRowSummary.tsx` now holds two incompatible visual languages for session liveness, and
-upstream is actively changing it (`832c5922f` rewrote it on 2026-11-01). Every future upstream
-touch to this file conflicts for the fork. Nobody currently owns whether these converge.
+`832c5922f` (2026-11-01) removed the row-level residency fade and moved liveness to the icon
+dot. The coordinated submission keeps that activity signal and proposes further changes on the
+same surface: restore residency as a row-level fade, land blocked-with-reason and attached-job
+chrome, and put status summaries to use as the producer for "what does it need from me".
 
-## Is "waiting" just "unread"? — no, but the overlap is the whole argument
+## Waiting is not unread
 
-They are different predicates:
-- `waiting` = `s.active && !thinking && !bgCount` — a runner holds it, nothing is running.
-- `unread` = `sessionIsUnread(...)` — there is activity you have not seen.
+Different predicates:
 
-A session can be waiting-and-read (you looked, nothing new) or waiting-and-unread (the agent
-finished and is holding output for you). **The case that actually matters — an agent finished its
-turn — is both at once**, and unread *already has its own affordance* in all three codebases
-(semibold title; fork adds accent time).
+- `waiting` = `s.active && !thinking && !bgCount` — held by a runner, nothing running.
+- `unread` = `sessionIsUnread(...)` — activity the operator has not seen.
 
-So Ian's `waiting` ring would be a **second mark for a state already signalled**, and it fires on
-the uninteresting half of the overlap too (idle *and* already read). That is an argument against
-the ring specifically, not against his principle.
+A session can be waiting and already read, or waiting and unread. When an agent finishes a turn,
+both are often true at once. Unread already has its own affordance in all three trees (semibold
+title; dogfood tip also accents the time). Ian's `waiting` ring therefore marks a state unread
+already covers for the interesting case, and also fires when the session is idle and already
+read.
 
-## Recommendation (for operator sign-off, not yet acted on)
+## Direction (operator decisions already taken)
 
-1. **Keep the fade, drop the power mark.** Residency is a row-scanning property — at ~30 sessions
-   a faded row reads instantly and a 2.5px glyph on an icon corner does not. We would also be
-   adding a *new* mark for a state the fade already shows. Fade is strictly better here.
-2. **Fade means residency, nothing else.** Fixed on the fork side at
-   `driver/session-row-residency-fade` — a non-resident session with a running attached job now
-   fades, with the job visible through its own chip.
-3. **Don't adopt the `waiting` ring.** Unread already carries the signal that matters, and the
-   ring fires on the read case too.
-4. **Do consider upstream's working/background dot colours** — those are an activity axis, and
-   they sit beside the fade rather than replacing it. Taking them costs nothing.
-5. **The thing worth arguing upstream:** `832c5922f` *removed* the residency fade (it existed
-   before — see `bc543dc49`) and replaced it with a dot. For a multi-session operator that is a
-   regression, and Ian's PR is the downstream symptom of it — he is adding marks back to a dot
-   because the row-level signal went away. The case to upstream is "residency deserves a
-   row-level affordance", not "please take our badge taxonomy".
-6. **Rationalise the display-mode split.** Fork liveness partly sits behind
-   `sessionListStatusMode: detailed` (default off); upstream's does not. Whatever we keep should
-   be always-on, or the signal is invisible to default users.
+1. Keep the fade; do not adopt the power mark. Residency is a whole-list scan property.
+2. Fade means residency only — including when an attached job is running.
+3. Do not adopt the `waiting` ring; unread already carries the useful half of that overlap.
+4. Keep upstream's working/background dot colours as the activity axis beside the fade.
+5. `832c5922f` removed a row-level residency signal that existed before (`bc543dc49`). The ask is
+   to restore a row-level residency affordance, not to import a badge taxonomy.
+6. Prefer always-on activity signalling over chrome that only appears in
+   `sessionListStatusMode: detailed`.
 
-## The point this all serves
+## What this is for
 
-The reason liveness matters here is **outcome**, not activity: when an agent finishes we need to
-know *what it concluded and what it needs next*. That is what the end-of-turn summary and
-next-steps emission feeds, and what lets sessions be surfaced by blocked status and by what they
-say about themselves. Any state taxonomy that does not serve that is decoration.
+Liveness matters for outcome, not for decorating activity: when an agent finishes, the list
+should show what it concluded and what it needs next. End-of-turn status summaries feed that;
+blocked chrome and self-reported next steps are how the list surfaces it.
 
 ---
 
-# Part 2 — the full attention-management surface
+# Part 2 — attention-management surface inventory (operator / soup; not for upstream paste)
 
-**Operator framing (2026-11-09):** *"It's all about attention management."* The session row is not
-three competing badge designs; it is the single place where **residency**, **activity**, and
-**what a session needs from you** all have to land at once. A pile of fork layers are about to be
-dogfooded and upstreamed that each move one of those three, and they have never been reconciled
-against each other or against current upstream. That reconciliation is the point of this document.
+**Framing:** residency, activity, and "what it needs from you" land on one row. Layers below each
+move one of those; they have not all been reconciled against current upstream in one place before.
 
 ## Inventory — soup layers that change how sessions are reported
 
@@ -145,8 +126,8 @@ Extracted from `config/driver-manifest.yaml` on fork main. 19 layers touch this 
 ### A. Residency — "is this taking RAM"
 | Layer | Ref | What it does |
 |---|---|---|
-| `driver/session-row-residency-fade` | fork-only, cites #1424 | Fade = residency, **not** "has attached job". Operator decision 2026-11-09. Not in #1424's diff. |
-| *(upstream)* `832c5922f` | — | **Removed** the residency fade on 2026-11-01, replaced with an icon-corner dot. |
+| `driver/session-row-residency-fade` | cites #1424 | Fade = residency, including when an attached job is running. Operator decision 2026-11-09. Not in #1424's diff. |
+| *(upstream)* `832c5922f` | — | Removed the residency fade on 2026-11-01, replaced with an icon-corner dot. |
 
 ### B. Activity — "what is it doing right now"
 | Layer | Ref | What it does |
@@ -160,7 +141,7 @@ Extracted from `config/driver-manifest.yaml` on fork main. 19 layers touch this 
 ### C. Attention — "what does it need from me, and why"
 | Layer | Ref | What it does |
 |---|---|---|
-| `driver/blocked-list-ux` | **#1717**, #1996 | Blocked section, rail+chip, jump pill — **fed by hub-persisted last `AGENT_NOTIFY_SUMMARY` (`sessions.last_notify_*`)** |
+| `driver/blocked-list-ux` | **#1717**, #1996 | Blocked section, rail+chip, jump pill — fed by hub-persisted last `AGENT_NOTIFY_SUMMARY` (`sessions.last_notify_*`) |
 | `fix/cursor-unexpected-stop-blocked-footer` | #1724 | Auto-Continue once after post-tool interrupt; blocked footer only if that also fails |
 | `driver/211-unexpected-stop-notify` | heavygee#211 | Restores the unexpected-stop blocked wire that later layers overwrite |
 | `driver/cursor-resource-exhausted-blocked` | heavygee#231 | `resource_exhausted` must retry then stamp Blocked, rather than fail silently |
@@ -170,70 +151,55 @@ Extracted from `config/driver-manifest.yaml` on fork main. 19 layers touch this 
 | Layer | Ref | What it does |
 |---|---|---|
 | `soup/1772-combined-list-filters` | **#1772 (open upstream)** | Combined filter menu: unread + scratchlist + date |
-| `driver/1996-consolidate-blocked-filter` | #1996 | Folds the blocked lens into that menu; **removes `BlockedLensToggle`** |
-| *(merged upstream)* | #2292, #2294 | Keep-unread-visible setting; unread-only filter — **both IanMStevenson** |
-| `sessionListStatusMode` | upstream + fork | `standard` \| `detailed`, **default standard** |
+| `driver/1996-consolidate-blocked-filter` | #1996 | Folds the blocked lens into that menu; removes `BlockedLensToggle` |
+| *(merged upstream)* | #2292, #2294 | Keep-unread-visible setting; unread-only filter — both IanMStevenson |
+| `sessionListStatusMode` | upstream | `standard` \| `detailed`, default standard |
 
 ### E. Navigation
 | Layer | Ref | What it does |
 |---|---|---|
 | `driver/1732-session-list-open-tick` | #1732 / #1733 | Scrollbar-gutter tick showing where the open session sits |
 
-### F. Summary emission — the *producer* of the attention signal
+### F. Summary emission — the producer of the attention signal
 | Layer | Ref | Note |
 |---|---|---|
-| `feat/overseer-summary-emit` | fork PR #86/#87 | **Manifest says "fork-only, DO NOT upstream"** — Cursor emits `AGENT_NOTIFY_SUMMARY` via a transient rule overlay |
+| `feat/overseer-summary-emit` | fork PR #86/#87 | Manifest: "fork-only, DO NOT upstream" — Cursor emits `AGENT_NOTIFY_SUMMARY` via a transient rule overlay |
 | `feat/overseer-open-loops` | fork #100 | "What am I forgetting" lens |
 | `feat/overseer-dispositions` | fork #102 | Disposition write path |
 
 ---
 
-## The seams that need deciding
+## Seams that need deciding (operator)
 
-1. **We are about to upstream a consumer of a signal whose producer we keep fork-only.**
-   #1717's blocked chrome reads `sessions.last_notify_*`, persisted from `AGENT_NOTIFY_SUMMARY`.
-   The fork's emission layer (`feat/overseer-summary-emit`) is marked *do not upstream*. Our
-   fleet's Cursor coverage is that layer — **542 / 892** Cursor sessions have `last_notify_*`
-   on the live hub DB — which does **not** prove a vanilla upstream install gets the same.
-   Unmodified upstream may still lack a Cursor system-prompt seam; do not imply otherwise in
-   public copy. **Before PR A ships, establish what upstream populates that field with** — if
-   the answer is "nothing" (or "everything except Cursor"), the feature lands upstream inert
-   for that flavour and we manufactured the trust cost.
+1. **Consumer vs producer.** #1717's blocked chrome reads `sessions.last_notify_*` from
+   `AGENT_NOTIFY_SUMMARY`. `feat/overseer-summary-emit` is marked do-not-upstream and is how
+   this fleet's Cursor sessions populate that field (**542 / 892** Cursor rows on the live hub
+   DB). That does not prove a vanilla upstream install gets the same Cursor coverage. Establish
+   what upstream populates `last_notify_*` with before the blocked chrome lands alone.
 
-2. **Three layers each claim the same residency/activity pixels.** The fade (A), the job progress
-   chrome (B), and upstream's dot all render liveness. Order of landing decides who wins by
-   accident unless we decide deliberately.
+2. **Same pixels, three layers.** Fade (A), job progress (B), and upstream's dot all speak to
+   liveness. Landing order decides the visual unless set deliberately.
 
-3. **`#1996` deletes a control `#1717`'s own issue text describes.** The blocked-lens toggle is
-   gone, folded into the combined menu. Whatever goes upstream must describe the *current* control.
+3. **`#1996` removes a control `#1717`'s issue text still describes.** Upstream copy must match
+   the combined filter menu, not the deleted toggle.
 
-4. **`#1772` is still open upstream** and is the menu that #1996 and #2002 both extend. If #1772
-   does not land, two of our filter layers have no home upstream.
+4. **`#1772` is still open upstream** and is the menu #1996 / #2002 extend.
 
-5. **The display-mode split (§ display-mode axis) hides part of our activity signalling by
-   default.** Anything we upstream should be always-on or it is invisible to default users.
+5. **`sessionListStatusMode: detailed` defaults off.** Activity chrome gated on it is invisible
+   to default users.
 
-6. **Four separate layers exist only to make "blocked" fire correctly** (#1724, #211, #231, plus
-   the hub blocker sources in PR B). That is not UI polish — it says the *producer* side is where
-   the real fragility is. An upstream submission that ships the chrome without that plumbing will
-   look good and work badly.
+6. **Four layers exist only to make "blocked" fire** (#1724, #211, #231, plus hub blocker
+   sources). Producer plumbing is the fragile part; chrome without it looks good and works badly.
 
-## Sequencing recommendation
+## Sequencing
 
-1. **#1424** (attached jobs) — Ready YES, waiting on @tiann. Lands the activity/job axis first.
-2. **#1717 PR A** (blocked chrome) + standalone Cursor retry fix in parallel — resolve seam 1 first.
-3. **PR B** (hub blocker sources) once A merges.
-4. **Residency fade** — fork-side now; upstream only as the argument in seam 7 below.
-5. **#1772 → #1996 → #2002** filter chain, in that order, gated on #1772 landing.
-
-7. **The upstream argument worth making, once the above is coherent:** `832c5922f` removed a
-   row-level residency signal that existed before it. For an operator running ~30 concurrent
-   sessions that is a regression, and #2296 is the visible symptom — a contributor adding marks
-   back onto a dot because the row-level signal went away. The ask is "residency deserves a
-   row-level affordance", supported by the attention-management case above.
+1. **#1424** (attached jobs) — already open.
+2. **#1717** blocked chrome + Cursor retry fix — resolve seam 1 first.
+3. Hub blocker sources once blocked chrome merges.
+4. Residency fade as the row-level ask beside the existing dot.
+5. **#1772 → #1996 → #2002** filter chain, gated on #1772.
 
 ## Not decided here
 
-Whether to raise this upstream and in what form; seam 1 (who populates `last_notify_*` upstream);
-and whether the fork converges with upstream on `SessionRowSummary.tsx` or accepts permanent
-divergence.
+Whether / when to paste Part 1 upstream; seam 1 (who populates `last_notify_*` on stock
+upstream); exact PR split for residency vs blocked vs jobs.
