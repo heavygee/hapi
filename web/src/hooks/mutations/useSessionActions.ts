@@ -8,6 +8,7 @@ import { clearMessageWindow } from '@/lib/message-window-store'
 import { isKnownFlavor } from '@hapi/protocol'
 
 export const sessionModelMutationKey = (sessionId: string) => ['session-model', sessionId] as const
+export const sessionArchiveMutationKey = (sessionId: string) => ['session-archive', sessionId] as const
 
 export function useSessionActions(
     api: ApiClient | null,
@@ -91,6 +92,7 @@ export function useSessionActions(
     })
 
     const archiveMutation = useMutation({
+        mutationKey: sessionArchiveMutationKey(sessionId ?? ''),
         mutationFn: async () => {
             if (!api || !sessionId) {
                 throw new Error('Session unavailable')

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { toSessionSummary, type Session } from '@hapi/protocol'
 import type { SessionSummary } from '@/types/api'
+import { sessionIsUnread } from '@/lib/sessionAttention'
 import {
     computeOpenSessionTickRatio,
     deduplicateSessionsByAgentId,
@@ -743,6 +744,7 @@ describe('filterUnreadSessionsOnly', () => {
     })
 })
 
+
 describe('filterScratchlistSessionsOnly', () => {
     it('keeps sessions with scratchlist entries and drops empty sessions', () => {
         const sessions = [
@@ -764,7 +766,6 @@ describe('filterScratchlistSessionsOnly', () => {
             .toEqual(['with-draft', 'selected-quiet'])
     })
 })
-
 describe('getNextSessionVisibleCount', () => {
     it('reveals one batch of step size per call', () => {
         expect(getNextSessionVisibleCount(8, 8, 20)).toBe(16)

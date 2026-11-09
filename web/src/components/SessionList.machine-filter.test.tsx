@@ -18,6 +18,9 @@ function parentHasMdHidden(button: HTMLElement): boolean {
 }
 
 afterEach(() => cleanup())
+// useSessionListView persists to real localStorage; without this, a prior
+// test's unread/status/sort choice leaks into the next test in this file.
+beforeEach(() => window.localStorage.clear())
 
 function makeSession(overrides: Partial<SessionSummary> & { id: string }): SessionSummary {
     return {
@@ -115,10 +118,9 @@ describe('SessionList machine filter', () => {
         renderSessionList(multiMachineSessions)
 
         expect(screen.getByRole('group', { name: 'Filter by machine' })).toBeTruthy()
-        // Mobile (below md) counterpart: the session and machine filters share
-        // one compact filter icon and menu.
-        const filterButtons = screen.getAllByRole('button', { name: 'Filter sessions' })
-        expect(filterButtons.some((button) => parentHasMdHidden(button))).toBe(true)
+        // One unified Sort-and-filter menu handles session + machine options at
+        // every viewport now; no separate mobile-only combined menu.
+        expect(screen.getByRole('button', { name: 'Sort and filter' })).toBeTruthy()
         expect(screen.getByRole('button', { name: /All \(2\)/ })).toBeTruthy()
         expect(screen.getByText('work/hapi · Mint')).toBeTruthy()
         expect(screen.getByText('work/docs · Teemo')).toBeTruthy()
@@ -168,28 +170,14 @@ describe('SessionList machine filter', () => {
         expect(screen.queryByTitle('/work/docs')).toBeNull()
     })
 
-    it('combines session and machine options in the mobile filter menu', () => {
+    it('combines session and machine options in the one unified filter menu', () => {
         renderSessionList(multiMachineSessions)
 
-        const mobileTrigger = screen.getAllByRole('button', { name: 'Filter sessions' })
-            .find((button) => parentHasMdHidden(button))
-        expect(mobileTrigger).toBeTruthy()
-        fireEvent.click(mobileTrigger!)
+        fireEvent.click(screen.getByRole('button', { name: 'Sort and filter' }))
 
-        const menu = screen.getByRole('menu', { name: 'Filter sessions' })
-        expect(within(menu).getByRole('group', { name: 'Session' })).toBeTruthy()
+        const menu = screen.getByRole('menu', { name: 'Sort and filter' })
+        expect(within(menu).getByRole('group', { name: 'Show' })).toBeTruthy()
         expect(within(menu).getByRole('group', { name: 'Filter by machine' })).toBeTruthy()
-        expect(Array.from(menu.querySelectorAll('[role="menuitemradio"], [role="menuitemcheckbox"], [role="menuitem"]')).map((item) => item.textContent?.replace(/\s+/g, ''))).toEqual([
-            'Unread',
-            'Date',
-            'Active',
-            'Working',
-            'Scratchlist',
-            'Blocked',
-            'All(2)',
-            'Mint(1)',
-            'Teemo(1)'
-        ])
         expect(within(menu).getByRole('menuitemradio', { name: /All \(2\)/ })).toBeTruthy()
         expect(within(menu).getByRole('menuitemradio', { name: /Mint \(1\)/ })).toBeTruthy()
         expect(within(menu).getByRole('menuitemradio', { name: /Teemo \(1\)/ })).toBeTruthy()
@@ -202,20 +190,23 @@ describe('SessionList session filter menu', () => {
             makeSession({ id: 'session-1', metadata: { path: '/work/hapi', name: 'Session one' } })
         ])
 
-        fireEvent.click(screen.getByRole('button', { name: 'Filter sessions' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Sort and filter' }))
 
-        const menu = screen.getByRole('menu', { name: 'Filter sessions' })
+        const menu = screen.getByRole('menu', { name: 'Sort and filter' })
         expect(Array.from(menu.querySelectorAll('[role="menuitemradio"], [role="menuitemcheckbox"], [role="menuitem"]')).map((item) => item.textContent)).toEqual([
-            'Unread',
-            'Date',
-            'Active',
-            'Working',
-            'Scratchlist',
-            'Blocked'
+            'Last message',
+            'Date created',
+            'Active first',
+            'All sessions',
+            'Active only',
+            'Archived only',
+            'Unread only',
+            'Updated date',
+            'With drafts only'
         ])
 
         fireEvent.click(screen.getByRole('button', { name: 'Close' }))
-        expect(screen.queryByRole('menu', { name: 'Filter sessions' })).toBeNull()
+        expect(screen.queryByRole('menu', { name: 'Sort and filter' })).toBeNull()
     })
 
     it('opens the existing date picker from the unified filter menu', () => {
@@ -223,14 +214,14 @@ describe('SessionList session filter menu', () => {
             makeSession({ id: 'session-1', metadata: { path: '/work/hapi', name: 'Session one' } })
         ])
 
-        expect(screen.queryByRole('button', { name: 'Filter sessions by last activity' })).toBeNull()
-        fireEvent.click(screen.getByRole('button', { name: 'Filter sessions' }))
+        expect(screen.queryByRole('button', { name: 'Filter sessions by update date' })).toBeNull()
+        fireEvent.click(screen.getByRole('button', { name: 'Sort and filter' }))
 
-        const menu = screen.getByRole('menu', { name: 'Filter sessions' })
-        fireEvent.click(within(menu).getByRole('menuitemcheckbox', { name: 'Date' }))
+        const menu = screen.getByRole('menu', { name: 'Sort and filter' })
+        fireEvent.click(within(menu).getByRole('menuitem', { name: 'Updated date' }))
 
-        expect(screen.getByRole('menu', { name: 'Filter sessions' })).toBeTruthy()
-        expect(screen.getByRole('dialog', { name: 'Filter sessions by last activity' })).toBeTruthy()
+        expect(screen.getByRole('menu', { name: 'Sort and filter' })).toBeTruthy()
+        expect(screen.getByRole('dialog', { name: 'Filter sessions by update date' })).toBeTruthy()
     })
 
     it('filters by scratchlist session ids using one batch request', async () => {
@@ -244,8 +235,8 @@ describe('SessionList session filter menu', () => {
             makeSession({ id: 'session-without-draft', metadata: { path: '/work/empty', name: 'Empty session' } })
         ], api)
 
-        fireEvent.click(screen.getByRole('button', { name: 'Filter sessions' }))
-        fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Scratchlist' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Sort and filter' }))
+        fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'With drafts only' }))
 
         await waitFor(() => expect(getScratchlistSessionIds).toHaveBeenCalledTimes(1))
         await waitFor(() => {
@@ -269,10 +260,10 @@ describe('SessionList session filter menu', () => {
             makeSession({ id: 'plain-unread', updatedAt: 500, metadata: { path: '/work/plain-unread', name: 'Plain unread' } })
         ], api)
 
-        fireEvent.click(screen.getByRole('button', { name: 'Filter sessions' }))
-        fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Unread' }))
-        expect(screen.getByRole('menu', { name: 'Filter sessions' })).toBeTruthy()
-        fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Scratchlist' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Sort and filter' }))
+        fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Unread only' }))
+        expect(screen.getByRole('menu', { name: 'Sort and filter' })).toBeTruthy()
+        fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'With drafts only' }))
 
         await waitFor(() => expect(getScratchlistSessionIds).toHaveBeenCalledTimes(1))
         await waitFor(() => {
@@ -290,8 +281,8 @@ describe('SessionList session filter menu', () => {
             makeSession({ id: 'session-seen', updatedAt: 500, metadata: { path: '/work/seen', name: 'Seen session' } })
         ])
 
-        fireEvent.click(screen.getByRole('button', { name: 'Filter sessions' }))
-        fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Unread' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Sort and filter' }))
+        fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Unread only' }))
 
         expect(screen.getByTitle('/work/unread')).toBeTruthy()
         expect(screen.queryByTitle('/work/seen')).toBeNull()
@@ -319,8 +310,8 @@ describe('SessionList session filter menu', () => {
             })
         ])
 
-        fireEvent.click(screen.getByRole('button', { name: 'Filter sessions' }))
-        fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Unread' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Sort and filter' }))
+        fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Unread only' }))
         fireEvent.click(screen.getByRole('button', { name: SEARCH_LABEL }))
         fireEvent.change(screen.getByPlaceholderText(SEARCH_PLACEHOLDER), { target: { value: 'Home' } })
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
     Dialog,
     DialogContent,
@@ -20,6 +20,11 @@ type ConfirmDialogProps = {
     isPending: boolean
     destructive?: boolean
     centerTitle?: boolean
+    isConfirmDisabled?: boolean
+    /** Lets Cancel/overlay dismiss the dialog while onConfirm is still pending. */
+    allowDismissWhilePending?: boolean
+    /** A later onConfirm rejection after a dismiss-while-pending close reports here instead of the (already closed) inline error. */
+    onBackgroundError?: (message: string) => void
 }
 
 export function ConfirmDialog(props: ConfirmDialogProps) {
@@ -34,17 +39,29 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
         onConfirm,
         isPending,
         destructive = false,
-        centerTitle = false
+        centerTitle = false,
+        isConfirmDisabled = false,
+        allowDismissWhilePending = false,
+        onBackgroundError
     } = props
 
     const [error, setError] = useState<string | null>(null)
+    const dismissedWhilePendingRef = useRef(false)
 
     // Clear error when dialog opens/closes
     useEffect(() => {
         if (isOpen) {
             setError(null)
+            dismissedWhilePendingRef.current = false
         }
     }, [isOpen])
+
+    const handleClose = () => {
+        if (isPending && allowDismissWhilePending) {
+            dismissedWhilePendingRef.current = true
+        }
+        onClose()
+    }
 
     const handleConfirm = async () => {
         setError(null)
@@ -56,12 +73,16 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
                 err instanceof Error && err.message
                     ? err.message
                     : t('dialog.error.default')
-            setError(message)
+            if (dismissedWhilePendingRef.current) {
+                onBackgroundError?.(message)
+            } else {
+                setError(message)
+            }
         }
     }
 
     return (
-        <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+        <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}>
             <DialogContent className="max-w-sm">
                 <DialogHeader className={centerTitle ? 'pr-0' : undefined}>
                     <DialogTitle
@@ -86,16 +107,16 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
                     <Button
                         type="button"
                         variant="secondary"
-                        onClick={onClose}
-                        disabled={isPending}
+                        onClick={handleClose}
+                        disabled={isPending && !allowDismissWhilePending}
                     >
-                        {t('button.cancel')}
+                        {isPending && allowDismissWhilePending ? t('button.close') : t('button.cancel')}
                     </Button>
                     <Button
                         type="button"
                         variant={destructive ? 'destructive' : 'secondary'}
                         onClick={handleConfirm}
-                        disabled={isPending}
+                        disabled={isPending || isConfirmDisabled}
                     >
                         {isPending ? confirmingLabel : confirmLabel}
                     </Button>
