@@ -5,9 +5,14 @@
 # hold the old CLAUDE_CODE_OAUTH_TOKEN until respawned. This is the mechanical
 # reopen step that hapi-claude-session-assess flags with "NEEDS REOPEN".
 #
+# Reopen alone does NOT resume agents — they sit idle until a continue wake.
+# Default: after reopen, run hapi-claude-continue-fleet (continue-only pings).
+# Use --no-continue to skip the wake (auth-only cutover).
+#
 # Usage:
-#   hapi-claude-reopen-mismatch           # only drifted / dead-pid rows
-#   hapi-claude-reopen-mismatch --all     # every API-active Claude session
+#   hapi-claude-reopen-mismatch              # drifted/dead + continue wake
+#   hapi-claude-reopen-mismatch --all        # every API-active Claude session
+#   hapi-claude-reopen-mismatch --no-continue
 #   hapi-claude-reopen-mismatch --dry-run
 
 set -euo pipefail
@@ -19,12 +24,15 @@ source "$SCRIPT_DIR/lib/hapi-claude-slots.sh"
 
 DRY=0
 ALL=0
+DO_CONTINUE=1
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run) DRY=1; shift ;;
         --all) ALL=1; shift ;;
+        --no-continue) DO_CONTINUE=0; shift ;;
+        --continue) DO_CONTINUE=1; shift ;;
         -h|--help)
-            sed -n '2,/^set -euo/p' "$0" | sed 's/^# \?//' | head -18
+            sed -n '2,/^set -euo/p' "$0" | sed 's/^# \?//' | head -22
             exit 0
             ;;
         *) echo "unknown arg: $1" >&2; exit 2 ;;
@@ -35,6 +43,7 @@ ACTIVE="$(hapi_claude_active_slot)" || { echo "no active slot" >&2; exit 2; }
 WANT="$(hapi_claude_slot_sha12 "$ACTIVE")" || exit 2
 echo "active=$ACTIVE want_sha12=$WANT"
 
+set +e
 python3 - "$DRY" "$ALL" "$HAPI_HOST" "$HAPI_PROXMOX_SSH" "$WANT" "$SCRIPT_DIR/lib" <<'PY'
 import hashlib, json, os, subprocess, sys, time, urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -293,3 +302,12 @@ for sid in archived:
 print(f"== reopen-mismatch ok={ok} fail={fail} survivors={len(survivor_sids)} ==")
 sys.exit(1 if fail else 0)
 PY
+reopen_rc=$?
+set -e
+
+if [[ "$DRY" -eq 0 && "$DO_CONTINUE" -eq 1 ]]; then
+    echo "-- continue wake (hapi-claude-continue-fleet) --"
+    bash "$SCRIPT_DIR/hapi-claude-continue-fleet.sh" || true
+fi
+
+exit "$reopen_rc"
