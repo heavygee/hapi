@@ -123,6 +123,7 @@ export default {
   'sessions.view.status.active': '活跃',
   'sessions.view.status.archived': '归档',
   'sessions.view.unreadOnly': '未读',
+  'sessions.view.blocked': '已阻塞',
   'sessions.view.reset': '恢复默认',
   'sessions.kitchenStatus.label': '厨房卫生需要注意',
   'sessions.blockedSection': '已阻塞',

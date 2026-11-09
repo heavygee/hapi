@@ -2361,9 +2361,10 @@ export function SessionList(props: {
     const { showActiveSessionsOnly, setShowActiveSessionsOnly } = useShowActiveSessionsOnly()
     const lastSeenVersion = useSessionLastSeenVersion()
     // Transient session-list lenses (unread lives in the upstream view store;
-    // scratchlist is ephemeral — not a Settings preference, cleared on reload,
-    // same as today).
+    // scratchlist / blocked are ephemeral — not Settings preferences, cleared
+    // on reload, same as today).
     const [showScratchlistOnly, setShowScratchlistOnly] = useState(false)
+    const [showBlockedOnly, setShowBlockedOnly] = useState(false)
     const {
         sessionIds: scratchlistSessionIds,
         isLoading: isScratchlistStatusLoading,
@@ -2472,6 +2473,7 @@ export function SessionList(props: {
     const isFiltering = isSearchFiltering
         || listView.unreadOnly
         || showScratchlistOnly
+        || showBlockedOnly
 
     const resolveMachineLabel = (machineId: string | null): string => {
         if (machineId && machineLabelsById[machineId]) {
@@ -2714,6 +2716,15 @@ export function SessionList(props: {
                 scratchlistSessionIds
             )
         }
+        // Blocked is AND-composed with unread/scratchlist (#1996): "you have not
+        // looked at this" and "it stopped and needs you" remain different
+        // questions — a blocked session you already read is still blocked.
+        if (showBlockedOnly) {
+            const now = Date.now()
+            filtered = filtered.filter(session =>
+                session.id === selectedSessionId || sessionIsBlocked(session, { now })
+            )
+        }
         return filtered
     }, [
         isScratchlistStatusLoading,
@@ -2722,6 +2733,7 @@ export function SessionList(props: {
         scratchlistStatusError,
         selectedSessionId,
         showScratchlistOnly,
+        showBlockedOnly,
         listView.unreadOnly,
         visibleSessions
     ])
@@ -2867,15 +2879,21 @@ export function SessionList(props: {
         [machineFilteredSessions, fixedSessionOrder]
     )
     const actionOnlyGroups = useMemo(() => {
-        // Needed when the Blocked section (not the in-progress pin) is what
-        // emptied a directory, or the project's copy-path / new-session
-        // actions would vanish with its last row.
+        // Under the blocked lens the operator asked for blocked rows and
+        // nothing else; every directory would otherwise contribute a bare
+        // action-only header, which is exactly the noise the lens removes.
+        if (showBlockedOnly) {
+            return []
+        }
+        // Otherwise also needed when the Blocked section (not the in-progress
+        // pin) is what emptied a directory, or the project's copy-path /
+        // new-session actions would vanish with its last row.
         if (pinInProgressMode === 'off' && blockedSectionIds.size === 0) {
             return []
         }
         const visibleKeys = new Set(groups.map((group) => group.key))
         return allDirectoryGroups.filter((group) => !visibleKeys.has(group.key))
-    }, [groups, allDirectoryGroups, pinInProgressMode, blockedSectionIds])
+    }, [groups, allDirectoryGroups, pinInProgressMode, blockedSectionIds, showBlockedOnly])
     const [collapseOverrides, setCollapseOverrides] = useState<Map<string, boolean>>(
         () => new Map()
     )
@@ -3533,6 +3551,7 @@ export function SessionList(props: {
             setMachineFilter(null)
             setListView(DEFAULT_SESSION_LIST_VIEW)
             setShowScratchlistOnly(false)
+            setShowBlockedOnly(false)
             // Active-only is a persisted preference rather than a transient
             // lens, but it narrows just the same, and the pill's contract is
             // "this row exists and I will take you to it".
@@ -3737,12 +3756,15 @@ export function SessionList(props: {
                                             onReset={() => {
                                                 setListView(DEFAULT_SESSION_LIST_VIEW)
                                                 setShowScratchlistOnly(false)
+                                                setShowBlockedOnly(false)
                                                 setCustomStart('')
                                                 setCustomEnd('')
                                                 setMachineFilter(null)
                                             }}
                                             scratchlistOnly={showScratchlistOnly}
                                             onScratchlistChange={setShowScratchlistOnly}
+                                            blockedOnly={showBlockedOnly}
+                                            onBlockedChange={setShowBlockedOnly}
                                             customStart={customStart}
                                             customEnd={customEnd}
                                             sessionActivityDates={sessionActivityDates}
