@@ -947,7 +947,12 @@ layers:
   # Union needed: soup claimed v26-v29, so this tip renumbers the two
   # migrations to v28->v29 (last_notify_*) and v29->v30 (blocked_ack_*), and
   # resolves SessionList against pinInProgressMode / setExternalRefs.
-  # Worktree: /work/coding/hapi/worktrees/blocked-list-ux-soup
+  # Dogfooded live on :3006 2026-11-09 (heavygee/hapi peer e8da381e): section,
+  # rail+chip, header jump pill, and right-click Mark-unblocked-with-reason all
+  # work as designed. The standalone blocked-only lens toggle this comment
+  # originally described no longer exists — #1996 folded it into the combined
+  # session-list-filter-menu (data-testid="session-list-filter-blocked").
+  # Worktree: /work/coding/hapi/worktrees/blocked-list-ux-worktrees/0829-756b
   # Tip: bcfe1cadf
   - branch: driver/blocked-list-ux
 
