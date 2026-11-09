@@ -26,8 +26,12 @@ Environment=HAPI_SETTINGS=/home/heavygee/.hapi/settings.json
 Environment=NO_COLOR=1
 Environment=CLICOLOR=0
 Environment=HAPI_GH_TIMEOUT_SECS=30
+# Gate A drop detection: live recipe mirror, not a dirty off-main primary checkout
+# (#2034 ouroboros 2026-10-15). Overridable via meta-daily.env.
+Environment=HAPI_META_MANIFEST=/home/heavygee/.config/hapi/driver-manifest.yaml
 # Optional overrides (~/.hapi/meta-daily.env): HAPI_META_SESSION_ID (ping SOURCE
-# UUID), HAPI_META_TOOLING_SESSION_ID (wave-clear TARGET), collect fuse.
+# UUID), HAPI_META_TOOLING_SESSION_ID (wave-clear TARGET), collect fuse,
+# HAPI_META_MANIFEST.
 EnvironmentFile=-/home/heavygee/.hapi/meta-daily.env
 WorkingDirectory=/home/heavygee/coding/hapi
 ExecStartPre=/usr/bin/mkdir -p /home/heavygee/.local/state/hapi

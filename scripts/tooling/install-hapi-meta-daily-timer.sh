@@ -18,6 +18,7 @@
 #   HAPI_META_SESSION_NAME='meta - PR watcher'
 #   HAPI_META_TOOLING_SESSION_ID=<sid>   # wave-clear unlock ping TARGET
 #   HAPI_META_WAVE_COLLECT_SECS=1800     # inbox collect fuse (default 30m)
+#   HAPI_META_MANIFEST=<path>            # Gate A recipe (unit default: ~/.config/…)
 #
 # Usage:
 #   sudo bash scripts/tooling/install-hapi-meta-daily-timer.sh
@@ -99,6 +100,7 @@ echo "  journalctl -u hapi-meta-daily -n 50 --no-pager"
 echo
 echo "Optional env overrides: /home/heavygee/.hapi/meta-daily.env"
 echo "  HAPI_META_TOOLING_SESSION_ID=…   # required for wave-clear unlock ping"
+echo "  HAPI_META_MANIFEST=…             # Gate A recipe (default ~/.config mirror)"
 echo "Disable: sudo bash $0 --disable"
 
 if [[ "$DO_RUN_NOW" -eq 1 ]]; then

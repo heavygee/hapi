@@ -24,6 +24,8 @@ Environment=HAPI_SETTINGS=/home/heavygee/.hapi/settings.json
 Environment=NO_COLOR=1
 Environment=CLICOLOR=0
 Environment=HAPI_GH_TIMEOUT_SECS=30
+# Gate A drop detection: live recipe mirror (see hapi-meta-daily.service).
+Environment=HAPI_META_MANIFEST=/home/heavygee/.config/hapi/driver-manifest.yaml
 EnvironmentFile=-/home/heavygee/.hapi/meta-daily.env
 WorkingDirectory=/home/heavygee/coding/hapi
 ExecStartPre=/usr/bin/mkdir -p /home/heavygee/.local/state/hapi
