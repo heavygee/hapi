@@ -36,7 +36,7 @@ WANT="$(hapi_claude_slot_sha12 "$ACTIVE")" || exit 2
 echo "active=$ACTIVE want_sha12=$WANT"
 
 python3 - "$DRY" "$ALL" "$HAPI_HOST" "$HAPI_PROXMOX_SSH" "$WANT" "$SCRIPT_DIR/lib" <<'PY'
-import hashlib, json, os, signal, subprocess, sys, time, urllib.request
+import hashlib, json, os, subprocess, sys, time, urllib.request
 
 dry, do_all = sys.argv[1] == "1", sys.argv[2] == "1"
 host, proxmox_ssh, want = sys.argv[3], sys.argv[4], sys.argv[5]
@@ -155,57 +155,35 @@ if dry:
     sys.exit(0)
 
 # kill — verify, do not assume. `kill`/SIGKILL returning means the signal was
-# delivered, never that the process died. Poll /proc/<pid> until gone or a
-# bounded timeout; anything still alive at the timeout is a confirmed survivor
-# and must NOT proceed to archive+reopen (that's exactly how you get two
-# agents bound to one session id).
+# delivered, never that the process died. One authored algorithm
+# (lib/hapi-kill-verify.sh: SIGTERM -> poll -> SIGKILL -> poll -> report),
+# serialized via `declare -f` and run for REAL on both hosts — locally via
+# `bash -c` for oos-linux, over SSH for proxmox — so there is exactly one
+# copy of the grace-period/escalation logic, not a hand-duplicated Python
+# twin that can silently drift from it.
 KILL_VERIFY_TIMEOUT_S = float(os.environ.get("HAPI_KILL_VERIFY_TIMEOUT_S", "5"))
 KILL_VERIFY_POLL_S = float(os.environ.get("HAPI_KILL_VERIFY_POLL_S", "0.2"))
 
-def wait_for_death(is_alive_fn, timeout=KILL_VERIFY_TIMEOUT_S, poll=KILL_VERIFY_POLL_S):
-    """Poll is_alive_fn() until it reports False or timeout elapses.
-    Returns True iff confirmed dead within the bound — never assumed."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if not is_alive_fn():
-            return True
-        time.sleep(poll)
-    return not is_alive_fn()
+lib_load = subprocess.run(
+    ["bash", "-c", f"source {LIB_DIR}/hapi-kill-verify.sh && declare -f hapi_kill_verify_wait_dead"],
+    capture_output=True, text=True,
+)
+if lib_load.returncode != 0 or not lib_load.stdout.strip():
+    print(f"FATAL: cannot load {LIB_DIR}/hapi-kill-verify.sh: {lib_load.stderr.strip()}", file=sys.stderr)
+    sys.exit(2)
+KILL_VERIFY_LIB_SRC = lib_load.stdout
 
-def oos_pid_alive(pid):
-    return os.path.exists(f"/proc/{pid}")
-
-for sid, name, hname, pid, sha, alive in targets:
-    if not pid or not alive:
-        continue
-    if hname == "oos-linux":
-        try:
-            os.kill(int(pid), signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-
-prox_kill = [str(pid) for sid, name, hname, pid, sha, alive in targets if hname == "proxmox" and pid and alive]
-prox_survivors = set()
-if prox_kill:
-    open("/tmp/hapi-claude-prox-kill.pids", "w").write("\n".join(prox_kill) + "\n")
-    subprocess.check_call(["scp", "-o", "BatchMode=yes", "/tmp/hapi-claude-prox-kill.pids", f"{proxmox_ssh}:/tmp/hapi-claude-prox-kill.pids"])
-    # Serialize the lib's wait_dead function into the SSH payload (one
-    # authored copy, not a second hand-maintained inline duplicate) and do
-    # the remote side's own verify-don't-assume: SIGTERM, poll, SIGKILL,
-    # poll again, then REPORT (not assume) which pids are still alive.
-    lib_src = subprocess.run(
-        ["bash", "-c", f"source {LIB_DIR}/hapi-kill-verify.sh && declare -f hapi_kill_verify_wait_dead"],
-        capture_output=True, text=True, check=True,
-    ).stdout
-    remote_result = subprocess.run(
-        ["ssh", "-o", "BatchMode=yes", proxmox_ssh, "bash", "-s"],
-        input=f"""
+def kill_verify_script(pids):
+    pid_block = "\n".join(pids)
+    return f"""
 set -u
-{lib_src}
+{KILL_VERIFY_LIB_SRC}
 while read -r pid; do
   [ -z "$pid" ] && continue
   if [ -d "/proc/$pid" ]; then kill -TERM "$pid" 2>/dev/null || true; fi
-done < /tmp/hapi-claude-prox-kill.pids
+done <<'PIDLIST'
+{pid_block}
+PIDLIST
 while read -r pid; do
   [ -z "$pid" ] && continue
   if ! hapi_kill_verify_wait_dead "$pid" {KILL_VERIFY_TIMEOUT_S} {KILL_VERIFY_POLL_S}; then
@@ -214,27 +192,45 @@ while read -r pid; do
       echo "SURVIVOR $pid"
     fi
   fi
-done < /tmp/hapi-claude-prox-kill.pids
-rm -f /tmp/hapi-claude-prox-kill.pids
-""",
-        text=True, capture_output=True, timeout=60,
-    )
-    for line in (remote_result.stdout or "").splitlines():
-        if line.startswith("SURVIVOR "):
-            prox_survivors.add(line.split(" ", 1)[1].strip())
+done <<'PIDLIST'
+{pid_block}
+PIDLIST
+"""
 
-oos_survivors = set()
-for sid, name, hname, pid, sha, alive in targets:
-    if hname == "oos-linux" and pid and alive:
-        pid = int(pid)
-        if not oos_pid_alive(pid):
-            continue
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            continue
-        if not wait_for_death(lambda p=pid: oos_pid_alive(p)):
-            oos_survivors.add(str(pid))
+def kill_verify(pids, ssh_target=None):
+    """Run the shared kill-verify algorithm for real (local bash or over SSH).
+    On ANY failure to even run the check (crashed ssh, missing bash, timeout),
+    treat every requested pid as an unverified survivor — fail closed, never
+    silently skip verification and proceed to archive+reopen anyway."""
+    if not pids:
+        return set()
+    script = kill_verify_script(pids)
+    try:
+        if ssh_target:
+            result = subprocess.run(
+                ["ssh", "-o", "BatchMode=yes", ssh_target, "bash", "-s"],
+                input=script, text=True, capture_output=True, timeout=60,
+            )
+        else:
+            result = subprocess.run(
+                ["bash", "-c", script], text=True, capture_output=True, timeout=60,
+            )
+    except Exception as e:
+        print(f"FATAL kill-verify run failed ({ssh_target or 'local'}): {e} — treating all {len(pids)} pid(s) as unverified survivors", file=sys.stderr)
+        return set(pids)
+    if result.returncode not in (0, None):
+        print(f"WARN kill-verify script exited {result.returncode} ({ssh_target or 'local'}): {(result.stderr or '').strip()[:200]}", file=sys.stderr)
+    survivors = set()
+    for line in (result.stdout or "").splitlines():
+        if line.startswith("SURVIVOR "):
+            survivors.add(line.split(" ", 1)[1].strip())
+    return survivors
+
+oos_kill = [str(pid) for sid, name, hname, pid, sha, alive in targets if hname == "oos-linux" and pid and alive]
+prox_kill = [str(pid) for sid, name, hname, pid, sha, alive in targets if hname == "proxmox" and pid and alive]
+
+oos_survivors = kill_verify(oos_kill)
+prox_survivors = kill_verify(prox_kill, ssh_target=proxmox_ssh)
 
 survivor_sids = set()
 for sid, name, hname, pid, sha, alive in targets:
