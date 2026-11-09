@@ -1044,7 +1044,25 @@ layers:
   # Worktree used for assessment: ~/coding/hapi/worktrees/1772-upstream-filters (read-only
   # dogfood) and ~/coding/hapi/worktrees/1772-techotaku-reshape (reconciliation scratch).
   # Remat order: #1607 → #1772 last. Remat owner: tooling/meta — no self-remat.
-  - branch: soup/1772-techotaku-upstream
+  # PARKED 2026-11-09 by tooling/meta (cbd1073e), NOT dropped. This layer does
+  # not merge: 15 conflicted files, 32 hunks in SessionList.tsx, and
+  # SessionDateFilter.tsx / useScratchlistSessionIds.ts arrive as "added by
+  # both". Cause is not the conflict text — it is that removing the old
+  # manifest entry removed nothing. techotaku's own earlier draft (7ae356697,
+  # Ananovo, 2026-09-11) is contained in 37 of the 89 active layers, every one
+  # cut from a tip that already had it, so each drags it back in as a passenger
+  # and collides with their final version. See
+  # docs/operator/tooling-meta-role.md § "When a compose conflicts".
+  #
+  # Parked rather than left in place because an unmergeable layer blocks EVERY
+  # compose, including unrelated fixes — it held up the #322 notify-summary
+  # heal, which is an operator-visible bug. A layer that does not merge must
+  # not freeze the fleet.
+  #
+  # Unpark when session 3c5af7c8 pushes the repair layer (thin, deletes
+  # SessionListFilterMenu.tsx + sessionListFilter.ts, reconciles the shared
+  # files) and it sits in the manifest AHEAD of this entry. They own it.
+  # - branch: soup/1772-techotaku-upstream
 
   # FOOTGUN FOUND while swapping #1772 (2026-11-09, session 3c5af7c8): the `- pr: N`
   # manifest layer type (scripts/tooling/hapi-driver-rebuild.sh resolve_merge_ref) fetches
