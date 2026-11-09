@@ -73,6 +73,13 @@ export WORKING_DIR DRIVER_CLI HAPI_SESSION_ID CURSOR_SESSION_ID
 
 run_cursor() {
     cd "$WORKING_DIR"
+    # Trailing argv after the -e script is inert to bun (it lands in the
+    # script's own argv, which this body never reads) but makes the process
+    # VISIBLE to the runner's argv-matching reaper. Without it, startedBy
+    # 'runner' is declared only inside the script text below, so the runner is
+    # blind to a process it is told it started: 16 of 17 such wrappers on this
+    # host were produced here (2026-11-09). See docs/plans/
+    # 2026-11-09-cursor-bune-ram-reclaim-predicate.md.
     exec bun --cwd "$DRIVER_CLI" -e "
 import { initializeToken } from './src/ui/tokenInit.ts';
 import { authAndSetupMachineIfNeeded } from './src/ui/auth.ts';
@@ -86,7 +93,7 @@ await runCursor({
   startedBy: 'runner',
   permissionMode: 'yolo',
 });
-"
+" -- --started-by runner --existing-session-id "$HAPI_SESSION_ID"
 }
 
 if [[ "$DETACH" -eq 1 ]]; then
