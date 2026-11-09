@@ -1,31 +1,40 @@
 #!/usr/bin/env bash
-# hapi-claude-account-toggle.sh — switch oos-linux Claude auth slot (primary | secondary).
+# hapi-claude-account-toggle.sh — switch fleet Claude auth slot (primary | secondary).
 #
-# Copies both OAuth surfaces for the slot:
-#   ~/.claude/.credentials.json                 (interactive claude)
-#   /etc/hapi/claude-setup-token.env            (systemd → hapi-runner-oos CLAUDE_CODE_OAUTH_TOKEN)
+# Cursor twin: hapi-cursor-account-toggle.sh
+#
+# Copies OAuth surfaces for the slot:
+#   ~/.claude/.credentials.json                 (interactive claude on oos)
+#   /etc/hapi/claude-setup-token.env            (systemd → hapi-runner-oos)
+#   proxmox ~/.config/claude/oauth.env          (fleet runner) unless --skip-proxmox
 #
 # Slot storage (still under operator home):
 #   ~/.hapi/claude-auth/{primary,secondary}/.credentials.json
 #   ~/.hapi/claude-auth/{primary,secondary}/claude-setup-token.env
 #   ~/.hapi/claude-auth/active
 #
+# Live Claude children keep the old token until reopen — after toggle run:
+#   hapi-claude-session-assess
+#   hapi-claude-reopen-mismatch
+#
 # Usage:
-#   hapi-claude-account-toggle.sh primary|secondary [--skip-restart] [--skip-smoke]
+#   hapi-claude-account-toggle.sh primary|secondary [--skip-restart] [--skip-smoke] [--skip-proxmox]
 #
 # Runner restart is a production mutation — run from a real TTY with operator approval.
 set -euo pipefail
 
 SLOT="${1:-}"
-[[ -n "$SLOT" ]] || { echo "Usage: $0 primary|secondary [--skip-restart] [--skip-smoke]" >&2; exit 1; }
+[[ -n "$SLOT" ]] || { echo "Usage: $0 primary|secondary [--skip-restart] [--skip-smoke] [--skip-proxmox]" >&2; exit 1; }
 [[ "$SLOT" == primary || "$SLOT" == secondary ]] || { echo "slot must be primary or secondary" >&2; exit 1; }
 
 SKIP_RESTART=0
 SKIP_SMOKE=0
+SKIP_PROXMOX=0
 for arg in "${@:2}"; do
     case "$arg" in
         --skip-restart) SKIP_RESTART=1 ;;
         --skip-smoke) SKIP_SMOKE=1 ;;
+        --skip-proxmox) SKIP_PROXMOX=1 ;;
         *) echo "unknown arg: $arg" >&2; exit 2 ;;
     esac
 done
@@ -33,6 +42,8 @@ done
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=lib/hapi-claude-oauth-dropin.sh
 source "$SCRIPT_DIR/lib/hapi-claude-oauth-dropin.sh"
+# shellcheck source=lib/hapi-claude-slots.sh
+source "$SCRIPT_DIR/lib/hapi-claude-slots.sh"
 
 ROOT="$HOME/.hapi/claude-auth"
 CRED="$ROOT/$SLOT/.credentials.json"
@@ -286,7 +297,29 @@ if [[ "$SKIP_SMOKE" -eq 0 ]]; then
     (
         unset CLAUDE_CODE_OAUTH_TOKEN CLAUDE_CODE_OAUTH_REFRESH_TOKEN 2>/dev/null || true
         timeout 75 claude -p --output-format text "reply exactly: claude-slot-$SLOT-ok"
-    ) || echo "WARNING: smoke failed — check quota or claude login"
+    ) || echo "WARNING: smoke failed — check quota or claude login (try: hapi-claude-usage $SLOT)"
 fi
 
-echo "== done: oos-linux on claude slot '$SLOT' =="
+if [[ "$SKIP_PROXMOX" -eq 0 ]]; then
+    echo "-- proxmox oauth.env + hapi-runner restart --"
+    TMP_OAUTH="$(mktemp)"
+    grep -E '^CLAUDE_CODE_OAUTH_TOKEN=' "$TOKEN" | tail -n1 >"$TMP_OAUTH"
+    scp -o ConnectTimeout=12 -o BatchMode=yes "$TMP_OAUTH" "${HAPI_PROXMOX_SSH}:/tmp/hapi-claude-oauth.env"
+    rm -f "$TMP_OAUTH"
+    ssh -o ConnectTimeout=12 -o BatchMode=yes "$HAPI_PROXMOX_SSH" 'bash -s' <<'REMOTE'
+set -euo pipefail
+TS=$(date -u +%Y%m%d%H%M%S)
+mkdir -p ~/.config/claude
+[[ -f ~/.config/claude/oauth.env ]] && cp -a ~/.config/claude/oauth.env ~/.config/claude/oauth.env.bak-$TS
+install -m 600 /tmp/hapi-claude-oauth.env ~/.config/claude/oauth.env
+rm -f /tmp/hapi-claude-oauth.env
+HAPI_OPERATOR_SYSTEMCTL_OVERRIDE=1 HAPI_OPERATOR_PRODUCTION_MUTATION_OVERRIDE=1 \
+  sudo -n systemctl restart hapi-runner.service
+sleep 2
+systemctl is-active hapi-runner.service
+REMOTE
+    echo "-- proxmox oauth sha12=$(hapi_claude_slot_sha12 "$SLOT") --"
+fi
+
+echo "== done: fleet on claude slot '$SLOT' (sha12 $SHA12) =="
+echo "Live sessions still hold the old token until: hapi-claude-reopen-mismatch"

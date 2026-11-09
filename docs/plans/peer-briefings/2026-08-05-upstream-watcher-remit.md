@@ -48,7 +48,7 @@ hapi-pr-emoji-batch --repo tiann/hapi <prs>
 ## Out of scope
 
 - Soup rematerialize / stack-switch (Meta tooling `05d9f0f2` / `meta-soup`).
-- Issue taxonomy / `low-impact` slap-fest (labelling session `f3c41205` owns daily label sweep; this session may *recommend* promote).
+- Issue taxonomy / `low-impact` slap-fest (labelling session `22fc4ba7` owns daily label sweep; this session may *recommend* promote).
 - Marking GitHub notifications read; replying on GitHub unless operator asks.
 
 ## HARD FENCE — linked HAPI metadata only (2026-08-06 Sparling incident)

@@ -64,7 +64,7 @@ One promote label: **`low-impact`** on `tiann/hapi`.
 
 We dropped `self-merge-ok` - it was on-the-nose and redundant. Lane B = `low-impact` (or auto tests/docs) **and** chip `✅` (CI/bot/threads). The health chip already gates "ok to merge"; a second "please merge me" label added no signal.
 
-**Owner session:** [Issue labelling (tiann/hapi)](/sessions/f3c41205-ba17-465e-8964-8e46f190f208) (`f3c41205-ba17-465e-8964-8e46f190f208`) - daily ~09:00 UTC sweep; apply `low-impact` on focused heavygee PRs by judgment.
+**Owner session (low-impact only):** [Issue labelling (tiann/hapi)](/sessions/22fc4ba7-c166-4592-aeff-1340cb7ed230) (`22fc4ba7-c166-4592-aeff-1340cb7ed230`) - daily ~09:00 UTC sweep; apply `low-impact` on focused heavygee PRs by judgment. **Do not** auto-apply `dogfooded` from that sweep.
 
 | Label | Apply when | Do not |
 |-------|------------|--------|

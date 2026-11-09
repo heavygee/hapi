@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 # hapi-claude-assess.sh — report API-active Claude sessions vs live hostPid.
 #
+# Prefer the Cursor-parity tools:
+#   hapi-claude-session-assess   # token sha vs active slot (oos + proxmox)
+#   hapi-claude-auth-audit       # host files + runner env
+#   hapi-claude-usage            # slot quota smoke
+# This script remains as a thin local zombie list (oos /proc only — proxmox
+# rows look dead here by design).
+#
 # Usage: hapi-claude-assess.sh
 set -euo pipefail
 export PATH="/usr/bin:/bin:${PATH:-}"

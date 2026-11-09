@@ -697,10 +697,10 @@ layers:
 
   # tiann/hapi#1404 — session-attached long-running jobs (outlive agent; list chrome).
   # Upstream PR: #1424 (feat/session-attached-jobs). Wake stays #1489 / layer below.
-  # Worktree: ~/coding/hapi/worktrees/session-jobs-fake-meter-fix @ driver/session-attached-jobs
-  # Soup tip: 659b91bab — seamless striped indeterminate (8px tile loop); re-thin after dogfood bump.
+  # Worktree: ~/coding/hapi/worktrees/slim-session-job-mcp @ driver/slim-session-job-mcp
+  # Soup tip: db656c411 — re-thin on live tip c5a182a12; hoist session_job "pass null to clear" once (heavygee/hapi#310).
   # Drop when upstream #1424 merges.
-  - branch: driver/session-attached-jobs
+  - branch: driver/slim-session-job-mcp
 
   # DROPPED 2026-09-02: driver/cursor-notify-rule-delta — stale fat tip (60 commits from
   # Aug merge-base). Notify overlay + session_job instanceof + omit-action-key fixes
@@ -1417,5 +1417,20 @@ layers:
   # Hub-only → remat + publish + seal; tip-unique: preferFleetLatestPointer
   - branch: driver/fix-304-offer-notes-thin
 
+  # heavygee/hapi#308 / PR #309 — Claude Code Tool Search alwaysLoad for proactive
+  # HAPI MCP tools (change_title + display_image/video/media). Fork-only.
+  # Thin tip on soup HEAD c5a182a12: driver/mcp-always-load-meta @ d4d16dd65
+  # cli-only → remat --build-web --verify + hapi-restart-hub (MCP server lives in CLI).
+  # Tip-unique: anthropic/alwaysLoad on change_title/display_*
+  - branch: driver/mcp-always-load-meta
+
   # DROPPED 2026-11-04: driver/2267-post-close-silence MERGED as tiann/hapi#2268
   # (was #2267 Cursor post-done harness silence; thin fix/2267-post-close-summary-silence)
+
+  # 2026-11-03/04 oos-linux OOM postmortem — adds scripts/tooling/hapi-claude-resurrect-session.sh
+  # (Claude orphan resurrect, jsonl-gone sessions) plus a single-instance guard: a prior
+  # resurrect attach still alive for a target, or a target the hub already reports active=1,
+  # now refuses outright instead of leaking another orphaned process (new exit codes 5/6).
+  # See docs/plans/2026-11-03-oos-linux-oom-orphaned-session-trees-postmortem.md
+  # tooling-only → no build-web required; remat picks it up.
+  - branch: chore/claude-orphan-resurrect
