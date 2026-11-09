@@ -64,6 +64,17 @@ describe('schema migrations through v28', () => {
         new Store(dbPath).close()
         const legacy = new Database(dbPath)
         legacy.exec(`
+            -- V26/V27 indexes depend on delivery_state and did not exist in V24.
+            -- SQLite refuses to drop a column an index references, so a genuine
+            -- V24 fixture must drop them first. Restores upstream 5fd1179d2,
+            -- which a later soup merge resolution reverted while bumping the
+            -- version expectations below — leaving the suite red and every
+            -- remat --verify blocked.
+            -- IF EXISTS: the fork's schema currently creates only the
+            -- immediate-queued index. Naming an absent one would make this
+            -- fixture rot again the next time the index set changes.
+            DROP INDEX IF EXISTS idx_messages_immediate_queued;
+            DROP INDEX IF EXISTS idx_messages_future_scheduled_queued;
             ALTER TABLE messages DROP COLUMN delivery_state;
             PRAGMA user_version = 24;
         `)
@@ -72,9 +83,12 @@ describe('schema migrations through v28', () => {
         const migrated = new Store(dbPath)
         const internalDb = (migrated as unknown as { db: Database }).db
         const columns = internalDb.prepare('PRAGMA table_info(messages)').all() as Array<{ name: string }>
+        const indexes = internalDb.prepare('PRAGMA index_list(messages)').all() as Array<{ name: string }>
         const version = internalDb.prepare('PRAGMA user_version').get() as { user_version: number }
         expect(columns.some((col) => col.name === 'delivery_state')).toBe(true)
         expect(version.user_version).toBe(32)
+        // The migration must put the indexes back, not just the column.
+        expect(indexes.map((index) => index.name)).toContain('idx_messages_immediate_queued')
         migrated.close()
     })
 })
