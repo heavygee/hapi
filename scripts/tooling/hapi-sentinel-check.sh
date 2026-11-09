@@ -45,12 +45,16 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TREE="${HAPI_DRIVER:-$HOME/coding/hapi/driver}"
 MANIFEST=""
 QUIET=0
+AUTO=0
+AUTO_SAMPLE="${HAPI_SENTINEL_AUTO_SAMPLE:-40}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --tree) TREE="$2"; shift 2 ;;
         --manifest) MANIFEST="$2"; shift 2 ;;
         --quiet) QUIET=1; shift ;;
+        --auto) AUTO=1; shift ;;
+        --auto-sample) AUTO_SAMPLE="$2"; shift 2 ;;
         -h|--help) sed -n '2,38p' "$0"; exit 0 ;;
         *) die "unexpected arg: $1" ;;
     esac
@@ -63,6 +67,63 @@ done
 [[ -f "$MANIFEST" ]] || die "manifest not found: $MANIFEST"
 
 say() { [[ "$QUIET" == "1" ]] || echo "$*"; }
+
+
+# --auto: derive the check from each layer's own diff instead of a declaration.
+#
+# Declared sentinels only protect features somebody already thought to protect,
+# and every real loss so far was one nobody imagined. This mode needs no
+# foresight: take the identifiers the layer ADDED relative to its base, and
+# assert they are still present in the composed tree. If a conflict resolution
+# deleted the layer's code, its own identifiers go missing and this says so.
+#
+# Sampled (default 40 identifiers/layer) to keep remat cost bounded; layers are
+# thin by policy, so a sample is usually the whole set.
+run_auto() {
+    local tip="$1" layers=0 flagged=0
+    while IFS= read -r line; do
+        [[ "$line" =~ ^[[:space:]]*-[[:space:]]*branch:[[:space:]]*(.+)$ ]] || continue
+        local br; br="$(echo "${BASH_REMATCH[1]}" | sed 's/[[:space:]]*$//')"
+        local ref="origin/$br"
+        git -C "$TREE" rev-parse --verify --quiet "$ref" >/dev/null 2>&1 || ref="$br"
+        git -C "$TREE" rev-parse --verify --quiet "$ref" >/dev/null 2>&1 || continue
+        local base; base="$(git -C "$TREE" rev-list --max-count=1 "${ref}^" 2>/dev/null || true)"
+        [[ -n "$base" ]] || continue
+        # A SKIPPED layer (fat-tip gate) is legitimately absent from the tip.
+        # Only an ABSORBED layer losing its content is the bug we are hunting.
+        [[ "$(git -C "$TREE" rev-list --count "$ref" ^"$tip" 2>/dev/null || echo 1)" == "0" ]] || continue
+        layers=$((layers+1))
+        local absent=0 names=""
+        while read -r sym; do
+            [[ -n "$sym" ]] || continue
+            git -C "$TREE" grep -q -- "$sym" "$tip" 2>/dev/null || { absent=$((absent+1)); names="$names $sym"; }
+        done < <(git -C "$TREE" diff "$base" "$ref" -- '*.ts' '*.tsx' '*.mjs' '*.js' 2>/dev/null \
+                 | grep "^+" | grep -v "^+++" \
+                 | grep -oE "\b[A-Za-z_][A-Za-z0-9_]{5,}\b" \
+                 | sort -u | head -"$AUTO_SAMPLE")
+        if [[ "$absent" -gt 0 ]]; then
+            echo "LOST     $br" >&2
+            echo "         $absent identifier(s) the layer added are absent from the composed tree:$names" >&2
+            flagged=$((flagged+1))
+        else
+            say "ok       $br  (layer identifiers intact)"
+        fi
+    done < "$MANIFEST"
+    say ""
+    say "auto: $layers layer(s) checked against their own diffs, $flagged with missing content"
+    [[ "$flagged" -eq 0 ]]
+}
+
+if [[ "$AUTO" -eq 1 ]]; then
+    command -v git >/dev/null 2>&1 || die "git not on PATH (tool failure, not a finding)"
+    TIP="$(git -C "$TREE" rev-parse HEAD 2>/dev/null)" || die "cannot resolve HEAD in $TREE (tool failure, not a finding)"
+    if run_auto "$TIP"; then
+        exit 0
+    fi
+    err "layer content lost despite being composed in — ancestry is not presence"
+    err "see docs/plans/2026-11-08-ancestry-vs-presence-verification-gap.md"
+    exit 1
+fi
 
 # Walk the manifest line by line, same shape as parse-driver-manifest.mjs, so a
 # sentinel always binds to the branch entry directly above it.
