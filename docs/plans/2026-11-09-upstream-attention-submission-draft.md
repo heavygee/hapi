@@ -72,16 +72,23 @@ order above is a real dependency chain, so a removal part way down just stops ev
   shipped it.
 - **Long-running-job fade digression removed.** Point of residency is: fade = not taking RAM;
   operators already know that signal. Job chrome is its own item.
-- **Cursor "no system-prompt seam" claim deleted from the upstream body — and stay precise.**
-  Live hub DB (`/var/lib/hapi/hapi.db`, 2026-11-09): **542 / 892** Cursor sessions have
-  `last_notify_status` populated. That beats the upstream code comment Meta relayed. **Both can
-  be true:** unmodified upstream may still lack a Cursor system-prompt seam; *our* fleet
-  self-reports because emission was arranged via `feat/overseer-summary-emit` (transient
-  `.cursor` rule overlay; manifest: **"fork-only (PR #86/#87, DO NOT upstream)"**). Upstream
-  body wording ("emission was arranged") is the right shape — do **not** let it drift into
-  implying a vanilla install gets the same Cursor coverage. If a maintainer enables the setting
-  and finds Cursor silently dark, that is a trust cost we manufactured. PR 3 stays as hub
-  speaking for *terminal* agent errors / dead turns, not as a Cursor hole-filler.
+- **Status summaries are already upstream** (emit toggle + `AGENT_NOTIFY_SUMMARY` contract on
+  `tiann/hapi` main). Upstream's own instruction file notes Cursor lacks a system-prompt seam
+  on stock main, so the toggle covers other flavors today. Live hub DB (2026-11-09):
+  **542 / 892** Cursor sessions have `last_notify_status`. Tooling/meta (2026-11-09): the
+  composed soup still **declares** `installCursorNotifyRuleOverlay` but nothing calls it —
+  launcher wiring was lost in a rewrite (tracked in the sentinel triage plan). Fleet Cursor
+  emit is therefore not "the overlay works"; it is some other arranged path (rules / overlays
+  outside that function). **Closing a stock-upstream Cursor emission path remains forthcoming
+  under this heading.** Upstream body keeps "quietly accumulating / time to put it to use"
+  without claiming every flavor is covered on a fresh install. PR 3 (hub-authored blockers)
+  still covers terminal agent errors / dead turns regardless.
+- **Notify display glue (heavygee/hapi#322):** Happy showed summary JSON welded to trailing
+  prose because `shared/src/messages.ts` required the last line to end with `}`, while the
+  Cursor seal path already tolerated glue (`a176ca7ba`). Fix on
+  `fix/notify-summary-trailing-prose` — **not in soup yet**. Phone still live-broken until
+  composed. Delimiter-hardening plan (2026-07-29) trigger has fired; hardening the delimiter
+  itself is a separate operator decision.
 - **Fleet framing:** "over 1,000 sessions, ≥~30 active at a time" — not "30-session fleet".
   Live list chrome in the blocked shot shows All (1280).
 - **Inline images (operator ask, refreshed 2026-11-09 dark mode):** light-mode pinned-section

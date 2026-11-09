@@ -1,14 +1,18 @@
 # Session row state rendering — three-way comparison
 
 **Date:** 2026-11-09
+**Role:** Full rationale for the coordinated upstream work on **session attention for
+multi-session fleets**. Individual PRs under that heading should link back here (or to the
+umbrella issue that embeds / cites this).
+
 **Why:** Definitive list of the states a session can be in, and what each of three codebases
 draws for them. Prompted by comparing `tiann/hapi#2296` (IanMStevenson) against current
-upstream and the dogfood tree that has been running the attention work.
+upstream and a live install that has been dogfooding the attention work at fleet scale.
 
 **Sources read directly (no inference):**
 - Upstream: `tiann/hapi@main` `web/src/components/SessionRowSummary.tsx` (post `832c5922f`, 2026-11-01)
 - Ian: `IanMStevenson/hapi@f67e13905308` same file
-- Dogfood tip: `ff7e86490` same file
+- Dogfood tip used for the live comparison: `ff7e86490` same file
 
 ---
 
@@ -19,24 +23,24 @@ upstream and the dogfood tree that has been running the attention work.
 3. **Needs a human** — `pendingRequestsCount`, `attention.kind` (permission / input / background / unread).
 4. **Lifecycle** — `metadata.lifecycleState === 'archived'`.
 5. **Work / attention chrome** — attached job progress; blocked-with-reason from the last status
-   summary. (Landing via the coordinated attention submission; not a separate taxonomy.)
+   summary. Subject of the coordinated submission.
 
 ## Session list status mode
 
 `sessionListStatusMode: 'standard' | 'detailed'`, default `standard` — Settings → Display →
-"Session list status". Defined in `web/src/hooks/useSessionListStatusMode.ts`. Present on
-upstream. It feeds `showDetailedStatus`, which gates some marker-slot chrome in the dogfood tip:
+"Session list status". Defined in `web/src/hooks/useSessionListStatusMode.ts` on upstream. It
+feeds `showDetailedStatus`, which gates some marker-slot chrome in the dogfood tip:
 
-- `:182` schedule tooltip — gated
-- `:271` background attention indicator — gated
-- `:278` background spinner — half gated:
+- schedule tooltip — gated
+- background attention indicator — gated
+- background spinner — half gated:
   `(showDetailedStatus && attention==='background') || (s.active && bgCount>0)`
 
 Upstream's presence dot and Ian's badge are not mode-gated; both render in `standard`.
 
 ## What each codebase draws
 
-| State | Condition | Upstream `main` | Ian #2296 | Dogfood tip `ff7e86490` |
+| State | Condition | Upstream `main` | Ian #2296 | Dogfood tip (live) |
 |---|---|---|---|---|
 | Working | `active && thinking` | green dot on icon, pulsing | green dot, pulsing (`working`) | inline spinner, marker slot |
 | Background work | `active && !thinking && bgCount>0` | blue dot, pulsing | blue dot, pulsing (`background`) | blue spinner |
@@ -48,7 +52,7 @@ Upstream's presence dot and Ian's badge are not mode-gated; both render in `stan
 | Running attached job | `attachedJob.status==='running'` | — | — | job label + progress meter (row still dims when `!active`) |
 | Unread | `sessionIsUnread` | semibold title | semibold title (source changed to `attention.kind`) | semibold title + accent time |
 
-Linked GitHub-issue chips are tracked separately and omitted here.
+Linked GitHub-issue chips are tracked on a separate track and omitted here.
 
 ---
 
@@ -67,7 +71,7 @@ Linked GitHub-issue chips are tracked separately and omitted here.
    archived"*. Upstream and the dogfood tip do not model `lifecycleState` in this file; dimming
    follows `!s.active`.
 
-4. **Blocked-with-reason and attached jobs** appear in the dogfood tip and are the subject of the
+4. **Blocked-with-reason and attached jobs** are live in dogfood and are the body of the
    coordinated upstream submission. They are absent from upstream `main` and from Ian's branch
    today.
 
@@ -95,7 +99,7 @@ title; dogfood tip also accents the time). Ian's `waiting` ring therefore marks 
 already covers for the interesting case, and also fires when the session is idle and already
 read.
 
-## Direction (operator decisions already taken)
+## Direction
 
 1. Keep the fade; do not adopt the power mark. Residency is a whole-list scan property.
 2. Fade means residency only — including when an attached job is running.
@@ -114,92 +118,93 @@ blocked chrome and self-reported next steps are how the list surfaces it.
 
 ---
 
-# Part 2 — attention-management surface inventory (operator / soup; not for upstream paste)
+# Part 2 — work under this heading
 
-**Framing:** residency, activity, and "what it needs from you" land on one row. Layers below each
-move one of those; they have not all been reconciled against current upstream in one place before.
+**Framing.** Managing attention across a large session fleet is the product problem. A substantial
+body of that work has already been dogfooded live (1,000+ sessions, ≥~30 active at a time). As
+much as possible is already on `tiann/hapi` as issues and PRs. What is still only on the dogfood
+install is not a private design — it is **forthcoming upstream work under this same heading**,
+and will be opened / linked as PRs against the umbrella issue.
 
-## Inventory — soup layers that change how sessions are reported
+No local branch names below. References are upstream issues/PRs, or "forthcoming under this
+heading".
 
-Extracted from `config/driver-manifest.yaml` on fork main. 19 layers touch this surface.
+## Already on upstream `main` (foundation)
 
-### A. Residency — "is this taking RAM"
-| Layer | Ref | What it does |
+| Piece | Where |
+|---|---|
+| `AGENT_NOTIFY_SUMMARY` trailing-line contract | CLI session-summary instruction + settings ("Emit status summaries"); opt-in today |
+| Parse / FCM / native companion use of that line | Hub + protocol |
+| Work-graph ingest of notify lines | `workGraphNotifyIngest` on hub |
+| Activity dots (green working / blue background) | `832c5922f` (2026-11-01) |
+| Cursor post-`done` harness silence | #2267 family (merged) |
+| Unread list filters / keep-unread-visible | #2292, #2294 (merged; IanMStevenson) |
+| Session list sort/filter primitives | #2263 (merged) |
+
+Upstream's own session-summary instruction notes that **Cursor has no system-prompt seam on
+stock main**, so the emit toggle covers Claude / Codex / OpenCode / Grok today. Cursor sessions
+on a dogfood fleet still emit because a Cursor injection path was arranged locally; **closing
+that gap on upstream (or relying on hub-authored blockers when the agent cannot speak) is
+forthcoming under this heading** — not a reason to treat status summaries as non-upstream.
+
+## Open upstream (in flight)
+
+| Topic | Issue / PR | Notes |
 |---|---|---|
-| `driver/session-row-residency-fade` | cites #1424 | Fade = residency, including when an attached job is running. Operator decision 2026-11-09. Not in #1424's diff. |
-| *(upstream)* `832c5922f` | — | Removed the residency fade on 2026-11-01, replaced with an icon-corner dot. |
+| Session-attached jobs (list chrome, jobs outlive the agent) | Issue #1404, PR **#1424** | Item 1 of the coordinated set; carries `dogfooded` |
+| Wake owning session when an attached job completes/fails | Issue **#1489** | Stacks on attached jobs |
+| Blocked affordance: section, rail, jump pill, mark-unblocked | Issue **#1717** | Item 2; PR forthcoming / in prep |
+| Cursor unexpected-stop → retry then blocked footer | Issue #1724, PR **#1725** | Producer plumbing for blocked |
+| Session-list scrollbar tick for open session | Issue **#1732** | Navigation cue |
+| Combined session-list filter menu | PR **#1772** | Community PR (techotaku39); `dogfooded` |
+| Fold blocked lens into that filter menu | Issue **#1996** | Depends on #1772 |
+| Active + Working lenses in the filter menu | Issue **#2002** | Depends on #1772 |
+| Discovery callouts for shipped-but-unlabelled controls | PR **#2339** | Item 7; content-search scope, sort/filter, title lock |
 
-### B. Activity — "what is it doing right now"
-| Layer | Ref | What it does |
-|---|---|---|
-| `driver/session-job-progress-until` | #1404 → PR **#1424** | Attached-job progress in list chrome; jobs outlive the agent |
-| `driver/job-complete-wake` | #1489 | Wake owning session when an attached job completes/fails (opt-in) |
-| `driver/slim-session-job-mcp` | (#1424 family) | Job MCP surface |
-| `fix/cursor-thinking-flicker-1487` | #1502 / PR #1503 | Cursor ACP chatter was flipping `thinking` every 1–2s — the spinner dance |
-| `driver/2002-session-filter-active-working` | #2002 | Active and Working as explicit lenses |
+## Forthcoming under this heading (dogfooded; not yet separate upstream PRs)
 
-### C. Attention — "what does it need from me, and why"
-| Layer | Ref | What it does |
-|---|---|---|
-| `driver/blocked-list-ux` | **#1717**, #1996 | Blocked section, rail+chip, jump pill — fed by hub-persisted last `AGENT_NOTIFY_SUMMARY` (`sessions.last_notify_*`) |
-| `fix/cursor-unexpected-stop-blocked-footer` | #1724 | Auto-Continue once after post-tool interrupt; blocked footer only if that also fails |
-| `driver/211-unexpected-stop-notify` | heavygee#211 | Restores the unexpected-stop blocked wire that later layers overwrite |
-| `driver/cursor-resource-exhausted-blocked` | heavygee#231 | `resource_exhausted` must retry then stamp Blocked, rather than fail silently |
-| `driver/operator-hold-chip` | heavygee#121 | Operator-hold chip (needs_operator / babysit.hold) |
+These are live on the dogfood install and belong in the coordinated submission. Each becomes an
+upstream PR (or an extension of one above) linked to the umbrella:
 
-### D. Lenses and filtering — "how do I narrow it"
-| Layer | Ref | What it does |
-|---|---|---|
-| `soup/1772-combined-list-filters` | **#1772 (open upstream)** | Combined filter menu: unread + scratchlist + date |
-| `driver/1996-consolidate-blocked-filter` | #1996 | Folds the blocked lens into that menu; removes `BlockedLensToggle` |
-| *(merged upstream)* | #2292, #2294 | Keep-unread-visible setting; unread-only filter — both IanMStevenson |
-| `sessionListStatusMode` | upstream | `standard` \| `detailed`, default standard |
+| Topic | Intent |
+|---|---|
+| Residency: restore row-level fade beside the activity dot | Item 4 — fade = not held by a runner (including while a job runs) |
+| Hub-authored blocker sources for terminal agent errors | Item 3 — extends #1717's enum; hub speaks when the agent cannot |
+| Settings: flag blocked sessions from status summaries | Item 5 — below the existing emit toggle; default on |
+| First-use introduction for the blocked affordance | Item 6 — on upstream's existing FUE primitives |
+| Persist last notify onto session-list fields (`last_notify_*`) | Producer → list consumer bridge for #1717 |
+| Cursor path for status-summary emission on stock upstream | Close the seam called out in upstream's own instruction comment. Dogfood tip still has an uncalled `installCursorNotifyRuleOverlay` (wiring lost); fleet Cursor rows that emit today are not proof that function is live. |
+| Operator-hold / needs-operator chip | Related attention chrome; PR under this heading when scoped |
+| Resource-exhausted → retry then blocked (Cursor) | Related producer fix; PR under this heading when scoped |
 
-### E. Navigation
-| Layer | Ref | What it does |
-|---|---|---|
-| `driver/1732-session-list-open-tick` | #1732 / #1733 | Scrollbar-gutter tick showing where the open session sits |
+## Seams to resolve as the PRs land
 
-### F. Summary emission — the producer of the attention signal
-| Layer | Ref | Note |
-|---|---|---|
-| `feat/overseer-summary-emit` | fork PR #86/#87 | Manifest: "fork-only, DO NOT upstream" — Cursor emits `AGENT_NOTIFY_SUMMARY` via a transient rule overlay |
-| `feat/overseer-open-loops` | fork #100 | "What am I forgetting" lens |
-| `feat/overseer-dispositions` | fork #102 | Disposition write path |
+1. **Consumer needs a producer.** Blocked chrome reads the last status summary. The emit
+   contract is already on upstream; session-list persistence of that summary, default-on emit,
+   and Cursor coverage are the remaining producer gaps (forthcoming above).
 
----
+2. **Same pixels, several PRs.** Residency fade, job progress, and the activity dot all speak to
+   liveness. The umbrella's order is deliberate: jobs → blocked → hub blockers → fade.
 
-## Seams that need deciding (operator)
+3. **Filter menu ownership.** #1996 and #2002 extend #1772. If #1772 does not land, those two
+   need another home.
 
-1. **Consumer vs producer.** #1717's blocked chrome reads `sessions.last_notify_*` from
-   `AGENT_NOTIFY_SUMMARY`. `feat/overseer-summary-emit` is marked do-not-upstream and is how
-   this fleet's Cursor sessions populate that field (**542 / 892** Cursor rows on the live hub
-   DB). That does not prove a vanilla upstream install gets the same Cursor coverage. Establish
-   what upstream populates `last_notify_*` with before the blocked chrome lands alone.
+4. **`sessionListStatusMode: detailed` defaults off.** Activity chrome gated on it is invisible
+   to default users; prefer always-on for anything in this set.
 
-2. **Same pixels, three layers.** Fade (A), job progress (B), and upstream's dot all speak to
-   liveness. Landing order decides the visual unless set deliberately.
+5. **Producer fragility.** Unexpected-stop retry (#1724/#1725), resource-exhausted handling, and
+   hub-authored blockers exist so "blocked" fires correctly — not as UI polish.
 
-3. **`#1996` removes a control `#1717`'s issue text still describes.** Upstream copy must match
-   the combined filter menu, not the deleted toggle.
+## Sequencing (matches the umbrella issue)
 
-4. **`#1772` is still open upstream** and is the menu #1996 / #2002 extend.
+1. **#1424** — attached jobs (open).
+2. **#1717** — blocked chrome (+ #1725 in parallel).
+3. Hub-authored blocker sources once blocked chrome merges.
+4. Residency fade beside the existing dot.
+5. **#1772 → #1996 → #2002** filter chain.
+6. Settings default-on + FUE + discovery callouts (#2339) as listed in the umbrella.
 
-5. **`sessionListStatusMode: detailed` defaults off.** Activity chrome gated on it is invisible
-   to default users.
+## Not decided in this doc
 
-6. **Four layers exist only to make "blocked" fire** (#1724, #211, #231, plus hub blocker
-   sources). Producer plumbing is the fragile part; chrome without it looks good and works badly.
-
-## Sequencing
-
-1. **#1424** (attached jobs) — already open.
-2. **#1717** blocked chrome + Cursor retry fix — resolve seam 1 first.
-3. Hub blocker sources once blocked chrome merges.
-4. Residency fade as the row-level ask beside the existing dot.
-5. **#1772 → #1996 → #2002** filter chain, gated on #1772.
-
-## Not decided here
-
-Whether / when to paste Part 1 upstream; seam 1 (who populates `last_notify_*` on stock
-upstream); exact PR split for residency vs blocked vs jobs.
+Exact PR boundaries for the "forthcoming" rows; whether Cursor emission is a dedicated PR or
+folded into hub-authored blockers; paste form of Part 1 into the umbrella issue vs link-only.
