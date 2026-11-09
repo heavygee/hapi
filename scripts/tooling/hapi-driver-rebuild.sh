@@ -540,6 +540,16 @@ if [[ "$VERIFY" -eq 1 ]]; then
         if ! "$SENTINEL_SCRIPT" --tree "$DRIVER" --manifest "$DRIVER/config/driver-manifest.yaml"; then
             remat_rollback_live_tip "layer sentinel missing (behaviour lost despite being composed)"
         fi
+        # --auto needs no declaration: it checks every identifier each layer
+        # added against the composed tree. REPORT-ONLY, deliberately — a rename
+        # is textually identical to a deletion, and 3 of the first 7 flags were
+        # renames with the behaviour intact. Gating on it would block remats on
+        # refactors. It costs ~2.5s for a 90-layer soup, so it runs every time.
+        echo "Scanning layers for silently lost content (report-only)..."
+        "$SENTINEL_SCRIPT" --tree "$DRIVER" --manifest "$DRIVER/config/driver-manifest.yaml" --auto --quiet || {
+            echo "  ^ triage guide: docs/plans/2026-11-09-sentinel-auto-first-sweep-triage.md" >&2
+            echo "  ^ report-only: a rename looks identical to a deletion. Verify before acting." >&2
+        }
     fi
 
     echo "Running typecheck..."

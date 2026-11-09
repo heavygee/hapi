@@ -6,12 +6,17 @@
 # reopen step that hapi-claude-session-assess flags with "NEEDS REOPEN".
 #
 # Reopen alone does NOT resume agents — they sit idle until a continue wake.
-# Default: after reopen, run hapi-claude-continue-fleet (continue-only pings).
-# Use --no-continue to skip the wake (auth-only cutover).
+# Default: after reopen, selectively continue-wake sessions that looked
+# interrupted / needing attention BEFORE the kill (thinking, lastNotify
+# attention, usage-limit text, pending user turn). Sessions already
+# lastNotify=done are left quiet — otherwise the operator gets dozens of
+# "I didn't need that" pings. Use --continue-all for the old wake-everyone
+# behaviour, or --no-continue for auth-only.
 #
 # Usage:
-#   hapi-claude-reopen-mismatch              # drifted/dead + continue wake
-#   hapi-claude-reopen-mismatch --all        # every API-active Claude session
+#   hapi-claude-reopen-mismatch                 # drifted/dead + selective wake
+#   hapi-claude-reopen-mismatch --all           # migrate every API-active Claude
+#   hapi-claude-reopen-mismatch --continue-all  # wake every migrated session
 #   hapi-claude-reopen-mismatch --no-continue
 #   hapi-claude-reopen-mismatch --dry-run
 
@@ -25,14 +30,16 @@ source "$SCRIPT_DIR/lib/hapi-claude-slots.sh"
 DRY=0
 ALL=0
 DO_CONTINUE=1
+CONTINUE_ALL=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run) DRY=1; shift ;;
         --all) ALL=1; shift ;;
         --no-continue) DO_CONTINUE=0; shift ;;
         --continue) DO_CONTINUE=1; shift ;;
+        --continue-all) DO_CONTINUE=1; CONTINUE_ALL=1; shift ;;
         -h|--help)
-            sed -n '2,/^set -euo/p' "$0" | sed 's/^# \?//' | head -22
+            sed -n '2,/^set -euo/p' "$0" | sed 's/^# \?//' | head -28
             exit 0
             ;;
         *) echo "unknown arg: $1" >&2; exit 2 ;;
@@ -43,14 +50,22 @@ ACTIVE="$(hapi_claude_active_slot)" || { echo "no active slot" >&2; exit 2; }
 WANT="$(hapi_claude_slot_sha12 "$ACTIVE")" || exit 2
 echo "active=$ACTIVE want_sha12=$WANT"
 
+WAKE_IDS="$(mktemp)"
+# shellcheck disable=SC2064
+trap 'rm -f "$WAKE_IDS"' EXIT
+
 set +e
-python3 - "$DRY" "$ALL" "$HAPI_HOST" "$HAPI_PROXMOX_SSH" "$WANT" "$SCRIPT_DIR/lib" <<'PY'
+python3 - "$DRY" "$ALL" "$HAPI_HOST" "$HAPI_PROXMOX_SSH" "$WANT" "$SCRIPT_DIR/lib" "$WAKE_IDS" <<'PY'
 import hashlib, json, os, subprocess, sys, time, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 dry, do_all = sys.argv[1] == "1", sys.argv[2] == "1"
 host, proxmox_ssh, want = sys.argv[3], sys.argv[4], sys.argv[5]
 LIB_DIR = sys.argv[6]
+WAKE_IDS_PATH = sys.argv[7]
+sys.path.insert(0, LIB_DIR)
+from hapi_claude_wake_classify import classify_active_claude  # noqa: E402
+
 
 settings = json.load(open(os.path.expanduser("~/.hapi/settings.json")))
 req = urllib.request.Request(
@@ -159,6 +174,19 @@ if prox_pids:
 print(f"targets={len(targets)} (all={do_all})")
 for sid, name, hname, pid, sha, alive in targets:
     print(f"  {sid[:8]} host={hname} pid={pid} sha={sha} alive={alive} {name[:40]}")
+
+# Pre-kill wake snapshot — must happen before archive/reopen contaminates state.
+only = {t[0] for t in targets}
+classified = classify_active_claude(host, only_ids=only)
+with open(WAKE_IDS_PATH, "w") as fh:
+    for row in classified["wake"]:
+        fh.write(row["id"] + "\n")
+print(
+    f"pre-kill wake={classified['counts']['wake']} skip={classified['counts']['skip']} "
+    f"(selective continue after reopen)"
+)
+for row in classified["wake"]:
+    print(f"  WAKE {row['id'][:8]} {row['reason']} {row['name'][:40]}")
 
 if dry:
     print("dry-run: no kill/archive/reopen")
@@ -307,7 +335,11 @@ set -e
 
 if [[ "$DRY" -eq 0 && "$DO_CONTINUE" -eq 1 ]]; then
     echo "-- continue wake (hapi-claude-continue-fleet) --"
-    bash "$SCRIPT_DIR/hapi-claude-continue-fleet.sh" || true
+    if [[ "$CONTINUE_ALL" -eq 1 ]]; then
+        bash "$SCRIPT_DIR/hapi-claude-continue-fleet.sh" --all || true
+    else
+        bash "$SCRIPT_DIR/hapi-claude-continue-fleet.sh" --ids-file "$WAKE_IDS" || true
+    fi
 fi
 
 exit "$reopen_rc"

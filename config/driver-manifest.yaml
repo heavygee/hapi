@@ -1030,34 +1030,70 @@ layers:
   # Tip: b6f90c596 — remat needs --build-web + hapi-restart-hub (hub+web)
   - branch: driver/1607-project-group-menu
 
-  # tiann/hapi#1772 — combined session list filters (unread + scratchlist + date) in one menu;
-  # GET /api/sessions/scratchlist-status + SSE resync invalidation for scratchlist membership.
-  # Upstream #1772 still open/MERGEABLE; soup tip re-thinned onto post-#1848 upstream/main
-  # (de6c9dee2). Ranking/pin-divider from upstream #1848 — do NOT re-apply soup ranking commits.
-  # Worktree: ~/coding/hapi/worktrees/soup-1772-list-filters @ soup/1772-combined-list-filters
-  # Tip: 79c85e024 — 2 commits / 34 files (#1772 filters + scratchlist SSE only)
-  # Remat order: #1607 → #1772 last (#1605 catalog DROPPED 2026-10-08). Remat owner: tooling/meta — no self-remat.
-  - branch: soup/1772-combined-list-filters
+  # tiann/hapi#1772 — SWAPPED 2026-11-09 to dogfood techotaku39's actual implementation
+  # instead of our parallel one. Operator history: we took this PR over at some point,
+  # they rescued it; the two implementations diverged under one issue number for two
+  # months with nobody noticing. Assessed 2026-11-09 (session 3c5af7c8): dogfooded live
+  # via their own e2e fixture (web/e2e-fixtures/session-list-filter-fixture.tsx) against
+  # an isolated hub+vite instance, confirmed AND-composition of status/unread/scratchlist/
+  # machine filters works, their 83 vitest tests pass. `dogfooded` label applied to #1772
+  # on the strength of this swap landing — 48h UTC window closes 2026-11-11T15:01:24Z.
+  # Branch: techotaku39/investigate/draft-session-filter, head d15db8f09b, mirrored to a
+  # local branch below (their PR is cross-repo from techotaku39/hapi, NOT same-repo —
+  # see the `- pr: N` footgun note just below this block before using that layer type).
+  # Worktree used for assessment: ~/coding/hapi/worktrees/1772-upstream-filters (read-only
+  # dogfood) and ~/coding/hapi/worktrees/1772-techotaku-reshape (reconciliation scratch).
+  # Remat order: #1607 → #1772 last. Remat owner: tooling/meta — no self-remat.
+  - branch: soup/1772-techotaku-upstream
 
-  # tiann/hapi#1996 — fold blocked lens into combined session list filter menu.
-  # Keep BlockedJumpPill; remove leftmost BlockedLensToggle.
-  # Worktree: ~/coding/hapi/worktrees/consolidate-list-filters
-  # Tip: 7ed7e05e3 — 3 commits / 12 files on post-1772 driver tip (7543f5eab).
-  # Remat order: after soup/1772-combined-list-filters (needs both layers present).
-  # Needs --build-web. Remat owner: tooling/meta.
-  # Sanity 2026-10-08: delta is incremental on soup tip (12 files vs parent), not a
-  # 1400-file soup snapshot — tip-forward absorb will not stomp #1772 the way the
-  # held thin deltas did.
-  - branch: driver/1996-consolidate-blocked-filter
+  # FOOTGUN FOUND while swapping #1772 (2026-11-09, session 3c5af7c8): the `- pr: N`
+  # manifest layer type (scripts/tooling/hapi-driver-rebuild.sh resolve_merge_ref) fetches
+  # the PR's head branch from the `origin` remote only. That is correct for a same-repo
+  # PR but silently wrong for a cross-repo community PR (head lives on the contributor's
+  # own fork, e.g. techotaku39/hapi) — `git fetch origin "$head_branch"` fails quietly
+  # (`|| true`), and the layer resolves to a ref that does not exist. Confirmed via
+  # `gh pr view 1772 --repo tiann/hapi --json isCrossRepository` → true. Filed as a fork
+  # issue (cross-ref #312–318, same "confidently wrong, not loudly wrong" pattern) —
+  # see issue link once filed. Until fixed, cross-repo PR layers must use
+  # `- branch: <contributor-remote>/<head-branch>` (remote already configured per
+  # contributor in this mirror) instead of `- pr: N`.
 
-  # tiann/hapi#2002 — Active + Working lenses in the combined session list filter menu.
-  # Active = connected/non-archived (filterActiveSessionsOnly); Working = thinking or
-  # backgroundTaskCount (In-progress working bucket). Ephemeral AND-compose like unread/blocked.
-  # Worktree: ~/coding/hapi/worktrees/session-filter-active-working
-  # Tip: da58d04b6 — 3 commits / 9 files on live driver tip (cf595c7e8).
-  # Remat order: after driver/1996-consolidate-blocked-filter (extends that menu).
-  # Needs --build-web. Remat owner: this peer (feature promote).
-  - branch: driver/2002-session-filter-active-working
+  # tiann/hapi#1996 — PARKED 2026-11-09 (session 3c5af7c8), NOT ABANDONED. Was built to
+  # fold the blocked lens into OUR soup/1772-combined-list-filters menu; that base layer
+  # is gone now (see swap above), so this branch's diff no longer applies anywhere
+  # coherent. The menu-checkbox wiring itself is confirmed mechanical (byte-level diff of
+  # 431b43e11 in hand: one more ephemeral boolean + one MenuRow + one AND-filter clause
+  # using the existing sessionIsBlocked()/BlockedJumpPill from #1717, which is unaffected
+  # by this swap and needs no changes). What is NOT mechanical, found via real trial merge
+  # of techotaku39's branch onto live driver/integration (git merge-tree, then a real
+  # `git merge --no-commit`): web/src/components/MachineFilterBar.tsx is a genuine fork,
+  # not an additive diff, on both sides (our SESSION_LIST_FILTER_OPTIONS-driven rows vs
+  # their MachineSummaryRow/MachineFilterMenuAnchor-based clamp helpers) — a real
+  # Layer-collisions-class hot-file union, not a quick add. Separately, our soup has at
+  # some earlier point *deleted* upstream-provided code that techotaku's PR still builds
+  # on and left no conflict trail (uncontested deletions merge silently) — confirmed for
+  # shared/src/sessionOrder.ts (+ its shared/src/index.ts export line) and the original
+  # upstream web/src/components/SessionListViewMenu.tsx, and for sessions.view.* locale
+  # keys in en.ts/ru.ts. These must be restored as part of the reshape, not just unioned;
+  # tsc --noEmit is the reliable backstop for the code-symbol class, locale keys needed
+  # manual restoration (already found and documented, not yet applied to any landed
+  # branch). hub-side scratchlist (scratchlist.ts/scratchlistStore.ts/sessions-scratchlist
+  # route) is reassuring: byte-identical already between our soup and techotaku's PR, no
+  # dedup work needed there. Owner: this session's continuation (3c5af7c8) — re-thin onto
+  # soup/1772-techotaku-upstream once living, do not let a different peer silently absorb
+  # or re-park this.
+  # - branch: driver/1996-consolidate-blocked-filter
+
+  # tiann/hapi#2002 — PARKED 2026-11-09 (session 3c5af7c8), NOT ABANDONED, same reason and
+  # owner as #1996 immediately above (built against the now-removed soup/1772 base).
+  # Active is already satisfied by techotaku's menu `status==='active'` radio option
+  # (filterSessionsByStatus keeps session.active===true); the one real gap is that our
+  # filterActiveSessionsOnly also keeps sessions with a running attached background job
+  # and theirs doesn't — a one-line patch to their filter, not a redesign. Working does
+  # not exist on their side at all; adding it is the same one-boolean/one-MenuRow/one-AND
+  # -clause shape as #1996's blocked checkbox, confirmed mechanical. Both wait on #1996's
+  # base reconciliation landing first (this layer extends that menu).
+  # - branch: driver/2002-session-filter-active-working
 
   # DROPPED 2026-10-12: driver/large-empty-dictate MERGED upstream as tiann/hapi#2007
   # (eca9e9933 — feat Enlarge button for dictation/submit; closes #2006). Gate A wave

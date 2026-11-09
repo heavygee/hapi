@@ -46,7 +46,6 @@ TREE="${HAPI_DRIVER:-$HOME/coding/hapi/driver}"
 MANIFEST=""
 QUIET=0
 AUTO=0
-AUTO_SAMPLE="${HAPI_SENTINEL_AUTO_SAMPLE:-40}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -54,7 +53,9 @@ while [[ $# -gt 0 ]]; do
         --manifest) MANIFEST="$2"; shift 2 ;;
         --quiet) QUIET=1; shift ;;
         --auto) AUTO=1; shift ;;
-        --auto-sample) AUTO_SAMPLE="$2"; shift 2 ;;
+        # --auto-sample is gone: --auto now reads every identifier, so there is
+        # nothing to size. Accepted and ignored so an older caller still runs.
+        --auto-sample) err "--auto-sample is obsolete (coverage is complete); ignoring"; shift 2 ;;
         -h|--help) sed -n '2,38p' "$0"; exit 0 ;;
         *) die "unexpected arg: $1" ;;
     esac
@@ -77,10 +78,64 @@ say() { [[ "$QUIET" == "1" ]] || echo "$*"; }
 # assert they are still present in the composed tree. If a conflict resolution
 # deleted the layer's code, its own identifiers go missing and this says so.
 #
-# Sampled (default 40 identifiers/layer) to keep remat cost bounded; layers are
-# thin by policy, so a sample is usually the whole set.
+# COVERAGE IS COMPLETE, AND THAT MATTERS. The first implementation sampled
+# `sort -u | head -40` per layer "to bound remat cost". That was not a sample,
+# it was an ALPHABETICAL PREFIX: it over-weighted SCREAMING_CASE constants and
+# never reached the tail of the alphabet, and because it reported `ok` on the
+# layers it had only partly read, the blindness was invisible. Two consecutive
+# sweeps over the SAME tip returned different real losses, purely because an
+# unrelated change shifted where the cut line fell. A cap that is also an
+# ordering silently decides what you never look at.
+#
+# The fix was to stop sampling. One `git grep -o` pass extracts every
+# identifier in the composed tree (~1.6s for 43k names across a 90-layer soup);
+# each layer is then a `comm` against that set, which costs nothing. Full
+# coverage is now cheaper than the sample was.
+#
+# KNOWN NOISE, and what is deliberately NOT filtered. Hex-looking tokens are
+# dropped — `driver/job-complete-wake` was flagged for `c88c8925` and
+# `eb72fcacc7c8`, two halves of a UUID in a test fixture. English words inside
+# string literals are NOT dropped (`Adopting`, `Likely`, from a changed log
+# message) even though they are noise, because the same filter would blind the
+# tool to quoted identifiers like `'search_content'` — and a tool name silently
+# dropped from an advertised list is exactly the loss this exists to catch.
+# Prefer a few readable false positives over a silent hole.
+#
+# COMMENT LINES ARE EXCLUDED. First run over 90 layers: 5 flagged, 3 false
+# positives, and two of those three were identifiers that only ever appeared in
+# PROSE — `driver/a2a-2251-strict-delta` named `pingPeerOptions` in a comment
+# explaining a test it was DELETING, and `driver/247-deliberate-fleet-push`
+# used the word `Unattended` in a doc comment that was later reworded (all four
+# of its exported functions are present). Neither was ever behaviour, so
+# neither could be lost. Dropping `//`, `/*`, `*` and `#` lines takes precision
+# from 2/5 to 2/3 for free.
+#
+# The irreducible false positive is a RENAME: `feat/tier-b-reattach-orphan-
+# runner-children` declared `adoptedSession`, which a later refactor renamed to
+# `adopted` while strengthening the behaviour. Treat every flag as "go look",
+# never as "this is broken" — see the triage in
+# docs/plans/2026-11-09-sentinel-auto-first-sweep-triage.md.
+# Identifiers added by a ref relative to a base, code lines only.
+_sentinel_pool() {
+    git -C "$TREE" diff "$1" "$2" -- '*.ts' '*.tsx' '*.mjs' '*.js' 2>/dev/null \
+        | grep "^+" | grep -v "^+++" \
+        | grep -vE "^\+[[:space:]]*(//|/\*|\*|#)" \
+        | grep -oE "\b[A-Za-z_][A-Za-z0-9_]{5,}\b" \
+        | grep -vE "^[0-9a-f]*[0-9][0-9a-f]*$" \
+        | sort -u
+}
+
 run_auto() {
     local tip="$1" layers=0 flagged=0
+    # One pass over the composed tree yields every identifier in it (~1.6s for
+    # 43k names on a 90-layer soup). Every layer is then a set difference, which
+    # is free — so there is no sample and no cap, and the earlier
+    # `sort -u | head -40` lottery is gone. See the header note.
+    local tipsyms; tipsyms="$(mktemp)"
+    trap 'rm -f "$tipsyms"' RETURN
+    git -C "$TREE" grep -h -oE "\b[A-Za-z_][A-Za-z0-9_]{5,}\b" "$tip" \
+        -- '*.ts' '*.tsx' '*.mjs' '*.js' 2>/dev/null | sort -u > "$tipsyms"
+    [[ -s "$tipsyms" ]] || die "no identifiers extracted from $tip (tool failure, not a finding)"
     while IFS= read -r line; do
         [[ "$line" =~ ^[[:space:]]*-[[:space:]]*branch:[[:space:]]*(.+)$ ]] || continue
         local br; br="$(echo "${BASH_REMATCH[1]}" | sed 's/[[:space:]]*$//')"
@@ -93,24 +148,30 @@ run_auto() {
         # Only an ABSORBED layer losing its content is the bug we are hunting.
         [[ "$(git -C "$TREE" rev-list --count "$ref" ^"$tip" 2>/dev/null || echo 1)" == "0" ]] || continue
         layers=$((layers+1))
-        local absent=0 names=""
-        while read -r sym; do
-            [[ -n "$sym" ]] || continue
-            git -C "$TREE" grep -q -- "$sym" "$tip" 2>/dev/null || { absent=$((absent+1)); names="$names $sym"; }
-        done < <(git -C "$TREE" diff "$base" "$ref" -- '*.ts' '*.tsx' '*.mjs' '*.js' 2>/dev/null \
-                 | grep "^+" | grep -v "^+++" \
-                 | grep -oE "\b[A-Za-z_][A-Za-z0-9_]{5,}\b" \
-                 | sort -u | head -"$AUTO_SAMPLE")
+        local pool; pool="$(_sentinel_pool "$base" "$ref")"
+        local pool_n; pool_n="$(printf '%s\n' "$pool" | grep -c . || true)"
+        [[ "$pool_n" -gt 0 ]] || { say "ok       $br  (no code identifiers added — nothing to lose)"; continue; }
+        local names; names="$(comm -23 <(printf '%s\n' "$pool" | grep .) "$tipsyms" | tr '\n' ' ')"
+        local absent; absent="$(printf '%s\n' "$names" | tr ' ' '\n' | grep -c . || true)"
         if [[ "$absent" -gt 0 ]]; then
             echo "LOST     $br" >&2
-            echo "         $absent identifier(s) the layer added are absent from the composed tree:$names" >&2
+            echo "         $absent of $pool_n identifier(s) the layer added are absent from the composed tree:" >&2
+            echo "         $names" >&2
+            # A layer whose diff-vs-parent is huge is not thin: its first parent
+            # is not its real base, so the finding is real but the ATTRIBUTION
+            # is coarse — the missing code may belong to a neighbour in the
+            # range rather than to this branch's own commit.
+            local fat; fat="$(git -C "$TREE" diff --shortstat "$base" "$ref" 2>/dev/null)"
+            if [[ "$fat" =~ ([0-9]+)\ insertion ]] && [[ "${BASH_REMATCH[1]}" -gt 500 ]]; then
+                echo "         note: fat diff vs first parent (${BASH_REMATCH[1]} insertions) — attribution to this branch is approximate" >&2
+            fi
             flagged=$((flagged+1))
         else
-            say "ok       $br  (layer identifiers intact)"
+            say "ok       $br  (all $pool_n layer identifiers intact)"
         fi
     done < "$MANIFEST"
     say ""
-    say "auto: $layers layer(s) checked against their own diffs, $flagged with missing content"
+    say "auto: $layers layer(s) checked in full against their own diffs, $flagged with missing content"
     [[ "$flagged" -eq 0 ]]
 }
 
