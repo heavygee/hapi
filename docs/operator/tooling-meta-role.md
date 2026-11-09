@@ -73,6 +73,48 @@ The PR watcher may send an unlock ping; execution is this seat's. The previous h
 
 There is no secret ritual beyond this checklist.
 
+### When a compose conflicts: check for re-carry before resolving anything
+
+**PRACTICE, learned 2026-11-09 the expensive way.** A peer swapped our parallel
+`#1772` implementation out of the manifest for the community PR's version, dogfooded
+theirs live, and asked for a compose. It conflicted in 15 files, 32 hunks in
+`SessionList.tsx` alone. The temptation is to start resolving. Don't — ask first *why*
+there is a conflict at all.
+
+**Removing a manifest entry does not remove its code.** Every layer branch cut from a
+soup tip that already contained that code carries it back in as a passenger. Here, the
+dropped commit was contained in **37 of 89 active layers**, so the swap achieved
+nothing and the new implementation collided with the old one as *added by both*.
+
+The tell is **`AA` (added by both) status on files that should exist on one side only**.
+If a swap worked, the replaced files arrive from the incoming layer alone. Two
+independent copies means the old one is still being re-carried.
+
+```bash
+# is a "removed" commit still arriving via other layers?
+for b in $(grep -E "^\s*-\s*branch:" config/driver-manifest.yaml | sed -E 's/.*branch:\s*//'); do
+    ref="origin/$b"; git rev-parse -q --verify "$ref" >/dev/null || ref="$b"
+    [[ "$(git rev-list --count <dropped-sha> ^"$ref" 2>/dev/null || echo 1)" == "0" ]] \
+        && echo "carries it: $b"
+done
+```
+
+This is the class `hapi-soup-excised-check.mjs` was built for (#1473 fortress), but
+that check runs at **verify**, so a merge that conflicts first never reaches it. Run
+the loop above by hand the moment a compose conflicts in files a recent swap touched.
+
+**Remedy is the requesting peer's choice, not yours:** register the dropped files in
+the excision registry so the compose strips them from the carriers, or reshape the
+incoming layer onto a current soup tip. Either way the layer must merge before this
+seat composes it — **a layer that conflicts is not ready, and saying so with evidence
+is delivering, not punting.** Give them the carrier list and the conflict inventory so
+the handback is a work list rather than a refusal.
+
+Then **abort the WIP and clear your own hold** (`hapi-remat-hold clear` with
+`HAPI_REMAT_OWNER=1` + `HAPI_REMAT_OWNER_TOKEN`). A hold blocks every other session's
+remat and build-web; leaving one set while a peer reshapes freezes the fleet for no
+reason. The previous tip stays live and serving throughout.
+
 ## 4. Other routines of the seat
 
 - **Same-turn commit of utensil dirt** on the mirror before stopping (tooling-commit ledger / stop hook). Do not leave `scripts/tooling/` or `docs/` edits uncommitted across a turn.
