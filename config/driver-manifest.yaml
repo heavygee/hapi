@@ -1434,3 +1434,15 @@ layers:
   # See docs/plans/2026-11-03-oos-linux-oom-orphaned-session-trees-postmortem.md
   # tooling-only → no build-web required; remat picks it up.
   - branch: chore/claude-orphan-resurrect
+
+  # Dogfood upstream tiann/hapi#2296 (IanMStevenson, OPEN/dirty vs upstream/main
+  # as of 2026-11-06) — every session presence state gets its own badge mark
+  # (working=solid pulse, waiting=ring, stopped=power mark) instead of a badge
+  # only while active. Merged IanMStevenson/hapi@f67e13905 onto upstream 0.34.4;
+  # the only real conflict was the isUnread computation in SessionRowSummary.tsx,
+  # kept HEAD's sessionIsUnread()-based calc alongside Ian's presence taxonomy.
+  # Worktree: ~/coding/hapi/worktrees/2296-presence-badges
+  # Thin tip: driver/2296-presence-badges @ 5baf98fd5
+  # Web-only → remat --build-web; hard-reload (no hub restart).
+  # Tip-unique: PRESENCE_BADGE_CLASS / StoppedBadgeIcon / data-presence
+  - branch: driver/2296-presence-badges
