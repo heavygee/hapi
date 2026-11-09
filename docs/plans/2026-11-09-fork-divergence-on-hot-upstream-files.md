@@ -52,11 +52,13 @@ Anyone arguing option 1 (upstream the redesign) has to show it's a strict gain, 
 
 Three honest options:
 
-1. **Upstream the redesign.** The fork's row UI (attached-job progress, blocked chips, issue refs) is arguably better than upstream's badge corner and is exactly the kind of thing a stranger would want. If it lands upstream, the divergence ends and Ian's PR becomes a merge rather than a redesign. Cost: PR work, review latency, and upstream may decline.
+1. **Upstream the redesign — but split the pitch.** Corrected by the design section above, which contradicts the first draft of this line. The fork's additions (blocked chip, issue chip, attached-job progress, foreground-vs-background spinner) are a genuine gain upstream would likely want on their own merits. The fork's *presence* handling is **not** — showing stopped and waiting by absence/dimming rather than an affirmative mark is a regression against exactly the premise of Ian's PR. So: pitch the additions, and **separately fold in an explicit stopped/waiting mark** rather than claiming the fork's row is strictly better. A pitch that leads with "ours is better" is factually wrong on the one point the upstream author cares most about, and would deserve to be rejected.
 2. **Accept the divergence explicitly.** Keep the fork design, write down that `SessionRowSummary.tsx` is a permanent conflict site, and budget for it — meaning every upstream bump gets a deliberate resolution with a symbol-preservation check, not a hurried one at the end of a compose.
 3. **Revert toward upstream.** Drop the fork-only row features to stop the bleeding. Probably wrong — they are in daily use — but it should be named rather than silently excluded.
 
-**Recommendation: (1), with (2) as the interim.** Upstreaming converges the file and removes the recurring tax; until it lands, treat the file as a known conflict site and resolve it with the symbol-diff check rather than tests alone.
+**Recommendation: (1) in the split form above, with (2) as the interim.** Upstreaming converges the file and removes the recurring tax; until it lands, treat the file as a known conflict site and resolve it with the symbol-diff check rather than tests alone.
+
+**Note on how this recommendation was reached, because it matters for the next one.** The first draft of option 1 asserted the fork's row was "arguably better" — written by the kitchen from marker counts, without reading the rendering logic. The feature peer then read the actual file and showed that claim is wrong for stopped and waiting. The marker counts proved *divergence*; they said nothing about *quality*, and the recommendation leaned on them for a conclusion they could not support. Same shape as the other failures in this estate's recent record: a measurement answering a question adjacent to the one being decided.
 
 ## What to do regardless of the answer
 
