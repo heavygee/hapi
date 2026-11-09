@@ -234,3 +234,53 @@ cap, in the test harness meant to catch it.
 
 Expected steady-state cost: a flag or two per sweep, a few minutes each, on a 2.5s run
 that can sit inside every remat. The four losses here had been invisible for months.
+
+---
+
+## Coverage gap found the hard way: upstream merges are invisible to `--auto`
+
+Later the same day, every `hapi-driver-rebuild --verify` started failing on one test:
+
+```
+SQLiteError: error in index idx_messages_immediate_queued after drop column:
+no such column: delivery_state
+```
+
+Upstream `5fd1179d2` *"fix(hub): repair v24 migration test fixture"* (weishu, 2026-10-29)
+had fixed exactly this by dropping the V26/V27 indexes before dropping the column
+SQLite will not release while an index references it. **That commit is a provable
+ancestor of the live tip and its content was gone** — a soup merge resolution kept the
+fork's version bumps (v28 → v32) and reverted his `DROP INDEX` lines.
+
+Textbook ancestry-vs-presence. And `--auto` could not have found it.
+
+`run_auto` walks `config/driver-manifest.yaml` and checks each **manifest layer
+branch**. This loss arrived through a **tip-forward merge of `upstream/main`**, which
+is not a manifest entry, so no iteration of the loop ever looked at it. Full coverage
+across layers is still blind to everything absorbed from upstream directly.
+
+**Severity is the lesson, not the bug.** One red test in the composed tree blocks every
+remat, so a silently-reverted upstream test fixture presented as *"the soup cannot
+ship"* — including an operator-visible phone bug (#322) that had nothing to do with it.
+The ancestry-vs-presence class does not only lose features quietly; it can also seize
+the whole delivery pipeline.
+
+**Closing it** means giving `--auto` a second source of refs: the upstream commits
+absorbed since the previous tip, not just the manifest layers. The same set difference
+works — identifiers an upstream commit added, checked against the composed tree — and
+it would have flagged `DROP INDEX idx_messages_immediate_queued` as missing. Not built
+yet; recorded here so the next holder of this seat does not rediscover it from a
+blocked pipeline.
+
+Healed meanwhile as `scripts/tooling/soup-heals/108-v24-migration-fixture-indexes.patch`.
+
+## Two other pipeline traps from the same session
+
+- **SKIP still exits 0.** `driver/1772-techotaku-reshape-wip` (13 commits, **46 files**)
+  was refused by the fat-tip gate at 40 files, the compose continued, `--verify` went
+  green, and the tip promoted **without the layer**. Always grep the remat log for
+  `SKIP` before telling anyone their feature shipped.
+- **CI contends with the remat for the isolated test hub.** One run reported 347 CLI
+  test *files* failed while 798 tests passed, all at setup with `Missing isolated hub
+  config`, because a self-hosted Actions runner was executing `vitest.integration`
+  concurrently. A mass failure with a passing test count is this, not a regression.
