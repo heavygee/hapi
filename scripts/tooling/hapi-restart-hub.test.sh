@@ -60,5 +60,15 @@ rm -f "$stub" "$harness"
 printf '%s' "$out" | grep -q "unbound variable" && bad "drain dies under set -u for a non-Cursor agent: $out" || ok
 printf '%s' "$out" | grep -qi "wrapped agent session" && ok || bad "self-exempt message did not fire for claude: $out"
 
+# --- the shared lib must not drift back to Cursor-only ---
+# lib/patient-drain.sh has no consumer yet; it carried the identical bug, so
+# adopting it would have reintroduced the Claude hang silently.
+LIB="$(dirname "$S")/lib/patient-drain.sh"
+if [[ -f "$LIB" ]]; then
+    grep -q 'CLAUDECODE' "$LIB" && ok || bad "lib/patient-drain.sh is Cursor-only again"
+    out="$(CLAUDECODE=1 bash -c "set -u; source '$LIB'; patient_drain_detect_self_exempt; echo \$PATIENT_SELF_EXEMPT" 2>&1 || true)"
+    [[ "$out" == "1" ]] && ok || bad "lib does not self-exempt a claude caller: $out"
+fi
+
 echo "hapi-restart-hub self-exempt: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]]

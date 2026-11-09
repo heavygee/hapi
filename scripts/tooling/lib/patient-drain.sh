@@ -78,7 +78,15 @@ patient_drain_detect_self_exempt() {
     if [[ "${HAPI_PATIENT_INCLUDE_SELF:-}" == "1" ]]; then
         return 0
     fi
-    if [[ "${CURSOR_AGENT:-}" == "1" || "${CURSOR_INVOKED_AS:-}" == "agent" ]]; then
+    # Flavour-agnostic: the caller is itself a WORKING row, so counting it
+    # deadlocks patient mode forever. This was Cursor-only until 2026-11-09,
+    # which left the Claude tooling/meta bot unable to restart the hub at all
+    # (hung at `effective WORKING=1 … wait forever`). This lib has no consumer
+    # yet — fixed here so adopting it does not reintroduce the same bug.
+    # Mirrors hapi-restart-hub.sh; keep the two in step.
+    if [[ "${CURSOR_AGENT:-}" == "1" || "${CURSOR_INVOKED_AS:-}" == "agent" ]] \
+        || [[ -n "${CLAUDECODE:-}" || -n "${CLAUDE_CODE_SESSION_ID:-}" ]] \
+        || { [[ -n "${HAPI_SESSION_ID:-}" ]] && [[ ! -t 0 ]]; }; then
         PATIENT_SELF_EXEMPT=1
     fi
 }
