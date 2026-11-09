@@ -121,7 +121,18 @@ fi
 # If so, the caller is one of the WORKING sessions and patient-mode would
 # wait forever on itself unless we exempt it from the count.
 SELF_EXEMPT=0
-if [[ "$INCLUDE_SELF" -ne 1 ]] && [[ "${CURSOR_AGENT:-}" == "1" || "${CURSOR_INVOKED_AS:-}" == "agent" ]]; then
+# Self-exempt any wrapped agent session, not just Cursor. The caller is itself
+# a WORKING row, so counting it deadlocks patient mode forever — it waits for
+# its own tool call to finish, which cannot happen while it is the one waiting.
+# This was Cursor-only until 2026-11-09, so the Claude tooling/meta bot could
+# not use the patient path at all: it hung at `effective WORKING=1` (itself)
+# with `wait forever`. Flavour-agnostic test = "I am a HAPI session with no
+# controlling terminal", plus the explicit per-flavour markers.
+if [[ "$INCLUDE_SELF" -ne 1 ]] && {
+        [[ "${CURSOR_AGENT:-}" == "1" || "${CURSOR_INVOKED_AS:-}" == "agent" ]] \
+        || [[ -n "${CLAUDECODE:-}" || -n "${CLAUDE_CODE_SESSION_ID:-}" ]] \
+        || { [[ -n "${HAPI_SESSION_ID:-}" ]] && [[ ! -t 0 ]]; }
+    }; then
     SELF_EXEMPT=1
 fi
 
