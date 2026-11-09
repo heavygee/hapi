@@ -35,11 +35,12 @@ ACTIVE="$(hapi_claude_active_slot)" || { echo "no active slot" >&2; exit 2; }
 WANT="$(hapi_claude_slot_sha12 "$ACTIVE")" || exit 2
 echo "active=$ACTIVE want_sha12=$WANT"
 
-python3 - "$DRY" "$ALL" "$HAPI_HOST" "$HAPI_PROXMOX_SSH" "$WANT" <<'PY'
+python3 - "$DRY" "$ALL" "$HAPI_HOST" "$HAPI_PROXMOX_SSH" "$WANT" "$SCRIPT_DIR/lib" <<'PY'
 import hashlib, json, os, signal, subprocess, sys, time, urllib.request
 
 dry, do_all = sys.argv[1] == "1", sys.argv[2] == "1"
 host, proxmox_ssh, want = sys.argv[3], sys.argv[4], sys.argv[5]
+LIB_DIR = sys.argv[6]
 
 settings = json.load(open(os.path.expanduser("~/.hapi/settings.json")))
 req = urllib.request.Request(
@@ -153,7 +154,27 @@ if dry:
     print("dry-run: no kill/archive/reopen")
     sys.exit(0)
 
-# kill
+# kill — verify, do not assume. `kill`/SIGKILL returning means the signal was
+# delivered, never that the process died. Poll /proc/<pid> until gone or a
+# bounded timeout; anything still alive at the timeout is a confirmed survivor
+# and must NOT proceed to archive+reopen (that's exactly how you get two
+# agents bound to one session id).
+KILL_VERIFY_TIMEOUT_S = float(os.environ.get("HAPI_KILL_VERIFY_TIMEOUT_S", "5"))
+KILL_VERIFY_POLL_S = float(os.environ.get("HAPI_KILL_VERIFY_POLL_S", "0.2"))
+
+def wait_for_death(is_alive_fn, timeout=KILL_VERIFY_TIMEOUT_S, poll=KILL_VERIFY_POLL_S):
+    """Poll is_alive_fn() until it reports False or timeout elapses.
+    Returns True iff confirmed dead within the bound — never assumed."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not is_alive_fn():
+            return True
+        time.sleep(poll)
+    return not is_alive_fn()
+
+def oos_pid_alive(pid):
+    return os.path.exists(f"/proc/{pid}")
+
 for sid, name, hname, pid, sha, alive in targets:
     if not pid or not alive:
         continue
@@ -164,37 +185,71 @@ for sid, name, hname, pid, sha, alive in targets:
             pass
 
 prox_kill = [str(pid) for sid, name, hname, pid, sha, alive in targets if hname == "proxmox" and pid and alive]
+prox_survivors = set()
 if prox_kill:
     open("/tmp/hapi-claude-prox-kill.pids", "w").write("\n".join(prox_kill) + "\n")
     subprocess.check_call(["scp", "-o", "BatchMode=yes", "/tmp/hapi-claude-prox-kill.pids", f"{proxmox_ssh}:/tmp/hapi-claude-prox-kill.pids"])
-    subprocess.run(
+    # Serialize the lib's wait_dead function into the SSH payload (one
+    # authored copy, not a second hand-maintained inline duplicate) and do
+    # the remote side's own verify-don't-assume: SIGTERM, poll, SIGKILL,
+    # poll again, then REPORT (not assume) which pids are still alive.
+    lib_src = subprocess.run(
+        ["bash", "-c", f"source {LIB_DIR}/hapi-kill-verify.sh && declare -f hapi_kill_verify_wait_dead"],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    remote_result = subprocess.run(
         ["ssh", "-o", "BatchMode=yes", proxmox_ssh, "bash", "-s"],
-        input="""
+        input=f"""
+set -u
+{lib_src}
 while read -r pid; do
   [ -z "$pid" ] && continue
   if [ -d "/proc/$pid" ]; then kill -TERM "$pid" 2>/dev/null || true; fi
 done < /tmp/hapi-claude-prox-kill.pids
-sleep 2
 while read -r pid; do
   [ -z "$pid" ] && continue
-  if [ -d "/proc/$pid" ]; then kill -KILL "$pid" 2>/dev/null || true; fi
+  if ! hapi_kill_verify_wait_dead "$pid" {KILL_VERIFY_TIMEOUT_S} {KILL_VERIFY_POLL_S}; then
+    if [ -d "/proc/$pid" ]; then kill -KILL "$pid" 2>/dev/null || true; fi
+    if ! hapi_kill_verify_wait_dead "$pid" {KILL_VERIFY_TIMEOUT_S} {KILL_VERIFY_POLL_S}; then
+      echo "SURVIVOR $pid"
+    fi
+  fi
 done < /tmp/hapi-claude-prox-kill.pids
 rm -f /tmp/hapi-claude-prox-kill.pids
 """,
-        text=True, timeout=60,
+        text=True, capture_output=True, timeout=60,
     )
+    for line in (remote_result.stdout or "").splitlines():
+        if line.startswith("SURVIVOR "):
+            prox_survivors.add(line.split(" ", 1)[1].strip())
 
-time.sleep(2)
+oos_survivors = set()
 for sid, name, hname, pid, sha, alive in targets:
-    if hname == "oos-linux" and pid and os.path.exists(f"/proc/{pid}"):
+    if hname == "oos-linux" and pid and alive:
+        pid = int(pid)
+        if not oos_pid_alive(pid):
+            continue
         try:
-            os.kill(int(pid), signal.SIGKILL)
+            os.kill(pid, signal.SIGKILL)
         except ProcessLookupError:
-            pass
+            continue
+        if not wait_for_death(lambda p=pid: oos_pid_alive(p)):
+            oos_survivors.add(str(pid))
 
-# archive + reopen (sequential reopen after archive; batch archive first)
+survivor_sids = set()
+for sid, name, hname, pid, sha, alive in targets:
+    if not pid or not alive:
+        continue
+    if (hname == "oos-linux" and str(pid) in oos_survivors) or (hname == "proxmox" and str(pid) in prox_survivors):
+        survivor_sids.add(sid)
+        print(f"SURVIVOR {sid[:8]} host={hname} pid={pid} — old process did NOT die, refusing archive+reopen for this session {name[:40]}")
+
+# archive + reopen (sequential reopen after archive; batch archive first) —
+# never for a session whose old process is a confirmed survivor.
 archived = []
 for sid, name, hname, pid, sha, alive in targets:
+    if sid in survivor_sids:
+        continue
     _, err = api("POST", f"/api/sessions/{sid}/archive", {})
     if err:
         print(f"archive FAIL {sid[:8]} {err}")
@@ -202,7 +257,8 @@ for sid, name, hname, pid, sha, alive in targets:
         archived.append(sid)
         print(f"archived {sid[:8]}")
 
-ok = fail = 0
+ok = 0
+fail = len(survivor_sids)
 for sid in archived:
     resp, err = api("POST", f"/api/sessions/{sid}/reopen", {})
     if err:
@@ -218,6 +274,6 @@ for sid in archived:
         ok += 1
     time.sleep(0.5)
 
-print(f"== reopen-mismatch ok={ok} fail={fail} ==")
+print(f"== reopen-mismatch ok={ok} fail={fail} survivors={len(survivor_sids)} ==")
 sys.exit(1 if fail else 0)
 PY
