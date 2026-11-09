@@ -1,0 +1,56 @@
+# Heal: restore upstream's V24 migration fixture repair (5fd1179d2).
+#
+# The composed hub/src/store/migration-v24.test.ts had weishu's fix reverted by
+# a later soup merge resolution, which kept the fork's version bumps (v28 -> v32)
+# but dropped the DROP INDEX lines he added. SQLite refuses to drop a column an
+# index references, so the fixture's `ALTER TABLE messages DROP COLUMN
+# delivery_state` threw and the test failed.
+#
+# 5fd1179d2 IS a provable ancestor of the live tip. Its content is gone. Same
+# ancestry-vs-presence class as docs/plans/2026-11-08-ancestry-vs-presence-
+# verification-gap.md, but absorbed via a tip-forward upstream merge rather than
+# a manifest layer — so hapi-sentinel-check --auto, which only walks manifest
+# layer branches, cannot see it. That is a real coverage gap in the instrument.
+#
+# Severity: this is why EVERY remat --verify was failing. One red test in the
+# composed tree blocks all delivery, so it surfaced as "the soup cannot ship"
+# rather than as a migration bug.
+#
+# Uses DROP INDEX IF EXISTS and asserts only idx_messages_immediate_queued:
+# the fork's schema does not create idx_messages_future_scheduled_queued, and
+# naming an absent index is how this fixture rots again.
+diff --git a/hub/src/store/migration-v24.test.ts b/hub/src/store/migration-v24.test.ts
+index d6c532b76..18fbc684c 100644
+--- a/hub/src/store/migration-v24.test.ts
++++ b/hub/src/store/migration-v24.test.ts
+@@ -64,6 +64,17 @@ describe('schema migrations through v28', () => {
+         new Store(dbPath).close()
+         const legacy = new Database(dbPath)
+         legacy.exec(`
++            -- V26/V27 indexes depend on delivery_state and did not exist in V24.
++            -- SQLite refuses to drop a column an index references, so a genuine
++            -- V24 fixture must drop them first. Restores upstream 5fd1179d2,
++            -- which a later soup merge resolution reverted while bumping the
++            -- version expectations below — leaving the suite red and every
++            -- remat --verify blocked.
++            -- IF EXISTS: the fork's schema currently creates only the
++            -- immediate-queued index. Naming an absent one would make this
++            -- fixture rot again the next time the index set changes.
++            DROP INDEX IF EXISTS idx_messages_immediate_queued;
++            DROP INDEX IF EXISTS idx_messages_future_scheduled_queued;
+             ALTER TABLE messages DROP COLUMN delivery_state;
+             PRAGMA user_version = 24;
+         `)
+@@ -72,9 +83,12 @@ describe('schema migrations through v28', () => {
+         const migrated = new Store(dbPath)
+         const internalDb = (migrated as unknown as { db: Database }).db
+         const columns = internalDb.prepare('PRAGMA table_info(messages)').all() as Array<{ name: string }>
++        const indexes = internalDb.prepare('PRAGMA index_list(messages)').all() as Array<{ name: string }>
+         const version = internalDb.prepare('PRAGMA user_version').get() as { user_version: number }
+         expect(columns.some((col) => col.name === 'delivery_state')).toBe(true)
+         expect(version.user_version).toBe(32)
++        // The migration must put the indexes back, not just the column.
++        expect(indexes.map((index) => index.name)).toContain('idx_messages_immediate_queued')
+         migrated.close()
+     })
+ })
