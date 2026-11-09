@@ -72,11 +72,16 @@ order above is a real dependency chain, so a removal part way down just stops ev
   shipped it.
 - **Long-running-job fade digression removed.** Point of residency is: fade = not taking RAM;
   operators already know that signal. Job chrome is its own item.
-- **Cursor "no system-prompt seam" claim deleted — it was wrong.** Checked live hub DB
-  (`/var/lib/hapi/hapi.db`, 2026-11-09): **542 / 892** Cursor sessions have
-  `last_notify_status` populated (same path as Claude/pi/codex). Fleet self-reports across
-  flavors because emission was arranged; PR 3 stays as hub speaking for *terminal* agent
-  errors / dead turns, not as a Cursor hole-filler.
+- **Cursor "no system-prompt seam" claim deleted from the upstream body — and stay precise.**
+  Live hub DB (`/var/lib/hapi/hapi.db`, 2026-11-09): **542 / 892** Cursor sessions have
+  `last_notify_status` populated. That beats the upstream code comment Meta relayed. **Both can
+  be true:** unmodified upstream may still lack a Cursor system-prompt seam; *our* fleet
+  self-reports because emission was arranged via `feat/overseer-summary-emit` (transient
+  `.cursor` rule overlay; manifest: **"fork-only (PR #86/#87, DO NOT upstream)"**). Upstream
+  body wording ("emission was arranged") is the right shape — do **not** let it drift into
+  implying a vanilla install gets the same Cursor coverage. If a maintainer enables the setting
+  and finds Cursor silently dark, that is a trust cost we manufactured. PR 3 stays as hub
+  speaking for *terminal* agent errors / dead turns, not as a Cursor hole-filler.
 - **Fleet framing:** "over 1,000 sessions, ≥~30 active at a time" — not "30-session fleet".
   Live list chrome in the blocked shot shows All (1280).
 - **Inline images (operator ask):** item 1 = live attached-job meter crop

@@ -192,9 +192,13 @@ Extracted from `config/driver-manifest.yaml` on fork main. 19 layers touch this 
 
 1. **We are about to upstream a consumer of a signal whose producer we keep fork-only.**
    #1717's blocked chrome reads `sessions.last_notify_*`, persisted from `AGENT_NOTIFY_SUMMARY`.
-   The fork's emission layer is marked *do not upstream*. **Before PR A ships, establish what
-   upstream populates that field with** — if the answer is "nothing", the feature lands upstream
-   inert and we will have shipped chrome with no data behind it. *Open question, not yet checked.*
+   The fork's emission layer (`feat/overseer-summary-emit`) is marked *do not upstream*. Our
+   fleet's Cursor coverage is that layer — **542 / 892** Cursor sessions have `last_notify_*`
+   on the live hub DB — which does **not** prove a vanilla upstream install gets the same.
+   Unmodified upstream may still lack a Cursor system-prompt seam; do not imply otherwise in
+   public copy. **Before PR A ships, establish what upstream populates that field with** — if
+   the answer is "nothing" (or "everything except Cursor"), the feature lands upstream inert
+   for that flavour and we manufactured the trust cost.
 
 2. **Three layers each claim the same residency/activity pixels.** The fade (A), the job progress
    chrome (B), and upstream's dot all render liveness. Order of landing decides who wins by
