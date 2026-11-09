@@ -20,6 +20,29 @@ Sourced from the 2026-11-09 handover conversation with the outgoing Cursor holde
 
 **Anti-pattern, observed:** the incoming Claude holder read `CLAUDE.md`'s *"NEVER `sudo systemctl restart hapi-hub.service` — use `hapi-restart-hub`"* as "restarts need escalation", and left a composed tip unpublished for hours. The prohibition is about the **raw** call; the wrapper is the sanctioned path and it is yours.
 
+### Managing a drain you no longer want
+
+**PRACTICE (predecessor) + hard-won 2026-11-09.** A patient drain waits **forever** by design. That is correct behaviour, and it means a drain you no longer want does not go away on its own.
+
+| Situation | Do this |
+|---|---|
+| Drain is waiting on genuinely busy sessions | **Wait.** That is the feature. |
+| Hub is wedged and you need it now | `--impatient` / `HAPI_IMPATIENT=1` — TTY-gated, operator-shaped urgency only |
+| Drain is superseded (stack already restarted, or you started a duplicate) | **`hapi-restart-hub --cancel`** |
+| Any of the above | **NEVER `kill` / `pkill` the wrapper** |
+
+**Why `pkill` is forbidden and not merely blocked.** The production-mutation guard refuses it, correctly — it cannot tell a restart wrapper from the hub. But the deeper reason is that half-killing a drain **defeats the lock that stops drains stacking**:
+
+`hapi-restart-hub` takes `driver_status_acquire switch` *before* draining, so a second invocation should exit 75. The line above it heals "stale" state, where stale meant *recorded pid dead AND flock free*. `pkill` of the recorded wrapper makes both true — the lock fd dies with the parent — while live waiters keep draining. Status then reads stale while a real drain runs, autoclear heals the lie, and the next caller acquires cleanly and **queues a second drain behind the first**. Three accumulated this way on 2026-11-09; both then fire whenever sessions next go quiet.
+
+Three fixes closed it, and the ordering matters if you are reading the code:
+
+- `d138ad5a9` — `--cancel`, the control plane that did not exist (SIGTERM only, narrowed to this script's own pids, never the test harness, no SIGKILL escalation)
+- `4ead05223` — startup refusal when a drain is already live; stops **you** stacking
+- `784a0d7db` — `driver_stack_autoclear_stale` now checks process reality for `switch`, not just the recorded pid; stops the **next agent** stacking after someone else's half-kill. The genuine `kill -9` leftover case still heals — that is asserted first in its test so the fix cannot degrade into "refuse always".
+
+**The generalisable bit:** dead recorded pid + free lockfile is *necessary but not sufficient* evidence that nothing is running. Check process reality before healing any lock.
+
 ## 2. Standing authority — what to just do
 
 | Action | Authority | Note |
@@ -28,6 +51,7 @@ Sourced from the 2026-11-09 handover conversation with the outgoing Cursor holde
 | Clear a remat hold **you own** | **Just do it** | success auto-clears it anyway |
 | `hapi-restart-hub` after a green hub/CLI remat | **Just do it** | § 1 |
 | Push fork `main` unannounced | **Just do it** | kitchen hygiene, not ceremony — and remat refuses an unpushed tip |
+| `hapi-restart-hub --cancel` a superseded drain | **Just do it** | see § Managing a drain above; never `pkill` |
 | Reset dirty worktrees | **Carefully** | never a blind stash of someone else's dirt; prove the index tree matches an existing commit first, and check no active session has it as cwd |
 | Retitle a superseded session `SUPERSEDED …` | **Just do it** | |
 | **Hard-archive another session** | **NOT this seat's call** | operator/outside only |
