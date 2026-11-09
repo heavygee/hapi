@@ -214,11 +214,13 @@ export function SessionRowSummary(props: {
 
     return (
         <div className={`flex w-full min-w-0 flex-col gap-1 ${className ?? ''}`}>
-            <div className={`grid grid-cols-[minmax(9rem,1fr)_minmax(0,max-content)] items-center gap-2 ${!s.active && !attachedJob ? 'opacity-50' : ''}`}>
+            {/* Fade = residency (RAM) only. Running attached jobs must not un-dim
+                a disconnected row — the job chip/progress below carries that signal. */}
+            <div className={`grid grid-cols-[minmax(9rem,1fr)_minmax(0,max-content)] items-center gap-2 ${!s.active ? 'opacity-50' : ''}`}>
                 <div className="flex min-w-0 items-center gap-2">
                     <AgentFlavorIcon flavor={s.metadata?.flavor} className="h-4 w-4 shrink-0 -translate-y-px" />
                     <div
-                        className={`min-w-0 flex-1 truncate text-sm ${isUnread ? 'font-semibold' : 'font-medium'} ${s.active || attachedJob ? 'text-[var(--app-fg)]' : 'text-[var(--app-hint)]'}`}
+                        className={`min-w-0 flex-1 truncate text-sm ${isUnread ? 'font-semibold' : 'font-medium'} ${s.active ? 'text-[var(--app-fg)]' : 'text-[var(--app-hint)]'}`}
                         title={sessionName}
                     >
                         {sessionName}
