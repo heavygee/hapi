@@ -334,7 +334,111 @@ Also checked and **not** bugs, so nobody re-finds them: `titleLocked` is likewis
 
 ---
 
+## Follow-up 7 — the orphan census, and the one lesson that outlives all of this (triage, 2026-11-08)
+
+The kitchen escalated the archive line as the cause of a production leak: parentless agent processes, up to **14.7 days** old, swap exhausted. The leak is real. The cause was not the archive line, and the census says so.
+
+**Census — all 96 parentless processes carrying a `HAPI_SESSION_ID`, read per id:**
+
+| Session state | n | mean age | max age |
+|---|---|---|---|
+| `idle`, no archive marker | 36 | 6.0d | 13.4d |
+| `archived` / `cli` / *Hub restart* | 27 | — | — |
+| `archived` / `cli` / *User terminated* | 22 | — | — |
+| `running`, no archive marker | 11 | 7.9d | 14.7d |
+| *(archived subtotal)* | *49* | *9.5d* | *14.7d* |
+
+**49 of 96 — half — were never archived by anything.** For those, no hub marker was ever due, so the `lifecycleState`-vs-`archivedBy` short-circuit cannot be what kept them alive. "Hub restart" is also not dominant (27 vs 22). And the never-archived half **ages identically** to the archived half, which is the opposite of what a starved-reaper story predicts.
+
+Also confirmed: PPID=1 really is anomalous for these. Healthy sessions run `claude` → `node` → `bun` with real parent pids — checked against four live meta sessions. So these processes did lose their parents; they are not normal detachment.
+
+**What remains unexplained, and is the only open question worth carrying forward:** `#1911`'s reaper is in the live tip (`rev-list --count ecabe3b4c ^c5a182a12` = 0) and is reaping **none** of these, across every session state. That sits upstream of the archive argument entirely. With discovery.
+
+### Operational outcome (kitchen, same evening)
+
+Two SIGTERM rounds, 56 processes, clean exits. Verified independently after the fact: **MemAvailable 8 → 20 GiB, swap 15/15 → 6/15 GiB**, 49 parentless processes remaining (28 `idle`/active, 12 `running`/active, 8 with no session id, 1 unreadable) and deliberately left alone, because the hub believes those sessions are live. All four meta peers `active=true`, registry auditor exit 0. No collateral damage.
+
+### The lesson, which is the real output of this thread
+
+Six times in one day, a confident claim was built on a probe that answered a different question than the one asked:
+
+1. `jq '.archived'` → `null` read as "not archived". **The field does not exist**; archive state is `metadata.lifecycleState`.
+2. `GET /api/sessions?limit=500` — `limit=2000` also returns 500 and `offset` is ignored, so "absent" meant **"not updated in ~22 days"**.
+3. `GET /api/sessions` strips `archivedBy`/`archiveReason` (**0 of 500 rows**) while per-id serves them — a list-based join would have "proved" no orphan was ever archived.
+4. A kill-list script lost its session-id extraction in a patch and reported **8,087** candidates, including the wrapper just started. Only the absurdity of the number stopped it killing live work.
+5. Bug B — a real code read (`acpManualTitle` captured once) built into a mechanism, without checking that **nothing outside the process ever writes that flag**.
+6. Bug A — a real code read (`lifecycleState` not in the preserve list) built into an erasure story, without checking that **`preserveHubArchiveOnMerged()` re-stamps hub archives**.
+
+The first four are probe failures; the last two are the same failure in prose. **Reading code until a story coheres is not verification.** The missing step every time was looking for the thing that would kill the story — the guard, the re-stamp, the narrowing condition, the field the endpoint declines to serve. Each one was caught by a different session than the one that made it, which is the argument for this thread having had three participants rather than one.
+
+Durable form of the rule, for anything downstream: **absence in a payload is not absence in the system; a round-number result is a cap until disproved; and a causal chain is a hypothesis until its falsifier has been searched for and not found.**
+
+---
+
+## Follow-up 8 — the reaper was never in scope, and my own bug is retracted too (discovery, 2026-11-08)
+
+Three findings. The first two stand. The third is mine and it is withdrawn — the rule in Follow-up 7 caught me one round after I helped write it.
+
+### 1. The reaper could not have reaped these, for two independent reasons
+
+**It is not a sweeper.** `reapRunnerSpawnedOrphans` has one import site (`cli/src/runner/run.ts:18`) and two call sites (`:1258`, `:1572`), both inside `stopSession` (`:1166`). There is no periodic or startup sweep anywhere — the only `setInterval` in `run.ts` is `restartOnStaleVersionAndHeartbeat`. **Reaping is an action inside a stop of one named session id.** Nothing in HAPI ever asks "are there processes here that should not be?", so nothing revisits a process whose stop already finished.
+
+That alone explains all four rows of the Follow-up 7 census without reference to archive state: never-archived sessions are never stopped, and already-archived ones are never stopped *again*. The archive short-circuit from Follow-ups 5/6 is not upstream of this and never was.
+
+**And it matches argv, which these processes do not carry.** `commandMatchesRunnerSpawnedSession` requires `--started-by runner` plus `--existing-session-id`/`--hapi-session-id` as argv tokens. Measured on this host:
+
+```
+PPID=1 with session id on ARGV    : 6     <- all the matcher can ever see
+PPID=1 with HAPI_SESSION_ID in ENV: 44    (5947 MiB)
+   of those, argv-invisible       : 44
+HAPI_STARTED_BY in environ        : 0
+```
+
+This is **fork-local, not an upstream defect.** Upstream's runner stamps argv correctly (`run.ts:2113`, `args.push('--started-by','runner')`). The local launch form is `bun --cwd /work/coding/hapi/driver/cli -e 'import { initializeToken } …'` — an inline-eval with no argv flags at all — which appears nowhere in upstream `cli/src/runner`. Sessions started that way are `startedBy: 'terminal'`-shaped, and the runner deliberately does not own or tree-kill what it did not spawn. **The durable finding of this whole thread is that gap between how this estate starts sessions and what the runner will ever clean up.**
+
+Separately, cursor-agent children match *no* rule — no `--started-by runner`, no `--hapi-session-id`, and not the `mcp --url` bridge shape either. That is documented upstream, not new: `orphanReap.ts:75` names the cause (OOM of the root only, KillMode=process races). Do not file it as a discovery.
+
+### 2. `PPID=1` is not an orphan test
+
+```
+PPID=1 inspected         = 99
+inside a .service cgroup = 98
+```
+
+Reparenting to init is the normal steady state of every daemon; the set includes `runsvc.sh` ×14, `tailscaled`, `agetty`, `systemd`, and the hapi hub and runners themselves. Use `HAPI_SESSION_ID` in `/proc/<pid>/environ` plus per-id hub state. Note also that a live process carrying a session id does **not** mean that session's root is alive — roots and children are different populations and must be bucketed before any lifecycle conclusion is drawn.
+
+### 3. Retracted: `cleanupAndExit` "announces death and never exits"
+
+I claimed the archived-but-alive sessions proved the CLI wrote `archivedBy: 'cli'` in `archiveAndClose()` and then never reached `process.exit()`, hung on one of the unbounded awaits (`session.close()`, `onAfterClose()`), with no watchdog anywhere in `cli/src` to bound it.
+
+**The code description is accurate. The inference from it is not.** It assumed the surviving process was the same process that wrote the marker. A hapi root can write the marker, exit perfectly cleanly, and leave agent children holding `HAPI_SESSION_ID` in their environment — "session archived, live process carries its id", with no hang anywhere.
+
+Two falsifiers, neither of which I looked for before asserting it:
+
+- **The kitchen's reap: 56 SIGTERMs, 56 clean exits.** `cleanup()` is memoized (`if (cleanupPromise) return cleanupPromise`), so a second SIGTERM into a genuinely hung cleanup would await the same stuck promise and never exit. A clean sweep is strong evidence the path completes.
+- **Zero specimens.** Every session on this host with a live hapi *root* process, asked per-id:
+
+```
+sessions with a live hapi ROOT process   : 15
+live root, session ARCHIVED (specimen)   :  0
+live root, session running/idle (normal) : 15
+```
+
+Not one root is alive under an archived session. The "49 specimens" I cited were a process count, roughly half of them cursor-agent children that could not have written a marker — never 49 instances of the thing I was claiming.
+
+Honest caveat: this was measured *after* the kitchen's two reap rounds, so it cannot prove zero specimens ever existed. It does mean none can be produced now, and nothing filed on it could be reproduced by a maintainer.
+
+**What survives is a real but unevidenced robustness gap:** two unbounded awaits between publishing a death marker and exiting, and `git grep` for `forceExit|hardExit|exitTimer|setTimeout(… process.exit)` across `cli/src` genuinely returns zero (positive control: 170 plain `setTimeout` uses in the same tree, so the grep works). **Not filed**, by the same standard that retired the `acpManualTitle` hardening in Follow-up 5: a change justified only by "this could theoretically hang" spends maintainer review for nothing. If a specimen ever appears — a live root under an archived row — it becomes filable that day.
+
+### Net disposition
+
+Nothing in this thread is upstream-filable. The only live candidate remains a narrow note on [#2020](https://github.com/tiann/hapi/issues/2020) about `de758a55b`'s fall-through, with no memory-leak claim attached, held pending the operator. The leak was never one bug: it was a measurement artifact, a fork-local launch form, and a documented by-design exclusion.
+
+---
+
 ## Changelog
+
+- 2026-11-08 — Kitchen escalated the archive line as the cause of a production orphan leak (swap exhausted, processes to 14.7d). Triage censused all 96 parentless processes per-id: **half were never archived at all** and age identically to the archived half, so the short-circuit is not the cause; "Hub restart" is 27 vs 22, not dominant. Kitchen conceded. 56 processes reaped in two SIGTERM rounds — MemAvailable 8 → 20 GiB, swap 15/15 → 6/15, no collateral damage; 49 left alone because the hub believes those sessions live. **Open and unexplained: #1911's reaper is in the tip and reaps none of them.** Nothing filed upstream.
 
 - 2026-11-08 — Written by triage from the kitchen's swap-verification report; collision did not reproduce; #2269/#1672 confirmed shipped in the running driver; two residual footguns recorded.
 - 2026-11-08 — Kitchen built `scripts/tooling/hapi-meta-sessions-audit.sh` (`bc9c0380b`); triage adjudicated its check-B widening — reasoning accepted, implementation rejected: `/api/sessions` caps at 500 rows with `offset` ignored, so "absent" means "older than ~22 days". Fix specified: per-id `GET /api/sessions/:id` (404 = absent).
@@ -347,4 +451,5 @@ Also checked and **not** bugs, so nobody re-finds them: `titleLocked` is likewis
 - 2026-11-08 — Kitchen re-probed `028d0a86` ×3: settled `archived`/`archivedBy: cli`, so both prior readings were accurate at their own sample times — the object flapped, nobody mis-measured. **Attribution corrected:** all three archived husks read `archivedBy: cli` / `archiveReason: "User terminated"`, not `hub`, so the current archived state came from process termination, not from the operator's `archive_peer`. The hub archive applied and was erased (Bug A); the session retired because it died. Bug A filing strengthened, not changed.
 - 2026-11-08 — Triage addendum: the live repro self-destructed when `028d0a86`'s process exited, and always will — the bad state only persists while the session runs to overwrite it. Issue must stand on the code chain and state outright that it is not reproducible by inspection after the fact. Kitchen and triage reached the attribution independently and agree. Thread closed; auditor clean, exit 0.
 - 2026-11-08 — Discovery confirmed against `upstream/main` @ `ee1e6ae7c` and **corrected Bug A's mechanism** (Follow-up 5/6). The three hub-archive guards are byte-identical across soup `c5a182a12`, `upstream/main`, and `feat/archive-peer-2020` — no fork drift — so the absent `archivedBy: 'hub'` proves the hub never authored an archive, rather than showing one was erased. Real chain: fire-and-forget KillSession → CLI self-archives `archivedBy: 'cli'` → process fails to exit → soft stand-down falls through → tail sees `archived` and skips hub-authoring → `ok: true` on an archive that left no durable marker. Race, hence the flap. Fix is `archivedBy === 'hub'` at the tail, **not** extending `pickExistingSessionMetadata` (that would break reopen). Disposition: review input on #2020, not a new issue; `upstream/main` unexposed (it throws where the branch falls through). Bug B hardening dropped by agreement; the non-runner terminal lane recorded as unproven. Nothing posted to `tiann/hapi` — held for the operator's decision.
+- 2026-11-08 — Discovery answered both orphan questions (Follow-up 8). Hub restart never reaches the archive tail — `'Hub restart'` is a CLI-side default for parent-driven SIGTERM (`runnerLifecycle.ts:48,184`), so that thread is decoupled from the archive short-circuit entirely. The reaper's precondition is twofold and explains all four census rows: `reapRunnerSpawnedOrphans` is reachable **only from inside `stopSession`** (one import, two call sites, no sweep anywhere), and it matches **argv** while 44 local processes holding 5.9 GiB carry `HAPI_SESSION_ID` only in `/proc/<pid>/environ` — the `bun … -e` launch form has no argv flags, making them `startedBy: 'terminal'` and permanently invisible. Fork-local gap, not upstream (`run.ts:2113` stamps argv correctly upstream). `PPID=1` retired as an orphan predicate: 98 of 99 sit inside a `.service` cgroup. **Discovery's own `cleanupAndExit` finding retracted** — the inference assumed the surviving process wrote the marker, but roots exit cleanly and leave children holding the id; 56/56 clean SIGTERM exits plus **0 of 15** live roots under an archived row leave it with no specimen. Code gap (two unbounded awaits, no watchdog, zero `forceExit` hits against a 170-hit `setTimeout` positive control) recorded as real but unevidenced and **not filed**, by the same standard that retired the `acpManualTitle` hardening. Net: nothing upstream-filable; only the narrow #2020 fall-through note remains, still held.
 - 2026-11-08 — Discovery's Follow-up 6 committed by the kitchen (append-only verified: 75 insertions, 0 deletions, heading order intact). Follow-up 4's attribution marked superseded in place: the missing `archivedBy: 'hub'` proves the hub never authored an archive, rather than showing one erased. Defect is the `lifecycleState === 'archived'` short-circuit at `syncEngine`'s archive tail; fix is `archivedBy === 'hub'`, **not** extending `pickExistingSessionMetadata` (that would break the deliberate `cli`-archive reopen path). Disposition: review input on #2020, nothing posted to `tiann/hapi` — **awaiting operator yes/no.**
