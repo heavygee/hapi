@@ -49,3 +49,55 @@ Deliberate, and distinct from over-caution:
 6. Only then remat, so the soup absorbs 0.34.4 deliberately rather than as a side effect.
 
 Upstream 0.34.4 also carries `#2312` (peer session MCP tools) and a new `enabledTools` allowlist wrapper around `registerTool()` — a peer hit that on `#2147` and broke two of upstream's own tests by folding fork tools in unconditionally. Expect it to matter at remat.
+
+---
+
+## Second attempt (04:20, under operator priority) — two of three resolved, one is a contract merge
+
+Attempted again because an operator-priority dogfood was blocked behind it (`#1424`'s job meter lying;
+PATH `hapi` lacks the `--progress until` prevention, which needs a driver rebuild, which the sync gates).
+**Aborted again, cleanly.** Two files resolved in the attempt; the third is not a merge problem.
+
+### Resolved (re-apply these)
+
+- **`cli/src/index.ts`** — as recorded above: upstream's `async main()` + the fork's try/catch exit-code
+  backstop around `await runCli()`.
+- **`cli/src/claude/utils/startHappyServer.ts`** — two hunks, and **the second one hides a silent drop**:
+  - *Hunk 1:* take upstream's imports (`forwardPeerReply`, `supportsPeerReply`) and its new
+    `HapiMcpToolName` union, **keep** the fork's `searchContent` import and `SEARCH_CONTENT_DESCRIPTION`,
+    and **add `'search_content'` to the union** — this file registers that tool (`mcp.registerTool(...)`
+    at ~line 623), so omitting it means an explicit `enabledTools` allowlist silently excludes it.
+  - *Hunk 2:* upstream **deleted** the fork's `toolNames` block because it rebuilt the list with
+    `includeTool()` gating. Taking that deletion verbatim **drops `search_content` from `toolNames`** —
+    upstream's builder covers `change_title`, `display_*`, the peer tools and `skill_lookup`, and has no
+    `search_content`. Take the deletion, then re-add
+    `if (includeTool('search_content')) toolNames.push('search_content');` after the display loop.
+    Everything would have compiled and gone green without it; the fork's search tool would simply have
+    stopped being advertised.
+
+### Not resolved: `pingPeer.ts` hunk 2 is a **contract conflict**, not a text conflict
+
+Hunks 1 and 3 are trivial (upstream's `isReadyEvent` vs the fork's `InspectMessagesFetch` type; a
+one-liner). Hunk 2 is the same function implemented twice with **different signatures and return types**:
+
+```
+ours   (http): Promise<InspectMessagesFetch>                       97 lines
+       multi-page accumulation, seenIds dedupe, rowsScanned, snippetsSkipped, hasMore
+
+theirs (http, watch = false, after?: {at, seq})                    47 lines
+       : Promise<{ messages, next: {at, seq} | null }>
+       single page + cursor, for upstream's waitForReply (#2167)
+```
+
+**Both have live callers.** The fork's `inspect_peer` report needs the paging metadata; upstream's
+`forwardPeerReply` / `supportsPeerReply` need the cursor — and those are imported by
+`startHappyServer.ts`, so a partial absorb that keeps the fork's version while taking upstream's imports
+does not compile. The feature spans files; there is no coherent half.
+
+Resolving means **merging two function contracts**, and the failure mode is silent either way: lose the
+paging metadata and `inspect_peer` quietly under-reports, or lose the cursor and `waitForReply` never
+fires. In the one file with documented precedent for exactly that (`1b4438be5`, 11-05).
+
+**This needs daylight and preferably whoever owns the fork's inspect paging — not an improvised merge at
+04:20 on a shared branch.** No override exists for the gate (`hapi-driver-rebuild` line 129 is a hard
+`--check-only` fail with no env bypass), so the dogfood stays blocked until this is done properly.
