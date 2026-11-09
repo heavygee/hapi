@@ -27,7 +27,8 @@ Slot storage (never committed):
 | Switch fleet slot (oos + proxmox runners) | `hapi-claude-account-toggle primary\|secondary` |
 | Host files + runner env match active slot? | `hapi-claude-auth-audit` |
 | Live session process tokens match? | `hapi-claude-session-assess` |
-| Kill+archive+reopen drifted sessions | `hapi-claude-reopen-mismatch` |
+| Kill+archive+reopen drifted sessions | `hapi-claude-reopen-mismatch` (defaults to continue-wake after) |
+| Continue-only wake after cutover | `hapi-claude-continue-fleet` |
 
 Install/refresh PATH symlinks: `bash scripts/tooling/install-hapi-local-bin.sh`
 
@@ -38,11 +39,15 @@ hapi-claude-usage                    # see which slot still works / reset clock
 hapi-claude-account-toggle secondary # or primary — fleet runners + active marker
 hapi-claude-auth-audit               # host/runner sha12 must match
 hapi-claude-session-assess           # expect NEEDS REOPEN until next step
-hapi-claude-reopen-mismatch          # respawn live Claude onto the new token
+hapi-claude-reopen-mismatch          # respawn + continue-wake (use --no-continue to skip wake)
 hapi-claude-session-assess           # should be clean
 ```
 
 Do **not** hand-roll JWT/archive/reopen Python each time — that is what these scripts are for.
+
+## Does cutover stop agents mid-flow?
+
+**Yes.** Live Claude children are killed so they can respawn on the new token. Reopen alone leaves them **idle on the good account** — the operator should not have to hunt them down. `hapi-claude-reopen-mismatch` therefore defaults to `hapi-claude-continue-fleet` (continue-only pings, no ack-for-ack). Auth-only: pass `--no-continue`.
 
 ## Why reopen is separate
 

@@ -53,17 +53,106 @@ IMPATIENT=0
 RUNNER=1
 INCLUDE_SELF=0
 
+CANCEL=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --impatient) IMPATIENT=1; shift ;;
         --no-runner) RUNNER=0; shift ;;
         --patient-include-self) INCLUDE_SELF=1; shift ;;
+        --cancel) CANCEL=1; shift ;;
         -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
         *) echo "Unknown flag: $1" >&2; exit 2 ;;
     esac
 done
 [[ "${HAPI_IMPATIENT:-}" == "1" ]] && IMPATIENT=1
 [[ "${HAPI_RESTART_INCLUDE_SELF:-}" == "1" ]] && INCLUDE_SELF=1
+
+# Ancestors of this process (the invoking shell, the tool wrapper, …) often have
+# the script name in their own cmdline — `hapi-restart-hub > log` makes the
+# parent shell match a naive pgrep. Excluding only $$ is not enough: the first
+# real use of the stacking guard refused a legitimate restart with "0s elapsed",
+# which is the signature of matching your own launcher. A guard that blocks
+# valid work trains people to bypass it.
+_hrh_is_ancestor() {
+    local target="$1" p="$PPID" hops=0
+    while [[ "$p" =~ ^[0-9]+$ && "$p" -gt 1 && "$hops" -lt 24 ]]; do
+        [[ "$p" == "$target" ]] && return 0
+        p="$(awk '{print $4}' "/proc/$p/stat" 2>/dev/null || echo 1)"
+        hops=$((hops+1))
+    done
+    return 1
+}
+
+# Refuse to stack drains. A patient drain waits forever, so starting a second
+# one does not replace the first — it queues behind it, and BOTH fire when the
+# stack next goes quiet. That is how 3 strays accumulated on 2026-11-09: a drain
+# hung on the Cursor-only self-exemption bug, could not be cancelled (no
+# --cancel existed, kill is guard-refused), and each retry added another.
+# Nothing warned, because nothing looked.
+if [[ "$CANCEL" -ne 1 ]]; then
+    _existing=0
+    for _pid in $(pgrep -f "hapi-restart-hub" 2>/dev/null || true); do
+        [[ "$_pid" == "$$" ]] && continue
+        [[ -r "/proc/$_pid/cmdline" ]] || continue
+        _cmd="$({ tr '\0' ' ' < "/proc/$_pid/cmdline"; } 2>/dev/null || true)"
+        [[ "$_cmd" == *"hapi-restart-hub"* ]] || continue
+        [[ "$_cmd" == *".test.sh"* || "$_cmd" == *"--cancel"* ]] && continue
+        _hrh_is_ancestor "$_pid" && continue          # never our own launcher
+        echo "ERROR: a hapi-restart-hub drain is already running (pid $_pid, $(ps -o etimes= -p "$_pid" 2>/dev/null | tr -d ' ')s elapsed)." >&2
+        _existing=$((_existing+1))
+    done
+    if [[ "$_existing" -gt 0 ]]; then
+        echo "       Patient drains wait forever, so this one would QUEUE behind it and both would restart." >&2
+        echo "       Inspect it, or: hapi-restart-hub --cancel   (then re-run)" >&2
+        exit 2
+    fi
+fi
+
+# --cancel: stop drains this seat started. A patient drain waits forever by
+# design, so a superseded one (stack already restarted, or a duplicate) sits
+# holding the switch flock and will fire an unwanted restart whenever sessions
+# next go quiet. There was no sanctioned way to stop one: a bare kill/pkill is
+# refused by the production-mutation guard's kill-on-:3006 class, correctly —
+# it cannot tell a restart wrapper from the hub itself. So the capability lives
+# here, inside the allowed wrapper, and is narrowed to this script's own pids.
+if [[ "$CANCEL" -eq 1 ]]; then
+    self="$$"
+    me="$(readlink -f "${BASH_SOURCE[0]}")"
+    found=0
+    for pid in $(pgrep -f "hapi-restart-hub" 2>/dev/null || true); do
+        [[ "$pid" == "$self" ]] && continue
+        # Only ever signal a process whose argv really is this script.
+        [[ -r "/proc/$pid/cmdline" ]] || continue
+        cmd="$({ tr '\0' ' ' < "/proc/$pid/cmdline"; } 2>/dev/null || true)"
+        [[ "$cmd" == *"hapi-restart-hub"* ]] || continue
+        [[ "$cmd" == *".test.sh"* ]] && continue      # never the test harness
+        [[ "$cmd" == *"--cancel"* ]] && continue
+        _hrh_is_ancestor "$pid" && continue            # never our own launcher
+        echo "cancel: signalling drain pid=$pid ($(ps -o etimes= -p "$pid" 2>/dev/null | tr -d ' ')s elapsed)"
+        kill -TERM "$pid" 2>/dev/null || true
+        found=$((found+1))
+    done
+    if [[ "$found" -eq 0 ]]; then
+        echo "cancel: no other hapi-restart-hub drain running"
+        exit 0
+    fi
+    for _ in $(seq 1 10); do
+        still=0
+        for pid in $(pgrep -f "hapi-restart-hub" 2>/dev/null || true); do
+            [[ "$pid" == "$self" ]] && continue
+            [[ -r "/proc/$pid/cmdline" ]] || continue
+        cmd="$({ tr '\0' ' ' < "/proc/$pid/cmdline"; } 2>/dev/null || true)"
+            [[ "$cmd" == *"--cancel"* ]] && continue
+            [[ "$cmd" == *".test.sh"* ]] && continue
+            [[ "$cmd" == *"hapi-restart-hub"* ]] && still=$((still+1))
+        done
+        [[ "$still" -eq 0 ]] && { echo "cancel: $found drain(s) stopped; switch lock released by their EXIT trap"; exit 0; }
+        sleep 1
+    done
+    echo "cancel: WARNING drain(s) still alive after 10s — report, do not escalate to SIGKILL" >&2
+    exit 1
+fi
+
 
 # TTY check for --impatient. Operator at SSH/tmux/console: parent has
 # tty_nr != 0. Agent tool-call shell: tty_nr=0. Allow when caller has
@@ -121,8 +210,34 @@ fi
 # If so, the caller is one of the WORKING sessions and patient-mode would
 # wait forever on itself unless we exempt it from the count.
 SELF_EXEMPT=0
-if [[ "$INCLUDE_SELF" -ne 1 ]] && [[ "${CURSOR_AGENT:-}" == "1" || "${CURSOR_INVOKED_AS:-}" == "agent" ]]; then
+# Self-exempt any wrapped agent session, not just Cursor. The caller is itself
+# a WORKING row, so counting it deadlocks patient mode forever — it waits for
+# its own tool call to finish, which cannot happen while it is the one waiting.
+# This was Cursor-only until 2026-11-09, so the Claude tooling/meta bot could
+# not use the patient path at all: it hung at `effective WORKING=1` (itself)
+# with `wait forever`. Flavour-agnostic test = "I am a HAPI session with no
+# controlling terminal", plus the explicit per-flavour markers.
+if [[ "$INCLUDE_SELF" -ne 1 ]] && {
+        [[ "${CURSOR_AGENT:-}" == "1" || "${CURSOR_INVOKED_AS:-}" == "agent" ]] \
+        || [[ -n "${CLAUDECODE:-}" || -n "${CLAUDE_CODE_SESSION_ID:-}" ]] \
+        || { [[ -n "${HAPI_SESSION_ID:-}" ]] && [[ ! -t 0 ]]; }
+    }; then
     SELF_EXEMPT=1
+fi
+# Which marker matched — for the operator-facing drain message. Every
+# expansion is :-guarded: this script runs under `set -u`, and before
+# 2026-11-09 the message interpolated $CURSOR_AGENT unguarded, which was
+# safe only because the exemption could not fire for any other flavour.
+if [[ "$SELF_EXEMPT" -eq 1 ]]; then
+    if [[ "${CURSOR_AGENT:-}" == "1" || "${CURSOR_INVOKED_AS:-}" == "agent" ]]; then
+        SELF_EXEMPT_WHY="cursor: CURSOR_AGENT=${CURSOR_AGENT:-}/${CURSOR_INVOKED_AS:-}"
+    elif [[ -n "${CLAUDECODE:-}" || -n "${CLAUDE_CODE_SESSION_ID:-}" ]]; then
+        SELF_EXEMPT_WHY="claude: CLAUDECODE=${CLAUDECODE:-} session=${CLAUDE_CODE_SESSION_ID:0:8}"
+    else
+        SELF_EXEMPT_WHY="hapi session ${HAPI_SESSION_ID:0:8} with no tty"
+    fi
+else
+    SELF_EXEMPT_WHY=""
 fi
 
 PRIMARY="${HAPI_PRIMARY:-$HOME/coding/hapi}"
@@ -170,7 +285,7 @@ patient_drain() {
     raw="$("$HEALTH_SCRIPT" --json 2>/dev/null | jq -r '[.sessions[]? | select(.status == "WORKING")] | length' 2>/dev/null || echo 0)"
     working="$(adjust_for_self "$raw")"
     if [[ "$SELF_EXEMPT" -eq 1 ]]; then
-        echo "patient: caller appears to be a Cursor agent (CURSOR_AGENT=$CURSOR_AGENT); subtracting 1 from WORKING count to avoid self-deadlock. Override: --patient-include-self / HAPI_RESTART_INCLUDE_SELF=1"
+        echo "patient: caller is a wrapped agent session ($SELF_EXEMPT_WHY); subtracting 1 from WORKING count to avoid self-deadlock. Override: --patient-include-self / HAPI_RESTART_INCLUDE_SELF=1"
         echo "patient: WORKING raw=$raw effective=$working (effective = others in flight after self-exempt)"
     fi
     if [[ "$working" -gt 0 ]]; then

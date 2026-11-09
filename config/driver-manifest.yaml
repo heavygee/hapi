@@ -700,7 +700,24 @@ layers:
   # Worktree: ~/coding/hapi/worktrees/slim-session-job-mcp @ driver/slim-session-job-mcp
   # Soup tip: db656c411 — re-thin on live tip c5a182a12; hoist session_job "pass null to clear" once (heavygee/hapi#310).
   # Drop when upstream #1424 merges.
+  # session_job `--progress until` preventions — postmortem
+  # docs/plans/2026-11-08-session-job-wrong-affordance-postmortem.md.
+  # Thin tip on soup HEAD ff7e86490. Layer owner: /sessions/6e70f97b.
+  # Restored by the kitchen: the owner staged this line into the 0.34.4
+  # sync and my abort of that sync discarded it.
+  - branch: driver/session-job-progress-until
+
+  # Fork-only: row fade = residency (RAM), not "has attached job".
+  # Operator decision 2026-11-09 — non-resident + running job → faded + job chip.
+  # Not in tiann/hapi#1424 (no opacity-50 in upstream PR diff). Layer owner: /sessions/6e70f97b.
+  # Tip: a740628eb on soup HEAD 26e5eebc3. Worktree: session-row-residency-fade.
+  - branch: driver/session-row-residency-fade
+    sentinel: opacity-50
+    sentinel_path: web/src/components/SessionRowSummary.tsx
+
   - branch: driver/slim-session-job-mcp
+    sentinel: pass null to clear that field
+    sentinel_path: cli/src/modules/sessionJob/sessionJobMcp.ts
 
   # DROPPED 2026-09-02: driver/cursor-notify-rule-delta — stale fat tip (60 commits from
   # Aug merge-base). Notify overlay + session_job instanceof + omit-action-key fixes
@@ -934,7 +951,12 @@ layers:
   # Union needed: soup claimed v26-v29, so this tip renumbers the two
   # migrations to v28->v29 (last_notify_*) and v29->v30 (blocked_ack_*), and
   # resolves SessionList against pinInProgressMode / setExternalRefs.
-  # Worktree: /work/coding/hapi/worktrees/blocked-list-ux-soup
+  # Dogfooded live on :3006 2026-11-09 (heavygee/hapi peer e8da381e): section,
+  # rail+chip, header jump pill, and right-click Mark-unblocked-with-reason all
+  # work as designed. The standalone blocked-only lens toggle this comment
+  # originally described no longer exists — #1996 folded it into the combined
+  # session-list-filter-menu (data-testid="session-list-filter-blocked").
+  # Worktree: /work/coding/hapi/worktrees/blocked-list-ux-worktrees/0829-756b
   # Tip: bcfe1cadf
   - branch: driver/blocked-list-ux
 
@@ -1417,12 +1439,8 @@ layers:
   # Hub-only → remat + publish + seal; tip-unique: preferFleetLatestPointer
   - branch: driver/fix-304-offer-notes-thin
 
-  # heavygee/hapi#308 / PR #309 — Claude Code Tool Search alwaysLoad for proactive
-  # HAPI MCP tools (change_title + display_image/video/media). Fork-only.
-  # Thin tip on soup HEAD c5a182a12: driver/mcp-always-load-meta @ d4d16dd65
-  # cli-only → remat --build-web --verify + hapi-restart-hub (MCP server lives in CLI).
-  # Tip-unique: anthropic/alwaysLoad on change_title/display_*
-  - branch: driver/mcp-always-load-meta
+  # DROPPED 2026-11-09: driver/mcp-always-load-meta MERGED as heavygee/hapi#309
+  # (alwaysLoad on change_title/display_* — now on fork main @ 9591daad5; not upstream)
 
   # DROPPED 2026-11-04: driver/2267-post-close-silence MERGED as tiann/hapi#2268
   # (was #2267 Cursor post-done harness silence; thin fix/2267-post-close-summary-silence)
@@ -1434,3 +1452,36 @@ layers:
   # See docs/plans/2026-11-03-oos-linux-oom-orphaned-session-trees-postmortem.md
   # tooling-only → no build-web required; remat picks it up.
   - branch: chore/claude-orphan-resurrect
+
+  # 2026-11-09 driver/fue-unlabelled-controls — thin re-base of
+  # feat/fue-unlabelled-controls (upstream-bound, a788cba01, based cleanly on
+  # upstream/main) onto this soup tip (e75ead74d, base aea13a532) for
+  # dogfooding. Just-in-time FUE callouts (useFue + FueDot + FueCallout) for
+  # two shipped, icon-only controls with no discovery path:
+  #   - session-list message-content search scope toggle (SessionList.tsx)
+  #   - sort/filter menu trigger — soup's SessionListFilterMenu.tsx stands in
+  #     for upstream's SessionListViewMenu.tsx (richer filter+date-range menu
+  #     here; same trigger-button wiring)
+  # A third control (per-session title-lock padlock, RenameSessionDialog.tsx)
+  # is in the upstream-bound branch but NOT in this layer: this soup tip has
+  # no title-lock feature at all in that file, despite upstream's
+  # 577ab7546 (#2072, which added it) being an ancestor of this tip — a
+  # pre-existing soup gap, unrelated to this change, flagged separately.
+  # Build-only, no schema/API changes. web-only → requires --build-web.
+  # Worktree: ~/coding/hapi/worktrees/fue-unlabelled-controls-driver
+  # Dogfooding before filing upstream (tiann/hapi); not yet filed.
+  - branch: driver/fue-unlabelled-controls
+    sentinel: FueCallout
+    sentinel_path: web/src/components/SessionList.tsx
+
+  # PARKED 2026-11-09: driver/2296-presence-badges (tiann/hapi#2296, IanMStevenson)
+  # does not re-thin onto live soup — SessionRowSummary.tsx's icon-corner presence
+  # badge (data-testid="session-presence") that Ian's PR patches no longer exists
+  # on the soup tip; it was replaced by fork-only opacity-dimming + SessionSpinner +
+  # blocked/issue chips (attachedJob, SessionSpinner, opacity-50: 0 on upstream
+  # 0.34.4, present on soup). Not a mechanical re-thin — a product call on whether
+  # the fork's row redesign upstreams (converging with Ian's taxonomy) or stays a
+  # deliberate fork-only divergence. Escalated to operator via tooling/meta.
+  # Branch left pushed at driver/2296-presence-badges @ 5baf98fd5 (harmless, not
+  # in soup). Worktree: ~/coding/hapi/worktrees/2296-presence-badges
+  # Upstream review of #2296 does not require this layer — proceeds independently.
