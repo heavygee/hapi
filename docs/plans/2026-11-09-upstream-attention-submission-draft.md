@@ -25,8 +25,8 @@ scattered changes.
 **(2) regressed, and I'd like to make the case for restoring it.** Before `832c5922f` a
 non-resident row was faded. At a handful of sessions a 10px dot is fine; at thirty-plus active
 inside a thousand-session fleet, residency is a whole-list scan, and only a row-level signal
-survives that scan. Fade means residency: faded sessions are not taking RAM. Operators already
-know how to read that, and it means something important.
+survives it. Fade means residency: faded sessions are not taking RAM. Operators already know how
+to read that, and it means something important.
 
 **A note on the signal itself.** `AGENT_NOTIFY_SUMMARY` already exists upstream. It has been
 quietly accumulating on installs that emit it — time to put it to use. Today it lands in the
@@ -35,10 +35,10 @@ toggle. The blocked affordance below is the consumer that makes that latent sign
 
 **(3) is where most of my work has gone, and it is not a chrome problem.** A session should be
 able to say what it is blocked on, in its own words, and the list should surface that. I persist
-the agent's last end-of-turn status footer and drive a blocked section, a per-row rail, and an
-off-viewport jump counter from it, plus a "mark unblocked" flow that records a reason. Four
-separate fixes in my tree exist purely to make that signal *fire correctly* — the chrome was the
-easy part. I'd rather land the producer side than a prettier badge.
+the agent's last end-of-turn status footer and drive a blocked section, a per-row rail, an
+off-viewport jump counter, and a "mark unblocked" flow that records a reason. Four fixes in my
+tree exist purely to make that signal *fire correctly* — the chrome was the easy part. I'd rather
+land the producer side than a prettier badge.
 
 **What follows, in order** — each PR links back here:
 
