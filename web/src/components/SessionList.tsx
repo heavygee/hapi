@@ -2361,10 +2361,11 @@ export function SessionList(props: {
     const { showActiveSessionsOnly, setShowActiveSessionsOnly } = useShowActiveSessionsOnly()
     const lastSeenVersion = useSessionLastSeenVersion()
     // Transient session-list lenses (unread lives in the upstream view store;
-    // scratchlist / blocked are ephemeral — not Settings preferences, cleared
-    // on reload, same as today).
+    // scratchlist / blocked / working are ephemeral — not Settings
+    // preferences, cleared on reload, same as today).
     const [showScratchlistOnly, setShowScratchlistOnly] = useState(false)
     const [showBlockedOnly, setShowBlockedOnly] = useState(false)
+    const [showWorkingOnly, setShowWorkingOnly] = useState(false)
     const {
         sessionIds: scratchlistSessionIds,
         isLoading: isScratchlistStatusLoading,
@@ -2472,6 +2473,7 @@ export function SessionList(props: {
         && contentSearchResponse?.hasPotentiallyIncompleteResults === true
     const isFiltering = isSearchFiltering
         || listView.unreadOnly
+        || showWorkingOnly
         || showScratchlistOnly
         || showBlockedOnly
 
@@ -2706,6 +2708,11 @@ export function SessionList(props: {
                 (id, readState) => getSessionManualUnreadAt(id, readState)
             )
             : visibleSessions
+        // Working is AND-composed with the other lenses (#2002); Active is
+        // handled upstream via listView.status (allSessions), not here.
+        if (showWorkingOnly) {
+            filtered = filterWorkingSessionsOnly(filtered, selectedSessionId)
+        }
         if (showScratchlistOnly) {
             if (isScratchlistStatusLoading || scratchlistStatusError) {
                 return []
@@ -2733,6 +2740,7 @@ export function SessionList(props: {
         scratchlistStatusError,
         selectedSessionId,
         showScratchlistOnly,
+        showWorkingOnly,
         showBlockedOnly,
         listView.unreadOnly,
         visibleSessions
@@ -3551,6 +3559,7 @@ export function SessionList(props: {
             setMachineFilter(null)
             setListView(DEFAULT_SESSION_LIST_VIEW)
             setShowScratchlistOnly(false)
+            setShowWorkingOnly(false)
             setShowBlockedOnly(false)
             // Active-only is a persisted preference rather than a transient
             // lens, but it narrows just the same, and the pill's contract is
@@ -3756,6 +3765,7 @@ export function SessionList(props: {
                                             onReset={() => {
                                                 setListView(DEFAULT_SESSION_LIST_VIEW)
                                                 setShowScratchlistOnly(false)
+                                                setShowWorkingOnly(false)
                                                 setShowBlockedOnly(false)
                                                 setCustomStart('')
                                                 setCustomEnd('')
@@ -3763,6 +3773,8 @@ export function SessionList(props: {
                                             }}
                                             scratchlistOnly={showScratchlistOnly}
                                             onScratchlistChange={setShowScratchlistOnly}
+                                            workingOnly={showWorkingOnly}
+                                            onWorkingChange={setShowWorkingOnly}
                                             blockedOnly={showBlockedOnly}
                                             onBlockedChange={setShowBlockedOnly}
                                             customStart={customStart}
