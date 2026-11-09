@@ -707,6 +707,12 @@ layers:
   # sync and my abort of that sync discarded it.
   - branch: driver/session-job-progress-until
 
+  # Fork-only: row fade = residency (RAM), not "has attached job".
+  # Operator decision 2026-11-09 — non-resident + running job → faded + job chip.
+  # Not in tiann/hapi#1424 (no opacity-50 in upstream PR diff). Layer owner: /sessions/6e70f97b.
+  # Tip: a740628eb on soup HEAD 26e5eebc3. Worktree: session-row-residency-fade.
+  - branch: driver/session-row-residency-fade
+
   - branch: driver/slim-session-job-mcp
 
   # DROPPED 2026-09-02: driver/cursor-notify-rule-delta — stale fat tip (60 commits from
@@ -941,7 +947,12 @@ layers:
   # Union needed: soup claimed v26-v29, so this tip renumbers the two
   # migrations to v28->v29 (last_notify_*) and v29->v30 (blocked_ack_*), and
   # resolves SessionList against pinInProgressMode / setExternalRefs.
-  # Worktree: /work/coding/hapi/worktrees/blocked-list-ux-soup
+  # Dogfooded live on :3006 2026-11-09 (heavygee/hapi peer e8da381e): section,
+  # rail+chip, header jump pill, and right-click Mark-unblocked-with-reason all
+  # work as designed. The standalone blocked-only lens toggle this comment
+  # originally described no longer exists — #1996 folded it into the combined
+  # session-list-filter-menu (data-testid="session-list-filter-blocked").
+  # Worktree: /work/coding/hapi/worktrees/blocked-list-ux-worktrees/0829-756b
   # Tip: bcfe1cadf
   - branch: driver/blocked-list-ux
 
@@ -1424,12 +1435,8 @@ layers:
   # Hub-only → remat + publish + seal; tip-unique: preferFleetLatestPointer
   - branch: driver/fix-304-offer-notes-thin
 
-  # heavygee/hapi#308 / PR #309 — Claude Code Tool Search alwaysLoad for proactive
-  # HAPI MCP tools (change_title + display_image/video/media). Fork-only.
-  # Thin tip on soup HEAD c5a182a12: driver/mcp-always-load-meta @ d4d16dd65
-  # cli-only → remat --build-web --verify + hapi-restart-hub (MCP server lives in CLI).
-  # Tip-unique: anthropic/alwaysLoad on change_title/display_*
-  - branch: driver/mcp-always-load-meta
+  # DROPPED 2026-11-09: driver/mcp-always-load-meta MERGED as heavygee/hapi#309
+  # (alwaysLoad on change_title/display_* — now on fork main @ 9591daad5; not upstream)
 
   # DROPPED 2026-11-04: driver/2267-post-close-silence MERGED as tiann/hapi#2268
   # (was #2267 Cursor post-done harness silence; thin fix/2267-post-close-summary-silence)

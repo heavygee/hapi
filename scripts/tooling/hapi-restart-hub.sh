@@ -53,17 +53,88 @@ IMPATIENT=0
 RUNNER=1
 INCLUDE_SELF=0
 
+CANCEL=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --impatient) IMPATIENT=1; shift ;;
         --no-runner) RUNNER=0; shift ;;
         --patient-include-self) INCLUDE_SELF=1; shift ;;
+        --cancel) CANCEL=1; shift ;;
         -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
         *) echo "Unknown flag: $1" >&2; exit 2 ;;
     esac
 done
 [[ "${HAPI_IMPATIENT:-}" == "1" ]] && IMPATIENT=1
 [[ "${HAPI_RESTART_INCLUDE_SELF:-}" == "1" ]] && INCLUDE_SELF=1
+
+# Refuse to stack drains. A patient drain waits forever, so starting a second
+# one does not replace the first — it queues behind it, and BOTH fire when the
+# stack next goes quiet. That is how 3 strays accumulated on 2026-11-09: a drain
+# hung on the Cursor-only self-exemption bug, could not be cancelled (no
+# --cancel existed, kill is guard-refused), and each retry added another.
+# Nothing warned, because nothing looked.
+if [[ "$CANCEL" -ne 1 ]]; then
+    _existing=0
+    for _pid in $(pgrep -f "hapi-restart-hub" 2>/dev/null || true); do
+        [[ "$_pid" == "$$" ]] && continue
+        [[ -r "/proc/$_pid/cmdline" ]] || continue
+        _cmd="$({ tr '\0' ' ' < "/proc/$_pid/cmdline"; } 2>/dev/null || true)"
+        [[ "$_cmd" == *"hapi-restart-hub"* ]] || continue
+        [[ "$_cmd" == *".test.sh"* || "$_cmd" == *"--cancel"* ]] && continue
+        echo "ERROR: a hapi-restart-hub drain is already running (pid $_pid, $(ps -o etimes= -p "$_pid" 2>/dev/null | tr -d ' ')s elapsed)." >&2
+        _existing=$((_existing+1))
+    done
+    if [[ "$_existing" -gt 0 ]]; then
+        echo "       Patient drains wait forever, so this one would QUEUE behind it and both would restart." >&2
+        echo "       Inspect it, or: hapi-restart-hub --cancel   (then re-run)" >&2
+        exit 2
+    fi
+fi
+
+# --cancel: stop drains this seat started. A patient drain waits forever by
+# design, so a superseded one (stack already restarted, or a duplicate) sits
+# holding the switch flock and will fire an unwanted restart whenever sessions
+# next go quiet. There was no sanctioned way to stop one: a bare kill/pkill is
+# refused by the production-mutation guard's kill-on-:3006 class, correctly —
+# it cannot tell a restart wrapper from the hub itself. So the capability lives
+# here, inside the allowed wrapper, and is narrowed to this script's own pids.
+if [[ "$CANCEL" -eq 1 ]]; then
+    self="$$"
+    me="$(readlink -f "${BASH_SOURCE[0]}")"
+    found=0
+    for pid in $(pgrep -f "hapi-restart-hub" 2>/dev/null || true); do
+        [[ "$pid" == "$self" ]] && continue
+        # Only ever signal a process whose argv really is this script.
+        [[ -r "/proc/$pid/cmdline" ]] || continue
+        cmd="$({ tr '\0' ' ' < "/proc/$pid/cmdline"; } 2>/dev/null || true)"
+        [[ "$cmd" == *"hapi-restart-hub"* ]] || continue
+        [[ "$cmd" == *".test.sh"* ]] && continue      # never the test harness
+        [[ "$cmd" == *"--cancel"* ]] && continue
+        echo "cancel: signalling drain pid=$pid ($(ps -o etimes= -p "$pid" 2>/dev/null | tr -d ' ')s elapsed)"
+        kill -TERM "$pid" 2>/dev/null || true
+        found=$((found+1))
+    done
+    if [[ "$found" -eq 0 ]]; then
+        echo "cancel: no other hapi-restart-hub drain running"
+        exit 0
+    fi
+    for _ in $(seq 1 10); do
+        still=0
+        for pid in $(pgrep -f "hapi-restart-hub" 2>/dev/null || true); do
+            [[ "$pid" == "$self" ]] && continue
+            [[ -r "/proc/$pid/cmdline" ]] || continue
+        cmd="$({ tr '\0' ' ' < "/proc/$pid/cmdline"; } 2>/dev/null || true)"
+            [[ "$cmd" == *"--cancel"* ]] && continue
+            [[ "$cmd" == *".test.sh"* ]] && continue
+            [[ "$cmd" == *"hapi-restart-hub"* ]] && still=$((still+1))
+        done
+        [[ "$still" -eq 0 ]] && { echo "cancel: $found drain(s) stopped; switch lock released by their EXIT trap"; exit 0; }
+        sleep 1
+    done
+    echo "cancel: WARNING drain(s) still alive after 10s — report, do not escalate to SIGKILL" >&2
+    exit 1
+fi
+
 
 # TTY check for --impatient. Operator at SSH/tmux/console: parent has
 # tty_nr != 0. Agent tool-call shell: tty_nr=0. Allow when caller has

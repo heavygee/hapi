@@ -163,6 +163,28 @@ driver_stack_autoclear_stale() {
                 continue
             fi
         fi
+        # Dead recorded pid + free flock is NECESSARY but NOT SUFFICIENT for
+        # `switch`. Half-killing a patient drain (pkill of the recorded wrapper)
+        # leaves live waiters whose fd died with the parent, so the status reads
+        # stale while a real drain is still running. Healing then lets the next
+        # caller acquire cleanly and start a SECOND drain behind the first —
+        # three accumulated that way on 2026-11-09. Check process reality, not
+        # just the recorded pid.
+        if [[ "$op" == "switch" ]] && command -v pgrep >/dev/null 2>&1; then
+            local _live=0 _p _c
+            for _p in $(pgrep -f "hapi-restart-hub" 2>/dev/null || true); do
+                [[ "$_p" == "$$" ]] && continue
+                [[ -r "/proc/$_p/cmdline" ]] || continue
+                _c="$({ tr '\0' ' ' < "/proc/$_p/cmdline"; } 2>/dev/null || true)"
+                [[ "$_c" == *"hapi-restart-hub"* ]] || continue
+                [[ "$_c" == *".test.sh"* || "$_c" == *"--cancel"* ]] && continue
+                _live=$((_live+1))
+            done
+            if [[ "$_live" -gt 0 ]]; then
+                echo "WARN: hapi-switch status looks stale (pid=$pid dead) but $_live live hapi-restart-hub drain(s) remain; not clearing (use: hapi-restart-hub --cancel)" >&2
+                continue
+            fi
+        fi
         echo "healed: hapi-$op stale status (pid=${pid} dead) -> idle" >&2
         driver_status_end "$op" 130 "note=autoclear-stale-dead-pid"
         rm -f "$lockfile"

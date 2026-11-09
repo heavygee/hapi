@@ -70,5 +70,37 @@ if [[ -f "$LIB" ]]; then
     [[ "$out" == "1" ]] && ok || bad "lib does not self-exempt a claude caller: $out"
 fi
 
+# --- --cancel: stop a drain this seat started ---
+# A patient drain waits forever by design, so a superseded one holds the switch
+# flock and fires an unwanted restart whenever sessions next go quiet. kill/pkill
+# are refused by the production-mutation guard (correctly — it cannot tell a
+# restart wrapper from the hub), so the capability has to live in the wrapper.
+grep -q -- '--cancel) CANCEL=1' "$S" && ok || bad "--cancel flag missing"
+# it must never signal a process that is not this script
+grep -q 'hapi-restart-hub\"\* \]\] || continue' "$S" && ok || bad "cancel does not narrow to this script's own pids"
+# and must not escalate past SIGTERM
+# behaviour, not prose: the script MENTIONS SIGKILL in a refusal message, so
+# assert on an actual kill -9 / -KILL invocation instead.
+# strip comments first: the script mentions SIGKILL and `kill -9` in prose, and
+# a check that matches commentary is not a check. Third time tonight.
+sed 's/#.*//' "$S" | grep -qE 'kill +-(9|KILL)' && bad "cancel escalates to SIGKILL — drains must exit via their EXIT trap" || ok
+# no-op when nothing is running (safe to call blind)
+out="$(bash "$S" --cancel 2>&1 || true)"
+printf '%s' "$out" | grep -q "no other hapi-restart-hub drain running" && ok || bad "cancel is not a clean no-op: $out"
+# and it must not print /proc race noise
+printf '%s' "$out" | grep -q "No such file or directory" && bad "cancel leaks /proc pid-race noise: $out" || ok
+
+# --- must refuse to stack drains (the 2026-11-09 stray-drain cause) ---
+# Patient drains wait forever, so a second invocation queues rather than
+# replaces, and both fire later. Simulate a live drain and assert the refusal.
+fake="$(mktemp -d)/hapi-restart-hub"
+printf '#!/usr/bin/env bash\nsleep 30\n' > "$fake"; chmod +x "$fake"
+"$fake" & fakepid=$!
+sleep 1
+out="$(bash "$S" 2>&1 || true)"
+kill "$fakepid" 2>/dev/null || true
+printf '%s' "$out" | grep -q "already running" && ok || bad "did not refuse to stack a second drain: $(printf '%s' "$out" | head -3)"
+printf '%s' "$out" | grep -q -- "--cancel" && ok || bad "refusal does not point at the recovery path"
+
 echo "hapi-restart-hub self-exempt: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]]
