@@ -147,10 +147,10 @@ export async function runAgy(opts: {
                     sessionModel = selection.model;
                     sessionEffort = selection.effort;
                 }
-                // No return: upstream narrowed onApply to void|Promise<void>
-                // (#2319) and sessionConfigRpc awaits it without reading the
-                // result. The session model/effort side effects above are the
-                // whole contract.
+                // sessionConfigRpc Object.assigns this into the RPC `applied`
+                // payload, so the normalized model surfaces even when only
+                // effort was requested.
+                return selection;
             },
             onAfterApply: syncSessionMode
         });
