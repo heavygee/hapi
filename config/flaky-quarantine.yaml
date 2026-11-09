@@ -126,3 +126,26 @@ quarantine:
     signature: "XCTAssertEqualWithAccuracy failed"
     added: "2026-10-15"
     expires: "2026-10-29"
+
+  # OpenCode compaction storage scans — spy observes 0 calls instead of 1 under
+  # full-suite parallel load. Evidence (both bars, 2026-11-09): standalone runs
+  # pass 5/5 on live tip 5a281d30b AND composed tree aa556e3b8, while the full
+  # remat suite failed; and session fc47e8d8 saw CI go fail/pass/fail/pass
+  # across TWO DIFFERENT subtests on unchanged commit d285eb0ac, with a
+  # concurrent run on that same commit passing both jobs. Cost one wasted remat
+  # (atomic rollback of the live tip) and two `gh run rerun --failed` cycles.
+  # Signature pairs the assertion text with the call site per the field docs —
+  # the bare assertion is generic enough to hit other spies in this file.
+  - id: "cli:OpenCode compaction storage scans keeps old structural markers for a compaction finishing after attachment without replaying old output"
+    owner: "heavygee"
+    issue: 323
+    signature: "to be called once with arguments && opencodeStorageScanner.test.ts:"
+    added: "2026-11-09"
+    expires: "2026-11-23"
+
+  - id: "cli:OpenCode compaction storage scans rejects a stale file read after an A to B to A generation change"
+    owner: "heavygee"
+    issue: 323
+    signature: "to be called once with arguments && opencodeStorageScanner.test.ts:"
+    added: "2026-11-09"
+    expires: "2026-11-23"

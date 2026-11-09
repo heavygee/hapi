@@ -51,7 +51,41 @@ const manifestPath = resolveManifest()
 const registryPath = flag('registry', join(primary, 'config/soup-excised.yaml'))
 const asJson = has('json')
 
+/**
+ * Remat mode, mirroring hapi-driver-rebuild.sh's own $REMAT_MODE.
+ *
+ * WHY THIS EXISTS (2026-11-09, found by session 3c5af7c8 before it cost anyone
+ * a red light): `refCarries` asks `git cat-file -e <ref>:<path>` — does the
+ * file EXIST in that layer branch's tree. That is the right question for a
+ * full-recipe rebuild, where every layer is merged onto a fresh base and its
+ * tree really would reintroduce the file. It is the wrong question for
+ * tip-forward, which does not replay layers that are already tip ancestors:
+ * their trees never contribute, so a file sitting in them as dead baggage from
+ * an old rebase cannot come back.
+ *
+ * Adding two #1772 entries made the check exit 1 while naming 37 unrelated
+ * layers (session-job-progress-until, search-peers, spawn-machine-delta, …)
+ * that merely still have the file present. None of them use it. Blocking a
+ * tip-forward remat on that is a false red, and "re-thin 37 peers' layers to
+ * clear incidental baggage" is not a real remedy.
+ *
+ * So: in tip-forward, a carrier that is ALREADY A TIP ANCESTOR is reported but
+ * does not block; a carrier that is not an ancestor WILL be replayed and still
+ * blocks. Full-recipe keeps the exhaustive behaviour, because there the
+ * baggage genuinely does come back. Same split the heal step in
+ * hapi-driver-rebuild.sh already makes between the two modes.
+ */
+const rematMode = flag('mode', process.env.HAPI_REMAT_MODE ?? 'full-recipe')
+const tipRef = flag('tip', null)
+
 const git = (args) => spawnSync('git', ['-C', primary, ...args], { encoding: 'utf8' })
+
+/** Is `ref` already contained in the tip? Then tip-forward will not replay it. */
+function isTipAncestor(ref) {
+    if (!tipRef) return false
+    const r = git(['rev-list', '--count', ref, `^${tipRef}`])
+    return r.status === 0 && r.stdout.trim() === '0'
+}
 
 /**
  * Active manifest layers. Deliberately regex over the YAML rather than pulling a
@@ -125,37 +159,66 @@ if (entries.length === 0) {
     process.exit(0)
 }
 
+const tipForward = rematMode === 'tip-forward' && Boolean(tipRef)
 const findings = []
 for (const entry of entries) {
     const label = entry.path ?? `symbol:${entry.symbol}`
     const carriers = layers
         .filter((l) => !entry.allow.includes(l))
         .filter((l) => refCarries(l, entry))
-    if (carriers.length > 0) findings.push({ label, carriers, reason: entry.reason, ref: entry.ref })
+    if (carriers.length === 0) continue
+    // In tip-forward, an ancestor layer is not replayed, so its copy of the
+    // file cannot reach the composed tip. Report it, do not block on it.
+    const inert = tipForward ? carriers.filter((c) => isTipAncestor(c)) : []
+    const blocking = carriers.filter((c) => !inert.includes(c))
+    findings.push({ label, carriers, blocking, inert, reason: entry.reason, ref: entry.ref })
 }
 
+const blockingFindings = findings.filter((f) => f.blocking.length > 0)
+
 if (asJson) {
-    console.log(JSON.stringify({ manifest: manifestPath, layers: layers.length, findings }, null, 2))
-    process.exit(findings.length > 0 ? 1 : 0)
+    console.log(JSON.stringify({
+        manifest: manifestPath, layers: layers.length, mode: rematMode,
+        tip: tipRef, findings
+    }, null, 2))
+    process.exit(blockingFindings.length > 0 ? 1 : 0)
 }
 
 console.log(`hapi-soup-excised-check: ${entries.length} excised item(s) vs ${layers.length} active layer(s)`)
+if (tipForward) console.log(`  mode: tip-forward (tip ${tipRef}) — ancestor carriers are not replayed`)
 
 if (findings.length === 0) {
     console.log('  OK — no active layer carries an excised item')
     process.exit(0)
 }
 
+// Inert carriers are worth SAYING even when they do not block: silence here
+// would be the same "looks covered, wasn't" failure the registry exists to
+// prevent. They stop being inert the moment someone runs a full recipe.
+for (const f of findings.filter((x) => x.inert.length > 0)) {
+    console.log(`\n  present but inert: ${f.label}`)
+    console.log(`    ${f.inert.length} carrier(s) are already tip ancestors, so tip-forward will not replay them.`)
+    console.log('    They WILL reintroduce it under a full recipe — re-thin or drop them before one.')
+}
+
+if (blockingFindings.length === 0) {
+    console.log('\n  OK — nothing an excised item is carried by will be replayed into this tip')
+    process.exit(0)
+}
+
 console.error('hapi-soup-excised-check: FAIL')
-for (const f of findings) {
+for (const f of blockingFindings) {
     console.error(`\n  EXCISED ITEM STILL PRESENT: ${f.label}`)
     if (f.reason) console.error(`    why excised: ${f.reason}`)
     if (f.ref) console.error(`    decision:    ${f.ref}`)
-    console.error(`    carried by ${f.carriers.length} active layer(s):`)
-    for (const c of f.carriers) console.error(`      - ${c}`)
+    console.error(`    carried by ${f.blocking.length} layer(s) that WILL be replayed:`)
+    for (const c of f.blocking) console.error(`      - ${c}`)
 }
 console.error(`
   Dropping a manifest layer does NOT remove code that other layers re-carry.
   Re-cut the layers above thin (feature-only) from a clean base, or drop them.
+  NOTE: the registry DETECTS, it never removes — land an excision entry WITH or
+  AFTER the layer that actually deletes the files, never before, or every
+  compose fails on a removal nothing performs.
   See config/soup-excised.yaml and docs/tooling/driver-soup.md.`)
 process.exit(1)
