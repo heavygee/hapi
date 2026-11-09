@@ -529,6 +529,29 @@ if [[ "$VERIFY" -eq 1 ]]; then
         remat_rollback_live_tip "bun install failed"
         exit 1
     fi
+    # Ancestry containment is not presence: a layer can be a provable ancestor
+    # while a conflict resolution has deleted its code. Typecheck and tests
+    # cannot see that — nothing breaks when a feature merely stops being
+    # offered. Assert declared sentinels before the other gates so the failure
+    # names the layer that lost its behaviour.
+    SENTINEL_SCRIPT="$PRIMARY/scripts/tooling/hapi-sentinel-check.sh"
+    if [[ -x "$SENTINEL_SCRIPT" ]]; then
+        echo "Checking layer sentinels..."
+        if ! "$SENTINEL_SCRIPT" --tree "$DRIVER" --manifest "$DRIVER/config/driver-manifest.yaml"; then
+            remat_rollback_live_tip "layer sentinel missing (behaviour lost despite being composed)"
+        fi
+        # --auto needs no declaration: it checks every identifier each layer
+        # added against the composed tree. REPORT-ONLY, deliberately — a rename
+        # is textually identical to a deletion, and 3 of the first 7 flags were
+        # renames with the behaviour intact. Gating on it would block remats on
+        # refactors. It costs ~2.5s for a 90-layer soup, so it runs every time.
+        echo "Scanning layers for silently lost content (report-only)..."
+        "$SENTINEL_SCRIPT" --tree "$DRIVER" --manifest "$DRIVER/config/driver-manifest.yaml" --auto --quiet || {
+            echo "  ^ triage guide: docs/plans/2026-11-09-sentinel-auto-first-sweep-triage.md" >&2
+            echo "  ^ report-only: a rename looks identical to a deletion. Verify before acting." >&2
+        }
+    fi
+
     echo "Running typecheck..."
     if ! (cd "$DRIVER" && "$BUN" typecheck); then
         remat_rollback_live_tip "typecheck failed"

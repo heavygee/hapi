@@ -1,0 +1,4 @@
+# Python bytecode from the tooling helpers — regenerated on every run,
+# and it shows up as untracked dirt in every agent's `git status`.
+__pycache__/
+*.pyc

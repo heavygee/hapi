@@ -68,11 +68,36 @@ while read -r local_ref local_sha remote_ref remote_sha; do
       files="$(git ls-tree -r --name-only "$local_sha")"
     fi
   elif git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null; then
-    # Normal incremental push: remote_sha is a true ancestor of local_sha, so
-    # this diff is exactly "what my own commits changed" — unchanged from
-    # before this fix.
-    range="${remote_sha}..${local_sha}"
-    files="$(git diff --name-only "$remote_sha" "$local_sha" 2>/dev/null || true)"
+    # Normal incremental push: remote_sha IS an ancestor, so remote_sha..local
+    # is usually exactly "what my own commits changed".
+    #
+    # Usually — but NOT when the push contains a merge of main. Then that range
+    # also carries every file main changed since the branch last synced, and
+    # the hook flags fork-only paths (docs/operator/, docs/plans/) that the
+    # branch did not author and that will never appear in the PR diff. This is
+    # the SAME false-positive class the force-push branch below was fixed for
+    # on 2026-10-20; a rebase and a merge just arrive at it differently.
+    #
+    # It is not cosmetic. The documented workaround is to delete the offending
+    # file from the branch, which reads as a deletion against main and produces
+    # a MODIFY/DELETE conflict on every subsequent main-side edit of that file
+    # — permanently, and for every branch that does it (#238, 2026-11-09, on
+    # docs/operator/tooling-meta-role.md).
+    #
+    # So when the range contains a merge, use the merge-base diff the other two
+    # cases already use: what the eventual PR will actually show.
+    if [[ -n "$(git rev-list --merges "${remote_sha}..${local_sha}" 2>/dev/null | head -1)" ]]; then
+      base="$(resolve_push_base "$local_sha" "$PUSH_REMOTE")"
+    else
+      base=""
+    fi
+    if [[ -n "$base" ]]; then
+      range="${base}..${local_sha}"
+      files="$(git diff --name-only "$base" "$local_sha" 2>/dev/null || true)"
+    else
+      range="${remote_sha}..${local_sha}"
+      files="$(git diff --name-only "$remote_sha" "$local_sha" 2>/dev/null || true)"
+    fi
   else
     # Force-push after a rebase: remote_sha is NOT an ancestor of local_sha
     # (history was rewritten), so remote_sha..local_sha is not "my commits" —

@@ -65,7 +65,27 @@ AUTHOR=$(jq -r '.author.login' <<<"$META")
 # 1. open, not draft, mergeable
 [ "$STATE" = "OPEN" ] && pass "state OPEN" || fail "state is $STATE"
 [ "$DRAFT" = "false" ] && pass "not a draft" || fail "PR is a draft"
-[ "$MERGEABLE" = "MERGEABLE" ] && pass "mergeable" || fail "mergeable=$MERGEABLE (UNKNOWN means GitHub is still computing — re-run)"
+# Still fails closed on anything that is not MERGEABLE — a local trial merge
+# does not entitle anyone to merge while GitHub disagrees. But the REASON
+# matters to whoever reads this: `mergeable` is cached and lags pushes (#238,
+# 2026-11-09: CONFLICTING for 4+ minutes after the fixing push, GitHub's own
+# merge ref still built on the previous head). "Wait and re-run" and "go
+# rebase, here is the conflicting file" are different instructions, and
+# guessing wrong wastes a session either way.
+if [ "$MERGEABLE" = "MERGEABLE" ]; then
+    pass "mergeable"
+else
+    _mv="$(dirname "$(readlink -f "$0")")/hapi-pr-merge-verdict.sh"
+    _hint=""
+    if [ -x "$_mv" ]; then
+        if _out="$("$_mv" --repo "$REPO" "$PR" 2>&1)"; then
+            _hint=" — local trial merge is CLEAN, so this verdict is STALE: wait and re-run, do not rebase"
+        else
+            [ "$?" = "2" ] || _hint=" — local trial merge CONFLICTS too: $(printf '%s' "$_out" | grep -A2 'conflicting path' | tail -n +2 | tr -s ' \n' ' ')"
+        fi
+    fi
+    fail "mergeable=$MERGEABLE (UNKNOWN means GitHub is still computing — re-run)$_hint"
+fi
 
 # 2. checks green ON THE HEAD SHA (not the PR-level summary, which can lag a push)
 #
