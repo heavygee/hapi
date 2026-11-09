@@ -66,3 +66,29 @@ Restore resolve-by-`agentSessionId` as a **thin delta on the current soup tip** 
 ## Operator decision, pending
 
 Every agent's tool descriptions advertise durable resolve — *"agentSessionId survives hub-row churn when the cited hub id is stale"* — and it does not work on this hub. Until restored, the honest options are **fix it quickly** or **stop advertising it**. Documented-and-broken is the worst of the three. Taken to the operator by the overseer stand-in.
+
+---
+
+## Third confirmed instance: title-lock, found by a feature peer (2026-11-09)
+
+**A feature peer found this class independently, using exactly the check this document proposes.** It was re-thinning an FUE layer onto the soup tip, went to add a callout to the rename dialog's title-lock padlock, and discovered there is no padlock.
+
+Verified here before composing their layer:
+
+| Probe | Result |
+|---|---|
+| `git rev-list --count 577ab7546 ^aea13a532` (#2072, the commit that ADDED title-lock) | **0** — it is an ancestor |
+| `titleLocked` in the tip's `web/src/components/RenameSessionDialog.tsx` | **0** |
+| `titleLocked` in `upstream/main`'s same file | **11** |
+| last real touch on that file in the tip's history | `ad7222992` (#1577, AI title suggestions) — *predates* #2072 |
+
+So the feature was absorbed into ancestry and then removed by a later conflict resolution that took an older fork shape of the file. Ancestry says present; the tree says absent. Identical to the 11-05 `agentSessionId` loss, in a different file, found three days later by accident.
+
+**What this instance adds:**
+
+- **The class is not rare.** Three confirmed now (`pingPeer.ts` 11-05, this, plus the `search_content`/`toolNames` near-miss caught mid-merge on 11-09). Two reached the live tip; one was caught only because a merge happened to fail typecheck for an unrelated reason.
+- **The discovery mode is still accidental.** Nobody audits for it. Both live instances surfaced when someone tried to *use* the missing thing — agents unable to cite each other by durable id, and a peer with nothing to attach an FUE callout to.
+- **It confirms the sentinel proposal is worth building.** A `sentinel:` on the #2072 layer (`titleLocked` in `RenameSessionDialog.tsx`) would have failed the remat that dropped it, on the day it dropped.
+- **The peer did the right thing by not fixing it.** Reintroducing title-lock is product-sized work, not a one-file patch inside an unrelated FUE layer. It flagged and scoped down to the two controls that do exist. Silently widening a layer to repair an unrelated regression is how layers go fat and how review loses the plot.
+
+**Open:** title-lock is absent from the soup and present upstream. That is a live feature regression against upstream, unowned. It needs a deliberate re-absorb, not a drive-by.
