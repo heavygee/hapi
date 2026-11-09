@@ -57,7 +57,7 @@ export function shouldShowInlineToolCardBody(
     terminalTool = TERMINAL_RELATED_TOOL_NAMES.has(resolveToolNameAlias(toolName))
 ): boolean {
     if (isSubagentToolName(toolName)) return false
-    if (TERMINAL_RELATED_TOOL_NAMES.has(toolName)) {
+    if (terminalTool) {
         return terminalToolDisplayMode === 'detailed'
     }
     return !presentationMinimal
@@ -76,7 +76,7 @@ export function getToolTimingDetails(tool: ChatToolCall, now: number): {
 
     const active = tool.state === 'running'
     const hasExecPair = tool.execStartedAt != null && tool.execCompletedAt != null
-    const startedAt = active || !hasExecPair
+    const startedAt = tool.startUnavailable ? null : active || !hasExecPair
         ? (tool.startedAt ?? tool.createdAt)
         : tool.execStartedAt
     const completedAt = active
@@ -453,8 +453,9 @@ function ToolCardInner(props: ToolCardProps) {
         ? getSubagentModel(props.block.children, getInputStringAny(props.block.tool.input, ['model']))
         : null
     const isCodexAgentCard = toolName === 'CodexAgent'
-    const useCompactTerminalCard = shouldUseCompactTerminalToolCard(toolName, props.terminalToolDisplayMode)
-    const showInline = shouldShowInlineToolCardBody(toolName, presentation.minimal, props.terminalToolDisplayMode)
+    const isTerminalTool = isTerminalToolBlock(props.block)
+    const useCompactTerminalCard = shouldUseCompactTerminalToolCard(toolName, props.terminalToolDisplayMode, isTerminalTool)
+    const showInline = shouldShowInlineToolCardBody(toolName, presentation.minimal, props.terminalToolDisplayMode, isTerminalTool)
     const CompactToolView = showInline ? getToolViewComponent(toolName, props.block.tool) : null
     const compactViewOwnsInteractions = toolName === 'CodexDiff'
     const ResultToolView = getToolResultViewComponent(toolName, props.block)

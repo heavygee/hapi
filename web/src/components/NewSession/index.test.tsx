@@ -300,9 +300,10 @@ vi.mock('./ModelSelector', () => ({
     )
 }))
 vi.mock('./ActionButtons', () => ({
-    ActionButtons: (props: { onCreate: () => void; onChooseFolder?: () => void; canCreate: boolean }) => (
+    ActionButtons: (props: { onCreate: () => void; onCancel: () => void; onChooseFolder?: () => void; canCreate: boolean }) => (
         <>
             <button type="button" data-testid="create" disabled={!props.canCreate} onClick={props.onCreate}>create</button>
+            <button type="button" data-testid="cancel" onClick={props.onCancel}>cancel</button>
             {props.onChooseFolder ? <button type="button" data-testid="browse" onClick={props.onChooseFolder}>browse</button> : null}
         </>
     )

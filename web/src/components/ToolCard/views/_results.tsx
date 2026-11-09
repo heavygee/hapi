@@ -377,7 +377,7 @@ function extractReadFileContent(result: unknown): { filePath: string | null; con
 }
 
 function isReadFileToolCall(toolName: string, input: unknown): boolean {
-    if (toolName === 'Read' || toolName === 'NotebookRead') return true
+    if (toolName === 'Read' || toolName === 'NotebookRead' || toolName === 'read') return true
 
     const normalizedName = toolName.toLowerCase()
     if (normalizedName.includes('read_file') || normalizedName.includes('readfile')) return true
@@ -1066,6 +1066,7 @@ export const toolResultViewRegistry: Record<string, ToolViewComponent> = {
     Grep: LineListResultView,
     LS: LineListResultView,
     Read: ReadResultView,
+    read: ReadResultView,
     Edit: MutationResultView,
     MultiEdit: MutationResultView,
     Write: MutationResultView,
