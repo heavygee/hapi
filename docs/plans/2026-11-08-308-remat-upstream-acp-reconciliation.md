@@ -58,3 +58,33 @@ Taking upstream drops all four (live post-done seal + MCP project config behavio
 - **The hold guard reads `HAPI_REMAT_OWNER` from its own process env**, not the command string, so inline `VAR=… cmd` cannot satisfy it from an agent shell. Sanctioned path: owner-clears the hold, then re-runs with `HAPI_REMAT_RESUME=1` to preserve the WIP merge commit. Do not reshape the command to dodge the hook.
 - **Piping the rebuild through `tail` destroys its exit code** — the pipeline returns `tail`'s status. Both failures tonight reported exit 0 while the log said `ERROR`. Redirect to a file and check the script's own status.
 - `hapi-sync-fork-main` is a *required* precondition that can silently enlarge the job: it pulled a major upstream refactor into a routine compose.
+
+---
+
+## Round 2 — cli green, web down to 4 (2026-11-09)
+
+Everything below the upstream merge is now resolved except one cluster. Current WIP: `b6b401ea6`.
+
+**Cleared since the first writeup:**
+
+| Was failing | Cause | Fix |
+|---|---|---|
+| `AcpSdkBackend` hybrid (2 errors) | took upstream for 2 hunks, rest auto-merged to soup's older file | rebuilt on upstream + re-applied the one surviving soup delta (`2e40d38f9` child cwd). Diff vs upstream was 47 lines and cwd was the only fork-unique content. |
+| `cursorAcpRemoteLauncher` steer shape | local annotation restated the backend's type | now `ReturnType<typeof backend.beginSoftSteerPrompt>` |
+| 3× `runAgy.test.ts` | **my own bad fix.** I deleted `return selection` after reading `sessionConfigRpc.ts` and seeing the result discarded — but that was the *hybrid* file. Upstream widens `onApply` to return `SessionConfigState` and does `Object.assign(applied, normalized)`. | took upstream's `sessionConfigRpc.ts` (7-line diff, no fork content), restored the return |
+| `ToolCard`, `knownTools`, 2× `_results` | upstream additions dropped where the fork's older region won the auto-merge: lowercase `read` predicate + registry entry, `knownTools` `read` entry + `filePath` key, `isTerminalToolBlock` threading + `startUnavailable` | took upstream for each after confirming no fork content in the diff |
+| 4× `NewSession` (first pass) | test mock lost its cancel button | restored upstream's mock shape |
+
+**cli/hub/web/relay typecheck clean. cli 4584 passed. web 4547 passed / 4 failed.**
+
+## The remaining 4 — genuine divergence, not a merge drop
+
+`NewSession/index.test.tsx > preserves hub $agent/$permissionMode after cancel and remount` (codex/read-only ×2, claude/plan, cursor/plan).
+
+- The mocks are byte-identical to upstream; `permission-mode` renders `props.nativeValue`, and the fork is not seeding it from hub `peerSpawnDefaults` on the cancel-and-remount path.
+- `nativePermissionMode` state, the `nativeValue=` wiring, and the "Seed from hub peerSpawnDefaults once" block are all structurally identical to upstream — so the gate is elsewhere.
+- **`web/src/components/NewSession/index.tsx` diverges from upstream by 359 lines** (fork board-spawn semantics, `seedComposerDraftIfEmpty`, the fresh-spawn-only `onSpawned` contract; upstream has opencode import + claude model/effort pickers). Whoever resumes needs to know which gate the fork added, not guess.
+
+**Do not delete these tests to go green.** They are upstream tests for upstream behaviour that arrived legitimately with the merge. Conflict-resolution-by-deletion is precisely how the fork lost resolve-by-`agentSessionId` on 11-05 — see `2026-11-08-ancestry-vs-presence-verification-gap.md`. Either port the behaviour or record, in the test, why the fork's spawn flow intentionally differs.
+
+**Still deferred regardless of the above:** `hapi-restart-hub` — operator mid bring-up on `gc-in-linux`.
