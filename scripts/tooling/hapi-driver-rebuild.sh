@@ -563,7 +563,15 @@ if [[ "$VERIFY" -eq 1 ]]; then
         # dropped to excise code, but other active layers re-carry it, so the
         # drop silently achieves nothing (#1473 fortress, 2026-08-17 -> 08-27).
         echo "Checking soup excision registry (dropped code not re-carried)..."
-        if ! "$BUN" run "$EXCISED"; then
+        # Pass the mode and the tip: in tip-forward an ancestor layer is never
+        # replayed, so its stale copy of an excised file cannot reach the
+        # composed tip and must not block. Full-recipe stays exhaustive,
+        # because there the baggage genuinely does come back. Without this the
+        # check reported 37 unrelated layers as carriers of #1772's dead draft
+        # and would have red-lit every compose (found 2026-11-09 by 3c5af7c8,
+        # who reverted the registry entry rather than hand over a false red).
+        _excised_tip="$(git -C "$DRIVER" rev-parse HEAD 2>/dev/null || true)"
+        if ! "$BUN" run "$EXCISED" --mode "$REMAT_MODE" ${_excised_tip:+--tip "$_excised_tip"}; then
             remat_rollback_live_tip "soup excision check failed"
             exit 1
         fi
