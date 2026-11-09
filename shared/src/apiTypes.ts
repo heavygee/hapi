@@ -169,6 +169,7 @@ export type AuthResponse = {
 }
 
 export type SessionsResponse = { sessions: SessionSummary[] }
+export type ScratchlistSessionIdsResponse = { sessionIds: string[] }
 export type SessionContentMatch = {
     messageId: string
     role: 'user' | 'assistant'
@@ -181,12 +182,13 @@ export type SessionContentSearchResponse = {
         session: SessionSummary
         match: SessionContentMatch
     }>
+    /** True when this query may miss content omitted by an indexing optimization. */
+    hasPotentiallyIncompleteResults: boolean
 }
 export type SessionContentMatchesResponse = {
     matches: SessionContentMatch[]
     total: number
 }
-export type ScratchlistSessionIdsResponse = { sessionIds: string[] }
 export type SessionResponse = { session: Session }
 export type MessagesResponse = {
     messages: DecryptedMessage[]

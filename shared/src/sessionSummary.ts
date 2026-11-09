@@ -1,4 +1,5 @@
 import type { AgentState, AttachedJob, ExternalRef, Metadata, Session, TodoItem, WorktreeMetadata } from './schemas'
+import type { ConversationHistoryCapabilities } from './conversationHistory'
 import type { SessionReadState } from './sessionReadState'
 import { isKnownFlavor } from './flavors'
 import type { SessionBlockedAck, SessionNotifySignal } from './notifyAttention'
@@ -45,6 +46,10 @@ function classifyKind(tool: string): PendingRequestKind {
 
 export type SessionSummaryMetadata = {
     name?: string
+    /** Not yet populated by this fork's hub — see heavygee/hapi#312 (title-lock regression). */
+    titleLocked?: boolean
+    /** Not yet populated by this fork's hub. */
+    promptTitle?: string
     path: string
     machineId?: string
     summary?: { text: string }
@@ -59,6 +64,7 @@ export type SessionSummaryMetadata = {
     lastModelError?: Metadata['lastModelError']
     /** Structured contribution links (GitHub PRs, issues, …). */
     externalRefs?: ExternalRef[]
+    conversationHistory?: ConversationHistoryCapabilities
 }
 
 export type SessionSummary = {
@@ -74,6 +80,11 @@ export type SessionSummary = {
      *  list sort. Optional because summaries from an older hub lack it —
      *  consumers fall back to `updatedAt` via the session-order key. */
     createdAt?: number
+    /** Epoch ms of the most recent user-authored message, distinct from
+     *  `updatedAt` (which agent output / connection state can also bump).
+     *  Drives the "Last message" session-list sort; undefined falls back
+     *  to `createdAt` via the session-order key until the hub populates it. */
+    lastUserMessageAt?: number
     pinned?: boolean
     globalPinned?: boolean
     metadata: SessionSummaryMetadata | null

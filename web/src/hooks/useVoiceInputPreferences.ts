@@ -46,7 +46,7 @@ export function useVoiceInputPreferences(api: ApiClient | null) {
     const [transcriptionMode, setTranscriptionModeState] = useState<TranscriptionMode>('standard')
 
     useEffect(() => {
-        if (!api) return
+        if (!api || typeof api.fetchTranscriptionProviders !== 'function') return
         let cancelled = false
         const browserLocal = hasBrowserLocalSpeechSupport()
         const load = () => {

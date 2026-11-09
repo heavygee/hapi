@@ -57,7 +57,21 @@ See `src/router.tsx` for route definitions.
 - Pending permission request count.
 - Agent flavor label (claude/codex/gemini).
 - Model mode display.
-- Transient filters for unread sessions and sessions with scratchlist entries.
+- One Sort and filter menu combines the persisted sort/status/unread view with transient update-date and scratchlist filters and machine selection; Reset to default clears all conditions. Its popover sizes to its content, centers on the trigger, and stays within the viewport.
+- Agent name and model display.
+- Metadata search with relevance ranking, wildcard matching, and date/unread/machine filters.
+- Stable user-input ordering across sessions and machine/project groups; agent output and status updates do not reorder ordinary rows.
+- Machine/project grouping, pinned and in-progress sections, and configurable collapsed previews.
+
+### Session title lock
+
+The rename dialog has a per-session lock beside the title input. New and existing
+sessions are unlocked by default. Saving a manual name does not automatically lock
+it: agents may still rename an unlocked session. Locking prevents agent title
+updates; users can still edit or generate a title and save it while locked.
+Save applies the title and lock together; Cancel discards both changes. Unlocking
+allows future agent title updates without immediately changing the current title.
+The Hub persists and enforces the lock across clients, restarts, and resume.
 
 ### Chat interface (`src/components/SessionChat.tsx`)
 
@@ -76,6 +90,8 @@ See `src/router.tsx` for route definitions.
   - Workbench panel for held notes/drafts; **distinct from the queue**.
   - Add/delete/reorder entries; promote to composer (copy) or queue (send).
   - Persists in the Hub and syncs across clients; `localStorage` is an offline cache and migration source.
+  - Entries and attachments saved on the hub and synced across devices.
+  - Reordering affects only the current view and resets when entries refresh.
   - Keyboard shortcut: Ctrl/Cmd+Shift+S to focus the add-input.
 
 ### File browser (`src/routes/sessions/files.tsx`)

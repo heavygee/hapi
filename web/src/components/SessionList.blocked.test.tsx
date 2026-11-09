@@ -177,24 +177,6 @@ describe('SessionList blocked chrome (#1717)', () => {
         expect(within(pill).getByText('2')).toBeTruthy()
     })
 
-    it('narrows to blocked work through the combined filter menu', () => {
-        renderList([blocked('stuck-one'), blocked('stuck-two'), makeSession({ id: 'fine-one', active: true })])
-
-        expect(screen.queryByTestId('blocked-lens-toggle')).toBeNull()
-        expect(screen.getByText('fine-one')).toBeTruthy()
-
-        fireEvent.click(screen.getByTestId('session-list-filter-menu'))
-        const option = screen.getByTestId('session-list-filter-blocked')
-        expect(option.getAttribute('aria-checked')).toBe('false')
-        fireEvent.click(option)
-
-        expect(screen.getByTestId('session-list-filter-blocked').getAttribute('aria-checked')).toBe('true')
-        expect(screen.queryByText('fine-one')).toBeNull()
-        expect(screen.getAllByTestId('session-blocked-chip')).toHaveLength(2)
-        // Jump pill stays — navigation, not a filter (#1996).
-        expect(visibleBlockedJumpPill()).toBeTruthy()
-    })
-
     it('counts a session awaiting a permission prompt as blocked', () => {
         // Operator's rule: pending means the agent cannot proceed without them,
         // so it shares the count, the section and the row treatment.
