@@ -183,12 +183,12 @@ describe('SessionList blocked chrome (#1717)', () => {
         expect(screen.queryByTestId('blocked-lens-toggle')).toBeNull()
         expect(screen.getByText('fine-one')).toBeTruthy()
 
-        fireEvent.click(screen.getByTestId('session-list-filter-menu'))
-        const option = screen.getByTestId('session-list-filter-blocked')
+        fireEvent.click(screen.getByRole('button', { name: 'Sort and filter' }))
+        const option = screen.getByRole('menuitemcheckbox', { name: 'Blocked only' })
         expect(option.getAttribute('aria-checked')).toBe('false')
         fireEvent.click(option)
 
-        expect(screen.getByTestId('session-list-filter-blocked').getAttribute('aria-checked')).toBe('true')
+        expect(screen.getByRole('menuitemcheckbox', { name: 'Blocked only' }).getAttribute('aria-checked')).toBe('true')
         expect(screen.queryByText('fine-one')).toBeNull()
         expect(screen.getAllByTestId('session-blocked-chip')).toHaveLength(2)
         // Jump pill stays — navigation, not a filter (#1996).
