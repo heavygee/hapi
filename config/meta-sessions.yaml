@@ -14,6 +14,16 @@ sessions:
     id: cbd1073e-4fd3-4f4a-bff8-cf9ba97bca6d
     role: local kitchen / remat owner
     superseded: 028d0a86-262e-4538-a735-92247d17cb5f
+    # Operator 2026-11-09: keep the superseded Cursor husk REACHABLE, do not
+    # hard-archive. It is the consultant for anything that surprises the
+    # current flavour. It answered what no doc did: restarts after a green
+    # hub/CLI remat are standing authority (the patient drain IS the quiet
+    # period), hard-archiving other sessions is NOT this seat's call, and
+    # long remats belong in `hapi job run --wake-on-terminal`. Its suggested
+    # CURSOR_AGENT audit then found a second landmine (lib/patient-drain.sh,
+    # 8e339eb83). Ping it with wake=true before inferring role behaviour
+    # from prose — docs described the prohibition, it described the practice.
+    consult_on_surprise: 028d0a86-262e-4538-a735-92247d17cb5f
   pr_watcher:
     name: meta - PR watcher
     id: 1e32daba-7b7e-4955-9264-dde6e78723f3
