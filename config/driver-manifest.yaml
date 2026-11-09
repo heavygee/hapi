@@ -1068,9 +1068,16 @@ layers:
   # a hard compile/reconciliation requirement surfaced by landing it honestly (confirmed
   # file-by-file: each restored file is directly imported by techotaku's kept
   # SessionList.tsx/SessionListViewMenu.tsx, or fixes an uncontested-deletion loss
-  # pre-dating #1772 entirely). If this still SKIPs the gate, it needs an operator-level
-  # threshold override for this specific layer, not another split — there is nothing
-  # left to split.
+  # pre-dating #1772 entirely). It genuinely cannot shrink further — tooling/meta
+  # confirmed this by running the gate's own file-count function — so this layer stays
+  # on HAPI_REMAT_ABSORB_FAT=1 (tooling/meta's call, blast radius checked: only this
+  # layer and driver/hub-upstream-seal-url were non-ancestors subject to the gate).
+  #
+  # Thin-tip SHA: 473634875 — one commit added 2026-11-09 after the first absorb
+  # (tooling/meta's --build-web run caught two t() keys —
+  # sessions.search.content.incomplete/noResultsIncomplete — wired to zh-CN but never
+  # defined in en.ts, the base locale with no further fallback; folded in here, retiring
+  # tooling/meta's 109-en-locale-search-content-incomplete.patch heal).
   #
   # Verified (this layer alone): web/hub/shared typecheck clean; web vitest 422/422
   # files, 4577/4577 tests (one pre-existing @react-three/xr module-resolution failure
@@ -1078,24 +1085,34 @@ layers:
   #
   # Worktree: ~/coding/hapi/worktrees/1772-techotaku-reshape (reconciliation + commit).
   # Remat order: #1607 → this layer → layer 2/3 → layer 3/3. Remat owner: tooling/meta —
-  # no self-remat.
+  # no self-remat. Re-thin after dogfood bump if tip-forward SKIP.
   - branch: driver/1772-techotaku-base-wip
 
   # Layer 2/3 — tiann/hapi#1996 (blocked-only filter), stacked on
   # driver/1772-techotaku-base-wip above. Re-adds the blocked-only lens as one ephemeral
   # MenuRow in techotaku's unified Sort-and-filter menu, AND-composed with unread/
   # scratchlist, reusing #1717's sessionIsBlocked/BlockedJumpPill unchanged — confirmed
-  # mechanical per the original combined commit's byte-level diff (431b43e11). 7 files
-  # against its own parent. Verified standalone: typecheck clean, web vitest green.
+  # mechanical per the original combined commit's byte-level diff (431b43e11).
+  #
+  # Thin-tip SHA: ced18eaaaaab — re-cut 2026-11-09 onto layer 1's 473634875 (was
+  # stacked on the pre-locale-fix 0650b198e, which produced an add/add conflict on
+  # every shared-file edit to layer 1 from then on; tooling/meta resolved one such
+  # conflict by hand before this re-cut landed). 7 files against its own merge-base
+  # with the tip — clears the fat-tip gate on its own merits, no override needed.
+  # Verified standalone: typecheck clean, web vitest green.
   - branch: driver/1996-consolidate-blocked-filter-wip
 
   # Layer 3/3 — tiann/hapi#2002 (Active + Working), stacked on
   # driver/1996-consolidate-blocked-filter-wip above. Active is already covered by
   # techotaku's status==='active' radio; this adds Working as one more ephemeral
   # MenuRow, AND-composed with the others — confirmed mechanical per the original
-  # combined commit's byte-level diff (fb502599d). 6 files against its own parent.
-  # Verified standalone: typecheck clean, web vitest green, full suite 4578/4578 (same
-  # one pre-existing garden/xr failure as layer 1/3, unrelated).
+  # combined commit's byte-level diff (fb502599d).
+  #
+  # Thin-tip SHA: 2bf6ef8a8fa8 — re-cut 2026-11-09 onto the re-cut #1996 tip above,
+  # same reason. 6 files against its own merge-base with the tip — clears the gate on
+  # its own merits, no override needed. Verified standalone: typecheck clean, web
+  # vitest green, full suite 4578/4578 (same one pre-existing garden/xr failure as
+  # layer 1/3, unrelated).
   - branch: driver/2002-session-filter-active-working-wip
 
   # FOOTGUN FOUND while swapping #1772 (2026-11-09, session 3c5af7c8): the `- pr: N`
