@@ -32,5 +32,33 @@ decide() { # env assignments... -> prints SELF_EXEMPT
 grep -q 'CLAUDECODE' "$S" && ok || bad "script lost the claude branch"
 grep -q 'HAPI_SESSION_ID' "$S" && ok || bad "script lost the flavour-agnostic branch"
 
+# --- runtime guard: the drain message must not explode under `set -u` ---
+# A --help probe is NOT a test of this: --help exits before patient_drain runs,
+# so it stays green against the exact bug (verified — the first version of this
+# test passed while the unguarded $CURSOR_AGENT was restored). Extract
+# patient_drain and run it for real, with a stub health script reporting one
+# WORKING session so the self-exempt branch is actually entered.
+stub="$(mktemp)"; cat > "$stub" <<'STUB'
+#!/usr/bin/env bash
+echo '{"sessions":[{"status":"WORKING","sid8":"stub1234","project":"stub"}]}'
+STUB
+chmod +x "$stub"
+harness="$(mktemp)"
+{
+    echo 'set -euo pipefail'
+    echo 'INCLUDE_SELF=0; IMPATIENT=0'
+    sed -n '/^SELF_EXEMPT=0/,/^PRIMARY=/p' "$S" | sed '$d'   # decision + WHY blocks
+    sed -n '/^adjust_for_self()/,/^}/p' "$S"
+    sed -n '/^patient_drain()/,/^}/p' "$S"
+    echo 'PATIENT_TIMEOUT=1; PATIENT_INTERVAL=1'
+    echo "HEALTH_SCRIPT='$stub'"
+    echo 'patient_drain || true'
+} > "$harness"
+out="$(CLAUDECODE=1 HAPI_SESSION_ID=deadbeef-0000-0000-0000-000000000000 \
+       bash "$harness" 2>&1 || true)"
+rm -f "$stub" "$harness"
+printf '%s' "$out" | grep -q "unbound variable" && bad "drain dies under set -u for a non-Cursor agent: $out" || ok
+printf '%s' "$out" | grep -qi "wrapped agent session" && ok || bad "self-exempt message did not fire for claude: $out"
+
 echo "hapi-restart-hub self-exempt: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]]
