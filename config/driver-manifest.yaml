@@ -1449,6 +1449,25 @@ layers:
   # tooling-only → no build-web required; remat picks it up.
   - branch: chore/claude-orphan-resurrect
 
+  # 2026-11-09 driver/fue-unlabelled-controls — thin re-base of
+  # feat/fue-unlabelled-controls (upstream-bound, a788cba01, based cleanly on
+  # upstream/main) onto this soup tip (e75ead74d, base aea13a532) for
+  # dogfooding. Just-in-time FUE callouts (useFue + FueDot + FueCallout) for
+  # two shipped, icon-only controls with no discovery path:
+  #   - session-list message-content search scope toggle (SessionList.tsx)
+  #   - sort/filter menu trigger — soup's SessionListFilterMenu.tsx stands in
+  #     for upstream's SessionListViewMenu.tsx (richer filter+date-range menu
+  #     here; same trigger-button wiring)
+  # A third control (per-session title-lock padlock, RenameSessionDialog.tsx)
+  # is in the upstream-bound branch but NOT in this layer: this soup tip has
+  # no title-lock feature at all in that file, despite upstream's
+  # 577ab7546 (#2072, which added it) being an ancestor of this tip — a
+  # pre-existing soup gap, unrelated to this change, flagged separately.
+  # Build-only, no schema/API changes. web-only → requires --build-web.
+  # Worktree: ~/coding/hapi/worktrees/fue-unlabelled-controls-driver
+  # Dogfooding before filing upstream (tiann/hapi); not yet filed.
+  - branch: driver/fue-unlabelled-controls
+
   # PARKED 2026-11-09: driver/2296-presence-badges (tiann/hapi#2296, IanMStevenson)
   # does not re-thin onto live soup — SessionRowSummary.tsx's icon-corner presence
   # badge (data-testid="session-presence") that Ian's PR patches no longer exists
