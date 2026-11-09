@@ -13,6 +13,13 @@ import {
 } from '@/modules/sessionJob/sessionJob'
 import { formatJobLine } from '@/modules/sessionJob/formatJobLine'
 import { runSessionJob } from '@/modules/sessionJob/runSessionJob'
+import {
+    assertCreateProgressMode,
+    assertNumericSleepUsesUntil,
+    type JobProgressMode,
+    parseUntilTimestamp,
+    stampUntilProgress
+} from '@/modules/sessionJob/jobProgressMode'
 import type { CommandDefinition } from './types'
 
 export { formatJobLine, terminalText } from '@/modules/sessionJob/formatJobLine'
@@ -24,6 +31,8 @@ export type ParsedJobArgs = {
     jobKey?: string
     label?: string
     status?: 'running' | 'completed' | 'failed'
+    progress?: JobProgressMode
+    untilMs?: number
     done?: number | null
     total?: number | null
     remaining?: number | null
@@ -49,12 +58,18 @@ ${chalk.bold('When to use:')}
 ${chalk.bold('Agent contract:')}
   Prefer ${chalk.bold('hapi job run')} — it heartbeats for you and marks completed/failed on exit.
   An idle agent cannot heartbeat; set-once jobs go amber after ~15m.
-  Prefer honest --remaining or --done/--total; omit counts if unknown.
+  ${chalk.bold('run/set require --progress')} unknown|fraction|until (explicit affordance).
+  unknown → indeterminate stripes (no counts). fraction → remaining+total or done+total.
+  until → --until <ISO|epoch>; remaining/total derived (job run heartbeats re-stamp remaining).
+  Fraction without a continuous updater freezes under heartbeats — keep
+  ${chalk.bold('job update')}ing done/remaining (or use --progress unknown).
+  Numeric ${chalk.bold('sleep N')} requires ${chalk.bold('--progress until')}.
   Never invent a fake percent.
+  Do not wrap hapi-restart-hub / stack-switch in job run (hub down → zombie running meter).
 
 ${chalk.bold('Usage:')}
-  hapi job run <session> <job-key> --label <text> [--wake-on-terminal] [--wake-prompt <text>] [--heartbeat-sec 300] [progress flags] -- <cmd> [args...]
-  hapi job set <session> <job-key> --label <text> [--wake-on-terminal] [--wake-prompt <text>] [--started-at MS] [--run-id UUID] [--remaining N] [--done N --total N] [--unit tracks] [--detail ...]
+  hapi job run <session> <job-key> --label <text> --progress unknown|fraction|until […] -- <cmd>…
+  hapi job set <session> <job-key> --label <text> --progress unknown|fraction|until […]
   hapi job update <session> <job-key> [--expected-run-id UUID] [--remaining N] [--done N] [--total N] [--status running|completed|failed] [--wake-on-terminal] [--wake-prompt <text>] [--detail ...]
                        [--clear-remaining|--clear-done|--clear-total|--clear-unit|--clear-detail]
   hapi job clear <session> <job-key> [--expected-run-id UUID]
@@ -65,11 +80,11 @@ ${chalk.bold('Wake on terminal (tiann/hapi#1489, default off):')}
                        session and posts a prompt so an idle agent can continue.
   --wake-prompt TEXT   Optional prescription appended to the wake message.
 
-${chalk.bold('Progress UI:')}
-  remaining           → "N units left · 2h"
-  done + total        → "P% · done/total · 2h"
-  label/detail only   → "running · 2h" + indeterminate bar
-  elapsed always from startedAt (wall clock) — never an ETA / time-remaining field
+${chalk.bold('Progress UI (--progress):')}
+  unknown             → "running · 2h" + subtle indeterminate striped bar (no %)
+  fraction            → remaining+total or done+total → fill bar
+  until               → determinate countdown from --until (unit s)
+  elapsed always from startedAt (wall clock) — never an ETA field
   --clear-remaining   → drop leftover meter so done/total can take over (PATCH null)
 
 ${chalk.bold('startedAt / elapsed:')}
@@ -77,6 +92,8 @@ ${chalk.bold('startedAt / elapsed:')}
   PATCH rejects startedAt. PUT/set without --started-at keeps the existing clock.
   Late attach or wrong clock: ${chalk.bold('set --started-at <epoch-ms>')} (explicit PUT),
   or clear then set with --started-at (works on older hubs that ignored PUT corrections).
+  Mid-window countdown re-attach: ${chalk.bold('run --progress until --until … --started-at <window-start-ms>')}
+  so heartbeat total stays until−start (not "time left from this restart").
   Manual babysitter wrappers: mint one UUID per run (${chalk.bold('set --run-id <uuid>')}),
   then pass the same value on every heartbeat (${chalk.bold('update --expected-run-id <uuid>')})
   and on clear (${chalk.bold('clear --expected-run-id <uuid>')}) so a key-reuse cannot
@@ -263,6 +280,34 @@ export function parseJobArgs(args: string[]): ParsedJobArgs {
             result.wakePrompt = arg.slice('--wake-prompt='.length)
             continue
         }
+        if (arg === '--progress') {
+            const value = flagArgs[++i]
+            if (value !== 'unknown' && value !== 'fraction' && value !== 'until') {
+                throw new SessionJobError('bad_args', '--progress must be unknown|fraction|until')
+            }
+            result.progress = value
+            continue
+        }
+        if (arg.startsWith('--progress=')) {
+            const value = arg.slice('--progress='.length)
+            if (value !== 'unknown' && value !== 'fraction' && value !== 'until') {
+                throw new SessionJobError('bad_args', '--progress must be unknown|fraction|until')
+            }
+            result.progress = value
+            continue
+        }
+        if (arg === '--until') {
+            const value = flagArgs[++i]
+            if (value === undefined) {
+                throw new SessionJobError('bad_args', '--until requires a value')
+            }
+            result.untilMs = parseUntilTimestamp(value)
+            continue
+        }
+        if (arg.startsWith('--until=')) {
+            result.untilMs = parseUntilTimestamp(arg.slice('--until='.length))
+            continue
+        }
         if (arg.startsWith('-')) {
             throw new SessionJobError('bad_args', `unexpected flag: ${arg}`)
         }
@@ -290,8 +335,23 @@ export function parseJobArgs(args: string[]): ParsedJobArgs {
         throw new SessionJobError('bad_args', `unexpected arg: ${arg}`)
     }
 
-    if (result.startedAt !== undefined && result.action !== undefined && result.action !== 'set') {
-        throw new SessionJobError('bad_args', '--started-at is only valid with job set')
+    if (result.startedAt !== undefined && result.action !== undefined) {
+        if (result.action === 'set') {
+            // ok — correct historical clock / window start
+        } else if (result.action === 'run' && result.progress === 'until') {
+            // ok — mid-window countdown: heartbeats keep total = until - startedAt
+        } else if (result.action === 'run') {
+            throw new SessionJobError(
+                'bad_args',
+                '--started-at on job run is only valid with --progress until '
+                + '(pass the window start so total stays honest across re-attach)'
+            )
+        } else {
+            throw new SessionJobError(
+                'bad_args',
+                '--started-at is only valid with job set, or job run --progress until'
+            )
+        }
     }
 
     if (
@@ -351,6 +411,35 @@ export function parseJobArgs(args: string[]): ParsedJobArgs {
         throw new SessionJobError('bad_args', '-- <cmd> is only valid with job run')
     }
 
+    if (
+        (result.progress !== undefined || result.untilMs !== undefined)
+        && result.action !== undefined
+        && result.action !== 'run'
+        && result.action !== 'set'
+    ) {
+        throw new SessionJobError('bad_args', '--progress/--until are only valid with job run or set')
+    }
+
+    if (result.action === 'run' || result.action === 'set') {
+        assertCreateProgressMode(result.action, {
+            progress: result.progress,
+            untilMs: result.untilMs,
+            done: result.done,
+            total: result.total,
+            remaining: result.remaining
+        })
+        if (result.progress === 'until' && result.untilMs !== undefined) {
+            const startedAt = result.startedAt ?? Date.now()
+            const stamped = stampUntilProgress(result.untilMs, Date.now(), startedAt)
+            result.remaining = stamped.remaining
+            result.total = stamped.total
+            result.unit = result.unit ?? stamped.unit
+        }
+        if (result.action === 'run' && result.command) {
+            assertNumericSleepUsesUntil(result.progress!, result.command)
+        }
+    }
+
     return result
 }
 
@@ -405,10 +494,6 @@ export async function handleJobCommand(args: string[]): Promise<void> {
         throw new SessionJobError('bad_args', 'missing job key')
     }
 
-    if (parsed.startedAt !== undefined && parsed.action !== 'set') {
-        throw new SessionJobError('bad_args', '--started-at is only valid with job set')
-    }
-
     if (parsed.action === 'clear') {
         const result = await clearSessionJob({
             sessionIdPrefix: parsed.sessionIdPrefix,
@@ -428,6 +513,7 @@ export async function handleJobCommand(args: string[]): Promise<void> {
         if (parsed.startedAt !== undefined && !Number.isFinite(parsed.startedAt)) {
             throw new SessionJobError('bad_args', '--started-at must be epoch milliseconds')
         }
+        // --progress already asserted + until stamped in parseJobArgs
         const body: AttachedJobUpsert = {
             label: parsed.label,
             status: parsed.status ?? 'running',
@@ -457,6 +543,9 @@ export async function handleJobCommand(args: string[]): Promise<void> {
         if (!parsed.command || parsed.command.length === 0) {
             throw new SessionJobError('bad_args', 'run requires a command after --')
         }
+        if (parsed.startedAt !== undefined && !Number.isFinite(parsed.startedAt)) {
+            throw new SessionJobError('bad_args', '--started-at must be epoch milliseconds')
+        }
         const exitCode = await runSessionJob({
             sessionIdPrefix: parsed.sessionIdPrefix,
             jobKey: parsed.jobKey,
@@ -470,6 +559,8 @@ export async function handleJobCommand(args: string[]): Promise<void> {
             ...(typeof parsed.remaining === 'number' ? { remaining: parsed.remaining } : {}),
             ...(typeof parsed.unit === 'string' ? { unit: parsed.unit } : {}),
             ...(typeof parsed.detail === 'string' ? { detail: parsed.detail } : {}),
+            ...(parsed.untilMs !== undefined ? { untilMs: parsed.untilMs } : {}),
+            ...(parsed.startedAt !== undefined ? { startedAtMs: parsed.startedAt } : {}),
             ...(parsed.wakeOnTerminal !== undefined ? { wakeOnTerminal: parsed.wakeOnTerminal } : {}),
             ...(parsed.wakePrompt !== undefined ? { wakePrompt: parsed.wakePrompt } : {})
         })

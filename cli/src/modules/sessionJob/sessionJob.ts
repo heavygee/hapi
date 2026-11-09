@@ -29,7 +29,9 @@ export class SessionJobError extends Error {
 
 /** Exact Shell recipe agents should run instead of MCP set or update-before-create. */
 export const SESSION_JOB_RUN_RECIPE =
-    'hapi job run <session-id> <job-key> --label "<label>" [--done N --total M|--remaining N] [--unit …] -- <cmd>…'
+    'hapi job run <session-id> <job-key> --label "<label>" --progress unknown|fraction|until … -- <cmd>…'
+    + ' (required --progress: unknown=stripes; fraction=remaining+total|done+total;'
+    + ' until=--until <iso> with auto remaining on heartbeats).'
     + ' (use "$HAPI_SESSION_ID" only when it matches the operator /sessions/<id> chat row;'
     + ' remote Cursor: pass the URL uuid explicitly)'
 

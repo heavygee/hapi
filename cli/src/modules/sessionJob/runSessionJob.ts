@@ -13,6 +13,7 @@ import {
     type SessionJobClientOptions,
     type SessionJobResolvedClient
 } from './sessionJob'
+import { stampUntilProgress } from './jobProgressMode'
 
 export type RunSessionJobOptions = SessionJobClientOptions & {
     jobKey: string
@@ -24,12 +25,22 @@ export type RunSessionJobOptions = SessionJobClientOptions & {
     total?: number
     unit?: string
     detail?: string
+    /** When set, heartbeats re-stamp remaining from wall clock (progress until). */
+    untilMs?: number
+    /**
+     * Window start for until-mode total (until − startedAt). Defaults to supervisor
+     * launch time. Pass the original window start on mid-window re-attach so the
+     * bar does not reset to "time left from this restart."
+     */
+    startedAtMs?: number
     wakeOnTerminal?: boolean
     wakePrompt?: string
     /** Injected for tests. */
     spawnImpl?: typeof spawn
     setIntervalImpl?: typeof setInterval
     clearIntervalImpl?: typeof clearInterval
+    /** Injected for tests — wall clock for until stamps. */
+    nowImpl?: () => number
 }
 
 const DEFAULT_HEARTBEAT_MS = 5 * 60 * 1000
@@ -47,6 +58,7 @@ export async function runSessionJob(options: RunSessionJobOptions): Promise<numb
         ...(options.remaining !== undefined ? { remaining: options.remaining } : {}),
         ...(options.unit !== undefined ? { unit: options.unit } : {}),
         ...(options.detail !== undefined ? { detail: options.detail } : {}),
+        ...(options.startedAtMs !== undefined ? { startedAt: options.startedAtMs } : {}),
         ...(options.wakeOnTerminal !== undefined ? { wakeOnTerminal: options.wakeOnTerminal } : {}),
         ...(options.wakePrompt !== undefined ? { wakePrompt: options.wakePrompt } : {})
     }
@@ -71,7 +83,11 @@ export async function runSessionJob(options: RunSessionJobOptions): Promise<numb
     const spawnFn = options.spawnImpl ?? spawn
     const setIntervalFn = options.setIntervalImpl ?? setInterval
     const clearIntervalFn = options.clearIntervalImpl ?? clearInterval
+    const now = options.nowImpl ?? Date.now
     const heartbeatMs = options.heartbeatMs ?? DEFAULT_HEARTBEAT_MS
+    // Until-mode total = until − windowStart. Prefer explicit startedAtMs so a
+    // mid-window move keeps the original 48h (etc.) denominator.
+    const untilWindowStartMs = options.startedAtMs ?? now()
 
     const child: ChildProcess = spawnFn(options.command[0]!, options.command.slice(1), {
         stdio: 'inherit',
@@ -80,13 +96,24 @@ export async function runSessionJob(options: RunSessionJobOptions): Promise<numb
 
     let loggedHeartbeatFailure = false
     const heartbeat = setIntervalFn(() => {
+        // Do not re-send --detail: MCP/CLI progress updates would otherwise be
+        // clobbered by the next timer tick with the launch-time string.
+        // Never PATCH status:running on the heartbeat — a late in-flight
+        // request must not resurrect running after the terminal write.
+        const untilBody = options.untilMs !== undefined
+            ? (() => {
+                const stamped = stampUntilProgress(options.untilMs!, now(), untilWindowStartMs)
+                return {
+                    remaining: stamped.remaining,
+                    total: stamped.total,
+                    unit: options.unit ?? stamped.unit
+                }
+            })()
+            : {}
         void updateSessionJob({
             ...clientOpts,
             jobKey: options.jobKey,
-            body: {
-                detail: options.detail,
-                status: 'running'
-            }
+            body: { ...untilBody }
         }).catch((error: unknown) => {
             // Best-effort — exit path still marks terminal status. Log once so
             // a broken supervisor is visible (stuck chip with dead PID is worse).
