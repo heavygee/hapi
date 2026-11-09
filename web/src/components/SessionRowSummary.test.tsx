@@ -242,6 +242,51 @@ function expectUnreadOnce() {
     )).toHaveLength(0)
 }
 
+describe('SessionRowSummary residency fade', () => {
+    beforeEach(() => {
+        localStorage.clear()
+    })
+
+    it('fades inactive rows even when a running attached job is present', () => {
+        const now = Date.now()
+        const { container } = render(
+            <I18nProvider>
+                <SessionRowSummary
+                    session={makeSummary({
+                        active: false,
+                        thinking: false,
+                        backgroundTaskCount: 0,
+                        attachedJob: {
+                            key: 'dogfood',
+                            label: 'dogfood countdown',
+                            status: 'running',
+                            remaining: 3600,
+                            total: 172_800,
+                            unit: 's',
+                            startedAt: now - 3600_000,
+                            heartbeatAt: now,
+                            updatedAt: now,
+                        },
+                        attachedJobUpdatedAt: now,
+                    })}
+                />
+            </I18nProvider>
+        )
+
+        expect(container.querySelector('.opacity-50')).not.toBeNull()
+        expect(screen.getByText('dogfood countdown')).toBeInTheDocument()
+    })
+
+    it('does not fade active rows', () => {
+        const { container } = render(
+            <I18nProvider>
+                <SessionRowSummary session={makeSummary({ active: true, backgroundTaskCount: 0 })} />
+            </I18nProvider>
+        )
+        expect(container.querySelector('.opacity-50')).toBeNull()
+    })
+})
+
 describe('SessionRowSummary time label', () => {
     beforeEach(() => {
         localStorage.clear()
