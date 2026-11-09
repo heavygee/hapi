@@ -85,10 +85,12 @@ order above is a real dependency chain, so a removal part way down just stops ev
   still covers terminal agent errors / dead turns regardless.
 - **Notify display glue (heavygee/hapi#322):** Happy showed summary JSON welded to trailing
   prose because `shared/src/messages.ts` required the last line to end with `}`, while the
-  Cursor seal path already tolerated glue (`a176ca7ba`). Fix on
-  `fix/notify-summary-trailing-prose` — **not in soup yet**. Phone still live-broken until
-  composed. Delimiter-hardening plan (2026-07-29) trigger has fired; hardening the delimiter
-  itself is a separate operator decision.
+  Cursor seal path already tolerated glue (`a176ca7ba`). **Live in soup** as of tip
+  `8395651da` (soup-heal; upstream-facing branch remains `fix/notify-summary-trailing-prose`
+  @ `8233bbc69` — heal retires when that lands). Phone display no longer broken for this
+  shape. Delimiter-hardening plan (2026-07-29) trigger has fired; hardening the delimiter
+  itself is still a separate operator decision (fix makes the bare-token contract robust; it
+  does not choose a wrapper).
 - **Fleet framing:** "over 1,000 sessions, ≥~30 active at a time" — not "30-session fleet".
   Live list chrome in the blocked shot shows All (1280).
 - **Inline images (operator ask, refreshed 2026-11-09 dark mode):** light-mode pinned-section
