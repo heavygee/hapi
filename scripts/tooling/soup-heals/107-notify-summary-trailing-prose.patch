@@ -1,0 +1,169 @@
+# Heal: AGENT_NOTIFY_SUMMARY footers with prose glued after the JSON.
+#
+# heavygee/hapi#322. Operator saw Happy render a closing message as the raw
+# JSON footer with prose welded onto it (`...}Dark-mode capture finished`).
+# matchNotifySummaryLine bailed on `if (!trimmedEnd.endsWith('}')) return null`,
+# so nothing was extracted and nothing was stripped.
+#
+# Why a heal and not a thin layer: the composed shared/src/messages.ts is a
+# SOUP variant (collapseRepeats / findNotifyTokenStart, Cursor SUMMARY->SUMARY
+# tolerance) that exists on no single layer branch — the live content is
+# identical to merge-resolution commit ab9ce7ce3 on the integration line. The
+# equivalent fix for the upstream variant is a real branch,
+# fix/notify-summary-trailing-prose (8233bbc69), shaped for an upstream PR.
+# Retire this heal once that lands and the soup absorbs it.
+#
+# Tests ride along in the patch so --verify covers them: 5 of the 7 fail
+# without this change; the other 2 are over-matching guards that must pass
+# either way.
+diff --git a/shared/src/messages.test.ts b/shared/src/messages.test.ts
+index e0fa59393..8ee90da69 100644
+--- a/shared/src/messages.test.ts
++++ b/shared/src/messages.test.ts
+@@ -517,3 +517,54 @@ describe('hasConversationMessageContent', () => {
+         expect(hasConversationMessageContent(content)).toBe(false)
+     })
+ })
++
++describe('AGENT_NOTIFY_SUMMARY footers with prose glued after the JSON', () => {
++    // Operator-reported 2026-11-09: Happy rendered the raw JSON with prose
++    // welded on, because the trimmed line did not end with `}` so the parser
++    // bailed before scanning. heavygee/hapi#322.
++    const glued = 'AGENT_NOTIFY_SUMMARY {"version":1,"status":"needs_decision","summary":"Do you want these cuts?"}Dark-mode capture finished cleanly.'
++
++    test('extracts the summary despite trailing prose', () => {
++        const got = extractNotifySummary(glued)
++        expect(got).not.toBeNull()
++        expect(got?.status).toBe('needs_decision')
++        expect(got?.summary).toBe('Do you want these cuts?')
++    })
++
++    test('strips the footer and KEEPS the trailing prose visible', () => {
++        const visible = stripNotifySummaryFooter(glued)
++        expect(visible).toBe('Dark-mode capture finished cleanly.')
++        expect(visible).not.toContain('AGENT_NOTIFY_SUMMARY')
++    })
++
++    test('keeps prose glued on BOTH sides', () => {
++        const both = 'Done.AGENT_NOTIFY_SUMMARY {"status":"done","summary":"s"}And more.'
++        expect(extractNotifySummary(both)?.status).toBe('done')
++        expect(stripNotifySummaryFooter(both)).toBe('Done. And more.')
++    })
++
++    test('is not confused by braces inside a summary string', () => {
++        const braces = 'AGENT_NOTIFY_SUMMARY {"status":"done","summary":"fixed the {foo} handler"}trailing'
++        expect(extractNotifySummary(braces)?.summary).toBe('fixed the {foo} handler')
++        expect(stripNotifySummaryFooter(braces)).toBe('trailing')
++    })
++
++    test('keeps the Cursor dup-drop tolerance working with trailing prose', () => {
++        // collapseRepeats recovers SUMMARY -> SUMARY; it must still apply now
++        // that the closing brace is found by scanning.
++        const dropped = 'AGENT_NOTIFY_SUMARY {"status":"done","summary":"ok"}tail'
++        expect(extractNotifySummary(dropped)?.summary).toBe('ok')
++    })
++
++    test('still rejects a prose mention rather than eating the sentence', () => {
++        const mention = 'See the AGENT_NOTIFY_SUMMARY {"status":"done"} docs for details.'
++        expect(extractNotifySummary(mention)).toBeNull()
++        expect(stripNotifySummaryFooter(mention)).toBe(mention)
++    })
++
++    test('leaves a truncated object unmatched', () => {
++        const broken = 'AGENT_NOTIFY_SUMMARY {"status":"done","summary":"unterminated'
++        expect(extractNotifySummary(broken)).toBeNull()
++        expect(stripNotifySummaryFooter(broken)).toBe(broken)
++    })
++})
+diff --git a/shared/src/messages.ts b/shared/src/messages.ts
+index 4179ba66f..2f9610db3 100644
+--- a/shared/src/messages.ts
++++ b/shared/src/messages.ts
+@@ -456,27 +456,67 @@ function findNotifyTokenStart(before: string): number {
+ export type NotifySummaryLineMatch = {
+     jsonPart: string
+     start: number
++    /** Index just past the footer's closing `}` — prose after this is visible. */
++    endExclusive: number
++}
++
++/**
++ * Index of the `}` closing the object opened at `braceAt`, or -1.
++ *
++ * String- and escape-aware, so a brace inside a summary value (an agent
++ * writing "fixed the {foo} handler") does not move the depth counter.
++ */
++function findJsonObjectEnd(line: string, braceAt: number): number {
++    let depth = 0
++    let inString = false
++    let escape = false
++    for (let i = braceAt; i < line.length; i += 1) {
++        const ch = line[i]!
++        if (inString) {
++            if (escape) { escape = false; continue }
++            if (ch === '\\') { escape = true; continue }
++            if (ch === '"') inString = false
++            continue
++        }
++        if (ch === '"') { inString = true; continue }
++        if (ch === '{') depth += 1
++        else if (ch === '}') {
++            depth -= 1
++            if (depth === 0) return i
++        }
++    }
++    return -1
+ }
+ 
+ export function matchNotifySummaryLine(line: string): NotifySummaryLineMatch | null {
+     const trimmedEnd = line.trimEnd()
+-    if (!trimmedEnd.endsWith('}')) return null
+ 
++    // NOTE: there is deliberately no `endsWith('}')` precondition here any
++    // more. It made a glued SUFFIX (`...}Shell finished.`) unmatchable, so the
++    // summary was not extracted, the footer was not stripped, and the raw JSON
++    // was rendered to the user. Agents emit that shape; the closing brace is
++    // found by scanning instead of assumed to be at end of line.
+     let matched: NotifySummaryLineMatch | null = null
+     for (let braceIdx = 0; braceIdx < trimmedEnd.length; braceIdx++) {
+         if (trimmedEnd[braceIdx] !== '{') continue
+         const before = trimmedEnd.slice(0, braceIdx).replace(/\s+$/, '')
+         if (!before) continue
++        // findNotifyTokenStart requires the WHOLE tail of `before` to be the
++        // token, so a `{` sitting inside trailing prose cannot match.
+         const tokenStart = findNotifyTokenStart(before)
+         if (tokenStart < 0) continue
+         // Reject whitespace-delimited mentions (`Example: AGENT_NOTIFY_SUMMARY ...`).
+         const prefix = before.slice(0, tokenStart)
+         if (prefix.trim().length > 0 && /\s/.test(before[tokenStart - 1]!)) continue
+-        const jsonPart = trimmedEnd.slice(braceIdx).trim()
+-        if (!jsonPart.startsWith('{') || !jsonPart.endsWith('}')) continue
++        // Inline-code example: `AGENT_NOTIFY_SUMMARY {...}` inside a sentence.
++        if (tokenStart > 0 && before[tokenStart - 1] === '`') continue
++        const end = findJsonObjectEnd(trimmedEnd, braceIdx)
++        if (end < 0) continue
++        if (trimmedEnd[end + 1] === '`') continue
++        const jsonPart = trimmedEnd.slice(braceIdx, end + 1)
+         try {
+             if (isObject(JSON.parse(jsonPart))) {
+-                matched = { jsonPart, start: tokenStart }
++                matched = { jsonPart, start: tokenStart, endExclusive: end + 1 }
+             }
+         } catch {
+             // Try an earlier `{` (e.g. nested braces / truncated payload).
+@@ -548,9 +588,14 @@ export function splitNotifySummary(text: unknown): NotifySummaryDisplay | null {
+     const found = findNotifySummary(text)
+     if (found === null) return null
+ 
++    // Prose can be welded to either side. Strip only the footer and keep both
++    // sides — dropping the suffix would silently delete content the agent
++    // wrote for the user, which is worse than showing the raw footer.
+     const prefix = found.line.slice(0, found.match.start).trimEnd()
++    const suffix = found.line.slice(found.match.endExclusive).trim()
++    const remainder = [prefix, suffix].filter((part) => part.length > 0).join(' ')
+     const visibleLines = found.lines.slice(0, found.lastIdx)
+-    if (prefix.length > 0) visibleLines.push(prefix)
++    if (remainder.length > 0) visibleLines.push(remainder)
+ 
+     return {
+         visibleText: visibleLines.join('\n').trimEnd(),
