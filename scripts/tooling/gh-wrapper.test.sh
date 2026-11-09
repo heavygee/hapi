@@ -32,5 +32,25 @@ out="$(cd "$WORKDIR/hapi" && HAPI_REAL_GH="$FAKE_GH" GH_WRAP_LOG="$LOG" env HAPI
 check "agent ack exit 0" "[[ $rc -eq 0 ]]"
 check "agent ack checklist" "has \"\$out\" PRE-PR"
 check "agent ack called gh" "grep -q fake-gh \"$LOG\""
+# --- merge-gate repo resolution (2026-11-09) ---------------------------------
+# gh treats --repo, -R, --repo=X and -RX as the same flag. The wrapper used to
+# match only "--repo", so `gh pr merge 275 -R heavygee/hapi` resolved repo_arg
+# from the cwd instead and gated the WRONG repository. These assert the gate is
+# handed the repo the caller actually named, whichever form they used.
+GATE="$WORKDIR/hapi/scripts/tooling/hapi-pr-merge-gate.sh"
+printf "%s\n" "#!/usr/bin/env bash" "echo gate-args:\$* >>\"\${GH_WRAP_LOG:?}\"" "exit 0" >"$GATE"
+chmod +x "$GATE"
+gate_repo_case() { # $1 = label, rest = argv after `pr merge`
+    local label="$1"; shift
+    : >"$LOG"
+    (cd "$WORKDIR/hapi" && HAPI_REAL_GH="$FAKE_GH" GH_WRAP_LOG="$LOG" \
+        env HAPI_AGENT_CONTEXT=1 bash "$WRAP" pr merge "$@" >/dev/null 2>&1) || true
+    check "$label" "grep -q 'gate-args:7 --repo heavygee/hapi' \"$LOG\""
+}
+gate_repo_case "gate repo via --repo"   7 --repo heavygee/hapi --squash
+gate_repo_case "gate repo via -R"       7 -R heavygee/hapi --squash
+gate_repo_case "gate repo via --repo="  7 --repo=heavygee/hapi --squash
+gate_repo_case "gate repo via -RX"      7 -Rheavygee/hapi --squash
+
 echo pass=$pass fail=$fail
 [[ $fail -eq 0 ]]

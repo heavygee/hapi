@@ -117,9 +117,23 @@ if [[ "${1:-}" == "pr" && "${2:-}" == "merge" ]]; then
     # Override with HAPI_MERGE_GATE_REPOS="owner/name owner/other".
     gate_repos="${HAPI_MERGE_GATE_REPOS:-tiann/hapi heavygee/hapi}"
 
+    # gh accepts --repo, -R, --repo=X and -RX interchangeably. Matching only
+    # "--repo" meant `gh pr merge 275 -R heavygee/hapi` left repo_arg empty, fell
+    # through to `gh repo view` (the cwd default repo) and gated the WRONG
+    # repository — observed 2026-11-09 gating tiann/hapi#275 for a heavygee/hapi
+    # merge. Fail-closed saved it that time only because upstream #275 happened to
+    # be CLOSED; a green same-numbered PR elsewhere would have passed a merge that
+    # nothing had verified. It also let an out-of-scope -R repo inherit the cwd's
+    # in-scope verdict.
     repo_arg=""
     for ((i=1; i<=$#; i++)); do
-        [[ "${!i}" == "--repo" ]] && { j=$((i+1)); repo_arg="${!j}"; break; }
+        a="${!i}"
+        case "$a" in
+            --repo|-R)  j=$((i+1)); repo_arg="${!j}"; break ;;
+            --repo=*)   repo_arg="${a#--repo=}"; break ;;
+            -R=*)       repo_arg="${a#-R=}"; break ;;
+            -R?*)       repo_arg="${a#-R}"; break ;;
+        esac
     done
     if [[ -z "$repo_arg" ]]; then
         repo_arg="$("$REAL_GH" repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || true)"
