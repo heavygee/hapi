@@ -26,6 +26,26 @@ This is not hypothetical, and it is not one file. The same class cost us twice i
 
 **The tax is not the conflict, it is the resolution.** Each one is a chance to silently drop a feature, and our measured rate is not good: of 14 conflicts resolved on 11-08, four produced regressions — one of which let a sticky preference nobody set override the operator's hub config. Green suites do not catch this class; the 11-05 loss passed verify because no test covered the deleted feature.
 
+## Design detail: what soup's row UI does today (facts only, for the option-1 argument)
+
+Anyone arguing option 1 (upstream the redesign) has to show it's a strict gain, not a trade. Here's what's actually in `SessionRowSummary.tsx` on the soup tip, read directly off the file rather than inferred from the marker counts above.
+
+**What soup has that upstream's badge corner doesn't:**
+
+- **Blocked-state chip** (`data-testid="session-blocked-chip"`, `getSessionBlockedState`/`getSessionBlockedLabelKey`/`sessionBlockedIsError`) — a labeled, colored chip (error vs warning vs stale border) with its own tooltip/`aria-label`, independent of the presence/attention channel. Upstream has no equivalent concept.
+- **Issue-ref chip** (`IssueRefChip`, `getLinkedGithubIssue`) — shows a linked GitHub issue inline on the row. Fork-only, no upstream equivalent.
+- **Attached-job progress** (`attachedJobFraction`, `formatAttachedJobProgress`, `isAttachedJobStale`, a `setInterval`-driven minute tick) — a session with a running background job stays full-opacity and un-dimmed even if `s.active === false`, and can show fractional progress / staleness. Upstream's model has no concept of a job surviving session inactivity.
+- **Foreground vs background spinner distinction** (`isAgentForegroundThinking(s)` → plain `SessionSpinner`; background task count → `SessionSpinner background`, a blue variant) — two visually distinct spinners for "the agent itself is thinking" vs "a background task is running while the agent is idle." Upstream's badge only had a binary pulse (green working / blue background), not a spinner-shape distinction.
+
+**What soup does NOT have that upstream's (and Ian's open PR's) badge-per-state design does:**
+
+- **No affirmative "waiting" mark.** A session that is `active: true`, not thinking, no background task, no pending/urgent attention, not unread renders with *nothing* in the marker slot — full opacity, fg-colored title, no icon, no dot, no spinner. It is visually identical to "nothing is happening here," distinguished from a genuinely idle/disconnected row only by the row-level dimming (below).
+- **"Stopped" is shown by absence (dimming), not by an affirmative mark.** `!s.active && !attachedJob` → `opacity-50` + `text-[var(--app-hint)]` title. There's no icon, glyph, or dot that says "this session is stopped" — just reduced emphasis on the whole row. A user has to notice a dimmer row, not read a distinct symbol.
+- **So stopped vs waiting *is* distinguishable today** — by the opacity/color toggle alone — but neither state gets a dedicated visual identity the way working (spinner) and background (blue spinner) and blocked (chip) do. Ian's PR's whole premise (own code comment: "every state has its own mark, so no state is shown by the absence of one") is specifically the thing soup's current design does for exactly these two states.
+- **Edge case:** `active: false` with a running `attachedJob` is NOT dimmed — the one case where "stopped-looking" inactivity still reads as full-opacity/live.
+
+**Net for the option-1 argument:** soup's redesign is additive in three real ways (blocked chip, issue chip, job progress) that upstream would likely want on their own merits, independent of presence semantics. But it is a net *regression* on affirmative-state legibility for exactly the two states (stopped, waiting) that prompted Ian's PR in the first place. An upstreaming pitch that leads with "our row is strictly better" would be factually wrong on that one point; a pitch that says "ours adds X/Y/Z, and separately we should fold in an explicit stopped/waiting mark (which upstream already has via `832c5922f` and Ian's PR extends)" is the accurate framing.
+
 ## The question
 
 **Does the fork's row redesign get upstreamed so the two converge, or is it a deliberate fork-only divergence with an accepted conflict budget?**
