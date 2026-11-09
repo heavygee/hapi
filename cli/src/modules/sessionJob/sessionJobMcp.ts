@@ -46,6 +46,7 @@ export const SESSION_JOB_TOOL_DESCRIPTION = [
     SESSION_JOB_RUN_RECIPE,
     '(auto-heartbeats + completed/failed on exit). Idle agents cannot heartbeat.',
     'This MCP tool: action=update (progress/status), action=clear, action=list only.',
+    'For done/total/remaining/unit/detail: pass null to clear that field.',
     'Prefer honest remaining or done+total; omit counts when unknown.',
     'Never invent a percent or ETA. Not for todos, thinking, or short tool calls.',
 ].join(' ')
@@ -64,19 +65,19 @@ export const sessionJobInputSchema: z.ZodTypeAny = z.object({
         'Job status on update (completed|failed to finish).'
     ),
     done: z.number().nonnegative().nullable().optional().describe(
-        'Units completed (pair with total). Pass null to clear a stale done count.'
+        'Units completed (pair with total).'
     ),
     total: z.number().positive().nullable().optional().describe(
-        'Total units when both ends of a fraction exist. Pass null to clear.'
+        'Total units when both ends of a fraction exist.'
     ),
     remaining: z.number().nonnegative().nullable().optional().describe(
-        'Units left. Pass null to clear so done/total can take over (web prefers remaining).'
+        'Units left (web prefers remaining over done/total when set).'
     ),
     unit: z.string().trim().min(1).max(64).nullable().optional().describe(
-        'Unit label (tracks, folders, files, …). Pass null to clear.'
+        'Unit label (tracks, folders, files, …).'
     ),
     detail: z.string().max(500).nullable().optional().describe(
-        'Stage / current item text (not an ETA). Pass null to clear.'
+        'Stage / current item text (not an ETA).'
     ),
     expectedRunId: z.string().min(1).max(64).optional().describe(
         'Run generation fence for update/clear. Required when a manual wrapper stamped runId on set.'
