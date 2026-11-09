@@ -67,6 +67,22 @@ done
 [[ "${HAPI_IMPATIENT:-}" == "1" ]] && IMPATIENT=1
 [[ "${HAPI_RESTART_INCLUDE_SELF:-}" == "1" ]] && INCLUDE_SELF=1
 
+# Ancestors of this process (the invoking shell, the tool wrapper, …) often have
+# the script name in their own cmdline — `hapi-restart-hub > log` makes the
+# parent shell match a naive pgrep. Excluding only $$ is not enough: the first
+# real use of the stacking guard refused a legitimate restart with "0s elapsed",
+# which is the signature of matching your own launcher. A guard that blocks
+# valid work trains people to bypass it.
+_hrh_is_ancestor() {
+    local target="$1" p="$PPID" hops=0
+    while [[ "$p" =~ ^[0-9]+$ && "$p" -gt 1 && "$hops" -lt 24 ]]; do
+        [[ "$p" == "$target" ]] && return 0
+        p="$(awk '{print $4}' "/proc/$p/stat" 2>/dev/null || echo 1)"
+        hops=$((hops+1))
+    done
+    return 1
+}
+
 # Refuse to stack drains. A patient drain waits forever, so starting a second
 # one does not replace the first — it queues behind it, and BOTH fire when the
 # stack next goes quiet. That is how 3 strays accumulated on 2026-11-09: a drain
@@ -81,6 +97,7 @@ if [[ "$CANCEL" -ne 1 ]]; then
         _cmd="$({ tr '\0' ' ' < "/proc/$_pid/cmdline"; } 2>/dev/null || true)"
         [[ "$_cmd" == *"hapi-restart-hub"* ]] || continue
         [[ "$_cmd" == *".test.sh"* || "$_cmd" == *"--cancel"* ]] && continue
+        _hrh_is_ancestor "$_pid" && continue          # never our own launcher
         echo "ERROR: a hapi-restart-hub drain is already running (pid $_pid, $(ps -o etimes= -p "$_pid" 2>/dev/null | tr -d ' ')s elapsed)." >&2
         _existing=$((_existing+1))
     done
@@ -110,6 +127,7 @@ if [[ "$CANCEL" -eq 1 ]]; then
         [[ "$cmd" == *"hapi-restart-hub"* ]] || continue
         [[ "$cmd" == *".test.sh"* ]] && continue      # never the test harness
         [[ "$cmd" == *"--cancel"* ]] && continue
+        _hrh_is_ancestor "$pid" && continue            # never our own launcher
         echo "cancel: signalling drain pid=$pid ($(ps -o etimes= -p "$pid" 2>/dev/null | tr -d ' ')s elapsed)"
         kill -TERM "$pid" 2>/dev/null || true
         found=$((found+1))
