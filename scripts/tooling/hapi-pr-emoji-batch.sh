@@ -341,7 +341,24 @@ classify_one() {
     IFS=$'\t' read -r pr_state pr_json merge_state head_ref draft_flag labels_csv pr_body pr_title <<< "$err_out"
     [[ "$pr_json" == "true" ]] && merged=1
     [[ "$pr_state" == "closed" && "$merged" -eq 0 ]] && closed=1
-    [[ "$merge_state" == "dirty" || "$merge_state" == "behind" ]] && merge_bad=1
+    # GitHub's mergeable_state is a CACHED computation and lags pushes — on
+    # 2026-11-09 #238 reported CONFLICTING for 4+ minutes after the push that
+    # fixed it, with GitHub's own refs/pull/238/merge still built on the
+    # PREVIOUS head. Painting "rebase (merge state dirty)" on that sends a
+    # session to rebase a branch that merges fine. Verify with a real local
+    # trial merge against a current base before believing it.
+    #
+    # Fail-closed: only an explicit "merges clean" (exit 0) clears the flag.
+    # A real conflict (1) or an undeterminable result (2) keeps it set.
+    if [[ "$merge_state" == "dirty" || "$merge_state" == "behind" ]]; then
+        merge_bad=1
+        local _verdict="$SCRIPT_DIR/hapi-pr-merge-verdict.sh"
+        if [[ -x "$_verdict" ]] \
+           && "$_verdict" --repo "$REPO" --quiet "$n" >/dev/null 2>&1; then
+            merge_bad=0
+            merge_state="stale-${merge_state}"
+        fi
+    fi
 
     if [[ "$merged" -eq 1 ]]; then
         decided="$(pec_decide_emoji 1 1 0 1 0 1 0 1 0 0 0 0)"
