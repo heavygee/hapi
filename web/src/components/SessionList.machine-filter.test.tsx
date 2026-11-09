@@ -202,6 +202,7 @@ describe('SessionList session filter menu', () => {
             'Archived only',
             'Unread only',
             'Updated date',
+            'Working only',
             'Blocked only',
             'With drafts only'
         ])

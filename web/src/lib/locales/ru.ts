@@ -88,6 +88,7 @@ export default {
   'sessions.view.status.active': 'Только активные',
   'sessions.view.status.archived': 'Только архивные',
   'sessions.view.unreadOnly': 'Только непрочитанные',
+  'sessions.view.working': 'Только работающие',
   'sessions.view.blocked': 'Только заблокированные',
   'sessions.view.reset': 'Сбросить',
   'sessions.unreadFilter.toggle': 'Только непрочитанные',
