@@ -1,0 +1,32 @@
+# Heal: two English strings the #1772 layer referenced but never added.
+#
+# driver/1772-techotaku-base-wip added `t('sessions.search.content.incomplete')`
+# and `t('sessions.search.content.noResultsIncomplete')` call sites in
+# web/src/components/SessionList.tsx (~line 3976) and defined both keys in
+# zh-CN.ts — but not in en.ts. English users would have seen the raw key
+# strings in the content-search UI.
+#
+# Not a deletion: neither key exists on the previous tip 8395651da either, so
+# nothing in the soup lost them. This is a missing-translation gap introduced
+# with the feature. Typecheck cannot see it (t() keys are strings) and the
+# layer's own vitest run did not either; hapi-verify-web-dist caught it.
+#
+# Copy is translated from the zh-CN strings the same layer added, not invented:
+#   noResultsIncomplete  没有已索引的消息匹配搜索内容。部分长消息被截断，结果可能不完整。
+#   incomplete           部分长消息被截断，搜索结果可能不完整。
+#
+# RETIRE THIS by folding the two keys into driver/1772-techotaku-base-wip,
+# which is where they belong. Reported to session 3c5af7c8 (layer owner).
+diff --git a/web/src/lib/locales/en.ts b/web/src/lib/locales/en.ts
+index ded4d38ef..33a9efbe0 100644
+--- a/web/src/lib/locales/en.ts
++++ b/web/src/lib/locales/en.ts
+@@ -108,6 +108,8 @@ export default {
+   'sessions.search.content.error': 'Message content search failed.',
+   'sessions.search.content.minQuery': 'Enter at least 2 characters to search message content.',
+   'sessions.search.content.noResults': 'No messages match your search.',
++  'sessions.search.content.noResultsIncomplete': 'No indexed messages match your search. Some long messages are truncated, so results may be incomplete.',
++  'sessions.search.content.incomplete': 'Some long messages are truncated, so search results may be incomplete.',
+   'sessions.view.label': 'Sort and filter',
+   'sessions.view.sort': 'Sort by',
+   'sessions.view.sort.lastMessage': 'Last message',
