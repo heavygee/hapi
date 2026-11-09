@@ -130,6 +130,8 @@ import { Spinner } from '@/components/Spinner'
 import { useToast } from '@/lib/toast-context'
 import { transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
 import { getPathDisplayName } from '@/utils/path'
+import { useFue } from '@/lib/use-fue'
+import { FueCallout, FueDot } from '@/components/Fue'
 import {
     shedToolbarSlots,
     toolbarActionBudget,
@@ -1439,6 +1441,8 @@ export function SessionListSearch(props: {
     const collapsedButtonRef = useRef<HTMLButtonElement>(null)
     const dateButtonRef = useRef<HTMLButtonElement>(null)
     const searchRootRef = useRef<HTMLDivElement>(null)
+    const scopeButtonRef = useRef<HTMLButtonElement>(null)
+    const scopeFue = useFue('session-list-search-scope')
     const hasDateRange = Boolean(props.customStart && props.customEnd)
     const showDateFilter = props.showDateFilter !== false
 
@@ -1577,26 +1581,48 @@ export function SessionListSearch(props: {
     const ScopeIcon = searchMode === 'content' ? ScopeContentIcon : ScopeMetadataIcon
 
     const renderSearchMode = () => canSearchContent ? (
-        <button
-            type="button"
-            data-testid="session-list-search-scope"
-            data-search-scope={searchMode}
-            onClick={() => props.onSearchModeChange?.(otherSearchMode)}
-            // Hit target matches the clear endcap so the scope is as tappable
-            // as the action beside it (tiann/hapi#2081).
-            className={cn(
-                'session-list-search-scope flex min-h-[48px] min-w-[48px] shrink-0 items-center justify-center',
-                'border-r border-[var(--app-border)] transition-colors',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] focus-visible:ring-inset',
-                searchMode === 'content'
-                    ? 'bg-[var(--app-subtle-bg)] text-[var(--app-link)] hover:bg-[var(--app-secondary-bg)]'
-                    : 'text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]'
-            )}
-            title={scopeHint}
-            aria-label={scopeHint}
-        >
-            <ScopeIcon className="h-5 w-5 shrink-0" />
-        </button>
+        <>
+            <button
+                ref={scopeButtonRef}
+                type="button"
+                data-testid="session-list-search-scope"
+                data-search-scope={searchMode}
+                onClick={() => {
+                    scopeFue.engage()
+                    props.onSearchModeChange?.(otherSearchMode)
+                }}
+                // Hit target matches the clear endcap so the scope is as tappable
+                // as the action beside it (tiann/hapi#2081).
+                className={cn(
+                    'session-list-search-scope relative flex min-h-[48px] min-w-[48px] shrink-0 items-center justify-center',
+                    'border-r border-[var(--app-border)] transition-colors',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] focus-visible:ring-inset',
+                    searchMode === 'content'
+                        ? 'bg-[var(--app-subtle-bg)] text-[var(--app-link)] hover:bg-[var(--app-secondary-bg)]'
+                        : 'text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]'
+                )}
+                title={scopeHint}
+                aria-label={scopeHint}
+            >
+                <ScopeIcon className="h-5 w-5 shrink-0" />
+                {scopeFue.status !== 'acknowledged' ? (
+                    <FueDot
+                        pulsing={scopeFue.status === 'unseen'}
+                        ariaLabel={t('fue.newFeatureDot')}
+                    />
+                ) : null}
+            </button>
+            {scopeFue.status === 'engaging' ? (
+                <FueCallout
+                    title={t('sessions.search.scope.fueTitle')}
+                    body={t('sessions.search.scope.fueBody')}
+                    onDismiss={scopeFue.dismiss}
+                    dismissLabel={t('fue.gotIt')}
+                    closeAriaLabel={t('fue.closeAriaLabel')}
+                    anchorRef={scopeButtonRef}
+                />
+            ) : null}
+        </>
     ) : null
 
     // getCurrentText reads from a ref, not props.value directly, so dictation's

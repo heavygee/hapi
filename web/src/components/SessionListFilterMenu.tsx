@@ -15,6 +15,8 @@ import {
 } from '@/lib/sessionListFilter'
 import { useTranslation } from '@/lib/use-translation'
 import { cn } from '@/lib/utils'
+import { useFue } from '@/lib/use-fue'
+import { FueCallout, FueDot } from '@/components/Fue'
 
 export type { SessionListFilter, SessionListFilterState } from '@/lib/sessionListFilter'
 
@@ -37,6 +39,7 @@ export function SessionListFilterMenu(props: {
     const dateFilterButtonRef = useRef<HTMLButtonElement>(null)
     const [anchor, setAnchor] = useState<{ right: number; bottom: number } | null>(null)
     const [menuLeft, setMenuLeft] = useState<number | null>(null)
+    const fue = useFue('session-list-view-menu')
     const hasDateFilter = props.customStart !== undefined
         && props.customEnd !== undefined
         && props.sessionActivityDates !== undefined
@@ -140,7 +143,10 @@ export function SessionListFilterMenu(props: {
             <button
                 ref={triggerRef}
                 type="button"
-                onClick={() => setOpen(value => !value)}
+                onClick={() => {
+                    fue.engage()
+                    setOpen(value => !value)
+                }}
                 aria-label={t('sessions.filter.label')}
                 title={t('sessions.filter.label')}
                 aria-haspopup="menu"
@@ -158,8 +164,23 @@ export function SessionListFilterMenu(props: {
                         aria-hidden="true"
                         className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-[var(--app-link)]"
                     />
-                ) : null}
+                ) : (fue.status !== 'acknowledged' ? (
+                    <FueDot
+                        pulsing={fue.status === 'unseen'}
+                        ariaLabel={t('fue.newFeatureDot')}
+                    />
+                ) : null)}
             </button>
+            {fue.status === 'engaging' ? (
+                <FueCallout
+                    title={t('sessions.filter.fueTitle')}
+                    body={t('sessions.filter.fueBody')}
+                    onDismiss={fue.dismiss}
+                    dismissLabel={t('fue.gotIt')}
+                    closeAriaLabel={t('fue.closeAriaLabel')}
+                    anchorRef={triggerRef}
+                />
+            ) : null}
             {open ? (
                 <>
                     <button
