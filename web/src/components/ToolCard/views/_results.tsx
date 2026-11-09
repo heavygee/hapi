@@ -433,6 +433,16 @@ export function parseNumberedFileLines(text: string): { startLine: number; body:
     return startLine === null ? null : { startLine, body: body.join('\n') }
 }
 
+export function unwrapOpencodeReadOutput(text: string): { path: string | null; body: string; isOpencodeRead: boolean } {
+    const wrapper = text.match(/^<path>([\s\S]*?)<\/path>\s*<type>file<\/type>\s*<content>\n?([\s\S]*)<\/content>\s*$/)
+    if (!wrapper) return { path: null, body: text, isOpencodeRead: false }
+    return {
+        path: wrapper[1].trim(),
+        body: wrapper[2].replace(/\n\(End of file[^)]*\)\n?$/, ''),
+        isOpencodeRead: true
+    }
+}
+
 function renderReadTextResult(text: string, path: string | null, surface: ToolViewProps['surface'], parseNumberedLines: boolean) {
     // A file read is line-oriented content: render it in a code block (monospace
     // + line-number gutter) even when the extension is unknown (.txt, .log, agy
@@ -676,11 +686,12 @@ const ReadResultView: ToolViewComponent = (props: ToolViewProps) => {
 
     const text = extractTextFromResult(result)
     if (text) {
-        const path = extractReadPathFromInput(props.block.tool.input)
+        const unwrapped = unwrapOpencodeReadOutput(text)
+        const path = unwrapped.path ?? extractReadPathFromInput(props.block.tool.input)
         const displayPath = path ? resolveDisplayPath(path, props.metadata) : null
         return (
             <>
-                {renderReadTextResult(text, displayPath, props.surface, props.block.tool.nativeKind === 'agy-numbered-read')}
+                {renderReadTextResult(unwrapped.body, displayPath, props.surface, unwrapped.isOpencodeRead || props.block.tool.nativeKind === 'agy-numbered-read')}
                 <RawJsonDevOnly value={result} surface={props.surface} />
             </>
         )
@@ -1102,12 +1113,9 @@ export function getToolResultViewComponent(toolName: string, block?: ToolCallBlo
     if (isSubagentToolName(toolName)) {
         return MarkdownResultView
     }
-    // Fork opencode aliases resolve before the upstream alias table.
-    const aliased = Object.hasOwn(OPENCODE_RESULT_VIEW_ALIASES, toolName)
-        ? OPENCODE_RESULT_VIEW_ALIASES[toolName]
-        : undefined
+    // The fork's OPENCODE_RESULT_VIEW_ALIASES table was hoisted upstream into
+    // toolNameAliases.ts with identical mappings — one lookup now covers both.
     const resolved = toolResultViewRegistry[toolName]
-        ?? (aliased ? toolResultViewRegistry[aliased] : undefined)
         ?? toolResultViewRegistry[resolveToolNameAlias(toolName)]
     if (resolved) return resolved
     // Generic markdown would collapse the output lines and autolink file

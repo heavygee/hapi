@@ -587,7 +587,9 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                     await restoreQueuedReservation();
                     return { steered: false, error: 'Active turn changed' };
                 }
-                let steer: { dispatched: Promise<void>; completed: Promise<void> };
+                // Track the backend's shape: upstream widened completed to the
+                // ACP stopReason and added `answered` (#2319).
+                let steer: ReturnType<typeof backend.beginSoftSteerPrompt>;
                 try {
                     steer = backend.beginSoftSteerPrompt(acpSessionId, [{
                         type: 'text',

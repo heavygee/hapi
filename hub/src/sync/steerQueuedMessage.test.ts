@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, spyOn } from 'bun:test'
 import { Store } from '../store'
 import { RpcRegistry } from '../socket/rpcRegistry'
 import { SyncEngine } from './syncEngine'
+import { RpcGateway } from './rpcGateway'
 
 function createEngine() {
     const store = new Store(':memory:')
