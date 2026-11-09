@@ -700,6 +700,13 @@ layers:
   # Worktree: ~/coding/hapi/worktrees/slim-session-job-mcp @ driver/slim-session-job-mcp
   # Soup tip: db656c411 — re-thin on live tip c5a182a12; hoist session_job "pass null to clear" once (heavygee/hapi#310).
   # Drop when upstream #1424 merges.
+  # session_job `--progress until` preventions — postmortem
+  # docs/plans/2026-11-08-session-job-wrong-affordance-postmortem.md.
+  # Thin tip on soup HEAD ff7e86490. Layer owner: /sessions/6e70f97b.
+  # Restored by the kitchen: the owner staged this line into the 0.34.4
+  # sync and my abort of that sync discarded it.
+  - branch: driver/session-job-progress-until
+
   - branch: driver/slim-session-job-mcp
 
   # DROPPED 2026-09-02: driver/cursor-notify-rule-delta — stale fat tip (60 commits from
@@ -1434,3 +1441,15 @@ layers:
   # See docs/plans/2026-11-03-oos-linux-oom-orphaned-session-trees-postmortem.md
   # tooling-only → no build-web required; remat picks it up.
   - branch: chore/claude-orphan-resurrect
+
+  # PARKED 2026-11-09: driver/2296-presence-badges (tiann/hapi#2296, IanMStevenson)
+  # does not re-thin onto live soup — SessionRowSummary.tsx's icon-corner presence
+  # badge (data-testid="session-presence") that Ian's PR patches no longer exists
+  # on the soup tip; it was replaced by fork-only opacity-dimming + SessionSpinner +
+  # blocked/issue chips (attachedJob, SessionSpinner, opacity-50: 0 on upstream
+  # 0.34.4, present on soup). Not a mechanical re-thin — a product call on whether
+  # the fork's row redesign upstreams (converging with Ian's taxonomy) or stays a
+  # deliberate fork-only divergence. Escalated to operator via tooling/meta.
+  # Branch left pushed at driver/2296-presence-badges @ 5baf98fd5 (harmless, not
+  # in soup). Worktree: ~/coding/hapi/worktrees/2296-presence-badges
+  # Upstream review of #2296 does not require this layer — proceeds independently.

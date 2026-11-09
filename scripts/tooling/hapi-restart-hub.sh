@@ -121,8 +121,34 @@ fi
 # If so, the caller is one of the WORKING sessions and patient-mode would
 # wait forever on itself unless we exempt it from the count.
 SELF_EXEMPT=0
-if [[ "$INCLUDE_SELF" -ne 1 ]] && [[ "${CURSOR_AGENT:-}" == "1" || "${CURSOR_INVOKED_AS:-}" == "agent" ]]; then
+# Self-exempt any wrapped agent session, not just Cursor. The caller is itself
+# a WORKING row, so counting it deadlocks patient mode forever — it waits for
+# its own tool call to finish, which cannot happen while it is the one waiting.
+# This was Cursor-only until 2026-11-09, so the Claude tooling/meta bot could
+# not use the patient path at all: it hung at `effective WORKING=1` (itself)
+# with `wait forever`. Flavour-agnostic test = "I am a HAPI session with no
+# controlling terminal", plus the explicit per-flavour markers.
+if [[ "$INCLUDE_SELF" -ne 1 ]] && {
+        [[ "${CURSOR_AGENT:-}" == "1" || "${CURSOR_INVOKED_AS:-}" == "agent" ]] \
+        || [[ -n "${CLAUDECODE:-}" || -n "${CLAUDE_CODE_SESSION_ID:-}" ]] \
+        || { [[ -n "${HAPI_SESSION_ID:-}" ]] && [[ ! -t 0 ]]; }
+    }; then
     SELF_EXEMPT=1
+fi
+# Which marker matched — for the operator-facing drain message. Every
+# expansion is :-guarded: this script runs under `set -u`, and before
+# 2026-11-09 the message interpolated $CURSOR_AGENT unguarded, which was
+# safe only because the exemption could not fire for any other flavour.
+if [[ "$SELF_EXEMPT" -eq 1 ]]; then
+    if [[ "${CURSOR_AGENT:-}" == "1" || "${CURSOR_INVOKED_AS:-}" == "agent" ]]; then
+        SELF_EXEMPT_WHY="cursor: CURSOR_AGENT=${CURSOR_AGENT:-}/${CURSOR_INVOKED_AS:-}"
+    elif [[ -n "${CLAUDECODE:-}" || -n "${CLAUDE_CODE_SESSION_ID:-}" ]]; then
+        SELF_EXEMPT_WHY="claude: CLAUDECODE=${CLAUDECODE:-} session=${CLAUDE_CODE_SESSION_ID:0:8}"
+    else
+        SELF_EXEMPT_WHY="hapi session ${HAPI_SESSION_ID:0:8} with no tty"
+    fi
+else
+    SELF_EXEMPT_WHY=""
 fi
 
 PRIMARY="${HAPI_PRIMARY:-$HOME/coding/hapi}"
@@ -170,7 +196,7 @@ patient_drain() {
     raw="$("$HEALTH_SCRIPT" --json 2>/dev/null | jq -r '[.sessions[]? | select(.status == "WORKING")] | length' 2>/dev/null || echo 0)"
     working="$(adjust_for_self "$raw")"
     if [[ "$SELF_EXEMPT" -eq 1 ]]; then
-        echo "patient: caller appears to be a Cursor agent (CURSOR_AGENT=$CURSOR_AGENT); subtracting 1 from WORKING count to avoid self-deadlock. Override: --patient-include-self / HAPI_RESTART_INCLUDE_SELF=1"
+        echo "patient: caller is a wrapped agent session ($SELF_EXEMPT_WHY); subtracting 1 from WORKING count to avoid self-deadlock. Override: --patient-include-self / HAPI_RESTART_INCLUDE_SELF=1"
         echo "patient: WORKING raw=$raw effective=$working (effective = others in flight after self-exempt)"
     fi
     if [[ "$working" -gt 0 ]]; then

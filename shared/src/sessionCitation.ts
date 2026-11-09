@@ -31,9 +31,9 @@ export const INSPECT_PEER_TOOL_DESCRIPTION =
  * Shared across spawn_peer / ping_peer / inspect_peer descriptions.
  */
 export const PEER_IDENTITY_UUID_RULE =
-    'Never invent peer titles (upstream, orchestrator, nicknames). '
-    + 'Always copy [title](/sessions/<uuid>) from the handoff or inspect_peer / search_peers; '
-    + 'title is decoration - UUID is identity. Rename of a parent is a non-event.'
+    'Never invent peer titles. '
+    + 'Copy [title](/sessions/<uuid>) from the handoff or inspect_peer / search_peers - '
+    + 'UUID is identity; rename is a non-event.'
 
 /** MCP `spawn_peer` tool description. Remit is required; empty shell is failure. */
 export const SPAWN_PEER_TOOL_DESCRIPTION =
@@ -80,6 +80,10 @@ export const PEER_CONTACT_RULE =
 export const PEER_WAKE_PARAM_DESCRIPTION =
     'Resume the target if it is inactive. Default false: an inactive target is refused and no message is sent. ' +
     'Set true only when the user asked you to wake that peer or the work you hand off requires it to act; never for FYI, status, or done notes.'
+
+/** Zod `.describe` for ping_peer / spawn_peer `waitForReply`. */
+export const PEER_WAIT_FOR_REPLY_PARAM_DESCRIPTION =
+    'Post the peer\'s reply into this session when its turn ends (default false). End your turn after calling; do not poll.'
 
 /** Zod `.describe` for list_peers `includeInactive`. */
 export const LIST_PEERS_INCLUDE_INACTIVE_PARAM_DESCRIPTION =

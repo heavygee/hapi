@@ -31,7 +31,7 @@ Choose a supported coding agent from your terminal and control its sessions remo
 - `hapi codex resume <native-thread-id>` - Resume a Codex conversation by its native thread ID. For a HAPI session ID, use `hapi resume <id>`.
 - `hapi cursor` - Start Cursor Agent mode. See `src/cursor/runCursor.ts`.
   Supports `hapi cursor resume <chatId>`, `hapi cursor --continue`, `--mode plan|ask`, `--yolo`, `--model`.
-  Local and remote modes supported; remote uses `agent -p` with stream-json.
+  Local and remote modes supported; new remote sessions use `agent acp`. Pre-ACP sessions retain the legacy `agent -p` stream-json resume path.
 - `hapi grok` - Start Grok Build mode. See `src/grok/runGrok.ts`.
 - `hapi copilot` - Start GitHub Copilot mode.
 - `hapi kimi` - Start Kimi mode.
@@ -42,12 +42,10 @@ Choose a supported coding agent from your terminal and control its sessions remo
 - `hapi dsh` - Start DeepSeek Harness through ACP. See `src/dsh/runDsh.ts`.
   DSH is remote-only and its ACP server must be configured separately.
 - `hapi resume [sessionId]` - List resumable sessions for this machine or resume one locally.
-- `hapi ping-peer <session-id-prefix> <message>` - Resume (if needed) and message another session. Prefer this or MCP `ping_peer` / `list_peers` / `search_peers` over reinventing JWT+curl. Also `--message-file` / `--list`.
-- `hapi search-peers <query>` - Keyword search for sessions (name/path/agentSessionId) beyond `list_peers` recency. Prefer MCP `search_peers` in-session.
+- `hapi ping-peer <session-id-prefix> <message>` - Message another session. Inactive targets are refused (exit 5) unless `--wake` resumes them first. Prefer this or MCP `ping_peer` / `list_peers` over reinventing JWT+curl. Also `--message-file` / `--list [--all]` (active sessions with machine and cwd; `--all` includes inactive).
 - `hapi spawn-peer --dir PATH --name TITLE --message-file -` - Spawn a session and deliver a required first message. Optional `--machine ID|hostname` targets another runner (resolved via GET /api/machines); `--dir` must exist on the target. Machine spawn HTTP 200 is not a working peer; this command fails if the remit does not land. Prefer MCP `spawn_peer`.
+- `hapi usage [--since 24h|7d|<ISO>|<ms>] [--until …] [--json]` - When agents were working across every machine on the hub, from `GET /api/activity`. `--json` prints one `hapi.activity.v1` report for other tools (time trackers); errors go to stderr with exit codes 2 (arguments), 3 (no token or refused), 4 (hub too old), 1 (other).
 - `hapi inspect-peer <session-id-or-prefix>` - Read-only peer metadata + recent message text (no resume). Prefer this or MCP `inspect_peer` when a user cites `[title](/sessions/<id>)` or Copy-reference `See session "…" (/sessions/<id>) for context`. `/sessions/<id>` is a hub path, not a local file. Optional `--limit`.
-- `hapi job set|update|clear|list|run` - Attach long-running outliving work to a session so the list UI shows progress while the agent is idle (`tiann/hapi#1404`). Prefer `"$HAPI_SESSION_ID"`. Heartbeat via `update` (or `run`); honest `--remaining` or `--done`/`--total` (omit counts if unknown — never invent a percent). Late-attach clock fix: `set --started-at <epoch-ms>` or clear+set. See `docs/guide/session-jobs.md` and `hapi job --help`.
-- `hapi archive-peer <session-id-or-prefix>` - Soft stand-down (archive only, never delete). Prefer this or MCP `archive_peer` over hand JWT+curl. Peer Done / idle ghosts should succeed; WORKING (thinking) peers may still refuse.
 - `hapi set-mode <session-id-or-prefix> <mode>` - Change the permission mode of an existing session, like the web permission picker. Active sessions switch immediately; inactive ones use it on next resume. An invalid mode prints the modes allowed for that agent.
 
 Peer messages default to `auto`: use the target's live capabilities and turn
@@ -120,14 +118,12 @@ hapi resume <session-id>
 
 `hapi resume` lists resumable sessions for the current machine. `hapi resume <session-id>` hands off an active remote session and opens the same HAPI session in the local terminal.
 
-**Codex exception:** Codex 0.154.0+ uses shared sessions, not handoff. `hapi
-resume <id>` attaches another official TUI to its live execution; Web and other
-terminals remain usable. The original terminal owns a terminal-created execution:
-its exit stops that execution, leaving resumable history. Web-created/resumed
-executions use the existing Runner; additional terminals only detach on exit.
-**End session** archives the selected root. Native profile-v2 launch selection and in-place rewind are currently
-unavailable. See [Codex shared sessions](../docs/guide/codex-shared-sessions.md)
-for queue semantics, environment isolation, recovery, supported flags and tests.
+For Codex, the terminal and Web stay usable at the same time. Closing the
+original terminal stops a terminal-started run, but its history remains
+resumable. Sessions started from the Web run under the Runner; closing a
+terminal attached later does not stop them. **End session** archives the
+selected conversation. See [Codex usage and limits](../docs/guide/codex-shared-sessions.md)
+for details.
 
 ### Answer local Claude prompts from HAPI
 
@@ -158,8 +154,9 @@ See `src/commands/auth.ts`.
 
 ### Runner management
 
-- `hapi runner start` - Start runner as detached process.
-- `hapi runner stop` - Stop runner gracefully.
+- `hapi runner start` - Replace any existing runner and start a detached process with the supplied flags/environment.
+- `hapi runner stop` - Stop runner gracefully; agent sessions stay alive.
+- `hapi runner start-sync` - Run in the foreground (for a process supervisor).
 - `hapi runner status` - Show runner diagnostics.
 - `hapi runner list` - List active sessions managed by runner.
 - `hapi runner stop-session <sessionId>` - Terminate specific session.
@@ -169,6 +166,8 @@ Both `start` and `start-sync` accept repeatable `--workspace-root <path>` (or `-
 
 - The web `/browse` page surfaces scoped file trees rooted at those paths.
 - The runner refuses `list-directory` and `spawn-session` requests for paths outside the configured roots.
+- The runner can serve read-only file, Git, and ripgrep requests for inactive
+  sessions through its machine-scoped `workspace-file-access` capability.
 - `~` and `~/foo` are expanded.
 
 Omitting the flag keeps manual session spawning unrestricted and leaves the
@@ -199,13 +198,36 @@ tail reload. Local transcript timing uses the original start and completion
 timestamps; imported history and turns without an observed live start do not
 receive a new duration.
 
+### Codex model catalog
+
+To use an existing static Codex model catalog, set
+`HAPI_CODEX_MODEL_CATALOG_JSON` on the CLI/runner machine to an absolute path
+or `~/...`. HAPI passes it as `-c model_catalog_json=...` to standalone and
+shared app-servers, including resumed sessions. This explicit HAPI setting
+has precedence over Codex configuration files; an explicit launch
+`-c 'model_catalog_json="/path/to/catalog.json"'` takes precedence over HAPI.
+
+When unset, HAPI adds no catalog override and Codex uses its normal configuration
+and discovery. You can also configure `model_catalog_json` directly in Codex's
+`config.toml`. HAPI does not inspect, generate, refresh or copy catalogs or
+credentials, and does not start extra processes to prepare them. Codex validates
+catalog contents during its normal startup and reports invalid files itself.
+Use a complete catalog appropriate for the current provider/account and update
+it when availability changes; a static catalog bypasses native discovery.
+
+Paths support macOS, Linux and Windows, including spaces. Restart the runner
+after changing its environment; existing servers use the new setting after
+they are safely stopped and resumed. Inference traffic is unaffected.
+
 ### Codex MCP servers
 
 Codex sessions keep the MCP servers configured in the user's Codex
 `config.toml`. HAPI adds its own `hapi` bridge without replacing other user
-servers. Runner-spawned Codex sessions copy only `config.toml` into their
-temporary `CODEX_HOME`, so MCP settings are preserved while authentication
-state remains isolated. The `hapi` server name is reserved by HAPI.
+servers. When a runner spawn supplies a Codex auth token, it copies only
+`config.toml` into a temporary `CODEX_HOME` and writes the supplied `auth.json`,
+preserving MCP settings without copying unrelated authentication state.
+Without a supplied token, Codex uses the runner's normal Codex home/auth.
+The `hapi` server name is reserved by HAPI.
 
 On Windows, known package-manager shims (`uvx`, `npx`, `npm`, `pnpm`, `yarn`,
 `bunx`, and `.cmd`/`.bat` commands) use a short-lived HAPI stdio compatibility
@@ -242,20 +264,19 @@ export HAPI_DSH_ACP_COMMAND=pnpm
 export HAPI_DSH_ACP_ARGS_JSON='["--dir", "/path/to/deepseek-harness", "run", "demo:acp"]'
 ```
 
-The official ACP entrypoint is fresh-session-only and does not support native
-resume, MCP injection, or live tool/reasoning telemetry. Model selection is
-advertised for DSH: the composition's catalog is listed via the `ListDshModels`
-session RPC and applied per turn with ACP `session/set_config_option`. HAPI
-uses the standard chat and pending one-shot permission surfaces; the ACP
-composition owns the overall permission policy.
+The DSH ACP profile can restore native context through `session/resume` when
+advertised; Hub history remains the transcript source. A legacy server may
+fall back to a fresh session with a visible notice. Model catalogs are exposed
+through `ListDshModels` and selected per turn via `session/set_config_option`.
+DSH owns MCP injection, live tool/reasoning telemetry and permission policy.
 
 ### Required
 
 - `CLI_API_TOKEN` - Shared secret; must match the hub. Can be set via env or `~/.hapi/settings.json` (env wins).
-- `HAPI_API_URL` - Hub base URL (default: http://localhost:3006).
 
 ### Optional
 
+- `HAPI_API_URL` - Hub base URL (default: http://localhost:3006; also configurable as `apiUrl` in settings).
 - `HAPI_HOME` - Config/data directory (default: ~/.hapi).
 - `HAPI_EXPERIMENTAL` - Enable experimental features (true/1/yes).
 - `HAPI_EXTRA_HEADERS_JSON` - JSON object of extra headers to send on CLI → hub requests, e.g. `{"Cookie":"CF_Authorization=..."}`. Can also be set as the `extraHeaders` object in `~/.hapi/settings.json` (environment variable wins).
@@ -269,7 +290,7 @@ composition owns the overall permission policy.
 
 - `HAPI_RUNNER_HEARTBEAT_INTERVAL` - Heartbeat interval in ms (default: 60000).
 - `HAPI_RUNNER_HTTP_TIMEOUT` - HTTP timeout for runner control in ms (default: 10000).
-- `HAPI_RUNNER_WEBHOOK_TIMEOUT_MS` - Session-start webhook timeout in ms (default: 15000); raise for slow agent startup/resume. Overrides the hub's Settings -> Machines -> Session start timeout for this runner, and is not clamped.
+- `HAPI_RUNNER_WEBHOOK_TIMEOUT_MS` - Session-start webhook timeout in ms (default: 15000); raise for slow agent startup/resume.
 - `HAPI_DISABLE_VERSION_HANDOFF` - Set to `1` to disable automatic runner replacement on CLI binary changes.
 - `HAPI_RUNNER_SUPERVISED` - Set to `1` only when a supervisor restarts the runner after exit; enables the web Restart control's supervised path.
 
@@ -283,18 +304,29 @@ composition owns the overall permission policy.
 
 ### Set for the wrapped agent
 
-- `HAPI_SESSION_ID` - The hub session id for the current run, exported into the wrapped agent/CLI child environment at spawn for every flavor (claude / codex / copilot / cursor / gemini / opencode / kimi / grok / pi), both runner-spawned and locally started sessions. Agents can read it to self-target "this chat" over the hub REST API or shell helpers without listing `/api/sessions`. Prefer the MCP `display_image` tool for inline media when it is available; use `HAPI_SESSION_ID` for hub REST / shell tooling where MCP is not. To **list** peers on the same hub/namespace, prefer MCP `list_peers` (works from runner-spawned sessions without sitting on the hub host; excludes the calling session). To **read** another session, prefer MCP `inspect_peer` or `hapi inspect-peer`. To **message** another session, prefer MCP `ping_peer` or `hapi ping-peer`. To **spawn** a new peer with work, prefer MCP `spawn_peer` or `hapi spawn-peer` — do not reinvent JWT+curl, and never treat machine-spawn HTTP 200 as a working peer. User citations look like `[title](/sessions/<id>)` or Copy-reference `See session "…" (/sessions/<id>) for context`; pass that `<id>` as `sessionIdPrefix`. Do not Grep/Glob `/sessions/<id>` as a local filesystem path. On a remote runner, configure matching `HAPI_API_URL` + `CLI_API_TOKEN` (or `hapi auth login` / `~/.hapi/settings.json`) on the runner host so shell `hapi ping-peer --list` works; session CLI may export an explicit non-default hub URL into child env, but never mirrors `CLI_API_TOKEN` into wrapped agents.
+- `HAPI_SESSION_ID` - The current HAPI session ID, available inside agent shells. Use it in scripts that target the current conversation without listing sessions.
 - An explicitly configured `HAPI_API_URL` is also made available to agent shells. HAPI does not copy settings-backed `CLI_API_TOKEN` secrets into the agent environment; credentials already present in the parent environment may still be inherited. Web Terminal PTYs (session Terminal button) strip hub secrets and agent-context markers (`HAPI_AGENT_CONTEXT`, `CURSOR_AGENT`, …) and set `HAPI_USER_TERMINAL=1` so operator tools treat that shell as human-facing.
 
-  Lazy Codex (terminal) sessions export the id only after the hub row is materialized, which happens when the MCP bridge starts — before the agent process is spawned — so path-only self-targeting does not race a missing hub row.
+For peer discovery and messaging, use the session's MCP `list_peers`,
+`inspect_peer`, and `ping_peer` tools, or the corresponding CLI commands.
+To create a new peer with work attached, use MCP `spawn_peer` or `hapi spawn-peer`.
+The first message is required and verified in the transcript before success;
+machine-spawn HTTP 200 alone does not prove the task was delivered. In-session
+spawns add a Parent `[title](/sessions/<uuid>)` citation so parent renames do not
+change its identity.
+With `waitForReply` on `ping_peer` or `spawn_peer`, the peer's reply is posted
+back into the calling session when the peer's turn ends (Pi peers are not
+supported). The caller's CLI process does the polling, so if that process exits
+first, the reply is not posted back; it stays in the peer session.
+On a remote runner host, configure the matching hub URL and token so shell
+commands reach the same hub (`hapi auth login` saves the token).
 
-  Example (shell fallback when MCP is unavailable) — path-only, self-targets the current session:
+For example, this source-checkout helper displays an image in the current
+session when MCP is unavailable:
 
-  ```bash
-  bun scripts/tooling/hapi-display-image.mjs /absolute/path/to/image.png "optional title"
-  ```
-
-  Explicit other session (prefix or full uuid) still works; that path may list sessions.
+```bash
+bun scripts/tooling/hapi-display-image.mjs /absolute/path/to/image.png "optional title"
+```
 
 ## Session lifecycle invariants
 
@@ -304,6 +336,20 @@ composition owns the overall permission policy.
   completes the same session. Wait for that row or explicitly stop it rather
   than creating duplicates. Process exit and explicit stop still clean up the
   child. The Hub gives Codex spawn RPCs 60 seconds for preflight plus startup.
+- On macOS, when the spawner's responsible process goes away with it (a runner
+  started by launchd, directly or through the npm launcher `bin/hapi.cjs`,
+  which passes `HAPI_LAUNCHER_PID`), every detached `spawnHappyCLI` child
+  (sessions, runner handoff, runner start) is started with
+  `HAPI_DISCLAIM_RESPONSIBILITY=<spawner pid>`. In a direct child of that pid,
+  the entry hook clears the variable and re-executes the same executable in
+  place so the child becomes its own responsible process; the pid, stdio and
+  cwd are unchanged. Without this, a session kept alive across a runner restart
+  loses LAN access for every new process in its tree (macOS Local Network
+  check, `EHOSTUNREACH`) once the old runner is gone. Spawners started from
+  Terminal or SSH keep the inherited responsibility (and its implicit LAN
+  allowance). Binaries without the hook ignore the variable; any failure in the
+  hook falls back to a plain exec or to continuing in-process, and is logged.
+  Implementation: `src/runtime/disclaimExec.ts`, `src/runtime/responsibility.ts`.
 
 When changing agent bootstrap, handoff, or shared-session plumbing:
 
@@ -325,7 +371,7 @@ Data is stored in `~/.hapi/` (or `$HAPI_HOME`):
 - Cursor Agent CLI installed (`agent` on PATH) for `hapi cursor`. Install: `curl https://cursor.com/install -fsS | bash` (macOS/Linux), `irm 'https://cursor.com/install?win32=true' | iex` (Windows).
 - Grok Build CLI installed (`grok` on PATH) for `hapi grok`. Authenticate with `grok login --device-auth` on headless runner machines, or set `XAI_API_KEY`.
 - OpenCode CLI installed (`opencode` on PATH).
-- Bun 1.4.0 for building from source.
+- Bun 1.4.4 for building from source.
 
 ## Build from source
 
@@ -333,8 +379,8 @@ From the repo root:
 
 ```bash
 bun install
-bun run build:cli
-bun run build:cli:exe
+bun run build:cli                 # Type-check the CLI; no executable output
+bun run --cwd cli build:exe       # Host-platform executable in cli/dist-exe/<target>/
 ```
 
 For an all-in-one binary that also embeds the web app:
@@ -343,9 +389,33 @@ For an all-in-one binary that also embeds the web app:
 bun run build:single-exe
 ```
 
+## Large Codex thread recovery
+
+Cold resumes and established internal subscriptions exclude inline turns; HAPI
+reads history separately. The initial root subscription retains the existing
+response behavior so empty native threads can initialize their history source.
+This does not truncate the native rollout or reduce the context restored by Codex.
+
+For exceptionally large threads, set `HAPI_CODEX_LAZY_HISTORY_IDS` to a
+comma-separated list of native Codex thread IDs in the Runner environment before
+starting the Runner. Only these roots replay their newest turn when reading
+paginated history and skip child history replay. Other threads retain full replay;
+legacy native threads without paginated history still use the full-history path.
+Descendant discovery and subscriptions to loaded children are retained, including
+after reconnect, so pending questions and live child events can still reach HAPI.
+
+This option favors recovery latency over Hub history completeness. It does not
+implement UI-driven pagination or asynchronous backfill. Older turns and child
+traces missing from the Hub may remain missing after reconnect; messages with an
+uncertain delivery state may need manual inspection if their acceptance evidence
+is in an older turn. Native rollout files remain intact. Historical fork checks
+still read complete history when the message-to-turn mapping is already known;
+older messages without that mapping cannot be forked through the Hub. A single
+turn can still be large, so this is a turn limit rather than a byte limit.
+
 ## Source structure
 
-- `src/api/` - Bot communication (Socket.IO + REST).
+- `src/api/` - Hub communication (Socket.IO + REST).
 - `src/claude/` - Claude Code integration.
 - `src/codex/` - Codex mode integration.
 - `src/cursor/` - Cursor Agent integration.
@@ -372,6 +442,11 @@ uses [Trusted Publishing](https://docs.npmjs.com/trusted-publishers) (OIDC), so 
 token is involved; each `@twsxtd/hapi*` package must list `tiann/hapi` /
 `release.yml` as its trusted publisher on npmjs.com. Packages already on npm are
 skipped, so a failed release can be retried by re-running the workflow.
+
+`setup-bun` reads the build version from the root `package.json`'s `packageManager`.
+Keep local release builds on that version too. Bun 1.4.0 produces invalid
+darwin-arm64 signatures that macOS 27 rejects with `SIGKILL`; Bun 1.4.4 includes
+the [upstream signing fix](https://github.com/oven-sh/bun/pull/39837).
 
 ## Related docs
 

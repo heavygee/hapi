@@ -63,6 +63,7 @@ See `src/router.tsx` for route definitions.
 
 - Message thread with infinite scroll.
 - Composer for sending messages.
+- A collapsible **Awaiting your reply** section above the composer collects all live non-blocking `request_user_input` questions, including those outside the loaded transcript. Answer there or dismiss individual questions without sending an answer or stopping the agent. Collapsing preserves drafts; blocking permissions retain their existing controls.
 - Permission mode and model selection for supported agents.
   Cursor Auto uses CLI Auto for new/resumed sessions configured with Auto. Switching a live session to Auto when ACP does not advertise a literal Auto option relaunches the Cursor ACP process in place under `--model auto` while preserving the hub session id.
 - Session abort and handoff controls.

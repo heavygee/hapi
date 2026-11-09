@@ -230,6 +230,26 @@ If @tiann narrows or expands scope, revise this section.
 
 PR watcher **may** ping tooling meta-bot outbound (wave-clear unlock, merged-cleanup nudge when a peer failed Gate A). That is PR watcher → tooling meta-bot only. **Reverse pings are forbidden:** feature peers, dogfood peers, and remat escalation must **never** `ping_peer` PR watcher for soup status, remat acks, process feedback, drain updates, or "thanks".
 
+### The seat's own handbook: [`tooling-meta-role.md`](./tooling-meta-role.md)
+
+**This role is swapped periodically.** Standing authority, restart cadence, the wave-clear order, the archive line, and the flavour-coupling audit live in [`tooling-meta-role.md`](./tooling-meta-role.md), marked POLICY vs PRACTICE. Every note from an outgoing holder gets encoded there — the seat's knowledge must not live in a session.
+
+### After a flavour swap: keep the predecessor as consultant (operator, 2026-11-09)
+
+**Do not hard-archive the superseded husk.** Retitle it `SUPERSEDED …`, leave it reachable, and `ping_peer … wake=true` it whenever role behaviour surprises you. `config/meta-sessions.yaml` records it as `consult_on_surprise:`.
+
+The reason is specific: **docs describe prohibitions, the predecessor describes practice**, and the gap between them is where a swap loses capability silently. Worked example from the Cursor → Claude tooling/meta swap:
+
+| What the docs said | What the predecessor said it actually did |
+|---|---|
+| "**NEVER** `sudo systemctl restart hapi-hub.service` … use `hapi-restart-hub`" | Restart after **any** green remat touching hub/CLI, unasked. *"Patient drain is the quiet period."* Hold only for fleet-seal/governance, stack-switch smells, or `--impatient` on a wedged hub. |
+| (silent) | Hard-archiving other sessions is **not** this seat's call — titles yes, archive is operator/outside. |
+| (silent) | Long remats go in `hapi job run --wake-on-terminal` so the session meter survives the rebuild. |
+
+The successor read the prohibition as "restarts need operator permission" and deferred one for hours while a composed tip sat unpublished — then discovered it *could not* restart anyway, because `hapi-restart-hub`'s drain self-exemption keyed only on `CURSOR_AGENT` and hung waiting on itself (`9b855dd3f`, `8e87a2143`). The predecessor's suggested `CURSOR_AGENT|CURSOR_INVOKED_AS` audit then found a second landmine in `lib/patient-drain.sh` (`8e339eb83`).
+
+**Generalisation:** a flavour swap can silently remove an ability, and the symptom reads as *"this action needs permission"* rather than *"the tool cannot see me"*. When something in the role feels gated, ask the predecessor before concluding it is policy.
+
 ---
 
 ## Meta orchestration volume (quieter Meta — 2026-08-09; tightened 2026-08-10)

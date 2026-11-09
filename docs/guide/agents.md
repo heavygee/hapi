@@ -321,11 +321,18 @@ the ACP composition owns the overall permission policy.
   finishes any tool call already running, then continues the same turn with
   the new message. The turn's usage includes the steered part.
 
-  Permission modes map to agy's session modes: `request-review` is agy's
-  `default` mode, which follows agy's own permission settings and, on ACP,
-  shows its approval requests in HAPI; `acceptEdits` and `plan` are agy's
-  `accept-edits` and `plan` modes; `always-proceed` approves every request
-  automatically. On ACP, mode changes apply to the next message without
+  Permission modes map to agy's session modes. `request-review` is agy's
+  `default` mode, which asks only as agy's own `toolPermission` setting
+  (`~/.gemini/antigravity-cli/settings.json`) says; on ACP its approval
+  requests show in HAPI. With `toolPermission: always-proceed`, agy runs
+  commands and edits without asking, so HAPI shows no approval prompts; set
+  it to `request-review` in agy to approve each command and edit from HAPI.
+  HAPI cannot override this per session. `acceptEdits` is agy's
+  `accept-edits` mode, which also runs edits without asking, and `plan` is
+  agy's `plan` mode, which writes a plan instead of running commands or
+  edits. `always-proceed` approves every request automatically, including
+  one a PreToolUse hook marks `force_ask` (agy does not tell HAPI a request
+  came from a hook). On ACP, mode changes apply to the next message without
   restarting agy. Conversation titles come from agy; on ACP each response's
   details show the turn's token usage.
 
@@ -333,6 +340,10 @@ the ACP composition owns the overall permission policy.
   servers are loaded natively from `~/.gemini/config/mcp_config.json` or
   workspace `.agents/mcp_config.json`; HAPI does not inject its own MCP server.
   [Google Antigravity](https://antigravity.google)
+
+  On ACP, agy's questions (`ask_question`) appear as the question card; the
+  choice goes back as agy's answer, and no permission mode answers a question
+  for you.
 
   In the web model picker, models with multiple effort variants appear once,
   with a separate effort selector showing the levels in the machine's catalog.
@@ -353,6 +364,8 @@ the ACP composition owns the overall permission policy.
   Pi's extension commands and prompt templates (discovered via `get_commands`) keep working from the `/` menu, and skills are available through `$skill-name` like other ACP flavors. Other Pi TUI builtins (e.g. `/tree`, `/export`, `/reload`) cannot run over RPC; typing them in web shows an explicit "terminal-only" notice instead of silently forwarding the text to the model.
 
   Pi sessions include a `hapi_display_image` tool for showing local PNG, JPEG, GIF, or WebP images up to 25 MiB in the chat. Images returned by Pi tools render inline even when the selected model has no vision support. The display tool also returns image bytes to Pi's model context.
+
+  On Pi versions with built-in MCP support (0.99+), HAPI also exposes its peer-session tools through Pi: `list_peers`, `inspect_peer`, `ping_peer`, and `spawn_peer`. Calls that read another session, send to it, or spawn a session require confirmation in the HAPI UI. `HAPI_DISABLE_PEER_TOOLS=1` hides the tools and keeps the disabled citation guidance in the system prompt.
 
 ## Related
 

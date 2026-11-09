@@ -140,7 +140,8 @@ describe('pingPeer', () => {
             sessionId,
             name: 'Orchestrator',
             resumed: false,
-            delivery: 'accepted'
+            delivery: 'accepted',
+            flavor: 'cursor'
         })
         expect(result.localId).toMatch(/^ping-peer-/)
         expect(http.post.mock.calls[1]?.[1]).toEqual({ text: 'hello peer', localId: result.localId })
@@ -402,6 +403,7 @@ describe('pingPeer', () => {
             name: 'Spawned',
             resumed: false,
             delivery: 'accepted',
+            flavor: 'cursor',
             steerNote: expect.stringMatching(/^steer not attempted: /),
             localId: expect.stringMatching(/^ping-peer-/),
         })
