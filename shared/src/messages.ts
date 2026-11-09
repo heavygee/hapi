@@ -456,27 +456,67 @@ function findNotifyTokenStart(before: string): number {
 export type NotifySummaryLineMatch = {
     jsonPart: string
     start: number
+    /** Index just past the footer's closing `}` — prose after this is visible. */
+    endExclusive: number
+}
+
+/**
+ * Index of the `}` closing the object opened at `braceAt`, or -1.
+ *
+ * String- and escape-aware, so a brace inside a summary value (an agent
+ * writing "fixed the {foo} handler") does not move the depth counter.
+ */
+function findJsonObjectEnd(line: string, braceAt: number): number {
+    let depth = 0
+    let inString = false
+    let escape = false
+    for (let i = braceAt; i < line.length; i += 1) {
+        const ch = line[i]!
+        if (inString) {
+            if (escape) { escape = false; continue }
+            if (ch === '\\') { escape = true; continue }
+            if (ch === '"') inString = false
+            continue
+        }
+        if (ch === '"') { inString = true; continue }
+        if (ch === '{') depth += 1
+        else if (ch === '}') {
+            depth -= 1
+            if (depth === 0) return i
+        }
+    }
+    return -1
 }
 
 export function matchNotifySummaryLine(line: string): NotifySummaryLineMatch | null {
     const trimmedEnd = line.trimEnd()
-    if (!trimmedEnd.endsWith('}')) return null
 
+    // NOTE: there is deliberately no `endsWith('}')` precondition here any
+    // more. It made a glued SUFFIX (`...}Shell finished.`) unmatchable, so the
+    // summary was not extracted, the footer was not stripped, and the raw JSON
+    // was rendered to the user. Agents emit that shape; the closing brace is
+    // found by scanning instead of assumed to be at end of line.
     let matched: NotifySummaryLineMatch | null = null
     for (let braceIdx = 0; braceIdx < trimmedEnd.length; braceIdx++) {
         if (trimmedEnd[braceIdx] !== '{') continue
         const before = trimmedEnd.slice(0, braceIdx).replace(/\s+$/, '')
         if (!before) continue
+        // findNotifyTokenStart requires the WHOLE tail of `before` to be the
+        // token, so a `{` sitting inside trailing prose cannot match.
         const tokenStart = findNotifyTokenStart(before)
         if (tokenStart < 0) continue
         // Reject whitespace-delimited mentions (`Example: AGENT_NOTIFY_SUMMARY ...`).
         const prefix = before.slice(0, tokenStart)
         if (prefix.trim().length > 0 && /\s/.test(before[tokenStart - 1]!)) continue
-        const jsonPart = trimmedEnd.slice(braceIdx).trim()
-        if (!jsonPart.startsWith('{') || !jsonPart.endsWith('}')) continue
+        // Inline-code example: `AGENT_NOTIFY_SUMMARY {...}` inside a sentence.
+        if (tokenStart > 0 && before[tokenStart - 1] === '`') continue
+        const end = findJsonObjectEnd(trimmedEnd, braceIdx)
+        if (end < 0) continue
+        if (trimmedEnd[end + 1] === '`') continue
+        const jsonPart = trimmedEnd.slice(braceIdx, end + 1)
         try {
             if (isObject(JSON.parse(jsonPart))) {
-                matched = { jsonPart, start: tokenStart }
+                matched = { jsonPart, start: tokenStart, endExclusive: end + 1 }
             }
         } catch {
             // Try an earlier `{` (e.g. nested braces / truncated payload).
@@ -548,9 +588,14 @@ export function splitNotifySummary(text: unknown): NotifySummaryDisplay | null {
     const found = findNotifySummary(text)
     if (found === null) return null
 
+    // Prose can be welded to either side. Strip only the footer and keep both
+    // sides — dropping the suffix would silently delete content the agent
+    // wrote for the user, which is worse than showing the raw footer.
     const prefix = found.line.slice(0, found.match.start).trimEnd()
+    const suffix = found.line.slice(found.match.endExclusive).trim()
+    const remainder = [prefix, suffix].filter((part) => part.length > 0).join(' ')
     const visibleLines = found.lines.slice(0, found.lastIdx)
-    if (prefix.length > 0) visibleLines.push(prefix)
+    if (remainder.length > 0) visibleLines.push(remainder)
 
     return {
         visibleText: visibleLines.join('\n').trimEnd(),
