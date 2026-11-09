@@ -102,5 +102,26 @@ kill "$fakepid" 2>/dev/null || true
 printf '%s' "$out" | grep -q "already running" && ok || bad "did not refuse to stack a second drain: $(printf '%s' "$out" | head -3)"
 printf '%s' "$out" | grep -q -- "--cancel" && ok || bad "refusal does not point at the recovery path"
 
+# --- the stacking guard must not refuse its own launcher (regression) ---
+# `hapi-restart-hub > log` gives the invoking shell a cmdline containing the
+# script name, so a naive pgrep matches it and refuses a legitimate restart with
+# the giveaway "0s elapsed". Excluding only $$ is insufficient.
+#
+# A --cancel probe does NOT test this (cancel exits before the stacking guard) —
+# that version passed against the broken code. Extract the real helper and
+# exercise it directly instead.
+grep -q '_hrh_is_ancestor' "$S" && ok || bad "ancestor exclusion helper is gone"
+helper="$(mktemp)"
+{ sed -n '/^_hrh_is_ancestor()/,/^}/p' "$S"
+  echo '_hrh_is_ancestor "$1" && echo YES || echo NO'
+} > "$helper"
+# the invoking shell IS an ancestor -> must be excluded
+[[ "$(bash "$helper" "$$" 2>/dev/null)" == "YES" ]] && ok || bad "helper does not recognise its own launcher as an ancestor"
+# an unrelated pid (init) must NOT be treated as an ancestor
+[[ "$(bash "$helper" 1 2>/dev/null)" == "NO" ]] && ok || bad "helper claims an unrelated pid is an ancestor"
+rm -f "$helper"
+# and the guard must actually consult it
+grep -q '_hrh_is_ancestor "\$_pid" && continue' "$S" && ok || bad "startup guard does not use the ancestor exclusion"
+
 echo "hapi-restart-hub self-exempt: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]]

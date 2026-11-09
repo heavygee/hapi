@@ -9,7 +9,8 @@
 ## Non-code residue
 
 - Claude Code Tool Search defers MCP schemas; proactive tools need `_meta anthropic/alwaysLoad` or they silently stop firing
-- Fork Actions still disabled — estate bridge `oos-linux/test` is the real CI; `hapi-pr-status` / merge-gate false-negative no-findings Codex waves and status-only CI (check-runs only)
+- **Estate CI bridge E2E while Actions dead (~32d):** this run posted a real `oos-linux/test` commit status on a real tip — first genuine fork green in a month — and proved merge-gate `/check-runs`-only blindness to Statuses API
+- **`hapi-pr-status` false negative:** tip-matched Codex no-findings via `codex-review-state:v1` (`code_review.commit_sha` + `has_any_findings: false`) reported as "no verdict found" because the detector only greps the older `Reviewed commit` / findings-wave surface — do not re-derive; do not quote the tool as clean until patched
 - Soup remat ≠ live CLI until `hapi-restart-hub`; pre-restart sessions are invalid dogfood surfaces
 - Feature peer must not self-serve remat — Meta compose lane worked through a 14-conflict cascade that peers would have thrashed
 - Dogfood proof: resident vs deferred split in a post-restart Claude session (four alwaysLoad tools full schema; ping_peer needed ToolSearch)
@@ -23,6 +24,7 @@
 
 - Merge used `/usr/bin/gh` to bypass wrapper gate blocked on "no check-runs" despite green status — gate patch still owed
 - Change is fork-main only until/unless upstream wants the same alwaysLoad marks
+- Remote `driver/mcp-always-load-meta` tip is **not** an ancestor of `origin/main` (squash) — left in place on purpose; do not force-delete
 
 ## Skip
 

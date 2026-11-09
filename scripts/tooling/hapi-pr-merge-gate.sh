@@ -68,13 +68,48 @@ AUTHOR=$(jq -r '.author.login' <<<"$META")
 [ "$MERGEABLE" = "MERGEABLE" ] && pass "mergeable" || fail "mergeable=$MERGEABLE (UNKNOWN means GitHub is still computing — re-run)"
 
 # 2. checks green ON THE HEAD SHA (not the PR-level summary, which can lag a push)
+#
+# Two surfaces, not one. GitHub Actions writes CHECK-RUNS; the Statuses API is a
+# separate surface that check-runs never reflects. heavygee/hapi has had Actions
+# disabled since 2026-10-08 (#301 / #243), so its only real signal arrives as a
+# commit STATUS posted by the estate bridge (hapi-local-ci.sh:98, context
+# oos-linux/test). Reading check-runs alone made this gate report "no check-runs
+# found" on PRs that were genuinely verified — refusing for a reason that was
+# factually wrong, which is the fastest way to teach people to route around a gate.
+#
+# Still fails closed: a trusted-context allowlist (NOT "any status"), every
+# accepted context must be success, and NEITHER surface having anything is a
+# refusal exactly as before.
+TRUSTED_STATUS_CONTEXTS="${HAPI_GATE_TRUSTED_STATUS_CONTEXTS:-oos-linux/test}"
 CR="$("$REAL_GH" api "repos/$REPO/commits/$HEAD/check-runs" --jq '.check_runs[] | "\(.name)\t\(.status)\t\(.conclusion)"' 2>/dev/null || true)"
-if [ -z "$CR" ]; then
-    fail "no check-runs found for head $HEAD"
-else
+if [ -n "$CR" ]; then
     BAD=$(awk -F'\t' '$2!="completed" || ($3!="success" && $3!="neutral" && $3!="skipped")' <<<"$CR" | head -5)
     [ -z "$BAD" ] && pass "all checks green on head ${HEAD:0:9}" \
         || fail "checks not green on head ${HEAD:0:9}: $(tr '\n' ' ' <<<"$BAD")"
+else
+    # No check-runs. Fall back to commit statuses, trusted contexts only.
+    ST="$("$REAL_GH" api "repos/$REPO/commits/$HEAD/status" --jq '.statuses[] | "\(.context)\t\(.state)"' 2>/dev/null || true)"
+    if [ -z "$ST" ]; then
+        fail "no check-runs and no commit statuses found for head $HEAD"
+    else
+    TRUSTED=""
+    while IFS=$'\t' read -r ctx state; do
+        [ -n "$ctx" ] || continue
+        for want in $TRUSTED_STATUS_CONTEXTS; do
+            [ "$ctx" = "$want" ] && TRUSTED="${TRUSTED}${ctx}\t${state}\n"
+        done
+    done <<<"$ST"
+    # `fail` records and continues rather than exiting, so guard the green check
+    # behind a non-empty TRUSTED — otherwise an empty set passes the awk filter
+    # vacuously and prints a bogus "ok" line underneath the refusal.
+    if [ -z "$TRUSTED" ]; then
+        fail "no check-runs, and no TRUSTED commit status on head ${HEAD:0:9} (saw: $(cut -f1 <<<"$ST" | tr '\n' ' ')); trusted = $TRUSTED_STATUS_CONTEXTS"
+    else
+        BADST=$(printf '%b' "$TRUSTED" | awk -F'\t' 'NF && $2!="success"' | head -5)
+        [ -z "$BADST" ] && pass "no check-runs; trusted commit status green on head ${HEAD:0:9} ($(printf '%b' "$TRUSTED" | cut -f1 | tr '\n' ' '))" \
+            || fail "trusted commit status not green on head ${HEAD:0:9}: $(printf '%b' "$BADST" | tr '\n' ' ')"
+    fi
+    fi
 fi
 
 # 3. review decision must not be a rejection
