@@ -67,6 +67,30 @@ done
 [[ "${HAPI_IMPATIENT:-}" == "1" ]] && IMPATIENT=1
 [[ "${HAPI_RESTART_INCLUDE_SELF:-}" == "1" ]] && INCLUDE_SELF=1
 
+# Refuse to stack drains. A patient drain waits forever, so starting a second
+# one does not replace the first — it queues behind it, and BOTH fire when the
+# stack next goes quiet. That is how 3 strays accumulated on 2026-11-09: a drain
+# hung on the Cursor-only self-exemption bug, could not be cancelled (no
+# --cancel existed, kill is guard-refused), and each retry added another.
+# Nothing warned, because nothing looked.
+if [[ "$CANCEL" -ne 1 ]]; then
+    _existing=0
+    for _pid in $(pgrep -f "hapi-restart-hub" 2>/dev/null || true); do
+        [[ "$_pid" == "$$" ]] && continue
+        [[ -r "/proc/$_pid/cmdline" ]] || continue
+        _cmd="$({ tr '\0' ' ' < "/proc/$_pid/cmdline"; } 2>/dev/null || true)"
+        [[ "$_cmd" == *"hapi-restart-hub"* ]] || continue
+        [[ "$_cmd" == *".test.sh"* || "$_cmd" == *"--cancel"* ]] && continue
+        echo "ERROR: a hapi-restart-hub drain is already running (pid $_pid, $(ps -o etimes= -p "$_pid" 2>/dev/null | tr -d ' ')s elapsed)." >&2
+        _existing=$((_existing+1))
+    done
+    if [[ "$_existing" -gt 0 ]]; then
+        echo "       Patient drains wait forever, so this one would QUEUE behind it and both would restart." >&2
+        echo "       Inspect it, or: hapi-restart-hub --cancel   (then re-run)" >&2
+        exit 2
+    fi
+fi
+
 # --cancel: stop drains this seat started. A patient drain waits forever by
 # design, so a superseded one (stack already restarted, or a duplicate) sits
 # holding the switch flock and will fire an unwanted restart whenever sessions

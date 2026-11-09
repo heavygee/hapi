@@ -90,5 +90,17 @@ printf '%s' "$out" | grep -q "no other hapi-restart-hub drain running" && ok || 
 # and it must not print /proc race noise
 printf '%s' "$out" | grep -q "No such file or directory" && bad "cancel leaks /proc pid-race noise: $out" || ok
 
+# --- must refuse to stack drains (the 2026-11-09 stray-drain cause) ---
+# Patient drains wait forever, so a second invocation queues rather than
+# replaces, and both fire later. Simulate a live drain and assert the refusal.
+fake="$(mktemp -d)/hapi-restart-hub"
+printf '#!/usr/bin/env bash\nsleep 30\n' > "$fake"; chmod +x "$fake"
+"$fake" & fakepid=$!
+sleep 1
+out="$(bash "$S" 2>&1 || true)"
+kill "$fakepid" 2>/dev/null || true
+printf '%s' "$out" | grep -q "already running" && ok || bad "did not refuse to stack a second drain: $(printf '%s' "$out" | head -3)"
+printf '%s' "$out" | grep -q -- "--cancel" && ok || bad "refusal does not point at the recovery path"
+
 echo "hapi-restart-hub self-exempt: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]]
