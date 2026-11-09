@@ -529,6 +529,19 @@ if [[ "$VERIFY" -eq 1 ]]; then
         remat_rollback_live_tip "bun install failed"
         exit 1
     fi
+    # Ancestry containment is not presence: a layer can be a provable ancestor
+    # while a conflict resolution has deleted its code. Typecheck and tests
+    # cannot see that — nothing breaks when a feature merely stops being
+    # offered. Assert declared sentinels before the other gates so the failure
+    # names the layer that lost its behaviour.
+    SENTINEL_SCRIPT="$PRIMARY/scripts/tooling/hapi-sentinel-check.sh"
+    if [[ -x "$SENTINEL_SCRIPT" ]]; then
+        echo "Checking layer sentinels..."
+        if ! "$SENTINEL_SCRIPT" --tree "$DRIVER" --manifest "$DRIVER/config/driver-manifest.yaml"; then
+            remat_rollback_live_tip "layer sentinel missing (behaviour lost despite being composed)"
+        fi
+    fi
+
     echo "Running typecheck..."
     if ! (cd "$DRIVER" && "$BUN" typecheck); then
         remat_rollback_live_tip "typecheck failed"

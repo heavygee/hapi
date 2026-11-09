@@ -712,8 +712,12 @@ layers:
   # Not in tiann/hapi#1424 (no opacity-50 in upstream PR diff). Layer owner: /sessions/6e70f97b.
   # Tip: a740628eb on soup HEAD 26e5eebc3. Worktree: session-row-residency-fade.
   - branch: driver/session-row-residency-fade
+    sentinel: opacity-50
+    sentinel_path: web/src/components/SessionRowSummary.tsx
 
   - branch: driver/slim-session-job-mcp
+    sentinel: pass null to clear that field
+    sentinel_path: cli/src/modules/sessionJob/sessionJobMcp.ts
 
   # DROPPED 2026-09-02: driver/cursor-notify-rule-delta — stale fat tip (60 commits from
   # Aug merge-base). Notify overlay + session_job instanceof + omit-action-key fixes
@@ -1467,6 +1471,8 @@ layers:
   # Worktree: ~/coding/hapi/worktrees/fue-unlabelled-controls-driver
   # Dogfooding before filing upstream (tiann/hapi); not yet filed.
   - branch: driver/fue-unlabelled-controls
+    sentinel: FueCallout
+    sentinel_path: web/src/components/SessionList.tsx
 
   # PARKED 2026-11-09: driver/2296-presence-badges (tiann/hapi#2296, IanMStevenson)
   # does not re-thin onto live soup — SessionRowSummary.tsx's icon-corner presence
