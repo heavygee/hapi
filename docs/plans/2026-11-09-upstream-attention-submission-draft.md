@@ -84,11 +84,14 @@ order above is a real dependency chain, so a removal part way down just stops ev
   speaking for *terminal* agent errors / dead turns, not as a Cursor hole-filler.
 - **Fleet framing:** "over 1,000 sessions, ≥~30 active at a time" — not "30-session fleet".
   Live list chrome in the blocked shot shows All (1280).
-- **Inline images (operator ask):** item 1 = live attached-job meter crop
-  (`assets/session-attention-attached-job.png` from `/tmp/hapi-honesty-proof/crop-A-B-meters.png`);
-  item 2 = dogfood blocked row (`assets/session-attention-blocked-row.png` from
-  `/tmp/dogfood-1717/01-blocked-header-and-row.png`). For the GitHub issue body, upload these
-  (or re-crop tighter) rather than relying on repo-relative `assets/` paths.
+- **Inline images (operator ask, refreshed 2026-11-09 dark mode):** light-mode pinned-section
+  shots discarded. New crops from live `:3006` with `hapi-appearance=dark`:
+  - item 1 = `assets/session-attention-attached-job.png` — session-attached jobs row with live
+    countdown meter (`6e70f97b…`, `/tmp/attention-dark-shots/attached-job-row-dark.png`)
+  - item 2 = `assets/session-attention-blocked-row.png` — Blocked section (107) with natural
+    BLOCKED / DECISION rows, no pinned chrome (`blocked-section-multi-dark.png`)
+  - extras on disk: jump pill, single-row blocked crop. For the GitHub issue body, upload these
+  rather than relying on repo-relative `assets/` paths.
 - **Omitted deliberately:** any reference to `#2296`. Arguing against a live contributor's PR in
   our own submission would be poor form, and the case stands on its own without it. If the
   maintainer raises it, answer then. (Do not @-mention anyone in the posted body — fires the
