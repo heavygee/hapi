@@ -28,7 +28,9 @@ Still later (orchestrator will spawn when blockers clear): list persistence of l
 
 ## Daily check
 
-Session job `attention-daily-sweep` on the orchestrator — wakes ~every 24h to triage Discussion #2355, Issue #2356, and all dogfooded / child PRs for pushback. Re-arm after each sweep.
+**Do not** use a `hapi job run … -- sleep 86400` meter for this — that is fake work with a meaningless progression bar (cleared 2026-11-10).
+
+Real options: Meta daily / operator ping / agent `/loop` / a cron that wakes this session with a remit. Until one of those is wired, daily triage is a conscious turn, not a zombie sleeper.
 
 Merge remains operator/Meta after elapsed windows — prepare only.
 
