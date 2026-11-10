@@ -77,8 +77,8 @@ order above is a real dependency chain, so a removal part way down just stops ev
   Cursor rules overlay; #1376 shipped without Cursor and closed the parent — unfinished ask,
   no follow-up until **#2353** (filed 2026-11-10). Peer babysitting the fix PR:
   [/sessions/ab6f3c6c-3a29-49df-82fa-bceda7e46318](/sessions/ab6f3c6c-3a29-49df-82fa-bceda7e46318).
-  Three-way Part 2 cites #2353; fill in the PR number when the peer opens it. Soup overlay
-  function still uncalled (tip-forward loss); estate Cursor emit rides alwaysApply rules.
+  Three-way Part 2 cites #2353 / PR **#2354**. Soup overlay still uncalled until that lands /
+  remats; estate Cursor emit still rides alwaysApply rules meantime.
 - **Notify display glue (heavygee/hapi#322):** Happy showed summary JSON welded to trailing
   prose because `shared/src/messages.ts` required the last line to end with `}`, while the
   Cursor seal path already tolerated glue (`a176ca7ba`). **Live in soup** as of tip
