@@ -25,8 +25,8 @@ scattered changes.
 **(2) regressed, and I'd like to make the case for restoring it.** Before `832c5922f` a
 non-resident row was faded. At a handful of sessions a 10px dot is fine; at thirty-plus active
 inside a thousand-session fleet, residency is a whole-list scan, and only a row-level signal
-survives it. Fade means residency: faded sessions are not taking RAM. Operators already know how
-to read that, and it means something important.
+survives it. Fade marks non-residency: faded sessions are not taking RAM. Operators already know
+how to read that, and it means something important.
 
 **A note on the signal itself.** `AGENT_NOTIFY_SUMMARY` already exists upstream. It has been
 quietly accumulating on installs that emit it — time to put it to use. Today it lands in the
@@ -44,7 +44,7 @@ land the producer side than a prettier badge.
 
 | # | Scope |
 |---|---|
-| 1 | Session-attached jobs — work that outlives the agent, with list chrome *(already open)* |
+| 1 | Session-attached jobs — work that outlives the agent, with list chrome *(#1424 merged 2026-11-10)* |
 | 2 | Blocked affordance: section, rail, jump pill, mark-unblocked with recorded reason |
 | 3 | Hub-authored blocker sources for terminal agent errors *(extends 2)* |
 | 4 | Residency: restore the row-level fade alongside your dot |
