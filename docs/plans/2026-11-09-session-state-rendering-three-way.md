@@ -114,61 +114,62 @@ summaries feed that; blocked chrome surfaces it.
 
 ---
 
-# Part 2 — already on `main`, open PRs/issues, and what comes next
+# Part 2 — landing the rest under this umbrella
 
-A large body of this work was dogfooded on a live multi-session install, then pushed upstream
-piece by piece. Status summaries (`AGENT_NOTIFY_SUMMARY`, "Emit status summaries" setting,
-parse / FCM / work-graph ingest) already ship on `main`. Attached jobs are on `main` as of
-#1424. What follows is the rest of the attention surface: open work to finish, then the next
-PRs under the same umbrella.
+I have been dogfooding this attention-management surface on a live multi-session install
+(1,000+ sessions, ≥~30 resident at a time). Pieces already on `main` are listed first. Open
+PRs are next. Issues that still need a PR are last.
+
+**Intent:** over the next week or two I intend to dogfood and merge the remainder of this set —
+open PRs first, then the PRs not yet lodged — under this same umbrella, using the published
+`dogfooded` practice (48h UTC opt-out, then merge intent;
+[Discussion #2083](https://github.com/tiann/hapi/discussions/2083)). If any item should not
+proceed, remove the `dogfooded` label on that PR.
 
 ## Already on `main`
 
 | Piece | Ref |
 |---|---|
-| Status-summary contract + emit setting | CLI / hub settings on `main` |
+| Status-summary contract + emit setting | CLI / hub settings on `main` (#1375 / #1376) |
 | Parse, FCM, native companion, work-graph ingest of that line | hub + protocol on `main` |
 | Activity dots (green working / blue background) | `832c5922f` |
-| Cursor post-`done` harness silence | #2267 family |
+| Cursor post-`done` harness silence | #2267 / #2268 |
 | Unread list filters / keep-unread-visible | #2292, #2294 (IanMStevenson) |
 | Session list sort/filter primitives | #2263 |
 | Session-attached jobs + wake-on-complete | **#1424** (merged 2026-11-10; closes #1404 / #1489) |
 
-## Open on upstream (finish these)
+## PRs already placed (dogfood → merge under this umbrella)
 
-| Topic | Ref | Status |
+| Topic | Ref | Notes |
 |---|---|---|
-| Blocked affordance: section, rail, jump pill, mark-unblocked | Issue **#1717** | Open issue; **no PR yet** |
-| Cursor unexpected-stop → retry then blocked footer | PR **#1725** (issue #1724) | Open PR |
-| Session-list scrollbar tick for open session | Issue #1732, PR **#1733** | Open PR |
-| Combined session-list filter menu | PR **#1772** | Open PR (`dogfooded`) |
-| Fold blocked lens into that filter menu | Issue **#1996** | Open issue; depends on #1772 |
-| Active + Working lenses in the filter menu | Issue **#2002** | Open issue; **no PR yet**. Already present on the local fork's filter menu (dogfood); still needs an upstream PR |
-| Discovery callouts for shipped-but-unlabelled controls | PR **#2339** | Open PR |
-| Inline model errors (`resource_exhausted` etc.) → surface + notify | Issue #878, PR **#987** | Open PR |
-| Cursor emits `AGENT_NOTIFY_SUMMARY` when Emit status summaries is on | Issue **#2353**, PR **#2354** (closes the Cursor half left unfinished when #1375 / #1376 shipped without Cursor) | Open PR; peer babysitting |
+| Cursor unexpected-stop → retry then blocked footer | PR **#1725** (issue #1724) | Producer plumbing for blocked |
+| Session-list scrollbar tick for open session | PR **#1733** (issue #1732) | Navigation cue |
+| Combined session-list filter menu | PR **#1772** | Already carries `dogfooded` |
+| Discovery callouts for shipped-but-unlabelled controls | PR **#2339** | Content-search scope, sort/filter, title lock |
+| Inline model errors (`resource_exhausted` etc.) → surface + notify | PR **#987** (issue #878) | Related producer / row signal |
+| Cursor emits `AGENT_NOTIFY_SUMMARY` when Emit status summaries is on | PR **#2354** (issue #2353) | Closes Cursor half left unfinished when #1375 / #1376 shipped without Cursor |
 
-**#2353 / #2354 context:** #1375 already named a Cursor rules overlay in its proposal; #1376 merged the toggle for Claude/Codex/OpenCode/Grok only and closed the parent. No Cursor follow-up was filed until #2353; #2354 is the fix PR (overlay gated on the emit setting).
+## PRs yet to be lodged
 
-## Next PRs under this umbrella
+Open issues (or dogfooded local work) that still need an upstream PR. Same umbrella; same
+dogfood → merge intent over the next week or two.
 
-Dogfooded on the local fork; open as upstream PRs linked to the umbrella issue:
-
-| Topic | Intent |
-|---|---|
-| Restore row-level fade for non-residency (beside the activity dot) | After `832c5922f` |
-| Hub-authored blocker sources for terminal agent errors | Extends #1717 |
-| Persist last status summary onto session-list fields | Bridge emit → blocked chrome |
-| Settings: flag blocked sessions from status summaries (default on) | Below the existing emit toggle |
-| First-use introduction for the blocked affordance | Upstream FUE primitives |
-| Blocked affordance PR for #1717 | Chrome itself |
-| Active + Working lenses PR for #2002 | Mirror what the local fork already ships in the filter menu |
+| Topic | Issue / basis | Notes |
+|---|---|---|
+| Blocked affordance: section, rail, jump pill, mark-unblocked | **#1717** | Chrome itself; no PR yet |
+| Fold blocked lens into the combined filter menu | **#1996** | Depends on #1772 |
+| Active + Working lenses in the filter menu | **#2002** | Already on the local fork filter menu; needs upstream PR |
+| Restore row-level fade for non-residency (beside the activity dot) | After `832c5922f` | Dogfooded locally |
+| Hub-authored blocker sources for terminal agent errors | Extends #1717 | After blocked chrome |
+| Persist last status summary onto session-list fields | Bridges emit → blocked chrome | Producer → list |
+| Settings: flag blocked sessions from status summaries (default on) | Below existing emit toggle | Biggest behaviour ask |
+| First-use introduction for the blocked affordance | Upstream FUE primitives | Once blocked chrome lands |
 
 ## Seams
 
 1. Blocked chrome needs the last status summary on the session row — emit already exists on
-   `main`; list persistence and default-on are still open.
-2. Fade, job meter, and activity dot all speak to liveness; land in the umbrella order so they
+   `main` (and #2354 covers Cursor); list persistence and default-on are still open.
+2. Fade, job meter, and activity dot all speak to liveness; land in umbrella order so they
    compose on purpose.
 3. #1996 and #2002 extend #1772's menu.
 4. Prefer always-on chrome over `sessionListStatusMode: detailed`.
@@ -178,8 +179,8 @@ Dogfooded on the local fork; open as upstream PRs linked to the umbrella issue:
 ## Order
 
 1. Attached jobs — **done** (#1424).
-2. #1717 blocked chrome (+ #1725).
-3. Hub-authored blockers once blocked chrome merges.
+2. Open PRs above (#1725, #1733, #1772, #2339, #987, #2354) — dogfood and merge as each is ready.
+3. #1717 blocked chrome (+ hub-authored blockers once it merges).
 4. Row-level fade for non-residency.
-5. #1772 → #1996 → #2002.
-6. Settings / FUE / #2339 as listed above.
+5. #1772 → #1996 → #2002 (filter chain).
+6. Settings default-on + FUE as listed under "yet to be lodged."
