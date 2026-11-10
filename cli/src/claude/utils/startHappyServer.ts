@@ -44,6 +44,13 @@ import {
     searchSessionContent,
 } from "@/modules/searchContent/searchContent";
 import { applySessionDisplayRename, normalizeSessionDisplayTitle } from "@/agent/sessionDisplayRename";
+import {
+    SESSION_JOB_TOOL_DESCRIPTION,
+    SESSION_JOB_TOOL_NAME,
+    handleSessionJobTool,
+    sessionJobInputSchema,
+    type SessionJobToolArgs,
+} from "@/modules/sessionJob/sessionJobMcp";
 import { SpawnPeerError, spawnPeer } from "@/modules/spawnPeer/spawnPeer";
 
 export type HapiMcpToolName =
@@ -56,6 +63,7 @@ export type HapiMcpToolName =
     | 'inspect_peer'
     | 'spawn_peer'
     | 'search_content'
+    | 'session_job'
     | 'skill_lookup';
 
 const SEARCH_CONTENT_DESCRIPTION =
@@ -473,6 +481,19 @@ function createHapiMcpServer(
         }
     });
 
+    registerTool(SESSION_JOB_TOOL_NAME, {
+        description: SESSION_JOB_TOOL_DESCRIPTION,
+        title: 'Session-Attached Job',
+        inputSchema: sessionJobInputSchema,
+    }, async (args: SessionJobToolArgs) => {
+        logger.debug('[hapiMCP] session_job:', args.action, args.jobKey);
+        const result = await handleSessionJobTool(args, client.sessionId);
+        return {
+            content: [{ type: 'text' as const, text: result.text }],
+            isError: result.isError,
+        };
+    });
+
     if (!peerToolsDisabled) {
         registerTool('ping_peer', {
             description: PING_PEER_TOOL_DESCRIPTION,
@@ -798,6 +819,7 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
             if (includeTool(name)) toolNames.push(name);
         }
     }
+    if (includeTool(SESSION_JOB_TOOL_NAME)) toolNames.push(SESSION_JOB_TOOL_NAME);
     if (options.skillLookup && includeTool('skill_lookup')) toolNames.push('skill_lookup');
     if (toolNames.length === 0) {
         throw new Error('startHappyServer requires at least one enabled tool');
