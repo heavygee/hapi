@@ -50,9 +50,16 @@ Merge remains operator/Meta after elapsed windows — prepare only.
 - Compare: https://github.com/tiann/hapi/compare/main...heavygee:rebase-assist/1772-onto-upstream-main
 - Prep peer: [/sessions/3c5af7c8-540d-4d7c-b7a1-5df17abe5b37](/sessions/3c5af7c8-540d-4d7c-b7a1-5df17abe5b37)
 
-## Ready-YES (awaiting dogfood window / operator merge)
+## Landed on upstream `main` (via fork sync 2026-11-10)
 
-| PR | HEAD | Notes |
-|---|---|---|
-| #2354 Cursor emit | `316b5f34e` | CLEAN + cold-review-clean; ~45h dogfood left at Ready-YES ack; prepare-only |
+| PR | Notes |
+|---|---|
+| #2354 Cursor emit | Merged upstream (`39da0be55`) — dogfood window moot; Ready-YES was correct |
+| #2339 FUE unlabelled callouts | Merged upstream (`7498d8c8f`) — check whether `driver/fue-unlabelled-controls` soup layer is now redundant |
+| #1424 session-attached jobs | Already counted; reconfirmed in sync |
+| #2296 presence badges (Ian) | Landed — residency-fade sibling narrative may need a light refresh vs power-mark/badge taxonomy |
+
+## Mirror hygiene
+
+Rebased+pushed 4 local docs/tooling commits onto `origin/main` @ `9591e34ac` (2026-11-10) after tooling/meta blocked remat on ahead-of-origin main.
 
