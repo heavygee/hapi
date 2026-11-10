@@ -6,17 +6,16 @@
 # floods the operator with "I didn't need that" replies from sessions that
 # had already finished (lastNotify=done).
 #
-# Default: wake only sessions that look interrupted or still needing attention
-# (see lib/hapi_claude_wake_classify.py). When used from reopen-mismatch, pass
-# a pre-kill --ids-file so classification is not contaminated by the wake.
+# Default mode **thinking**: wake only if thinking=true (mid-turn at snapshot).
+# Broader modes flooded the operator with "nothing to resume" — opt in only.
 #
 # Usage:
-#   hapi-claude-continue-fleet                 # selective wake
-#   hapi-claude-continue-fleet --all           # every active Claude (old behaviour)
-#   hapi-claude-continue-fleet --ids-file PATH # exact id list (one uuid per line)
-#   hapi-claude-continue-fleet --classify-only # print wake/skip JSON, no pings
+#   hapi-claude-continue-fleet                 # thinking-only
+#   hapi-claude-continue-fleet --mode attention
+#   hapi-claude-continue-fleet --all           # every active Claude
+#   hapi-claude-continue-fleet --ids-file PATH
+#   hapi-claude-continue-fleet --classify-only
 #   hapi-claude-continue-fleet --dry-run
-#   hapi-claude-continue-fleet --message '…'
 
 set -euo pipefail
 export PATH="/usr/bin:/bin:${HOME}/.local/bin:${PATH:-}"
@@ -29,7 +28,8 @@ DRY=0
 WAKE_ALL=0
 CLASSIFY_ONLY=0
 IDS_FILE=""
-MSG='Continue. Auth was rotated to the other Claude slot; you were interrupted mid-flight — resume your prior work. No ack needed if you were already done.'
+WAKE_MODE=thinking
+MSG='Continue. You were mid-turn when Claude auth rotated — resume that work. No ack if this does not apply.'
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -37,6 +37,7 @@ while [[ $# -gt 0 ]]; do
         --all) WAKE_ALL=1; shift ;;
         --classify-only) CLASSIFY_ONLY=1; shift ;;
         --ids-file) IDS_FILE="$2"; shift 2 ;;
+        --mode) WAKE_MODE="$2"; shift 2 ;;
         --message) MSG="$2"; shift 2 ;;
         -h|--help)
             sed -n '2,/^set -euo/p' "$0" | sed 's/^# \?//' | head -22
@@ -86,7 +87,8 @@ for s in json.loads(urllib.request.urlopen(urllib.request.Request(
     print(s["id"])
 PY
 else
-    HAPI_HOST="$HAPI_HOST" HAPI_SESSION_ID="$SELF" python3 "$CLASSIFY_PY" >"$TMP_JSON"
+    HAPI_HOST="$HAPI_HOST" HAPI_SESSION_ID="$SELF" \
+        python3 "$CLASSIFY_PY" --mode "$WAKE_MODE" >"$TMP_JSON"
     if [[ "$CLASSIFY_ONLY" -eq 1 ]]; then
         cat "$TMP_JSON"
         exit 0

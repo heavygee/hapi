@@ -49,18 +49,17 @@ Do **not** hand-roll JWT/archive/reopen Python each time — that is what these 
 
 **Yes.** Live Claude children are killed so they can respawn on the new token. Reopen alone leaves them idle on the good account.
 
-**Do not wake everyone.** Sessions that already closed with `lastNotify.status=done` will happily reply “I didn’t need that” — 40 of those pings is worse than silence. Before kill, `hapi-claude-reopen-mismatch` snapshots who to wake:
+**Default wake is thinking-only.** Broader heuristics (lastNotify attention, usage-limit transcript text) produced fleets of “nothing to resume / nothing new” replies — operator veto 2026-11-10. Before kill, snapshot `thinking=true` only.
 
-| Wake | Skip |
-|------|------|
-| `thinking=true` (mid-turn) | `lastNotify.status=done` / `idle` |
-| `lastNotify` in blocked / needs_decision / needs_review / failed / stalled | quiet `lifecycleState=running` with no attention notify |
-| recent usage/session-limit text | |
-| trailing user message awaiting agent | |
+| Mode | Wake when |
+|------|-----------|
+| `thinking` (default) | `thinking=true` at pre-kill |
+| `attention` (`--continue-attention`) | + lastNotify blocked/needs_*/failed/stalled |
+| `aggressive` | legacy; avoid |
+| `--continue-all` | every migrated session |
+| `--no-continue` | auth migrate only |
 
-Auth-only: `--no-continue`. Old wake-everyone: `--continue-all`. Inspect: `hapi-claude-continue-fleet --classify-only`.
-
-Opt out a session that asked to stop being woken: append its id to `~/.hapi/claude-auth/wake-skip` (machine-local, not committed).
+Inspect: `hapi-claude-continue-fleet --classify-only`. Opt out: `~/.hapi/claude-auth/wake-skip`.
 
 ## Why reopen is separate
 
