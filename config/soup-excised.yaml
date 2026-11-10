@@ -43,3 +43,20 @@ excised:
       Enforcement half of the same rejected #1473 stack. Listed separately from
       the file because a layer can re-introduce the call site without the file.
     ref: docs/operator/AGENTS.md
+
+  - path: web/src/components/SessionListFilterMenu.tsx
+    reason: >-
+      techotaku39's own earlier, abandoned draft of tiann/hapi#1772 (commit
+      7ae356697, 2026-09-05) — superseded by their own later
+      SessionListViewMenu.tsx/useSessionListView.ts on the same PR. Confirmed
+      nothing else imports it; 37 of 89 active layers carry it anyway as dead
+      baggage because each was cut from a tip that still had it. Lands with
+      the removal itself (driver/1772-techotaku-base-wip), not before.
+    ref: config/driver-manifest.yaml
+
+  - path: web/src/lib/sessionListFilter.ts
+    reason: >-
+      Same abandoned draft as SessionListFilterMenu.tsx immediately above —
+      the two were a matched pair (menu + filter helpers) from techotaku39's
+      first #1772 attempt, both replaced by their later architecture.
+    ref: config/driver-manifest.yaml

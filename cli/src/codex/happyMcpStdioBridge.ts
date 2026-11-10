@@ -33,8 +33,13 @@ import { SESSION_NAME_MAX_LENGTH } from '@hapi/protocol';
 import { CREATABLE_AGENT_FLAVORS } from '@hapi/protocol/modes';
 import { PermissionModeSchema } from '@hapi/protocol/schemas';
 import { isPeerToolsDisabled, PEER_TOOL_NAMES } from '@/modules/common/peerTools';
+import {
+  SESSION_JOB_TOOL_DESCRIPTION,
+  SESSION_JOB_TOOL_NAME,
+  sessionJobInputSchema,
+} from '@/modules/sessionJob/sessionJobMcp';
 
-const DEFAULT_TOOL_NAMES = ['change_title', 'link_issue', 'display_image', 'display_video', 'display_media', 'list_peers', 'search_content', 'ping_peer', 'spawn_peer', 'inspect_peer'];
+const DEFAULT_TOOL_NAMES = ['change_title', 'link_issue', 'display_image', 'display_video', 'display_media', SESSION_JOB_TOOL_NAME, 'ping_peer', 'spawn_peer', 'inspect_peer', 'list_peers', 'search_content'];
 
 function parseArgs(argv: string[]): { url: string | null; toolNames: Set<string> } {
   let url: string | null = null;
@@ -239,6 +244,34 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
           } catch (error) {
             return {
               content: [{ type: 'text' as const, text: `Failed to display media: ${error instanceof Error ? error.message : String(error)}` }],
+              isError: true,
+            };
+          }
+        }
+      );
+    }
+
+    if (toolNames.has(SESSION_JOB_TOOL_NAME)) {
+      server.registerTool<any, any>(
+        SESSION_JOB_TOOL_NAME,
+        {
+          description: SESSION_JOB_TOOL_DESCRIPTION,
+          title: 'Session-Attached Job',
+          inputSchema: sessionJobInputSchema,
+        },
+        async (args: Record<string, unknown>) => {
+          try {
+            const client = await ensureHttpClient();
+            const response = await client.callTool({ name: SESSION_JOB_TOOL_NAME, arguments: args });
+            return response as any;
+          } catch (error) {
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: `Failed to run session_job: ${error instanceof Error ? error.message : String(error)}`,
+                },
+              ],
               isError: true,
             };
           }

@@ -18,6 +18,7 @@ import { getProcessStartMarker, getSystemBootId, getProcessThreadGroupId, normal
 import { findStopSessionOrphanTargets, listWindowsProcessesWithCommandLine, reapRunnerSpawnedOrphans } from '@/runner/orphanReap';
 import { decideUntrackedRunnerWebhook } from '@/runner/lateRunnerWebhook';
 import { cleanupFailedStartupAfterExit, sessionStartupTimeout, waitForRecoverableStartup } from './sessionStartup';
+import { buildChildExitNotices, type ChildExitNotice } from './childExitNotice';
 import {
     decideKeepWrapperArchive,
     decideRawPidStop,
@@ -436,6 +437,15 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     // existingSessionId identifies the HAPI row, not a permanent spawn request.
     // Keep the dedupe entry only while this runner still owns the child PID.
     const existingSessionIdByChildPid = new Map<number, string>();
+    // PIDs the runner is deliberately killing (archive/stop/switch), consumed
+    // once when the exit is observed. Their exit must not be reported to the
+    // hub as an unexpected child death: those flows already end the session
+    // through the normal session-end / archive path.
+    const intentionallyStoppedPids = new Set<number>();
+    // Wired once the machine socket exists (see apiMachine.connect below).
+    // Before that an unexpected child exit is not reported; the child's own
+    // socket plus keep-alive expiry remain the hub-side backstop.
+    let reportChildExitToHub: ((notice: ChildExitNotice) => void) | null = null;
     type SpawnFailureDetails = {
       message: string
       pid?: number
@@ -1273,10 +1283,45 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       );
     }
 
-    // Stop a session by sessionId or PID fallback
-    const stopSession = coalesceStopRequests(async (
+    // A stop (archive/switch/user stop) kills this session's child. Record the
+    // owning PIDs before any kill so onChildExited treats their exit as
+    // deliberate and does not report it as an unexpected child death.
+    // Returns the marked PIDs plus the subset the runner spawned itself: only
+    // those have an 'exit' listener that consumes their entry in onChildExited.
+    const markIntentionalStop = (sessionId: string) => {
+      const marked = new Set<number>();
+      const withExitListener = new Set<number>();
+      const mark = (pid: number) => {
+        marked.add(pid);
+        intentionallyStoppedPids.add(pid);
+        if (pidToTrackedSession.get(pid)?.childProcess) withExitListener.add(pid);
+      };
+      for (const [pid, session] of pidToTrackedSession) {
+        if (session.requestedHappySessionId === sessionId
+          || session.happySessionId === sessionId
+          || session.sharedSessions?.[sessionId]) {
+          mark(pid);
+        }
+      }
+      for (const [pid, record] of persistedResumeProcesses) {
+        if (record.requestedSessionId === sessionId || record.confirmedSessionId === sessionId) {
+          mark(pid);
+        }
+      }
+      if (sessionId.startsWith('PID-')) {
+        const pid = Number(sessionId.slice('PID-'.length));
+        if (Number.isInteger(pid) && pid > 0) mark(pid);
+      }
+      return { marked, withExitListener };
+    };
+
+    // Stop a session by sessionId or PID fallback. `terminated` collects the
+    // marked PIDs this attempt actually killed, so the caller can keep their
+    // suppression only while their own exit event is still pending.
+    const attemptStopSession = async (
       sessionId: string,
-      opts?: { processStartMarker?: string }
+      opts?: { processStartMarker?: string },
+      terminated: Set<number> = new Set<number>()
     ): Promise<'stopped' | 'already_gone' | 'still_alive' | 'unknown'> => {
       logger.debug(`[RUNNER RUN] Attempting to stop session ${sessionId}`);
 
@@ -1459,6 +1504,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             return await finishWithOrphanSweep('stopped');
           }
           if (!(await killProcessTreeByPid(pid))) return 'still_alive';
+          terminated.add(pid);
           rememberVerifiedExit(sessionId);
           return await finishWithOrphanSweep('stopped');
         }
@@ -1564,6 +1610,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
                 return 'still_alive';
               }
               treeTerminationVerified = true;
+              terminated.add(pid);
               logger.debug(`[RUNNER RUN] Requested termination for runner-spawned session ${sessionId}`);
             } catch (error) {
               logger.debug(`[RUNNER RUN] Failed to kill session ${sessionId}:`, error);
@@ -1573,6 +1620,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             // For externally started sessions, try to kill by PID
             try {
               if (!(await killProcess(pid))) return 'still_alive';
+              terminated.add(pid);
               logger.debug(`[RUNNER RUN] Requested termination for external session PID ${pid}`);
             } catch (error) {
               logger.debug(`[RUNNER RUN] Failed to kill external session PID ${pid}:`, error);
@@ -1650,6 +1698,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             return decision;
           }
           if (!(await killProcessTreeByPid(pid))) return 'still_alive';
+          terminated.add(pid);
           if (requestedSessionId) rememberVerifiedExit(requestedSessionId);
           if (confirmedSessionId) rememberVerifiedExit(confirmedSessionId);
           rememberVerifiedExit(`PID-${pid}`);
@@ -1721,6 +1770,25 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       // while callers that just spawned this id can treat unknown defensively.
       logger.debug(`[RUNNER RUN] Session ${sessionId} not found without verified exit`);
       return 'unknown';
+    };
+
+    // Late RPC retries join the same operation, but every attempt records its
+    // own intentional PIDs and releases the ones this attempt did not
+    // terminate: a preserved shared wrapper or a child the stop left alive
+    // must not suppress its later real unexpected exit.
+    const stopSession = coalesceStopRequests(async (
+      sessionId: string,
+      opts?: { processStartMarker?: string }
+    ): Promise<'stopped' | 'already_gone' | 'still_alive' | 'unknown'> => {
+      const intentional = markIntentionalStop(sessionId);
+      const terminated = new Set<number>();
+      try {
+        return await attemptStopSession(sessionId, opts, terminated);
+      } finally {
+        for (const pid of intentional.marked) {
+          if (!(intentional.withExitListener.has(pid) && terminated.has(pid))) intentionallyStoppedPids.delete(pid);
+        }
+      }
     });
 
     // A reused PID invalidates a binding, not every runtime for that session.
@@ -1751,6 +1819,20 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         spawnSession.onChildExited(existingSessionId);
         existingSessionIdByChildPid.delete(pid);
       }
+      // Tell the hub this generation died, unless we killed it on purpose.
+      // The marker from the durable resume record outlives a dropped
+      // TrackedSession (webhook timeout), so a late exit still carries the
+      // generation the hub compares against.
+      const intentional = intentionallyStoppedPids.delete(pid);
+      const notices = buildChildExitNotices({
+        pid,
+        processStartMarker: persistedResumeProcesses.get(pid)?.processStartMarker,
+        tracked: session,
+        requestedSessionId,
+        confirmedSessionId,
+        existingSessionId
+      }, { time: Date.now(), intentional });
+      for (const notice of notices) reportChildExitToHub?.(notice);
       pidToTrackedSession.delete(pid);
       for (const [sid, awaitingPid] of sessionIdAwaitingReady) {
         if (awaitingPid === pid) {
@@ -1880,6 +1962,8 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
 
     // Connect to server
     apiMachine.connect();
+    // Route unexpected child exits to the hub on the same machine socket.
+    reportChildExitToHub = (notice) => apiMachine.reportSessionChildExited(notice);
     scheduleCursorModelsPrewarm();
 
     // Visible startup banner. Use console.log so it always appears on stdout,
@@ -2246,7 +2330,7 @@ export function buildCliArgs(
   if (options.model) {
     args.push('--model', options.model);
   }
-  if (options.effort && (agent === 'claude' || agent === 'grok' || agent === 'pi' || agent === 'agy')) {
+  if (options.effort && (agent === 'claude' || agent === 'grok' || agent === 'pi' || agent === 'agy' || agent === 'kimi' || agent === 'copilot')) {
     args.push('--effort', options.effort);
   }
   if (options.modelReasoningEffort && (agent === 'codex' || agent === 'opencode')) {

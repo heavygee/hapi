@@ -27,8 +27,10 @@ import type {
     GeneratedImageResponse,
     ImplementCodexPlanResult,
     CopilotModelsResponse,
+    CopilotReasoningEffortResponse,
     GrokModelsResponse,
     KimiModelsResponse,
+    KimiReasoningEffortResponse,
     GrokReasoningEffortResponse,
     ListDirectoryResponse,
     ListCodexSessionsRpcResponse,
@@ -598,6 +600,10 @@ export class RpcGateway {
         ) as RpcListCopilotModelsResponse
     }
 
+    async listCopilotReasoningEffortOptionsForSession(sessionId: string): Promise<CopilotReasoningEffortResponse> {
+        return await this.sessionRpc(sessionId, RPC_METHODS.ListCopilotReasoningEffortOptions, {}) as CopilotReasoningEffortResponse
+    }
+
     async listCopilotModelsForSession(sessionId: string): Promise<RpcListCopilotModelsResponse> {
         return await this.sessionRpc(
             sessionId,
@@ -620,6 +626,10 @@ export class RpcGateway {
      * Active-session Kimi discovery. The probe runs in the CLI that owns the
      * session, so it works without a background runner on the machine.
      */
+    async listKimiReasoningEffortOptionsForSession(sessionId: string): Promise<KimiReasoningEffortResponse> {
+        return await this.sessionRpc(sessionId, RPC_METHODS.ListKimiReasoningEffortOptions, {}) as KimiReasoningEffortResponse
+    }
+
     async listKimiModelsForSession(sessionId: string): Promise<RpcListKimiModelsResponse> {
         return await this.sessionRpc(
             sessionId,
