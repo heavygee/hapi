@@ -22,6 +22,12 @@
 #     posting formal REVIEWS (`### 💡 Codex Review`) and/or ISSUE COMMENTS via the
 #     ChatGPT subscription-side App. Clean signal: tip-matched review with no-findings
 #     body / 👍, OR operator `cold-review-clean` **only after a tip-matched wave**.
+#     Newer waves carry a machine-readable `codex-review-state:v1` block instead of
+#     the "Reviewed commit:" prose, in a summary comment EDITED IN PLACE as the
+#     review runs. Read tip from `code_review.commit_sha`; clean iff
+#     `status == "completed"` AND `has_any_findings == false`. A `running` review is
+#     not a verdict. Matching only the old prose made this dimension report UNKNOWN
+#     for every fork PR once the connector switched formats (2026-11, #324).
 #   - `cold-review-clean` does NOT skip unresolved threads, and does NOT excuse a tip
 #     that has moved past the latest Codex "Reviewed commit" (agents must wait for /
 #     clear the next wave). Usage-limit comments are not a clean verdict.
@@ -218,14 +224,15 @@ if [[ "$OWNER" == "heavygee" ]]; then
     LATEST_EVENT=$(jq -n --slurpfile reviews "$REVIEWS_TMP" --slurpfile comments "$COMMENTS_TMP" '
         def is_codex: (.user.login == "chatgpt-codex-connector[bot]"
             or .user.login == "chatgpt-codex-connector");
-        def has_reviewed_commit: ((.body // "") | test("Reviewed commit"));
+        def has_reviewed_commit: ((.body // "")
+            | test("Reviewed commit") or test("codex-review-state:v1"));
         def pages: if type == "array" and length > 0 and (.[0]|type) == "array" then add else . end;
         ($reviews[0] | pages // []) as $r
         | ($comments[0] | pages // []) as $c
         | ([ $r[]? | select(is_codex and has_reviewed_commit)
              | {kind:"review", at:.submitted_at, body:(.body // "")} ]
            + [ $c[]? | select(is_codex and has_reviewed_commit)
-             | {kind:"comment", at:.created_at, body:(.body // "")} ])
+             | {kind:"comment", at:(.updated_at // .created_at), body:(.body // "")} ])
         | sort_by(.at) | reverse | .[0] // null
         ' 2>/dev/null || echo "null")
     # Quota notices can arrive as either a plain issue comment OR a formal
@@ -254,19 +261,42 @@ if [[ "$OWNER" == "heavygee" ]]; then
     SUBMITTED=""
     BODY=""
     KIND=""
+    # Codex's newer summary comment carries machine-readable state instead of the
+    # legacy "Reviewed commit: `sha`" prose, and is EDITED IN PLACE as the review
+    # progresses (running → completed). Parse it when present; the prose parse
+    # below stays as the fallback for older waves.
+    #   <!-- codex-review-state:v1 {"code_review":{"commit_sha":…,
+    #        "has_any_findings":…,"status":"running|completed"},…} -->
+    STATE_STATUS=""
+    STATE_FINDINGS=""
     if [[ "$LATEST_EVENT" != "null" && -n "$LATEST_EVENT" ]]; then
         KIND=$(echo "$LATEST_EVENT" | jq -r '.kind')
         SUBMITTED=$(echo "$LATEST_EVENT" | jq -r '.at')
         BODY=$(echo "$LATEST_EVENT" | jq -r '.body // empty')
-        REVIEWED_SHA=$(printf '%s' "$BODY" | grep -oE 'Reviewed commit:\*\* `[0-9a-f]{7,40}`|Reviewed commit: `[0-9a-f]{7,40}`' \
-            | head -1 | grep -oE '[0-9a-f]{7,40}' | head -1)
+        STATE_JSON=$(printf '%s' "$BODY" \
+            | grep -o 'codex-review-state:v1 {.*}' | head -1 \
+            | sed 's/^codex-review-state:v1 //' \
+            | jq -c '.code_review // empty' 2>/dev/null || true)
+        if [[ -n "$STATE_JSON" ]]; then
+            REVIEWED_SHA=$(printf '%s' "$STATE_JSON" | jq -r '.commit_sha // empty')
+            STATE_STATUS=$(printf '%s' "$STATE_JSON" | jq -r '.status // empty')
+            # NOT `// empty` — jq's alternative operator swallows `false`, which
+            # is precisely the value that means "reviewed, nothing found".
+            STATE_FINDINGS=$(printf '%s' "$STATE_JSON" \
+                | jq -r 'if .has_any_findings == null then "" else (.has_any_findings | tostring) end')
+        fi
+        if [[ -z "$REVIEWED_SHA" ]]; then
+            REVIEWED_SHA=$(printf '%s' "$BODY" | grep -oE 'Reviewed commit:\*\* `[0-9a-f]{7,40}`|Reviewed commit: `[0-9a-f]{7,40}`' \
+                | head -1 | grep -oE '[0-9a-f]{7,40}' | head -1)
+        fi
         echo "     Source: ${BOT_DESC} ${KIND}"
         echo "     Last run: ${SUBMITTED}"
         [[ -n "$REVIEWED_SHA" ]] && echo "     Reviewed commit: ${REVIEWED_SHA}"
+        [[ -n "$STATE_STATUS" ]] && echo "     Codex review state: ${STATE_STATUS} (findings=${STATE_FINDINGS:-unknown})"
         echo "$BODY" | head -c 300 | sed 's/^/     /'
         echo ""
     else
-        echo "     ? No ${BOT_DESC} review/comment with Reviewed commit found"
+        echo "     ? No ${BOT_DESC} review/comment with a reviewed commit found"
         BODY=""
     fi
 
@@ -336,6 +366,21 @@ if [[ "$OWNER" == "heavygee" ]]; then
         echo "     → UNKNOWN (no Reviewed-commit Codex event; cold-review-clean does not invent tip-match)"
         BOT_OK=false
         PASS=1
+    elif [[ -n "$STATE_STATUS" && "$STATE_STATUS" != "completed" ]]; then
+        # An in-flight review is not a verdict. Without this branch the summary
+        # comment's "no findings yet" shape would read as clean mid-run.
+        echo "     ✗ Codex review is '${STATE_STATUS}', not completed"
+        echo "     → FAIL (wait for the review to finish — cold-review-clean does not skip an in-flight wave)"
+        BOT_OK=false
+        PASS=1
+    elif [[ "$STATE_STATUS" == "completed" && "$STATE_FINDINGS" == "false" ]]; then
+        if $TIP_MATCHED; then
+            echo "     → PASS (tip-matched codex-review-state:v1, completed with no findings)"
+        else
+            echo "     → FAIL (clean review state but not tip-matched)"
+            BOT_OK=false
+            PASS=1
+        fi
     elif printf '%s' "$BODY" | sed 's/\\n/ /g' | tr '\n' ' ' | grep -qE "$CLEAN_REGEX"; then
         if $TIP_MATCHED; then
             echo "     → PASS (tip-matched clean body)"
