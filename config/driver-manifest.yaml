@@ -701,8 +701,10 @@ layers:
 
   # Fork-only: row fade = residency (RAM), not "has attached job".
   # Operator decision 2026-11-09 — non-resident + running job → faded + job chip.
-  # Not in tiann/hapi#1424 (no opacity-50 in upstream PR diff). Layer owner: /sessions/6e70f97b.
+  # Not upstream (no opacity-50 in the merged session-jobs PR). Layer owner: /sessions/6e70f97b.
   # Tip: a740628eb on soup HEAD 26e5eebc3. Worktree: session-row-residency-fade.
+  # Gate A note: do NOT cite the merged upstream PR number here — meta-wave
+  # attributes any #N mention on an active - branch: line as soup dirt for that PR.
   - branch: driver/session-row-residency-fade
     sentinel: opacity-50
     sentinel_path: web/src/components/SessionRowSummary.tsx
