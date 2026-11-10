@@ -50,3 +50,9 @@ Merge remains operator/Meta after elapsed windows — prepare only.
 - Compare: https://github.com/tiann/hapi/compare/main...heavygee:rebase-assist/1772-onto-upstream-main
 - Prep peer: [/sessions/3c5af7c8-540d-4d7c-b7a1-5df17abe5b37](/sessions/3c5af7c8-540d-4d7c-b7a1-5df17abe5b37)
 
+## Ready-YES (awaiting dogfood window / operator merge)
+
+| PR | HEAD | Notes |
+|---|---|---|
+| #2354 Cursor emit | `316b5f34e` | CLEAN + cold-review-clean; ~45h dogfood left at Ready-YES ack; prepare-only |
+
