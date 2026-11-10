@@ -5,8 +5,10 @@ export function hasRunningAttachedJob(session: SessionSummary): boolean {
 }
 
 /**
- * Hub `thinking` that reflects real agent foreground work — not ambient ACP
- * state_update chatter while an attached job is the honest outliving signal (#1553).
+ * Hub `thinking` that should show the Running spinner / bucket.
+ * Ambient ACP chatter is filtered in the CLI (#1553); do not second-guess
+ * `thinking` here when a long-running job is also attached — real prompts
+ * still set thinking=true via prompt().
  */
 export function isAgentForegroundThinking(session: SessionSummary): boolean {
     if (!session.active || !session.thinking) {

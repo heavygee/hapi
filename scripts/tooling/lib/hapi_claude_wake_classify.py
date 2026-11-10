@@ -33,6 +33,27 @@ ATTENTION = frozenset(
     {"blocked", "needs_decision", "needs_review", "failed", "stalled"}
 )
 DONEISH = frozenset({"done", "idle"})
+WAKE_SKIP_FILE = os.path.expanduser("~/.hapi/claude-auth/wake-skip")
+
+
+def load_wake_skip_ids() -> set[str]:
+    """Session ids (full or 8-char prefix) that asked not to be cutover-woken."""
+    try:
+        lines = open(WAKE_SKIP_FILE).read().splitlines()
+    except OSError:
+        return set()
+    out = set()
+    for line in lines:
+        line = line.split("#", 1)[0].strip()
+        if line:
+            out.add(line)
+    return out
+
+
+def is_wake_skipped(sid: str, skip: set[str]) -> bool:
+    if sid in skip:
+        return True
+    return any(sid.startswith(p) for p in skip if len(p) >= 8)
 
 
 def hub_jwt(host: str) -> str:
@@ -95,43 +116,80 @@ def classify_session(host: str, jwt: str, sid: str, detail: dict) -> tuple[str, 
     if notify_status in ATTENTION:
         return "wake", f"lastNotify={notify_status}"
 
-    # Message scrape for usage-limit wedge + trailing user turn.
-    try:
-        msgs = get(host, jwt, f"/api/sessions/{sid}/messages?limit=12").get("messages") or []
-    except Exception:
-        msgs = []
-
-    saw_limit = False
-    last_userish = False
-    for m in msgs:
-        body = "\n".join(walk_text(m))
-        if LIMIT_RE.search(body):
-            saw_limit = True
-        role = message_role(m)
-        if role == "user" and body.strip() and "Auth was rotated" not in body:
-            last_userish = True
-        elif role == "agent" and body.strip():
-            last_userish = False
-
-    if saw_limit:
-        return "wake", "usage-limit-text"
-
-    if last_userish:
-        return "wake", "awaiting-agent-after-user"
-
+    # Finished sessions must stay quiet. Stale "session limit" lines in the
+    # transcript (from an earlier cap) used to override lastNotify=done and
+    # re-wake the same peers on every cutover — Headroom/Caveman got three
+    # identical continues with nothing to resume.
     if notify_status in DONEISH:
         return "skip", f"lastNotify={notify_status}"
 
     if lifecycle == "idle":
         return "skip", "lifecycle-idle"
 
+    # Message scrape (only if not done): still-wedged on limit, or real user awaiting reply.
+    try:
+        msgs = get(host, jwt, f"/api/sessions/{sid}/messages?limit=20").get("messages") or []
+    except Exception:
+        msgs = []
+
+    last_userish = False
+    saw_our_continue = False
+    agent_after_our_continue = False
+    last_agent_meaningful = None
+    for m in msgs:
+        body = "\n".join(walk_text(m))
+        role = message_role(m)
+        if role == "user" and body.strip():
+            if _is_cutover_continue(body):
+                saw_our_continue = True
+                last_userish = False
+            else:
+                last_userish = True
+        elif role == "agent" and body.strip():
+            if _is_meaningful_agent_body(body):
+                last_agent_meaningful = body
+                if saw_our_continue:
+                    agent_after_our_continue = True
+            last_userish = False
+
+    # Already answered a cutover continue — do not poke again for stale limit text.
+    if agent_after_our_continue:
+        return "skip", "already-replied-to-continue"
+
+    # Usage-limit wake only when the *latest* meaningful agent text is still the cap.
+    if last_agent_meaningful and LIMIT_RE.search(last_agent_meaningful):
+        return "wake", "usage-limit-text"
+
+    if last_userish:
+        return "wake", "awaiting-agent-after-user"
+
     # Quiet running session with no attention notify — do not spam.
     return "skip", f"quiet notify={notify_status or 'none'} lifecycle={lifecycle or '?'}"
 
 
+def _is_cutover_continue(body: str) -> bool:
+    b = body.lower()
+    return (
+        "auth was rotated" in b
+        or "interrupted mid-flight" in b
+        or "ack — stopping" in b
+        or (b.lstrip().startswith("continue.") and "claude slot" in b)
+    )
+
+
+def _is_meaningful_agent_body(body: str) -> bool:
+    """Ignore ACP event shells / id soup; keep prose + limit lines."""
+    if LIMIT_RE.search(body):
+        return True
+    # Heuristic: real replies have spaces and words, not only uuids/paths.
+    letters = sum(c.isalpha() for c in body)
+    spaces = body.count(" ")
+    return letters >= 40 and spaces >= 5
+
 def classify_active_claude(host: str, self_id: str = "", only_ids: set[str] | None = None):
     jwt = hub_jwt(host)
     wake, skip = [], []
+    wake_skip = load_wake_skip_ids()
     for s in get(host, jwt, "/api/sessions?limit=500")["sessions"]:
         if not s.get("active"):
             continue
@@ -141,6 +199,10 @@ def classify_active_claude(host: str, self_id: str = "", only_ids: set[str] | No
         if self_id and s["id"] == self_id:
             continue
         if only_ids is not None and s["id"] not in only_ids:
+            continue
+        if is_wake_skipped(s["id"], wake_skip):
+            name = (md.get("name") or "?")[:50]
+            skip.append({"id": s["id"], "reason": "wake-skip-file", "name": name})
             continue
         detail = get(host, jwt, f"/api/sessions/{s['id']}").get("session", s)
         action, reason = classify_session(host, jwt, s["id"], detail)

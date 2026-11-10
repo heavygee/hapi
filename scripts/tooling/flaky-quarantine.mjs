@@ -169,6 +169,18 @@ function runCheck() {
             }
         }
     }
+    // The registry is read from the CHECKED-OUT TREE, so a branch carries its
+    // own copy. Widening a signature on main does not reach an open PR until
+    // that PR syncs the file — #238 (2026-11-10) burned two CI reruns hitting
+    // the identical mismatch after the fix had already landed on main. Say so
+    // rather than letting each branch rediscover it.
+    if (verdict.blocking.length > 0) {
+        console.error('');
+        console.error('  If a fix for this was just landed on main, THIS BRANCH MAY BE STALE —');
+        console.error(`  the registry is read from the working tree (${registryPath}), not from main.`);
+        console.error('  Sync it before re-running CI:');
+        console.error('    git checkout origin/main -- config/flaky-quarantine.yaml');
+    }
     if (verdict.ceilingExceeded) {
         console.error(`flaky-quarantine: CEILING EXCEEDED — ${verdict.activeCount} active entries > ceiling ${ceiling}. Gate fails until the registry is cleaned up, independent of test results.`);
     }

@@ -25,6 +25,8 @@ import type { CursorChatStoreStatus, CursorMigrateOutcome, CursorMigrateToAcpReq
 import type { SteerQueuedMessageResponse } from '@hapi/protocol/schemas'
 import type { ImplementCodexPlanResult } from '@hapi/protocol/apiTypes'
 import type { ExternalRef, AgentFlavor, CodexCollaborationMode, CopilotAgentMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
+import type { CopilotReasoningEffortResponse, KimiReasoningEffortResponse } from '@hapi/protocol/apiTypes'
+import type { BackgroundTask } from '@hapi/protocol/types'
 import { hasConversationMessageContent, unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
 import type { Server } from 'socket.io'
 import { randomUUID } from 'node:crypto'
@@ -46,6 +48,7 @@ import {
     waitUntilSessionActive,
 } from './sessionJobWake'
 import { isTransientArtifactBuildFailure } from '../upgrade/cliArtifact'
+    buildJobWakeLocalId,
 
 import { executeSessionRelay } from './sessionRelay'
 import { EventPublisher, type SyncEventListener } from './eventPublisher'
@@ -284,6 +287,14 @@ export class SyncEngine {
     private readonly opencodeClearTails = new Map<string, Promise<ClearOpencodeSessionResult>>()
     /** Serialize fork/rewind per session so concurrent native rollbacks cannot stack. */
     private readonly historyActionsInFlight = new Set<string>()
+    /** Pending #1489 wake retries after recoverable pre-delivery failures. */
+    private readonly jobTerminalWakeRetryTimers = new Map<string, ReturnType<typeof setTimeout>>()
+    private readonly jobTerminalWakeRetryAttempts = new Map<string, number>()
+    /** Debounced scan of DB-pending wakes after runner recovery / hub start. */
+    private jobWakeRequeueTimer: ReturnType<typeof setTimeout> | null = null
+    /** Base delay for wake retries; tests may lower this. */
+    private jobWakeRetryBaseMs = 1_000
+    private static readonly JOB_WAKE_RETRY_MAX_ATTEMPTS = 8
     /**
      * Coalesce concurrent banner Upgrade / push calls for the same machine so
      * the runner's "already in progress" reply is not toasted as upgrade_failed.
@@ -407,6 +418,9 @@ export class SyncEngine {
         this.overseerByNamespace.set('default', this.createOverseerForNamespace('default'))
         this.reloadAll()
         this.inactivityTimer = setInterval(() => this.expireInactive(), 5_000)
+        // Hub start: undelivered opt-in wakes survive process restart as eligible
+        // SQLite rows — requeue after caches are warm.
+        this.requeuePendingJobTerminalWakes()
     }
 
     setHubOwnerUserId(ownerUserId: string | number): void {
@@ -418,6 +432,15 @@ export class SyncEngine {
             clearInterval(this.inactivityTimer)
             this.inactivityTimer = null
         }
+        if (this.jobWakeRequeueTimer) {
+            clearTimeout(this.jobWakeRequeueTimer)
+            this.jobWakeRequeueTimer = null
+        }
+        for (const timer of this.jobTerminalWakeRetryTimers.values()) {
+            clearTimeout(timer)
+        }
+        this.jobTerminalWakeRetryTimers.clear()
+        this.jobTerminalWakeRetryAttempts.clear()
     }
 
     subscribe(listener: SyncEventListener): () => void {
@@ -645,6 +668,41 @@ export class SyncEngine {
         return this.sessionCache.resolveAttachedJobSessionId(sessionId, namespace)
     }
 
+    /** Follow dual-running same-key remaps after merge (tiann/hapi#1404). */
+    resolveAttachedJobKey(
+        requestedSessionId: string,
+        ownerSessionId: string,
+        jobKey: string,
+        namespace: string
+    ): string {
+        return this.sessionCache.resolveAttachedJobKey(
+            requestedSessionId,
+            ownerSessionId,
+            jobKey,
+            namespace
+        )
+    }
+
+    /**
+     * PUT path: follow existing remaps, or allocate one when a redirected late
+     * registration would overwrite a different running generation.
+     */
+    resolveAttachedJobKeyForUpsert(
+        requestedSessionId: string,
+        ownerSessionId: string,
+        jobKey: string,
+        namespace: string,
+        incomingRunId: string | undefined
+    ): string {
+        return this.sessionCache.resolveAttachedJobKeyForUpsert(
+            requestedSessionId,
+            ownerSessionId,
+            jobKey,
+            namespace,
+            incomingRunId
+        )
+    }
+
     getActiveSessions(): Session[] {
         return this.sessionCache.getActiveSessions()
     }
@@ -801,6 +859,15 @@ export class SyncEngine {
             void this.maybeFleetUpgradeMachine(event.machineId, { source: 'machine-updated' }).catch((error) => {
                 console.warn('[fleet-upgrade] offer resolution failed', error)
             })
+            // Connect publishes machine-update-state (active=1 in SQLite) before the
+            // first heartbeat. Requeue here so wake recovery is not skipped when
+            // handleMachineAlive later sees wasActive already true.
+            const wasActive = this.machineCache.getMachine(event.machineId)?.active === true
+            const refreshed = this.machineCache.refreshMachine(event.machineId)
+            const nowActive = refreshed?.active === true
+            if (!wasActive && nowActive) {
+                this.requeuePendingJobTerminalWakes()
+            }
             return
         }
 
@@ -1144,8 +1211,49 @@ export class SyncEngine {
         clearAgentTerminalBuffer(payload.sid)
     }
 
-    handleBackgroundTaskCount(sessionId: string, count: number): void {
-        this.sessionCache.setBackgroundTaskCount(sessionId, count)
+    /**
+     * A runner reported that one of its child processes exited without the
+     * CLI's normal session-end handshake (crash, SIGKILL, OOM). Accept the
+     * notice only while the reported OS generation still owns the session, so
+     * a late notice about a replaced process cannot flip a session that was
+     * already resumed elsewhere. Accepted notices reuse the existing crash
+     * path: active/thinking clear immediately, the row stays unarchived and
+     * resumable, and no second lifecycle event fires for an already-ended row.
+     */
+    handleSessionChildExited(payload: {
+        machineId: string
+        namespace: string
+        sid: string
+        pid: number
+        processStartMarker?: string
+        time: number
+    }): boolean {
+        const session = this.sessionCache.getSessionByNamespace(payload.sid, payload.namespace)
+        if (!session) return false
+        if (session.metadata?.machineId !== payload.machineId) return false
+        if (session.metadata?.hostPid !== payload.pid) return false
+        // A marker on either side binds the notice to one process generation:
+        // only an exact match proves the dying process is the registered owner.
+        // When BOTH sides lack a marker (the CLI's start-marker probe can fail),
+        // a pid-only match must still reject a notice older than the current
+        // owner's registration — a reused pid's late notice would otherwise
+        // deactivate the new owner. lifecycleStateSince is written by the CLI
+        // together with hostPid on every (re)spawn of the row.
+        const ownerStartMarker = session.metadata?.hostStartMarker
+        if (ownerStartMarker !== undefined || payload.processStartMarker !== undefined) {
+            if (ownerStartMarker !== payload.processStartMarker) return false
+        } else {
+            const ownerRegisteredAt = session.metadata?.lifecycleStateSince
+            if (ownerRegisteredAt === undefined || payload.time < ownerRegisteredAt) return false
+        }
+        if (!session.active && !session.thinking) return false
+
+        this.handleSessionEnd({ sid: session.id, time: payload.time, reason: 'error' })
+        return true
+    }
+
+    handleBackgroundTasks(sessionId: string, tasks: BackgroundTask[]): void {
+        this.sessionCache.setBackgroundTasks(sessionId, tasks)
     }
 
     
@@ -1340,6 +1448,16 @@ recordSessionActivity(sessionId: string, updatedAt: number): void {
         return this.store.sessionJobs.getPrimaryRunningBySessionIds(sessionIds)
     }
 
+    /** Move outliving jobs + redirects onto another session (pre-delete). */
+    transferAttachedJobs(fromSessionId: string, toSessionId: string, namespace: string): void {
+        this.sessionCache.transferAttachedJobs(fromSessionId, toSessionId, namespace)
+    }
+
+    /** Shared REST/SSE watermark allocator for attachedJob patches. */
+    allocateAttachedJobVersion(sessionId: string): number {
+        return this.sessionCache.allocateAttachedJobVersion(sessionId)
+    }
+
     upsertSessionJob(
         sessionId: string,
         jobKey: string,
@@ -1364,121 +1482,321 @@ recordSessionActivity(sessionId: string, updatedAt: number): void {
         sessionId: string,
         jobKey: string,
         patch: import('@hapi/protocol').AttachedJobPatch
-    ): import('@hapi/protocol').AttachedJob | null {
-        const updated = this.store.sessionJobs.patch(sessionId, jobKey, patch)
-        if (!updated) return null
+    ):
+        | { outcome: 'patched'; job: import('@hapi/protocol').AttachedJob }
+        | { outcome: 'not-found' }
+        | { outcome: 'run-mismatch' } {
+        const result = this.store.sessionJobs.patch(sessionId, jobKey, patch)
+        if (result.outcome !== 'patched') {
+            return result
+        }
         const primary = this.store.sessionJobs.getPrimaryRunning(sessionId)
         this.sessionCache.emitAttachedJobChanged(sessionId, primary)
         this.maybeScheduleJobTerminalWake(sessionId, jobKey)
-        return toAttachedJob(updated)
-    }
-
-    deleteSessionJob(sessionId: string, jobKey: string): boolean {
-        const removed = this.store.sessionJobs.delete(sessionId, jobKey)
-        if (removed) {
-            const primary = this.store.sessionJobs.getPrimaryRunning(sessionId)
-            this.sessionCache.emitAttachedJobChanged(sessionId, primary)
+        return {
+            outcome: 'patched',
+            job: toAttachedJob(result.job)
         }
-        return removed
     }
 
+    private jobTerminalWakeRetryKey(sessionId: string, jobKey: string): string {
+        return `${sessionId}\0${jobKey}`
+    }
+
+    /**
+     * Follow merge/OpenCode job-owner + key redirects before claim/release/retry
+     * so a deferred wake does not abandon a transferred row.
+     */
+    private resolveJobWakeLocation(
+        sessionId: string,
+        jobKey: string,
+        namespace: string
+    ): { sessionId: string; jobKey: string; namespace: string } {
+        const ownerId = this.resolveAttachedJobSessionId(sessionId, namespace)
+        const resolvedKey = this.resolveAttachedJobKey(sessionId, ownerId, jobKey, namespace)
+        return { sessionId: ownerId, jobKey: resolvedKey, namespace }
+    }
+
+    private clearJobTerminalWakeRetry(sessionId: string, jobKey: string): void {
+        const key = this.jobTerminalWakeRetryKey(sessionId, jobKey)
+        const timer = this.jobTerminalWakeRetryTimers.get(key)
+        if (timer) {
+            clearTimeout(timer)
+            this.jobTerminalWakeRetryTimers.delete(key)
+        }
+        this.jobTerminalWakeRetryAttempts.delete(key)
+    }
+
+    /**
+     * After a recoverable pre-delivery failure, drop the provisional claim and
+     * retry with capped rapid backoff. Exhausted budgets leave the row eligible
+     * in SQLite; {@link requeuePendingJobTerminalWakes} picks them up when a
+     * runner returns (or on hub start).
+     */
+    private scheduleJobTerminalWakeRetry(
+        sessionId: string,
+        jobKey: string,
+        namespace: string
+    ): void {
+        const key = this.jobTerminalWakeRetryKey(sessionId, jobKey)
+        const attempt = (this.jobTerminalWakeRetryAttempts.get(key) ?? 0) + 1
+        if (attempt > SyncEngine.JOB_WAKE_RETRY_MAX_ATTEMPTS) {
+            console.warn('[session-job-wake] rapid retry budget exhausted; awaiting runner recovery', {
+                sessionId,
+                jobKey,
+                attempt,
+            })
+            this.clearJobTerminalWakeRetry(sessionId, jobKey)
+            return
+        }
+        this.jobTerminalWakeRetryAttempts.set(key, attempt)
+        const existing = this.jobTerminalWakeRetryTimers.get(key)
+        if (existing) clearTimeout(existing)
+        const delayMs = Math.min(30_000, this.jobWakeRetryBaseMs * (2 ** (attempt - 1)))
+        const timer = setTimeout(() => {
+            this.jobTerminalWakeRetryTimers.delete(key)
+            const loc = this.resolveJobWakeLocation(sessionId, jobKey, namespace)
+            this.maybeScheduleJobTerminalWake(loc.sessionId, loc.jobKey)
+        }, delayMs)
+        this.jobTerminalWakeRetryTimers.set(key, timer)
+    }
+
+    /**
+     * Re-claim opted-in terminal wakes that are still undelivered. Called on
+     * hub start and when a machine flips offline→online. Resets rapid-retry
+     * budgets so a long outage can still complete after recovery.
+     */
+    requeuePendingJobTerminalWakes(): void {
+        if (this.jobWakeRequeueTimer) return
+        this.jobWakeRequeueTimer = setTimeout(() => {
+            this.jobWakeRequeueTimer = null
+            this.jobTerminalWakeRetryAttempts.clear()
+            let pending: import('../store/types').StoredSessionJob[] = []
+            try {
+                // Hub restart leaves pending:<claimId> markers with no in-flight
+                // deliverer — clear them so rows are reclaimable.
+                this.store.sessionJobs.clearAbandonedProvisionalWakeClaims()
+                pending = this.store.sessionJobs.listPendingTerminalWakes()
+            } catch (error) {
+                console.warn('[session-job-wake] list pending failed', {
+                    error: error instanceof Error ? error.message : String(error),
+                })
+                return
+            }
+            for (const job of pending) {
+                const session = this.sessionCache.getSession(job.sessionId)
+                if (!session) continue
+                const loc = this.resolveJobWakeLocation(job.sessionId, job.key, session.namespace)
+                this.maybeScheduleJobTerminalWake(loc.sessionId, loc.jobKey)
+            }
+        }, 250)
+    }
+
+    /**
+     * After a durable job write: claim one-shot terminal wake and fire-and-forget
+     * resume→send (same ordering as pingPeer). Heartbeats never reach here with
+     * a new terminal claim. Claim is provisional until send persists.
+     */
     private maybeScheduleJobTerminalWake(sessionId: string, jobKey: string): void {
-        const claimed = this.store.sessionJobs.claimTerminalWake(sessionId, jobKey)
+        const session = this.sessionCache.getSession(sessionId)
+        const namespace = session?.namespace
+        const loc = namespace
+            ? this.resolveJobWakeLocation(sessionId, jobKey, namespace)
+            : { sessionId, jobKey }
+        const claimed = this.store.sessionJobs.claimTerminalWake(loc.sessionId, loc.jobKey)
         if (!claimed || !isTerminalJobStatus(claimed.status)) {
             return
         }
-        void this.deliverJobTerminalWake(sessionId, claimed).catch((error) => {
+        void this.deliverJobTerminalWake(loc.sessionId, claimed, namespace).catch((error) => {
             console.warn('[session-job-wake] deliver failed', {
-                sessionId,
-                jobKey,
+                sessionId: loc.sessionId,
+                jobKey: loc.jobKey,
                 status: claimed.status,
                 error: error instanceof Error ? error.message : String(error),
             })
         })
     }
 
+    /**
+     * Resume inactive owner (if needed), wait for active, then POST a user message.
+     * Injectable seams live on sessionJobWake helpers for unit tests.
+     * Pre-delivery failures release the provisional claim and schedule a retry.
+     */
     private async deliverJobTerminalWake(
         sessionId: string,
-        job: import('../store/types').StoredSessionJob
+        job: import('../store/types').StoredSessionJob,
+        namespaceHint?: string
     ): Promise<void> {
-        const session = this.sessionCache.getSession(sessionId)
-        if (!session) {
-            console.warn('[session-job-wake] session missing after claim', { sessionId, jobKey: job.key })
-            return
-        }
-        const namespace = session.namespace
-        let targetId = sessionId
+        const claimId = job.runId ?? `norun:${job.startedAt}`
+        let ownerSessionId = sessionId
+        let ownerJobKey = job.key
+        let namespace = namespaceHint
 
-        if (!session.active) {
-            const resume = await this.resumeSession(sessionId, namespace)
-            if (resume.type !== 'success') {
-                console.warn('[session-job-wake] resume failed', {
-                    sessionId,
-                    jobKey: job.key,
-                    code: resume.code,
-                    message: resume.message,
-                })
-                return
+        const releaseAndRetry = (info: Record<string, unknown>): void => {
+            const ns = namespace
+                ?? this.sessionCache.getSession(ownerSessionId)?.namespace
+                ?? this.sessionCache.getSession(sessionId)?.namespace
+            if (ns) {
+                const loc = this.resolveJobWakeLocation(ownerSessionId, ownerJobKey, ns)
+                ownerSessionId = loc.sessionId
+                ownerJobKey = loc.jobKey
+                namespace = loc.namespace
             }
-            targetId = resume.sessionId
-            const becameActive = await waitUntilSessionActive({
-                getActive: () => this.sessionCache.getSession(targetId)?.active === true,
-                sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-                now: Date.now,
-                timeoutMs: 30_000,
-                pollMs: 250,
+            console.warn('[session-job-wake] delivery deferred', {
+                sessionId: ownerSessionId,
+                jobKey: ownerJobKey,
+                ...info,
             })
-            if (!becameActive) {
-                console.warn('[session-job-wake] session did not become active', {
-                    sessionId: targetId,
-                    jobKey: job.key,
-                })
-                return
+            this.store.sessionJobs.releaseTerminalWake(ownerSessionId, ownerJobKey, claimId)
+            // Also clear a stale provisional claim left on the pre-transfer row.
+            if (ownerSessionId !== sessionId || ownerJobKey !== job.key) {
+                this.store.sessionJobs.releaseTerminalWake(sessionId, job.key, claimId)
+            }
+            if (namespace) {
+                this.scheduleJobTerminalWakeRetry(ownerSessionId, ownerJobKey, namespace)
             }
         }
 
-        const live = this.sessionCache.getSession(targetId)
-        if (live?.metadata?.flavor === 'pi') {
-            const piReady = await waitUntilSessionActive({
-                getActive: () => {
-                    const s = this.sessionCache.getSession(targetId)
-                    const id = s?.metadata?.piSessionId
-                    return typeof id === 'string' && id.length > 0
-                },
-                sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-                now: Date.now,
-                timeoutMs: 30_000,
-                pollMs: 250,
-            })
-            if (!piReady) {
-                console.warn('[session-job-wake] piSessionId missing; refusing send', {
-                    sessionId: targetId,
-                    jobKey: job.key,
-                })
+        try {
+            const session = this.sessionCache.getSession(ownerSessionId)
+            if (!session) {
+                releaseAndRetry({ reason: 'session_missing' })
                 return
             }
-            if (this.sessionCache.getSession(targetId)?.active !== true) {
-                const resume = await this.resumeSession(targetId, namespace)
+            namespace = session.namespace
+            let targetId = ownerSessionId
+
+            if (!session.active) {
+                const resume = await this.resumeSession(ownerSessionId, namespace)
                 if (resume.type !== 'success') {
-                    console.warn('[session-job-wake] re-resume failed', {
-                        sessionId: targetId,
-                        jobKey: job.key,
+                    releaseAndRetry({
+                        reason: 'resume_failed',
                         code: resume.code,
+                        message: resume.message,
                     })
                     return
                 }
                 targetId = resume.sessionId
+                // Resume/merge may have moved the job — follow redirects before release/send.
+                const loc = this.resolveJobWakeLocation(ownerSessionId, ownerJobKey, namespace)
+                ownerSessionId = loc.sessionId
+                ownerJobKey = loc.jobKey
+                const becameActive = await waitUntilSessionActive({
+                    getActive: () => this.sessionCache.getSession(targetId)?.active === true,
+                    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+                    now: Date.now,
+                    timeoutMs: 30_000,
+                    pollMs: 250,
+                })
+                if (!becameActive) {
+                    releaseAndRetry({ reason: 'not_active', sessionId: targetId })
+                    return
+                }
             }
-        }
 
-        const text = buildJobTerminalWakePrompt({
-            key: job.key,
-            label: job.label,
-            status: job.status,
-            ...(job.detail !== undefined ? { detail: job.detail } : {}),
-            ...(job.wakePrompt !== undefined ? { wakePrompt: job.wakePrompt } : {}),
-        })
-        await this.sendMessage(targetId, { text, sentFrom: 'webapp' })
+            // Pi can be active before piSessionId lands (#1143) — wait briefly.
+            const live = this.sessionCache.getSession(targetId)
+            if (live?.metadata?.flavor === 'pi') {
+                const piReady = await waitUntilSessionActive({
+                    getActive: () => {
+                        const s = this.sessionCache.getSession(targetId)
+                        const id = s?.metadata?.piSessionId
+                        return typeof id === 'string' && id.length > 0
+                    },
+                    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+                    now: Date.now,
+                    timeoutMs: 30_000,
+                    pollMs: 250,
+                })
+                if (!piReady) {
+                    releaseAndRetry({ reason: 'pi_session_id_missing', sessionId: targetId })
+                    return
+                }
+                // Re-check active after pi wait (mid-wait flips).
+                if (this.sessionCache.getSession(targetId)?.active !== true) {
+                    const resume = await this.resumeSession(targetId, namespace)
+                    if (resume.type !== 'success') {
+                        releaseAndRetry({
+                            reason: 're_resume_failed',
+                            sessionId: targetId,
+                            code: resume.code,
+                        })
+                        return
+                    }
+                    targetId = resume.sessionId
+                    const loc = this.resolveJobWakeLocation(ownerSessionId, ownerJobKey, namespace)
+                    ownerSessionId = loc.sessionId
+                    ownerJobKey = loc.jobKey
+                }
+            }
+
+            // Fence to the claimed run — key reuse mid-resume must not describe run B.
+            const liveJob = this.store.sessionJobs.get(ownerSessionId, ownerJobKey)
+            const liveClaimId = liveJob
+                ? (liveJob.runId ?? `norun:${liveJob.startedAt}`)
+                : null
+            if (
+                !liveJob
+                || liveClaimId !== claimId
+                || !liveJob.wakeOnTerminal
+                || !isTerminalJobStatus(liveJob.status)
+            ) {
+                console.warn('[session-job-wake] claimed run superseded; dropping wake', {
+                    sessionId: ownerSessionId,
+                    jobKey: ownerJobKey,
+                    claimId,
+                    liveClaimId,
+                    liveStatus: liveJob?.status,
+                    liveWake: liveJob?.wakeOnTerminal,
+                })
+                this.store.sessionJobs.releaseTerminalWake(ownerSessionId, ownerJobKey, claimId)
+                this.clearJobTerminalWakeRetry(ownerSessionId, ownerJobKey)
+                this.clearJobTerminalWakeRetry(sessionId, job.key)
+                return
+            }
+
+            // Prompt text from the claimed snapshot (run A), not a newer live generation.
+            const text = buildJobTerminalWakePrompt({
+                key: job.key,
+                label: job.label,
+                status: job.status,
+                ...(job.detail !== undefined ? { detail: job.detail } : {}),
+                ...(job.wakePrompt !== undefined ? { wakePrompt: job.wakePrompt } : {}),
+                ...(job.runId !== undefined ? { runId: job.runId } : {}),
+            })
+            // Run-scoped localId so a rare double-send after persist dedupes.
+            // Prefix must stay exempt from session-end synthetic sweep (see
+            // MessageService.sweepImmediateQueuedOnSessionEnd).
+            await this.sendMessage(targetId, {
+                text,
+                sentFrom: 'webapp',
+                localId: buildJobWakeLocalId(ownerJobKey, claimId),
+            })
+            this.store.sessionJobs.markTerminalWakeDelivered(ownerSessionId, ownerJobKey, claimId)
+            this.clearJobTerminalWakeRetry(ownerSessionId, ownerJobKey)
+            this.clearJobTerminalWakeRetry(sessionId, job.key)
+        } catch (error) {
+            releaseAndRetry({
+                reason: 'exception',
+                error: error instanceof Error ? error.message : String(error),
+            })
+        }
+    }
+
+    deleteSessionJob(
+        sessionId: string,
+        jobKey: string,
+        expectedRunId?: string
+    ):
+        | { outcome: 'deleted' }
+        | { outcome: 'not-found' }
+        | { outcome: 'run-mismatch' } {
+        const result = this.store.sessionJobs.delete(sessionId, jobKey, expectedRunId)
+        if (result.outcome === 'deleted') {
+            const primary = this.store.sessionJobs.getPrimaryRunning(sessionId)
+            this.sessionCache.emitAttachedJobChanged(sessionId, primary)
+        }
+        return result
     }
 
     private async withScratchlistUploadLock<T>(
@@ -1603,11 +1921,13 @@ recordSessionActivity(sessionId: string, updatedAt: number): void {
     }
 
     handleMachineAlive(payload: { machineId: string; time: number; health?: unknown }): void {
+        const wasActive = this.machineCache.getMachine(payload.machineId)?.active === true
         this.machineCache.handleMachineAlive(payload)
-        // Effective `auto` (hub default or per-machine override) pull-applies.
-        void this.maybeFleetUpgradeMachine(payload.machineId, { source: 'machine-alive' }).catch((error) => {
-            console.warn('[fleet-upgrade] offer resolution failed', error)
-        })
+        const nowActive = this.machineCache.getMachine(payload.machineId)?.active === true
+        if (!wasActive && nowActive) {
+            // Runner recovery: requeue wakes whose rapid-retry budget expired.
+            this.requeuePendingJobTerminalWakes()
+        }
     }
 
     /**
@@ -3948,6 +4268,10 @@ recordSessionActivity(sessionId: string, updatedAt: number): void {
             this.persistClearOperationState(sessionId, namespace, operation, message)
             return { type: 'error', message, code: 'replacement_link_failed' }
         }
+        // Move outliving jobs before writing supersededBySessionId. resolveAttachedJobSessionId
+        // follows that link; without a transfer, heartbeats on the retained source id hit the
+        // empty replacement while the meter row stays frozen on the archived source.
+        this.transferAttachedJobs(sessionId, replacementSessionId, namespace)
         if (!this.persistClearReplacement(sessionId, namespace, replacementSessionId, operation)) {
             const message = 'Fresh OpenCode session started but the archived source could not be linked'
             this.persistClearOperationState(sessionId, namespace, operation, message)
@@ -4619,6 +4943,11 @@ recordSessionActivity(sessionId: string, updatedAt: number): void {
                         message: 'Cursor chat data is no longer available on the recorded machine',
                         code: 'resume_unavailable'
                     }
+                }
+                // Thread dir without store.db: nothing was ever persisted, so
+                // there is nothing to resume; start a fresh Cursor thread.
+                if (chatStatus.store === 'empty') {
+                    resumeToken = undefined
                 }
             } catch (error) {
                 // Soft-fail on probe skew / missing handler (#1084): definitive
@@ -5903,12 +6232,20 @@ recordSessionActivity(sessionId: string, updatedAt: number): void {
         return await this.rpcGateway.listCopilotModelsForCwd(machineId, cwd)
     }
 
+    async listCopilotReasoningEffortOptionsForSession(sessionId: string): Promise<CopilotReasoningEffortResponse> {
+        return await this.rpcGateway.listCopilotReasoningEffortOptionsForSession(sessionId)
+    }
+
     async listCopilotModelsForSession(sessionId: string): Promise<RpcListCopilotModelsResponse> {
         return await this.rpcGateway.listCopilotModelsForSession(sessionId)
     }
 
     async listKimiModelsForCwd(machineId: string, cwd: string): Promise<RpcListKimiModelsResponse> {
         return await this.rpcGateway.listKimiModelsForCwd(machineId, cwd)
+    }
+
+    async listKimiReasoningEffortOptionsForSession(sessionId: string): Promise<KimiReasoningEffortResponse> {
+        return await this.rpcGateway.listKimiReasoningEffortOptionsForSession(sessionId)
     }
 
     async listKimiModelsForSession(sessionId: string): Promise<RpcListKimiModelsResponse> {

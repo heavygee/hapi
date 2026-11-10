@@ -19,7 +19,6 @@ import {
 } from './events'
 import { ensureOverseerInboxSchema } from './inboxItems'
 import { SessionJobsStore } from './sessionJobsStore'
-import { ensureSessionJobWakeColumns } from './sessionJobs'
 import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
 import { UsageStore } from './usageStore'
@@ -68,7 +67,7 @@ export {
     WorkGraphValidationError
 } from './workGraph'
 
-const SCHEMA_VERSION: number = 32
+const SCHEMA_VERSION: number = 34
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -154,7 +153,6 @@ export class Store {
 
         // Soup tip keeps SCHEMA_VERSION=23 (tolerate-ahead). Wake columns for
         // #1489 are additive and must exist even when user_version is already ahead.
-        ensureSessionJobWakeColumns(this.db)
         ensureMessageDeliveryStateColumn(this.db)
 
         if (dbPath !== ':memory:' && !dbPath.startsWith('file::memory:')) {
@@ -360,6 +358,14 @@ export class Store {
         })()
     }
 
+    /**
+     * Run `fn` in one SQLite transaction. Nested `runInTransaction` calls
+     * become savepoints (bun:sqlite). Throw to roll back.
+     */
+    runInTransaction<T>(fn: () => T): T {
+        return this.db.transaction(fn)()
+    }
+
     close(): void {
         if (this.closed) return
         this.db.close()
@@ -401,8 +407,15 @@ export class Store {
             18: () => this.migrateFromV18ToV19(),
             19: () => this.migrateFromV19ToV20(),
             20: () => this.migrateFromV20ToV21(),
-            // Upstream #1115 dual-pin columns at v21→v22; upstream work graph
-            // at v22→v23; V24 unions the independently-shipped soup jobs table.
+            // Upstream #1115 dual-pin at v21→v22; #1467 A2A events at v22→v23;
+            // iOS push_key at v23→v24; steer delivery_state at v24→v25;
+            // immediate-queue heartbeat index at v25→v26;
+            // upstream future-scheduled index at v26→v27;
+            // upstream session_turns at v27→v28; last_user_message_at at v28→v29;
+            // upstream read-state at v29→v30;
+            // #1404 session_jobs at v31→v32 (after upstream FTS v30→v31); run_id fence at v32→v33;
+            // #1489 wake-on-terminal at v33→v34
+            // (jobs remapped again after upstream took 28/29/30).
             21: () => this.migrateFromV21ToV22(),
             22: () => this.migrateFromV22ToV23(),
             23: () => this.migrateFromV23ToV24(),
@@ -415,6 +428,8 @@ export class Store {
             29: () => this.migrateFromV29ToV30(),
             30: () => this.migrateFromV30ToV31(),
             31: () => this.migrateFromV31ToV32(),
+            32: () => this.migrateFromV32ToV33(),
+            33: () => this.migrateFromV33ToV34(),
         })
 
         if (currentVersion === 0) {
@@ -445,6 +460,20 @@ export class Store {
         }
 
         const stepMigrations = buildStepMigrations(false)
+        // A v26 database predates all three derived-index refinements. Create
+        // the final schema and rebuild once instead of running the v26→v27
+        // rebuild, v28→v29 short-index backfill, and v29→v30 rebuild in turn.
+        // Keep the individual steps below for databases that resume from an
+        // intermediate schema version after an interrupted upgrade.
+        if (currentVersion === 26) {
+            this.migrateFromV26ToV30()
+            this.migrateFromV29ToV30()
+            this.migrateFromV30ToV31()
+            this.migrateFromV31ToV32()
+            this.migrateFromV32ToV33()
+            this.setUserVersion(SCHEMA_VERSION)
+            return
+        }
         if (currentVersion < SCHEMA_VERSION && stepMigrations[currentVersion]) {
             for (let v = currentVersion; v < SCHEMA_VERSION; v++) {
                 const step = stepMigrations[v]
@@ -660,6 +689,7 @@ export class Store {
                 remaining REAL,
                 unit TEXT,
                 detail TEXT,
+                run_id TEXT,
                 wake_on_terminal INTEGER NOT NULL DEFAULT 0,
                 wake_prompt TEXT,
                 wake_emitted_run_id TEXT,
@@ -1112,7 +1142,7 @@ export class Store {
     }
 
     private migrateFromV21ToV22(): void {
-        // Upstream #1115 dual-pin (their SCHEMA 22) remapped onto soup ladder.
+        // Upstream #1115 dual-pin columns.
         const columns = this.getSessionColumnNames()
         if (columns.size === 0) return
         if (!columns.has('pinned')) {
@@ -1341,6 +1371,72 @@ export class Store {
     private getMessageColumnNames(): Set<string> {
         const rows = this.db.prepare('PRAGMA table_info(messages)').all() as Array<{ name: string }>
         return new Set(rows.map((row) => row.name))
+    }
+
+    /**
+     * v31→v32: #1404 session-attached jobs (after upstream took v30→v31 for FTS).
+     * Also repairs session_turns + last_user_message_at for fork DBs that
+     * previously burned those version numbers on an earlier jobs remap —
+     * both ensures are idempotent.
+     */
+    private migrateFromV31ToV32(): void {
+        this.migrateFromV27ToV28()
+        this.migrateFromV28ToV29()
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS session_jobs (
+                session_id TEXT NOT NULL,
+                job_key TEXT NOT NULL,
+                label TEXT NOT NULL,
+                status TEXT NOT NULL,
+                done REAL,
+                total REAL,
+                remaining REAL,
+                unit TEXT,
+                detail TEXT,
+                wake_on_terminal INTEGER NOT NULL DEFAULT 0,
+                wake_prompt TEXT,
+                wake_emitted_run_id TEXT,
+                heartbeat_at INTEGER NOT NULL,
+                started_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (session_id, job_key),
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_session_jobs_session_status_updated
+                ON session_jobs(session_id, status, updated_at DESC);
+        `)
+    }
+
+    /**
+     * v32→v33: supervisor run generation — CAS fence for key reuse (#1424).
+     * Also ensures message-content FTS for fork DBs that already sat at tip 32
+     * (jobs+run_id) before this merge absorbed upstream v30→v31 search.
+     * Also ensures upstream read-state columns for older fork tips.
+     */
+    private migrateFromV32ToV33(): void {
+        this.migrateFromV29ToV30()
+        this.migrateFromV30ToV31()
+        const cols = this.db.prepare('PRAGMA table_info(session_jobs)').all() as Array<{ name: string }>
+        if (cols.length > 0 && !cols.some((c) => c.name === 'run_id')) {
+            this.db.exec('ALTER TABLE session_jobs ADD COLUMN run_id TEXT')
+        }
+    }
+
+    /**
+     * v33→v34: tiann/hapi#1489 — opt-in terminal wake + one-shot claim marker.
+     */
+    private migrateFromV33ToV34(): void {
+        const cols = this.db.prepare('PRAGMA table_info(session_jobs)').all() as Array<{ name: string }>
+        const names = new Set(cols.map((c) => c.name))
+        if (!names.has('wake_on_terminal')) {
+            this.db.exec('ALTER TABLE session_jobs ADD COLUMN wake_on_terminal INTEGER NOT NULL DEFAULT 0')
+        }
+        if (!names.has('wake_prompt')) {
+            this.db.exec('ALTER TABLE session_jobs ADD COLUMN wake_prompt TEXT')
+        }
+        if (!names.has('wake_emitted_run_id')) {
+            this.db.exec('ALTER TABLE session_jobs ADD COLUMN wake_emitted_run_id TEXT')
+        }
     }
 
     private getUserVersion(): number {

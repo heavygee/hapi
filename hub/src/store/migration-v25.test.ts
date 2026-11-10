@@ -37,6 +37,19 @@ describe('schema migration v24 to v27 (via grants/replays)', () => {
             .map((row) => row.name)
         expect(columns).toContain('grant_hash')
         expect(columns).toContain('machine_id')
+        const plan = internalDb.prepare(`
+            EXPLAIN QUERY PLAN
+            SELECT * FROM messages
+            WHERE session_id = ?
+              AND invoked_at IS NULL
+              AND local_id IS NOT NULL
+              AND scheduled_at IS NULL
+              AND delivery_state = 'queued'
+            ORDER BY seq ASC
+        `).all('session-id') as Array<{ detail: string }>
+
+        expect(version.user_version).toBe(34)
+        expect(plan.some((row) => row.detail.includes('idx_messages_immediate_queued'))).toBe(true)
         migrated.close()
     })
 })

@@ -185,6 +185,44 @@ export function ScheduleIcon(props: IconProps) {
     )
 }
 
+/**
+ * Power/standby mark — a stopped or archived session's presence badge. Drawn
+ * heavier than the other icons (stroke 3.6 of 24) because it renders at 10px.
+ */
+export function StoppedBadgeIcon(props: IconProps) {
+    return createIcon(
+        <>
+            <path d="M7.2 6.2a8.6 8.6 0 1 0 9.6 0" />
+            <path d="M12 2v8.4" />
+        </>,
+        props,
+        3.6
+    )
+}
+
+/** Raised hand — a session waiting for permission approval. */
+export function HandIcon(props: IconProps) {
+    return createIcon(
+        <>
+            <path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2" />
+            <path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2" />
+            <path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8" />
+            <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" />
+        </>,
+        props,
+        2
+    )
+}
+
+/** Speech bubble — a session waiting for the user's reply. */
+export function MessageIcon(props: IconProps) {
+    return createIcon(
+        <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />,
+        props,
+        2
+    )
+}
+
 /** Spinner spokes; callers add the spin animation and color. */
 export function LoaderIcon(props: IconProps) {
     return createIcon(

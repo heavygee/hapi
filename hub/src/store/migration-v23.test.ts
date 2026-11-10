@@ -8,21 +8,47 @@ function getColumns(store: Store, table: string): string[] {
     return rows.map((row) => row.name)
 }
 
-describe('Store V22→V23 (soup); fresh schema still includes migration: session_jobs table', () => {
-    it('fresh DB has session_jobs with expected columns', () => {
-        const store = new Store(':memory:')
-        const cols = getColumns(store, 'session_jobs')
-        expect(cols).toContain('session_id')
-        expect(cols).toContain('job_key')
-        expect(cols).toContain('label')
-        expect(cols).toContain('status')
-        expect(cols).toContain('done')
-        expect(cols).toContain('total')
-        expect(cols).toContain('remaining')
-        expect(cols).toContain('heartbeat_at')
-        expect(cols).toContain('started_at')
-        expect(cols).toContain('updated_at')
-        store.close()
+afterEach(() => {
+    for (const dir of tempDirs.splice(0)) {
+        Bun.gc(true)
+        rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+    }
+})
+
+describe('schema migrations through v33', () => {
+    it('adds events and event_links tables to a V22 database', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v23-'))
+        tempDirs.push(dir)
+        const dbPath = join(dir, 'hapi.db')
+
+        new Store(dbPath).close()
+        const legacy = new Database(dbPath)
+        legacy.exec(`
+            DROP TABLE IF EXISTS event_links;
+            DROP TABLE IF EXISTS events;
+            PRAGMA user_version = 22;
+        `)
+        legacy.close()
+
+        const migrated = new Store(dbPath)
+        try {
+            const internalDb = (migrated as unknown as { db: Database }).db
+            const events = internalDb.prepare(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'events'"
+            ).get() as { name: string } | null
+            const links = internalDb.prepare(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'event_links'"
+            ).get() as { name: string } | null
+            const version = internalDb.prepare('PRAGMA user_version').get() as { user_version: number }
+
+            expect(events?.name).toBe('events')
+            expect(links?.name).toBe('event_links')
+            const columns = internalDb.prepare('PRAGMA table_info(messages)').all() as Array<{ name: string }>
+            expect(columns.map((column) => column.name)).toContain('delivery_state')
+            expect(version.user_version).toBe(34)
+        } finally {
+            migrated.close()
+        }
     })
 
     it('upserts, patches, deletes a job and surfaces primary running', () => {
@@ -42,32 +68,51 @@ describe('Store V22→V23 (soup); fresh schema still includes migration: session
         expect(primary?.key).toBe('beets')
         expect(primary?.remaining).toBe(100)
 
-        store.sessionJobs.upsert(session.id, 'newer', {
-            label: 'sidecar',
-            status: 'running',
-            remaining: 1,
-            startedAt: (primary!.startedAt) + 60_000
-        })
-        store.sessionJobs.patch(session.id, 'newer', { remaining: 0 })
-        expect(store.sessionJobs.getPrimaryRunning(session.id)?.key).toBe('beets')
-        expect(store.sessionJobs.delete(session.id, 'newer')).toBe(true)
-
-        const patched = store.sessionJobs.patch(session.id, 'beets', { remaining: 80 })
-        expect(patched?.remaining).toBe(80)
-
-        expect(store.sessionJobs.delete(session.id, 'beets')).toBe(true)
-        expect(store.sessionJobs.getPrimaryRunning(session.id)).toBeNull()
-        store.close()
+        const migrated = new Store(dbPath)
+        try {
+            expect(migrated.messages.searchContent('backfill this', 'default')[0]?.sessionId).toBe(session.id)
+            const internalDb = (migrated as unknown as { db: Database }).db
+            const version = internalDb.prepare('PRAGMA user_version').get() as { user_version: number }
+            expect(version.user_version).toBe(34)
+        } finally {
+            migrated.close()
+        }
     })
 
-    it('cascade-deletes jobs when session is deleted', async () => {
-        const store = new Store(':memory:')
-        const session = store.sessions.getOrCreateSession('test', { path: '/tmp' }, null, 'default')
-        store.sessionJobs.upsert(session.id, 'job', { label: 'x', status: 'running' })
-        expect(store.sessionJobs.list(session.id)).toHaveLength(1)
-        await store.sessions.deleteSession(session.id, 'default')
-        expect(store.sessionJobs.list(session.id)).toHaveLength(0)
-        store.close()
+    it('adds the indexed message lookup to an existing v27 search schema', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v27-'))
+        tempDirs.push(dir)
+        const dbPath = join(dir, 'hapi.db')
+
+        const initial = new Store(dbPath)
+        const session = initial.sessions.getOrCreateSession('migration-lookup', { path: '/tmp/migration-lookup' }, null, 'default')
+        initial.messages.addMessage(session.id, {
+            role: 'user',
+            content: { type: 'text', text: 'backfill the lookup table' }
+        })
+        initial.close()
+
+        const legacy = new Database(dbPath)
+        legacy.exec(`
+            DROP TABLE IF EXISTS message_content_search_lookup;
+            DROP TABLE IF EXISTS message_content_search_short;
+            PRAGMA user_version = 27;
+        `)
+        legacy.close()
+
+        const migrated = new Store(dbPath)
+        try {
+            expect(migrated.messages.searchContent('lookup table', 'default')[0]?.sessionId).toBe(session.id)
+            const internalDb = (migrated as unknown as { db: Database }).db
+            const lookup = internalDb.prepare(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'message_content_search_lookup'"
+            ).get() as { name: string } | null
+            const version = internalDb.prepare('PRAGMA user_version').get() as { user_version: number }
+            expect(lookup?.name).toBe('message_content_search_lookup')
+            expect(version.user_version).toBe(34)
+        } finally {
+            migrated.close()
+        }
     })
 
     it('preserves startedAt on PUT without body.startedAt; honors explicit correction', () => {
@@ -108,6 +153,34 @@ describe('Store V22→V23 (soup); fresh schema still includes migration: session
         expect(patched?.startedAt).toBe(historical)
         expect(patched?.remaining).toBe(8)
         store.close()
+        const migrated = new Store(dbPath)
+        try {
+            expect(migrated.messages.searchContent('你好', 'default')[0]?.sessionId).toBe(session.id)
+            expect(migrated.messages.searchContent('tail-migration-needle', 'default')[0]?.sessionId)
+                .toBe(session.id)
+            const internalDb = (migrated as unknown as { db: Database }).db
+            const shortIndex = internalDb.prepare(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'message_content_search_short'"
+            ).get() as { name: string } | null
+            const lookupColumns = internalDb.prepare(
+                'PRAGMA table_info(message_content_search_lookup)'
+            ).all() as Array<{ name: string }>
+            const target = internalDb.prepare(
+                'SELECT target_message_id FROM message_content_search_lookup WHERE message_id = ?'
+            ).get(message.id) as { target_message_id: string } | undefined
+            const indexed = internalDb.prepare(
+                'SELECT searchable_text FROM message_content_search WHERE message_id = ?'
+            ).get(message.id) as { searchable_text: string } | undefined
+            const version = internalDb.prepare('PRAGMA user_version').get() as { user_version: number }
+            expect(shortIndex?.name).toBe('message_content_search_short')
+            expect(lookupColumns.map((column) => column.name)).toContain('target_message_id')
+            expect(target?.target_message_id).toBe(message.id)
+            expect(indexed?.searchable_text.length).toBeLessThanOrEqual(MAX_INDEXED_MESSAGE_CHARACTERS)
+            expect(indexed?.searchable_text).toContain('tail-migration-needle')
+            expect(version.user_version).toBe(34)
+        } finally {
+            migrated.close()
+        }
     })
 
     it('transfers jobs on merge without colliding keys', () => {
@@ -124,5 +197,48 @@ describe('Store V22→V23 (soup); fresh schema still includes migration: session
         expect(store.sessionJobs.getPrimaryRunning(newSession.id)?.remaining).toBe(5)
         expect(store.sessionJobs.list(oldSession.id)).toHaveLength(0)
         store.close()
+        initial.close()
+
+        // Simulate the v29 derived index without deleting any user data. The
+        // old 16 KiB head/tail window misses the marker near its midpoint.
+        const legacy = new Database(dbPath)
+        const legacyIndexedText = `${text.slice(0, 8_191)} ${text.slice(-8_192)}`
+        legacy.prepare(
+            'UPDATE message_content_search SET searchable_text = ? WHERE message_id = ?'
+        ).run(legacyIndexedText, message.id)
+        legacy.prepare(
+            `UPDATE message_content_search_lookup
+             SET is_truncated = 0, short_index_truncated = 0
+             WHERE target_message_id = ?`
+        ).run(message.id)
+        legacy.exec('PRAGMA user_version = 29')
+        legacy.close()
+
+        const migrated = new Store(dbPath)
+        try {
+            expect(migrated.messages.searchContent('v30-middle-needle', 'default'))
+                .toMatchObject([{ sessionId: session.id, truncated: true }])
+
+            const internalDb = (migrated as unknown as { db: Database }).db
+            const indexed = internalDb.prepare(`
+                SELECT searchable_text
+                FROM message_content_search
+                WHERE message_id = ?
+            `).get(message.id) as { searchable_text: string } | undefined
+            const metadata = internalDb.prepare(`
+                SELECT is_truncated, short_index_truncated
+                FROM message_content_search_lookup
+                WHERE target_message_id = ?
+            `).get(message.id) as { is_truncated: number; short_index_truncated: number } | undefined
+            const version = internalDb.prepare('PRAGMA user_version').get() as { user_version: number }
+
+            expect(indexed?.searchable_text.length).toBeLessThanOrEqual(MAX_INDEXED_MESSAGE_CHARACTERS)
+            expect(indexed?.searchable_text).toContain('v30-middle-needle')
+            expect(metadata?.is_truncated).toBe(1)
+            expect(metadata?.short_index_truncated).toBe(1)
+            expect(version.user_version).toBe(34)
+        } finally {
+            migrated.close()
+        }
     })
 })

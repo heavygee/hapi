@@ -183,6 +183,19 @@ describe('runHappyMcpStdioBridge tool forwarding', () => {
         ].sort())
     })
 
+    it.each(['auto', 'queue', 'steer'])('advertises and forwards ping_peer delivery mode %s', async (deliveryMode) => {
+        await runHappyMcpStdioBridge(['--url', 'http://127.0.0.1:43006', '--tools', 'ping_peer'])
+        const schema = harness.configs.get('ping_peer')?.inputSchema as {
+            parse(input: unknown): unknown
+        }
+        const args = { sessionIdPrefix: 'peer-id', message: 'hello', deliveryMode }
+        expect(harness.configs.get('ping_peer')?.description).toContain('auto (default)')
+        expect(schema.parse(args)).toEqual(args)
+        expect(() => schema.parse({ ...args, deliveryMode: 'interrupt' })).toThrow()
+        await harness.tools.get('ping_peer')?.(args)
+        expect(harness.callTool).toHaveBeenCalledWith({ name: 'ping_peer', arguments: args })
+    })
+
     it('registers inspect_peer when included in --tools', async () => {
         await runHappyMcpStdioBridge([
             '--url',
@@ -299,6 +312,18 @@ describe('runHappyMcpStdioBridge tool forwarding', () => {
         for (const name of ['change_title', 'list_peers', 'search_peers', 'ping_peer', 'inspect_peer', 'spawn_peer', 'archive_peer', 'search_content']) {
             expect(seeded).toContain(name)
         }
+        expect([...harness.tools.keys()]).toEqual([
+            'change_title',
+            'display_image',
+            'display_video',
+            'display_media',
+            'session_job',
+            'ping_peer',
+            'spawn_peer',
+            'inspect_peer',
+            'list_peers',
+            'search_content'
+        ])
 
         harness.tools.clear()
         harness.configs.clear()
@@ -314,7 +339,15 @@ describe('runHappyMcpStdioBridge tool forwarding', () => {
             // search_content is a transcript search, not a peer tool: it survives the kill switch.
             for (const name of ['change_title', 'display_image', 'display_video', 'display_media', 'search_content']) {
                 expect(remaining).toContain(name)
-            }
+            // session_job is own-session — kept when peer tools are stripped.
+            expect([...harness.tools.keys()]).toEqual([
+                'change_title',
+                'display_image',
+                'display_video',
+                'display_media',
+                'session_job',
+                'search_content',
+            ])
         } finally {
             delete process.env.HAPI_DISABLE_PEER_TOOLS
         }

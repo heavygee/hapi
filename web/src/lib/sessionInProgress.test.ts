@@ -42,9 +42,21 @@ describe('sessionInProgress', () => {
     })
 
     it('suppresses ambient thinking when an attached job is the honest signal (#1553)', () => {
+    it('keeps real foreground thinking when a job is also attached (#1553)', () => {
         const session = makeSession({
             active: true,
             thinking: true,
+            attachedJob: runningJob,
+        })
+        expect(isAgentForegroundThinking(session)).toBe(true)
+        expect(hasAgentForegroundWork(session)).toBe(true)
+    })
+
+    it('defers to pending chrome instead of the thinking spinner', () => {
+        const session = makeSession({
+            active: true,
+            thinking: true,
+            pendingRequestsCount: 1,
             attachedJob: runningJob,
         })
         expect(isAgentForegroundThinking(session)).toBe(false)
@@ -56,6 +68,7 @@ describe('sessionInProgress', () => {
             active: true,
             thinking: true,
         }))).toBe(true)
+    it('still treats background tasks as foreground work', () => {
         expect(hasAgentForegroundWork(makeSession({
             active: true,
             backgroundTaskCount: 2,

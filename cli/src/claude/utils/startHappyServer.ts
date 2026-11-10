@@ -47,6 +47,7 @@ import {
     searchSessionContent,
 } from "@/modules/searchContent/searchContent";
 import { applyLinkIssue } from "@/agent/sessionIssueLink";
+import { applySessionDisplayRename, normalizeSessionDisplayTitle } from "@/agent/sessionDisplayRename";
 import {
     SESSION_JOB_TOOL_DESCRIPTION,
     SESSION_JOB_TOOL_NAME,
@@ -55,6 +56,19 @@ import {
     type SessionJobToolArgs,
 } from "@/modules/sessionJob/sessionJobMcp";
 import { SpawnPeerError, spawnPeer } from "@/modules/spawnPeer/spawnPeer";
+
+export type HapiMcpToolName =
+    | 'change_title'
+    | 'display_image'
+    | 'display_video'
+    | 'display_media'
+    | 'list_peers'
+    | 'ping_peer'
+    | 'inspect_peer'
+    | 'spawn_peer'
+    | 'search_content'
+    | 'session_job'
+    | 'skill_lookup';
 
 const SEARCH_CONTENT_DESCRIPTION =
     'Search transcript text across HAPI sessions on the same hub/namespace (what sessions actually said). ' +
@@ -618,6 +632,18 @@ mcp.registerTool<any, any>('display_image', {
             }
         });
     }
+    registerTool(SESSION_JOB_TOOL_NAME, {
+        description: SESSION_JOB_TOOL_DESCRIPTION,
+        title: 'Session-Attached Job',
+        inputSchema: sessionJobInputSchema,
+    }, async (args: SessionJobToolArgs) => {
+        logger.debug('[hapiMCP] session_job:', args.action, args.jobKey);
+        const result = await handleSessionJobTool(args, client.sessionId);
+        return {
+            content: [{ type: 'text' as const, text: result.text }],
+            isError: result.isError,
+        };
+    });
 
     if (!peerToolsDisabled) {
         mcp.registerTool<any, any>('ping_peer', {
@@ -1030,6 +1056,35 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
     const emitTitleSummary = options.emitTitleSummary ?? true;
     const enableChangeTitle = options.enableChangeTitle ?? true;
     const enableDisplayLinks = resolveEnableDisplayLinks(options);
+    const requestedTools = options.enabledTools ? new Set(options.enabledTools) : null;
+    const includeTool = (name: HapiMcpToolName): boolean =>
+        requestedTools === null || requestedTools.has(name);
+    const peerToolsDisabled = isPeerToolsDisabled();
+    const toolNames: HapiMcpToolName[] = [];
+    if (enableChangeTitle && includeTool('change_title')) toolNames.push('change_title');
+    // Fork tools: upstream's builder has no notion of these.
+    for (const name of ['set_voice_mode', 'link_issue'] as const) {
+        if (includeTool(name)) toolNames.push(name);
+    }
+    for (const name of ['display_image', 'display_video', 'display_media'] as const) {
+        if (includeTool(name)) toolNames.push(name);
+    }
+    if (enableDisplayLinks && includeTool('display_links')) toolNames.push('display_links');
+    // Fork tool: upstream's builder omits search_content and its rewrite removed
+    // the fork block that pushed it. Gated like the rest.
+    if (includeTool('search_content')) toolNames.push('search_content');
+    if (!peerToolsDisabled) {
+        for (const name of ['list_peers', 'search_peers', 'ping_peer', 'inspect_peer', 'spawn_peer', 'archive_peer'] as const) {
+            if (includeTool(name)) toolNames.push(name);
+        }
+    }
+    if (includeTool(SESSION_JOB_TOOL_NAME)) toolNames.push(SESSION_JOB_TOOL_NAME);
+    if (options.skillLookup && includeTool('skill_lookup')) toolNames.push('skill_lookup');
+    if (toolNames.length === 0) {
+        throw new Error('startHappyServer requires at least one enabled tool');
+    }
+    const enabledTools = new Set(toolNames);
+
     const transports = new Map<string, StreamableHTTPServerTransport>();
     const mcps = new Map<string, McpServer>();
 
@@ -1096,20 +1151,6 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
         hapiMcpUrl: mcpUrl,
     }));
 
-    const peerToolsDisabled = isPeerToolsDisabled();
-    const toolNames = enableChangeTitle
-        ? ['change_title', 'set_voice_mode', 'link_issue', 'display_image', 'display_video', 'display_media']
-        : ['set_voice_mode', 'link_issue', 'display_image', 'display_video', 'display_media'];
-    if (enableDisplayLinks) {
-        toolNames.push('display_links');
-    }
-    toolNames.push('list_peers', 'search_peers', 'search_content', 'ping_peer', 'inspect_peer', 'spawn_peer', 'archive_peer', SESSION_JOB_TOOL_NAME);
-    if (peerToolsDisabled) {
-        const peerTools = new Set<string>(PEER_TOOL_NAMES);
-        for (let i = toolNames.length - 1; i >= 0; i--) {
-            if (peerTools.has(toolNames[i])) toolNames.splice(i, 1);
-        }
-    }
     if (options.skillLookup) {
         toolNames.push('skill_lookup');
     }

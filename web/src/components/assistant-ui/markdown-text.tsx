@@ -10,6 +10,7 @@ import {
 } from '@assistant-ui/react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
+import remarkCjkFriendly from 'remark-cjk-friendly/parseOnly'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import remarkDisableIndentedCode from '@/lib/remark-disable-indented-code'
@@ -37,9 +38,15 @@ import { DEFAULT_OPEN_EXTERNAL_LINKS_IN_NEW_TAB, useOpenExternalLinksInNewTab } 
 import type { MarkdownTextPrimitiveProps } from '@assistant-ui/react-markdown'
 
 // ── Plugin array ────────────────────────────────────────────────────────────
-// Order: remarkGfm → remarkRepairTables → remarkLatexBracketMath → remarkNonHttpsAutolink → remarkStripCjkAutolink → remarkMath → remarkDisableIndentedCode → remarkSessionPathLinks → remarkFilePathLinks
+// Order: remarkGfm → remarkRepairTables → remarkCjkFriendly → remarkLatexBracketMath → remarkNonHttpsAutolink → remarkStripCjkAutolink → remarkMath → remarkDisableIndentedCode → remarkSessionPathLinks → remarkFilePathLinks
 // remarkRepairTables must run immediately after remarkGfm — it reads file.value
 // (raw source) to pad short separator rows before remark-gfm parses the table.
+// remarkCjkFriendly is a parse-time micromark extension
+// (commonmark/commonmark-spec#650):
+// it lets `**` close before CJK particles that directly follow punctuation
+// (e.g. `**...(...)**은`). It stays after remarkRepairTables so the documented
+// remarkGfm → remarkRepairTables adjacency is preserved; position in the array
+// does not affect parsing, which happens once before any transformer runs.
 // remarkNonHttpsAutolink must run BEFORE remarkStripCjkAutolink so that the
 // CJK strip plugin sees the new link nodes and can trim trailing CJK punctuation
 // from them. Both must come before remarkMath (to avoid treating TeX as URI).
@@ -86,6 +93,7 @@ const REMARK_GFM_PLUGIN = [
 export const MARKDOWN_PLUGINS = [
     REMARK_GFM_PLUGIN,
     remarkRepairTables,
+    remarkCjkFriendly,
     remarkLatexBracketMath,
     ...MARKDOWN_PLUGIN_TAIL,
 ] satisfies NonNullable<MarkdownTextPrimitiveProps['remarkPlugins']>
@@ -93,6 +101,7 @@ export const MARKDOWN_PLUGINS = [
 export const MARKDOWN_PLUGINS_STANDALONE = [
     REMARK_GFM_PLUGIN,
     remarkRepairTables,
+    remarkCjkFriendly,
     remarkLatexBracketMath,
     ...MARKDOWN_PLUGIN_TAIL_STANDALONE,
 ] satisfies NonNullable<MarkdownTextPrimitiveProps['remarkPlugins']>
@@ -102,6 +111,7 @@ export const MARKDOWN_PLUGINS_STANDALONE = [
 export const MARKDOWN_PLUGINS_WITH_BREAKS = [
     REMARK_GFM_PLUGIN,
     remarkRepairTables,
+    remarkCjkFriendly,
     remarkLatexBracketMath,
     remarkBreaks,
     ...MARKDOWN_PLUGIN_TAIL,
@@ -110,6 +120,7 @@ export const MARKDOWN_PLUGINS_WITH_BREAKS = [
 export const MARKDOWN_PLUGINS_STANDALONE_WITH_BREAKS = [
     REMARK_GFM_PLUGIN,
     remarkRepairTables,
+    remarkCjkFriendly,
     remarkLatexBracketMath,
     remarkBreaks,
     ...MARKDOWN_PLUGIN_TAIL_STANDALONE,

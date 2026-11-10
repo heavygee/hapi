@@ -857,6 +857,13 @@ export const AttachedJobSchema = z.object({
     detail: z.string().max(500).optional(),
     /** Opt-in terminal wake (#1489). */
     wakeOnTerminal: z.boolean().optional(),
+    /** Opaque run generation — supervisors CAS against this on PATCH. */
+    runId: z.string().min(1).max(64).optional(),
+    /**
+     * Opt-in (tiann/hapi#1489): when the job hits completed/failed, hub resumes
+     * the owning session and posts a wake prompt. Default off.
+     */
+    /** Optional prescription text appended to the hub wake message. */
     wakePrompt: z.string().max(2000).optional(),
     heartbeatAt: z.number(),
     startedAt: z.number(),
@@ -876,6 +883,9 @@ export const AttachedJobUpsertSchema = z.object({
     detail: z.string().max(500).optional(),
     heartbeatAt: z.number().optional(),
     startedAt: z.number().optional(),
+    /** Supervisor-owned generation; hub mints one when omitted. */
+    runId: z.string().min(1).max(64).optional(),
+    /** Opt-in job-complete wake (#1489). Default off when omitted. */
     wakeOnTerminal: z.boolean().optional(),
     wakePrompt: z.string().max(2000).optional()
 }).strict()
@@ -892,12 +902,19 @@ export const AttachedJobPatchSchema = z.object({
     unit: z.string().min(1).max(64).nullable().optional(),
     detail: z.string().max(500).nullable().optional(),
     heartbeatAt: z.number().optional(),
+    /**
+     * Run generation fence. Supervisors that stamped runId on PUT must send the
+     * same value so a stale process cannot mutate a newer key-reuse run.
+     * Date.now()/startedAt is not unique enough for concurrent supervisors.
+     */
+    expectedRunId: z.string().min(1).max(64).optional(),
     wakeOnTerminal: z.boolean().optional(),
     wakePrompt: z.string().max(2000).nullable().optional()
 }).strict()
 
 export type AttachedJobPatch = z.infer<typeof AttachedJobPatchSchema>
 
+// Dual SSE (global + per-session) has no shared delivery order. Version is a
 // monotonic per-session emit watermark (not primary.updatedAt — primary
 // switches can go backwards). Lagged heartbeats cannot resurrect a clear.
 const VersionedAttachedJobPatchSchema = z.object({

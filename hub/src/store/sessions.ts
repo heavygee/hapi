@@ -1135,11 +1135,24 @@ export function getSessionsByNamespace(db: Database, namespace: string): StoredS
 }
 
 export function deleteSession(db: Database, id: string, namespace: string): boolean {
+    // Refuse while a running attached job exists — CASCADE would erase the live
+    // meter for idle (active=false) outliving work. Callers must transfer/clear first.
+    // Also drop FTS rows before the session DELETE (#1598).
     return runInTransaction(db, () => {
         const row = getSessionByNamespace(db, id, namespace)
         if (!row) {
             return false
         }
+
+        // Upstream guard: never delete a session that still has a running
+        // attached job. Checked BEFORE the tombstone below, so a refused
+        // delete does not leave an overseer tombstone for a live session.
+        const blocked = prepareCached(db, `
+            SELECT 1 FROM session_jobs
+            WHERE session_id = ? AND status = 'running'
+            LIMIT 1
+        `).get(id)
+        if (blocked) return false
 
         const metadata = row.metadata as Metadata | null
         tombstoneDeletedSession(

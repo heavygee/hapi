@@ -139,13 +139,29 @@ quarantine:
   - id: "cli:OpenCode compaction storage scans keeps old structural markers for a compaction finishing after attachment without replaying old output"
     owner: "heavygee"
     issue: 323
-    signature: "to be called once with arguments && opencodeStorageScanner.test.ts:"
+    # Covers the assertion FAMILY, not one instance: the same vi.waitFor race
+    # surfaces as toHaveBeenCalledWith at :127 ("to be called once with
+    # arguments") AND toHaveBeenCalledTimes at :126 ("to be called 1 times,
+    # but got 0 times"). The original signature named only the first, so CI
+    # blocked #238 on the second — same test, same flake, different wording
+    # (reported by 2ec10899, 2026-11-10). '"vi.fn()" to be called' is the
+    # common prefix of both; the per-test id above still bounds the blast
+    # radius to this one test.
+    signature: '"vi.fn()" to be called && opencodeStorageScanner.test.ts:'
     added: "2026-11-09"
     expires: "2026-11-23"
 
   - id: "cli:OpenCode compaction storage scans rejects a stale file read after an A to B to A generation change"
     owner: "heavygee"
     issue: 323
-    signature: "to be called once with arguments && opencodeStorageScanner.test.ts:"
+    # Covers the assertion FAMILY, not one instance: the same vi.waitFor race
+    # surfaces as toHaveBeenCalledWith at :127 ("to be called once with
+    # arguments") AND toHaveBeenCalledTimes at :126 ("to be called 1 times,
+    # but got 0 times"). The original signature named only the first, so CI
+    # blocked #238 on the second — same test, same flake, different wording
+    # (reported by 2ec10899, 2026-11-10). '"vi.fn()" to be called' is the
+    # common prefix of both; the per-test id above still bounds the blast
+    # radius to this one test.
+    signature: '"vi.fn()" to be called && opencodeStorageScanner.test.ts:'
     added: "2026-11-09"
     expires: "2026-11-23"

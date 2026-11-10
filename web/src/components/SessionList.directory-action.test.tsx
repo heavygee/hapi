@@ -43,6 +43,7 @@ function makeSession(overrides: Partial<SessionSummary> & { id: string }): Sessi
         futureScheduledMessageCount: 0,
         nextScheduledAt: null,
         attachedJob: null,
+        attachedJobUpdatedAt: 0,
         model: null,
         effort: null,
         ...overrides
@@ -103,6 +104,59 @@ describe('SessionList directory action', () => {
             machineId: 'machine-1',
             directory: '/home/ubuntu',
         })
+    })
+
+    it('archives only the live sessions of a project from its context menu', async () => {
+        const archiveSession = vi.fn(async () => {})
+        const metadata = (name: string, lifecycleState: string) => ({
+            path: '/work/proj', machineId: 'machine-1', name, flavor: 'codex', lifecycleState
+        })
+        renderWithProviders(
+            <SessionList
+                sessions={[
+                    makeSession({ id: 'live', active: true, updatedAt: 3, metadata: metadata('Live', 'running') }),
+                    makeSession({ id: 'stale', updatedAt: 2, metadata: metadata('Stale', 'idle') }),
+                    makeSession({ id: 'done', updatedAt: 1, metadata: metadata('Done', 'archived') }),
+                ]}
+                selectedSessionId={null}
+                onSelect={vi.fn()}
+                onNewSession={vi.fn()}
+                onRefresh={vi.fn()}
+                isLoading={false}
+                renderHeader={false}
+                api={{ archiveSession } as unknown as ApiClient}
+            />
+        )
+
+        fireEvent.contextMenu(screen.getByTitle('/work/proj'))
+        expect(screen.getByRole('menuitem', { name: 'Copy path' })).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Archive all' }))
+        expect(screen.getByText('Archive 2 sessions in "work/proj"?')).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Archive' }))
+
+        await waitFor(() => expect(archiveSession).toHaveBeenCalledTimes(2))
+        expect(archiveSession).toHaveBeenCalledWith('live')
+        expect(archiveSession).toHaveBeenCalledWith('stale')
+    })
+
+    it('opens the project menu from the keyboard with Shift+F10', () => {
+        renderWithProviders(
+            <SessionList
+                sessions={[makeSession({ id: 's1', metadata: { path: '/work/proj', name: 'S1', flavor: 'codex' } })]}
+                selectedSessionId={null}
+                onSelect={vi.fn()}
+                onNewSession={vi.fn()}
+                onRefresh={vi.fn()}
+                isLoading={false}
+                renderHeader={false}
+                api={null}
+            />
+        )
+
+        const header = screen.getByTitle('/work/proj')
+        expect(header).toHaveAttribute('tabindex', '0')
+        fireEvent.keyDown(header, { key: 'F10', shiftKey: true })
+        expect(screen.getByRole('menuitem', { name: 'Copy path' })).toBeInTheDocument()
     })
 
     it('keeps the sticky project header opaque and aligned with the list viewport', () => {
@@ -564,6 +618,7 @@ describe('SessionList collapse behavior', () => {
     })
 
     it('keeps In progress above project-pin groups; project pin stays first inside its group', () => {
+        // Legacy true → all (tri-state); floater under In progress; project folders stay below.
         localStorage.setItem('hapi-pin-in-progress-sessions', 'true')
         const sessions = [
             makeSession({
@@ -652,6 +707,7 @@ describe('SessionList collapse behavior', () => {
     })
 
     it('puts ambient thinking with attached job in Jobs not Running (#1553)', () => {
+    it('keeps a real agent turn in Running when a job is also attached (#1553)', () => {
         localStorage.setItem('hapi-pin-in-progress-sessions', 'all')
         const sessions = [
             makeSession({
@@ -674,8 +730,8 @@ describe('SessionList collapse behavior', () => {
         render(renderSessionList(sessions, null))
 
         expect(screen.getByTitle('In progress')).toBeInTheDocument()
-        expect(screen.getByText(/Jobs \(1\)/)).toBeInTheDocument()
-        expect(screen.queryByText(/^Running \(/i)).toBeNull()
+        expect(screen.getByText(/^Running \(1\)/i)).toBeInTheDocument()
+        expect(screen.queryByText(/^Jobs \(/i)).toBeNull()
         expect(screen.getByRole('button', { name: /Comfy batch/ })).toBeInTheDocument()
     })
 
@@ -707,11 +763,14 @@ describe('SessionList collapse behavior', () => {
         // Blocked section above it. This test's point is unchanged — operator
         // action still outranks Jobs — but it now outranks it harder.
         expect(screen.getByTestId('blocked-section')).toBeInTheDocument()
+        expect(screen.getByTitle('In progress')).toBeInTheDocument()
+        expect(screen.getByText(/^pending \(1\)$/i)).toBeInTheDocument()
         expect(screen.queryByText(/^Jobs \(/i)).toBeNull()
         expect(screen.getByRole('button', { name: /Needs approval/ })).toBeInTheDocument()
     })
 
     it('does not label quiet active sessions as Idle', () => {
+    it('does not label quiet connected sessions as Idle', () => {
         const sessions = [
             makeSession({
                 id: 'session-quiet',
@@ -728,6 +787,7 @@ describe('SessionList collapse behavior', () => {
     })
 
     it('keeps quiet active sessions in directory groups when pin-in-progress is on', () => {
+    it('keeps quiet connected sessions in directory groups when pin-in-progress is on', () => {
         localStorage.setItem('hapi-pin-in-progress-sessions', 'all')
         const sessions = [
             makeSession({
@@ -767,17 +827,21 @@ describe('SessionList collapse behavior', () => {
         // new-session-in-directory) even though every row floated.
         expect(screen.getByTitle('/work/hapi')).toBeInTheDocument()
         expect(screen.getByTitle('/work/other')).toBeInTheDocument()
+        expect(screen.getByText(/pending \(1\)/)).toBeInTheDocument()
+        // Quiet active stays under its project directory, not an Idle pin bucket.
+        expect(getProjectPanel().getAttribute('data-open')).toBe('true')
     })
 
     it('keeps new-session-in-directory actions for projects whose rows all floated', () => {
-        localStorage.setItem('hapi-pin-in-progress-sessions', 'true')
+        localStorage.setItem('hapi-pin-in-progress-sessions', 'all')
         const onNewSessionInDirectory = vi.fn()
         const sessions = [
             makeSession({
-                id: 'session-quiet',
+                id: 'session-running',
                 active: true,
+                thinking: true,
                 updatedAt: 100,
-                metadata: { path: '/work/hapi', machineId: 'machine-1', name: 'Quiet task', flavor: 'codex' },
+                metadata: { path: '/work/hapi', machineId: 'machine-1', name: 'Running task', flavor: 'codex' },
             }),
         ]
         renderWithProviders(
@@ -794,7 +858,7 @@ describe('SessionList collapse behavior', () => {
             />
         )
 
-        expect(screen.getByTitle('Active sessions')).toBeInTheDocument()
+        expect(screen.getByTitle('In progress')).toBeInTheDocument()
         // The project header survives as an action-only header.
         expect(screen.getByTitle('/work/hapi')).toBeInTheDocument()
 
@@ -861,8 +925,10 @@ describe('SessionList collapse behavior', () => {
         expect(screen.getByRole('button', { name: /Idle task/ })).toBeInTheDocument()
     })
 
-    it('toggles the Active section independently of In progress', () => {
-        localStorage.setItem('hapi-pin-in-progress-sessions', 'true')
+    it('does not pin quiet connected sessions as in-progress (#1404 jobs stand)', () => {
+        // Connected (session.active) ≠ working. Mode key `all` floats jobs +
+        // working + pending only — never quiet connected sockets.
+        localStorage.setItem('hapi-pin-in-progress-sessions', 'all')
         const sessions = [
             makeSession({
                 id: 'session-running',
@@ -880,23 +946,12 @@ describe('SessionList collapse behavior', () => {
         ]
         render(renderSessionList(sessions, null))
 
-        const activeHeader = screen.getByTitle('Active sessions')
-        const activePanel = () => activeHeader.nextElementSibling
-        expect(activePanel()?.getAttribute('data-open')).toBe('true')
-        expect(activeHeader.getAttribute('aria-expanded')).toBe('true')
-
-        // Keyboard toggle mirrors the In progress section.
-        fireEvent.keyDown(activeHeader, { key: 'Enter' })
-        expect(activeHeader.getAttribute('aria-expanded')).toBe('false')
-        expect(activePanel()?.getAttribute('data-open')).toBeNull()
-
-        // Searching forces the section open even while collapsed.
-        fireEvent.click(screen.getByRole('button', { name: SEARCH_LABEL }))
-        fireEvent.change(screen.getByPlaceholderText(SEARCH_PLACEHOLDER), {
-            target: { value: 'Quiet' },
-        })
-        expect(activePanel()?.getAttribute('data-open')).toBe('true')
-        expect(activeHeader.getAttribute('aria-expanded')).toBe('true')
+        expect(screen.getByTitle('In progress')).toBeInTheDocument()
+        expect(screen.queryByTitle('Active sessions')).toBeNull()
+        expect(screen.getByRole('button', { name: /Quiet task/ })).toBeInTheDocument()
+        expect(getProjectPanel().getAttribute('data-open')).toBe('true')
+        // Quiet connected stays under the project; working floats.
+        expect(screen.getByRole('button', { name: /Running task/ })).toBeInTheDocument()
     })
 
     it('keeps the running section open while searching even when collapsed', () => {
@@ -1965,4 +2020,43 @@ describe('SessionList search toggle', () => {
         expect(screen.getByRole('button', { name: 'Refresh' })).toBeInTheDocument()
         expect(screen.queryByRole('button', { name: SEARCH_LABEL })).toBeNull()
     })
+
+    it('toggles the Active section independently of In progress', () => {
+        localStorage.setItem('hapi-pin-in-progress-sessions', 'true')
+        const sessions = [
+            makeSession({
+                id: 'session-running',
+                active: true,
+                thinking: true,
+                updatedAt: 100,
+                metadata: { path: '/work/hapi', name: 'Running task', flavor: 'codex' },
+            }),
+            makeSession({
+                id: 'session-quiet',
+                active: true,
+                updatedAt: 90,
+                metadata: { path: '/work/hapi', name: 'Quiet task', flavor: 'codex' },
+            }),
+        ]
+        render(renderSessionList(sessions, null))
+
+        const activeHeader = screen.getByTitle('Active sessions')
+        const activePanel = () => activeHeader.nextElementSibling
+        expect(activePanel()?.getAttribute('data-open')).toBe('true')
+        expect(activeHeader.getAttribute('aria-expanded')).toBe('true')
+
+        // Keyboard toggle mirrors the In progress section.
+        fireEvent.keyDown(activeHeader, { key: 'Enter' })
+        expect(activeHeader.getAttribute('aria-expanded')).toBe('false')
+        expect(activePanel()?.getAttribute('data-open')).toBeNull()
+
+        // Searching forces the section open even while collapsed.
+        fireEvent.click(screen.getByRole('button', { name: SEARCH_LABEL }))
+        fireEvent.change(screen.getByPlaceholderText(SEARCH_PLACEHOLDER), {
+            target: { value: 'Quiet' },
+        })
+        expect(activePanel()?.getAttribute('data-open')).toBe('true')
+        expect(activeHeader.getAttribute('aria-expanded')).toBe('true')
+    })
+
 })

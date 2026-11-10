@@ -1,8 +1,14 @@
-# DRAFT — upstream submission, for operator approval before anything is posted
+# Session attention umbrella — posted
 
-**Target:** `tiann/hapi`, as one issue that the coordinated PRs each link back to.
-**Constraint:** short enough to actually be read by a solo maintainer. Current draft ≈ 450 words.
-**Status:** NOT POSTED. Nothing has been opened upstream.
+**Posted:**
+- Umbrella issue (submission text + images): [tiann/hapi#2356](https://github.com/tiann/hapi/issues/2356)
+- Three-way rationale Discussion: [tiann/hapi#2355](https://github.com/tiann/hapi/discussions/2355)
+- Flagship / "uber" PR (blocked chrome #1717) — lodging now; body carries this submission text + images and links #2355 / #2356
+
+**Orchestrator:** this HAPI session owns the campaign. All attention PRs link to **#2356** (and to the flagship PR once open). Daily feedback sweep on #2355 / #2356 / dogfooded children.
+
+**Constraint:** short enough to actually be read by a solo maintainer. Body ≈ 450 words.
+**Status:** POSTED 2026-11-10. Dogfood countdowns started on placed PRs.
 
 ---
 
@@ -25,8 +31,8 @@ scattered changes.
 **(2) regressed, and I'd like to make the case for restoring it.** Before `832c5922f` a
 non-resident row was faded. At a handful of sessions a 10px dot is fine; at thirty-plus active
 inside a thousand-session fleet, residency is a whole-list scan, and only a row-level signal
-survives it. Fade means residency: faded sessions are not taking RAM. Operators already know how
-to read that, and it means something important.
+survives it. Fade marks non-residency: faded sessions are not taking RAM. Operators already know
+how to read that, and it means something important.
 
 **A note on the signal itself.** `AGENT_NOTIFY_SUMMARY` already exists upstream. It has been
 quietly accumulating on installs that emit it — time to put it to use. Today it lands in the
@@ -44,7 +50,7 @@ land the producer side than a prettier badge.
 
 | # | Scope |
 |---|---|
-| 1 | Session-attached jobs — work that outlives the agent, with list chrome *(already open)* |
+| 1 | Session-attached jobs — work that outlives the agent, with list chrome *(#1424 merged 2026-11-10)* |
 | 2 | Blocked affordance: section, rail, jump pill, mark-unblocked with recorded reason |
 | 3 | Hub-authored blocker sources for terminal agent errors *(extends 2)* |
 | 4 | Residency: restore the row-level fade alongside your dot |
@@ -73,16 +79,12 @@ order above is a real dependency chain, so a removal part way down just stops ev
 - **Long-running-job fade digression removed.** Point of residency is: fade = not taking RAM;
   operators already know that signal. Job chrome is its own item.
 - **Status summaries are already upstream** (emit toggle + `AGENT_NOTIFY_SUMMARY` contract on
-  `tiann/hapi` main). Upstream's own instruction file notes Cursor lacks a system-prompt seam
-  on stock main, so the toggle covers other flavors today. Live hub DB (2026-11-09):
-  **542 / 892** Cursor sessions have `last_notify_status`. Tooling/meta (2026-11-09): the
-  composed soup still **declares** `installCursorNotifyRuleOverlay` but nothing calls it —
-  launcher wiring was lost in a rewrite (tracked in the sentinel triage plan). Fleet Cursor
-  emit is therefore not "the overlay works"; it is some other arranged path (rules / overlays
-  outside that function). **Closing a stock-upstream Cursor emission path remains forthcoming
-  under this heading.** Upstream body keeps "quietly accumulating / time to put it to use"
-  without claiming every flavor is covered on a fresh install. PR 3 (hub-authored blockers)
-  still covers terminal agent errors / dead turns regardless.
+  `tiann/hapi` main) for Claude/Codex/OpenCode/Grok. **Cursor gap:** #1375 already asked for a
+  Cursor rules overlay; #1376 shipped without Cursor and closed the parent — unfinished ask,
+  no follow-up until **#2353** (filed 2026-11-10). Peer babysitting the fix PR:
+  [/sessions/ab6f3c6c-3a29-49df-82fa-bceda7e46318](/sessions/ab6f3c6c-3a29-49df-82fa-bceda7e46318).
+  Three-way Part 2 cites #2353 / PR **#2354**. Soup overlay still uncalled until that lands /
+  remats; estate Cursor emit still rides alwaysApply rules meantime.
 - **Notify display glue (heavygee/hapi#322):** Happy showed summary JSON welded to trailing
   prose because `shared/src/messages.ts` required the last line to end with `}`, while the
   Cursor seal path already tolerated glue (`a176ca7ba`). **Live in soup** as of tip

@@ -3,6 +3,7 @@ import { mergeReadState } from '@hapi/protocol'
 import type { ApiClient } from '@/api/client'
 import type { SessionsResponse, SessionSummary } from '@/types/api'
 import { queryKeys } from '@/lib/query-keys'
+import { reconcileAttachedJobsFromCache } from './reconcileAttachedJobs'
 
 export type UseSessionsOptions = {
     enabled?: boolean
@@ -24,7 +25,7 @@ export function useSessions(api: ApiClient | null, options: UseSessionsOptions =
             const response = await api.getSessions()
             const current = queryClient.getQueryData<SessionsResponse>(queryKeys.sessions)
             const cached = new Map(current?.sessions.map(s => [s.id, s]))
-            return {
+            const withClocks: SessionsResponse = {
                 ...response,
                 sessions: response.sessions.map(session => {
                     const prior = cached.get(session.id)
@@ -35,6 +36,7 @@ export function useSessions(api: ApiClient | null, options: UseSessionsOptions =
                     }
                 })
             }
+            return reconcileAttachedJobsFromCache(withClocks, current)
         },
         enabled: Boolean(api) && (options.enabled ?? true),
     })

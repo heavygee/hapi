@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
 import type { SessionSummary } from '@/types/api'
 import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
-import { ScheduleIcon } from '@/components/icons'
+import { InfoIcon, ScheduleIcon, StoppedBadgeIcon } from '@/components/icons'
 import { HoverTooltip, SESSION_ROW_TOOLTIP_FOCUS_CLASS, useSessionRowTooltipIds } from '@/components/HoverTooltip'
 import { getAttentionLabel, SessionAttentionIndicator, SessionSpinner } from '@/components/SessionAttentionIndicator'
 import {
@@ -96,12 +96,20 @@ function getSessionTimeLabel(
     return formatRelativeTime(stamp, t)
 }
 
+const PRESENCE_BADGE_CLASS = {
+    working: 'bg-[var(--app-badge-success-text)] animate-pulse',
+    background: 'bg-blue-400 animate-pulse',
+    waiting: 'border-2 border-[var(--app-badge-success-text)] bg-[var(--app-bg)]',
+    stopped: 'bg-[var(--app-bg)] text-[var(--app-hint)]',
+} as const
+
 /**
  * Presentational session row — same chrome as the sidebar SessionItem body
  * (flavor icon with presence badge, title, request/schedule symbols, todos,
- * relative time, path). Visual language matches the native apps: no dimmed
- * rows or spinners; unread sessions have a separate accent dot.
- * Used by the session list and by rich-composer mention chip tooltips.
+ * relative time, path, optional attached-job meter). Visual language matches
+ * the native apps: no dimmed rows or spinners; unread sessions have a
+ * separate accent dot. Used by the session list and by rich-composer
+ * mention chip tooltips.
  */
 export function SessionRowSummary(props: {
     session: SessionSummary
@@ -186,31 +194,62 @@ export function SessionRowSummary(props: {
     )
     const attentionId = attentionTooltipIdProp ?? ownedIds.attentionId
     const scheduleId = scheduleTooltipIdProp ?? ownedIds.scheduleId
-    // Rows are memoized, so the label keeps itself current.
+    // Rows are memoized, so the label keeps itself current (also advances job elapsed).
     useMinuteTick()
+    const nowMs = Date.now()
     const codexSessionId = s.metadata?.flavor === 'codex' ? s.metadata?.agentSessionId : null
     const importedAt = useSyncExternalStore(subscribeCodexImportedSessions, () => getCodexImportedAt(codexSessionId))
     const timeLabel = getSessionTimeLabel(s, importedAt, t)
     const timeStamp = getSessionTimeStamp(s, importedAt)
     const timeAbsolute = timeStamp !== null ? formatAbsoluteDateTime(timeStamp) : null
     const attachedJob = s.attachedJob?.status === 'running' ? s.attachedJob : null
-    // Tick once a minute so elapsed wall-time advances without waiting for a heartbeat SSE.
-    const [nowMs, setNowMs] = useState(() => Date.now())
-    useEffect(() => {
-        if (!attachedJob) return
-        setNowMs(Date.now())
-        const id = window.setInterval(() => setNowMs(Date.now()), 60_000)
-        return () => window.clearInterval(id)
-    }, [attachedJob?.key, attachedJob?.startedAt])
     const jobStale = attachedJob ? isAttachedJobStale(attachedJob, nowMs) : false
     const jobFraction = attachedJob ? attachedJobFraction(attachedJob) : null
-    const jobProgressLabel = attachedJob ? formatAttachedJobProgress(attachedJob, nowMs) : null
+
+    const jobProgressLabel = attachedJob
+        ? formatAttachedJobProgress(attachedJob, nowMs, {
+            left: t('session.item.attachedJob.left'),
+            running: t('session.item.attachedJob.running'),
+            noHeartbeat: t('session.item.attachedJob.noHeartbeat'),
+        })
+        : null
     const linkedIssue = getLinkedGithubIssue(s.metadata)
 
+    // Presence lives on the agent icon and every state has its own mark, so no
+    // state is shown by the absence of one: solid = working (pulsing), ring =
+    // connected and waiting, power mark = stopped or archived. Blue is the
+    // existing background-work state. An outliving attached job counts as
+    // working even when the agent itself is idle or disconnected.
+    const isRunning = s.active && s.thinking
+    const isBackgroundOnly = s.active && !s.thinking && (s.backgroundTaskCount ?? 0) > 0
+    const presence: 'working' | 'background' | 'waiting' | 'stopped' = isBackgroundOnly
+        ? 'background'
+        : isRunning || attachedJob
+            ? 'working'
+            : s.active
+                ? 'waiting'
+                : 'stopped'
     const isUnread = sessionIsUnread(s, {
         lastSeenAt: getSessionLastSeenAt(s.id),
         manualUnreadAt: getSessionManualUnreadAt(s.id, s.readState),
     })
+    const requestKind = urgentAttention
+        ? attention.kind as 'permission' | 'input'
+        : s.active && (s.pendingRequestsCount ?? 0) > 0
+            ? (s.pendingRequestKinds?.length && !s.pendingRequestKinds.includes('permission') ? 'input' : 'permission')
+            : null
+    const agentIcon = (
+        <span className="relative inline-flex h-6 w-6 shrink-0 items-center justify-center">
+            <AgentFlavorIcon flavor={s.metadata?.flavor} className="h-6 w-6" />
+            <span
+                data-testid="session-presence"
+                data-presence={presence}
+                className={`absolute -bottom-0.5 -right-0.5 box-border flex h-2.5 w-2.5 items-center justify-center rounded-full ring-2 ring-[var(--app-bg)] ${PRESENCE_BADGE_CLASS[presence]}`}
+            >
+                {presence === 'stopped' ? <StoppedBadgeIcon className="h-2.5 w-2.5" /> : null}
+            </span>
+        </span>
+    )
 
     return (
         <div className={`flex w-full min-w-0 flex-col gap-1 ${className ?? ''}`}>
@@ -339,6 +378,98 @@ export function SessionRowSummary(props: {
                         </span>
                     ) : null}
                 </div>
+                {attachedJob && jobProgressLabel ? (
+                    <div
+                        className={`flex min-w-0 items-center gap-2 text-[11px] leading-none ${
+                            jobStale
+                                ? 'text-[var(--app-badge-warning-text)]'
+                                : 'text-[var(--app-badge-success-text)]'
+                        }`}
+                        title={
+                            jobStale
+                                ? t('session.item.attachedJob.staleTitle', {
+                                    detail: attachedJob.detail ?? attachedJob.label,
+                                })
+                                : (attachedJob.detail ?? attachedJob.label)
+                        }
+                    >
+                        <span
+                            className={`h-1.5 w-1.5 shrink-0 rounded-full bg-current ${jobStale ? '' : 'animate-pulse'}`}
+                            aria-hidden="true"
+                        />
+                        <span className="min-w-0 truncate font-medium">
+                            {attachedJob.label}
+                            {jobStale ? (
+                                <span className="font-semibold"> · {t('session.item.attachedJob.stale')}</span>
+                            ) : null}
+                            <span className="font-normal opacity-80"> · {jobProgressLabel}</span>
+                        </span>
+                        {jobFraction !== null ? (
+                            <span
+                                data-testid="attached-job-progress-bar"
+                                data-progress="determinate"
+                                className="ml-auto h-1 w-16 shrink-0 overflow-hidden rounded-full bg-[var(--app-border)]"
+                                role="progressbar"
+                                aria-label={attachedJob.label}
+                                aria-valuemin={0}
+                                aria-valuemax={100}
+                                aria-valuenow={Math.round(jobFraction * 100)}
+                            >
+                                <span
+                                    className="block h-full rounded-full bg-current transition-[width] duration-300"
+                                    style={{ width: `${Math.round(jobFraction * 100)}%` }}
+                                />
+                            </span>
+                        ) : (
+                            <span
+                                data-testid="attached-job-progress-bar"
+                                data-progress="indeterminate"
+                                className="relative ml-auto h-1 w-16 shrink-0 overflow-hidden rounded-full bg-[var(--app-border)]"
+                                role="progressbar"
+                                aria-label={attachedJob.label}
+                            >
+                                {/* No aria-valuenow: unknown amount (ARIA indeterminate). No inline width%. */}
+                                <span
+                                    className="animate-attached-job-indeterminate"
+                                    aria-hidden="true"
+                                />
+                            </span>
+                        )}
+                    </div>
+                ) : null}
+                {contentSnippet ? (
+                    <div
+                        className="line-clamp-2 text-xs text-[var(--app-fg)]/80"
+                        title={contentSearchTruncated
+                            ? `${contentSnippet}\n${t('sessions.search.content.truncated')}`
+                            : contentSnippet}
+                    >
+                        {contentSnippet}
+                        {contentSearchTruncated ? (
+                            <span
+                                className="ml-1 inline-flex align-[-2px] text-[var(--app-badge-warning-text)]"
+                                title={t('sessions.search.content.truncated')}
+                                aria-label={t('sessions.search.content.truncated')}
+                            >
+                                <InfoIcon className="h-3 w-3" />
+                            </span>
+                        ) : null}
+                    </div>
+                ) : null}
+                {projectLabel || machineLabel ? (
+                    <div className="truncate text-xs text-[var(--app-hint)]" title={[projectLabel, machineLabel].filter(Boolean).join(' · ')}>
+                        {[projectLabel, machineLabel].filter(Boolean).join(' · ')}
+                    </div>
+                ) : showPath || worktreeLabel ? (
+                    <div
+                        className="truncate text-xs text-[var(--app-hint)]"
+                        title={worktreeLabel
+                            ? s.metadata?.worktree?.worktreePath ?? s.metadata?.path
+                            : undefined}
+                    >
+                        {worktreeLabel ?? s.metadata?.path ?? s.id}
+                    </div>
+                ) : null}
             </div>
             {attachedJob && jobProgressLabel ? (
                 <div

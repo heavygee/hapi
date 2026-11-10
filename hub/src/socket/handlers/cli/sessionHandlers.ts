@@ -2,7 +2,7 @@ import type { ClientToServerEvents } from '@hapi/protocol'
 import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
 import type { CopilotAgentMode } from '@hapi/protocol'
-import type { AgentState, CodexCollaborationMode, Metadata, PermissionMode } from '@hapi/protocol/types'
+import type { AgentState, BackgroundTask, CodexCollaborationMode, Metadata, PermissionMode } from '@hapi/protocol/types'
 import {
     getReasoningStreamId,
     isRedundantGoalStatusEventContent,
@@ -12,7 +12,7 @@ import type { Store, StoredSession } from '../../../store'
 import type { SyncEvent } from '../../../sync/syncEngine'
 import { extractTodoWriteTodosFromMessageContent } from '../../../sync/todos'
 import { extractTeamStateFromMessageContent, applyTeamStateDelta } from '../../../sync/teams'
-import { extractBackgroundTaskCount } from '../../../sync/backgroundTasks'
+import { extractBackgroundTasks } from '../../../sync/backgroundTasks'
 import { tryPromoteCursorInlineModelErrorFromMessage } from '../../../sync/cursorInlineModelErrorBackstop'
 import { shouldRecordSessionActivity } from '../../../sync/sessionActivity'
 import { extractFailingMermaidBlocks, buildMermaidRenderIssueHint } from '../../../sync/mermaid'
@@ -119,12 +119,20 @@ const updateStateSchema = z.object({
     agentState: z.unknown().nullable()
 })
 
+// Hub-only merge/clear/title links. CLI update-metadata must not forge or erase them
+// (same strip/restore as supersededBySessionId — see sessionHandlers.test.ts).
 const HUB_OWNED_METADATA_KEYS = [
     'supersededBySessionId',
     'opencodeClearOperation',
     // machineId gates local-resume-capability mint (#1473). Client-writable
     // rewrite would let a sibling redirect the mint to its own proven machine.
     'machineId',
+    'titleSuggestionAutoAttemptedAt',
+    'titleSuggestionTurn',
+    'jobsAcceptedFromSessionIds',
+    'jobsTransferredToSessionId',
+    'jobKeyRedirects',
+    'promptTitle'
 ] as const
 
 // omitEmptyExternalRefsOnCliMetadataWrite: defined once above (soup heal ∪
@@ -152,7 +160,7 @@ export type SessionHandlersDeps = {
     onSessionReady?: (payload: SessionReadyPayload) => void
     onSessionEnd?: (payload: SessionEndPayload) => void
     onWebappEvent?: (event: SyncEvent) => void
-    onBackgroundTaskCount?: (sessionId: string, count: number) => void
+    onBackgroundTasks?: (sessionId: string, tasks: BackgroundTask[]) => void
     onSessionActivity?: (sessionId: string, updatedAt: number) => void
     /** tiann/hapi#1820: any message is agent progress, either direction. */
     onAgentProgress?: (sessionId: string, at: number) => void
@@ -164,7 +172,7 @@ export type SessionHandlersDeps = {
 }
 
 export function registerSessionHandlers(socket: CliSocketWithData, deps: SessionHandlersDeps): void {
-    const { store, resolveSessionAccess, emitAccessError, onSessionAlive, onSessionReady, onSessionEnd, onWebappEvent, onBackgroundTaskCount, onSessionActivity, onAgentProgress, onSweepImmediateQueued, onMessagesConsumed } = deps
+    const { store, resolveSessionAccess, emitAccessError, onSessionAlive, onSessionReady, onSessionEnd, onWebappEvent, onBackgroundTasks, onSessionActivity, onAgentProgress, onSweepImmediateQueued, onMessagesConsumed } = deps
 
     socket.on('native-queue-message', data => {
         const parsed = z.object({ sid: z.string(), localId: z.string().min(1), text: z.string().nullable() }).safeParse(data)
@@ -244,9 +252,9 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
 
         // A background-task snapshot is session state, not chat: apply it
         // without storing a hidden row. (#2102 count snapshot replaces soup delta.)
-        const backgroundTaskCount = extractBackgroundTaskCount(content)
-        if (backgroundTaskCount !== null) {
-            onBackgroundTaskCount?.(sid, backgroundTaskCount)
+        const backgroundTasks = extractBackgroundTasks(content)
+        if (backgroundTasks !== null) {
+            onBackgroundTasks?.(sid, backgroundTasks)
             return
         }
 

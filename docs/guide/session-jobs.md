@@ -53,19 +53,92 @@ Treat this like `ping_peer` / `inspect_peer`: it is first-class HAPI tooling, no
 
 ### CLI supervisor (required for process-shaped work)
 
+`hapi job run` registers the job, heartbeats on a timer while the child runs, then marks `completed`/`failed` from the **exit code**. An idle agent **cannot** heartbeat. Heartbeats do **not** advance `--done` / `--total` — those flags on `job run` are **initial meter state only**.
+
+Prefer `"$HAPI_SESSION_ID"` only when it matches the operator chat URL uuid. Remote Cursor runner: pass `/sessions/<id>` explicitly (see "Which session id").
+
+#### Progress mode (required on `run` / `set`)
+
+`--progress` is **required** on create. Omission used to default to indeterminate stripes and hid known-duration countdowns (dogfood postmortem 2026-11-08). Pick deliberately:
+
+| Mode | Flags | List chrome |
+|------|-------|-------------|
+| `unknown` | no counts / no `--until` | `running · elapsed` + indeterminate stripes |
+| `fraction` | `--remaining N --total M` **or** `--done N --total M` | determinate fill |
+| `until` | `--until <ISO-8601\|epoch-ms>` | determinate countdown (`s`); `job run` heartbeats re-stamp `remaining` |
+
+#### Alive-only / indeterminate (`--progress unknown`)
+
 ```bash
-# Prefer "$HAPI_SESSION_ID" only when it matches the operator chat URL uuid.
-# Remote Cursor runner: pass /sessions/<id> explicitly (see "Which session id").
 hapi job run "$HAPI_SESSION_ID" beets \
   --label 'beets import' \
-  --remaining 150 --done 1637 --total 1787 --unit units \
-  --detail 'album: …' \
+  --progress unknown \
+  --detail 'phase: …' \
   -- ./beets-import.sh
 ```
 
-`hapi job run` registers the job, heartbeats on a timer while the child runs, then marks `completed`/`failed` from the exit code. An idle agent **cannot** heartbeat - set-once + nohup freezes the bar (counts stuck, UI goes stale after ~15m).
+List shows `running · elapsed` plus a **subtle indeterminate** progress bar: a real track with soft diagonal stripes that drift slowly (HTML5 `<progress>` indeterminate vibe, quiet contrast). Means "still moving," claims **zero percent**. Use this when size is **genuinely unknown** — not for a wall-clock deadline (use `--progress until`).
 
-Do **not** start long work with MCP `session_job` `set` or a one-shot CLI `set` and then background the process. That is the wardrobe failure mode.
+#### Fraction / display bar (0→100%)
+
+`--done` / `--total` (or `--remaining` + `--total`) only move the bar when something **keeps PATCHing** them for the whole run. **Forbidden** for a display meter:
+
+```bash
+# WRONG — looks like a progress bar; stays frozen at the launch stamp (often 0/N)
+# under live heartbeats while the child actually works.
+hapi job run "$HAPI_SESSION_ID" beets \
+  --label 'beets import' --progress fraction --done 0 --total 1787 -- \
+  ./beets-import.sh
+```
+
+**Required** for a moving fraction bar — pick one:
+
+1. **Portable (upstream):** `hapi job run --progress unknown` while the child runs, plus a continuous updater (`hapi job update` / MCP `session_job` `update`, or your own JSONL→update feeder) from the first progress event through exit. Or `--progress fraction` **only if** that updater keeps `--done`/`--remaining` moving.
+2. **Known deadline:** `--progress until --until <ISO>` (heartbeats re-stamp `remaining`; optional `--started-at <epoch-ms>` = window start on mid-window re-attach).
+3. **Optional estate helper** (not part of upstream HAPI): some operators ship `hapi-job-run-metered` locally to refuse fraction meters without a feeder. Do not assume it exists on PATH for every HAPI install.
+
+```bash
+# Portable fraction (updater required from t=0):
+hapi job run "$HAPI_SESSION_ID" beets --label 'beets import' --progress unknown -- ./beets-import.sh &
+# …and from t=0, something continuously: hapi job update … --done N --total 1787
+
+# Dogfood / countdown window (numeric sleep N without until is refused):
+hapi job run "$HAPI_SESSION_ID" dogfood-1424-48h \
+  --label 'dogfood #1424 48h' --progress until --until 2026-11-09T21:20:14Z \
+  --wake-on-terminal -- sleep 999999
+
+# Mid-window re-attach — keep the original 48h denominator:
+WINDOW_START_MS=$(( $(date -u -d '2026-11-07T21:20:14Z' +%s) * 1000 ))
+hapi job run "$HAPI_SESSION_ID" dogfood-1424-48h \
+  --label 'dogfood #1424 48h' --progress until --until 2026-11-09T21:20:14Z \
+  --started-at "$WINDOW_START_MS" --wake-on-terminal -- sleep 999999
+```
+
+Non-JSONL children need an adapter (line regex → `job update`, dual writer, or fall back to alive-only). Do not invent a fake percent.
+
+**Exit ≠ semantic failure:** `job run` stamps `failed` on nonzero exit even when the batch mostly succeeded (e.g. indexer `errors > 0` but run `completed`). Prefer the child exiting 0 when the *run* finished and putting item-error counts in `--detail` / logs; do not teach agents to ignore exit codes blindly.
+
+#### Wardrobe failures (frozen / lying bars)
+
+Do **not**:
+
+- MCP `session_job` `set` or one-shot CLI `set` + background the real work (no heartbeat).
+- `hapi job run --done 0 --total N -- cmd` with **no** continuous count writer (**frozen 0/N under a live heartbeat** — the common agent footgun).
+- `hapi job run --progress unknown -- sleep 150747` (or any numeric `sleep N`) — that is a known-duration countdown; CLI refuses it. Use `--progress until --until …` (or `sleep infinity` under `unknown`).
+- Wrap `hapi-restart-hub` / `hapi-use-worktree` / `hapi-use-driver` / `hapi-watch-activate-driver` inside `hapi job run`. The hub is down exactly when the terminal `completed`/`failed` PATCH must land → `ECONNREFUSED` → zombie `running` meter (CLI refuses these argv tokens). Run remat/work under the job; run the hub restart **after** the job exits (same shape as soup remat `#205`).
+- Claim done / invite archive while a zombie `running` meter remains.
+
+If the hub is briefly unreachable for other reasons after the child exits, `job run` keeps retrying the terminal PATCH for up to ~10 minutes (connection / 502–504). If it still cannot mark the meter, the supervisor exits **1** even when the child exited 0 — do not treat that as a silent success.
+
+### Hygiene (list on resume / before done)
+
+Agents must inventory their own jobs — do not wait for the operator to notice a sticky `running` meter before archive (delete returns 409 while a job is running).
+
+1. Call `session_job` `action=list` (or `hapi job list <session>`) on **start/resume** and again **before claiming done / inviting archive**.
+2. If a job is `running` but the process is dead (or you cannot prove it is alive): `clear` or `update` with `status: failed`. Prefer `clear` when progress is meaningless. **Never ask the operator to clean meters.**
+3. Leave live jobs with fresh heartbeats alone; mention them if still running when you summarize.
+
+Hub does **not** auto-clear silent jobs (quiet legitimate long runners must not be murdered). A structured `stale` flag on list is a follow-up; until then, agent judgment + the ~15m UI amber threshold apply.
 
 ### MCP (update / clear / list only)
 
@@ -90,6 +163,7 @@ RUN_ID="$(uuidgen)"   # or python -c 'import uuid; print(uuid.uuid4())'
 
 hapi job set "$HAPI_SESSION_ID" beets \
   --label 'beets import' \
+  --progress fraction \
   --run-id "$RUN_ID" \
   --remaining 150 --done 1637 --total 1787 --unit units \
   --detail 'album: Some Artist - Some Album'
@@ -107,22 +181,46 @@ hapi job clear "$HAPI_SESSION_ID" beets --expected-run-id "$RUN_ID"
 
 Same auth as `hapi ping-peer` (`HAPI_API_URL` / `CLI_API_TOKEN` or `hapi auth login`).
 
+## Wake owning session on terminal (opt-in, #1489)
+
+By default jobs are **meter-only**: terminal `completed`/`failed` does not resume the agent. For DJ / beets-style batches where the idle owner must verify and start the next chunk, opt in:
+
+```bash
+hapi job run "$HAPI_SESSION_ID" beets \
+  --label 'beets import' \
+  --progress fraction \
+  --wake-on-terminal \
+  --wake-prompt 'If exit looked clean, start the next album batch.' \
+  --remaining 150 --done 1637 --total 1787 --unit units \
+  -- ./beets-import.sh
+```
+
+When the hub accepts terminal status (and the opt-in was set on that run):
+
+1. Claims a one-shot wake for that `runId` (retries / duplicate terminal PATCH do not re-fire).
+2. Resumes the owning session if inactive (same resume path as `ping-peer`).
+3. Posts a user message naming job key, status, last detail, plus optional `--wake-prompt`.
+
+This does **not** treat heartbeats as thinking. Default remains off until dogfood proves the loop.
+
 ## Progress honesty (tiers)
 
-| What you know | What to send | What the list shows |
-|---------------|--------------|---------------------|
-| Countable leftover | `--remaining N` + `--total M` (+ optional `--unit`) | `150 units left · 2d 4h` + bar fill when `total` is set |
-| Countable fraction | `--done N --total M` | `91% · 1637/1787 units · 2d 4h` + bar fill |
-| Stage only / unknown size | `--label` + `--detail` + heartbeats | `running · 2d 4h` + indeterminate bar |
+| What you know | `--progress` + flags | What the list shows |
+|---------------|----------------------|---------------------|
+| Countable leftover | `fraction` + `--remaining N --total M` | `150 units left · 2d 4h` + fill |
+| Countable fraction | `fraction` + `--done N --total M` | `91% · 1637/1787 units · 2d 4h` + fill |
+| Known deadline | `until` + `--until <ISO\|epoch>` | countdown fill (`s`) |
+| Stage only / unknown size | `unknown` + `--detail` + heartbeats | `running · 2d 4h` + indeterminate stripes |
 
-**Bar fill:** the byte/progress bar moves only when `total` is set and you send `--done`/`--total` or `--remaining`/`--total`. `--remaining` alone (without `total`) updates the text label only — it is not a percent and does not tick the bar. Prefer `--done`/`--total` when you want visible byte-style progress.
+**Determinate fill:** left→right width moves only when `total` is set **and** something keeps sending `--done`/`--total` or `--remaining`/`--total` (update/feeder), not when those flags appear only on `job run` launch. **Indeterminate stripes:** when there is no honest fraction (`total` missing), the same track slot shows soft diagonal stripes that drift slowly with **no** claimed percent — not spinner-only, not an empty track, and not a loud sliding chunk. `--remaining` alone (without `total`) updates the text label and keeps the striped bar; it is not a percent.
 
 **Elapsed** is always derived from hub `startedAt` (wall clock). It is **not** an ETA and there is no time-remaining field - operators get "how long has this been going" plus whatever honest count/detail you report, without a fake completion estimate.
 
 Rules:
 
-- Prefer **remaining+total** when the operator cares about "how much left" and you know the denominator.
-- Prefer **done+total** when you want the simplest bar fill (byte-style progress).
+- Prefer **remaining+total** (via continuous `update`) when the operator cares about "how much left" and you know the denominator.
+- Prefer **done+total** (via continuous `update` / your feeder) when you want visible byte-style progress.
+- Do **not** put `--done`/`--total` on bare `job run` and walk away — that freezes the launch stamp under live heartbeats.
 - Do not send **remaining alone** expecting the bar to move — include `total` or use `done`/`total`.
 - If you only know a stage name, put it in `--detail` and keep heartbeating — do **not** fake `total=100`.
 - There is **no** `--percent` flag and **no** ETA / time-remaining field. Inventing either would train agents to lie.
@@ -147,6 +245,7 @@ START_MS=1785304595000
 hapi job clear "$HAPI_SESSION_ID" beets
 hapi job set "$HAPI_SESSION_ID" beets \
   --label 'beets import' \
+  --progress fraction \
   --started-at "$START_MS" \
   --remaining 0 --done 1787 --total 1787 --unit units \
   --status completed \
@@ -155,6 +254,7 @@ hapi job set "$HAPI_SESSION_ID" beets \
 # or, on hubs that honor explicit PUT startedAt without delete:
 hapi job set "$HAPI_SESSION_ID" beets \
   --label 'beets import' \
+  --progress fraction \
   --started-at "$START_MS" \
   --remaining 12 --done 1775 --total 1787 --unit units
 ```
@@ -168,7 +268,7 @@ Wrap the long process so something calls `hapi job update` on a timer (or on eac
 ```bash
 RUN_ID="$(uuidgen)"
 hapi job set "$HAPI_SESSION_ID" rsync-backup \
-  --run-id "$RUN_ID" --label 'rsync backup' --detail 'phase: copy'
+  --run-id "$RUN_ID" --label 'rsync backup' --progress unknown --detail 'phase: copy'
 # in a loop / cron / companion script:
 hapi job update "$HAPI_SESSION_ID" rsync-backup \
   --expected-run-id "$RUN_ID" --detail "phase: copy · $(date -u +%H:%M)Z"
@@ -179,11 +279,11 @@ When the process exits, mark completed/failed or clear. A stuck green/amber chip
 ## CLI / API reference
 
 ```bash
-hapi job set <session> <job-key> --label <text> [--started-at MS] [--run-id UUID] [progress flags]
+hapi job set <session> <job-key> --label <text> --progress unknown|fraction|until […]
 hapi job update <session> <job-key> [--expected-run-id UUID] [progress flags]   # no startedAt
 hapi job clear <session> <job-key> [--expected-run-id UUID]
 hapi job list <session>
-hapi job run <session> <job-key> --label <text> -- <cmd>…
+hapi job run <session> <job-key> --label <text> --progress unknown|fraction|until […] -- <cmd>…
 hapi job --help
 ```
 

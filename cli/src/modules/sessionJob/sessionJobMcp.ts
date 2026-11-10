@@ -33,6 +33,7 @@ export const SESSION_JOB_SET_REFUSED_TEXT = [
     'MCP session_job is only for action=update (progress/heartbeat/terminal status),',
     'action=clear, or action=list on a job that job run (or CLI set + self-heartbeat wrapper) already created.',
     'Bare set + nohup freezes the bar when the agent goes idle (wardrobe dogfood).',
+    'Bare job run --done 0 --total N with no continuous update freezes 0/N under live heartbeats.',
 ].join(' ')
 
 /**
@@ -42,12 +43,15 @@ export const SESSION_JOB_SET_REFUSED_TEXT = [
 export const SESSION_JOB_TOOL_DESCRIPTION = [
     'Progress meter on THIS HAPI session for work that OUTLIVES the agent turn.',
     'Own-session only. CRITICAL: do NOT use action=set — it is refused.',
+    'HYGIENE: call action=list on session start/resume AND before claiming done or inviting archive.',
+    'If list shows status=running but the process is dead / you cannot prove it is alive, action=clear or update status=failed — do not ask the operator to clean meters.',
+    'Leave live jobs with fresh heartbeats alone.',
     'To START a long job, use the Shell tool with:',
     SESSION_JOB_RUN_RECIPE,
     '(auto-heartbeats + completed/failed on exit). Idle agents cannot heartbeat.',
     'This MCP tool: action=update (progress/status), action=clear, action=list only.',
-    'For done/total/remaining/unit/detail: pass null to clear that field.',
-    'Prefer honest remaining or done+total; omit counts when unknown.',
+    'Fraction counts need continuous update/feeder; omit counts when unknown (use --progress unknown).',
+
     'Never invent a percent or ETA. Not for todos, thinking, or short tool calls.',
 ].join(' ')
 
@@ -65,19 +69,19 @@ export const sessionJobInputSchema: z.ZodTypeAny = z.object({
         'Job status on update (completed|failed to finish).'
     ),
     done: z.number().nonnegative().nullable().optional().describe(
-        'Units completed (pair with total).'
+        'Units completed (pair with total). Pass null to clear a stale done count.'
     ),
     total: z.number().positive().nullable().optional().describe(
-        'Total units when both ends of a fraction exist.'
+        'Total units when both ends of a fraction exist. Pass null to clear.'
     ),
     remaining: z.number().nonnegative().nullable().optional().describe(
-        'Units left (web prefers remaining over done/total when set).'
+        'Units left. Pass null to clear so done/total can take over (web prefers remaining).'
     ),
     unit: z.string().trim().min(1).max(64).nullable().optional().describe(
-        'Unit label (tracks, folders, files, …).'
+        'Unit label (tracks, folders, files, …). Pass null to clear.'
     ),
     detail: z.string().max(500).nullable().optional().describe(
-        'Stage / current item text (not an ETA).'
+        'Stage / current item text (not an ETA). Pass null to clear.'
     ),
     expectedRunId: z.string().min(1).max(64).optional().describe(
         'Run generation fence for update/clear. Required when a manual wrapper stamped runId on set.'

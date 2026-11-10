@@ -60,6 +60,8 @@ Do **not** hand-roll JWT/archive/reopen Python each time — that is what these 
 
 Auth-only: `--no-continue`. Old wake-everyone: `--continue-all`. Inspect: `hapi-claude-continue-fleet --classify-only`.
 
+Opt out a session that asked to stop being woken: append its id to `~/.hapi/claude-auth/wake-skip` (machine-local, not committed).
+
 ## Why reopen is separate
 
 Toggle restarts runners so **new** spawns inherit the slot. Already-running Claude children keep the old `CLAUDE_CODE_OAUTH_TOKEN` in their process environ. Same rule as Cursor after `hapi-cursor-account-toggle` → `hapi-cursor-session-assess` → kill/reopen.
