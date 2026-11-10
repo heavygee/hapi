@@ -19,9 +19,11 @@
 ## Promote?
 
 - [x] `lifecycle / tooling doc` — gate or Meta note: optional non-required check-run failures (e.g. `mention-response`) should not block dogfooded elapsed merges when GitHub `mergeStateStatus=CLEAN` — or fix upstream workflow `ref: dev`→`main`
-- [ ] optional second: High-signal index one-liner on "no `@tiann` in review threads until mention-response checks out `main`"
+- [x] `lifecycle / Gate A` — after DROPPING soup layers on repo `config/driver-manifest.yaml`, run `hapi-manifest-mirror-to-config.sh`. Meta (`HAPI_META_MANIFEST=~/.config/hapi/driver-manifest.yaml`) scores Gate A against that snapshot, not the repo file — stale snapshot keeps 🔧 "are you done yet?" forever
+- [x] `lifecycle / Gate A` — never cite the merged upstream `#N` on an *active* fork-only `- branch:` comment block; meta-wave attributes it as live soup dirt for that PR
+- [ ] optional: High-signal index one-liner on "no `@tiann` in review threads until mention-response checks out `main`"
 
 ## Open questions / landmines
 
 - Upstream `codex-mention-response.yml` still hardcodes `ref: dev` — any `@tiann` on a tip will red-check again
-- Soup still needs drop of absorbed #1424 layers + remat (Meta wave); residency-fade layer may still be pending compose
+- Fork-only `driver/session-row-residency-fade` still on soup (intentional); Meta remat of dropped #1424 layers is Meta's job after wave clear
