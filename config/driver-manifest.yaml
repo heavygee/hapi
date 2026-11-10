@@ -695,17 +695,9 @@ layers:
   # Tip: 9011417f0 (origin/feat/composer-expand-enter-newline)
   - branch: feat/composer-expand-enter-newline
 
-  # tiann/hapi#1404 — session-attached long-running jobs (outlive agent; list chrome).
-  # Upstream PR: #1424 (feat/session-attached-jobs). Wake stays #1489 / layer below.
-  # Worktree: ~/coding/hapi/worktrees/slim-session-job-mcp @ driver/slim-session-job-mcp
-  # Soup tip: db656c411 — re-thin on live tip c5a182a12; hoist session_job "pass null to clear" once (heavygee/hapi#310).
-  # Drop when upstream #1424 merges.
-  # session_job `--progress until` preventions — postmortem
-  # docs/plans/2026-11-08-session-job-wrong-affordance-postmortem.md.
-  # Thin tip on soup HEAD ff7e86490. Layer owner: /sessions/6e70f97b.
-  # Restored by the kitchen: the owner staged this line into the 0.34.4
-  # sync and my abort of that sync discarded it.
-  - branch: driver/session-job-progress-until
+  # DROPPED 2026-11-10: driver/session-job-progress-until — MERGED tiann/hapi#1424
+  # (ee73f3a84814). Progress until / sleep-refuse now on upstream main.
+  # - branch: driver/session-job-progress-until
 
   # Fork-only: row fade = residency (RAM), not "has attached job".
   # Operator decision 2026-11-09 — non-resident + running job → faded + job chip.
@@ -715,9 +707,8 @@ layers:
     sentinel: opacity-50
     sentinel_path: web/src/components/SessionRowSummary.tsx
 
-  - branch: driver/slim-session-job-mcp
-    sentinel: pass null to clear that field
-    sentinel_path: cli/src/modules/sessionJob/sessionJobMcp.ts
+  # DROPPED 2026-11-10: driver/slim-session-job-mcp — MERGED tiann/hapi#1424
+  # - branch: driver/slim-session-job-mcp
 
   # DROPPED 2026-09-02: driver/cursor-notify-rule-delta — stale fat tip (60 commits from
   # Aug merge-base). Notify overlay + session_job instanceof + omit-action-key fixes
@@ -731,12 +722,8 @@ layers:
   # ancestor but content is absorbed. Was: driver/kitchen-status-session-list.
   # - branch: driver/kitchen-status-session-list
 
-  # tiann/hapi#1489 — wake owning session when attached job completes/fails (opt-in).
-  # Thin tip on driver/session-attached-jobs. Upstream PR tip: feat/job-complete-wake
-  # (stacked on feat/session-attached-jobs with runId claim fence).
-  # Worktree: ~/coding/hapi/worktrees/job-complete-wake @ driver/job-complete-wake
-  # Tip: 962279837 — CLI wake argv restored after session-jobs re-thin dropped flags
-  - branch: driver/job-complete-wake
+  # DROPPED 2026-11-10: driver/job-complete-wake — MERGED with #1424 (wake folded)
+  # - branch: driver/job-complete-wake
 
   # DROPPED 2026-08-11: feat/share-native-fileurl (was driver/share-native-deeplink)
   # MERGED as tiann/hapi#1413 (a0621194 — /share#url=&text=&title= + fileUrl; Fixes #1412)
