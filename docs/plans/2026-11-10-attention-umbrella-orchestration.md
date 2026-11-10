@@ -40,3 +40,13 @@ Merge remains operator/Meta after elapsed windows — prepare only.
 - No Draft-stacked #2002 against `main` (cold-review noise).
 - Soup thin layers stay warm; peers idled `blocked`.
 - Unblock path: help #1772 clear conflicts (rebase-assist / operator-mediated offer), then re-wake filter peers.
+
+## #1772 rebase-assist (ready — awaiting operator post)
+
+- Branch: `heavygee/hapi` `rebase-assist/1772-onto-upstream-main` @ `8b254399c`
+- Author kept as techotaku39; committer heavygee
+- Shape: merge commit of current `upstream/main` + techotaku tip (not a linear squash — 28 commits in ancestry count; tip is one merge resolving conflicts)
+- `maintainerCanModify: true` on #1772 — do **not** push until author (or operator) says yes; no force-push
+- Compare: https://github.com/tiann/hapi/compare/main...heavygee:rebase-assist/1772-onto-upstream-main
+- Prep peer: [/sessions/3c5af7c8-540d-4d7c-b7a1-5df17abe5b37](/sessions/3c5af7c8-540d-4d7c-b7a1-5df17abe5b37)
+
