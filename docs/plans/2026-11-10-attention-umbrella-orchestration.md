@@ -31,3 +31,12 @@ Still later (orchestrator will spawn when blockers clear): list persistence of l
 Session job `attention-daily-sweep` on the orchestrator — wakes ~every 24h to triage Discussion #2355, Issue #2356, and all dogfooded / child PRs for pushback. Re-arm after each sweep.
 
 Merge remains operator/Meta after elapsed windows — prepare only.
+
+## Filter-chain hold (2026-11-10 decision)
+
+`#2002` / `#1996` **HOLD** upstream lodging until `tiann/hapi#1772` is mergeable.
+
+- techotaku39 pushed 2026-11-09 — author live; no competing reconciled #1772 PR.
+- No Draft-stacked #2002 against `main` (cold-review noise).
+- Soup thin layers stay warm; peers idled `blocked`.
+- Unblock path: help #1772 clear conflicts (rebase-assist / operator-mediated offer), then re-wake filter peers.
