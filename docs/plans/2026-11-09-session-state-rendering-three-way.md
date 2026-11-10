@@ -26,13 +26,13 @@ work at fleet scale (1,000+ sessions, ≥~30 resident at a time).
 ## Session list status mode
 
 `sessionListStatusMode: 'standard' | 'detailed'`, default `standard` — Settings → Display →
-"Session list status" (`web/src/hooks/useSessionListStatusMode.ts` on `main`). Feeds
-`showDetailedStatus`, which gates some marker-slot chrome on the local fork:
+"Session list status" (`web/src/hooks/useSessionListStatusMode.ts`). This setting is on
+`main`. It feeds `showDetailedStatus`, which gates some list chrome (not the activity dot):
 
-- schedule tooltip — gated
-- background attention indicator — gated
-- background spinner — half gated:
-  `(showDetailedStatus && attention==='background') || (s.active && bgCount>0)`
+- schedule tooltip — gated on `main` and the local fork
+- background attention / spinner affordances — gated or half-gated where those markers exist
+  (local fork marker slot uses
+  `(showDetailedStatus && attention==='background') || (s.active && bgCount>0)`)
 
 Upstream's presence dot and Ian's badge are not mode-gated; both render in `standard`.
 
