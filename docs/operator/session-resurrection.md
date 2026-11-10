@@ -29,6 +29,49 @@ The data is fine. The pointer is broken.
 
 ---
 
+## First: check there is something to resurrect
+
+The rest of this doc assumes **pointer broken, data fine**. The opposite case
+exists and looks identical from the UI: **pointer fine, data never written**.
+
+Cursor creates `~/.cursor/acp-sessions/<cursorSessionId>/meta.json` when the
+thread is created, but only writes `store.db` once a turn is actually
+persisted. If the very first turn never completes - exhausted allowance
+("Upgrade your plan to continue"), a model the account cannot use, a crash
+before the first reply - you get a thread directory with `meta.json` and no
+`store.db`, forever. Reopen then fails with *"Cursor chat data is no longer
+available on the recorded machine"*, which reads like loss but is not: there
+was never a conversation to lose. Hunting for a backup or a legacy store is
+wasted effort.
+
+Tell the two apart before you start:
+
+```bash
+# Symlinked to ~/.local/bin by install-hapi-local-bin.sh (globs hapi-*.sh);
+# the explicit path always works.
+~/coding/hapi/scripts/tooling/hapi-cursor-store-census.sh              # this host
+~/coding/hapi/scripts/tooling/hapi-cursor-store-census.sh --all-hosts  # + SSH fleet
+~/coding/hapi/scripts/tooling/hapi-cursor-store-census.sh --json       # machine-readable
+```
+
+| Cause reported | Meaning | Action |
+|---|---|---|
+| `never_persisted` | thread dir exists, `store.db` absent - agent never completed a turn | Nothing to recover. Respawn the task; the hub transcript (if any) stays readable |
+| `removed` | thread dir absent - a store existed and is gone | This doc applies; continue below |
+
+Run it **before** switching Cursor accounts, rotating credentials, or
+bulk-changing session models, so the casualty list is known in advance rather
+than discovered at the next reopen. Exit code is `1` when any session would
+fail resume.
+
+A 2026-10-26 census of 761 sessions across three hosts found 31 casualties,
+**all** `never_persisted` and none `removed`; the largest had 7 hub messages
+and 13 had zero, i.e. no accumulated work was lost. Product gap (misleading
+message, no fresh-spawn fallback, session left at `lifecycleState: running`):
+[tiann/hapi#2184](https://github.com/tiann/hapi/issues/2184).
+
+---
+
 ## One-command recovery
 
 ```bash

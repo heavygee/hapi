@@ -21,9 +21,11 @@ Prefer progressive loading: **[feature-work-lifecycle.md](../tooling/feature-wor
 | Peer close-the-loop / status | **Spawn parent only** — never CC Meta PR watcher | § quieter Meta (2026-08-10); intake §0 + spawn-peer skill |
 | Local soup / remat / kitchen / process feedback | Ping **tooling meta-bot** (`HAPI_META_TOOLING_SESSION_ID` / `config/remat-escalate.yaml`) — **never** PR watcher | § Two Meta sessions (2026-08-15) |
 | Read another HAPI session | Same — no JWT+curl | `hapi inspect-peer <id>` / MCP `inspect_peer` (read-only, no resume). Citations: `[title](/sessions/<id>)` → pass `<id>` |
+| Cursor session won't reopen ("chat data no longer available") **or** about to switch Cursor accounts / rotate creds / bulk-change models | **Census first** — `hapi-cursor-store-census.sh [--all-hosts]` (read-only; exit 1 if any session would fail resume). `never_persisted` = agent never completed a turn, **nothing to recover**; `removed` = store existed and is gone → resurrection doc applies | [`session-resurrection.md`](./session-resurrection.md) § First: check there is something to resurrect. Product gap: [#2184](https://github.com/tiann/hapi/issues/2184) (misleading message, no fresh-spawn fallback, stays `running`) |
 | Proof / screenshots / clips for operator | **Inline into HAPI chat** — do not only paste paths | **Estate default (this host only):** `~/coding/server-setup/docs/operator-visible-proof.md`. Off-host / other-repo peers: skill **`localize-estate-guidance`**. HAPI deep dive: lifecycle [§ Proof tiers](../tooling/feature-work-lifecycle.md#proof-tiers-images-and-video). **Playwright videos:** annotated pointer + `clickForHuman` (dwell on result) — raw `recordVideo` is a fail. Default branch language: **main**. MCP `display_image` / `display_video`, or `bun scripts/tooling/hapi-display-image.mjs <session-prefix> <abs-path> [title]` |
 | Stale Cursor `mcp.json` / hub-move MCP panic | **Hub ≠ MCP URL.** Strip project `hapi`/`hapi-*` sidecars; never rewrite `--url` to `:3006`. Live HAPI Cursor sessions overlay **user-level** `~/.cursor/mcp.json` → loopback `hapiMcpUrl`. **Live multiplex:** N `hapi-<uuid>` keys ⇒ N `ping_peer` tools; model may invoke a *foreign* session sidecar (chip shows wrong session). Fix: [#1613](https://github.com/tiann/hapi/pull/1613) project `hapi` isolation — not nametag / #1618 | [`cursor-hapi-mcp.md`](../tooling/cursor-hapi-mcp.md); prune: `hapi-prune-stale-cursor-mcp` |
 | Cursor ACP `Authentication required` / account flip on proxmox (or after auth switch) | **oos `~/.config/cursor/auth.json` is source of truth** — derive `api-key.env` + `~/.hapi/cursor.env`, `chattr +i`, restart **runner only**; no commented dual-key museums | [`cursor-auth-fleet-sync.md`](../tooling/cursor-auth-fleet-sync.md) |
+| Claude “out of usage” / dual Max slot switch | **Do not hand-roll.** `hapi-claude-usage` → toggle → audit → assess → `hapi-claude-reopen-mismatch` (selective continue-wake from pre-kill `thinking`/`lastNotify`; `--continue-all` / `--no-continue`) | [`claude-auth-slots.md`](../tooling/claude-auth-slots.md) |
 | Link operator to a file/doc in HAPI chat | Write path as **bare text** — no `[](...)`, no backticks | HAPI auto-links bare paths → in-app file viewer (`remarkFilePathLinks`). Only allowlisted extensions link; **wrap `.mmd`/exotic in a `.md`** so it's clickable + previewable. Tracking: [tiann/hapi#1120](https://github.com/tiann/hapi/issues/1120) |
 | New behavior intake / peer spawn | Follow intake §0; **`hapi-spawn-peer`** (supports `--model`/`--effort`/`--machine`). MCP / product `hapi spawn-peer` = **same-host only** until [tiann/hapi#1931](https://github.com/tiann/hapi/issues/1931) — cross-host is the hyphenated wrapper, **never** SSH. Bare `hapi` inside a HAPI checkout often resolves to `node_modules/.bin` → published binary (no spawn-peer). Spawn HTTP ≠ handoff | [`new-feature-intake.md`](../tooling/new-feature-intake.md); skill `spawn-peer-agents`; postmortem [`2026-08-11-spawn-peer-empty-shell-postmortem.md`](../plans/2026-08-11-spawn-peer-empty-shell-postmortem.md); PATH: [`driver-soup.md`](../tooling/driver-soup.md) `hapi-from-active` / `hapi-cli-path-hygiene` |
 
@@ -70,7 +72,7 @@ The operator often hears `AGENT_NOTIFY_SUMMARY.action` (TTS) and reads `summary`
 [upstream issue/pr discovery](/sessions/<full-session-id>)
 ```
 
-That is what rich composer serializes for `@` picks (`[title](/sessions/<id>)`). Do not use bare hashes, bare `/sessions/<id>`, or plain-name-only prose when a chip is possible.
+That is what rich composer serializes for `@` picks (`[title](/sessions/<id>)`). Do not use bare hashes, bare `/sessions/<id>`, or plain-name-only prose when a chip is possible. Live Meta/specialist UUIDs: [`config/meta-sessions.yaml`](../../config/meta-sessions.yaml) (tooling/meta, PR watcher, triage, discovery). The registry is hand-maintained — audit it with **`hapi-meta-sessions-audit`** (live title == `name:`, `superseded:` husk archived or titled `SUPERSEDED…`, `env:` agrees with `~/.hapi/meta-daily.env`; exit 1 on drift).
 
 **In `AGENT_NOTIFY_SUMMARY` `action`/`summary`:** chips do not render on TTS/FCM - use the **spoken display name** (same title string). Never a naked hash.
 
@@ -94,9 +96,17 @@ Canon also in `.cursor/rules/hapi-session.mdc` (alwaysApply).
 | Mechanism | What the recipient sees |
 |-----------|-------------------------|
 | MCP `ping_peer` inside a wrapped session | Attributed nametag via `POST /cli/sessions/:source/peer-messages` (`HAPI_SESSION_ID` / MCP client session id). Still open pings with `From:` for text-only agents. |
-| `hapi ping-peer` inside a wrapped session | Same. Script auto-stamps `From:` when `HAPI_SESSION_ID` is set (skip with `HAPI_PING_PEER_SKIP_FROM=1` if body already has it). |
+| `hapi ping-peer` inside a wrapped session | Same. Script auto-stamps `From:` when `HAPI_SESSION_ID` is set (skip with `HAPI_PING_PEER_SKIP_FROM=1` if body already has it). A body-supplied `From: /sessions/<id>` that does **not** match `HAPI_SESSION_ID` now warns (`HAPI_PING_PEER_STRICT_FROM=1` to refuse the send) — see § Void chips below. |
 | systemd timers (`hapi-meta-daily.timer`) | Estate helper POSTs `/cli/sessions/:source/peer-messages` for `HAPI_META_SESSION_ID` in `~/.hapi/meta-daily.env` — **operator automation only**; agents must not copy the mint pattern. |
 | CLI outside a session | Unattributed peer row only (no invented source id). |
+
+### Void chips — hand-written `From:` ids (2026-11-08)
+
+**The id in `From:` must be your *hub session* id, not your agent-runtime id.** Meta PR watcher hand-prepended its **Cursor agent id** (`CURSOR_SESSION_ID`) into MCP `ping_peer` bodies; its env `HAPI_SESSION_ID` was correct the whole time. The id resolved to nothing — `inspect_peer` errored, `search_peers` returned zero rows (and that search covers name/path/`agentSessionId`/id, so there was no row to find). Anyone replying to that chip would have sent into the void.
+
+- A hand-written `From:` **suppresses** the `hapi-ping-peer` auto-stamp (`^From:` short-circuit), so a wrong id rides every ping unchecked. The script now compares the claimed id against `HAPI_SESSION_ID` and warns; `HAPI_PING_PEER_STRICT_FROM=1` makes it a hard failure.
+- **MCP `ping_peer` bypasses the script entirely** — the guard does not cover that path, which is the one that actually failed here. For MCP, the fix is agent discipline: stamp `HAPI_SESSION_ID`, or omit `From:` and let the attributed nametag carry routing.
+- Cheapest self-check before trusting a remembered id: `inspect_peer <your-own-id>` should resolve to *you*.
 
 **Agents: do not describe nametags as "verified", "trusted provenance", or "capability-bound".** That was the rejected #1473 direction. Historical postmortems under `docs/plans/*1473*` are archaeology, not current product.
 
@@ -145,13 +155,27 @@ Chip status stays **PR health only** (`✅` / `🔁` / `⚠️` / …). Merge au
 | Lane | Who merges | How you get there | Agents |
 |------|------------|-------------------|--------|
 | **A** maintainer | **@tiann** | Default when over size caps and not promoted (**upstream only**) | Prepare only - never `gh pr merge` on `tiann/hapi` |
-| **B** self-merge | Operator / Meta tooling (not agents) | Auto: size caps on **product files** (≤8 files, ≤120 delta; `*.test.*` / `*.spec.*` / `__tests__` excluded); **or** human promote via GitHub label `low-impact` **or** `allow_pr_numbers` in policy (**upstream only**) | Prepare only - no auto merge yet |
+| **B** self-merge | Operator / Meta tooling (not agents) | Auto: size caps on **product files** (≤8 files, ≤120 delta; `*.test.*` / `*.spec.*` / `__tests__` excluded); **or** human promote via GitHub label `low-impact` **or** `dogfooded` (48h UTC opt-out — see below) **or** `allow_pr_numbers` in policy (**upstream only**) | Prepare only - no auto merge yet |
 | **C** forbidden | Nobody here | Others' PRs, direct push to `tiann/hapi:main`, settings, force-push | Hard no |
 | *(fork)* | Operator / Meta | Any green (or operator-directed) PR on **`heavygee/hapi`** | Still prepare-only unless operator directs a fork merge; lanes A/B do not apply |
 
 **Blessing:** after heavygee self-merged test-only [#1268](https://github.com/tiann/hapi/pull/1268), @tiann replied ([comment](https://github.com/tiann/hapi/pull/1268#issuecomment-5141575753)): *"Sounds great! Thanks for helping out."* That authorizes taking **low-impact** PRs off tiann's plate - not a blank check for every green PR.
 
-**Path kind is not a lane reject.** "Because product" was retired 2026-08-09 - touching `cli/`/`hub/`/`web/`/`shared/` does **not** force lane A. Auto-B is size-capped; oversized focused fixes promote with `low-impact` / allowlist. Salience + history: `docs/plans/2026-07-31-pr-merge-lanes.md`.
+**Path kind is not a lane reject.** "Because product" was retired 2026-08-09 - touching `cli/`/`hub/`/`web/`/`shared/` does **not** force lane A. Auto-B is size-capped; oversized focused fixes promote with `low-impact` / `dogfooded` / allowlist. Salience + history: `docs/plans/2026-07-31-pr-merge-lanes.md`.
+
+### `dogfooded` label (48h opt-out merge)
+
+Public process: [tiann/hapi discussions #2083](https://github.com/tiann/hapi/discussions/2083) (**General** category — Announcements create is restricted to maintainers for write collaborators).
+
+| Step | Who | What |
+|------|-----|------|
+| 1. Live dogfood | Write collaborator | Run the PR on a real HAPI install (not CI-green alone) |
+| 2. Label + stamp | Same | Apply `dogfooded`; PR comment `dogfooded since <ISO-8601 UTC>`. **This is merge intent** (fire-and-forget). |
+| 3. Countdown | Gate + Meta + session job | **48 calendar hours UTC** from the labeled event. Chip: `dogfooded countdown (… left)`. Gate **blocks** early merges. Prefer a session `hapi job run … --wake-on-terminal` so an idle babysit wakes when ready. |
+| 4. Opt-out | Anyone | Remove `dogfooded` **and** post rationale on #2083 (or close/draft the PR) |
+| 5. Merge | Babysit / Meta when woken | After window + still labeled + three-dim CLEAN: **merge quietly**. Elapsed `dogfooded` **satisfies lane-B auth** in `hapi-pr-merge-gate.sh` — **no second** `hapi-laneb-authorise`. `laneb` remains for `low-impact` / immediate merges only. |
+
+`dogfooded` is stronger than `low-impact` (substantial community work a maintainer has actually run). `low-impact` still skips the 48h window and still needs `hapi-laneb-authorise`. Policy: `scripts/tooling/lib/dogfood-countdown.sh` + `pr-merge-policy` `github_labels` includes both. Amendment 2026-11-03: label-as-intent must be fire-and-forget (incident: wake-then-laneb yanked the operator back).
 
 **Incident #1096** (2026-07-20): first accidental heavygee upstream merge - do not treat write access as "merge anything green."
 
@@ -171,9 +195,9 @@ Default remains **fork-contributor discipline** for product work (PRs from `upst
 
 **What we self-permit:**
 
-- **Label management** on `tiann/hapi` issues and PRs - including applying `low-impact` for lane B promote. Daily taxonomy owner: HAPI session **Issue labelling (tiann/hapi)** (`f3c41205…`); see `docs/plans/2026-07-31-pr-merge-lanes.md` § Label ownership.
-- **Lane B self-merge** when policy says eligible (operator/Meta; agents prepare-only until merge automation is explicitly enabled). Includes our PRs **and** others' auto-B / `low-impact` PRs. **Merge quietly** - no PR comments explaining estate lanes, the #1268 blessing, or why we are allowed to merge. Policy + chip are the paper trail; the merge commit is enough.
-- **Pushing to PR branches via `maintainerCanModify`** *only when* (a) the PR has `maintainerCanModify: true`, (b) we have coordinated with the PR author first (comment + reasonable response window), and (c) we are addressing a clear stall (conflicts, no author iteration, no maintainer review). Stays attributed: author's commits keep their authorship; our rebase / fix commits add `Co-authored-by:` lines
+- **Label management** on `tiann/hapi` issues and PRs - including applying `low-impact` for lane B promote **and** `dogfooded` after live dogfood (operator-directed or Discovery). Daily taxonomy owner for `low-impact`: HAPI session **Issue labelling (tiann/hapi)** (`22fc4ba7…`); see `docs/plans/2026-07-31-pr-merge-lanes.md` § Label ownership. Do **not** auto-slap `dogfooded` from the labelling sweep — only after real live use.
+- **Lane B self-merge** when policy says eligible (operator/Meta; agents prepare-only until merge automation is explicitly enabled). Includes our PRs **and** others' auto-B / `low-impact` / `dogfooded` (post-window) PRs. **Merge quietly** on `low-impact` / auto-B - no PR comments explaining estate lanes. For `dogfooded`, the stamp comment + #2083 thread are the public paper trail; still no estate jargon on merge.
+- **Pushing to PR branches via `maintainerCanModify`** when (a) the PR has `maintainerCanModify: true`, and (b) either we coordinated with the author first **or** the operator explicitly directed an amend (e.g. dogfood follow-up onto a community tip). Never force-push over the author's commits — fast-forward / cherry-pick on top. Stays attributed: author's commits keep their authorship; our commits add `Co-authored-by:` when co-writing
 
 **What we explicitly do NOT do (lane C):**
 
@@ -199,12 +223,32 @@ If @tiann narrows or expands scope, revise this section.
 
 | Session | Role | Agents ping? |
 |---------|------|--------------|
-| **Tooling meta-bot** (`HAPI_META_TOOLING_SESSION_ID`; remat owner in `config/remat-escalate.yaml`, currently prefix `05d9f0f2`) | **Local kitchen:** soup remat, manifest hygiene, remat-hold escalation, wave-clear **execution**, fork tooling | **Yes** — for any local soup/kitchen/remat/process-feedback |
-| **PR watcher** (`HAPI_META_SESSION_ID`; `meta - PR watcher`, currently prefix `9f5f7e1d`) | **Upstream/outward:** `tiann/hapi` PR health, chips, CI/threads, merge timeliness, hourly classify queue | **No** — agents must **not** consult or ping PR watcher |
+| **Tooling meta-bot** (`HAPI_META_TOOLING_SESSION_ID`; remat owner in `config/remat-escalate.yaml`, currently prefix `cbd1073e`) | **Local kitchen:** soup remat, manifest hygiene, remat-hold escalation, wave-clear **execution**, fork tooling | **Yes** — for any local soup/kitchen/remat/process-feedback |
+| **PR watcher** (`HAPI_META_SESSION_ID`; `meta - PR watcher`, currently prefix `1e32daba`) | **Upstream/outward:** `tiann/hapi` PR health, chips, CI/threads, merge timeliness, hourly classify queue | **No** — agents must **not** consult or ping PR watcher |
 
 **One line:** tooling meta-bot owns all **local soup orchestration**; PR watcher is **upstream-facing** and must **not** be described as kitchen controller.
 
 PR watcher **may** ping tooling meta-bot outbound (wave-clear unlock, merged-cleanup nudge when a peer failed Gate A). That is PR watcher → tooling meta-bot only. **Reverse pings are forbidden:** feature peers, dogfood peers, and remat escalation must **never** `ping_peer` PR watcher for soup status, remat acks, process feedback, drain updates, or "thanks".
+
+### The seat's own handbook: [`tooling-meta-role.md`](./tooling-meta-role.md)
+
+**This role is swapped periodically.** Standing authority, restart cadence, the wave-clear order, the archive line, and the flavour-coupling audit live in [`tooling-meta-role.md`](./tooling-meta-role.md), marked POLICY vs PRACTICE. Every note from an outgoing holder gets encoded there — the seat's knowledge must not live in a session.
+
+### After a flavour swap: keep the predecessor as consultant (operator, 2026-11-09)
+
+**Do not hard-archive the superseded husk.** Retitle it `SUPERSEDED …`, leave it reachable, and `ping_peer … wake=true` it whenever role behaviour surprises you. `config/meta-sessions.yaml` records it as `consult_on_surprise:`.
+
+The reason is specific: **docs describe prohibitions, the predecessor describes practice**, and the gap between them is where a swap loses capability silently. Worked example from the Cursor → Claude tooling/meta swap:
+
+| What the docs said | What the predecessor said it actually did |
+|---|---|
+| "**NEVER** `sudo systemctl restart hapi-hub.service` … use `hapi-restart-hub`" | Restart after **any** green remat touching hub/CLI, unasked. *"Patient drain is the quiet period."* Hold only for fleet-seal/governance, stack-switch smells, or `--impatient` on a wedged hub. |
+| (silent) | Hard-archiving other sessions is **not** this seat's call — titles yes, archive is operator/outside. |
+| (silent) | Long remats go in `hapi job run --wake-on-terminal` so the session meter survives the rebuild. |
+
+The successor read the prohibition as "restarts need operator permission" and deferred one for hours while a composed tip sat unpublished — then discovered it *could not* restart anyway, because `hapi-restart-hub`'s drain self-exemption keyed only on `CURSOR_AGENT` and hung waiting on itself (`9b855dd3f`, `8e87a2143`). The predecessor's suggested `CURSOR_AGENT|CURSOR_INVOKED_AS` audit then found a second landmine in `lib/patient-drain.sh` (`8e339eb83`).
+
+**Generalisation:** a flavour swap can silently remove an ability, and the symptom reads as *"this action needs permission"* rather than *"the tool cannot see me"*. When something in the role feels gated, ask the predecessor before concluding it is policy.
 
 ---
 
@@ -281,7 +325,7 @@ What it does, idempotently:
 | 🔁 `pending` | CI/bot in flight, or thread/CI data momentarily unavailable | wait / retry |
 | ⚠️ `needs_work` | failing CI, **current** open threads, bot findings, rebase, or **closed-unmerged** | fix per action string |
 | 📝 `pre_pr` | tracked number, no open PR upstream yet | file when ready |
-| 🔧 `merged` | merged; cleanup still owed (or Gate A clean, archive pending) | drop soup/wt/branch → **exit reflection** (or `skip:`) → ack + idle; Meta archives (peers: **no mid-turn self-archive**) |
+| 🔧 `merged` | merged; cleanup still owed (or Gate A clean, archive pending) | drop soup → **exit reflection** (or `skip:`) → remove wt/branch → ack + idle; Meta archives (peers: **no mid-turn self-archive**) |
 | 🧹 `complete` | fully cleaned (layer DROPPED, no worktree/branch, session archived) | **never** (babysit ended) |
 | `?` `unknown` | GitHub data unavailable this run | **chip left at last good status; never pinged** |
 
@@ -300,11 +344,14 @@ Chip thread count excludes GraphQL `isOutdated` unresolved threads (#847: leftov
 ```text
 PR #<N> merged (<tip SHA if known>). Chip shows merged / 🔧 — leave the workstream title alone.
 
-Please:
+Please (prefer ONE cleanup turn — never end a turn after rmtree if reflection/ack still owed):
 1. Drop your soup layer(s) from **repo** `config/driver-manifest.yaml` (# DROPPED comment OK); then `hapi-manifest-mirror-to-config.sh` if you use ~/.config
-2. Remove worktree + delete local/remote branch (hapi-branch-audit until clean)
-3. Exit reflection: copy docs/plans/retros/TEMPLATE-exit-reflection.md →
+2. Exit reflection FIRST (cwd still alive): copy docs/plans/retros/TEMPLATE-exit-reflection.md →
    docs/plans/retros/YYYY-MM-DD-<slug>-exit.md (or honest skip: <reason> / skip: timebox)
+3. THEN remove worktree + delete local/remote branch (hapi-branch-audit until clean).
+   After `git worktree remove`, leave an empty cwd husk at the old session path (no `.git`)
+   until Meta archives — Gate A ignores husks; a missing cwd makes Claude spawn look like
+   `posix_spawn '~/.local/bin/claude' ENOENT`.
 4. Ack: "Gate A clean + exit reflection: <path|skip:> — idle for archive."
 5. Idle cleanly — do NOT self-archive mid-turn (orphans tool UI). Meta archives when idle.
 
@@ -768,7 +815,8 @@ The gate blocks unless **all** of these hold:
 | 5 | **Zero unresolved review threads** | status APIs hide these |
 | 6 | **Zero unanswered comments from anyone but the author since the last push** | **the #1842 case** — a maintainer's plain comment carries no mechanical weight on GitHub, so the gate gives it weight |
 | 7 | No `docs/operator/`, `docs/plans/`, `CLAUDE.md` in the diff | leak scanner parity |
-| 8 | For `tiann/hapi`: a valid **lane B authorisation** | agents are prepare-only upstream |
+| 8 | If labeled `dogfooded`: **48h UTC window elapsed** | opt-out merge (#2083); blocks even with a fresh laneb grant |
+| 9 | For `tiann/hapi`: lane B auth — **elapsed `dogfooded`** (label still present) **or** valid **`hapi-laneb-authorise`** | dogfood is fire-and-forget; laneb for low-impact/immediate |
 
 Checks 5 and 6 **fail closed on API error** — an unreadable thread is treated as blocking, because an
 empty result is not absence.
