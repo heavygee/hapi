@@ -1793,7 +1793,13 @@ export function SessionListSearch(props: {
                 // Losing focus while a hold's transcript is still being applied
                 // must not collapse the field out from under it.
                 if (dictationListening) return
-                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                const related = event.relatedTarget as Element | null
+                // The scope FueCallout portals to document.body, so it's
+                // never a DOM descendant of this container — without this
+                // check, focusing its "Got it" button reads as focus leaving
+                // and collapses the search bar out from under it.
+                if (related?.closest('[data-fue-callout]')) return
+                if (!event.currentTarget.contains(related as Node | null)) {
                     props.onExpandedChange(false)
                 }
             }}
