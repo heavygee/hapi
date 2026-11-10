@@ -149,7 +149,19 @@ Local-only (never push — not in git):
 Never tracked:
   AGENTS.local.md, localdocs/, web/public/xr-poc/, .specstory/
 
-Upstream + origin feat/fix/soup branches:
+Push to UPSTREAM (or any remote not named "origin" — unknown is treated as
+upstream by fork_pre_push_path_ok):
   no docs/operator/, no docs/plans/, no .cursor/rules/operator*
+
+Push to ORIGIN on a feat/ fix/ soup/ branch:
+  no docs/operator/, no .cursor/rules/operator*
+  docs/plans/ IS allowed here — this is the one asymmetry between the two
+  destinations, and it is easy to misread. Check fork_pre_push_origin_ok()
+  before reporting a docs/plans/ push as blocked; a 2026-11-10 cold review on
+  #238 raised a Blocker from this summary text that the predicate does not
+  support, and the push it predicted would fail had already succeeded.
+
+Push to ORIGIN on main / driver/ / garden/ / tooling/ / docs/:
+  everything above is allowed
 EOF
 }
