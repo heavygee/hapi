@@ -73,7 +73,7 @@ First hourly sweep flagged #1725/#1733/#1772/#987 as CONFLICTING/DIRTY after syn
 | PR | Remediations |
 |---|---|
 | #1725 | **Rebased** — MERGEABLE @ `10c5ba127c`; CI running; dogfood ~40h left; [peer](/sessions/1e75a008-dda1-4549-af61-1f69150e1795) |
-| #1733 | [Peer #1733: rebase onto main](/sessions/fd5a0161-6f7e-40b7-81e6-3f19cef1cbbe) |
+| #1733 | **Rebased** — MERGEABLE @ `7e86f4f93b`; CI running; dogfood ~40h left; [peer](/sessions/fd5a0161-6f7e-40b7-81e6-3f19cef1cbbe) |
 | #987 | Thin re-cut approved — [Peer #987](/sessions/290c588b-5f7c-4391-80ad-6078f695d4be); drop cold-review-clean only; keep dogfooded; note pre-tip `2c28a1365` |
 | #1772 | Rebase-assist offer posted on PR; assist branch `rebase-assist/1772-onto-upstream-main` |
 
