@@ -28,9 +28,10 @@ Still later (orchestrator will spawn when blockers clear): list persistence of l
 
 ## Daily check
 
-**Do not** use a `hapi job run … -- sleep 86400` meter for this — that is fake work with a meaningless progression bar (cleared 2026-11-10).
-
-Real options: Meta daily / operator ping / agent `/loop` / a cron that wakes this session with a remit. Until one of those is wired, daily triage is a conscious turn, not a zombie sleeper.
+`attention-daily-sweep` via `scripts/tooling/hapi-attention-daily-sweep.sh`:
+- **Progress:** `done/total` hourly sweeps (24), unit `sweeps` — each tick queries Discussion #2355, Issue #2356, and open dogfooded PRs.
+- **Detail:** quiet vs N new signals; findings accumulate in `/tmp/hapi-attention-daily-sweep.log.findings`.
+- Wake-on-terminal re-arms triage after the day. Not a bare `sleep 86400`.
 
 Merge remains operator/Meta after elapsed windows — prepare only.
 
