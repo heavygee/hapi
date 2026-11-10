@@ -73,16 +73,12 @@ order above is a real dependency chain, so a removal part way down just stops ev
 - **Long-running-job fade digression removed.** Point of residency is: fade = not taking RAM;
   operators already know that signal. Job chrome is its own item.
 - **Status summaries are already upstream** (emit toggle + `AGENT_NOTIFY_SUMMARY` contract on
-  `tiann/hapi` main). Upstream's own instruction file notes Cursor lacks a system-prompt seam
-  on stock main, so the toggle covers other flavors today. Live hub DB (2026-11-09):
-  **542 / 892** Cursor sessions have `last_notify_status`. Tooling/meta (2026-11-09): the
-  composed soup still **declares** `installCursorNotifyRuleOverlay` but nothing calls it —
-  launcher wiring was lost in a rewrite (tracked in the sentinel triage plan). Fleet Cursor
-  emit is therefore not "the overlay works"; it is some other arranged path (rules / overlays
-  outside that function). **Closing a stock-upstream Cursor emission path remains forthcoming
-  under this heading.** Upstream body keeps "quietly accumulating / time to put it to use"
-  without claiming every flavor is covered on a fresh install. PR 3 (hub-authored blockers)
-  still covers terminal agent errors / dead turns regardless.
+  `tiann/hapi` main) for Claude/Codex/OpenCode/Grok. **Cursor gap:** #1375 already asked for a
+  Cursor rules overlay; #1376 shipped without Cursor and closed the parent — unfinished ask,
+  no follow-up until **#2353** (filed 2026-11-10). Peer babysitting the fix PR:
+  [/sessions/ab6f3c6c-3a29-49df-82fa-bceda7e46318](/sessions/ab6f3c6c-3a29-49df-82fa-bceda7e46318).
+  Three-way Part 2 cites #2353; fill in the PR number when the peer opens it. Soup overlay
+  function still uncalled (tip-forward loss); estate Cursor emit rides alwaysApply rules.
 - **Notify display glue (heavygee/hapi#322):** Happy showed summary JSON welded to trailing
   prose because `shared/src/messages.ts` required the last line to end with `}`, while the
   Cursor seal path already tolerated glue (`a176ca7ba`). **Live in soup** as of tip

@@ -146,6 +146,9 @@ PRs under the same umbrella.
 | Active + Working lenses in the filter menu | Issue **#2002** | Open issue; **no PR yet**. Already present on the local fork's filter menu (dogfood); still needs an upstream PR |
 | Discovery callouts for shipped-but-unlabelled controls | PR **#2339** | Open PR |
 | Inline model errors (`resource_exhausted` etc.) → surface + notify | Issue #878, PR **#987** | Open PR |
+| Cursor emits `AGENT_NOTIFY_SUMMARY` when Emit status summaries is on | Issue **#2353** (closes the Cursor half left unfinished when #1375 / #1376 shipped without Cursor); **PR TBD** — peer babysitting | Open issue; PR in flight |
+
+**#2353 context:** #1375 already named a Cursor rules overlay in its proposal; #1376 merged the toggle for Claude/Codex/OpenCode/Grok only and closed the parent. No Cursor follow-up was filed until #2353.
 
 ## Next PRs under this umbrella
 
