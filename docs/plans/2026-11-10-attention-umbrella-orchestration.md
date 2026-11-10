@@ -72,7 +72,7 @@ First hourly sweep flagged #1725/#1733/#1772/#987 as CONFLICTING/DIRTY after syn
 
 | PR | Remediations |
 |---|---|
-| #1725 | CLEAN CI but **Major** one-shot Continue can replay via generic retry — peer re-woken to patch; [peer](/sessions/1e75a008-dda1-4549-af61-1f69150e1795) |
+| #1725 | **Ready-YES / CLEAN** @ `cfa9b93e5` (one-shot Continue fix); dogfood ~40h left; peer idling |
 | #1733 | **Ready-YES / CLEAN** @ `7e86f4f93b`; dogfood ~40h left; peer idling |
 | #987 | Thin re-cut approved — [Peer #987](/sessions/290c588b-5f7c-4391-80ad-6078f695d4be); drop cold-review-clean only; keep dogfooded; note pre-tip `2c28a1365` |
 | #1772 | Rebase-assist offer posted on PR; assist branch `rebase-assist/1772-onto-upstream-main` |
