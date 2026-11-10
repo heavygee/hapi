@@ -81,6 +81,6 @@ First hourly sweep flagged #1725/#1733/#1772/#987 as CONFLICTING/DIRTY after syn
 
 | PR | Notes |
 |---|---|
-| #2362 | Open + dogfooded @ `21de8a3ef`; peer reported already DIRTY — rebase. Argues against `832c5922f` "no dimmed rows" on purpose. [peer](/sessions/205260d9-527a-4f7b-beeb-968ecf567fe0) |
-| Tooling | Authorized: teach `hapi-pr-status.sh` `codex-review-state:v1` (fork gate blind without it). Clean branch only. |
+| #2362 | **Ready-YES / CLEAN** + dogfooded (~48h from 10:04Z); [peer](/sessions/205260d9-527a-4f7b-beeb-968ecf567fe0) |
+| Tooling | **Fork [heavygee/hapi#326](https://github.com/heavygee/hapi/pull/326)** open — `codex-review-state:v1` parse + offline probe that fails on unpatched script. Awaiting fork merge. |
 
