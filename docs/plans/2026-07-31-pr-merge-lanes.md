@@ -60,15 +60,23 @@ When merging lane B: **just merge** (squash). Do **not** leave a trail comment a
 
 ## Label ownership
 
-One promote label: **`low-impact`** on `tiann/hapi`.
+Promote labels on `tiann/hapi`: **`low-impact`** and **`dogfooded`**.
 
-We dropped `self-merge-ok` - it was on-the-nose and redundant. Lane B = `low-impact` (or auto tests/docs) **and** chip `✅` (CI/bot/threads). The health chip already gates "ok to merge"; a second "please merge me" label added no signal.
+We dropped `self-merge-ok` - it was on-the-nose and redundant. Lane B = `low-impact` / `dogfooded` (or auto tests/docs) **and** chip `✅` (CI/bot/threads). The health chip already gates "ok to merge".
 
 **Owner session (low-impact only):** [Issue labelling (tiann/hapi)](/sessions/22fc4ba7-c166-4592-aeff-1340cb7ed230) (`22fc4ba7-c166-4592-aeff-1340cb7ed230`) - daily ~09:00 UTC sweep; apply `low-impact` on focused heavygee PRs by judgment. **Do not** auto-apply `dogfooded` from that sweep.
 
 | Label | Apply when | Do not |
 |-------|------------|--------|
 | `low-impact` | Focused PR (or issue whose fix PR will be) with small blast radius - product OK if scoped; human judgment | Auto-slap on every "small" bug; never as sole size heuristic; never on others' / `community-pr` without ask |
+| `dogfooded` | Write collaborator has run the change on a **live** HAPI install and is willing to merge after 48h UTC silence unless the label is removed + challenged on [#2083](https://github.com/tiann/hapi/discussions/2083) | Slap without live dogfood; use as a quieter synonym for low-impact |
+
+### Amendment 2026-10-21 — `dogfooded` 48h opt-out
+
+- Public thread: [Discussions #2083](https://github.com/tiann/hapi/discussions/2083) (General; Announcements create is maintainer-restricted). Issue #2082 was a short-lived fallback and is closed.
+- Attaching the label **is** merge intent. Gate: `lib/dogfood-countdown.sh` + check in `hapi-pr-merge-gate.sh`. Meta chip action surfaces `dogfooded countdown (… left)`.
+- After window: still requires **`hapi-laneb-authorise`** (existing dogma). Agents prepare-only.
+- Policy `github_labels`: `["low-impact", "dogfooded"]`.
 
 ### Amendment 2026-11-03 — `dogfooded` is fire-and-forget
 
