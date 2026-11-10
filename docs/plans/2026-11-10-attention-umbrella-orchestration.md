@@ -77,3 +77,10 @@ First hourly sweep flagged #1725/#1733/#1772/#987 as CONFLICTING/DIRTY after syn
 | #987 | **Re-cut MERGEABLE** @ `7a2cd6232` (1 commit); CRC dropped for fresh bot; dogfooded kept; archive `archive/pr987-pre-recut`; [peer](/sessions/290c588b-5f7c-4391-80ad-6078f695d4be) babysitting CI |
 | #1772 | Rebase-assist offer posted on PR; assist branch `rebase-assist/1772-onto-upstream-main` |
 
+## Residency fade lodged
+
+| PR | Notes |
+|---|---|
+| #2362 | Open + dogfooded @ `21de8a3ef`; peer reported already DIRTY — rebase. Argues against `832c5922f` "no dimmed rows" on purpose. [peer](/sessions/205260d9-527a-4f7b-beeb-968ecf567fe0) |
+| Tooling | Authorized: teach `hapi-pr-status.sh` `codex-review-state:v1` (fork gate blind without it). Clean branch only. |
+
