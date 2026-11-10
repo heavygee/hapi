@@ -2,7 +2,8 @@
 
 **Date:** 2026-11-09 (inventory verified 2026-11-10)
 **Role:** Rationale for upstream work on **session attention for multi-session fleets**.
-PRs in that set should link here (or to the umbrella issue that cites this).
+**Posted:** [Discussion #2355](https://github.com/tiann/hapi/discussions/2355) · umbrella [Issue #2356](https://github.com/tiann/hapi/issues/2356).
+Child PRs link to **#2356** (and the flagship blocked-chrome PR once lodged).
 
 **Why:** What states a session can be in, and what three trees draw for them — upstream
 `main`, IanMStevenson's #2296 tip, and the local fork that has been running the attention
@@ -125,6 +126,18 @@ open PRs first, then the PRs not yet lodged — under this same umbrella, using 
 `dogfooded` practice (48h UTC opt-out, then merge intent;
 [Discussion #2083](https://github.com/tiann/hapi/discussions/2083)). If any item should not
 proceed, remove the `dogfooded` label on that PR.
+
+## Orchestration (this campaign)
+
+- **Orchestrator session** owns lodging missing PRs, dogfood stamps, cross-links, and a **daily**
+  feedback sweep on Discussion #2355, Issue #2356, and every `dogfooded` child PR.
+- **Umbrella:** #2356 carries the short submission. **Discussion #2355** carries this three-way.
+- **Flagship / uber PR:** the #1717 blocked-chrome PR body repeats the submission text + images
+  and links #2355 / #2356. Other attention PRs also link #2356.
+- **Already stamped `dogfooded` (48h UTC from stamp):** #1725, #1733, #1772, #2339, #987, #2354.
+- **Still to lodge:** #1717, residency fade, #1996, #2002, list persistence of last status
+  summary, settings default-on, blocked FUE, hub-authored blockers.
+
 
 ## Already on `main`
 

@@ -1,8 +1,14 @@
-# DRAFT — upstream submission, for operator approval before anything is posted
+# Session attention umbrella — posted
 
-**Target:** `tiann/hapi`, as one issue that the coordinated PRs each link back to.
-**Constraint:** short enough to actually be read by a solo maintainer. Current draft ≈ 450 words.
-**Status:** NOT POSTED. Nothing has been opened upstream.
+**Posted:**
+- Umbrella issue (submission text + images): [tiann/hapi#2356](https://github.com/tiann/hapi/issues/2356)
+- Three-way rationale Discussion: [tiann/hapi#2355](https://github.com/tiann/hapi/discussions/2355)
+- Flagship / "uber" PR (blocked chrome #1717) — lodging now; body carries this submission text + images and links #2355 / #2356
+
+**Orchestrator:** this HAPI session owns the campaign. All attention PRs link to **#2356** (and to the flagship PR once open). Daily feedback sweep on #2355 / #2356 / dogfooded children.
+
+**Constraint:** short enough to actually be read by a solo maintainer. Body ≈ 450 words.
+**Status:** POSTED 2026-11-10. Dogfood countdowns started on placed PRs.
 
 ---
 
