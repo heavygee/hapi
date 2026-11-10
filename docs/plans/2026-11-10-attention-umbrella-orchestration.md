@@ -1,6 +1,6 @@
 # Attention umbrella orchestration
 
-**Orchestrator session:** Attention umbrella (HAPI id `c89dc806-274d-4194-b61a-d64c0a69f12d`)
+**Orchestrator session:** [Attention umbrella: orchestrate dogfood + PRs](/sessions/c89dc806-274d-4194-b61a-d64c0a69f12d)
 
 ## Posted
 
@@ -10,26 +10,24 @@
 | Umbrella issue (submission) | https://github.com/tiann/hapi/issues/2356 |
 | Proof assets | https://github.com/heavygee/hapi/releases/tag/attention-umbrella-assets |
 
-## Dogfooded (countdown running)
+## Dogfooded (countdown running from 2026-11-10T01:38Z-ish)
 
 #1725 · #1733 · #1772 · #2339 · #987 · #2354
 
-## Missing PRs to lodge (peers)
+## Peers lodging missing PRs
 
-1. **#1717 blocked chrome** — flagship / uber PR (submission text + images in body)
-2. Residency fade restore
-3. #2002 Active + Working lenses
-4. #1996 blocked lens (after / stacked on #1772)
-5. Persist last status summary onto session-list fields
-6. Settings: flag blocked from status summaries (default on)
-7. FUE for blocked affordance
-8. Hub-authored blocker sources (after #1717)
+| Remit | Session |
+|---|---|
+| Flagship #1717 blocked PR (submission text in body) | [Peer #1717: flagship blocked PR](/sessions/83d28e01-5852-4926-b163-99a95f46c931) |
+| Residency fade | [Peer #2356: residency fade PR](/sessions/205260d9-527a-4f7b-beeb-968ecf567fe0) |
+| #2002 Active + Working lenses | [Peer #2002: Active Working lenses](/sessions/ea9e52cc-cf3d-4f5d-95d8-9944bf08b0d6) |
+| #1996 blocked filter lens | [Peer #1996: blocked filter lens](/sessions/eddfb230-ebc4-4196-b2b7-c33a2f5f71f8) |
+| Cursor emit #2354 babysit (pre-existing) | [Cursor status-summary emit](/sessions/ab6f3c6c-3a29-49df-82fa-bceda7e46318) |
+
+Still later (orchestrator will spawn when blockers clear): list persistence of last status summary; settings default-on; blocked FUE; hub-authored blockers.
 
 ## Daily check
 
-Session job `attention-daily-sweep` wakes this orchestrator every ~24h to:
-- Read new comments on #2355 / #2356
-- Read reviews/comments on dogfooded + child PRs
-- Triage pushback; respond or escalate; re-arm the job
+Session job `attention-daily-sweep` on the orchestrator — wakes ~every 24h to triage Discussion #2355, Issue #2356, and all dogfooded / child PRs for pushback. Re-arm after each sweep.
 
 Merge remains operator/Meta after elapsed windows — prepare only.
