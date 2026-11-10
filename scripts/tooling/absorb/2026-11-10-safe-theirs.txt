@@ -1,0 +1,19 @@
+# Files where taking origin/main's side provably drops NO fork symbol.
+# Verified 2026-11-10 by comm -23 of stage2 vs stage3 identifier sets.
+cli/src/modules/common/sessionJobInstruction.test.ts
+cli/src/modules/sessionJob/runSessionJob.test.ts
+cli/src/modules/sessionJob/sessionJob.ts
+cli/src/modules/sessionJob/sessionJobMcp.test.ts
+docs/.vitepress/config.ts
+hub/src/store/migration-v28.test.ts
+hub/src/sync/sessionCache-merge-jobs.test.ts
+hub/src/sync/sessionJobWake.ts
+hub/src/web/routes/sessions-jobs.test.ts
+shared/src/sessionOrder.test.ts
+web/src/components/SessionAttentionIndicator.test.tsx
+web/src/components/SessionList.order.test.tsx
+web/src/components/SessionList.quick-archive.test.tsx
+web/src/components/SessionListSearch.test.tsx
+web/src/components/SessionListViewMenu.test.tsx
+web/src/hooks/queries/useSessions.test.tsx
+web/src/lib/sharePickerSessions.test.ts
