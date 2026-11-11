@@ -115,11 +115,15 @@ Peer exit reflection: `docs/plans/retros/2026-11-11-session-row-residency-fade-e
 
 Promotes applied: fork-stage non-draft guidance (`pr-review-loop.md` + `hapi-pr-create`); tip-check gap filed [heavygee/hapi#327](https://github.com/heavygee/hapi/issues/327).
 
-## MCP `link_pr` regression (2026-11-11)
+## Soup required-surface gate (2026-11-11) — Meta
 
-Live soup: awareness ON, CLI `hapi link-pr` OK, MCP catalog missing `link_pr` (only `link_issue`). Loss predates current absorb (inherits; both merge parents have 0). Originating restore that rebuilt `link_issue` and omitted `link_pr`: `e08eb8b69`. Symbol still on `driver/github-pr-awareness` @ `8ff958321`.
+[tooling/meta bot](/sessions/cbd1073e-4fd3-4f4a-bff8-cf9ba97bca6d) shipped `5e4fd6318`:
 
-**Owner:** [tooling/meta bot](/sessions/cbd1073e-4fd3-4f4a-bff8-cf9ba97bca6d) — finish current absorb first, then thin tip re-union + `sentinel: link_pr` (fail-closed remat). Confirm MCP catalog with awareness ON. [#1163 session](/sessions/b30cf5c0-633b-420f-bc10-26229e07f598) rematched tip `6f13c45fd` (was CONFLICTING); CI/bot settling → Lane A. Remat of MCP `link_pr` still Meta. Workaround: CLI `hapi link-pr`.
+- **`config/soup-required-surface.yaml`** — 22 surface entries extracted from live tree (MCP HTTP, MCP stdio, fork CLI commands, web FUE). Not per-layer only: a symbol with no claiming layer (e.g. `link_pr` after `e08eb8b69`) still fails closed.
+- **Multi-sentinel support** fixed (old loop overwrote; only last sentinel checked).
+- Hard `--verify` gate; live tip checked **3 missing** including `link_pr`×2; absorb WIP **2 missing** (`link_pr`×2) — gate would have blocked the silent drop.
+- **Sequencing change (accepted):** restore `link_pr` on absorb WIP *before* promote; keep entries red/enforced. First remat under expanded gate = absorb promote itself.
+- [#1163](/sessions/b30cf5c0-633b-420f-bc10-26229e07f598) tip `6f13c45fd` still Lane A / independent of remat. Workaround until promote: CLI `hapi link-pr`.
 
 ## #2002 lodged as tiann/hapi#2376 (2026-11-11)
 
