@@ -198,8 +198,10 @@ if [[ "$NO_FORK_STAGE" != "1" ]]; then
   if [[ "$FORK_PR" == "null" || -z "$FORK_PR" ]]; then
     echo "hapi-pr-create: no fork PR found for branch '$BRANCH' on heavygee/hapi" >&2
     echo "" >&2
-    echo "  Open a fork-stage PR first so the fork-side review bot can weigh in:" >&2
-    echo "    gh pr create --repo heavygee/hapi --base main --head $BRANCH --draft \\" >&2
+    echo "  Open a fork-stage PR first so the fork-side review bot can weigh in." >&2
+    echo "  Must be NON-DRAFT (or immediately ready-for-review / @codex review):" >&2
+    echo "  the chatgpt-codex connector does not review drafts — --draft = dead gate." >&2
+    echo "    gh pr create --repo heavygee/hapi --base main --head $BRANCH \\" >&2
     echo "      --title '[cold-review] <upstream title>' \\" >&2
     echo "      --body 'Fork-side cold-review stage PR. Not for merge.'" >&2
     echo "" >&2

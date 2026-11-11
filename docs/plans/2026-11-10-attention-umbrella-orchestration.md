@@ -104,3 +104,11 @@ Re-arm next 24h sweep watching the same open PRs (drop #2362; it was never in th
 Peer correctly flagged: blocked-only lens has no predicate home on `main` or any open PR; it lives only in [Peer #1717](/sessions/83d28e01-5852-4926-b163-99a95f46c931) WIP (`feat/blocked-session-affordance-1717`).
 
 **Call: option 1** — keep #1996 held until #1717 opens upstream. No invented minimal predicate. No informal base on moving tip `d1c19413a`. Branch may stay warm on #1772 tip `61d72d98c`.
+
+## #2362 Gate A clean (2026-11-11)
+
+Peer exit reflection: `docs/plans/retros/2026-11-11-session-row-residency-fade-exit.md`. Idle for Meta archive.
+
+**Follow-up authorized:** live stacking-context defect from #2362 Minor → tracker [tiann/hapi#2373](https://github.com/tiann/hapi/issues/2373); fix branch `fix/session-row-fade-tooltip-stacking` (`0cd8475d3`). Peer to open upstream PR.
+
+Promotes applied: fork-stage non-draft guidance (`pr-review-loop.md` + `hapi-pr-create`); tip-check gap filed [heavygee/hapi#327](https://github.com/heavygee/hapi/issues/327).

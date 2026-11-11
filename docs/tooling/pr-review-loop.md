@@ -312,6 +312,8 @@ Unsolicited top-level comments on **someone else's** upstream PR are an **operat
 
 The `cold-review-clean` label on a fork PR is the operator's explicit signal that the **fork-side bot pass is satisfactory** - either the bot found nothing actionable, or the operator explicitly accepts/defers what it did find. `hapi-pr-create` requires this signal (or `--skip-fork-stage`) before opening the upstream PR.
 
+**Fork-stage PR must be NON-DRAFT.** The `chatgpt-codex-connector` triggers on open / ready-for-review / `@codex review` — it does **not** review drafts. Opening the fork-stage PR with `--draft` produces a dead gate (no review arrives; `hapi-pr-status` stays UNKNOWN). Prefer a normal open PR titled `[cold-review] …` with body "Fork-side cold-review stage PR. Not for merge." If you already opened a draft, undraft or `@codex review`. Incident: draft #303 sat ~10 days with no bot; exit reflection on #2362.
+
 ### Important: fork bot and upstream bot are TWO DIFFERENT PRODUCTS
 
 This was misdocumented as "same vendor, different stochastic samples" until 2026-06-06. Corrected reality:
