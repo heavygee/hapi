@@ -98,3 +98,9 @@ No third-party pushback on Discussion #2355 or Issue #2356 (only our own comment
 | #2362 | **Landed** (tiann merge) — remove from open attention set |
 
 Re-arm next 24h sweep watching the same open PRs (drop #2362; it was never in the script list).
+
+## #1996 re-HOLD (2026-11-11) — waiting on #1717 open PR
+
+Peer correctly flagged: blocked-only lens has no predicate home on `main` or any open PR; it lives only in [Peer #1717](/sessions/83d28e01-5852-4926-b163-99a95f46c931) WIP (`feat/blocked-session-affordance-1717`).
+
+**Call: option 1** — keep #1996 held until #1717 opens upstream. No invented minimal predicate. No informal base on moving tip `d1c19413a`. Branch may stay warm on #1772 tip `61d72d98c`.
