@@ -22,9 +22,11 @@ vi.mock('@/claude/utils/startHappyServer', () => ({
         if (options.skillLookup) names.push('skill_lookup')
         return {
             url: 'http://127.0.0.1:43006/',
-            toolNames: options.skillLookup
-                ? ['change_title', 'display_image', 'display_video', 'display_media', 'list_peers', 'ping_peer', 'inspect_peer', 'search_content', 'spawn_peer', 'session_job', 'skill_lookup']
-                : ['change_title', 'display_image', 'display_video', 'display_media', 'list_peers', 'ping_peer', 'inspect_peer', 'search_content', 'spawn_peer', 'session_job'],
+            // `names` above is the fork's list and is what every expectation in
+            // this file is written against; the merge left it computed-then-
+            // discarded in favour of upstream's hardcoded arrays, which omit
+            // search_peers and archive_peer.
+            toolNames: names,
             stop: vi.fn()
         }
     })

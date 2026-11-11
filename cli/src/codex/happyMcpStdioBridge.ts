@@ -22,6 +22,9 @@ import {
   ARCHIVE_PEER_TOOL_DESCRIPTION,
   INSPECT_PEER_TOOL_DESCRIPTION,
   LIST_PEERS_INCLUDE_INACTIVE_PARAM_DESCRIPTION,
+  PEER_DELIVERY_MODE_DESCRIPTION,
+  PEER_WAIT_FOR_REPLY_PARAM_DESCRIPTION,
+  PEER_WAKE_PARAM_DESCRIPTION,
   PING_PEER_TOOL_DESCRIPTION,
   SESSION_ID_PREFIX_PARAM_DESCRIPTION,
   SPAWN_PEER_TOOL_DESCRIPTION,
@@ -32,6 +35,7 @@ import {
   sessionJobInputSchema,
 } from '@/modules/sessionJob/sessionJobMcp';
 import { SESSION_NAME_MAX_LENGTH } from '@hapi/protocol'
+import { PeerDeliveryModeSchema } from '@/modules/pingPeer/deliveryMode'
 import { CREATABLE_AGENT_FLAVORS } from '@hapi/protocol/modes'
 import { PermissionModeSchema } from '@hapi/protocol/schemas'
 import { isPeerToolsDisabled, PEER_TOOL_NAMES } from '@/modules/common/peerTools'
@@ -39,6 +43,7 @@ import { isPeerToolsDisabled, PEER_TOOL_NAMES } from '@/modules/common/peerTools
 const DEFAULT_TOOL_NAMES = [
   'change_title',
   'link_issue',
+  'link_pr',
   'display_image',
   'display_video',
   'display_media',
@@ -153,10 +158,80 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
       title: z.string().optional().describe('Optional display title or filename shown to the human user'),
     });
 
+    const linkPrInputSchema: z.ZodTypeAny = z.object({
+      url: z.string().optional().describe('GitHub PR URL'),
+      repo: z.string().optional().describe('owner/repo'),
+      number: z.number().int().positive().optional().describe('PR number'),
+      role: z.enum(['primary', 'secondary']).optional(),
+    });
+
     const linkIssueInputSchema: z.ZodTypeAny = z.object({
       url: z.string().describe('GitHub issue URL (https://github.com/<owner>/<repo>/issues/<n>) or the [host:]<owner>/<repo>#<n> shorthand'),
     });
 
+    if (toolNames.has('link_pr')) {
+      const linkPrTool = server.registerTool<any, any>(
+        'link_pr',
+        {
+          description: 'Attach the current HAPI session to a GitHub pull request',
+          title: 'Link Pull Request',
+          inputSchema: linkPrInputSchema,
+        },
+        async (args: Record<string, unknown>) => {
+          try {
+            const client = await ensureHttpClient();
+            await syncLinkPrVisibilityFromHttp(client);
+            if (!linkPrTool.enabled) {
+              return {
+                content: [
+                  {
+                    type: 'text' as const,
+                    text: 'GitHub PR awareness is disabled in Settings → Features. Enable it, then retry link_pr.',
+                  },
+                ],
+                isError: true,
+              };
+            }
+            const response = await client.callTool({ name: 'link_pr', arguments: args });
+            return response as any;
+          } catch (error) {
+            return {
+              content: [
+                { type: 'text' as const, text: `Failed to link PR: ${error instanceof Error ? error.message : String(error)}` },
+              ],
+              isError: true,
+            };
+          }
+        }
+      );
+      // Start hidden until the first HTTP listTools sync confirms awareness.
+      linkPrTool.disable();
+
+      async function syncLinkPrVisibilityFromHttp(client: Client): Promise<void> {
+        try {
+          const listed = await client.listTools();
+          const visible = listed.tools.some((tool) => tool.name === 'link_pr');
+          // Guard: SDK enable/disable always emit list_changed even when unchanged.
+          if (visible === linkPrTool.enabled) return;
+          if (visible) linkPrTool.enable();
+          else linkPrTool.disable();
+        } catch {
+          // Keep prior visibility on transient HTTP errors.
+        }
+      }
+
+      // Periodic sync so Codex listTools tracks hub toggles without destroying
+      // the cached HTTP MCP session.
+      const visibilityTimer = setInterval(() => {
+        void ensureHttpClient()
+          .then((client) => syncLinkPrVisibilityFromHttp(client))
+          .catch(() => undefined);
+      }, 15_000);
+      visibilityTimer.unref?.();
+      void ensureHttpClient()
+        .then((client) => syncLinkPrVisibilityFromHttp(client))
+        .catch(() => undefined);
+    }
     if (toolNames.has('link_issue')) {
       server.registerTool<any, any>(
         'link_issue',
@@ -291,9 +366,16 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
       );
     }
 
+    // The bridge must accept everything the HTTP server's ping_peer accepts,
+    // or Codex silently drops deliveryMode/wake/waitForReply at the boundary
+    // and the peer is pinged with different semantics than the caller asked
+    // for. The absorb reduced this schema to the two required fields.
     const pingPeerInputSchema: z.ZodTypeAny = z.object({
       sessionIdPrefix: z.string().trim().min(1).describe(SESSION_ID_PREFIX_PARAM_DESCRIPTION),
       message: z.string().min(1).describe('Message text to deliver to the target session'),
+      deliveryMode: PeerDeliveryModeSchema.optional().describe(PEER_DELIVERY_MODE_DESCRIPTION),
+      wake: z.boolean().optional().describe(PEER_WAKE_PARAM_DESCRIPTION),
+      waitForReply: z.boolean().optional().describe(PEER_WAIT_FOR_REPLY_PARAM_DESCRIPTION),
     });
 
     const displayLinksInputSchema: z.ZodTypeAny = z.object({

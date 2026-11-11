@@ -111,23 +111,27 @@ describe('startHappyServer skill_lookup', () => {
         const mcp = await connect(false)
         const tools = await mcp.listTools()
 
+        // Compared against .sort(), so this list must be sorted. The merge left
+        // it unsorted AND with ping_peer/session_job/spawn_peer listed twice --
+        // 17 entries for 14 tools, which could never equal a sorted 14-element
+        // array no matter what the server registered.
         expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
+            'archive_peer',
             'change_title',
-            'set_voice_mode',
-            'link_issue',
             'display_image',
             'display_media',
-            'ping_peer',
-            'archive_peer',
-            'spawn_peer',
             'display_video',
             'inspect_peer',
-            'session_job',
+            'link_issue',
+            // link_pr is registered but starts disabled until a hub awareness
+            // check confirms githubPrAwareness, and a disabled tool is absent
+            // from listTools. It is in the advertised toolNames either way.
             'list_peers',
-            'search_peers',
             'ping_peer',
             'search_content',
+            'search_peers',
             'session_job',
+            'set_voice_mode',
             'spawn_peer',
         ])
     })
@@ -474,43 +478,54 @@ describe('startHappyServer skill_lookup', () => {
         expect(server.toolNames).toEqual([
             'set_voice_mode',
             'link_issue',
+            'link_pr',
             'display_image',
             'display_video',
             'display_media',
+            'search_content',
             'list_peers',
             'search_peers',
-            'search_content',
             'ping_peer',
             'inspect_peer',
             'spawn_peer',
             'archive_peer',
             'session_job',
         ])
+        // Registration order inside createHapiMcpServer, which is not the
+        // toolNames order. search_peers is fork-only and was missing from the
+        // upstream list this assertion was absorbed from. link_pr is absent on
+        // purpose: it registers disabled until hub awareness is confirmed.
         expect(tools.tools.map((tool) => tool.name)).toEqual([
             'set_voice_mode',
             'link_issue',
             'display_image',
             'display_video',
             'display_media',
-            'search_content',
-            'list_peers',
+            'session_job',
             'ping_peer',
             'archive_peer',
-            'inspect_peer',
             'spawn_peer',
-            'session_job',
+            'inspect_peer',
+            'list_peers',
+            'search_peers',
+            'search_content',
         ])
+        // Same merge damage as the other sorted assertions: session_job listed
+        // twice, the list unsorted despite the .sort(), and the fork-only tools
+        // (set_voice_mode, link_issue, archive_peer, search_peers) absent.
         expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
+            'archive_peer',
             'display_image',
             'display_media',
             'display_video',
             'inspect_peer',
-            'session_job',
+            'link_issue',
             'list_peers',
-            'search_peers',
             'ping_peer',
             'search_content',
+            'search_peers',
             'session_job',
+            'set_voice_mode',
             'spawn_peer',
         ])
     })
@@ -847,6 +862,7 @@ describe('startHappyServer peer tools kill switch', () => {
             'change_title',
             'set_voice_mode',
             'link_issue',
+            'link_pr',
         // session_job is own-session (not peer) — stays available when peer tools are off.
             'display_image',
             'display_video',

@@ -5,6 +5,7 @@ type ToolHandler = (args: Record<string, unknown>) => Promise<unknown>
 const harness = vi.hoisted(() => ({
     tools: new Map<string, ToolHandler>(),
     configs: new Map<string, Record<string, unknown>>(),
+    registered: new Map<string, { enabled: boolean; enable(): void; disable(): void }>(),
     callTool: vi.fn(async (_request: unknown) => ({
         content: [{ type: 'text', text: 'forwarded' }],
         isError: false
@@ -13,9 +14,19 @@ const harness = vi.hoisted(() => ({
 
 vi.mock('@modelcontextprotocol/sdk/server/mcp.js', () => ({
     McpServer: class {
-        registerTool(name: string, config: Record<string, unknown>, handler: ToolHandler): void {
+        // The real SDK returns a RegisteredTool handle; link_pr uses its
+        // enable()/disable() to track hub githubPrAwareness, so the mock has to
+        // return one too or the bridge dies on an undefined handle.
+        registerTool(name: string, config: Record<string, unknown>, handler: ToolHandler) {
             harness.tools.set(name, handler)
             harness.configs.set(name, config)
+            const tool = {
+                enabled: true,
+                enable(): void { tool.enabled = true },
+                disable(): void { tool.enabled = false }
+            }
+            harness.registered.set(name, tool)
+            return tool
         }
 
         async connect(): Promise<void> {}
@@ -312,16 +323,24 @@ describe('runHappyMcpStdioBridge tool forwarding', () => {
         for (const name of ['change_title', 'list_peers', 'search_peers', 'ping_peer', 'inspect_peer', 'spawn_peer', 'archive_peer', 'search_content']) {
             expect(seeded).toContain(name)
         }
+        // The fork's default list, not upstream's: link_issue/link_pr and the
+        // soup peer tools (search_peers, archive_peer) are fork-only. The
+        // upstream expectation here contradicted the positive control three
+        // lines above, which already required search_peers and archive_peer.
         expect([...harness.tools.keys()]).toEqual([
             'change_title',
+            'link_pr',
+            'link_issue',
             'display_image',
             'display_video',
             'display_media',
             'session_job',
             'ping_peer',
             'spawn_peer',
+            'archive_peer',
             'inspect_peer',
             'list_peers',
+            'search_peers',
             'search_content'
         ])
 
@@ -343,6 +362,8 @@ describe('runHappyMcpStdioBridge tool forwarding', () => {
             // session_job is own-session — kept when peer tools are stripped.
             expect([...harness.tools.keys()]).toEqual([
                 'change_title',
+                'link_pr',
+                'link_issue',
                 'display_image',
                 'display_video',
                 'display_media',
