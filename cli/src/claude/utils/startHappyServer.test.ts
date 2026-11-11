@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import type { ApiSessionClient } from '@/api/apiSession'
 import * as peerMessages from '@/modules/pingPeer/pingPeer'
 import * as peerSpawn from '@/modules/spawnPeer/spawnPeer'
+import * as awareness from '@/api/fetchGithubPrAwareness'
 import { startHappyServer, toClaudeAllowedHapiMcpTools } from './startHappyServer'
 
 type ToolResult = {
@@ -888,5 +889,76 @@ describe('startHappyServer peer tools kill switch', () => {
             'search_content',
             'session_job',
         ]))
+    })
+})
+
+describe('startHappyServer link_pr', () => {
+    // Regression guard for e08eb8b69, which dropped link_pr from the fork-tools
+    // list that builds toolNames. The CLI command, hub route and docs all kept
+    // working, so the only symptom was a tool the catalog never offered -- no
+    // test, typecheck or build could see it. These assert the catalog directly.
+    const originalHome = process.env.HOME
+    let sandboxDir: string
+    let client: Client | null
+    let stopServer: (() => void) | null
+
+    beforeEach(async () => {
+        sandboxDir = await mkdtemp(join(tmpdir(), 'hapi-linkpr-mcp-'))
+        process.env.HOME = join(sandboxDir, 'home')
+        await mkdir(process.env.HOME, { recursive: true })
+        client = null
+        stopServer = null
+    })
+
+    afterEach(async () => {
+        await client?.close()
+        stopServer?.()
+        vi.restoreAllMocks()
+        if (originalHome === undefined) delete process.env.HOME
+        else process.env.HOME = originalHome
+        await rm(sandboxDir, { recursive: true, force: true })
+    })
+
+    async function startWithAwareness(
+        enabled: boolean,
+        options: Record<string, unknown> = {}
+    ): Promise<{ toolNames: string[]; listed: string[] }> {
+        vi.spyOn(awareness, 'fetchGithubPrAwarenessEnabled').mockResolvedValue(enabled)
+        const sessionClient = {
+            sessionId: 'linkpr-session',
+            getMetadata: () => ({ name: 'S', path: sandboxDir, flavor: 'codex' }),
+            updateMetadata: vi.fn(),
+            sendAgentMessage: vi.fn(),
+            sendClaudeSessionMessage: vi.fn()
+        } as unknown as ApiSessionClient
+        const server = await startHappyServer(sessionClient, options)
+        stopServer = server.stop
+        const mcp = new Client({ name: 'hapi-linkpr-test', version: '1.0.0' }, { capabilities: {} })
+        client = mcp
+        await mcp.connect(new StreamableHTTPClientTransport(new URL(server.url)))
+        const listed = (await mcp.listTools()).tools.map((tool) => tool.name)
+        return { toolNames: server.toolNames, listed }
+    }
+
+    it('advertises link_pr in the catalog when hub awareness is ON', async () => {
+        const { toolNames, listed } = await startWithAwareness(true)
+        expect(toolNames).toContain('link_pr')
+        expect(listed).toContain('link_pr')
+    })
+
+    it('registers but hides link_pr when hub awareness is OFF', async () => {
+        const { toolNames, listed } = await startWithAwareness(false)
+        // Still advertised to the launcher so --tools carries it...
+        expect(toolNames).toContain('link_pr')
+        // ...but not offered to the model until the hub says awareness is on.
+        expect(listed).not.toContain('link_pr')
+    })
+
+    it('excludes link_pr entirely when an explicit allowlist omits it', async () => {
+        const { toolNames, listed } = await startWithAwareness(true, {
+            enabledTools: ['change_title']
+        })
+        expect(toolNames).not.toContain('link_pr')
+        expect(listed).not.toContain('link_pr')
     })
 })
