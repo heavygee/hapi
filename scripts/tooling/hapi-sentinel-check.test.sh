@@ -137,5 +137,30 @@ amanv "layers:" "  - branch: layer-wide" ""
 if out="$(autorun)"; then bad "--auto missed a lost symbol that sorts past any head -N cut"; else ok; fi
 printf '%s' "$out" | grep -q "zzzTailSymbol" && ok || bad "--auto did not name the tail symbol — coverage is not complete: $out"
 
+
+# 11. MANY sentinels per layer. The operator's rule is that everything the
+#     manifest claims to keep gets one, so a layer shipping four tools needs
+#     four assertions. The old loop OVERWROTE: a second `sentinel:` line
+#     silently replaced the first, so only the last was ever checked — the same
+#     silent-pass class this tool exists to close, inside the tool.
+man "layers:" "  - branch: driver/multi" "    sentinel: liveSymbol" "    sentinel: definitelyNotInTree" ""
+if out="$(run)"; then bad "a missing sentinel in a multi-sentinel layer must fail"; else ok; fi
+printf '%s' "$out" | grep -q "definitelyNotInTree" && ok || bad "second sentinel was not checked: $out"
+
+# 12. ...and the FIRST one is still checked when the second is fine.
+man "layers:" "  - branch: driver/multi" "    sentinel: definitelyNotInTree" "    sentinel: liveSymbol" ""
+if out="$(run)"; then bad "a missing FIRST sentinel must fail"; else ok; fi
+printf '%s' "$out" | grep -q "definitelyNotInTree" && ok || bad "first sentinel was swallowed: $out"
+
+# 13. comma-separated form carries a set on one line
+man "layers:" "  - branch: driver/multi" "    sentinel: liveSymbol, definitelyNotInTree" ""
+if out="$(run)"; then bad "comma list with a missing symbol must fail"; else ok; fi
+printf '%s' "$out" | grep -q "2 checked" && ok || bad "comma list did not expand to 2 checks: $out"
+
+# 14. all present -> pass, and every one is reported
+man "layers:" "  - branch: driver/multi" "    sentinel: liveSymbol" "    sentinel: liveSymbol" ""
+if out="$(run)"; then ok; else bad "all-present multi-sentinel should pass: $out"; fi
+printf '%s' "$out" | grep -q "2 checked" && ok || bad "multi-sentinel count wrong: $out"
+
 echo "hapi-sentinel-check: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]]
