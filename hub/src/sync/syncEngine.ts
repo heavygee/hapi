@@ -849,19 +849,23 @@ export class SyncEngine {
         }
 
         if (event.type === 'machine-updated' && event.machineId) {
-            this.machineCache.refreshMachine(event.machineId)
-            void this.maybeFleetUpgradeMachine(event.machineId, { source: 'machine-updated' }).catch((error) => {
-                console.warn('[fleet-upgrade] offer resolution failed', error)
-            })
             // Connect publishes machine-update-state (active=1 in SQLite) before the
             // first heartbeat. Requeue here so wake recovery is not skipped when
             // handleMachineAlive later sees wasActive already true.
+            //
+            // wasActive MUST be sampled before the refresh. The absorb left a
+            // second refreshMachine() above this read, so the machine was always
+            // already active by the time wasActive was taken and the transition
+            // never fired.
             const wasActive = this.machineCache.getMachine(event.machineId)?.active === true
             const refreshed = this.machineCache.refreshMachine(event.machineId)
             const nowActive = refreshed?.active === true
             if (!wasActive && nowActive) {
                 this.requeuePendingJobTerminalWakes()
             }
+            void this.maybeFleetUpgradeMachine(event.machineId, { source: 'machine-updated' }).catch((error) => {
+                console.warn('[fleet-upgrade] offer resolution failed', error)
+            })
             return
         }
 
@@ -1922,6 +1926,13 @@ recordSessionActivity(sessionId: string, updatedAt: number): void {
             // Runner recovery: requeue wakes whose rapid-retry budget expired.
             this.requeuePendingJobTerminalWakes()
         }
+        // Fork #292: effective `auto` (hub default or per-machine override)
+        // pull-applies on every keepalive, not only on machine-updated. The
+        // absorb kept upstream's requeue above and dropped this call, which
+        // left auto-upgrade firing only when a machine record changed.
+        void this.maybeFleetUpgradeMachine(payload.machineId, { source: 'machine-alive' }).catch((error) => {
+            console.warn('[fleet-upgrade] offer resolution failed', error)
+        })
     }
 
     /**
