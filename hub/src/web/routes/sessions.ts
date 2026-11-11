@@ -3,8 +3,6 @@ import {
     AttachedJobUpsertSchema,
     SessionReadStateRequestSchema,
     AcknowledgeModelErrorRequestSchema,
-    AttachedJobPatchSchema,
-    AttachedJobUpsertSchema,
     CursorMigrateToAcpRequestSchema,
     DeleteUploadRequestSchema,
     ForkConversationRequestSchema,
@@ -33,12 +31,11 @@ import {
     supportsEffort,
     SetSessionBlockedAckRequestSchema,
     toSessionSummary,
-    UploadFileRequestSchema
+    UploadFileRequestSchema,
 } from '@hapi/protocol'
 import { RPC_METHODS, RPC_TARGET_MISSING_ERROR_CODE } from '@hapi/protocol/rpcMethods'
-import { parseIssueUrl } from '@hapi/protocol/schemas'
+import { parseIssueUrl, DeleteArchivedSessionsRequestSchema } from '@hapi/protocol/schemas'
 import type { SlashCommand } from '@hapi/protocol/apiTypes'
-import { DeleteArchivedSessionsRequestSchema } from '@hapi/protocol/schemas'
 import { Hono, type Context } from 'hono'
 import { getConfiguration } from '../../configuration'
 import { SessionArchiveUncontrollableError, type SyncEngine, type Session } from '../../sync/syncEngine'
@@ -1536,6 +1533,8 @@ export function createSessionsRoutes(
         if (c.req.query('requireArchived') === '1'
             && sessionResult.session.metadata?.lifecycleState !== 'archived') {
             return c.json({ error: 'Session is no longer archived' }, 409)
+        }
+
         // Attached jobs outlive active=false; CASCADE would erase the live meter and
         // leave supervisors PATCHing a deleted session (404 forever).
         if (engine.getPrimaryAttachedJob(sessionResult.sessionId)) {
@@ -1980,14 +1979,6 @@ export function createSessionsRoutes(
         if (engine instanceof Response) {
             return engine
         }
-        const sessionResult = resolveJobOwnerSession(c, engine)
-        if (sessionResult instanceof Response) {
-            return sessionResult
-        }
-        const jobKey = c.req.param('jobKey')
-        if (!jobKey || !JOB_KEY_RE.test(jobKey)) {
-            return c.json({ error: 'Invalid jobKey (1-128 chars: alnum, . _ -)' }, 400)
-        }
         const rawJobKey = c.req.param('jobKey')
         if (!rawJobKey || !JOB_KEY_RE.test(rawJobKey)) {
             return c.json({ error: 'Invalid jobKey (1-128 chars: alnum, . _ -)' }, 400)
@@ -2022,12 +2013,6 @@ export function createSessionsRoutes(
         if (engine instanceof Response) {
             return engine
         }
-        const sessionResult = resolveJobOwnerSession(c, engine)
-        if (sessionResult instanceof Response) {
-            return sessionResult
-        }
-        const jobKey = c.req.param('jobKey')
-        if (!jobKey || !JOB_KEY_RE.test(jobKey)) {
         const rawJobKey = c.req.param('jobKey')
         if (!rawJobKey || !JOB_KEY_RE.test(rawJobKey)) {
             return c.json({ error: 'Invalid jobKey (1-128 chars: alnum, . _ -)' }, 400)
@@ -2062,14 +2047,6 @@ export function createSessionsRoutes(
         const sessionResult = resolveJobOwnerSession(c, engine)
         if (sessionResult instanceof Response) {
             return sessionResult
-        }
-        const jobKey = c.req.param('jobKey')
-        if (!jobKey || !JOB_KEY_RE.test(jobKey)) {
-            return c.json({ error: 'Invalid jobKey (1-128 chars: alnum, . _ -)' }, 400)
-        }
-        const removed = engine.deleteSessionJob(sessionResult.sessionId, jobKey)
-        if (!removed) {
-            return c.json({ error: 'Job not found' }, 404)
         }
         const rawJobKey = c.req.param('jobKey')
         if (!rawJobKey || !JOB_KEY_RE.test(rawJobKey)) {

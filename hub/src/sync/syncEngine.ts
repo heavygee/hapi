@@ -21,17 +21,14 @@ import {
     type HubUpgradeOffer,
     type RunnerSelfUpgradeResponse,
 } from '@hapi/protocol/upgradeChannel'
-import type { CursorChatStoreStatus, CursorMigrateOutcome, CursorMigrateToAcpRequest, MessageContextResponse, MessageDeliveryMode, MessagesResponse, QueuedStateResponse, RewindConversationErrorCode, SlashCommandsResponse } from '@hapi/protocol/apiTypes'
+import type { CursorChatStoreStatus, CursorMigrateOutcome, CursorMigrateToAcpRequest, MessageContextResponse, MessageDeliveryMode, MessagesResponse, QueuedStateResponse, RewindConversationErrorCode, SlashCommandsResponse, ImplementCodexPlanResult, CopilotReasoningEffortResponse, KimiReasoningEffortResponse } from '@hapi/protocol/apiTypes'
 import type { SteerQueuedMessageResponse } from '@hapi/protocol/schemas'
-import type { ImplementCodexPlanResult } from '@hapi/protocol/apiTypes'
-import type { ExternalRef, AgentFlavor, CodexCollaborationMode, CopilotAgentMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
-import type { CopilotReasoningEffortResponse, KimiReasoningEffortResponse } from '@hapi/protocol/apiTypes'
-import type { BackgroundTask } from '@hapi/protocol/types'
-import { hasConversationMessageContent, unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
+import type { ExternalRef, AgentFlavor, CodexCollaborationMode, CopilotAgentMode, DecryptedMessage, PermissionMode, Session, SyncEvent, BackgroundTask } from '@hapi/protocol/types'
+import { hasConversationMessageContent, unwrapRoleWrappedRecordEnvelope, extractAssistantPlainText } from '@hapi/protocol/messages'
 import type { Server } from 'socket.io'
 import { randomUUID } from 'node:crypto'
 import { getEffectiveFleetUpgradePolicy } from '../upgrade/fleetUpgradePolicy'
-import type { Store, SettingsStore, CancelQueuedMessageResult } from '../store'
+import type { Store, SettingsStore, CancelQueuedMessageResult, ListSystemEventsOptions, StoredSystemEvent, InsertSystemEventInput } from '../store'
 import type {
     MessageContentSearchMatch,
     SessionMessageContentSearchResult
@@ -46,10 +43,9 @@ import {
     buildJobTerminalWakePrompt,
     isTerminalJobStatus,
     waitUntilSessionActive,
+    buildJobWakeLocalId,
 } from './sessionJobWake'
 import { isTransientArtifactBuildFailure } from '../upgrade/cliArtifact'
-    buildJobWakeLocalId,
-
 import { executeSessionRelay } from './sessionRelay'
 import { EventPublisher, type SyncEventListener } from './eventPublisher'
 import { MachineCache, type Machine } from './machineCache'
@@ -94,7 +90,6 @@ import { OverseerEventRecorder, toSessionSnapshot } from './overseerEventRecorde
 import { createOverseerLlmFallbackClient } from './overseerLlmFallback'
 import { loadOverseerLlmFallbackConfig, redactOverseerLlmBaseUrlForLog } from './overseerLlmFallbackConfig'
 import { OverseerEntity } from './overseerEntity'
-import { extractAssistantPlainText } from '@hapi/protocol/messages'
 import {
     buildOverseerSessionIdentity,
     deriveSeverity,
@@ -102,7 +97,6 @@ import {
     operatorPinIdempotencyKey,
     type InboxOperatorAction
 } from '@hapi/protocol'
-import type { ListSystemEventsOptions, StoredSystemEvent, InsertSystemEventInput } from '../store'
 import type { ListInboxItemsOptions, StoredInboxItem } from '../store/inboxItems'
 import { armResumePeerMint, clearResumePeerMint } from '../web/pendingResumePeerMint'
 import { buildProvenanceDiagnostics } from './provenanceDiagnostics'

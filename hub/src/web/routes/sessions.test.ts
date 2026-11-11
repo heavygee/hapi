@@ -209,15 +209,14 @@ function createApp(session: Session, opts?: {
         clearConversation: opts?.clearConversation,
         implementCodexPlan: opts?.implementCodexPlan,
         rewindConversation: opts?.rewindConversation ?? (async () => ({ type: 'success' })),
-        getPrimaryAttachedJobsBySessionIds: (_ids: string[]) => new Map(),
         getPrimaryAttachedJob: (_id: string) => null,
         upsertAttachedJob: async () => ({ outcome: 'upserted' as const }),
         patchAttachedJob: async () => null,
         deleteAttachedJob: async () => false,
         suggestSessionTitle: opts?.suggestSessionTitle ?? (async () => 'Generated title'),
         updateSessionSummary: opts?.updateSessionSummary ?? (async () => {}),
-        linkIssue: opts?.linkIssue ?? (async () => {})
-        renameSession: opts?.renameSession ?? (async () => {}),
+        linkIssue: opts?.linkIssue ?? (async () => {}),
+        renameSession: async () => {},
         getPrimaryAttachedJobsBySessionIds: opts?.getPrimaryAttachedJobsBySessionIds ?? (() => new Map()),
         allocateAttachedJobVersion: opts?.allocateAttachedJobVersion ?? (() => Date.now())
     } as Partial<SyncEngine>
@@ -2086,7 +2085,6 @@ describe('sessions routes', () => {
                 return new Map(ids.map((id) => [id, 0]))
             },
             getNextScheduledAtBySessionIds: (_ids: string[]) => new Map<string, number>(),
-            getPrimaryAttachedJobsBySessionIds: (_ids: string[]) => new Map(),
             getPrimaryAttachedJobsBySessionIds: () => new Map(),
             allocateAttachedJobVersion: () => Date.now(),
             resolveSessionAccess: () => ({ ok: false, reason: 'not-found' as const })
@@ -2307,7 +2305,6 @@ describe('sessions routes', () => {
             getSessionsByNamespace: () => sessions,
             getFutureScheduledMessageCounts: (ids: string[]) => new Map(ids.map((id) => [id, 0])),
             getNextScheduledAtBySessionIds: (_ids: string[]) => new Map<string, number>(),
-            getPrimaryAttachedJobsBySessionIds: (_ids: string[]) => new Map(),
             getPrimaryAttachedJobsBySessionIds: () => new Map(),
             allocateAttachedJobVersion: () => Date.now(),
             resolveSessionAccess: () => ({ ok: false, reason: 'not-found' as const })

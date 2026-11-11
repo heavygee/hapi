@@ -3,14 +3,14 @@
  * Provides HAPI CLI specific tools including chat session title management
  */
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { createServer, type IncomingMessage } from "node:http";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { AddressInfo } from "node:net";
-import { z } from "zod";
-import { logger } from "@/ui/logger";
-import { ApiSessionClient } from "@/api/apiSession";
-import { randomUUID } from "node:crypto";
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { createServer, type IncomingMessage } from 'node:http'
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
+import { AddressInfo } from 'node:net'
+import { z } from 'zod'
+import { logger } from '@/ui/logger'
+import { ApiSessionClient } from '@/api/apiSession'
+import { randomUUID } from 'node:crypto'
 import {
     detectDisplayMediaMimeType,
     detectImageMimeType,
@@ -18,12 +18,11 @@ import {
     readBoundedRegularFile,
     registerGeneratedImage,
 } from "@/modules/common/generatedImages";
-import type { InlineMediaSource } from "@/modules/common/inlineMediaSource";
-import { DISPLAY_IMAGE_PROMPT_CURSOR, DISPLAY_LINKS_PROMPT_CURSOR, DISPLAY_MEDIA_PROMPT_CURSOR, DISPLAY_VIDEO_PROMPT_CURSOR } from "@/modules/common/displayImagePrompt";
-import { buildDisplayLinksPayload, parseDisplayLinksInput } from "@hapi/protocol";
-import { resolveSkill } from "@/modules/common/skills";
-import { isPeerToolsDisabled, PEER_TOOL_NAMES } from "@/modules/common/peerTools";
-import { SESSION_NAME_MAX_LENGTH, toSessionSummaryMetadata } from '@hapi/protocol'
+import type { InlineMediaSource } from '@/modules/common/inlineMediaSource'
+import { DISPLAY_IMAGE_PROMPT_CURSOR, DISPLAY_LINKS_PROMPT_CURSOR, DISPLAY_MEDIA_PROMPT_CURSOR, DISPLAY_VIDEO_PROMPT_CURSOR } from '@/modules/common/displayImagePrompt'
+import { buildDisplayLinksPayload, parseDisplayLinksInput, SESSION_NAME_MAX_LENGTH, toSessionSummaryMetadata } from '@hapi/protocol'
+import { resolveSkill } from '@/modules/common/skills'
+import { isPeerToolsDisabled, PEER_TOOL_NAMES } from '@/modules/common/peerTools'
 import {
     ARCHIVE_PEER_TOOL_DESCRIPTION,
     INSPECT_PEER_TOOL_DESCRIPTION,
@@ -36,18 +35,17 @@ import {
 } from '@hapi/protocol/sessionCitation'
 import { CREATABLE_AGENT_FLAVORS } from '@hapi/protocol/modes'
 import { PermissionModeSchema } from '@hapi/protocol/schemas'
-import { applySessionDisplayRename, normalizeSessionDisplayTitle } from "@/agent/sessionDisplayRename";
-import { applySessionVoiceMode } from "@/agent/sessionVoiceMode";
-import { ArchivePeerError, archivePeer } from "@/modules/archivePeer/archivePeer";
-import { PingPeerError, formatInspectPeerReport, formatPeerSessionsList, forwardPeerReply, inspectPeer, listPeerSessions, peerListFetchLimit, pingPeer, searchPeerSessions, supportsPeerReply } from "@/modules/pingPeer/pingPeer";
-import { PeerDeliveryModeSchema, type PeerDeliveryMode } from "@/modules/pingPeer/deliveryMode";
+import { applySessionDisplayRename, normalizeSessionDisplayTitle } from '@/agent/sessionDisplayRename'
+import { applySessionVoiceMode } from '@/agent/sessionVoiceMode'
+import { ArchivePeerError, archivePeer } from '@/modules/archivePeer/archivePeer'
+import { PingPeerError, formatInspectPeerReport, formatPeerSessionsList, forwardPeerReply, inspectPeer, listPeerSessions, peerListFetchLimit, pingPeer, searchPeerSessions, supportsPeerReply } from '@/modules/pingPeer/pingPeer'
+import { PeerDeliveryModeSchema, type PeerDeliveryMode } from '@/modules/pingPeer/deliveryMode'
 import {
     SearchContentError,
     formatSearchContentMatches,
     searchSessionContent,
 } from "@/modules/searchContent/searchContent";
-import { applyLinkIssue } from "@/agent/sessionIssueLink";
-import { applySessionDisplayRename, normalizeSessionDisplayTitle } from "@/agent/sessionDisplayRename";
+import { applyLinkIssue } from '@/agent/sessionIssueLink'
 import {
     SESSION_JOB_TOOL_DESCRIPTION,
     SESSION_JOB_TOOL_NAME,
@@ -55,20 +53,8 @@ import {
     sessionJobInputSchema,
     type SessionJobToolArgs,
 } from "@/modules/sessionJob/sessionJobMcp";
-import { SpawnPeerError, spawnPeer } from "@/modules/spawnPeer/spawnPeer";
+import { SpawnPeerError, spawnPeer } from '@/modules/spawnPeer/spawnPeer'
 
-export type HapiMcpToolName =
-    | 'change_title'
-    | 'display_image'
-    | 'display_video'
-    | 'display_media'
-    | 'list_peers'
-    | 'ping_peer'
-    | 'inspect_peer'
-    | 'spawn_peer'
-    | 'search_content'
-    | 'session_job'
-    | 'skill_lookup';
 
 const SEARCH_CONTENT_DESCRIPTION =
     'Search transcript text across HAPI sessions on the same hub/namespace (what sessions actually said). ' +
@@ -632,7 +618,7 @@ mcp.registerTool<any, any>('display_image', {
             }
         });
     }
-    registerTool(SESSION_JOB_TOOL_NAME, {
+    mcp.registerTool<any, any>(SESSION_JOB_TOOL_NAME, {
         description: SESSION_JOB_TOOL_DESCRIPTION,
         title: 'Session-Attached Job',
         inputSchema: sessionJobInputSchema,

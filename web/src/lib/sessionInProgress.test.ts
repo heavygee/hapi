@@ -41,7 +41,6 @@ describe('sessionInProgress', () => {
         expect(hasRunningAttachedJob(makeSession({ attachedJob: { ...runningJob, status: 'completed' } }))).toBe(false)
     })
 
-    it('suppresses ambient thinking when an attached job is the honest signal (#1553)', () => {
     it('keeps real foreground thinking when a job is also attached (#1553)', () => {
         const session = makeSession({
             active: true,
@@ -63,11 +62,6 @@ describe('sessionInProgress', () => {
         expect(hasAgentForegroundWork(session)).toBe(false)
     })
 
-    it('still treats real agent work as foreground', () => {
-        expect(isAgentForegroundThinking(makeSession({
-            active: true,
-            thinking: true,
-        }))).toBe(true)
     it('still treats background tasks as foreground work', () => {
         expect(hasAgentForegroundWork(makeSession({
             active: true,

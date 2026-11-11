@@ -1,8 +1,6 @@
 import type { AgentState, AttachedJob, ExternalRef, Metadata, Session, TodoItem, WorktreeMetadata } from './schemas'
-import type { AgentState, AttachedJob, Metadata, Session, TodoItem, WorktreeMetadata } from './schemas'
 import type { SessionReadState } from './sessionReadState'
 import type { ConversationHistoryCapabilities } from './conversationHistory'
-import type { SessionReadState } from './sessionReadState'
 import { isKnownFlavor } from './flavors'
 import type { SessionBlockedAck, SessionNotifySignal } from './notifyAttention'
 import type { AgentFlavor } from './modes'

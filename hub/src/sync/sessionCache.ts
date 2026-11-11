@@ -783,17 +783,21 @@ export class SessionCache {
         }
     }
 
-    setBackgroundTaskCount(sessionId: string, next: number): void {
+    setBackgroundTasks(sessionId: string, tasks: BackgroundTask[]): void {
         const session = this.sessions.get(sessionId)
         if (!session) return
-        if (next === (session.backgroundTaskCount ?? 0)) return
+        const current = session.backgroundTasks ?? []
+        if (tasks.length === current.length && tasks.every((task, index) =>
+            task.id === current[index]?.id && task.description === current[index]?.description
+        )) return
 
-        session.backgroundTaskCount = next
+        session.backgroundTasks = tasks
+        session.backgroundTaskCount = tasks.length
         this.recordAgentProgress(sessionId)
         this.publisher.emit({
             type: 'session-updated',
             sessionId,
-            data: { backgroundTaskCount: next } satisfies SessionPatch
+            data: { backgroundTaskCount: tasks.length, backgroundTasks: tasks } satisfies SessionPatch
         })
     }
 
@@ -1785,6 +1789,9 @@ recordSessionActivity(sessionId: string, updatedAt: number): void {
                 await deleteScratchlistSessionAttachmentDir(hapiHome, namespace, session!.id)
             })
             this.publisher.emit({ type: 'session-removed', sessionId: session!.id, namespace })
+        }
+    }
+
     /**
      * Move outliving jobs + install owner/key redirects without deleting either
      * session. Used by Codex duplicate consolidation before a hard delete.

@@ -422,6 +422,7 @@ export function reconcileExternalRefs(prior: ExternalRef[], next: ExternalRef[])
 export const MetadataSchema = z.object({
     path: z.string(),
     host: z.string(),
+    hostStartMarker: z.string().optional(),
     version: z.string().optional(),
     name: z.string().optional(),
     os: z.string().optional(),
@@ -767,7 +768,17 @@ export const DecryptedMessageSchema = z.object({
 
 export type DecryptedMessage = z.infer<typeof DecryptedMessageSchema>
 
+// One entry of Claude's `system/background_tasks_changed` snapshot.
+export const BackgroundTaskSchema = z.object({
+    id: z.string(),
+    type: z.string(),
+    description: z.string()
+})
+
+export type BackgroundTask = z.infer<typeof BackgroundTaskSchema>
+
 export const SessionSchema = z.object({
+    lastUserMessageAt: z.number().optional(),
     contentRevision: z.number().int().nonnegative().safe().optional(),
     readState: SessionReadStateSchema.optional(),
     hasConversationContent: z.boolean().optional(),
@@ -789,6 +800,7 @@ export const SessionSchema = z.object({
     thinkingAt: z.number(),
     activeTurnStartedAt: z.number().nullable().optional(),
     backgroundTaskCount: z.number().optional(),
+    backgroundTasks: z.array(BackgroundTaskSchema).optional(),
     todos: TodosSchema.optional(),
     todosUpdatedAt: z.number().optional(),
     teamState: TeamStateSchema.optional(),
@@ -950,6 +962,7 @@ export const SessionPatchSchema = z.object({
     collaborationMode: CodexCollaborationModeSchema.optional(),
     copilotAgentMode: CopilotAgentModeSchema.optional(),
     backgroundTaskCount: z.number().optional(),
+    backgroundTasks: z.array(BackgroundTaskSchema).optional(),
     // tiann/hapi#893 (scratchlist v2). Bumped whenever any entry on the
     // session_scratchlist table mutates. Web client uses the change as a
     // trigger to refetch the entries query - the timestamp itself is the

@@ -53,7 +53,6 @@ const harness = vi.hoisted(() => ({
         userMcpConfigDir?: string;
     } | null,
     newSessionConfig: null as { cwd?: string; mcpServers?: unknown } | null,
-    agentActivityListener: null as ((thinking: boolean) => void) | null,
     notifyRuleInstallCalls: [] as Array<{ cwd: string; project?: string | null; agentId?: string | null }>,
     notifyRuleCleanup: null as ReturnType<typeof vi.fn> | null,
     agentActivityListener: null as ((thinking: boolean, source?: string) => void) | null,

@@ -32,7 +32,6 @@ import { searchPeersCommand } from './searchPeers'
 import { searchContentCommand } from './searchContent'
 import { linkIssueCommand } from './linkIssue'
 import { setModeCommand } from './setMode'
-import { jobCommand } from './job'
 import type { CommandContext, CommandDefinition } from './types'
 
 // Gemini CLI was sunset (Google stopped serving the consumer Gemini CLI on
@@ -87,7 +86,6 @@ const COMMANDS: CommandDefinition[] = [
     linkIssueCommand,
     setModeCommand,
     jobCommand,
-    usageCommand
 ]
 
 const commandMap = new Map<string, CommandDefinition>()

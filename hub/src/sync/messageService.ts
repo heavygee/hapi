@@ -24,6 +24,9 @@ import type { Store, CancelQueuedMessageResult } from '../store'
 import { EventPublisher } from './eventPublisher'
 import { JOB_WAKE_MESSAGE_LOCAL_ID_PREFIX } from './sessionJobWake'
 
+// Mirrors cli/src/modules/pingPeer/pingPeer.ts — hub must not import from cli.
+const PEER_MESSAGE_LOCAL_ID_PREFIX = 'ping-peer-'
+
 type StoredMessageForDelivery = ReturnType<Store['messages']['getMessages']>[number]
 type MessagePosition = { at: number; seq: number }
 

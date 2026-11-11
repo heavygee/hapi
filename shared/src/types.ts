@@ -20,6 +20,7 @@ export type {
     AgentBudgetState
 } from './agentBudget'
 export type {
+    BackgroundTask,
     DecryptedMessage,
     ExternalRef,
     GithubPrExternalRef,

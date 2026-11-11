@@ -339,6 +339,7 @@ describe('runHappyMcpStdioBridge tool forwarding', () => {
             // search_content is a transcript search, not a peer tool: it survives the kill switch.
             for (const name of ['change_title', 'display_image', 'display_video', 'display_media', 'search_content']) {
                 expect(remaining).toContain(name)
+            }
             // session_job is own-session — kept when peer tools are stripped.
             expect([...harness.tools.keys()]).toEqual([
                 'change_title',

@@ -500,7 +500,6 @@ describe('cli session handlers', () => {
         expect(uuids).toEqual(['msg-1', 'msg-2'])
     })
 
-    it.each(['supersededBySessionId', 'opencodeClearOperation', 'machineId'] as const)(
     it.each([
         ['supersededBySessionId', 'foreign-session'],
         ['opencodeClearOperation', { replacementSessionId: 'foreign-session', state: 'reserved', updatedAt: Date.now() }],
@@ -510,6 +509,7 @@ describe('cli session handlers', () => {
         ['jobsAcceptedFromSessionIds', ['foreign-session']],
         ['jobsTransferredToSessionId', 'foreign-session'],
         ['jobKeyRedirects', { 'foreign-session/beets': 'beets.foreign' }],
+        ['machineId', 'attacker-machine'],
     ] as const)(
         'ignores a forged hub-owned %s addition from CLI metadata',
         (field, forged) => {
@@ -526,11 +526,6 @@ describe('cli session handlers', () => {
                 expectedVersion: session.metadataVersion,
                 metadata: {
                     path: '/tmp/project',
-                    [field]: field === 'supersededBySessionId'
-                        ? 'foreign-session'
-                        : field === 'machineId'
-                            ? 'attacker-machine'
-                            : { replacementSessionId: 'foreign-session', state: 'reserved', updatedAt: Date.now() }
                     [field]: forged
                 }
             }, () => {})

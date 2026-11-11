@@ -24,7 +24,7 @@ import type {
 } from '@/types/api'
 import { queryKeys } from '@/lib/query-keys'
 import { applyAgyCatalogAnnouncement } from '@/lib/agyCatalogAnnouncement'
-import { clearMessageWindow, getMessageWindowState, ingestIncomingMessages, markMessagesConsumed, markMessagesIndeterminate, markMessagesDispatching, markMessagesRequeued, removeOptimisticMessage, updateMessageStatus } from '@/lib/message-window-store'
+import { clearMessageWindow, getMessageWindowState, ingestIncomingMessages, markMessagesConsumed, markMessagesIndeterminate, markMessagesRequeued, removeOptimisticMessage, updateMessageStatus } from '@/lib/message-window-store'
 import {
     applySessionDetailPatch,
     isNewerVersionedPatch,
@@ -541,8 +541,6 @@ export function useSSE(options: {
                 const existing = existingIndex >= 0 ? previous.sessions[existingIndex] : undefined
                 const summary = {
                     ...toSessionSummary(session),
-                    attachedJob: existing?.attachedJob ?? null,
-                    attachedJobUpdatedAt: existing?.attachedJobUpdatedAt ?? 0,
                     contentRevision: Math.max(existing?.contentRevision ?? 0, session.contentRevision ?? 0),
                     readState: mergeReadState(existing?.readState, session.readState),
                     attachedJob: existing?.attachedJob ?? null,

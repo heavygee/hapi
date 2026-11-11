@@ -1,12 +1,12 @@
-import { describe, expect, it } from 'bun:test'
+import { afterEach, describe, expect, it } from 'bun:test'
 import { Database } from 'bun:sqlite'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Store } from './index'
+import { MAX_INDEXED_MESSAGE_CHARACTERS } from './messageContentSearch'
 
-function getColumns(store: Store, table: string): string[] {
-    const db: Database = (store as unknown as { db: Database }).db
-    const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
-    return rows.map((row) => row.name)
-}
+const tempDirs: string[] = []
 
 afterEach(() => {
     for (const dir of tempDirs.splice(0)) {
@@ -51,22 +51,27 @@ describe('schema migrations through v33', () => {
         }
     })
 
-    it('upserts, patches, deletes a job and surfaces primary running', () => {
-        const store = new Store(':memory:')
-        const session = store.sessions.getOrCreateSession('test', { path: '/tmp' }, null, 'default')
+    it('creates and backfills the message content search index after the v26 schema', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v26-'))
+        tempDirs.push(dir)
+        const dbPath = join(dir, 'hapi.db')
 
-        const created = store.sessionJobs.upsert(session.id, 'beets', {
-            label: 'beets import',
-            status: 'running',
-            remaining: 100,
-            unit: 'tracks'
+        const initial = new Store(dbPath)
+        const session = initial.sessions.getOrCreateSession('migration-search', { path: '/tmp/migration-search' }, null, 'default')
+        initial.messages.addMessage(session.id, {
+            role: 'user',
+            content: { type: 'text', text: 'backfill this message' }
         })
-        expect(created.outcome).toBe('upserted')
-        if (created.outcome !== 'upserted') throw new Error('unreachable')
+        initial.close()
 
-        const primary = store.sessionJobs.getPrimaryRunning(session.id)
-        expect(primary?.key).toBe('beets')
-        expect(primary?.remaining).toBe(100)
+        const legacy = new Database(dbPath)
+        legacy.exec(`
+            DROP TABLE IF EXISTS message_content_search;
+            DROP TABLE IF EXISTS message_content_search_lookup;
+            DROP TABLE IF EXISTS message_content_search_short;
+            PRAGMA user_version = 26;
+        `)
+        legacy.close()
 
         const migrated = new Store(dbPath)
         try {
@@ -115,44 +120,39 @@ describe('schema migrations through v33', () => {
         }
     })
 
-    it('preserves startedAt on PUT without body.startedAt; honors explicit correction', () => {
-        const store = new Store(':memory:')
-        const session = store.sessions.getOrCreateSession('test', { path: '/tmp' }, null, 'default')
-        const historical = 1_785_304_595_000
+    it('backfills indexed short-query grams for an existing v28 search schema', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v28-'))
+        tempDirs.push(dir)
+        const dbPath = join(dir, 'hapi.db')
 
-        const created = store.sessionJobs.upsert(session.id, 'beets', {
-            label: 'beets import',
-            status: 'running',
-            remaining: 10
-        }, 2_000)
-        expect(created.outcome).toBe('upserted')
-        if (created.outcome !== 'upserted') throw new Error('unreachable')
-        expect(created.job.startedAt).toBe(2_000)
+        const initial = new Store(dbPath)
+        const session = initial.sessions.getOrCreateSession('migration-short-query', { path: '/tmp/migration-short-query' }, null, 'default')
+        const text = `你好，短查询索引 ${Array.from({ length: MAX_INDEXED_MESSAGE_CHARACTERS + 1024 }, (_, index) =>
+            String.fromCodePoint(0x1000 + index)
+        ).join('')} tail-migration-needle`
+        const message = initial.messages.addMessage(session.id, {
+            role: 'user',
+            content: { type: 'text', text }
+        })
+        initial.close()
 
-        const progress = store.sessionJobs.upsert(session.id, 'beets', {
-            label: 'beets import',
-            status: 'running',
-            remaining: 9
-        }, 3_000)
-        expect(progress.outcome).toBe('upserted')
-        if (progress.outcome !== 'upserted') throw new Error('unreachable')
-        expect(progress.job.startedAt).toBe(2_000)
-        expect(progress.job.remaining).toBe(9)
+        const legacy = new Database(dbPath)
+        legacy.prepare(
+            'UPDATE message_content_search SET searchable_text = ? WHERE message_id = ?'
+        ).run(text, message.id)
+        legacy.exec(`
+            DROP TABLE IF EXISTS message_content_search_lookup;
+            CREATE TABLE message_content_search_lookup (
+                search_rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+                message_id TEXT NOT NULL UNIQUE
+            );
+            INSERT INTO message_content_search_lookup (search_rowid, message_id)
+            SELECT rowid, message_id FROM message_content_search;
+            DROP TABLE IF EXISTS message_content_search_short;
+            PRAGMA user_version = 28;
+        `)
+        legacy.close()
 
-        const corrected = store.sessionJobs.upsert(session.id, 'beets', {
-            label: 'beets import',
-            status: 'running',
-            remaining: 9,
-            startedAt: historical
-        }, 4_000)
-        expect(corrected.outcome).toBe('upserted')
-        if (corrected.outcome !== 'upserted') throw new Error('unreachable')
-        expect(corrected.job.startedAt).toBe(historical)
-
-        const patched = store.sessionJobs.patch(session.id, 'beets', { remaining: 8 }, 5_000)
-        expect(patched?.startedAt).toBe(historical)
-        expect(patched?.remaining).toBe(8)
-        store.close()
         const migrated = new Store(dbPath)
         try {
             expect(migrated.messages.searchContent('你好', 'default')[0]?.sessionId).toBe(session.id)
@@ -183,20 +183,23 @@ describe('schema migrations through v33', () => {
         }
     })
 
-    it('transfers jobs on merge without colliding keys', () => {
-        const store = new Store(':memory:')
-        const oldSession = store.sessions.getOrCreateSession('old', { path: '/a' }, null, 'default')
-        const newSession = store.sessions.getOrCreateSession('new', { path: '/b' }, null, 'default')
-        store.sessionJobs.upsert(oldSession.id, 'beets', {
-            label: 'beets',
-            status: 'running',
-            remaining: 5
+    it('rebuilds a v29 content index with the larger cap and truncation metadata', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v29-content-search-'))
+        tempDirs.push(dir)
+        const dbPath = join(dir, 'hapi.db')
+
+        const initial = new Store(dbPath)
+        const session = initial.sessions.getOrCreateSession(
+            'migration-content-cap',
+            { path: '/tmp/migration-content-cap' },
+            null,
+            'default'
+        )
+        const text = `${'a'.repeat(16_000)} v30-middle-needle ${'b'.repeat(18_000)}`
+        const message = initial.messages.addMessage(session.id, {
+            role: 'user',
+            content: { type: 'text', text }
         })
-        const result = store.sessionJobs.transfer(oldSession.id, newSession.id)
-        expect(result.moved).toBe(1)
-        expect(store.sessionJobs.getPrimaryRunning(newSession.id)?.remaining).toBe(5)
-        expect(store.sessionJobs.list(oldSession.id)).toHaveLength(0)
-        store.close()
         initial.close()
 
         // Simulate the v29 derived index without deleting any user data. The

@@ -18,6 +18,7 @@ import {
 import * as Popover from '@radix-ui/react-popover'
 import { SessionListScrollAnchor } from './SessionListScrollAnchor'
 import type { SessionContentSearchResponse, SessionSummary } from '@/types/api'
+import { SESSION_LIFECYCLE_IDLE } from '@hapi/protocol'
 import type { ApiClient } from '@/api/client'
 import {
     buildSessionSearchScoreIndex,
@@ -43,12 +44,6 @@ import { CopyIcon, CheckIcon, InfoIcon, MarkAllReadIcon } from '@/components/ico
 import { safeCopyToClipboard } from '@/lib/clipboard'
 import { useProjectGroupActions } from '@/hooks/mutations/useProjectGroupActions'
 import { getProjectGroupActionAvailability } from '@/lib/projectGroupActions'
-import { ArchiveSessionDialog } from '@/components/ArchiveSessionDialog'
-import { DeleteSessionDialog } from '@/components/DeleteSessionDialog'
-import { ProjectGroupRow } from '@/components/ProjectGroupRow'
-import { ArchiveIcon, CheckIcon, CopyIcon, InfoIcon, LoaderIcon, MarkAllReadIcon } from '@/components/icons'
-import { useFue } from '@/lib/use-fue'
-import { FueCallout, FueDot } from '@/components/Fue'
 
 function PinnedSectionIcon(props: { className?: string }) {
     return (
@@ -193,60 +188,6 @@ function SessionListHeaderOverflow(props: { children: ReactNode }) {
         </Popover.Root>
     )
 }
-import { cn } from '@/lib/utils'
-import { useTranslation } from '@/lib/use-translation'
-import { DEFAULT_SESSION_PREVIEW_LIMIT, useSessionPreviewLimit } from '@/hooks/useSessionPreviewLimit'
-import { useSessionListStatusMode } from '@/hooks/useSessionListStatusMode'
-import { DEFAULT_SESSION_LIST_VIEW, useSessionListView, type SessionListView } from '@/hooks/useSessionListView'
-import { SessionListViewMenu } from '@/components/SessionListViewMenu'
-import { useKeepUnreadSessionsVisible } from '@/hooks/useKeepUnreadSessionsVisible'
-import {
-    usePinInProgressSessions,
-    type PinInProgressMode
-} from '@/hooks/usePinInProgressSessions'
-import {
-    hasAgentForegroundWork,
-    hasRunningAttachedJob,
-} from '@/lib/sessionInProgress'
-import {
-    compareDescWithKeyTiebreak,
-    compareSessionsByOrderKeyDesc
-} from '@hapi/protocol'
-import { createSessionComparator, getSessionSortKey } from '@/lib/sessionListOrder'
-import { classifySessionAttention, sessionIsUnread } from '@/lib/sessionAttention'
-import {
-    getSessionLastSeenAt,
-    getSessionManualUnreadAt,
-    getUnreadSessionCount,
-    markAllSessionsSeen,
-    markSessionUnread,
-    useSessionLastSeenVersion
-} from '@/lib/sessionLastSeen'
-import { useSessionRowTooltipIds } from '@/components/HoverTooltip'
-import { formatReopenError } from '@/lib/reopenError'
-import { resolveCursorReopenGate } from '@/lib/sessionResume'
-import { getSessionTitle, hasSessionTitleSignal } from '@/lib/sessionTitle'
-import { getWorktreeSessionLabel } from '@/lib/sessionWorktreeLabel'
-import { getSessionProjectLabel, getSessionProjectPath } from '@/lib/sessionProjectLabel'
-import { retargetSharePendingTransfer } from '@/lib/sharePendingState'
-import type { Machine } from '@/types/api'
-import { getMachinePlatform, presentMachineHealth } from '@/lib/machineHealth'
-import { MachineFilterBar, MachineFilterMenu, MachineSummaryRow } from '@/components/MachineFilterBar'
-import { useSessionListMachineFilter } from '@/hooks/useSessionListMachineFilter'
-import { useTransientScrollbar } from '@/hooks/useTransientScrollbar'
-import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
-import { SessionRowSummary } from '@/components/SessionRowSummary'
-import { Spinner } from '@/components/Spinner'
-import { transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
-import { useToast } from '@/lib/toast-context'
-import {
-    shedToolbarSlots,
-    toolbarActionBudget,
-    TOOLBAR_GAP_PX,
-    TOOLBAR_ICON_PX,
-    TOOLBAR_MORE_PX,
-    type ToolbarShedSlot
-} from '@/components/sessionToolbarShed'
 
 /** Hit targets that must stay visible: icon, clear, calendar. Not the query text. */
 function measureSearchChrome(search: HTMLElement): number {
@@ -317,11 +258,15 @@ const RUNNING_BUCKETS = [
     { key: 'jobs', labelKey: 'session.item.attachedJob', colorClass: 'text-[var(--app-badge-success-text)]', pulse: true },
     { key: 'working', labelKey: 'session.item.running', colorClass: 'text-[var(--app-badge-success-text)]', pulse: true },
     { key: 'pending', labelKey: 'session.item.pending', colorClass: 'text-[var(--app-badge-warning-text)]', pulse: true },
+    { key: 'active', labelKey: 'session.item.active', colorClass: 'text-[var(--app-hint)]', pulse: false },
+    // tiann/hapi#1820: connected, but the hub has seen nothing except
+    // keepalives for the configured window. Split out so a fleet of zombies
+    // does not read as a fleet of ready sessions.
+    { key: 'idle', labelKey: 'session.item.idle', colorClass: 'text-[var(--app-hint)]', pulse: false },
 ] as const
 
 type RunningBucketKey = (typeof RUNNING_BUCKETS)[number]['key']
 
-/** True when the agent is working or waiting on the operator — not merely connected. */
 function hasAgentInProgressActivity(session: SessionSummary): boolean {
     if (!session.active) {
         return false
@@ -339,41 +284,38 @@ export function emptyRunningBuckets(): Record<RunningBucketKey, SessionSummary[]
 }
 
 /**
- * Split sessions into the in-progress / active sub-buckets the pinned sections
- * render. Pure so the bucketing rules stay testable. Quiet connected never
- * floats (#1404); keepalive-idle zombies (#1820) also stay out unless they have
- * agent activity or a running attached job.
+ * Split the connected sessions into the in-progress / active sub-buckets the
+ * pinned sections render. Pure so the bucketing rules stay testable.
  */
 export function bucketRunningSessions(
     sessions: SessionSummary[],
-    pinInProgressMode: PinInProgressMode,
-    compare: (a: SessionSummary, b: SessionSummary) => number = compareSessionsByOrderKeyDesc
+    pinInProgressSessions: boolean,
+    compare: (a: SessionSummary, b: SessionSummary) => number = (a, b) => b.updatedAt - a.updatedAt
 ): Record<RunningBucketKey, SessionSummary[]> {
     const buckets = emptyRunningBuckets()
-    if (pinInProgressMode === 'off') {
+    if (!pinInProgressSessions) {
         return buckets
     }
     for (const session of sessions) {
         if (session.globalPinned || session.pinned) {
             continue
         }
-        if (!isPinnedInProgressSession(session, pinInProgressMode)) {
+        if (!session.active) {
             continue
         }
-        const agentWorking = hasAgentForegroundWork(session)
-        const agentPending = session.active
-            && (session.pendingRequestsCount ?? 0) > 0
-            && !agentWorking
-        if (agentWorking) {
+        if (session.thinking || (session.backgroundTaskCount ?? 0) > 0) {
             buckets.working.push(session)
-        } else if (agentPending) {
-            // Operator action outranks the Jobs meter when both apply.
+        } else if ((session.pendingRequestsCount ?? 0) > 0) {
             buckets.pending.push(session)
         } else if (hasRunningAttachedJob(session)) {
-            // Outliving job while agent is idle — not foreground "Running".
             buckets.jobs.push(session)
+        } else if (session.metadata?.lifecycleState === SESSION_LIFECYCLE_IDLE) {
+            // Keepalive-only: socket up, no agent progress for hours.
+            buckets.idle.push(session)
+        } else {
+            // Quiet but connected: finished executing, operator will continue.
+            buckets.active.push(session)
         }
-        // Quiet connected never reaches here: isPinnedInProgressSession excludes it.
     }
     for (const key of Object.keys(buckets) as RunningBucketKey[]) {
         buckets[key].sort(compare)
@@ -383,9 +325,7 @@ export function bucketRunningSessions(
 
 /**
  * Sessions that float into the pinned In progress section.
- * Mode is a degree: off → jobs (outliving attachedJob) → all (jobs + working + pending).
- * Quiet connected (socket up, not working, not pending) never floats — that is not
- * in-progress work. Storage key `all` is historical; UI copy says Working & pending.
+ * Mode is a degree: off → jobs (outliving attachedJob) → all (jobs + agent activity).
  */
 export function isPinnedInProgressSession(
     session: SessionSummary,
@@ -765,15 +705,7 @@ export function deduplicateSessionsByAgentId(sessions: SessionSummary[], selecte
             if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1
             return b.updatedAt - a.updatedAt
         })
-        const winner = group[0]!
-        result.push(winner)
-        // Hub skips merge when two rows stay active — keep job-bearing losers so the
-        // outliving meter is not hidden behind a jobless duplicate winner.
-        for (const duplicate of group.slice(1)) {
-            if (hasRunningAttachedJob(duplicate)) {
-                result.push(duplicate)
-            }
-        }
+        result.push(group[0])
     }
 
     return result
@@ -790,17 +722,7 @@ export function isSidebarEmptySessionStub(session: SessionSummary): boolean {
 
 export function shouldShowSessionInSidebar(session: SessionSummary, selectedSessionId?: string | null): boolean {
     if (session.id === selectedSessionId) return true
-    // Running attached jobs must survive before the empty-stub filter — a job can
-    // register before agentSessionId/name/summary land, and idle agents still
-    // need the outliving meter visible in the list.
-    if (
-        session.active
-        || session.pinned
-        || session.globalPinned
-        || hasRunningAttachedJob(session)
-    ) {
-        return true
-    }
+    if (session.active || session.pinned || session.globalPinned) return true
     return !isSidebarEmptySessionStub(session)
 }
 
@@ -853,23 +775,6 @@ export function filterActiveSessionsOnly(sessions: SessionSummary[], selectedSes
         session.active
         || session.id === selectedSessionId
         || hasRunningAttachedJob(session)
-    )
-}
-
-/**
- * List-view status filter with the #1404 jobs exception on "active": idle rows
- * that still have a running attachedJob stay visible (and stay out of archived).
- */
-export function filterSessionsForListStatus(
-    sessions: SessionSummary[],
-    status: SessionListView['status'],
-    selectedSessionId?: string | null
-): SessionSummary[] {
-    if (status === 'all') return sessions
-    if (status === 'active') return filterActiveSessionsOnly(sessions, selectedSessionId)
-    return sessions.filter(session =>
-        session.id === selectedSessionId
-        || (!session.active && !hasRunningAttachedJob(session))
     )
 }
 
@@ -1910,14 +1815,14 @@ export function SessionListSearch(props: {
             data-expanded="true"
             className="relative min-w-0 flex-1"
             onBlur={(event) => {
-                const related = event.relatedTarget as Element | null
                 // Losing focus while a hold's transcript is still being applied
                 // must not collapse the field out from under it.
+                const related = event.relatedTarget as Element | null
                 if (dictationListening) return
                 // The scope FueCallout portals to document.body, so it is never a
                 // DOM descendant of this container — without this check, focusing
                 // its "Got it" button reads as focus leaving and collapses the
-                // search bar out from under it.
+                // search bar out from under it (operator-reported; upstream #2339).
                 if (related?.closest('[data-fue-callout]')) return
                 if (!event.currentTarget.contains(related as Node | null)) {
                     props.onExpandedChange(false)
@@ -2498,9 +2403,7 @@ export function SessionList(props: {
     // When off, unread rows are treated like any other: collapsed projects fold
     // completely and the preview limit may hide them.
     const previewIsUnread = keepUnreadSessionsVisible ? isSessionUnread : undefined
-    const { pinInProgressMode } = usePinInProgressSessions()
-    // List sort/filter lives in SessionListView (#2263); jobs mode is #1404.
-    const effectivePinInProgressMode: PinInProgressMode = pinInProgressMode
+    const { pinInProgressSessions } = usePinInProgressSessions()
     const { machineFilter, setMachineFilter } = useSessionListMachineFilter()
     const showDetailedStatus = sessionListStatusMode === 'detailed'
     const [searchQuery, setSearchQuery] = useState('')
@@ -2601,16 +2504,15 @@ export function SessionList(props: {
         () => props.sessions.filter(session => shouldShowSessionInSidebar(session, selectedSessionId)),
         [props.sessions, selectedSessionId]
     )
-    const allSessions = useMemo(
-        () => {
-            // Jobs-aware status filter (#1404), then optional Unread-only (#2294).
-            const byStatus = filterSessionsForListStatus(sidebarSessions, listView.status, selectedSessionId)
-            return listView.unreadOnly
-                ? filterUnreadSessionsOnly(byStatus, isSessionUnread, selectedSessionId)
-                : byStatus
-        },
-        [sidebarSessions, selectedSessionId, listView.status, listView.unreadOnly, isSessionUnread]
-    )
+    // Keep status filtering separate from the unread lens. Machine choices are
+    // derived from this set, so selecting a machine with no unread matches must
+    // stay an empty intersection instead of falling back to another machine.
+    const allSessions = useMemo(() => {
+        const byStatus = filterSessionsByStatus(preparedSessions, listView.status, selectedSessionId)
+        return showActiveSessionsOnly
+            ? filterActiveSessionsOnly(byStatus, selectedSessionId)
+            : byStatus
+    }, [preparedSessions, selectedSessionId, listView.status, showActiveSessionsOnly])
     const unreadSessionCount = useMemo(
         () => getUnreadSessionCount(readableSessions),
         [lastSeenVersion, readableSessions]
@@ -2637,9 +2539,17 @@ export function SessionList(props: {
             if (contentSearchActive) {
                 const results = contentSearchResponse?.results.map((result) => result.session) ?? []
                 const prepared = prepareSidebarSessions(results, selectedSessionId)
-                const byStatus = filterSessionsForListStatus(prepared, listView.status, selectedSessionId)
-                return listView.unreadOnly
-                    ? filterUnreadSessionsOnly(byStatus, isSessionUnread, selectedSessionId)
+                const activeFiltered = showActiveSessionsOnly
+                    ? filterActiveSessionsOnly(prepared, selectedSessionId)
+                    : prepared
+                const byStatus = filterSessionsByStatus(activeFiltered, listView.status, selectedSessionId)
+                const unreadFiltered = listView.unreadOnly
+                    ? filterUnreadSessionsOnly(
+                        byStatus,
+                        selectedSessionId,
+                        id => getSessionLastSeenSnapshot()[id] ?? 0,
+                        (id, readState) => getSessionManualUnreadAt(id, readState)
+                    )
                     : byStatus
                 return unreadFiltered.filter(session => sessionMatchesTimeRange(session, timeRange, selectedSessionId))
             }
@@ -2932,21 +2842,22 @@ export function SessionList(props: {
             }
             return b.updatedAt - a.updatedAt
         }
-        return bucketRunningSessions(machineFilteredSessions, effectivePinInProgressMode, byRelevanceOrRecent)
-    }, [machineFilteredSessions, effectivePinInProgressMode, searchScoreIndex, hasTextQuery, listComparator])
+        for (const key of Object.keys(buckets) as RunningBucketKey[]) {
+            buckets[key].sort(byRelevanceOrRecent)
+        }
+        return buckets
+    }, [unpinnedMachineSessions, pinInProgressMode, blockedSectionIds, searchScoreIndex, hasTextQuery])
     const runningSessionTotal = runningSessions.jobs.length
         + runningSessions.working.length
         + runningSessions.pending.length
+    const activeSessionTotal = runningSessions.active.length + runningSessions.idle.length
     const groups = useMemo(
         () => {
             const grouped = groupSessionsByDirectory(
-                machineFilteredSessions.filter((session) => {
-                    if (session.globalPinned) return false
-                    if (
-                        effectivePinInProgressMode !== 'off'
-                        && !session.pinned
-                        && isPinnedInProgressSession(session, effectivePinInProgressMode)
-                    ) return false
+                unpinnedMachineSessions.filter((session) => {
+                    if (blockedSectionIds.has(session.id)) return false
+                    if (pinInProgressMode !== 'off'
+                        && isPinnedInProgressSession(session, pinInProgressMode)) return false
                     return true
                 }),
                 fixedSessionOrder
@@ -2956,7 +2867,7 @@ export function SessionList(props: {
             }
             return grouped
         },
-        [machineFilteredSessions, effectivePinInProgressMode, blockedSectionIds, searchScoreIndex, hasTextQuery, listView]
+        [unpinnedMachineSessions, pinInProgressMode, blockedSectionIds, fixedSessionOrder, searchScoreIndex, hasTextQuery]
     )
     // Destructive group actions must scope to the FULL project group, not the
     // rendered subset: `groups` above drops global-pinned/in-progress rows and
@@ -2981,22 +2892,27 @@ export function SessionList(props: {
         ),
         [machineFilteredSessions, fixedSessionOrder]
     )
-    // Unfiltered project membership for group-wide actions (archive all).
-    const projectSessionsByKey = useMemo(
-        () => new Map(groupSessionsByDirectory(props.sessions).map((group) => [group.key, group.sessions])),
-        [props.sessions]
-    )
     const actionOnlyGroups = useMemo(() => {
-        if (effectivePinInProgressMode === 'off') {
+        // Under the blocked lens the operator asked for blocked rows and
+        // nothing else; every directory would otherwise contribute a bare
+        // action-only header, which is exactly the noise the lens removes.
+        if (showBlockedOnly) {
+            return []
+        }
+        // Otherwise also needed when the Blocked section (not the in-progress
+        // pin) is what emptied a directory, or the project's copy-path /
+        // new-session actions would vanish with its last row.
+        if (pinInProgressMode === 'off' && blockedSectionIds.size === 0) {
             return []
         }
         const visibleKeys = new Set(groups.map((group) => group.key))
         return allDirectoryGroups.filter((group) => !visibleKeys.has(group.key))
-    }, [groups, allDirectoryGroups, effectivePinInProgressMode])
+    }, [groups, allDirectoryGroups, pinInProgressMode, blockedSectionIds, showBlockedOnly])
     const [collapseOverrides, setCollapseOverrides] = useState<Map<string, boolean>>(
         () => new Map()
     )
     const [runningSectionCollapsed, setRunningSectionCollapsed] = useState(false)
+    const [activeSectionCollapsed, setActiveSectionCollapsed] = useState(false)
     const [pinnedSectionCollapsed, setPinnedSectionCollapsed] = useState(false)
     const autoExpandedSelectedSessionKeyRef = useRef<string | null>(null)
     const isGroupCollapsed = (group: SessionGroup): boolean => {
@@ -3166,30 +3082,6 @@ export function SessionList(props: {
         )
     }
 
-    const getNewSessionInGroup = (group: SessionGroup) => (
-        onNewSessionInDirectory && group.directory !== 'Other'
-            ? () => onNewSessionInDirectory({ machineId: group.machineId, directory: group.directory })
-            : undefined
-    )
-
-    const renderNewSessionInGroupButton = (group: SessionGroup) => {
-        const onNew = getNewSessionInGroup(group)
-        return onNew ? (
-            <button
-                type="button"
-                onClick={(event) => {
-                    event.stopPropagation()
-                    onNew()
-                }}
-                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] opacity-70 transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-link)] hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                title={t('sessions.group.new')}
-                aria-label={t('sessions.group.new')}
-            >
-                <PlusIcon className="h-3.5 w-3.5" />
-            </button>
-        ) : null
-    }
-
     const renderActionOnlyGroupHeader = (group: SessionGroup) => {
         // With multiple machines in the unfiltered view, disambiguate
         // same-named directories by suffixing the machine label.
@@ -3198,20 +3090,16 @@ export function SessionList(props: {
             : group.displayName
         return (
             <div key={group.key} data-session-scroll-anchor>
-                <ProjectGroupRow
-                    className="group/project sticky top-0 z-10 flex items-center gap-2 bg-[var(--app-bg)] py-1.5 pl-2 pr-2 text-left rounded-lg transition-colors hover:bg-[var(--app-secondary-bg)] min-w-0 w-full select-none"
-                    directory={group.directory}
-                    displayName={groupTitle}
-                    sessions={projectSessionsByKey.get(group.key) ?? group.sessions}
+                <ProjectGroupHeader
+                    group={group}
+                    actionSessions={actionGroupsByKey.get(group.key) ?? []}
+                    groupTitle={groupTitle}
+                    isCollapsed={false}
+                    onToggle={() => {}}
+                    collapsible={false}
+                    onNewSessionInDirectory={onNewSessionInDirectory}
                     api={api}
-                    onNewSession={getNewSessionInGroup(group)}
-                >
-                    <span className="font-medium text-sm truncate flex-1">
-                        {groupTitle}
-                    </span>
-                    <CopyPathButton path={group.directory} className="opacity-0 group-hover/project:opacity-100 transition-opacity duration-150" />
-                    {renderNewSessionInGroupButton(group)}
-                </ProjectGroupRow>
+                />
             </div>
         )
     }
@@ -3243,26 +3131,16 @@ export function SessionList(props: {
             : group.displayName
         return (
             <div key={group.key} data-session-scroll-anchor>
-                <ProjectGroupRow
-                    className="group/project sticky top-0 z-10 flex items-center gap-2 bg-[var(--app-bg)] py-1.5 pl-2 pr-2 text-left rounded-lg transition-colors hover:bg-[var(--app-secondary-bg)] cursor-pointer min-w-0 w-full select-none"
-                    directory={group.directory}
-                    displayName={groupTitle}
-                    sessions={projectSessionsByKey.get(group.key) ?? group.sessions}
+                <ProjectGroupHeader
+                    group={group}
+                    actionSessions={actionGroupsByKey.get(group.key) ?? []}
+                    groupTitle={groupTitle}
+                    isCollapsed={isCollapsed}
+                    onToggle={() => toggleGroup(group.key, isCollapsed)}
+                    onNewSessionInDirectory={onNewSessionInDirectory}
                     api={api}
-                    onClick={() => toggleGroup(group.key, isCollapsed)}
-                    expanded={!isCollapsed}
-                    onNewSession={getNewSessionInGroup(group)}
-                >
-                    <ChevronIcon className="h-3.5 w-3.5 text-[var(--app-hint)] shrink-0" collapsed={isCollapsed} />
-                    <span className="font-medium text-sm truncate flex-1">
-                        {groupTitle}
-                    </span>
-                    <CopyPathButton path={group.directory} className="opacity-0 group-hover/project:opacity-100 transition-opacity duration-150" />
-                    {renderNewSessionInGroupButton(group)}
-                    <span className="text-[11px] tabular-nums text-[var(--app-hint)] shrink-0">
-                        ({group.sessions.length})
-                    </span>
-                </ProjectGroupRow>
+                />
+
 
                 {collapsedUnreadSessions.length > 0 ? (
                     <div data-testid="session-group-unread-peek" className="flex flex-col gap-0.5 ml-3 pl-1 py-1">
@@ -4107,7 +3985,7 @@ export function SessionList(props: {
                     </div>
                 ) : null}
 
-                {props.sessions.length > 0 && !contentSearchLoading && !contentSearchError && !contentSearchHasIncompleteResults && (isFiltering || activeMachineFilter !== null || listView.status !== 'all' || listView.unreadOnly) && groups.length === 0 && runningSessionTotal === 0 && globalPinnedSessions.length === 0 ? (
+                {props.sessions.length > 0 && !contentSearchLoading && !contentSearchError && !contentSearchHasIncompleteResults && !isScratchlistStatusLoading && !scratchlistStatusError && (isFiltering || activeMachineFilter !== null || listView.status !== 'all' || listView.unreadOnly) && groups.length === 0 && runningSessionTotal === 0 && activeSessionTotal === 0 && pinnedSessions.length === 0 && blockedSectionSessions.length === 0 ? (
                     <div className="px-4 py-8 text-center text-sm text-[var(--app-hint)]">
                         {contentSearchActive
                             ? contentSearchReady

@@ -1,25 +1,25 @@
 import fs from 'fs/promises';
-import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto'
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 
-import { ApiClient } from '@/api/api';
-import { TrackedSession } from './types';
-import { RunnerState, Metadata } from '@/api/types';
-import { SpawnSessionOptions, SpawnSessionResult } from '@/modules/common/rpcTypes';
-import { resolveWebhookTimeoutMs, webhookTimeoutHint } from './webhookTimeout';
-import { logger } from '@/ui/logger';
-import { authAndSetupMachineIfNeeded } from '@/ui/auth';
-import { configuration } from '@/configuration';
+import { ApiClient } from '@/api/api'
+import { TrackedSession } from './types'
+import { RunnerState, Metadata } from '@/api/types'
+import { SpawnSessionOptions, SpawnSessionResult } from '@/modules/common/rpcTypes'
+import { resolveWebhookTimeoutMs, webhookTimeoutHint } from './webhookTimeout'
+import { logger } from '@/ui/logger'
+import { authAndSetupMachineIfNeeded } from '@/ui/auth'
+import { configuration } from '@/configuration'
 import packageJson from '../../package.json';
-import { getEnvironmentInfo } from '@/ui/doctor';
-import { spawnHappyCLI } from '@/utils/spawnHappyCLI';
-import { writeRunnerState, RunnerLocallyPersistedState, readRunnerState, acquireRunnerLock, releaseRunnerLock } from '@/persistence';
-import { getCliArgs } from '@/utils/cliArgs';
-import { getProcessStartMarker, isProcessAlive, isWindows, killProcess, killProcessByChildProcess, killProcessTreeByPid } from '@/utils/process';
-import { findStopSessionOrphanTargets, reapRunnerSpawnedOrphans } from '@/runner/orphanReap';
-import { decideUntrackedRunnerWebhook } from '@/runner/lateRunnerWebhook';
-import { cleanupFailedStartupAfterExit, sessionStartupTimeout, waitForRecoverableStartup } from './sessionStartup';
-import { buildChildExitNotices, type ChildExitNotice } from './childExitNotice';
+import { getEnvironmentInfo } from '@/ui/doctor'
+import { spawnHappyCLI } from '@/utils/spawnHappyCLI'
+import { writeRunnerState, RunnerLocallyPersistedState, readRunnerState, acquireRunnerLock, releaseRunnerLock } from '@/persistence'
+import { getCliArgs } from '@/utils/cliArgs'
+import { getProcessStartMarker, isProcessAlive, isWindows, killProcess, killProcessByChildProcess, killProcessTreeByPid } from '@/utils/process'
+import { findStopSessionOrphanTargets, reapRunnerSpawnedOrphans } from '@/runner/orphanReap'
+import { decideUntrackedRunnerWebhook } from '@/runner/lateRunnerWebhook'
+import { cleanupFailedStartupAfterExit, sessionStartupTimeout, waitForRecoverableStartup } from './sessionStartup'
+import { buildChildExitNotices, type ChildExitNotice } from './childExitNotice'
 import {
     decideKeepWrapperArchive,
     decideRawPidStop,
@@ -31,26 +31,27 @@ import {
     trackedSharedWrapperPidsWithSiblings,
     wrapperHasActiveSiblingRoots,
 } from '@/runner/sharedSessionStop';
-import { PERMISSION_MODES } from '@hapi/protocol/modes';
-import { RUNNER_CAPABILITIES } from '@hapi/protocol';
-import { withRetry } from '@/utils/time';
-import { extractErrorInfo, isRetryableConnectionError } from '@/utils/errorUtils';
+import { PERMISSION_MODES } from '@hapi/protocol/modes'
+import { RUNNER_CAPABILITIES } from '@hapi/protocol'
+import { withRetry } from '@/utils/time'
+import { extractErrorInfo, isRetryableConnectionError } from '@/utils/errorUtils'
 
-import { cleanupRunnerState, getInstalledCliMtimeMs, isRunnerRunningCurrentlyInstalledHappyVersion, stopRunner, waitForRunnerHandoff } from './controlClient';
-import { startRunnerControlServer } from './controlServer';
-import { createWorktree, removeWorktree, type WorktreeInfo } from './worktree';
-import { validateWorkspaceDirectory } from './validateWorkspaceDirectory';
-import { buildSpawnAuthEnv } from './spawnAuth';
-import { resolveCursorSpawnSessionType } from '@/cursor/utils/cursorMcpOverlay';
-import { buildMachineMetadata } from '@/agent/sessionFactory';
-import { resolveWorkspaceRoots } from '@/utils/workspaceRoot';
-import { hashRunnerCliApiToken, hashRunnerExtraHeaders } from './runnerIdentity';
-import { readRuntimes, runtimeMayBeAlive, runtimeAuthHash } from '@/codex/shared/registry';
-import { scheduleCursorModelsPrewarm } from '@/modules/common/cursorModelsPrewarm';
-import { isLinkedGitWorktree } from '@/utils/isLinkedGitWorktree';
-import { agentRequiresSpawnReady, resolveAgentReadyTimeoutMs } from './spawnReadyGate';
-import { agentUnavailableMessage, getAgentAvailability } from '@/agent/agentAvailability';
-import { copyCodexConfigFile, resolveCodexHome } from '@/codex/utils/codexHome';
+import { cleanupRunnerState, getInstalledCliMtimeMs, isRunnerRunningCurrentlyInstalledHappyVersion, stopRunner, waitForRunnerHandoff } from './controlClient'
+import { startRunnerControlServer } from './controlServer'
+import { createWorktree, removeWorktree, type WorktreeInfo } from './worktree'
+import { validateWorkspaceDirectory } from './validateWorkspaceDirectory'
+import { buildSpawnAuthEnv } from './spawnAuth'
+import { resolveCursorSpawnSessionType } from '@/cursor/utils/cursorMcpOverlay'
+import { buildMachineMetadata } from '@/agent/sessionFactory'
+import { resolveWorkspaceRoots } from '@/utils/workspaceRoot'
+import { hashRunnerCliApiToken, hashRunnerExtraHeaders } from './runnerIdentity'
+import { readRuntimes, runtimeMayBeAlive, runtimeAuthHash } from '@/codex/shared/registry'
+import { scheduleCursorModelsPrewarm } from '@/modules/common/cursorModelsPrewarm'
+import { isLinkedGitWorktree } from '@/utils/isLinkedGitWorktree'
+import { agentRequiresSpawnReady, resolveAgentReadyTimeoutMs } from './spawnReadyGate'
+import { agentUnavailableMessage, getAgentAvailability } from '@/agent/agentAvailability'
+import { copyCodexConfigFile, resolveCodexHome } from '@/codex/utils/codexHome'
+import { coalesceStopRequests } from './stopSessionRequests';
 
 /**
  * Deduplicates a preallocated HAPI-row spawn only while its child is alive.
@@ -1288,8 +1289,6 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     // marked PIDs this attempt actually killed, so the caller can keep their
     // suppression only while their own exit event is still pending.
     const attemptStopSession = async (
-    // Stop a session by sessionId or PID fallback
-    const stopSession = async (
       sessionId: string,
       opts?: { processStartMarker?: string },
       terminated: Set<number> = new Set<number>()
@@ -1550,6 +1549,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
               }
             }
             try {
+          let treeTerminationVerified = false;
               const treeStopped = session.childProcess
                 ? await killProcessByChildProcess(session.childProcess)
                 : await killProcessTreeByPid(pid);

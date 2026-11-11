@@ -25,6 +25,7 @@ import { UsageStore } from './usageStore'
 import { WorkGraphStore } from './workGraphStore'
 import { scanUnverifiedPeerMessages as scanUnverifiedPeerMessagesInDb } from './provenanceMessageScan'
 import type { ProvenanceMessageScanOptions } from '@hapi/protocol/provenanceMessageAudit'
+import { TurnStore } from './turnStore'
 import {
     backfillMessageContentSearchLookup,
     backfillMessageContentSearchShortIndex,
@@ -45,6 +46,8 @@ export type {
     VersionedUpdateResult
 } from './types'
 export type { CancelQueuedMessageResult, LookupQueuedMessageResult } from './messages'
+export { TurnStore } from './turnStore'
+export type { SessionTurn, SessionTurnEndReason, SessionTurnTrigger } from './turns'
 export { MachineStore } from './machineStore'
 export { MessageStore } from './messageStore'
 export { PushStore } from './pushStore'
@@ -99,6 +102,8 @@ export class Store {
     private closed: boolean = false
 
     readonly sessions: SessionStore
+
+    readonly turns: TurnStore
     readonly machines: MachineStore
     readonly messages: MessageStore
     readonly users: UserStore
@@ -165,6 +170,8 @@ export class Store {
         }
 
         this.sessions = new SessionStore(this.db)
+
+        this.turns = new TurnStore(this.db)
         this.machines = new MachineStore(this.db)
         this.messages = new MessageStore(this.db)
         this.users = new UserStore(this.db)
@@ -177,11 +184,6 @@ export class Store {
         this.sessionJobs = new SessionJobsStore(this.db)
         this.usage = new UsageStore(this.db)
         this.workGraph = new WorkGraphStore(this.db)
-    }
-
-    /** Run `fn` inside a single SQLite transaction (nested calls become savepoints). */
-    runInTransaction<T>(fn: () => T): T {
-        return this.db.transaction(fn)()
     }
 
     /**
@@ -1168,16 +1170,6 @@ export class Store {
 
     /** Upstream sessionReadState.v1 (5ef4304a4): readable content revisions + durable read cursors.
      *  Soup already used upstream's v29→v30 slot for FTS (#1598), so land columns as v31→v32. */
-    private migrateFromV31ToV32(): void {
-        const columns = this.getSessionColumnNames()
-        for (const name of ['content_revision', 'read_revision', 'read_state_version', 'manual_unread']) {
-            if (columns.size > 0 && !columns.has(name)) this.db.exec(`ALTER TABLE sessions ADD COLUMN ${name} INTEGER NOT NULL DEFAULT 0`)
-        }
-        const messageColumns = this.getMessageColumnNames()
-        if (messageColumns.size > 0 && !messageColumns.has('content_revision')) {
-            this.db.exec('ALTER TABLE messages ADD COLUMN content_revision INTEGER NOT NULL DEFAULT 0')
-        }
-    }
 
     /** Blocked-agent session-list chrome (#1717): persist the last
      *  AGENT_NOTIFY_SUMMARY footer so the list can flag stuck agents without
@@ -1379,6 +1371,12 @@ export class Store {
      * previously burned those version numbers on an earlier jobs remap —
      * both ensures are idempotent.
      */
+    private migrateFromV26ToV30(): void {
+        this.migrateFromV26ToV27()
+        this.migrateFromV27ToV28()
+        this.migrateFromV28ToV29()
+    }
+
     private migrateFromV31ToV32(): void {
         this.migrateFromV27ToV28()
         this.migrateFromV28ToV29()

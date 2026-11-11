@@ -12,12 +12,12 @@
  * Note: This process must not print to stdout as it would break MCP STDIO.
  */
 
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { z } from 'zod';
-import { DISPLAY_IMAGE_PROMPT_CURSOR, DISPLAY_LINKS_PROMPT_CURSOR, DISPLAY_MEDIA_PROMPT_CURSOR, DISPLAY_VIDEO_PROMPT_CURSOR } from '@/modules/common/displayImagePrompt';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { z } from 'zod'
+import { DISPLAY_IMAGE_PROMPT_CURSOR, DISPLAY_LINKS_PROMPT_CURSOR, DISPLAY_MEDIA_PROMPT_CURSOR, DISPLAY_VIDEO_PROMPT_CURSOR } from '@/modules/common/displayImagePrompt'
 import {
   ARCHIVE_PEER_TOOL_DESCRIPTION,
   INSPECT_PEER_TOOL_DESCRIPTION,
@@ -31,15 +31,10 @@ import {
   SESSION_JOB_TOOL_NAME,
   sessionJobInputSchema,
 } from '@/modules/sessionJob/sessionJobMcp';
-import { SESSION_NAME_MAX_LENGTH } from '@hapi/protocol';
-import { CREATABLE_AGENT_FLAVORS } from '@hapi/protocol/modes';
-import { PermissionModeSchema } from '@hapi/protocol/schemas';
-import { isPeerToolsDisabled, PEER_TOOL_NAMES } from '@/modules/common/peerTools';
-import {
-  SESSION_JOB_TOOL_DESCRIPTION,
-  SESSION_JOB_TOOL_NAME,
-  sessionJobInputSchema,
-} from '@/modules/sessionJob/sessionJobMcp';
+import { SESSION_NAME_MAX_LENGTH } from '@hapi/protocol'
+import { CREATABLE_AGENT_FLAVORS } from '@hapi/protocol/modes'
+import { PermissionModeSchema } from '@hapi/protocol/schemas'
+import { isPeerToolsDisabled, PEER_TOOL_NAMES } from '@/modules/common/peerTools'
 
 const DEFAULT_TOOL_NAMES = [
   'change_title',
