@@ -20,7 +20,7 @@
 |---|---|
 | Flagship #1717 blocked PR (submission text in body) | [Peer #1717: flagship blocked PR](/sessions/83d28e01-5852-4926-b163-99a95f46c931) |
 | Residency fade | [Peer #2356: residency fade PR](/sessions/205260d9-527a-4f7b-beeb-968ecf567fe0) |
-| #2002 Active + Working lenses | [Peer #2002: Active Working lenses](/sessions/ea9e52cc-cf3d-4f5d-95d8-9944bf08b0d6) |
+| #2002 Active + Working lenses → **PR #2376** | [Peer #2002: Active Working lenses](/sessions/ea9e52cc-cf3d-4f5d-95d8-9944bf08b0d6) |
 | #1996 blocked filter lens | [Peer #1996: blocked filter lens](/sessions/eddfb230-ebc4-4196-b2b7-c33a2f5f71f8) |
 | Cursor emit #2354 babysit (pre-existing) | [Cursor status-summary emit](/sessions/ab6f3c6c-3a29-49df-82fa-bceda7e46318) |
 
@@ -120,3 +120,7 @@ Promotes applied: fork-stage non-draft guidance (`pr-review-loop.md` + `hapi-pr-
 Live soup: awareness ON, CLI `hapi link-pr` OK, MCP catalog missing `link_pr` (only `link_issue`). Loss predates current absorb (inherits; both merge parents have 0). Originating restore that rebuilt `link_issue` and omitted `link_pr`: `e08eb8b69`. Symbol still on `driver/github-pr-awareness` @ `8ff958321`.
 
 **Owner:** [tooling/meta bot](/sessions/cbd1073e-4fd3-4f4a-bff8-cf9ba97bca6d) — finish current absorb first, then thin tip re-union + `sentinel: link_pr` (fail-closed remat). Confirm MCP catalog with awareness ON. [#1163 session](/sessions/b30cf5c0-633b-420f-bc10-26229e07f598) not required for remat (upstream #1163 CONFLICTING is independent). Workaround: CLI `hapi link-pr`.
+
+## #2002 lodged as tiann/hapi#2376 (2026-11-11)
+
+[Peer](/sessions/ea9e52cc-cf3d-4f5d-95d8-9944bf08b0d6) opened [PR #2376](https://github.com/tiann/hapi/pull/2376) off #1772 tip `61d72d98c` (head `0aaed119f`). Chip linked. Fork #328 cold-review-clean (P2s pre-existing in #1772 base). CI pending. Dogfood stamp authorized once CI green (soup-proven). Stack: `#1772 → #2376/#2002 → #1996` (#1996 still held on #1717 open).
