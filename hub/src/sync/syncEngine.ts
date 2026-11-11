@@ -7,7 +7,7 @@
  * - No E2E encryption; data is stored as JSON in SQLite
  */
 
-import { type SessionReadStateRequest, isKnownFlavor, isLiveLifecycleState, isSteeringSupportedForSession, MACHINE_CAPABILITIES, type LocalResumeTarget, type ResumableSession, type SessionEndReason } from '@hapi/protocol'
+import { BLOCKED_NOTIFY_STALE_MS, type SessionReadStateRequest, isKnownFlavor, isLiveLifecycleState, isSteeringSupportedForSession, MACHINE_CAPABILITIES, type LocalResumeTarget, type ResumableSession, type SessionEndReason } from '@hapi/protocol'
 import {
     cliBinaryUpdatedOnDisk,
     isMachineCapabilitySkewed,
@@ -85,7 +85,11 @@ import { ArchiveCleanupError } from './archiveCleanupError'
 import { AutomaticTitleSuggestionService } from './automaticTitleSuggestion'
 import { extractMessageEventType } from '../notifications/eventParsing'
 import { SessionEnumerationCache } from './sessionEnumerationCache'
-import { ingestNotifySummaryFromMessage } from './workGraphNotifyIngest'
+import { buildOperatorUnblockEvent, extractSessionNotifySignal, ingestNotifySummaryFromMessage, isOperatorReplyMessage } from './workGraphNotifyIngest'
+
+/** Startup notify backfill bounds (#1717) — see `backfillRecentNotifySignals`. */
+const NOTIFY_BACKFILL_MAX_SESSIONS = 200
+const NOTIFY_BACKFILL_MESSAGE_SCAN = 6
 
 type PiResumeAttempt = NonNullable<NonNullable<Session['metadata']>['piResumeAttempt']>
 type PtyResumeAttempt = NonNullable<NonNullable<Session['metadata']>['ptyResumeAttempt']>
@@ -377,6 +381,119 @@ export class SyncEngine {
 
     getSessions(): Session[] {
         return this.sessionCache.getSessions()
+    }
+
+    /**
+     * Operator manually marks a session unblocked (#1717).
+     *
+     * Two effects, deliberately: it dismisses the chrome, AND it writes a
+     * work-graph event. Replying to an agent leaves the rationale in the
+     * transcript for anyone to read later; dismissing
+     * silently would leave a state change with no "why", which is exactly the
+     * gap the reason prompt exists to close.
+     */
+    acknowledgeSessionBlocked(sessionId: string, reason: string): { at: number; reason: string } | null {
+        const session = this.getSession(sessionId)
+        if (!session) return null
+
+        const priorNotify = session.lastNotify ?? null
+        const ack = this.sessionCache.setSessionBlockedAck(sessionId, reason)
+        if (!ack) return null
+
+        try {
+            this.store.workGraph.insertEvent(session.namespace, buildOperatorUnblockEvent({
+                sessionId,
+                ownerUserId: this.hubOwnerUserId,
+                reason,
+                acknowledgedAt: ack.at,
+                priorNotify: priorNotify
+            }), { ts: ack.at })
+        } catch (error) {
+            // Best-effort ledger capture — never fail the operator's dismissal
+            // because the event log rejected the row.
+            console.error('[work-graph] operator_unblock capture failed', error)
+        }
+
+        return ack
+    }
+
+    /**
+     * One-shot startup backfill for the blocked session-list chrome (#1717).
+     *
+     * `lastNotify` is normally stamped as messages arrive, so a hub upgraded
+     * mid-flight would show nothing until every agent speaks again. Rather than
+     * rescan every session's history (600+ sessions x 200 messages), only look
+     * at sessions that moved inside the staleness window the UI actually
+     * renders loudly — anything older would be drawn muted anyway.
+     *
+     * Sessions with no footer in their last few messages are rescanned on each
+     * restart. That is accepted: the candidate set is already bounded by both
+     * the 24h window and `NOTIFY_BACKFILL_MAX_SESSIONS`, and a "we looked and
+     * found nothing" marker would be more state than the scan costs.
+     */
+    backfillRecentNotifySignals(options: { now?: number; maxSessions?: number } = {}): number {
+        const now = options.now ?? Date.now()
+        const maxSessions = options.maxSessions ?? NOTIFY_BACKFILL_MAX_SESSIONS
+        const candidates = this.sessionCache.getSessions()
+            .filter((session) => !session.lastNotify
+                && now - session.updatedAt <= BLOCKED_NOTIFY_STALE_MS)
+            .sort((a, b) => b.updatedAt - a.updatedAt)
+            .slice(0, maxSessions)
+
+        let stamped = 0
+        for (const session of candidates) {
+            if (this.restoreNotifySignalFromTranscript(session.id)) stamped += 1
+        }
+        return stamped
+    }
+
+    /**
+     * Re-derive `lastNotify` from the stored transcript, newest footer wins.
+     *
+     * Returns true when a footer was found and stamped.
+     */
+    private restoreNotifySignalFromTranscript(sessionId: string): boolean {
+        const scanned = this.store.messages.getMessages(sessionId, NOTIFY_BACKFILL_MESSAGE_SCAN)
+        // Re-order by message time before scanning. `getMessages` sorts by
+        // insertion `seq`, but replayed transcripts keep their original
+        // timestamps, so an older footer can be stored after a newer one.
+        // Live notify writes are timestamp-monotonic; a restart must agree with
+        // them rather than resurrect a superseded blocker. The operator-reply
+        // boundary moves with it, or the stop point would be chosen in a
+        // different order than the footer it guards.
+        const messages = [...scanned].sort((a, b) => (
+            a.createdAt !== b.createdAt ? a.createdAt - b.createdAt : a.seq - b.seq
+        ))
+        // Newest first: the most recent footer is the session's current
+        // self-report, and older ones have already been superseded.
+        for (let index = messages.length - 1; index >= 0; index -= 1) {
+            const message = messages[index]!
+            // Stop at the newest operator prompt. Anything older was already
+            // answered, and clear-on-new-turn deliberately erased it — a
+            // restart must not resurrect a blocker the operator dealt with.
+            if (isOperatorReplyMessage(message.content)) break
+            const signal = extractSessionNotifySignal(message.content, message.createdAt)
+            if (!signal) continue
+            this.sessionCache.setSessionLastNotify(sessionId, signal)
+            return true
+        }
+        return false
+    }
+
+    /**
+     * Reconcile the persisted notify signal after history truncation (#1717).
+     *
+     * A rewind can delete the very message whose footer is driving the blocked
+     * chrome. Nothing else repairs that: a Codex rollback does not start a new
+     * turn, so the clear-on-new-turn transition never fires, and the next
+     * refresh simply re-reads the stale columns.
+     */
+    private reconcileNotifySignalAfterTruncate(sessionId: string): void {
+        // Clear before re-deriving. Any surviving footer is necessarily older
+        // than the one just dropped, and `setSessionLastNotify` is deliberately
+        // timestamp-monotonic, so it would refuse to move the signal backwards.
+        this.sessionCache.clearSessionLastNotify(sessionId)
+        this.restoreNotifySignalFromTranscript(sessionId)
     }
 
     private resolveOnlineMachineForSession(
@@ -763,6 +880,17 @@ export class SyncEngine {
             // Capture is independent of chat display settings (#1462/#1464).
             const session = this.getSession(event.sessionId)
             if (session) {
+                // #1717: stamp the footer onto the session first, so the
+                // blocked session-list chrome is not hostage to work-graph
+                // validation bounds failing on the same message.
+                const notifySignal = extractSessionNotifySignal(
+                    event.message.content,
+                    event.message.createdAt
+                )
+                if (notifySignal) {
+                    this.sessionCache.setSessionLastNotify(session.id, notifySignal)
+                }
+
                 try {
                     ingestNotifySummaryFromMessage({
                         store: this.store,
@@ -2632,6 +2760,7 @@ export class SyncEngine {
             )
             this.scrubHistoryLocators(sessionId, namespace)
             this.sessionCache.rebuildTodosFromTranscript(sessionId)
+            this.reconcileNotifySignalAfterTruncate(sessionId)
             this.eventPublisher.emit({
                 type: 'messages-invalidated',
                 sessionId,

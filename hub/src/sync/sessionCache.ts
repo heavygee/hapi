@@ -273,6 +273,16 @@ export class SessionCache {
             teamState,
             todosUpdatedAt: stored.todosUpdatedAt ?? 0,
             teamStateUpdatedAt: stored.teamStateUpdatedAt ?? 0,
+            blockedAck: stored.blockedAckAt !== null
+                ? { at: stored.blockedAckAt, reason: stored.blockedAckReason ?? '' }
+                : null,
+            lastNotify: stored.lastNotifyStatus !== null && stored.lastNotifyAt !== null
+                ? {
+                    status: stored.lastNotifyStatus,
+                    at: stored.lastNotifyAt,
+                    note: stored.lastNotifyNote
+                }
+                : null,
             model: stored.model,
             modelReasoningEffort: stored.modelReasoningEffort,
             effort: stored.effort,
@@ -312,6 +322,86 @@ export class SessionCache {
         if (!session) throw new Error('Session not found')
         this.store.sessions.setSessionPinMode(sessionId, mode, session.namespace)
         this.refreshSession(sessionId)
+    }
+
+    /**
+     * Record the agent's latest `AGENT_NOTIFY_SUMMARY` footer (#1717).
+     * Refreshes so SSE carries the new `lastNotify` to session lists.
+     */
+    setSessionLastNotify(
+        sessionId: string,
+        signal: { status: string; at: number; note: string | null }
+    ): void {
+        const session = this.sessions.get(sessionId) ?? this.refreshSession(sessionId)
+        if (!session) return
+        // Unchanged status for the same turn: skip the write + SSE fan-out.
+        // The list only renders status/note, so a repeated footer is a no-op.
+        if (session.lastNotify
+            && session.lastNotify.status === signal.status
+            && session.lastNotify.note === signal.note
+            && session.lastNotify.at >= signal.at
+        ) {
+            return
+        }
+        if (this.store.sessions.setSessionLastNotify(sessionId, signal, session.namespace)) {
+            this.applyLastNotifyToCache(session, signal)
+        }
+    }
+
+    /**
+     * Record the operator's manual unblock (#1717). Returns the stored ack so
+     * the caller can put the same values in the ledger event.
+     */
+    setSessionBlockedAck(sessionId: string, reason: string, at: number = Date.now()): {
+        at: number
+        reason: string
+    } | null {
+        const session = this.sessions.get(sessionId) ?? this.refreshSession(sessionId)
+        if (!session) return null
+        const ack = { at, reason }
+        if (!this.store.sessions.setSessionBlockedAck(sessionId, ack, session.namespace)) {
+            return null
+        }
+        // In place + full-session emit, for the same reason as the notify
+        // writes: refreshSession would discard in-memory runtime state.
+        session.blockedAck = ack
+        this.publisher.emit({ type: 'session-updated', sessionId: session.id, data: session })
+        return ack
+    }
+
+    /**
+     * Forget the stored footer — a new turn started, so the agent's last
+     * self-report no longer describes the present.
+     */
+    clearSessionLastNotify(sessionId: string): void {
+        const session = this.sessions.get(sessionId)
+        // Guard on the cached value so the common (nothing stored) case costs
+        // no SQL: this runs on every thinking transition.
+        if (!session?.lastNotify) return
+        if (this.store.sessions.clearSessionLastNotify(sessionId, session.namespace)) {
+            this.applyLastNotifyToCache(session, null)
+        }
+    }
+
+    /**
+     * Update `lastNotify` in place and broadcast the whole Session.
+     *
+     * Deliberately NOT `refreshSession`: that rebuilds from SQLite and would
+     * discard in-memory runtime state, most damagingly the `updatedAt` bump
+     * `markMessageQueued` / `applySessionPatch` just made in memory — the clear
+     * runs on exactly those paths, so refreshing there broadcast a stale clock
+     * and moved the session back down the list.
+     *
+     * A full Session rather than a SessionPatch because `SessionPatch` has no
+     * `lastNotify` field; the web's full-session branch rebuilds the summary
+     * via `toSessionSummary`, which does carry it.
+     */
+    private applyLastNotifyToCache(
+        session: Session,
+        signal: { status: string; at: number; note: string | null } | null
+    ): void {
+        session.lastNotify = signal
+        this.publisher.emit({ type: 'session-updated', sessionId: session.id, data: session })
     }
 
     markSessionActive(sessionId: string, time: number = Date.now()): void {
@@ -425,6 +515,12 @@ export class SessionCache {
         }
         if (patch.thinking === false) this.forgetInterruptedTurn(session.id)
         this.recordTurn(session, wasThinking, Date.now(), 'patch', 'idle')
+
+        // #1717: last, because clearing re-seats the cached Session object and
+        // would strand the in-place mutations above.
+        if (!wasThinking && session.thinking) {
+            this.clearSessionLastNotify(session.id)
+        }
 
         return true
     }
@@ -560,6 +656,14 @@ export class SessionCache {
                 } satisfies SessionPatch
             })
         }
+
+        // #1717: a new turn invalidates the agent's last self-report — whatever
+        // it said it was blocked on, it is now working. Done last because
+        // `clearSessionLastNotify` re-seats the cached Session object, which
+        // would strand the in-place mutations above.
+        if (!wasThinking && session.thinking) {
+            this.clearSessionLastNotify(session.id)
+        }
     }
 
     /**
@@ -610,6 +714,13 @@ export class SessionCache {
                     updatedAt: session.updatedAt
                 } satisfies SessionPatch
             })
+        }
+
+        // #1717: this is the operator-answered-a-blocked-agent path, and it
+        // sets `thinking` before any CLI keep-alive lands — so the rising edge
+        // in `handleSessionAlive` would never see one.
+        if (!wasThinking) {
+            this.clearSessionLastNotify(session.id)
         }
     }
 

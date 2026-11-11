@@ -24,6 +24,11 @@ export type StoredSession = {
     todosUpdatedAt: number | null
     teamState: unknown | null
     teamStateUpdatedAt: number | null
+    lastNotifyStatus: string | null
+    lastNotifyAt: number | null
+    lastNotifyNote: string | null
+    blockedAckAt: number | null
+    blockedAckReason: string | null
     active: boolean
     activeAt: number | null
     seq: number
