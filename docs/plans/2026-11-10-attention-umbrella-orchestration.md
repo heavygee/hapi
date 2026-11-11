@@ -103,7 +103,9 @@ Re-arm next 24h sweep watching the same open PRs (drop #2362; it was never in th
 
 Peer correctly flagged: blocked-only lens has no predicate home on `main` or any open PR; it lives only in [Peer #1717](/sessions/83d28e01-5852-4926-b163-99a95f46c931) WIP (`feat/blocked-session-affordance-1717`).
 
-**Call: option 1** — keep #1996 held until #1717 opens upstream. No invented minimal predicate. No informal base on moving tip `d1c19413a`. Branch may stay warm on #1772 tip `61d72d98c`.
+**Call: option 1** — keep #1996 held until #1717 opens upstream. No invented minimal predicate. No informal base on moving tip `d1c19413a`.
+
+**Stack order (updated):** `#1772 → #2002 → #1996`. [#2002](/sessions/ea9e52cc-cf3d-4f5d-95d8-9944bf08b0d6) already lodged fork cold-review [heavygee/hapi#328](https://github.com/heavygee/hapi/pull/328) off #1772 tip; when #1996 resumes it builds on `feat/2002-active-working-lenses`, not the reverse.
 
 ## #2362 Gate A clean (2026-11-11)
 
