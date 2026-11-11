@@ -579,6 +579,7 @@ export default {
   'session.action.markUnread': 'Mark as unread',
   'session.action.syncCodex': 'Sync Codex',
   'session.action.syncPi': 'Sync Pi history',
+  'session.archived.title': 'Session archived',
   'session.action.archive': 'Archive',
   'session.action.reopen': 'Reopen',
   'session.action.reopenCursorChecking': 'Checking whether Cursor chat data is still available on the recorded machine.',

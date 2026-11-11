@@ -32,7 +32,7 @@ import { useHoldToTalk } from '@/hooks/useHoldToTalk'
 import { useDictation } from '@/hooks/useDictation'
 import { useVoiceInputPreferences } from '@/hooks/useVoiceInputPreferences'
 import { usePlatform } from '@/hooks/usePlatform'
-import { useSessionActions } from '@/hooks/mutations/useSessionActions'
+import { sessionArchiveMutationKey, useSessionActions } from '@/hooks/mutations/useSessionActions'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
 import { ProjectGroupActionMenu } from '@/components/ProjectGroupActionMenu'
 import { SessionExportDialog } from '@/components/SessionExportDialog'
@@ -122,6 +122,8 @@ import { SessionRowSummary } from '@/components/SessionRowSummary'
 import { KitchenStatusChip } from '@/components/KitchenStatusChip'
 import { UnblockReasonDialog } from '@/components/UnblockReasonDialog'
 import { ArchiveSessionDialog } from '@/components/ArchiveSessionDialog'
+import { useIsMutating } from '@tanstack/react-query'
+import { ArchiveIcon, LoaderIcon } from '@/components/icons'
 import { DeleteSessionDialog } from '@/components/DeleteSessionDialog'
 import { CalendarIcon, formatDateValue, parseLocalDate, SessionDateRangePicker } from '@/components/SessionDateFilter'
 import { IssueRefChip } from '@/components/IssueRefChip'
@@ -1446,7 +1448,9 @@ export function SessionListSearch(props: {
     onDateRangeChange?: (start: string, end: string) => void
     expanded: boolean
     onExpandedChange: (expanded: boolean) => void
-    api: ApiClient | null
+    /** Fork-only (voice input + content search). Optional: upstream's own
+     * SessionListSearch has no api prop, so its tests render without one. */
+    api?: ApiClient | null
     searchMode?: 'metadata' | 'content'
     onSearchModeChange?: (mode: 'metadata' | 'content') => void
     showDateFilter?: boolean
@@ -1656,12 +1660,12 @@ export function SessionListSearch(props: {
     valueRef.current = props.value
     const getCurrentValue = useCallback(() => valueRef.current, [])
 
-    const voiceInput = useVoiceInputPreferences(props.api)
+    const voiceInput = useVoiceInputPreferences(props.api ?? null)
     const onDictationTextChange = useCallback((text: string) => {
         props.onChange(normalizeSearchDictation(text))
     }, [props.onChange])
     const dictation = useDictation({
-        api: props.api,
+        api: props.api ?? null,
         provider: voiceInput.provider,
         mode: voiceInput.transcriptionMode,
         getCurrentText: getCurrentValue,
@@ -1980,6 +1984,14 @@ const SessionItem = memo(function SessionItem(props: {
     const [linkPrOpen, setLinkPrOpen] = useState(false)
     const [exportOpen, setExportOpen] = useState(false)
     const [archiveOpen, setArchiveOpen] = useState(false)
+    // Read from the shared mutation cache, not row state: the row remounts when
+    // an archived session moves between sections (e.g. out of Active), and the
+    // spinner must survive that until the request settles.
+    const quickArchivePending = useIsMutating({ mutationKey: sessionArchiveMutationKey(s.id), exact: true }) > 0
+    const archiveNeedsConfirmation = s.thinking || s.pendingRequestsCount > 0 || (s.backgroundTaskCount ?? 0) > 0
+    // The row can turn inactive before the archive request settles (the hub
+    // still confirms cleanup); keep the spinner until it does.
+    const showQuickArchive = s.active || quickArchivePending
     const [deleteOpen, setDeleteOpen] = useState(false)
     const { features } = useFeatures(api)
     const githubPrAwarenessEnabled = Boolean(features?.githubPrAwareness.enabled)
@@ -2053,6 +2065,33 @@ const SessionItem = memo(function SessionItem(props: {
             }
         } catch (error) {
             setReopenError(formatReopenError(error))
+        }
+    }
+
+    const handleQuickArchive = async () => {
+        if (archiveNeedsConfirmation) {
+            setArchiveOpen(true)
+            return
+        }
+        try {
+            await archiveSession()
+            addToast({
+                title: t('session.archived.title'),
+                body: sessionName,
+                sessionId: s.id,
+                url: `/sessions/${s.id}`,
+                action: {
+                    label: t('session.action.reopen'),
+                    onClick: () => void handleReopen()
+                }
+            })
+        } catch (error) {
+            addToast({
+                title: t('dialog.archive.error'),
+                body: error instanceof Error ? error.message : t('dialog.error.default'),
+                sessionId: s.id,
+                url: `/sessions/${s.id}`
+            })
         }
     }
 
@@ -2139,8 +2178,9 @@ const SessionItem = memo(function SessionItem(props: {
                 disconnected-row opacity treatment (soup #1717). */}
             <div
                 data-session-scroll-anchor
+                data-quick-action-pending={quickArchivePending ? '' : undefined}
                 className={cn(
-                    'session-list-item group/session-row flex w-full items-start gap-1 rounded-lg py-2 pr-2 transition-colors',
+                    'session-list-row session-list-item group/session-row relative flex w-full items-start gap-1 rounded-lg py-2 pr-2 transition-colors',
                     // Reserve the rail width on every row so blocked rows do
                     // not shift their neighbours when the flag appears.
                     'border-l-2 pl-2',
@@ -2186,6 +2226,20 @@ const SessionItem = memo(function SessionItem(props: {
                     />
                 </div>
                 {linkedIssue ? <IssueRefChip ref={linkedIssue} className="mt-0.5 shrink-0" /> : null}
+                {showQuickArchive ? (
+                    <button
+                        type="button"
+                        className="session-row-quick-action absolute right-1 top-1.5 h-7 w-7 items-center justify-center rounded-md text-[var(--app-hint)] transition-colors hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:cursor-wait"
+                        aria-label={t('session.action.archive')}
+                        title={t('session.action.archive')}
+                        disabled={quickArchivePending}
+                        onClick={() => void handleQuickArchive()}
+                    >
+                        {quickArchivePending
+                            ? <LoaderIcon className="h-4 w-4 animate-spin" />
+                            : <ArchiveIcon className="h-4 w-4" />}
+                    </button>
+                ) : null}
             </div>
 
             <SessionActionMenu
@@ -2919,6 +2973,11 @@ export function SessionList(props: {
         if (isFiltering) return false
         const override = collapseOverrides.get(group.key)
         if (override !== undefined) return override
+        // Archived-only would otherwise collapse every group (none has an
+        // active session), hiding exactly what was asked for.
+        if (listView.status === 'archived') return false
+        // Unread-only would otherwise fold unread rows into quiet collapsed groups.
+        if (listView.unreadOnly) return false
         const hasSelectedSession = selectedSessionId
             ? group.sessions.some(session => session.id === selectedSessionId)
             : false

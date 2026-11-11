@@ -461,6 +461,26 @@ html:has(.chat-scroll-y) #root {
     }
 }
 
+.session-row-quick-action {
+    display: none;
+}
+.session-list-row:has(:focus-visible) .session-row-quick-action,
+.session-list-row[data-quick-action-pending] .session-row-quick-action {
+    display: flex;
+}
+.session-list-row:has(:focus-visible) .session-row-trailing,
+.session-list-row[data-quick-action-pending] .session-row-trailing {
+    visibility: hidden;
+}
+@media (hover: hover) and (pointer: fine) {
+    .session-list-row:hover .session-row-quick-action {
+        display: flex;
+    }
+    .session-list-row:hover .session-row-trailing {
+        visibility: hidden;
+    }
+}
+
 /* Collapsible panel animation */
 .collapsible-panel {
     display: grid;

@@ -273,6 +273,7 @@ export function toSessionSummary(
         contentRevision: session.contentRevision,
         readState: session.readState,
         createdAt: session.createdAt,
+        lastUserMessageAt: session.lastUserMessageAt,
         pinned: session.pinned ?? false,
         globalPinned: session.globalPinned ?? false,
         metadata: toSessionSummaryMetadata(session.metadata),
