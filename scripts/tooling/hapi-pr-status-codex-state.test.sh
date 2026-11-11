@@ -45,8 +45,8 @@ export GH_HEAD_SHA="$TIP"
 # deliberately older than `updated_at`: the comment is edited in place, so a
 # selector keying on creation time would rank a finished review as stale.
 state_comment() {
-    local sha="$1" status="$2" findings="$3"
-    jq -nc --arg sha "$sha" --arg status "$status" --argjson findings "$findings" '
+    local sha="$1" status="$2" findings="$3" extra="${4:-}"
+    jq -nc --arg sha "$sha" --arg status "$status" --argjson findings "$findings" --arg extra "$extra" '
         [[{
             user: {login: "chatgpt-codex-connector"},
             created_at: "2026-11-10T02:04:22Z",
@@ -59,7 +59,7 @@ state_comment() {
                     status: $status
                 },
                 security_review: {commit_sha: null, status: null}
-            } | tostring) + " -->\n\nCodex Review Summary")
+            } | tostring) + " -->\n\nCodex Review Summary\n" + $extra)
         }]]'
 }
 
@@ -78,6 +78,14 @@ printf '%s' "$out" | grep -qi "No .*review/comment with a reviewed commit" \
 GH_COMMENTS="$(state_comment "$TIP" completed true)" ; export GH_COMMENTS
 if out="$(run)"; then bad "completed-with-findings must exit non-zero: $out"; else ok; fi
 printf '%s' "$out" | grep -q "FINDINGS PRESENT" && ok || bad "findings verdict not reported: $out"
+
+# 2b. Explicit state must not be overridden by prose elsewhere in the same comment.
+#     The v1 summary also renders a security-review row, so "No findings" there
+#     would otherwise match the legacy clean regex and flip a real code-review
+#     failure to CLEAN. Reported on heavygee/hapi#326 by the fork bot.
+GH_COMMENTS="$(state_comment "$TIP" completed true 'Security review: No findings')" ; export GH_COMMENTS
+if out="$(run)"; then bad "security-review prose must not override code-review findings: $out"; else ok; fi
+printf '%s' "$out" | grep -q "FINDINGS PRESENT" && ok || bad "findings verdict lost to prose match: $out"
 
 # 3. An in-flight review is not a verdict. This is the dangerous shape: mid-run
 #    the JSON carries has_any_findings=null, which must never read as clean.

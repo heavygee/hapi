@@ -381,7 +381,12 @@ if [[ "$OWNER" == "heavygee" ]]; then
             BOT_OK=false
             PASS=1
         fi
-    elif printf '%s' "$BODY" | sed 's/\\n/ /g' | tr '\n' ' ' | grep -qE "$CLEAN_REGEX"; then
+    elif [[ -z "$STATE_STATUS" ]] && printf '%s' "$BODY" | sed 's/\\n/ /g' | tr '\n' ' ' | grep -qE "$CLEAN_REGEX"; then
+        # Prose matching is the LEGACY path only. When the event carries explicit
+        # machine-readable state, that state is the verdict and must not be second-
+        # guessed by a regex over the whole summary: the v1 comment also renders a
+        # security-review row, so a "No findings" there would otherwise override
+        # `has_any_findings: true` from the code review and report a false CLEAN.
         if $TIP_MATCHED; then
             echo "     → PASS (tip-matched clean body)"
         else
