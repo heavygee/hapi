@@ -123,6 +123,8 @@ Promotes applied: fork-stage non-draft guidance (`pr-review-loop.md` + `hapi-pr-
 - **Multi-sentinel support** fixed (old loop overwrote; only last sentinel checked).
 - Hard `--verify` gate; live tip checked **3 missing** including `link_pr`×2; absorb WIP **2 missing** (`link_pr`×2) — gate would have blocked the silent drop.
 - **Sequencing change (accepted):** restore `link_pr` on absorb WIP *before* promote; keep entries red/enforced. First remat under expanded gate = absorb promote itself.
+
+**Update 2026-11-11 ~09:37Z:** `link_pr` restored; required-surface gate **22/0 missing**. Catalog proven via `listTools()` (ON/OFF/allowlist + negative control). Root cause was one missing `'link_pr'` in the fork-tools `toolNames` list (plus dropped `fetchGithubPrAwareness` / `upsertSessionExternalRef`). Collateral: duplicate `session_job` registration, truncated `ping_peer` schema, bad sorted tool-list asserts; migration spine → upstream + content-addressed self-heal (hub+shared green). **Not promoting yet** — web still 37 failures / empty SessionList suites; Meta next.
 - [#1163](/sessions/b30cf5c0-633b-420f-bc10-26229e07f598) **Ready-YES** tip `63063ad7a` three-dim CLEAN; Lane A / independent of remat. Workaround until promote: CLI `hapi link-pr`.
 
 ## #2002 lodged as tiann/hapi#2376 (2026-11-11)
