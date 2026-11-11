@@ -35,14 +35,13 @@ Still later (orchestrator will spawn when blockers clear): list persistence of l
 
 Merge remains operator/Meta after elapsed windows — prepare only.
 
-## Filter-chain hold (2026-11-10 decision)
+## Filter-chain hold (LIFTED 2026-11-11)
 
-`#2002` / `#1996` **HOLD** upstream lodging until `tiann/hapi#1772` is mergeable.
+`#1772` is now **MERGEABLE/CLEAN** (author techotaku39 merged `main` @ tip `61d72d98c`, `codex-review:pass`). HOLD on `#2002` / `#1996` lodging is **lifted**.
 
-- techotaku39 pushed 2026-11-09 — author live; no competing reconciled #1772 PR.
-- No Draft-stacked #2002 against `main` (cold-review noise).
-- Soup thin layers stay warm; peers idled `blocked`.
-- Unblock path: help #1772 clear conflicts (rebase-assist / operator-mediated offer), then re-wake filter peers.
+- Re-wake peers to lodge **stacked** PRs on `#1772` tip (not a competing #1772, not bare `main`).
+- Prefer Draft if still unsure of CI; body must say depends-on #1772.
+- Soup layers stay warm until upstream PR exists + linked.
 
 ## #1772 rebase-assist (ready — awaiting operator post)
 
@@ -61,6 +60,7 @@ Merge remains operator/Meta after elapsed windows — prepare only.
 | #2339 FUE unlabelled callouts | Merged upstream (`7498d8c8f`) — check whether `driver/fue-unlabelled-controls` soup layer is now redundant |
 | #1424 session-attached jobs | Already counted; reconfirmed in sync |
 | #2296 presence badges (Ian) | Landed — residency-fade sibling narrative may need a light refresh vs power-mark/badge taxonomy |
+| #2362 residency fade | Merged by tiann 2026-11-11 (`a29fe7b32`); badge identity + fade scale coexistence |
 
 ## Mirror hygiene
 
@@ -81,6 +81,20 @@ First hourly sweep flagged #1725/#1733/#1772/#987 as CONFLICTING/DIRTY after syn
 
 | PR | Notes |
 |---|---|
-| #2362 | Rebased onto post-#2296 main (tip `dffb5738a`, MERGEABLE); pitch = badge identity + fade scale. CI/pr-review **pending** on new tip; dogfooded ~48h. [peer](/sessions/205260d9-527a-4f7b-beeb-968ecf567fe0) |
+| #2362 | **MERGED** by @tiann 2026-11-11T00:58:25Z (`a29fe7b32`). Peer Gate A / exit reflection owed. [peer](/sessions/205260d9-527a-4f7b-beeb-968ecf567fe0) |
 | Tooling | **Fork [heavygee/hapi#326](https://github.com/heavygee/hapi/pull/326)** open — `codex-review-state:v1` parse + offline probe that fails on unpatched script. Awaiting fork merge. |
 
+## Daily sweep complete (2026-11-11T08:00Z — 24/24)
+
+Job `attention-daily-sweep` completed. Findings: `/tmp/hapi-attention-daily-sweep.log.findings`.
+No third-party pushback on Discussion #2355 or Issue #2356 (only our own comments).
+
+| PR | Status after day |
+|---|---|
+| #1725 | Ready-YES / CLEAN; dogfood ~17h left |
+| #1733 | Ready-YES / CLEAN; dogfood ~17h left |
+| #1772 | Author self-merged `main` overnight → **CLEAN** three-dim; dogfood clock running; HOLD lift |
+| #987 | Still NOT clean: Android `build` fail (`MissingTranslation` ru for `channel_model_errors` + sibling), 6 unresolved threads, bot Needs changes. Tip `8f5fc0672`. Peer wake with fix prescription. |
+| #2362 | **Landed** (tiann merge) — remove from open attention set |
+
+Re-arm next 24h sweep watching the same open PRs (drop #2362; it was never in the script list).
