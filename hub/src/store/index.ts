@@ -565,6 +565,25 @@ export class Store {
             CREATE INDEX IF NOT EXISTS idx_sessions_tag ON sessions(tag);
             CREATE INDEX IF NOT EXISTS idx_sessions_tag_namespace ON sessions(tag, namespace);
 
+            CREATE TABLE IF NOT EXISTS session_turns (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                namespace TEXT NOT NULL,
+                started_at INTEGER NOT NULL,
+                ended_at INTEGER,
+                end_reason TEXT,
+                started_by TEXT NOT NULL,
+                recover_until INTEGER,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_session_turns_namespace_started
+                ON session_turns(namespace, started_at);
+            CREATE INDEX IF NOT EXISTS idx_session_turns_session_started
+                ON session_turns(session_id, started_at);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_session_turns_one_open
+                ON session_turns(session_id)
+                WHERE ended_at IS NULL;
+
             CREATE TABLE IF NOT EXISTS machines (
                 id TEXT PRIMARY KEY,
                 namespace TEXT NOT NULL DEFAULT 'default',
