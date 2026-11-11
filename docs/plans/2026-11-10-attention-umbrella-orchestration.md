@@ -119,7 +119,7 @@ Promotes applied: fork-stage non-draft guidance (`pr-review-loop.md` + `hapi-pr-
 
 Live soup: awareness ON, CLI `hapi link-pr` OK, MCP catalog missing `link_pr` (only `link_issue`). Loss predates current absorb (inherits; both merge parents have 0). Originating restore that rebuilt `link_issue` and omitted `link_pr`: `e08eb8b69`. Symbol still on `driver/github-pr-awareness` @ `8ff958321`.
 
-**Owner:** [tooling/meta bot](/sessions/cbd1073e-4fd3-4f4a-bff8-cf9ba97bca6d) — finish current absorb first, then thin tip re-union + `sentinel: link_pr` (fail-closed remat). Confirm MCP catalog with awareness ON. [#1163 session](/sessions/b30cf5c0-633b-420f-bc10-26229e07f598) not required for remat (upstream #1163 CONFLICTING is independent). Workaround: CLI `hapi link-pr`.
+**Owner:** [tooling/meta bot](/sessions/cbd1073e-4fd3-4f4a-bff8-cf9ba97bca6d) — finish current absorb first, then thin tip re-union + `sentinel: link_pr` (fail-closed remat). Confirm MCP catalog with awareness ON. [#1163 session](/sessions/b30cf5c0-633b-420f-bc10-26229e07f598) rematched tip `6f13c45fd` (was CONFLICTING); CI/bot settling → Lane A. Remat of MCP `link_pr` still Meta. Workaround: CLI `hapi link-pr`.
 
 ## #2002 lodged as tiann/hapi#2376 (2026-11-11)
 
