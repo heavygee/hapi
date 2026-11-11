@@ -114,3 +114,7 @@ Peer exit reflection: `docs/plans/retros/2026-11-11-session-row-residency-fade-e
 **Follow-up authorized:** live stacking-context defect from #2362 Minor → tracker [tiann/hapi#2373](https://github.com/tiann/hapi/issues/2373); fix branch `fix/session-row-fade-tooltip-stacking` (`0cd8475d3`). Peer to open upstream PR.
 
 Promotes applied: fork-stage non-draft guidance (`pr-review-loop.md` + `hapi-pr-create`); tip-check gap filed [heavygee/hapi#327](https://github.com/heavygee/hapi/issues/327).
+
+## MCP `link_pr` regression (2026-11-11)
+
+Live soup: awareness ON, CLI `hapi link-pr` OK, MCP catalog missing `link_pr` (only `link_issue`). Cause: 0.34.4 absorb + restore dropped registration that still exists on soup layer `driver/github-pr-awareness` @ `8ff958321`. Reported to [session external_refs + PR chip](/sessions/b30cf5c0-633b-420f-bc10-26229e07f598) (#1163, woken) and [tooling/meta bot](/sessions/cbd1073e-4fd3-4f4a-bff8-cf9ba97bca6d). Workaround until remat: peers run CLI `hapi link-pr`.
