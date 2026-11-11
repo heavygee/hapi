@@ -60,7 +60,7 @@ describe('Store V14→V15 migration: scratchlist attachments column', () => {
             store2 = new Store(dbPath)
             const cols2 = getColumns(store2, 'session_scratchlist')
             expect(cols2).toEqual(cols1)
-            expect(getUserVersion(store2)).toBe(35)
+            expect(getUserVersion(store2)).toBe(34)
         } finally {
             store2?.close()
             store1?.close()

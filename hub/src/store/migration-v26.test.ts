@@ -66,7 +66,7 @@ describe('schema migration v26 to v27', () => {
     })
 })
 
-    it('adds machine_reenroll_replays and advances user_version', () => {
+    it('adds machine_reenroll_replays and advances user_version to SCHEMA_VERSION', () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v26-'))
         tempDirs.push(dir)
         const dbPath = join(dir, 'hapi.db')
@@ -79,7 +79,7 @@ describe('schema migration v26 to v27', () => {
 
         const migrated = new Store(dbPath)
         const internalDb = (migrated as unknown as { db: Database }).db
-        expect((internalDb.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(32)
+        expect((internalDb.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(34)
         const table = internalDb.prepare(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'machine_reenroll_replays'"
         ).get() as { name: string } | undefined

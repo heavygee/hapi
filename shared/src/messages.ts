@@ -1,5 +1,6 @@
 import { fromMarkdown } from 'mdast-util-from-markdown'
-import { toString } from 'mdast-util-to-string'
+import { gfmFromMarkdown } from 'mdast-util-gfm'
+import { gfm } from 'micromark-extension-gfm'
 import { AGENT_MESSAGE_PAYLOAD_TYPE } from './modes'
 import { isObject } from './utils'
 
@@ -112,6 +113,33 @@ export function getLiveReasoningStreamId(value: unknown): string | null {
     return readReasoningStreamId(value, true)
 }
 
+/**
+ * The callId of a supersedable tool-call row, or `null` when the value is not
+ * one.
+ *
+ * ACP agents re-emit the same tool call under a stable callId on every state
+ * tick, and the timeline folds all of those rows into a single card. The hub
+ * and the web therefore keep only the latest row per callId, and both need to
+ * recognise the rows that may be superseded. Only `tool-call` payloads match:
+ * the `tool-call-result` that shares the callId is a distinct row that carries
+ * completion, so it is never dropped. Anything unrecognised reads as `null`,
+ * which means "keep it".
+ */
+export function getToolCallId(value: unknown): string | null {
+    const record = unwrapRoleWrappedRecordEnvelope(value)
+    if (record?.role !== 'agent') return null
+
+    const content = record.content
+    if (!isObject(content) || content.type !== AGENT_MESSAGE_PAYLOAD_TYPE) return null
+
+    const data = isObject(content.data) ? content.data : null
+    if (!data || data.type !== 'tool-call') return null
+
+    const callId = data.callId
+    if (typeof callId !== 'string' || callId.trim().length === 0) return null
+    return callId
+}
+
 export function isRedundantGoalStatusEventContent(value: unknown): boolean {
     const record = unwrapRoleWrappedRecordEnvelope(value)
     if (record?.role !== 'agent') return false
@@ -168,6 +196,12 @@ export function extractAssistantPlainText(content: unknown): string | null {
         if (typeof data.message === 'string' && data.message.trim().length > 0) {
             return data.message
         }
+        // Claude also sends assistant prose as a plain string `message.content`
+        // (the renderer handles this shape in normalizeAgent). Without this the
+        // reply is visible but absent from both backfill and live indexing.
+        if (typeof message?.content === 'string') {
+            return message.content.trim().length > 0 ? message.content : null
+        }
         const blocks = Array.isArray(message?.content) ? message.content : null
         if (!blocks) return null
         const textParts: string[] = []
@@ -184,36 +218,6 @@ export function extractAssistantPlainText(content: unknown): string | null {
     return null
 }
 
-/** Output a reader can consume. Bookkeeping, reasoning and tool traffic do not
- * create unread activity. Run at durable ingest, never on heartbeat/metadata. */
-export function hasUnreadMessageContent(value: unknown): boolean {
-    const record = unwrapRoleWrappedRecordEnvelope(value)
-    if (record?.role !== 'agent' || !isObject(record.content)) return false
-    const content = record.content
-    if (isRedundantGoalStatusEventContent(value)) return false
-    const data = isObject(content.data) ? content.data : null
-    if (!data) return false
-    if (content.type === 'output' && (data.isMeta || data.isCompactSummary
-        || !isClaudeChatVisibleMessage({ type: data.type, subtype: data.subtype }))) return false
-    if (extractAssistantPlainText(content)?.trim()) return true
-    if (content.type === 'output') {
-        if (data.type === 'assistant' && typeof data.error === 'string' && data.error.trim()) return true
-        if (data.type === 'assistant' && isObject(data.message) && typeof data.message.content === 'string') {
-            return data.message.content.trim().length > 0
-        }
-        if (data.type === 'result') return data.is_error === true || (typeof data.result === 'string' && data.result.trim().length > 0)
-        return data.type === 'system' && data.subtype === 'api_error'
-    }
-    if (content.type === AGENT_MESSAGE_PAYLOAD_TYPE) {
-        if (data.type === 'error') return typeof data.message === 'string' && data.message.trim().length > 0
-        if (data.type === 'generated-image') {
-            const id = data.imageId ?? data.image_id
-            return typeof id === 'string' && id.trim().length > 0
-        }
-    }
-    return false
-}
-export const NOTIFY_SUMMARY_TOKEN = 'AGENT_NOTIFY_SUMMARY'
 // AGY sometimes echoes an async task's raw result into its own PLANNER_RESPONSE
 // prose. The web renderer strips this block and renders the corresponding task
 // result separately, so keep it out of the searchable assistant text as well.
@@ -232,19 +236,175 @@ function normalizeSearchablePlainText(value: string): string | null {
     return text.length > 0 ? text : null
 }
 
-function normalizeSearchableMarkdownText(value: string): string | null {
-    try {
-        return normalizeSearchablePlainText(toString(fromMarkdown(value)))
-    } catch {
-        // Keep indexing malformed/incomplete streamed Markdown rather than
-        // dropping otherwise visible assistant text.
-        return normalizeSearchablePlainText(value)
-    }
+type BoundedText = {
+    text: string
+    truncated: boolean
 }
 
-export function extractUserPlainText(content: unknown): string | null {
+type BoundedTextChunks = {
+    chunks: string[]
+    truncated: boolean
+}
+
+function sliceJoinedText(
+    parts: readonly string[],
+    separator: string,
+    start: number,
+    length: number
+): string {
+    if (length <= 0) return ''
+
+    const end = start + length
+    const chunks: string[] = []
+    let offset = 0
+    for (let index = 0; index < parts.length; index++) {
+        const part = parts[index]!
+        const partStart = offset
+        const partEnd = partStart + part.length
+        if (partEnd > start && partStart < end) {
+            chunks.push(part.slice(
+                Math.max(0, start - partStart),
+                Math.min(part.length, end - partStart)
+            ))
+        }
+        offset = partEnd
+
+        if (index === parts.length - 1) break
+        const separatorStart = offset
+        const separatorEnd = separatorStart + separator.length
+        if (separatorEnd > start && separatorStart < end) {
+            chunks.push(separator.slice(
+                Math.max(0, start - separatorStart),
+                Math.min(separator.length, end - separatorStart)
+            ))
+        }
+        offset = separatorEnd
+        if (offset >= end) break
+    }
+    return chunks.join('')
+}
+
+/**
+ * Join only the bounded head and tail of a multi-part message. In particular,
+ * do not materialize a potentially unbounded structured prompt before the
+ * Markdown parser's source limit is applied.
+ */
+function collectJoinedHeadTail(
+    parts: readonly string[],
+    separator: string,
+    maxSourceCharacters: number
+): BoundedTextChunks {
+    if (parts.length === 0) return { chunks: [], truncated: false }
+    if (!Number.isFinite(maxSourceCharacters)) {
+        return { chunks: [parts.join(separator)], truncated: false }
+    }
+
+    const maxCharacters = Math.max(0, Math.floor(maxSourceCharacters))
+    if (maxCharacters === 0) return { chunks: [], truncated: parts.length > 0 }
+
+    let totalCharacters = 0
+    for (let index = 0; index < parts.length; index++) {
+        totalCharacters += parts[index]!.length
+        if (index > 0) totalCharacters += separator.length
+    }
+    if (totalCharacters <= maxCharacters) {
+        return { chunks: [parts.join(separator)], truncated: false }
+    }
+
+    if (maxCharacters <= separator.length) {
+        return {
+            chunks: [sliceJoinedText(parts, separator, 0, maxCharacters)],
+            truncated: true
+        }
+    }
+
+    const contentCharacters = maxCharacters - separator.length
+    const headCharacters = Math.ceil(contentCharacters / 2)
+    const tailCharacters = contentCharacters - headCharacters
+    const chunks = [sliceJoinedText(parts, separator, 0, headCharacters)]
+    if (tailCharacters > 0) {
+        chunks.push(sliceJoinedText(parts, separator, totalCharacters - tailCharacters, tailCharacters))
+    }
+    return { chunks, truncated: true }
+}
+
+function normalizeSearchableMarkdownChunks(chunks: readonly string[]): string | null {
+    const markdownBlockTypes = new Set([
+        'blockquote',
+        'code',
+        'heading',
+        'html',
+        'list',
+        'listItem',
+        'paragraph',
+        'root',
+        'table',
+        'tableCell',
+        'tableRow'
+    ])
+    const renderMarkdownNode = (node: {
+        type?: string
+        value?: string
+        children?: readonly unknown[]
+    }): string => {
+        if (node.type === 'break') return ' '
+        // The chat renderer drops raw HTML, so indexing node.value here would
+        // make an HTML comment searchable and surface it in snippets with no
+        // rendered text to highlight.
+        if (node.type === 'html') return ''
+        if (typeof node.value === 'string') return node.value
+
+        let rendered = ''
+        let previousType: string | undefined
+        for (const child of node.children ?? []) {
+            if (!isObject(child)) continue
+            const childText = renderMarkdownNode(child)
+            if (!childText) continue
+            if (
+                rendered
+                && (markdownBlockTypes.has(child.type as string) || markdownBlockTypes.has(previousType ?? ''))
+            ) {
+                rendered += ' '
+            }
+            rendered += childText
+            previousType = child.type as string | undefined
+        }
+        return rendered
+    }
+
+    const rendered = chunks.map((chunk) => {
+        try {
+            // The chat renders with remark-gfm, so parse the same dialect:
+            // without it `~~old~~` keeps its tildes and a search for the
+            // displayed phrase cannot match, and table pipes stay in the index.
+            return renderMarkdownNode(fromMarkdown(chunk, {
+                extensions: [gfm({ singleTilde: false })],
+                mdastExtensions: [gfmFromMarkdown()]
+            }))
+        } catch {
+            // Keep indexing malformed/incomplete streamed Markdown rather than
+            // dropping otherwise visible assistant text.
+            return chunk
+        }
+    }).join(' ')
+    return normalizeSearchablePlainText(rendered)
+}
+
+function normalizeSearchableMarkdownTextWithMetadata(
+    value: string,
+    maxSourceCharacters = Number.POSITIVE_INFINITY
+): BoundedText | null {
+    const bounded = collectJoinedHeadTail([value], ' ', maxSourceCharacters)
+    const text = normalizeSearchableMarkdownChunks(bounded.chunks)
+    return text ? { text, truncated: bounded.truncated } : null
+}
+
+function extractUserPlainTextWithMetadata(
+    content: unknown,
+    maxSourceCharacters = Number.POSITIVE_INFINITY
+): BoundedText | null {
     if (typeof content === 'string') {
-        return normalizeSearchablePlainText(content)
+        return normalizeSearchableMarkdownTextWithMetadata(content, maxSourceCharacters)
     }
 
     const blocks = Array.isArray(content) ? content : [content]
@@ -257,21 +417,128 @@ export function extractUserPlainText(content: unknown): string | null {
         })
         .filter((text): text is string => text !== null)
 
-    return normalizeSearchablePlainText(textParts.join(' '))
+    const bounded = collectJoinedHeadTail(textParts, ' ', maxSourceCharacters)
+    const text = normalizeSearchableMarkdownChunks(bounded.chunks)
+    return text ? { text, truncated: bounded.truncated } : null
 }
 
-function extractClaudeUserPlainText(content: unknown): string | null {
+export function extractUserPlainText(content: unknown, maxSourceCharacters = Number.POSITIVE_INFINITY): string | null {
+    return extractUserPlainTextWithMetadata(content, maxSourceCharacters)?.text ?? null
+}
+
+function extractClaudeUserPlainText(content: unknown, maxSourceCharacters = Number.POSITIVE_INFINITY): BoundedText | null {
     if (!isObject(content) || content.type !== 'output') return null
     const data = isObject(content.data) ? content.data : null
     if (!data || data.type !== 'user' || Boolean(data.isSidechain)) return null
 
     const message = isObject(data.message) ? data.message : null
     const blocks = Array.isArray(message?.content) ? message.content : null
-    if (!blocks || blocks.length === 0 || !blocks.every((block) => (
-        isObject(block) && block.type === 'text' && typeof block.text === 'string'
-    ))) return null
+    if (!blocks || blocks.length === 0) return null
 
-    return extractUserPlainText(blocks)
+    return extractUserPlainTextWithMetadata(blocks, maxSourceCharacters)
+}
+
+export type SearchableMessageContext = {
+    injectedTurnUuids?: ReadonlySet<string>
+    maxSourceCharacters?: number
+}
+
+/** Return the Claude UUID that identifies a system-injected user turn. */
+export function extractInjectedTurnUuid(value: unknown): string | null {
+    const record = unwrapRoleWrappedRecordEnvelope(value)
+    if (!record || record.role !== 'agent' || !isObject(record.content) || record.content.type !== 'output') {
+        return null
+    }
+    const data = isObject(record.content.data) ? record.content.data : null
+    if (!data || data.type !== 'user') return null
+    const message = isObject(data.message) ? data.message : null
+    const messageContent = message?.content
+    const isSystemInjected = Boolean(data.isSidechain) || typeof messageContent === 'string'
+    if (!isSystemInjected || typeof data.uuid !== 'string' || data.uuid.length === 0) return null
+    return data.uuid
+}
+
+export function extractAssistantParentUuid(content: unknown): string | null {
+    if (!isObject(content) || content.type !== 'output') return null
+    const data = isObject(content.data) ? content.data : null
+    return data?.type === 'assistant' && typeof data.parentUuid === 'string' && data.parentUuid.length > 0
+        ? data.parentUuid
+        : null
+}
+
+function isNoResponseRequestedText(text: string): boolean {
+    const trimmed = text.trim()
+    return trimmed === 'No response requested.' || trimmed === 'No response requested'
+}
+
+function extractSearchableAssistantPlainText(
+    content: unknown,
+    context?: SearchableMessageContext
+): BoundedText | null {
+    if (!isObject(content) || content.type !== 'output') {
+        const text = extractAssistantPlainText(content)
+        return text === null ? null : { text, truncated: false }
+    }
+
+    const data = isObject(content.data) ? content.data : null
+    if (!data || data.type !== 'assistant') {
+        const text = extractAssistantPlainText(content)
+        return text === null ? null : { text, truncated: false }
+    }
+
+    const message = isObject(data.message) ? data.message : null
+    const blocks = Array.isArray(message?.content) ? message.content : null
+    // String `message.content` runs through the same sentinel filtering and
+    // bounding as block text; the plain-text fallback below is unbounded.
+    const stringContent = !blocks && typeof message?.content === 'string'
+        ? message.content
+        : null
+    if (!blocks && stringContent === null) {
+        const text = extractAssistantPlainText(content)
+        return text === null ? null : { text, truncated: false }
+    }
+
+    const taskToolCall = blocks?.find((block) => {
+        if (!isObject(block) || block.type !== 'tool_use') return false
+        const name = typeof block.name === 'string' ? block.name : ''
+        return name === 'Task'
+            || name === 'Agent'
+            || name.startsWith('Task:')
+            || name.startsWith('Agent:')
+    })
+    const taskToolInput = isObject(taskToolCall) && isObject(taskToolCall.input)
+        ? taskToolCall.input
+        : null
+    const hiddenTaskPrompt = typeof taskToolInput?.prompt === 'string'
+        ? taskToolInput.prompt.trim()
+        : null
+    const textParts = blocks
+        ? blocks.flatMap((block) => {
+            if (!isObject(block) || block.type !== 'text' || typeof block.text !== 'string') return []
+            return hiddenTaskPrompt && block.text.trim() === hiddenTaskPrompt ? [] : [block.text]
+        })
+        : stringContent !== null && stringContent.trim().length > 0
+            ? [stringContent]
+            : []
+    if (textParts.length === 1) {
+        const parentUuid = extractAssistantParentUuid(content)
+        if (
+            parentUuid
+            && context?.injectedTurnUuids?.has(parentUuid)
+            && isNoResponseRequestedText(textParts[0]!)
+        ) {
+            return null
+        }
+    }
+    if (textParts.length === 0) return null
+    const bounded = collectJoinedHeadTail(
+        textParts,
+        '\n',
+        context?.maxSourceCharacters ?? Number.POSITIVE_INFINITY
+    )
+    return bounded.chunks.length > 0
+        ? { text: bounded.chunks.join('\n'), truncated: bounded.truncated }
+        : null
 }
 
 export type SearchableMessage = {
@@ -279,6 +546,8 @@ export type SearchableMessage = {
     text: string
     /** Stable renderer identity used to coalesce streamed assistant snapshots. */
     renderKey?: string
+    /** True when the source text exceeded the indexing budget and was bounded. */
+    truncated?: boolean
 }
 
 function getMessageRenderKey(content: unknown): string | undefined {
@@ -328,19 +597,34 @@ function isHiddenAssistantOutput(content: unknown): boolean {
 }
 
 /** Extract only user-visible user/assistant prose from a stored role envelope. */
-export function extractSearchableMessageText(value: unknown): SearchableMessage | null {
+export function extractSearchableMessageText(
+    value: unknown,
+    context?: SearchableMessageContext
+): SearchableMessage | null {
     const record = unwrapRoleWrappedRecordEnvelope(value)
     if (!record) return null
 
     if (record.role === 'user') {
-        const text = extractUserPlainText(record.content)
-        return text ? { role: 'user', text } : null
+        const extracted = extractUserPlainTextWithMetadata(record.content, context?.maxSourceCharacters)
+        return extracted
+            ? {
+                role: 'user',
+                text: extracted.text,
+                ...(extracted.truncated ? { truncated: true } : {})
+            }
+            : null
     }
 
     if (record.role === 'agent' || record.role === 'assistant') {
         if (isHiddenAssistantOutput(record.content)) return null
-        const claudeUserText = extractClaudeUserPlainText(record.content)
-        if (claudeUserText) return { role: 'user', text: claudeUserText }
+        const claudeUserText = extractClaudeUserPlainText(record.content, context?.maxSourceCharacters)
+        if (claudeUserText) {
+            return {
+                role: 'user',
+                text: claudeUserText.text,
+                ...(claudeUserText.truncated ? { truncated: true } : {})
+            }
+        }
         const renderKey = getMessageRenderKey(record.content)
         const isAgyPlannerMessage = isObject(record.content)
             && record.content.type === 'output'
@@ -353,17 +637,66 @@ export function extractSearchableMessageText(value: unknown): SearchableMessage 
                 && typeof record.content.text === 'string'
                 ? record.content.text
                 : null
+        const extracted = isAgyPlannerMessage
+            ? (() => {
+                const text = directText ?? extractAssistantPlainText(record.content)
+                return text === null ? null : { text, truncated: false }
+            })()
+            : directText !== null
+                ? { text: directText, truncated: false }
+                : extractSearchableAssistantPlainText(record.content, context)
+        if (!extracted) return null
+
         const rawText = stripNotifySummaryFooter(
             isAgyPlannerMessage
-                ? stripAgyEchoedTaskResult(directText ?? extractAssistantPlainText(record.content) ?? '')
-                : (directText ?? extractAssistantPlainText(record.content) ?? '')
+                ? stripAgyEchoedTaskResult(extracted.text)
+                : extracted.text
         )
-        const text = normalizeSearchableMarkdownText(rawText)
-        if (!text || (isAgyPlannerMessage && getAgyTaskLogId(normalizeSearchablePlainText(rawText) ?? ''))) return null
-        return { role: 'assistant', text, ...(renderKey ? { renderKey } : {}) }
+        const normalized = normalizeSearchableMarkdownTextWithMetadata(
+            rawText,
+            context?.maxSourceCharacters
+        )
+        if (!normalized || (isAgyPlannerMessage && getAgyTaskLogId(normalizeSearchablePlainText(rawText) ?? ''))) return null
+        const truncated = extracted.truncated || normalized.truncated
+        return {
+            role: 'assistant',
+            text: normalized.text,
+            ...(renderKey ? { renderKey } : {}),
+            ...(truncated ? { truncated: true } : {})
+        }
     }
 
     return null
+}
+
+/** Output a reader can consume. Bookkeeping, reasoning and tool traffic do not
+ * create unread activity. Run at durable ingest, never on heartbeat/metadata. */
+export function hasUnreadMessageContent(value: unknown): boolean {
+    const record = unwrapRoleWrappedRecordEnvelope(value)
+    if (record?.role !== 'agent' || !isObject(record.content)) return false
+    const content = record.content
+    if (isRedundantGoalStatusEventContent(value)) return false
+    const data = isObject(content.data) ? content.data : null
+    if (!data) return false
+    if (content.type === 'output' && (data.isMeta || data.isCompactSummary
+        || !isClaudeChatVisibleMessage({ type: data.type, subtype: data.subtype }))) return false
+    if (extractAssistantPlainText(content)?.trim()) return true
+    if (content.type === 'output') {
+        if (data.type === 'assistant' && typeof data.error === 'string' && data.error.trim()) return true
+        if (data.type === 'assistant' && isObject(data.message) && typeof data.message.content === 'string') {
+            return data.message.content.trim().length > 0
+        }
+        if (data.type === 'result') return data.is_error === true || (typeof data.result === 'string' && data.result.trim().length > 0)
+        return data.type === 'system' && data.subtype === 'api_error'
+    }
+    if (content.type === AGENT_MESSAGE_PAYLOAD_TYPE) {
+        if (data.type === 'error') return typeof data.message === 'string' && data.message.trim().length > 0
+        if (data.type === 'generated-image') {
+            const id = data.imageId ?? data.image_id
+            return typeof id === 'string' && id.trim().length > 0
+        }
+    }
+    return false
 }
 
 function hasConversationBlock(value: unknown): boolean {
@@ -413,8 +746,14 @@ export function hasConversationMessageContent(value: unknown): boolean {
     return false
 }
 
-
-const NOTIFY_SUMMARY_PREFIX = 'AGENT_NOTIFY_SUMMARY '
+// FORK: the matcher below is the fork's, not upstream's. Upstream matches
+// the footer with a plain indexOf on a literal prefix; the fork normalises
+// repeated-character corruption first (collapseRepeats), because Cursor drops
+// one of a doubled letter in roughly 1 of 7 turns across 354k stored messages,
+// mangling AGENT_NOTIFY_SUMMARY -> AGENT_NOTIFY_SUMARY. Dropping it silently
+// reintroduces heavygee/hapi#322. The public API matches upstream exactly;
+// only the matcher internals differ, and they are exported for overseerEvents.
+export const NOTIFY_SUMMARY_TOKEN = 'AGENT_NOTIFY_SUMMARY'
 
 export type NotifySummary = {
     version?: number

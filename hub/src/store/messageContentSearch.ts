@@ -1,9 +1,12 @@
 import type { Database } from 'bun:sqlite'
 
 import {
+    extractAssistantParentUuid,
+    extractInjectedTurnUuid,
     extractMessageRenderKey,
     extractSearchableMessageText,
-    isLiveStreamSnapshot
+    isLiveStreamSnapshot,
+    unwrapRoleWrappedRecordEnvelope
 } from '@hapi/protocol/messages'
 import { decodeMessageContent } from './contentCodec'
 
@@ -14,6 +17,7 @@ export const MAX_CONTENT_SEARCH_SESSION_SCOPE_BYTES = 256 * 1024
 const MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE = 'message_content_search_lookup'
 const MESSAGE_CONTENT_SEARCH_SHORT_TABLE = 'message_content_search_short'
 const initializedDatabases = new WeakSet<object>()
+const injectedTurnUuidCaches = new WeakMap<object, Map<string, Set<string>>>()
 
 export type MessageContentSearchMatch = {
     sessionId: string
@@ -22,11 +26,13 @@ export type MessageContentSearchMatch = {
     seq: number
     createdAt: number
     snippet: string
+    truncated: boolean
 }
 
 export type SessionMessageContentSearchResult = {
     matches: MessageContentSearchMatch[]
     total: number
+    hasPotentiallyIncompleteResults: boolean
 }
 
 type IndexableMessage = {
@@ -51,7 +57,9 @@ type DbMessageRow = {
 const SEARCH_REBUILD_BATCH_SIZE = 500
 const SEARCH_LOOKUP_BACKFILL_BATCH_SIZE = 500
 const MIN_INDEXED_QUERY_LENGTH = 2
-export const MAX_INDEXED_MESSAGE_CHARACTERS = 16_384
+export const MAX_INDEXED_MESSAGE_CHARACTERS = 32_768
+export const MAX_SHORT_SEARCH_TEXT_CHARACTERS = 2_048
+export const MAX_SHORT_SEARCH_GRAMS_PER_MESSAGE = MAX_SHORT_SEARCH_TEXT_CHARACTERS - 1
 const INDEXED_TEXT_SEPARATOR = ' '
 const INDEXED_TEXT_HEAD_CHARACTERS = Math.floor(
     (MAX_INDEXED_MESSAGE_CHARACTERS - INDEXED_TEXT_SEPARATOR.length) / 2
@@ -69,10 +77,121 @@ type DbSearchRow = {
     created_at: number | string
     snippet?: string | null
     searchable_text?: string
+    is_truncated?: number | string | boolean
+    short_index_truncated?: number | string | boolean
 }
 
 type DbSearchLookupRow = {
     search_rowid: number
+}
+
+const NO_RESPONSE_REQUESTED_TEXTS = new Set(['No response requested.', 'No response requested'])
+
+function getInjectedTurnUuidCache(db: Database): Map<string, Set<string>> {
+    let cache = injectedTurnUuidCaches.get(db)
+    if (!cache) {
+        cache = new Map()
+        injectedTurnUuidCaches.set(db, cache)
+    }
+    return cache
+}
+
+function scanInjectedTurnUuidsForSessions(
+    db: Database,
+    sessionIds?: readonly string[]
+): Map<string, Set<string>> {
+    const bySession = new Map<string, Set<string>>()
+    if (sessionIds?.length === 0) return bySession
+
+    const scope = sessionIds === undefined
+        ? ''
+        : `AND session_id IN (${sessionIds.map(() => '?').join(', ')})`
+    const select = db.prepare(`
+        SELECT rowid AS row_id, session_id, content
+        FROM messages
+        WHERE rowid > ? ${scope}
+        ORDER BY rowid ASC
+        LIMIT ?
+    `)
+    let afterRowId = 0
+    while (true) {
+        const rows = (sessionIds === undefined
+            ? select.all(afterRowId, SEARCH_REBUILD_BATCH_SIZE)
+            : select.all(afterRowId, ...sessionIds, SEARCH_REBUILD_BATCH_SIZE)) as Array<{
+                row_id: number
+                session_id: string
+                content: string | Uint8Array
+            }>
+        if (rows.length === 0) break
+        for (const row of rows) {
+            const uuid = extractInjectedTurnUuid(decodeMessageContent(row.content))
+            if (!uuid) continue
+            const sessionUuids = bySession.get(row.session_id) ?? new Set<string>()
+            sessionUuids.add(uuid)
+            bySession.set(row.session_id, sessionUuids)
+        }
+        afterRowId = rows[rows.length - 1]!.row_id
+    }
+    return bySession
+}
+
+function getInjectedTurnUuidsForSessions(db: Database, sessionIds?: readonly string[]): ReadonlySet<string> {
+    const scanned = scanInjectedTurnUuidsForSessions(db, sessionIds)
+    const cache = getInjectedTurnUuidCache(db)
+    if (sessionIds === undefined) {
+        cache.clear()
+        for (const [sessionId, uuids] of scanned) cache.set(sessionId, uuids)
+    } else {
+        for (const sessionId of sessionIds) {
+            cache.set(sessionId, scanned.get(sessionId) ?? new Set<string>())
+        }
+    }
+
+    const injectedTurnUuids = new Set<string>()
+    if (sessionIds === undefined) {
+        for (const uuids of scanned.values()) {
+            for (const uuid of uuids) injectedTurnUuids.add(uuid)
+        }
+    } else {
+        for (const sessionId of sessionIds) {
+            for (const uuid of scanned.get(sessionId) ?? []) injectedTurnUuids.add(uuid)
+        }
+    }
+    return injectedTurnUuids
+}
+
+function getCachedInjectedTurnUuids(db: Database, sessionId: string): ReadonlySet<string> {
+    const cache = getInjectedTurnUuidCache(db)
+    const cached = cache.get(sessionId)
+    if (cached) return cached
+
+    const scanned = scanInjectedTurnUuidsForSessions(db, [sessionId])
+    const uuids = scanned.get(sessionId) ?? new Set<string>()
+    cache.set(sessionId, uuids)
+    return uuids
+}
+
+function rememberInjectedTurnUuid(db: Database, sessionId: string, content: unknown): void {
+    const uuid = extractInjectedTurnUuid(content)
+    if (!uuid) return
+    getInjectedTurnUuidCache(db).get(sessionId)?.add(uuid)
+}
+
+function invalidateInjectedTurnUuidCache(db: Database, sessionIds?: readonly string[]): void {
+    const cache = injectedTurnUuidCaches.get(db)
+    if (!cache) return
+    if (sessionIds === undefined) {
+        cache.clear()
+        return
+    }
+    for (const sessionId of sessionIds) cache.delete(sessionId)
+}
+
+export function invalidateMessageContentSearchInjectedTurnCache(
+    db: Database,
+    sessionIds: readonly string[]
+): void {
+    invalidateInjectedTurnUuidCache(db, sessionIds)
 }
 
 export function serializeContentSearchSessionIds(sessionIds: readonly string[]): string | null {
@@ -80,6 +199,44 @@ export function serializeContentSearchSessionIds(sessionIds: readonly string[]):
     return new TextEncoder().encode(serialized).byteLength <= MAX_CONTENT_SEARCH_SESSION_SCOPE_BYTES
         ? serialized
         : null
+}
+
+export function hasPotentiallyIncompleteMessageContent(
+    db: Database,
+    namespace: string,
+    query: string,
+    sessionIds?: readonly string[]
+): boolean {
+    ensureMessageContentSearchTable(db)
+    const normalizedQuery = normalizeSearchQuery(query)
+    const queryLength = [...normalizedQuery].length
+    if (queryLength < MIN_INDEXED_QUERY_LENGTH) return false
+    const scopedSessionIds = sessionIds === undefined
+        ? undefined
+        : [...new Set(sessionIds.map((sessionId) => sessionId.trim()).filter(Boolean))]
+    if (scopedSessionIds?.length === 0) return false
+    const serializedSessionIds = scopedSessionIds === undefined
+        ? undefined
+        : serializeContentSearchSessionIds(scopedSessionIds)
+    if (serializedSessionIds === null) return false
+    const sessionScope = scopedSessionIds === undefined
+        ? ''
+        : ' AND f.session_id IN (SELECT value FROM json_each(?))'
+    const sessionScopeParams: string[] = serializedSessionIds === undefined ? [] : [serializedSessionIds]
+    const row = db.prepare(`
+        SELECT 1 AS found
+        FROM ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE} AS lookup
+        INNER JOIN ${MESSAGE_CONTENT_SEARCH_TABLE} AS f
+            ON f.rowid = lookup.search_rowid
+        INNER JOIN sessions AS s
+            ON s.id = f.session_id AND s.namespace = ?
+        WHERE (
+            lookup.is_truncated = 1
+            OR (? = 2 AND lookup.short_index_truncated = 1)
+        )${sessionScope}
+        LIMIT 1
+    `).get(namespace, queryLength, ...sessionScopeParams) as { found?: number } | undefined
+    return row?.found === 1
 }
 
 export function backfillMessageContentSearchLookup(db: Database): void {
@@ -112,26 +269,33 @@ export function backfillMessageContentSearchLookup(db: Database): void {
     }
 }
 
-function getShortSearchGrams(text: string): string[] {
+function getShortSearchGrams(text: string): { grams: string[]; truncated: boolean } {
     const characters = Array.from(text.toLocaleLowerCase())
     const grams = new Set<string>()
+    let truncated = false
 
     for (let index = 0; index + 1 < characters.length; index += 1) {
+        if (grams.size >= MAX_SHORT_SEARCH_GRAMS_PER_MESSAGE) {
+            truncated = true
+            break
+        }
         grams.add(`${characters[index]!}${characters[index + 1]!}`)
     }
 
-    return [...grams]
+    return { grams: [...grams], truncated }
 }
 
-function boundSearchableText(text: string): string {
-    if (text.length <= MAX_INDEXED_MESSAGE_CHARACTERS) return text
+function boundSearchableText(text: string, maxCharacters = MAX_INDEXED_MESSAGE_CHARACTERS): string {
+    if (text.length <= maxCharacters) return text
 
     // Slice before converting to code points so a very large message cannot
     // allocate an Array for its entire contents just to index its head and
     // tail. The cap is intentionally expressed in UTF-16 code units to keep
     // this work bounded even for messages containing only astral characters.
-    let head = text.slice(0, INDEXED_TEXT_HEAD_CHARACTERS)
-    let tail = text.slice(text.length - INDEXED_TEXT_TAIL_CHARACTERS)
+    const headCharacters = Math.floor((maxCharacters - INDEXED_TEXT_SEPARATOR.length) / 2)
+    const tailCharacters = maxCharacters - INDEXED_TEXT_SEPARATOR.length - headCharacters
+    let head = text.slice(0, headCharacters)
+    let tail = text.slice(text.length - tailCharacters)
     const headLastCodeUnit = head.charCodeAt(head.length - 1)
     if (headLastCodeUnit >= 0xd800 && headLastCodeUnit <= 0xdbff) {
         head = head.slice(0, -1)
@@ -143,12 +307,29 @@ function boundSearchableText(text: string): string {
     return `${head}${INDEXED_TEXT_SEPARATOR}${tail}`
 }
 
+function boundSearchableTextWithMetadata(
+    text: string,
+    maxCharacters = MAX_INDEXED_MESSAGE_CHARACTERS
+): { text: string; truncated: boolean } {
+    const bounded = boundSearchableText(text, maxCharacters)
+    return { text: bounded, truncated: bounded !== text }
+}
+
+function getShortSearchIndexData(text: string): { grams: string[]; truncated: boolean } {
+    const bounded = boundSearchableTextWithMetadata(text, MAX_SHORT_SEARCH_TEXT_CHARACTERS)
+    const grams = getShortSearchGrams(bounded.text)
+    return {
+        grams: grams.grams,
+        truncated: bounded.truncated || grams.truncated
+    }
+}
+
 export function backfillMessageContentSearchShortIndex(db: Database): void {
     db.transaction(() => {
         ensureMessageContentSearchTable(db)
         // A failed pre-v28 startup may have left a partially populated short
-        // index behind. Remove obsolete unigram rows while preserving any
-        // completed bigrams so a retry can resume without a full reset.
+        // index behind. Remove obsolete unigram rows, then rebuild each row's
+        // grams so a retry cannot retain entries outside the current cap.
         db.exec(`DELETE FROM ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} WHERE length(gram) < 2`)
         const select = db.prepare(`
             SELECT rowid AS search_rowid,
@@ -162,14 +343,23 @@ export function backfillMessageContentSearchShortIndex(db: Database): void {
             ORDER BY rowid ASC
             LIMIT ?
         `)
-        const insert = db.prepare(`
+        const insertShortGrams = db.prepare(`
             INSERT OR IGNORE INTO ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} (gram, search_rowid)
-            VALUES (?, ?)
+            SELECT value, ? FROM json_each(?)
+        `)
+        const clearRow = db.prepare(`
+            DELETE FROM ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE}
+            WHERE search_rowid = ?
         `)
         const updateSearchableText = db.prepare(`
             UPDATE ${MESSAGE_CONTENT_SEARCH_TABLE}
             SET searchable_text = ?
             WHERE rowid = ?
+        `)
+        const updateShortIndexMetadata = db.prepare(`
+            UPDATE ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE}
+            SET short_index_truncated = ?
+            WHERE search_rowid = ?
         `)
 
         let afterRowId = 0
@@ -189,14 +379,18 @@ export function backfillMessageContentSearchShortIndex(db: Database): void {
             if (rows.length === 0) break
 
             for (const row of rows) {
+                clearRow.run(row.search_rowid)
                 const searchableText = boundSearchableText(row.searchable_text)
                 if (row.searchable_text_length > MAX_INDEXED_MESSAGE_CHARACTERS
                     || searchableText !== row.searchable_text) {
                     updateSearchableText.run(searchableText, row.search_rowid)
                 }
-                for (const gram of getShortSearchGrams(searchableText)) {
-                    insert.run(gram, row.search_rowid)
-                }
+                const shortIndex = getShortSearchIndexData(searchableText)
+                updateShortIndexMetadata.run(shortIndex.truncated ? 1 : 0, row.search_rowid)
+                insertShortGrams.run(
+                    row.search_rowid,
+                    JSON.stringify(shortIndex.grams)
+                )
             }
             afterRowId = rows[rows.length - 1]!.search_rowid
         }
@@ -221,7 +415,9 @@ export function createMessageContentSearchTable(db: Database): void {
         CREATE TABLE IF NOT EXISTS ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE} (
             search_rowid INTEGER PRIMARY KEY AUTOINCREMENT,
             message_id TEXT NOT NULL UNIQUE,
-            target_message_id TEXT NOT NULL
+            target_message_id TEXT NOT NULL,
+            is_truncated INTEGER NOT NULL DEFAULT 0,
+            short_index_truncated INTEGER NOT NULL DEFAULT 0
         )
     `)
     db.exec(`
@@ -241,6 +437,12 @@ export function createMessageContentSearchTable(db: Database): void {
         // Keep schema v28 compatible by upgrading the derived table in place.
         db.exec(`ALTER TABLE ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE} ADD COLUMN target_message_id TEXT`)
     }
+    if (!lookupColumns.some((column) => column.name === 'is_truncated')) {
+        db.exec(`ALTER TABLE ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE} ADD COLUMN is_truncated INTEGER NOT NULL DEFAULT 0`)
+    }
+    if (!lookupColumns.some((column) => column.name === 'short_index_truncated')) {
+        db.exec(`ALTER TABLE ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE} ADD COLUMN short_index_truncated INTEGER NOT NULL DEFAULT 0`)
+    }
     db.exec(`
         UPDATE ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE}
         SET target_message_id = message_id
@@ -249,6 +451,16 @@ export function createMessageContentSearchTable(db: Database): void {
     db.exec(`
         CREATE INDEX IF NOT EXISTS idx_message_content_search_lookup_target
         ON ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE} (target_message_id)
+    `)
+    db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_message_content_search_lookup_truncated
+        ON ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE} (is_truncated, search_rowid)
+        WHERE is_truncated = 1
+    `)
+    db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_message_content_search_lookup_short_truncated
+        ON ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE} (short_index_truncated, search_rowid)
+        WHERE short_index_truncated = 1
     `)
     // FTS5 UNINDEXED columns are intentionally not searchable, but SQLite
     // still has to scan the virtual table when deleting by one of them. Keep
@@ -301,40 +513,48 @@ function insertMessageContentSearchIndex(
         role: 'user' | 'assistant'
         seq: number
         createdAt: number
+        truncated?: boolean
     }
 ): void {
+    const bounded = boundSearchableTextWithMetadata(message.text)
+    const shortIndex = getShortSearchIndexData(bounded.text)
     db.prepare(`
-        INSERT INTO ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE} (message_id, target_message_id)
-        VALUES (?, ?)
-    `).run(message.id, message.targetMessageId)
+        INSERT INTO ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE} (
+            message_id, target_message_id, is_truncated, short_index_truncated
+        ) VALUES (?, ?, ?, ?)
+    `).run(
+        message.id,
+        message.targetMessageId,
+        message.truncated === true || bounded.truncated ? 1 : 0,
+        shortIndex.truncated ? 1 : 0
+    )
     const lookup = db.prepare(`
         SELECT search_rowid
         FROM ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE}
         WHERE message_id = ?
     `).get(message.id) as DbSearchLookupRow | undefined
     if (!lookup) throw new Error('Failed to create message content search lookup')
-    const searchableText = boundSearchableText(message.text)
-
     db.prepare(`
         INSERT INTO ${MESSAGE_CONTENT_SEARCH_TABLE} (
             rowid, searchable_text, message_id, session_id, seq, created_at, role
         ) VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(
         lookup.search_rowid,
-        searchableText,
+        bounded.text,
         message.targetMessageId,
         message.sessionId,
         message.seq,
         message.createdAt,
         message.role
     )
-    const insertShortGram = db.prepare(`
-        INSERT INTO ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} (gram, search_rowid)
-        VALUES (?, ?)
+    const insertShortGrams = db.prepare(`
+        INSERT OR IGNORE INTO ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} (gram, search_rowid)
+        SELECT value, ? FROM json_each(?)
     `)
-    for (const gram of getShortSearchGrams(searchableText)) {
-        insertShortGram.run(gram, lookup.search_rowid)
-    }
+    insertShortGrams.run(
+        lookup.search_rowid,
+        JSON.stringify(shortIndex.grams)
+    )
 }
 
 export function indexMessageContent(db: Database, message: IndexableMessage): void {
@@ -342,6 +562,7 @@ export function indexMessageContent(db: Database, message: IndexableMessage): vo
     // not indexed; the explicit terminal snapshot carries the same render key
     // and is indexed once when the stream finishes.
     if (isLiveStreamSnapshot(message.content)) return
+    rememberInjectedTurnUuid(db, message.sessionId, message.content)
     ensureMessageContentSearchTable(db)
     const renderKey = extractMessageRenderKey(message.content)
     const searchKey = renderKey ? `${message.sessionId}:${renderKey}` : message.id
@@ -349,7 +570,18 @@ export function indexMessageContent(db: Database, message: IndexableMessage): vo
     if (searchKey !== message.id) removeMessageContentSearchIndexByKey(db, searchKey)
     if (message.invokedAt === null) return
 
-    const searchable = extractSearchableMessageText(message.content)
+    const maxSourceCharacters = MAX_INDEXED_MESSAGE_CHARACTERS
+    const initialSearchable = extractSearchableMessageText(message.content, { maxSourceCharacters })
+    const record = unwrapRoleWrappedRecordEnvelope(message.content)
+    const parentUuid = extractAssistantParentUuid(record?.content)
+    const searchable = parentUuid
+        && initialSearchable?.role === 'assistant'
+        && NO_RESPONSE_REQUESTED_TEXTS.has(initialSearchable.text.trim())
+        ? extractSearchableMessageText(message.content, {
+            maxSourceCharacters,
+            injectedTurnUuids: getCachedInjectedTurnUuids(db, message.sessionId)
+        })
+        : initialSearchable
     if (!searchable) return
 
     insertMessageContentSearchIndex(db, {
@@ -359,7 +591,8 @@ export function indexMessageContent(db: Database, message: IndexableMessage): vo
         text: searchable.text,
         role: searchable.role,
         seq: message.seq,
-        createdAt: message.createdAt
+        createdAt: message.createdAt,
+        truncated: searchable.truncated === true
     })
 }
 
@@ -399,8 +632,9 @@ function rebuildMessageContentSearchInternal(db: Database, sessionIds?: string[]
     createMessageContentSearchTable(db)
 
     const insertLookup = db.prepare(`
-        INSERT INTO ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE} (message_id, target_message_id)
-        VALUES (?, ?)
+        INSERT INTO ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE} (
+            message_id, target_message_id, is_truncated, short_index_truncated
+        ) VALUES (?, ?, ?, ?)
     `)
     const getLookup = db.prepare(`
         SELECT search_rowid
@@ -411,6 +645,10 @@ function rebuildMessageContentSearchInternal(db: Database, sessionIds?: string[]
         INSERT INTO ${MESSAGE_CONTENT_SEARCH_TABLE} (
             rowid, searchable_text, message_id, session_id, seq, created_at, role
         ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `)
+    const insertShortGrams = db.prepare(`
+        INSERT OR IGNORE INTO ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} (gram, search_rowid)
+        SELECT value, ? FROM json_each(?)
     `)
 
     let selectBatch: ReturnType<Database['prepare']>
@@ -440,6 +678,11 @@ function rebuildMessageContentSearchInternal(db: Database, sessionIds?: string[]
         `)
     }
 
+    invalidateInjectedTurnUuidCache(db, sessionIds)
+
+    // Build the renderer-equivalent system-injected UUID set once per rebuild;
+    // doing this inside the batch loop would turn a full rebuild into O(N²).
+    const injectedTurnUuids = getInjectedTurnUuidsForSessions(db, sessionIds)
     let afterRowId = 0
     while (true) {
         const rows = (sessionIds
@@ -454,28 +697,34 @@ function rebuildMessageContentSearchInternal(db: Database, sessionIds?: string[]
             const searchKey = renderKey ? `${row.session_id}:${renderKey}` : row.id
             removeMessageContentSearchIndex(db, row.id)
             if (searchKey !== row.id) removeMessageContentSearchIndexByKey(db, searchKey)
-            const searchable = extractSearchableMessageText(decodedContent)
+            const searchable = extractSearchableMessageText(decodedContent, {
+                injectedTurnUuids,
+                maxSourceCharacters: MAX_INDEXED_MESSAGE_CHARACTERS
+            })
             if (!searchable) continue
-            const searchableText = boundSearchableText(searchable.text)
-            insertLookup.run(searchKey, row.id)
+            const bounded = boundSearchableTextWithMetadata(searchable.text)
+            const shortIndex = getShortSearchIndexData(bounded.text)
+            insertLookup.run(
+                searchKey,
+                row.id,
+                searchable.truncated === true || bounded.truncated ? 1 : 0,
+                shortIndex.truncated ? 1 : 0
+            )
             const lookup = getLookup.get(searchKey) as DbSearchLookupRow | undefined
             if (!lookup) throw new Error('Failed to create message content search lookup')
             insert.run(
                 lookup.search_rowid,
-                searchableText,
+                bounded.text,
                 row.id,
                 row.session_id,
                 row.seq,
                 row.created_at,
                 searchable.role
             )
-            const insertShortGram = db.prepare(`
-                INSERT INTO ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} (gram, search_rowid)
-                VALUES (?, ?)
-            `)
-            for (const gram of getShortSearchGrams(searchableText)) {
-                insertShortGram.run(gram, lookup.search_rowid)
-            }
+            insertShortGrams.run(
+                lookup.search_rowid,
+                JSON.stringify(shortIndex.grams)
+            )
         }
 
         afterRowId = rows[rows.length - 1]!.row_id
@@ -498,6 +747,7 @@ export function rebuildMessageContentSearchForSessions(
 
 export function removeMessageContentSearchForSessions(db: Database, sessionIds: string[]): void {
     ensureMessageContentSearchTable(db)
+    invalidateInjectedTurnUuidCache(db, sessionIds)
     removeMessageContentSearchRowsForSessions(db, sessionIds)
 }
 
@@ -528,6 +778,10 @@ function makeLikeSnippet(text: string, query: string, radius: number = 90): stri
 const SIDEBAR_SNIPPET_TOKENS = 24
 /** ~2 UI lines at hit-card width (~55 chars/line); FTS token snippets were still one line. */
 const IN_SESSION_LIKE_SNIPPET_RADIUS = 100
+
+function isSqlTrue(value: unknown): boolean {
+    return value === true || value === 1 || value === '1'
+}
 
 export function searchMessageContent(
     db: Database,
@@ -577,12 +831,18 @@ export function searchMessageContent(
                 FROM ${MESSAGE_CONTENT_SEARCH_TABLE} AS f
                 INNER JOIN ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} AS short
                     ON short.search_rowid = f.rowid AND short.gram = ?
+                INNER JOIN ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE} AS lookup
+                    ON lookup.search_rowid = f.rowid
                 INNER JOIN sessions AS s
                     ON s.id = f.session_id AND s.namespace = ?
                 WHERE 1 = 1${sessionScope}
             )
-            SELECT message_id, session_id, role, seq, created_at, searchable_text
-            FROM ranked_matches
+            SELECT ranked.message_id, ranked.session_id, ranked.role, ranked.seq,
+                   ranked.created_at, ranked.searchable_text, lookup.is_truncated,
+                   lookup.short_index_truncated
+            FROM ranked_matches AS ranked
+            INNER JOIN ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE} AS lookup
+                ON lookup.search_rowid = ranked.search_rowid
             WHERE session_rank = 1
             ORDER BY updated_at DESC, CAST(seq AS INTEGER) DESC
             LIMIT ?
@@ -609,14 +869,18 @@ export function searchMessageContent(
                 WHERE ${MESSAGE_CONTENT_SEARCH_TABLE} MATCH ?${sessionScope}
             )
             SELECT ranked.message_id, ranked.session_id, ranked.role, ranked.seq, ranked.created_at,
-                   snippet(${MESSAGE_CONTENT_SEARCH_TABLE}, 0, '', '', '…', ${SIDEBAR_SNIPPET_TOKENS}) AS snippet
+                   snippet(${MESSAGE_CONTENT_SEARCH_TABLE}, 0, '', '', '…', ${SIDEBAR_SNIPPET_TOKENS}) AS snippet,
+                   lookup.is_truncated, lookup.short_index_truncated
             FROM ranked_matches AS ranked
             INNER JOIN ${MESSAGE_CONTENT_SEARCH_TABLE} AS f
                 ON f.rowid = ranked.search_rowid
+            INNER JOIN ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE} AS lookup
+                ON lookup.search_rowid = ranked.search_rowid
             WHERE ranked.session_rank = 1
+              AND ${MESSAGE_CONTENT_SEARCH_TABLE} MATCH ?
             ORDER BY ranked.updated_at DESC, CAST(ranked.seq AS INTEGER) DESC
             LIMIT ?
-        `).all(namespace, escapeFtsPhrase(normalizedQuery), ...sessionScopeParams, safeLimit) as DbSearchRow[]
+        `).all(namespace, escapeFtsPhrase(normalizedQuery), ...sessionScopeParams, escapeFtsPhrase(normalizedQuery), safeLimit) as DbSearchRow[]
 
     return rows.map((row) => ({
         sessionId: row.session_id,
@@ -624,6 +888,8 @@ export function searchMessageContent(
         role: row.role,
         seq: Number(row.seq),
         createdAt: Number(row.created_at),
+        truncated: isSqlTrue(row.is_truncated)
+            || (useShortIndex && isSqlTrue(row.short_index_truncated)),
         snippet: useShortIndex
             ? makeLikeSnippet(row.searchable_text ?? '', normalizedQuery)
             : String(row.snippet ?? '').replace(/\s+/g, ' ').trim()
@@ -646,11 +912,13 @@ export function searchMessageContentInSession(
 ): SessionMessageContentSearchResult {
     ensureMessageContentSearchTable(db)
     const normalizedQuery = normalizeSearchQuery(query)
-    if (!normalizedQuery) return { matches: [], total: 0 }
+    if (!normalizedQuery) return { matches: [], total: 0, hasPotentiallyIncompleteResults: false }
 
     const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(1000, Math.floor(limit))) : 500
     const queryLength = [...normalizedQuery].length
-    if (queryLength < MIN_INDEXED_QUERY_LENGTH) return { matches: [], total: 0 }
+    if (queryLength < MIN_INDEXED_QUERY_LENGTH) {
+        return { matches: [], total: 0, hasPotentiallyIncompleteResults: false }
+    }
     const useShortIndex = queryLength === MIN_INDEXED_QUERY_LENGTH
     const countRow = useShortIndex
         ? db.prepare(`
@@ -673,10 +941,13 @@ export function searchMessageContentInSession(
 
     const rows = useShortIndex
         ? db.prepare(`
-            SELECT f.message_id, f.session_id, f.role, f.seq, f.created_at, f.searchable_text
+            SELECT f.message_id, f.session_id, f.role, f.seq, f.created_at, f.searchable_text,
+                   lookup.is_truncated, lookup.short_index_truncated
             FROM ${MESSAGE_CONTENT_SEARCH_TABLE} AS f
             INNER JOIN ${MESSAGE_CONTENT_SEARCH_SHORT_TABLE} AS short
                 ON short.search_rowid = f.rowid AND short.gram = ?
+            INNER JOIN ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE} AS lookup
+                ON lookup.search_rowid = f.rowid
             INNER JOIN sessions AS s
                 ON s.id = f.session_id AND s.namespace = ?
             WHERE f.session_id = ?
@@ -684,8 +955,12 @@ export function searchMessageContentInSession(
             LIMIT ?
         `).all(normalizedQuery.toLocaleLowerCase(), namespace, sessionId, safeLimit) as DbSearchRow[]
         : db.prepare(`
-            SELECT f.message_id, f.session_id, f.role, f.seq, f.created_at, f.searchable_text
+            SELECT f.message_id, f.session_id, f.role, f.seq, f.created_at, f.searchable_text,
+                   snippet(${MESSAGE_CONTENT_SEARCH_TABLE}, 0, '', '', '…', ${SIDEBAR_SNIPPET_TOKENS}) AS snippet,
+                   lookup.is_truncated, lookup.short_index_truncated
             FROM ${MESSAGE_CONTENT_SEARCH_TABLE} AS f
+            INNER JOIN ${MESSAGE_CONTENT_SEARCH_LOOKUP_TABLE} AS lookup
+                ON lookup.search_rowid = f.rowid
             INNER JOIN sessions AS s
                 ON s.id = f.session_id AND s.namespace = ?
             WHERE f.session_id = ?
@@ -701,14 +976,24 @@ export function searchMessageContentInSession(
             role: row.role,
             seq: Number(row.seq),
             createdAt: Number(row.created_at),
-            // Character window (not FTS token snippet) so the web hit card can
-            // reliably fill two lines of context around the query.
+            truncated: isSqlTrue(row.is_truncated)
+                || (useShortIndex && isSqlTrue(row.short_index_truncated)),
+            // Fork: character window (not the FTS token snippet) on BOTH index
+            // paths, so the web hit card reliably fills two lines of context.
+            // Upstream only widens the short-index path, which left in-session
+            // hits one line tall.
             snippet: makeLikeSnippet(
                 row.searchable_text ?? '',
                 normalizedQuery,
                 IN_SESSION_LIKE_SNIPPET_RADIUS
             )
         })),
-        total: Number(countRow?.count ?? 0)
+        total: Number(countRow?.count ?? 0),
+        hasPotentiallyIncompleteResults: hasPotentiallyIncompleteMessageContent(
+            db,
+            namespace,
+            normalizedQuery,
+            [sessionId]
+        )
     }
 }

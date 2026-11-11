@@ -14,12 +14,12 @@ afterEach(() => {
     }
 })
 
-describe('schema migration v30 to v31 (blocked ack)', () => {
-    it('fresh DB is v32 with blocked_ack columns', () => {
+describe('fork schema self-heal: blocked_ack (was soup ladder v30→v31)', () => {
+    it('fresh DB is at SCHEMA_VERSION with blocked_ack columns', () => {
         const store = new Store(':memory:')
         const db = (store as unknown as { db: Database }).db
         const version = db.prepare('PRAGMA user_version').get() as { user_version: number }
-        expect(version.user_version).toBe(32)
+        expect(version.user_version).toBe(34)
         const columns = db.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>
         const names = new Set(columns.map((row) => row.name))
         expect(names.has('blocked_ack_at')).toBe(true)
@@ -47,7 +47,7 @@ describe('schema migration v30 to v31 (blocked ack)', () => {
         try {
             const internalDb = (migrated as unknown as { db: Database }).db
             const version = internalDb.prepare('PRAGMA user_version').get() as { user_version: number }
-            expect(version.user_version).toBe(32)
+            expect(version.user_version).toBe(34)
             const columns = internalDb.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>
             const names = new Set(columns.map((row) => row.name))
             expect(names.has('blocked_ack_at')).toBe(true)

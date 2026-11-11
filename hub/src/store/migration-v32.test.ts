@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Store } from '.'
 
-it('upgrades to read-state columns via soup v31→v32 (upstream v29→v30)', () => {
+it('upgrades to read-state columns (upstream ladder v29→v30)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'hapi-read-migration-'))
     try {
         const path = join(dir, 'hub.db')
@@ -32,7 +32,7 @@ it('upgrades to read-state columns via soup v31→v32 (upstream v29→v30)', () 
         expect((restarted as any).db?.prepare?.('PRAGMA user_version') || null)
         restarted.close()
         const versionDb = new Database(path)
-        expect((versionDb.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(32)
+        expect((versionDb.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(34)
         versionDb.close()
     } finally { Bun.gc(true); rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }) }
 })

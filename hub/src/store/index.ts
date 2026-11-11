@@ -5,6 +5,7 @@ import { dirname } from 'node:path'
 import { MachineStore } from './machineStore'
 import { MessageStore } from './messageStore'
 import { addMessage, ensureMessageDeliveryStateColumn } from './messages'
+import { backfillLastUserMessageAt } from './sessionUserActivity'
 import type { StoredMessage } from './types'
 import { PushStore } from './pushStore'
 import { FcmStore } from './fcmStore'
@@ -473,7 +474,12 @@ export class Store {
             this.migrateFromV30ToV31()
             this.migrateFromV31ToV32()
             this.migrateFromV32ToV33()
+            // v33→v34 was missing here while SCHEMA_VERSION moved to 34, so a
+            // v26 DB was stamped 34 without session_jobs' wake columns; and this
+            // was the one boot path that never reached the self-heal.
+            this.migrateFromV33ToV34()
             this.setUserVersion(SCHEMA_VERSION)
+            this.finishSchemaInit()
             return
         }
         if (currentVersion < SCHEMA_VERSION && stepMigrations[currentVersion]) {
@@ -508,11 +514,163 @@ export class Store {
     private finishSchemaInit(): void {
         // Soup DBs that already passed v22 with single-column pin still need global_pinned.
         this.ensureSessionPinColumns()
+        this.ensureLineageConvergence()
         ensureOverseerEventsSchema(this.db)
         ensureDeletedSessionsSchema(this.db)
         ensureOverseerInboxSchema(this.db)
         ensureOverseerSettingsSchema(this.db)
         this.assertRequiredTablesPresent()
+    }
+
+    /**
+     * Converge a DB from EITHER lineage onto the full modern schema.
+     *
+     * WHY THIS IS NOT A LADDER STEP. The fork and upstream both numbered their
+     * own migrations into slots 23..32, with different content in the same slot.
+     * `user_version` therefore does not identify a schema in this fork — it
+     * identifies a schema *per lineage*, and the lineage is not recorded
+     * anywhere. This is not hypothetical: on the authoring machine, v30 DBs
+     * exist both with `session_turns` (upstream-shaped) and with `session_jobs`
+     * (soup-shaped), and v31 DBs likewise. The soup also re-numbered itself over
+     * time — its v26 DBs predate session_jobs moving to slot 23→24 — so the
+     * ambiguity is across time as well as across lineages.
+     *
+     * Any renumbering therefore mismigrates one lineage: replaying the ladder
+     * from a shared number runs the *other* side's steps, and skipping to the
+     * tip leaves real columns missing. The only sound mechanism is
+     * content-addressed self-heal — ask the DB what it actually has.
+     *
+     * The ladder spine is now upstream's, verbatim, so absorbs stop re-deriving
+     * a remap. Everything the fork adds, and everything a soup-lineage DB may
+     * have skipped while its number marched past the slot that owned it, is
+     * ensured here instead.
+     *
+     * Deliberately cheap: guarded ALTER/CREATE only, no FTS rebuild. The
+     * expensive rebuilds stay on the ladder where they run once.
+     *
+     * This is the same remedy, in the same method, that `ensureSessionPinColumns`
+     * already applies to the v22 pin collision.
+     */
+    private ensureLineageConvergence(): void {
+        const sessions = this.getSessionColumnNames()
+        if (sessions.size === 0) return
+
+        const addSessionColumn = (name: string, decl: string): void => {
+            if (!sessions.has(name)) this.db.exec(`ALTER TABLE sessions ADD COLUMN ${name} ${decl}`)
+        }
+        // fork-unique
+        addSessionColumn('last_notify_status', 'TEXT')
+        addSessionColumn('last_notify_at', 'INTEGER')
+        addSessionColumn('last_notify_note', 'TEXT')
+        addSessionColumn('blocked_ack_at', 'INTEGER')
+        addSessionColumn('blocked_ack_reason', 'TEXT')
+        // upstream slots a soup-lineage DB may have marched past
+        addSessionColumn('last_user_message_at', 'INTEGER')
+        for (const name of ['content_revision', 'read_revision', 'read_state_version', 'manual_unread']) {
+            addSessionColumn(name, 'INTEGER NOT NULL DEFAULT 0')
+        }
+
+        const machines = this.getMachineColumnNames()
+        if (machines.size > 0) {
+            if (!machines.has('tag')) this.db.exec('ALTER TABLE machines ADD COLUMN tag TEXT')
+            if (!machines.has('runner_proof_hash')) {
+                this.db.exec('ALTER TABLE machines ADD COLUMN runner_proof_hash TEXT')
+            }
+        }
+
+        const messages = this.getMessageColumnNames()
+        if (messages.size > 0 && !messages.has('content_revision')) {
+            this.db.exec('ALTER TABLE messages ADD COLUMN content_revision INTEGER NOT NULL DEFAULT 0')
+        }
+
+        // fork-unique tables
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS machine_reenroll_grants (
+                grant_hash TEXT PRIMARY KEY,
+                machine_id TEXT NOT NULL,
+                namespace TEXT NOT NULL,
+                expires_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_machine_reenroll_grants_machine
+                ON machine_reenroll_grants(machine_id);
+            CREATE TABLE IF NOT EXISTS machine_reenroll_replays (
+                grant_hash TEXT PRIMARY KEY,
+                from_machine_id TEXT NOT NULL,
+                to_machine_id TEXT NOT NULL,
+                namespace TEXT NOT NULL
+            );
+        `)
+
+        // upstream tables a soup-lineage DB may never have been offered
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS session_turns (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                namespace TEXT NOT NULL,
+                started_at INTEGER NOT NULL,
+                ended_at INTEGER,
+                end_reason TEXT,
+                started_by TEXT NOT NULL,
+                recover_until INTEGER,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_session_turns_namespace_started
+                ON session_turns(namespace, started_at);
+            CREATE INDEX IF NOT EXISTS idx_session_turns_session_started
+                ON session_turns(session_id, started_at);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_session_turns_one_open
+                ON session_turns(session_id)
+                WHERE ended_at IS NULL;
+        `)
+
+        // session_jobs: fork built it at 23→24, upstream at 31→32; the run_id
+        // fence and wake columns land at 32→33 and 33→34 on both.
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS session_jobs (
+                session_id TEXT NOT NULL,
+                job_key TEXT NOT NULL,
+                label TEXT NOT NULL,
+                status TEXT NOT NULL,
+                done REAL,
+                total REAL,
+                remaining REAL,
+                unit TEXT,
+                detail TEXT,
+                heartbeat_at INTEGER NOT NULL,
+                started_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (session_id, job_key),
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_session_jobs_session_status_updated
+                ON session_jobs(session_id, status, updated_at DESC);
+        `)
+        const jobCols = new Set(
+            (this.db.prepare('PRAGMA table_info(session_jobs)').all() as Array<{ name: string }>)
+                .map((c) => c.name)
+        )
+        for (const [name, decl] of [
+            ['run_id', 'TEXT'],
+            ['wake_on_terminal', 'INTEGER NOT NULL DEFAULT 0'],
+            ['wake_prompt', 'TEXT'],
+            ['wake_emitted_run_id', 'TEXT'],
+        ] as Array<[string, string]>) {
+            if (!jobCols.has(name)) this.db.exec(`ALTER TABLE session_jobs ADD COLUMN ${name} ${decl}`)
+        }
+
+        if (messages.size > 0) {
+            this.db.exec(`
+                CREATE INDEX IF NOT EXISTS idx_messages_future_scheduled_queued
+                    ON messages(session_id, scheduled_at)
+                    WHERE invoked_at IS NULL
+                      AND local_id IS NOT NULL
+                      AND scheduled_at IS NOT NULL
+                      AND delivery_state = 'queued';
+            `)
+        }
+
+        // Fork-only: Overseer events once collided with the work-graph tables.
+        rehomeOverseerEventsAwayFromWorkGraphCollision(this.db)
     }
 
     private ensureSessionPinColumns(): void {
@@ -554,6 +712,7 @@ export class Store {
                 last_notify_note TEXT,
                 blocked_ack_at INTEGER,
                 blocked_ack_reason TEXT,
+                last_user_message_at INTEGER,
                 content_revision INTEGER NOT NULL DEFAULT 0,
                 read_revision INTEGER NOT NULL DEFAULT 0,
                 read_state_version INTEGER NOT NULL DEFAULT 0,
@@ -1177,14 +1336,8 @@ export class Store {
     /** Operator manual-unblock watermark + rationale (#1717). Soup ladder
      *  v30->v31 (content search already occupies v29->v30). */
     private migrateFromV30ToV31(): void {
-        const columns = this.getSessionColumnNames()
-        if (columns.size === 0) return
-        if (!columns.has('blocked_ack_at')) {
-            this.db.exec('ALTER TABLE sessions ADD COLUMN blocked_ack_at INTEGER')
-        }
-        if (!columns.has('blocked_ack_reason')) {
-            this.db.exec('ALTER TABLE sessions ADD COLUMN blocked_ack_reason TEXT')
-        }
+        createMessageContentSearchTable(this.db)
+        if (this.getMessageColumnNames().size > 0) rebuildMessageContentSearch(this.db)
     }
 
     /** Upstream sessionReadState.v1 (5ef4304a4): readable content revisions + durable read cursors.
@@ -1195,17 +1348,16 @@ export class Store {
      *  re-reading messages. Numbered v28->v29 on the soup tip; the
      *  upstream-aimed branch carries the same migration as v25->v26. */
     private migrateFromV28ToV29(): void {
+        createMessageContentSearchTable(this.db)
+        backfillMessageContentSearchShortIndex(this.db)
         const columns = this.getSessionColumnNames()
-        if (columns.size === 0) return
-        if (!columns.has('last_notify_status')) {
-            this.db.exec('ALTER TABLE sessions ADD COLUMN last_notify_status TEXT')
-        }
-        if (!columns.has('last_notify_at')) {
-            this.db.exec('ALTER TABLE sessions ADD COLUMN last_notify_at INTEGER')
-        }
-        if (!columns.has('last_notify_note')) {
-            this.db.exec('ALTER TABLE sessions ADD COLUMN last_notify_note TEXT')
-        }
+        if (columns.size === 0 || columns.has('last_user_message_at')) return
+        this.db.transaction(() => {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN last_user_message_at INTEGER')
+            if (this.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'messages'").get()) {
+                backfillLastUserMessageAt(this.db)
+            }
+        })()
     }
 
     /**
@@ -1275,31 +1427,6 @@ export class Store {
         if (fcmColumns.length > 0 && !fcmColumns.some((column) => column.name === 'push_key')) {
             this.db.exec('ALTER TABLE fcm_devices ADD COLUMN push_key TEXT')
         }
-        rehomeOverseerEventsAwayFromWorkGraphCollision(this.db)
-        this.migrateFromV22ToV23()
-        this.db.exec(`
-            CREATE TABLE IF NOT EXISTS session_jobs (
-                session_id TEXT NOT NULL,
-                job_key TEXT NOT NULL,
-                label TEXT NOT NULL,
-                status TEXT NOT NULL,
-                done REAL,
-                total REAL,
-                remaining REAL,
-                unit TEXT,
-                detail TEXT,
-                wake_on_terminal INTEGER NOT NULL DEFAULT 0,
-                wake_prompt TEXT,
-                wake_emitted_run_id TEXT,
-                heartbeat_at INTEGER NOT NULL,
-                started_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL,
-                PRIMARY KEY (session_id, job_key),
-                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-            );
-            CREATE INDEX IF NOT EXISTS idx_session_jobs_session_status_updated
-                ON session_jobs(session_id, status, updated_at DESC);
-        `)
     }
 
     /** #1473 machine tag for RPC auth — remapped past soup dual-ledger V24. */
@@ -1308,19 +1435,9 @@ export class Store {
         if (messageColumns.size > 0 && !messageColumns.has('delivery_state')) {
             this.db.exec("ALTER TABLE messages ADD COLUMN delivery_state TEXT NOT NULL DEFAULT 'queued'")
         }
-        const columns = this.getMachineColumnNames()
-        if (columns.size === 0) return
-        if (!columns.has('tag')) {
-            this.db.exec('ALTER TABLE machines ADD COLUMN tag TEXT')
-        }
     }
 
     private migrateFromV25ToV26(): void {
-        const columns = this.getMachineColumnNames()
-        if (columns.size === 0) return
-        if (!columns.has('runner_proof_hash')) {
-            this.db.exec('ALTER TABLE machines ADD COLUMN runner_proof_hash TEXT')
-        }
         this.db.exec(`
             CREATE INDEX IF NOT EXISTS idx_messages_immediate_queued
                 ON messages(session_id, seq)
@@ -1333,25 +1450,41 @@ export class Store {
 
     private migrateFromV26ToV27(): void {
         this.db.exec(`
-            CREATE TABLE IF NOT EXISTS machine_reenroll_grants (
-                grant_hash TEXT PRIMARY KEY,
-                machine_id TEXT NOT NULL,
-                namespace TEXT NOT NULL,
-                expires_at INTEGER NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_machine_reenroll_grants_machine
-                ON machine_reenroll_grants(machine_id);
+            CREATE INDEX IF NOT EXISTS idx_messages_future_scheduled_queued
+                ON messages(session_id, scheduled_at)
+                WHERE invoked_at IS NULL
+                  AND local_id IS NOT NULL
+                  AND scheduled_at IS NOT NULL
+                  AND delivery_state = 'queued';
         `)
+        createMessageContentSearchTable(this.db)
+        if (this.getMessageColumnNames().size === 0) return
+        rebuildMessageContentSearch(this.db)
     }
 
     private migrateFromV27ToV28(): void {
+        createMessageContentSearchTable(this.db)
+        backfillMessageContentSearchLookup(this.db)
+        if (this.getSessionColumnNames().size === 0) return
         this.db.exec(`
-            CREATE TABLE IF NOT EXISTS machine_reenroll_replays (
-                grant_hash TEXT PRIMARY KEY,
-                from_machine_id TEXT NOT NULL,
-                to_machine_id TEXT NOT NULL,
-                namespace TEXT NOT NULL
+            CREATE TABLE IF NOT EXISTS session_turns (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                namespace TEXT NOT NULL,
+                started_at INTEGER NOT NULL,
+                ended_at INTEGER,
+                end_reason TEXT,
+                started_by TEXT NOT NULL,
+                recover_until INTEGER,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );
+            CREATE INDEX IF NOT EXISTS idx_session_turns_namespace_started
+                ON session_turns(namespace, started_at);
+            CREATE INDEX IF NOT EXISTS idx_session_turns_session_started
+                ON session_turns(session_id, started_at);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_session_turns_one_open
+                ON session_turns(session_id)
+                WHERE ended_at IS NULL;
         `)
     }
 
@@ -1362,11 +1495,17 @@ export class Store {
      * soup already used those slots, so union into a single v29→v30 step.
      */
     private migrateFromV29ToV30(): void {
-        createMessageContentSearchTable(this.db)
-        if (this.getMessageColumnNames().size === 0) return
-        rebuildMessageContentSearch(this.db)
-        backfillMessageContentSearchLookup(this.db)
-        backfillMessageContentSearchShortIndex(this.db)
+        const columns = this.getSessionColumnNames()
+        for (const name of ['content_revision', 'read_revision', 'read_state_version', 'manual_unread']) {
+            if (columns.size > 0 && !columns.has(name)) {
+                this.db.exec(`ALTER TABLE sessions ADD COLUMN ${name} INTEGER NOT NULL DEFAULT 0`)
+            }
+        }
+
+        const messageColumns = this.getMessageColumnNames()
+        if (messageColumns.size > 0 && !messageColumns.has('content_revision')) {
+            this.db.exec('ALTER TABLE messages ADD COLUMN content_revision INTEGER NOT NULL DEFAULT 0')
+        }
     }
 
     private getSessionColumnNames(): Set<string> {
