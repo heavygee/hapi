@@ -1734,7 +1734,8 @@ export function SessionList(props: {
     const actionsObserverRef = useRef<ResizeObserver | null>(null)
     const [headerRowWidth, setHeaderRowWidth] = useState(0)
     const [toolbarSlotWidths, setToolbarSlotWidths] = useState<Record<string, number>>({})
-    const [toolbarChrome, setToolbarChrome] = useState({ morePx: TOOLBAR_MORE_PX, gapPx: TOOLBAR_GAP_PX, machinePx: 0 })
+    const [toolbarChrome, setToolbarChrome] = useState({ morePx: TOOLBAR_MORE_PX, gapPx: TOOLBAR_GAP_PX, machinePx: 0, blockedPx: 0 })
+    const blockedControlsRef = useRef<HTMLDivElement>(null)
     const [searchChromePx, setSearchChromePx] = useState(0)
     const [searchMaxPx, setSearchMaxPx] = useState(0)
     // jsdom reports clientWidth 0; the row observer publishes the stubbed width.
@@ -2600,10 +2601,14 @@ export function SessionList(props: {
         const morePx = moreNode && moreNode.offsetWidth > 0 ? moreNode.offsetWidth : TOOLBAR_MORE_PX
         const gapPx = Number.isFinite(parsedGap) && parsedGap > 0 ? parsedGap : TOOLBAR_GAP_PX
         const machinePx = machineMenuRef.current?.offsetWidth ?? 0
+        const blockedPx = blockedControlsRef.current?.offsetWidth ?? 0
         setToolbarChrome((previous) => (
-            previous.morePx === morePx && previous.gapPx === gapPx && previous.machinePx === machinePx
+            previous.morePx === morePx
+            && previous.gapPx === gapPx
+            && previous.machinePx === machinePx
+            && previous.blockedPx === blockedPx
                 ? previous
-                : { morePx, gapPx, machinePx }
+                : { morePx, gapPx, machinePx, blockedPx }
         ))
         // Search may use a 9rem chip. Reserve padding + gap + visible machine
         // menu + More so that chip cannot eat the trailing controls (#2040).
@@ -2880,6 +2885,12 @@ export function SessionList(props: {
                                 const machineAndGap = toolbarChrome.machinePx > 0
                                     ? toolbarChrome.machinePx + toolbarChrome.gapPx
                                     : 0
+                                // The blocked pill + lens sit in this row but are not
+                                // shed-able slots, so their width has to come off the
+                                // budget too or the shedder over-fills the row.
+                                const blockedAndGap = toolbarChrome.blockedPx > 0
+                                    ? toolbarChrome.blockedPx + toolbarChrome.gapPx
+                                    : 0
                                 // Prefer the flex allocation. It tracks the row, not the
                                 // icons already on it. If they all fit, More is empty.
                                 const allocated = headerActionsRef.current?.clientWidth ?? 0
@@ -2889,7 +2900,7 @@ export function SessionList(props: {
                                         ? headerRowWidth
                                         : 0
                                 const budget = gutter > 0
-                                    ? Math.max(0, gutter - machineAndGap)
+                                    ? Math.max(0, gutter - machineAndGap - blockedAndGap)
                                     : toolbarActionBudget(0, searchQuery.length > 0)
                                 const slotWidth = (id: string, fallback: number) => {
                                     const measured = toolbarSlotWidths[id] ?? 0
@@ -2997,24 +3008,35 @@ export function SessionList(props: {
                                                 />
                                             </div>
                                         ) : null}
-                                        {blockedCount > 0 ? (
-                                            <BlockedJumpPill
-                                                count={blockedCount}
-                                                direction={blockedDirection}
-                                                alerting={blockedAlerting}
-                                                onJump={jumpToNextBlocked}
-                                            />
-                                        ) : null}
-                                        {/* Survives `blockedCount` reaching zero while the lens is
-                                            on. Dropping it there would leave the list filtered to
-                                            blocked-only with every row hidden and no control left
-                                            to turn it off. */}
+                                        {/* One measured box so `blockedPx` can be subtracted from
+                                            the shed budget below. These controls live in the
+                                            actions row but outside `definedSlots`, so without
+                                            reserving their width the shedder keeps icons inline
+                                            that no longer fit and the row overflows (#2039). */}
                                         {blockedCount > 0 || showBlockedOnly ? (
-                                            <BlockedLensToggle
-                                                active={showBlockedOnly}
-                                                count={blockedCount}
-                                                onToggle={() => setShowBlockedOnly((value) => !value)}
-                                            />
+                                            <div
+                                                ref={blockedControlsRef}
+                                                data-testid="blocked-toolbar-controls"
+                                                className="flex shrink-0 items-center gap-1"
+                                            >
+                                                {blockedCount > 0 ? (
+                                                    <BlockedJumpPill
+                                                        count={blockedCount}
+                                                        direction={blockedDirection}
+                                                        alerting={blockedAlerting}
+                                                        onJump={jumpToNextBlocked}
+                                                    />
+                                                ) : null}
+                                                {/* Survives `blockedCount` reaching zero while the
+                                                    lens is on. Dropping it there would leave the
+                                                    list filtered to blocked-only with every row
+                                                    hidden and no control left to turn it off. */}
+                                                <BlockedLensToggle
+                                                    active={showBlockedOnly}
+                                                    count={blockedCount}
+                                                    onToggle={() => setShowBlockedOnly((value) => !value)}
+                                                />
+                                            </div>
                                         ) : null}
                                         {visible.map((slot) => (
                                             <span key={slot.id} data-testid={`session-toolbar-slot-${slot.id}`} className="contents">
