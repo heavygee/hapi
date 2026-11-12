@@ -68,11 +68,27 @@ driver_remat_prepare() {
         # Canonical worktrees/<name> — guard allows this path.
         git -C "$primary" worktree add -B "$wip_branch" "$remat_wt" "$start_ref" >&2
     elif [[ "$resume" -eq 1 ]] \
-        && ! git -C "$remat_wt" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1 \
-        && [[ -z "$(git -C "$remat_wt" status --porcelain 2>/dev/null)" ]] \
         && git -C "$remat_wt" merge-base --is-ancestor "$start_ref" HEAD 2>/dev/null \
         && [[ "$(git -C "$remat_wt" rev-parse HEAD)" != "$(git -C "$remat_wt" rev-parse "$start_ref^{commit}")" ]]; then
         # Keep committed conflict resolution (or tip-forward progress) on WIP.
+        #
+        # Resumability is a property of the BRANCH, not of the working tree.
+        # Until 2026-11-12 a dirty tree or a half-finished merge also forced the
+        # hard reset below, which silently discarded every committed layer merge
+        # and conflict resolution on the WIP — hours of hand-resolution thrown
+        # away because a build stage had left a file behind. A post-promote
+        # rollback reliably leaves such dirt, so any failure after the promote
+        # point made the next --verify run unresumable by construction.
+        #
+        # Working-tree state is regenerable (layers re-merge, heals re-apply);
+        # committed history is not. So discard the tree and keep the commits.
+        if git -C "$remat_wt" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1 \
+            || [[ -n "$(git -C "$remat_wt" status --porcelain 2>/dev/null)" ]]; then
+            echo "Remat prepare: WIP tree dirty/mid-merge — discarding tree state, keeping commits" >&2
+            git -C "$remat_wt" merge --abort >/dev/null 2>&1 || true
+            git -C "$remat_wt" reset --hard HEAD >/dev/null 2>&1 || true
+            git -C "$remat_wt" clean -fdq >/dev/null 2>&1 || true
+        fi
         git -C "$remat_wt" checkout -f "$wip_branch" >/dev/null 2>&1 || \
             git -C "$remat_wt" checkout -f -B "$wip_branch" HEAD >&2
         echo "Remat prepare: RESUME $wip_branch @ $(git -C "$remat_wt" rev-parse --short HEAD) (kept WIP; skip reset to ${start_ref:0:12})" >&2

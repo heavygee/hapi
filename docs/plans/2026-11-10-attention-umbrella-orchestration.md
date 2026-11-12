@@ -164,3 +164,15 @@ No third-party pushback on #2355/#2356. Signal: **#987 CONFLICTING/DIRTY** from 
 ## Fork Actions blackout (2026-11-12)
 
 `heavygee/hapi` produced **no workflow runs since 2026-11-10T21:54Z** (~33h+). Permissions still enabled — likely minutes/spending limit. Blocks fork-stage CI for #326 (rebased locally green @ `b3642db08`). Escalated to [tooling/meta](/sessions/cbd1073e-4fd3-4f4a-bff8-cf9ba97bca6d) + **operator billing**. Meta confirmed: push `5574fa53a` to fork `main` created **zero** runs. Do not hold soup promote for Actions. #326 = locally green / CI dark. #2375 **Ready-YES** tip `ea1006e11` three-dim CLEAN; Lane B / low-impact / test-only / no dogfood.
+
+## Soup promote rollback / scope call (2026-11-12)
+
+Promote composed all 87 layers then gate rolled back on **cli** (14 blocking). Live tip safe at `e3b1e11a8`; remat-hold ACTIVE (`tests failed`). Absorb recovered as tag `soup-absorb-0.35.0-round2`. Tooling fixes committed (`caa4a796f`): install-before-web-build; resume no longer hard-resets dirty post-rollback trees.
+
+**Meta correction (Windows):** `#1911` was absorbed upstream into `cli/src/utils/windowsProcessStop.ts` (stricter root-probe-before-taskkill). Not a lost-behaviour regression — fork `process.test.ts` cases were stale. Fix = adopt upstream Windows test files (8 green; 56/56 across three Windows files). Prior "restore B1 into process.ts" call **cancelled**.
+
+**Narrowed orchestrator scope call (remaining 5 only):**
+1. `modelCatalog` (1) + Windows tests (8): already green — no further action.
+2. **intentionalStop (3) + agentQuotas (2):** revert orphaned upstream tests to fork versions. Do **not** port `reportStop` / generation probes / stop-flow into this remat.
+3. **Stop-flow port:** separate work later; out of blast radius for this promote.
+4. Re-promote when cli green; keep surface 22/22 + `link_pr`.

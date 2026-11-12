@@ -460,6 +460,23 @@ remat_rollback_live_tip() {
         "${REMAT:-}" "${PREV_TIP:-}" "${WIP_BRANCH:-}" ""
 }
 
+# Tip-forward may land new workspace deps (e.g. #1392 proper-lockfile, or
+# upstream 0.35.0's direct remark-cjk-friendly@^2.3.4) that the remat worktree
+# already installed while live driver/node_modules stayed stale. This has to
+# run BEFORE the web build, not only before the verify gates: vite resolves
+# imports against $DRIVER/node_modules, so a tip that adds a direct dep dies
+# with "Missing ./parseOnly specifier in remark-cjk-friendly" and rolls the
+# whole promote back. Until 2026-11-12 this install sat *after* the build it
+# was meant to protect, so --build-web could never survive a new direct dep.
+if [[ "${PROMOTED:-0}" -eq 1 ]]; then
+    echo "Ensuring driver dependencies (post-promote, pre-build)..."
+    if ! (cd "$DRIVER" && "$BUN" install); then
+        remat_rollback_live_tip "bun install failed"
+        exit 1
+    fi
+    DEPS_INSTALLED=1
+fi
+
 WEB_SWAP_DEFERRED=0
 if [[ "$BUILD_WEB" -eq 1 ]] || [[ ! -f "$DRIVER/web/dist/index.html" ]]; then
     # When hub/cli/shared changed, defer web/dist swap until after patient
@@ -521,13 +538,15 @@ elif [[ -f "$VERIFY_SCRIPT" ]] && [[ -f "$DRIVER/web/dist/index.html" ]]; then
 fi
 
 if [[ "$VERIFY" -eq 1 ]]; then
-    # Tip-forward may land new workspace deps (e.g. #1392 proper-lockfile) that
-    # remat WT already installed while live driver/node_modules stayed stale.
     # Typecheck/tests run against $DRIVER — refresh before gates (2026-08-07).
-    echo "Ensuring driver dependencies (post-promote)..."
-    if ! (cd "$DRIVER" && "$BUN" install); then
-        remat_rollback_live_tip "bun install failed"
-        exit 1
+    # Normally already done by the pre-build install above; this covers the
+    # --verify-without-promote path, where PROMOTED is 0 and that never ran.
+    if [[ "${DEPS_INSTALLED:-0}" -ne 1 ]]; then
+        echo "Ensuring driver dependencies (pre-gates)..."
+        if ! (cd "$DRIVER" && "$BUN" install); then
+            remat_rollback_live_tip "bun install failed"
+            exit 1
+        fi
     fi
     # Ancestry containment is not presence: a layer can be a provable ancestor
     # while a conflict resolution has deleted its code. Typecheck and tests
