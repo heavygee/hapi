@@ -142,3 +142,17 @@ Absorb green on `driver/integration-wip` @ `ebe57ea37` (web 4677/4677, surface 2
 **Calls:** (a) dirt owners commit — dogfood-fit [9bb5920b](/sessions/9bb5920b-604b-48c3-9864-bd868b28e58c); overseer-open-items [4230142b](/sessions/4230142b-8abe-4a31-af35-c22922bb649b); unfiled sweep → meta watcher. (b) **second absorb stays with [tooling/meta](/sessions/cbd1073e-4fd3-4f4a-bff8-cf9ba97bca6d)** (ladder ownership) — fresh turn OK, do not hand to 2ec10899.
 
 **(b)** Meta keeps second absorb (revised: measured ~25 files / 885 lines; ladder cheap/additive v35). 2ec10899 keeps #2147. Mirror dirt mostly cleared 2026-11-12; remaining `union-resolve.py` is Meta's to commit before sync.
+
+## Daily sweep complete (2026-11-12T07:03Z — 24/24)
+
+No third-party pushback on #2355/#2356. Signal: **#987 CONFLICTING/DIRTY** from 00:03Z (peer woken).
+
+| PR | Status |
+|---|---|
+| #1725 | CLEAN + **dogfood ready** (window elapsed); low-impact Lane B candidate |
+| #1733 | CLEAN + **dogfood ready**; low-impact Lane B candidate |
+| #1772 | CLEAN + **dogfood ready**; community / stack base for #2376 |
+| #987 | CONFLICTING — rebase peer woken |
+| #2376 | CLEAN + dogfooded (~26h left) |
+| #2375 | CONFLICTING — fade peer woken |
+| #1163 | CLEAN tip `6adaad77e` Lane A |
