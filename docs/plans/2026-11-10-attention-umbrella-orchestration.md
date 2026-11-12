@@ -130,3 +130,7 @@ Promotes applied: fork-stage non-draft guidance (`pr-review-loop.md` + `hapi-pr-
 ## #2002 lodged as tiann/hapi#2376 (2026-11-11)
 
 [Peer](/sessions/ea9e52cc-cf3d-4f5d-95d8-9944bf08b0d6) opened [PR #2376](https://github.com/tiann/hapi/pull/2376) off #1772 tip `61d72d98c` (head `0aaed119f`). Chip linked. Fork #328 cold-review-clean (P2s pre-existing in #1772 base). CI pending. Dogfood stamp authorized once CI green (soup-proven). Stack: `#1772 → #2376/#2002 → #1996` (#1996 still held on #1717 open).
+
+## Meta absorb promote call (2026-11-12)
+
+Web ~430/431; 8 remaining failures = upstream-structure asserts vs fork UI. **Orchestrator call: adapt tests to fork, then promote** (do not change fork UI to upstream). `link_pr` + required-surface 22/22 already green on WIP. [tooling/meta](/sessions/cbd1073e-4fd3-4f4a-bff8-cf9ba97bca6d).
