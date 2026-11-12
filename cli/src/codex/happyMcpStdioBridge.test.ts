@@ -18,6 +18,15 @@ vi.mock('@modelcontextprotocol/sdk/server/mcp.js', () => ({
         // enable()/disable() to track hub githubPrAwareness, so the mock has to
         // return one too or the bridge dies on an undefined handle.
         registerTool(name: string, config: Record<string, unknown>, handler: ToolHandler) {
+            // The real SDK throws on a second registration of the same name, and
+            // the bridge does not catch it: the process dies with
+            // "[hapi-mcp] Fatal: Tool <name> is already registered" and the
+            // session gets NO tools at all. A bare Map just overwrote, so this
+            // whole suite stayed green while an absorb had duplicated the
+            // session_job block and broken MCP for every new session
+            // (2026-11-12). Match the SDK so the next duplicate fails here
+            // rather than in production.
+            if (harness.tools.has(name)) throw new Error(`Tool ${name} is already registered`)
             harness.tools.set(name, handler)
             harness.configs.set(name, config)
             const tool = {

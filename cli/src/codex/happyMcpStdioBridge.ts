@@ -650,34 +650,6 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
       );
     }
 
-    if (toolNames.has(SESSION_JOB_TOOL_NAME)) {
-      server.registerTool<any, any>(
-        SESSION_JOB_TOOL_NAME,
-        {
-          description: SESSION_JOB_TOOL_DESCRIPTION,
-          title: 'Session-Attached Job',
-          inputSchema: sessionJobInputSchema,
-        },
-        async (args: Record<string, unknown>) => {
-          try {
-            const client = await ensureHttpClient();
-            const response = await client.callTool({ name: SESSION_JOB_TOOL_NAME, arguments: args });
-            return response as any;
-          } catch (error) {
-            return {
-              content: [
-                {
-                  type: 'text' as const,
-                  text: `Failed to run session_job: ${error instanceof Error ? error.message : String(error)}`,
-                },
-              ],
-              isError: true,
-            };
-          }
-        }
-      );
-    }
-
     const skillLookupInputSchema: z.ZodTypeAny = z.object({
       name: z.string().trim().min(1).max(128).describe('Exact skill name shown by HAPI skill autocomplete'),
     });
