@@ -162,6 +162,11 @@ describe('claudeCommand resume identity', () => {
 
     // Resume targets need a local transcript; give each test its own Claude config dir.
     const originalClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR
+    // getInvokedCwd() prefers HAPI_INVOKED_CWD over process.cwd(), and every
+    // HAPI-wrapped session sets it. CI passes only because the var is unset
+    // there; locally this fails deterministically. Same save/clear/restore
+    // shape as CLAUDE_CONFIG_DIR above. (Fixed upstream in tiann/hapi#2396.)
+    const originalInvokedCwd = process.env.HAPI_INVOKED_CWD
     let claudeConfigDir = ''
 
     beforeEach(() => {
@@ -171,6 +176,7 @@ describe('claudeCommand resume identity', () => {
         prepareSessionForLocalResumeMock.mockClear()
         claudeConfigDir = mkdtempSync(join(tmpdir(), 'hapi-claude-resume-'))
         process.env.CLAUDE_CONFIG_DIR = claudeConfigDir
+        delete process.env.HAPI_INVOKED_CWD
         const projectDir = getProjectPath(directory)
         mkdirSync(projectDir, { recursive: true })
         writeFileSync(join(projectDir, `${claudeId}.jsonl`), `${JSON.stringify({ uuid: 'm1' })}\n`)
@@ -179,6 +185,8 @@ describe('claudeCommand resume identity', () => {
     afterEach(() => {
         if (originalClaudeConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR
         else process.env.CLAUDE_CONFIG_DIR = originalClaudeConfigDir
+        if (originalInvokedCwd === undefined) delete process.env.HAPI_INVOKED_CWD
+        else process.env.HAPI_INVOKED_CWD = originalInvokedCwd
         rmSync(claudeConfigDir, { recursive: true, force: true })
     })
 
