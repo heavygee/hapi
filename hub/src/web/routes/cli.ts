@@ -12,6 +12,7 @@ import {
     upsertGithubPrIntoExternalRefs
 } from '@hapi/protocol'
 import { resolvePeerMetaFromSourceSession } from './messages'
+import { readGithubPrAwareness } from './features'
 import { getConfiguration } from '../../configuration'
 import { mapExternalRefRouteError } from '../../sync/externalRefErrors'
 import { readSessionSummaryContractEnabled } from '../../config/sessionSummaryContract'
@@ -99,6 +100,23 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
 
         c.set('namespace', parsedToken.namespace)
         return await next()
+    })
+
+    // Read-only feature flags for the CLI. The CLI resolves this as
+    // `${apiUrl}/cli/features` (apiUrl defaults to the hub root, no /api
+    // prefix) to decide whether MCP `link_pr` may be enabled, and
+    // fetchGithubPrAwarenessEnabled fails closed on any non-2xx. Until
+    // 2026-11-12 this route did not exist: the features router was mounted
+    // under /api only, so every CLI probe 404'd, the gate resolved false
+    // forever, and `link_pr` stayed disabled on every session even with
+    // githubPrAwareness enabled in settings. Nothing logged it, because
+    // failing closed is the designed behaviour for an unreachable hub.
+    //
+    // GET only, and deliberately not a second mount of createFeaturesRoutes():
+    // that router also serves PATCH, which belongs behind the web JWT, not the
+    // CLI token.
+    app.get('/features', (c) => {
+        return c.json({ githubPrAwareness: readGithubPrAwareness() })
     })
 
     app.post('/sessions', async (c) => {

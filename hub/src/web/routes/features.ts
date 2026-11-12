@@ -13,15 +13,23 @@ export type FeaturesRouteDeps = {
     setGithubPrAwareness: (enabled: boolean) => Promise<void>
 }
 
+/**
+ * Single source of truth for the flag, shared with the CLI router's
+ * `GET /cli/features`. The CLI gates MCP `link_pr` on that endpoint and fails
+ * closed on any non-2xx, so these two routes must not drift: if they ever
+ * disagree the tool silently vanishes with nothing in the logs.
+ */
+export function readGithubPrAwareness(): GithubPrAwarenessState {
+    const configuration = getConfiguration()
+    return {
+        enabled: configuration.githubPrAwareness,
+        source: configuration.sources.githubPrAwareness
+    }
+}
+
 function defaultDeps(): FeaturesRouteDeps {
     return {
-        getGithubPrAwareness: () => {
-            const configuration = getConfiguration()
-            return {
-                enabled: configuration.githubPrAwareness,
-                source: configuration.sources.githubPrAwareness
-            }
-        },
+        getGithubPrAwareness: readGithubPrAwareness,
         setGithubPrAwareness: async (enabled: boolean) => {
             await getConfiguration().setGithubPrAwareness(enabled)
         }

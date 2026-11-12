@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it, mock } from 'bun:test'
 import { Hono } from 'hono'
 import type { SyncEngine } from '../../sync/syncEngine'
-import { createConfiguration } from '../../configuration'
+import { createConfiguration, getConfiguration } from '../../configuration'
 import { createCliRoutes } from './cli'
 import { MachineTagConflictError } from '../../store/machines'
 import { hashRunnerProof } from '../../utils/runnerProof'
@@ -981,5 +981,50 @@ describe('cli machine registration (#2038 / heavygee#287)', () => {
         expect(ok.status).toBe(200)
         expect(await ok.json()).toEqual({ migrated: 1 })
         expect(migrateSessionsMachineId).toHaveBeenCalledWith('machine-live', 'machine-new', 'default')
+    })
+})
+
+describe('GET /cli/features (MCP link_pr gate)', () => {
+    // The CLI resolves this as `${apiUrl}/cli/features` to decide whether MCP
+    // `link_pr` may be enabled, and fails closed on any non-2xx. Before
+    // 2026-11-12 the route did not exist — features were mounted under /api
+    // only — so every probe 404'd and `link_pr` stayed disabled on every
+    // session despite githubPrAwareness being on. Nothing logged it: failing
+    // closed is correct behaviour for an unreachable hub, which is exactly why
+    // it hid for so long behind green gates.
+    it('reports githubPrAwareness to a CLI token, reflecting settings', async () => {
+        const app = createApp({})
+        const config = getConfiguration()
+
+        config.githubPrAwareness = true
+        const on = await app.request('/cli/features', { headers: authHeaders() })
+        expect(on.status).toBe(200)
+        expect((await on.json() as any).githubPrAwareness.enabled).toBe(true)
+
+        config.githubPrAwareness = false
+        const off = await app.request('/cli/features', { headers: authHeaders() })
+        expect(off.status).toBe(200)
+        expect((await off.json() as any).githubPrAwareness.enabled).toBe(false)
+
+        config.githubPrAwareness = true
+    })
+
+    it('requires the CLI token', async () => {
+        const app = createApp({})
+        const anon = await app.request('/cli/features')
+        expect(anon.status).toBe(401)
+    })
+
+    it('does not expose PATCH on the CLI router', async () => {
+        // createFeaturesRoutes also serves PATCH. Mounting that router wholesale
+        // under /cli would put a settings mutation behind the CLI token instead
+        // of the web JWT, so this route is GET-only by construction.
+        const app = createApp({})
+        const patched = await app.request('/cli/features', {
+            method: 'PATCH',
+            headers: { ...authHeaders(), 'content-type': 'application/json' },
+            body: JSON.stringify({ githubPrAwareness: false })
+        })
+        expect(patched.status).toBe(404)
     })
 })
