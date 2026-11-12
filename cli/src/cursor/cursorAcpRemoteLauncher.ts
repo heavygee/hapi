@@ -886,6 +886,13 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
                             this.surfacePromptFailure(CURSOR_POST_TOOL_INTERRUPT_GIVE_UP_MESSAGE);
                             break;
                         }
+                        if (postToolAutoContinueUsed) {
+                            // One-shot contract (#1724): a retryable failure on the
+                            // Continue attempt itself does not get the normal retry
+                            // budget — give up rather than resending Continue N times.
+                            this.surfacePromptFailure(CURSOR_POST_TOOL_INTERRUPT_GIVE_UP_MESSAGE);
+                            break;
+                        }
                         if (retryAttempt < CURSOR_AUTO_RETRY_LIMIT) {
                             this.surfaceRetry(retryAttempt + 1);
                             continue;
@@ -1214,7 +1221,13 @@ class CursorAcpRemoteLauncher extends RemoteLauncherBase {
         const converted = convertAgentMessage({ type: 'error', message });
         if (converted) this.session.sendAgentMessage(converted);
         this.messageBuffer.addMessage(message, 'status');
-        this.surfaceBlockedNotify(message);
+        // Estate Blocked chrome (#1717) keys off lastNotify from AGENT_NOTIFY_SUMMARY
+        // on assistant text — not error rows (#1724).
+        const footer = convertAgentMessage({
+            type: 'text',
+            text: formatUnexpectedStopBlockedFooter({ summary: message })
+        });
+        if (footer) this.session.sendAgentMessage(footer);
     }
 
     private installLiveSessionConfigSync(
