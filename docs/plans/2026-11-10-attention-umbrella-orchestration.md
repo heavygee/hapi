@@ -160,3 +160,7 @@ No third-party pushback on #2355/#2356. Signal: **#987 CONFLICTING/DIRTY** from 
 ## #2375 → test-only; #2373 closed (2026-11-12)
 
 #2380 fixed the stacking defect incidentally. #2375 tip `ea1006e11` is **test-only** regression guard (kept). No dogfood stamp. #2373 closed as fixed by #2380. Stray Codex P2s from fork #329 → **#2406** / **#2407**.
+
+## Fork Actions blackout (2026-11-12)
+
+`heavygee/hapi` produced **no workflow runs since 2026-11-10T21:54Z** (~33h+). Permissions still enabled — likely minutes/spending limit. Blocks fork-stage CI for #326 (rebased locally green @ `b3642db08`). Escalated to [tooling/meta](/sessions/cbd1073e-4fd3-4f4a-bff8-cf9ba97bca6d) + operator. #2375 babysitting upstream `test` check.
