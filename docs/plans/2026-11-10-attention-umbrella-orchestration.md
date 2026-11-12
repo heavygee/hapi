@@ -156,3 +156,7 @@ No third-party pushback on #2355/#2356. Signal: **#987 CONFLICTING/DIRTY** from 
 | #2376 | CLEAN + dogfooded (~26h left) |
 | #2375 | CONFLICTING — fade peer woken |
 | #1163 | CLEAN tip `6adaad77e` Lane A |
+
+## #2375 → test-only; #2373 closed (2026-11-12)
+
+#2380 fixed the stacking defect incidentally. #2375 tip `ea1006e11` is **test-only** regression guard (kept). No dogfood stamp. #2373 closed as fixed by #2380. Stray Codex P2s from fork #329 → **#2406** / **#2407**.
