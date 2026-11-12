@@ -191,4 +191,6 @@ Gate exit=0 (web 432/432, cli 5031/0, surface 22/22, sentinels clean). Generatio
 
 **Open — path mismatch (pre-absorb):** CLI `GET ${apiUrl}/cli/features` (CLI bearer) → 404; hub mounts features only at `/api` (JWT). Fail-closed → awareness false forever despite `settings.json` githubPrAwareness true. Surface gate cannot see runtime enablement.
 
-**Orchestrator call (bounce authorized):** hub-side — expose `GET /cli/features` under existing CLI auth (same response shape as `/api/features`). Do **not** point CLI at `/api/features` (CLI token ≠ JWT → 401 forever). Include a regression test that CLI-token GET succeeds. Proof bar after restart: in-process tool list shows `link_pr` (not argv, not source grep). Manifest de-churn (`feat/agent-session-import-picker`) can ride same bounce if ready; leave gc pile alone.
+**Orchestrator call (bounce authorized):** hub-side — expose `GET /cli/features` under existing CLI auth (same response shape as `/api/features`). Do **not** point CLI at `/api/features` (CLI token ≠ JWT → 401 forever). Include a regression test that CLI-token GET succeeds. Proof bar after restart: in-process tool list shows `link_pr` (not argv, not source grep). Leave gc pile alone.
+
+**Import-picker layer — drop retracted.** `feat/agent-session-import-picker` stays until upstream #945 merges (manifest condition). Tip-forward: already ancestor / clean skip / containment 0. `full-recipe` would lose the feature if dropped (symbols absent on `origin/main`). Layer is stale (`SidebarToggle.tsx` not on tip) — retire promptly when #945 lands.
