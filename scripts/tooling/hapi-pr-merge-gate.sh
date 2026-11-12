@@ -136,14 +136,22 @@ fi
 [ "$REVIEW" = "CHANGES_REQUESTED" ] && fail "reviewDecision=CHANGES_REQUESTED" || pass "no CHANGES_REQUESTED"
 
 # 4. UNRESOLVED REVIEW THREADS — the thing status APIs hide
-THREADS="$("$REAL_GH" api graphql -f query='
-  query($owner:String!,$name:String!,$pr:Int!){
-    repository(owner:$owner,name:$name){
-      pullRequest(number:$pr){
-        reviewThreads(first:100){ nodes { isResolved isOutdated comments(first:1){ nodes { author{login} body } } } }
-      }}}' \
-  -F owner="${REPO%%/*}" -F name="${REPO##*/}" -F pr="$PR" \
-  --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved==false and .isOutdated==false)] | length' 2>/dev/null || echo "ERR")"
+#
+# Paginated via the shared helper. A bare `first:100` silently returns a prefix
+# on a PR with more threads than that, and an under-count here reads as "clean"
+# and lets a merge through. Same shape that made tiann/hapi#2147 look like it
+# had 0 unresolved threads when it had 2 (2026-11-12).
+#
+# The helper's predicate is `isOutdated != true`, not the `== false` this used
+# to carry: a null isOutdated means unknown, and a gate must count an unknown
+# rather than wave it through.
+THREADS="$(
+    PRT_GH_BIN="$REAL_GH" prt_fetch_threads \
+        "${REPO%%/*}" "${REPO##*/}" "$PR" \
+        'isResolved isOutdated comments(first:1){ nodes { author{login} body } }' \
+        2>/dev/null | prt_count_blocking 2>/dev/null
+)"
+[ -n "$THREADS" ] || THREADS="ERR"
 if [ "$THREADS" = "ERR" ]; then
     fail "could not read review threads (treating as blocking — empty is not absence)"
 elif [ "$THREADS" -gt 0 ] 2>/dev/null; then
@@ -207,6 +215,8 @@ done
 [ -n "$_DF_LIB" ] || { echo "GATE FAIL: dogfood-countdown.sh not found" >&2; exit 2; }
 # shellcheck source=/dev/null
 source "$_DF_LIB"
+# shellcheck source=/dev/null
+source "$(dirname "$(readlink -f "$0")")/lib/pr-review-threads.sh"
 LABELS_CSV="$("$REAL_GH" pr view "$PR" --repo "$REPO" --json labels -q '[.labels[].name]|join(",")' 2>/dev/null || echo "")"
 DF_STATUS=""
 if [ "$REPO" = "$UPSTREAM_REPO" ] && dogfood_has_label "$LABELS_CSV"; then

@@ -203,7 +203,9 @@ Gate exit=0 (web 432/432, cli 5031/0, surface 22/22, sentinels clean). Generatio
 
 **Attribution correction:** `/cli/features` 404 was **not** pre-absorb. Consumer `fetchGithubPrAwareness.ts` entered via Meta `baf529bbf` (Nov 11) without the hub half; `feat/boards` carries both but is not a manifest layer. Causal claim retracted.
 
-**Durability (Option 1 authorized, not tonight):** land `link_pr` soup work (registration + gate consumer + hub GET `/cli/features`) on **fork main** so `full-recipe` keeps it. Reject option 2 (add `feat/boards` layer) and option 3 (tip-only + surface gate after the fact). Next quiet window / promote cycle.
+**Durability — Option 1 CANCELLED (operator 2026-11-12):** fork main is for fork-private only. `link_pr` / PR awareness is upstream-bound (#1163) — must **not** land on fork main. Durability = merge #1163 upstream (or keep tip/layer until then). Meta stand down.
+
+**Orchestrator remit (hard):** umbrella dogfood + PR babysit only. No Meta kitchen scope unless it blocks an umbrella PR's dogfood or chips.
 
 **Meta next (non-blocking):** `ctx_execute(shell)` bypasses Bash pre-tool guards; Bash guard also *redirects* `curl` into `ctx_execute`, so agents following the redirect leave production-mutation checks without intending to. Fix must cover the steer-into-ungarded path, not only a matcher list.
 
@@ -211,10 +213,18 @@ Gate exit=0 (web 432/432, cli 5031/0, surface 22/22, sentinels clean). Generatio
 
 Adapter normalises ctx_execute / ctx_execute_file / ctx_batch_execute payload into Bash `.tool_input.command` shape; punctuation-stripped copy catches argv lists. Both `.claude/settings.json` and `generateHookSettings.ts` updated (runner sessions). Fail-direction tests + Bash control. **Promote+restart authorized when stack free** — proof = runner-spawned session hook matcher expanded, not only manual launch. Estate `estate-android-gradle-gate.sh` left outside (operator/estate). Unrelated `claude.test.ts` resume identity / #2396 not touched.
 
+**Promoted tip `49f1e53c8`:** gate exit=0, patient restart, WORKING drained to 0 (no yank). Promoted CLI `generateHookSettingsFile` emits Bash + three `mcp__plugin_context-mode_context-mode__ctx_*` matchers. Pre-restart sessions still `matcher: Bash` only until relaunch — new spawns only.
+
+**Runner proof:** Cursor peer [29656ad1](/sessions/29656ad1-e922-43fd-9cbf-b555b17ac8a5) correctly saw Bash-only (no Claude launched post-restart yet). Meta then spawned Claude: `~/.hapi/tmp/hooks/session-hook-2762686.json` (mtime 09:31:31) has Bash + three ctx_* matchers. Criterion met. Note: Cursor defaults leave no hook-settings evidence until a Claude actually spawns.
+
 ## #987 rebased to 0.35.0 (2026-11-12)
 
 [Peer](/sessions/290c588b-5f7c-4391-80ad-6078f695d4be) tip `d18a6a38b` on parent `06d9e51f5`. Prior tip 10/10 CLEAN; round 6 CI running. Five bot findings fixed — all absorb re-sequencing, none original feature. Model-error dot kept **separate** ahead of #2380 activity/unread chain.
 
 **Calls:** keep rounds while productive; Ready-YES at next green+CLEAN with no mid-round actionable findings. Prepare-only. Pattern noted: conflict count ≠ risk on long-drift forks; prefer earlier rebases next time. `ctx_execute(shell)` bypasses Bash pre-tool guards → Meta tooling backlog (028d0a86 superseded).
 
-**Dogfood re-stamp — Option 1 (revised):** peer correctly refused CI-green-alone stamp (attestation + 48h merge-intent). Peer does **not** stack-switch / does **not** stamp yet. After Ready-YES: Operator/Meta live-dogfoods the tip when stack free; peer posts `dogfooded since <that UTC>` once told. Option 3 (admin re-date without live run) rejected — absorb moved control flow. Label may stay; countdown only moves on a truthful stamp.
+**Dogfood re-stamp — operator override 2026-11-12:** #987 has lived in soup and been dogfooded; rebase alone does not void that. **No re-stamp / no Option 1 live re-run.** Keep existing `dogfooded` label; do not re-date the countdown. Ready-YES/CLEAN when CI lands; prepare-only.
+
+### READY-YES / CLEAN @ `cdd6bcbc0` (2026-11-12)
+
+Three-dim PASS (CI 10/10, 0 threads, bot pass). MERGEABLE/CLEAN on 0.35.0 parent. `dogfooded` kept untouched. Prepare-only / not merged. Peer idling. Two CI reds were flakes (Android scratchlist / iOS typography) — verified outside our diffs, passed on rerun.

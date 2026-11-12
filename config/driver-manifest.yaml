@@ -235,8 +235,8 @@ layers:
   # - branch: feat/claude-session-import  # RETIRED: subsumed by #945 soup layer
 
   # Multi-agent session import (#945) — SOLE soup layer (Claude+Codex+Cursor).
-  # Tip bacfd20b9+ ; agentImport.tooltip; includes #942 product surface.
-  # Hub+web+cli → --build-web + hapi-restart-hub.
+  # Tip 67f01d6b2 (2026-11-12); agentImport.tooltip; includes #942 product surface.
+  # Hub+web+cli → --build-web + hapi-restart-hub. dogfooded merge path stamped.
   # Brief: docs/plans/peer-briefings/2026-07-24-peer-942-945-import-picker-rebase.md
   # Worktree: agent-import-picker. Drop when upstream #945 merges.
   # Heals 52/53/54 parked while this cluster is souped.
