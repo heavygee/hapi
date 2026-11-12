@@ -163,4 +163,4 @@ No third-party pushback on #2355/#2356. Signal: **#987 CONFLICTING/DIRTY** from 
 
 ## Fork Actions blackout (2026-11-12)
 
-`heavygee/hapi` produced **no workflow runs since 2026-11-10T21:54Z** (~33h+). Permissions still enabled — likely minutes/spending limit. Blocks fork-stage CI for #326 (rebased locally green @ `b3642db08`). Escalated to [tooling/meta](/sessions/cbd1073e-4fd3-4f4a-bff8-cf9ba97bca6d) + operator. #2375 babysitting upstream `test` check.
+`heavygee/hapi` produced **no workflow runs since 2026-11-10T21:54Z** (~33h+). Permissions still enabled — likely minutes/spending limit. Blocks fork-stage CI for #326 (rebased locally green @ `b3642db08`). Escalated to [tooling/meta](/sessions/cbd1073e-4fd3-4f4a-bff8-cf9ba97bca6d) + **operator billing**. Meta confirmed: push `5574fa53a` to fork `main` created **zero** runs. Do not hold soup promote for Actions. #326 = locally green / CI dark. #2375 babysitting upstream.
