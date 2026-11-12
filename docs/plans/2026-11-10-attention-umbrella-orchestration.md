@@ -195,6 +195,10 @@ Gate exit=0 (web 432/432, cli 5031/0, surface 22/22, sentinels clean). Generatio
 
 **Import-picker layer — drop retracted.** `feat/agent-session-import-picker` stays until upstream #945 merges (manifest condition). Tip-forward: already ancestor / clean skip / containment 0. `full-recipe` would lose the feature if dropped (symbols absent on `origin/main`). Layer is stale (`SidebarToggle.tsx` not on tip) — retire promptly when #945 lands.
 
+### Closed — tip `d8311eda3` (`link_pr` runtime)
+
+`GET /cli/features` on CLI router (inherits CLI auth); shared `readGithubPrAwareness()` with `/api`; PATCH not on `/cli`. Live: CLI-token 200 enabled=true/source=file; anon 401; PATCH 404. Fresh-session HTTP MCP **16 tools · `link_pr` PRESENT** (not argv). Pre-restart bridges correctly still 15 without it. Regression test fail-direction checked. Gate exit=0. Both breakages closed (tool-name entry + routing). Surface gate still cannot see runtime enablement — known limit.
+
 ## #987 rebased to 0.35.0 (2026-11-12)
 
 [Peer](/sessions/290c588b-5f7c-4391-80ad-6078f695d4be) tip `d18a6a38b` on parent `06d9e51f5`. Prior tip 10/10 CLEAN; round 6 CI running. Five bot findings fixed — all absorb re-sequencing, none original feature. Model-error dot kept **separate** ahead of #2380 activity/unread chain.
