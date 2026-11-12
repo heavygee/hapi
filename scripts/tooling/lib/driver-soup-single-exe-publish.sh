@@ -1047,7 +1047,9 @@ driver_soup_fleet_seal() {
 driver_soup_single_exe_assert_not_retagging_stale() {
     local dest="${1:?}"
     local tip_sha="${2:?}"
+    local driver="${3:-}"
     local root prev_manifest prev_tip prev_bin new_bin name prev_sha new_sha
+    local binary_sources_changed=1 stamp_file stamp
     root="$(driver_soup_single_exe_artifacts_root)"
     prev_manifest="$root/latest/manifest.json"
     [[ -f "$prev_manifest" ]] || return 0
@@ -1057,6 +1059,32 @@ driver_soup_single_exe_assert_not_retagging_stale() {
         # Same tip republish (e.g. fixing a bad prior upload) — allow digest churn.
         return 0
     fi
+    # Identical bytes under a new tip have two very different causes, and this
+    # guard used to treat them the same:
+    #
+    #   1. the compile never ran (the 2026-10 silent-stale case) — must refuse
+    #   2. the compile ran and the binary's inputs did not change — expected
+    #
+    # The single-exe is built from cli/ (+ shared/). A hub-only tip, e.g. the
+    # 2026-11-12 release-notes fix which touched hub/src/upgrade and nothing
+    # else, legitimately produces byte-identical binaries on a reproducible
+    # build. Failing that is a false positive that blocks a correct publish.
+    #
+    # Distinguish them with evidence rather than assumption: the dist-exe
+    # .composed-tip-sha stamp proves the compile ran for THIS tip, and the
+    # cli/shared diff proves whether the bytes had any reason to change.
+    if [[ -n "$driver" ]]; then
+        stamp_file="$(driver_soup_single_exe_tip_stamp_path "$driver" 2>/dev/null || true)"
+        stamp=""
+        [[ -n "$stamp_file" && -f "$stamp_file" ]] && stamp="$(tr -d '[:space:]' <"$stamp_file")"
+        if [[ -n "$stamp" && "$stamp" == "$tip_sha" ]] \
+            && git -C "$driver" rev-parse --verify "$prev_tip" >/dev/null 2>&1; then
+            if git -C "$driver" diff --quiet "$prev_tip" "$tip_sha" -- cli shared 2>/dev/null; then
+                binary_sources_changed=0
+            fi
+        fi
+    fi
+
     shopt -s nullglob
     for prev_bin in "$root/latest"/*/hapi "$root/latest"/*/hapi.exe; do
         [[ -f "$prev_bin" ]] || continue
@@ -1065,6 +1093,11 @@ driver_soup_single_exe_assert_not_retagging_stale() {
         [[ -f "$new_bin" ]] || continue
         prev_sha="$(driver_soup_single_exe_sha256_file "$prev_bin")"
         new_sha="$(driver_soup_single_exe_sha256_file "$new_bin")"
+        if [[ "$prev_sha" == "$new_sha" ]] && [[ "$binary_sources_changed" -eq 0 ]]; then
+            echo "soup-artifact: $name identical across tip change — cli/shared unchanged" >&2
+            echo "                (dist-exe stamp matches ${tip_sha:0:12}; reproducible build, not stale)" >&2
+            continue
+        fi
         if [[ "$prev_sha" == "$new_sha" ]]; then
             echo "ERROR: soup-artifact: binary $name sha256 unchanged across tip change" >&2
             echo "       prev tip ${prev_tip:0:12} → new tip ${tip_sha:0:12}" >&2
@@ -1253,7 +1286,7 @@ driver_soup_single_exe_publish() {
     printf '%s\n' "$notes_for_disk" >"$dest/NOTES.md"
     echo "soup-artifact: NOTES.md written ($dest/NOTES.md); manifest.releaseNotes ${#notes_for_disk} chars"
 
-    if ! driver_soup_single_exe_assert_not_retagging_stale "$dest" "$tip_sha"; then
+    if ! driver_soup_single_exe_assert_not_retagging_stale "$dest" "$tip_sha" "$driver"; then
         rm -rf "$dest"
         return 1
     fi
