@@ -1599,3 +1599,41 @@ export type KitchenStatusResponse =
         checkedAt: number
     }
     | { available: false }
+
+export type AgentActivityWait = {
+    start: number
+    end: number | null
+    kind: 'permission' | 'input'
+    tool: string
+}
+
+
+export type AgentActivitySession = {
+    id: string
+    flavor: string | null
+    /** The agent's own session id (Claude session, Codex thread, ...). */
+    agentSessionId: string | null
+    machineId: string | null
+    host: string | null
+    machineName: string | null
+    path: string | null
+    title: string | null
+    turns: AgentActivityTurn[]
+    waits: AgentActivityWait[]
+}
+
+
+export type AgentActivityResponse = {
+    since: number
+    until: number
+    generatedAt: number
+    sessions: AgentActivitySession[]
+}
+
+export type AgentActivityTurn = {
+    start: number
+    end: number | null
+    endReason: 'idle' | 'session_end' | 'expired' | 'hub_restart' | null
+    startedBy: 'hub_prompt' | 'agent' | 'patch'
+}
+

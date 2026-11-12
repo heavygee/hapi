@@ -40,7 +40,7 @@ export type PendingRequest = {
     since: number
 }
 
-function classifyKind(tool: string): PendingRequestKind {
+export function classifyKind(tool: string): PendingRequestKind {
     return INPUT_REQUEST_TOOLS.has(tool) ? 'input' : 'permission'
 }
 

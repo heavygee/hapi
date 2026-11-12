@@ -2,7 +2,8 @@ import type { Session } from '../sync/syncEngine'
 import type {
     ModelErrorNotification,
     ModelErrorSendOutcome,
-    NotificationChannel
+    NotificationChannel,
+    TaskNotification
 } from '../notifications/notificationTypes'
 import type { NotificationSendContext } from '../notifications/notificationSendContext'
 import { getAgentName, getSessionName } from '../notifications/sessionInfo'
@@ -84,7 +85,7 @@ export class PushNotificationChannel implements NotificationChannel {
         session: Session,
         payload: PushPayload,
         ctx: NotificationSendContext | undefined,
-        method: 'permission' | 'ready'
+        method: 'permission' | 'ready' | 'task'
     ): Promise<void> {
         if (ctx?.nativeGate?.sent) {
             this.logBranch(method, session.namespace, 'defer-to-native', 'fcm-delivered-this-dispatch')
@@ -160,5 +161,31 @@ export class PushNotificationChannel implements NotificationChannel {
 
     private buildSessionPath(sessionId: string): string {
         return `/sessions/${sessionId}`
+    }
+
+    async sendTaskNotification(session: Session, notification: TaskNotification, ctx?: NotificationSendContext): Promise<void> {
+        if (!session.active) {
+            return
+        }
+
+        const agentName = getAgentName(session)
+        const name = getSessionName(session)
+        const normalizedStatus = notification.status?.trim().toLowerCase()
+        const isFailure = normalizedStatus === 'failed'
+            || normalizedStatus === 'error'
+            || normalizedStatus === 'killed'
+            || normalizedStatus === 'aborted'
+
+        const payload: PushPayload = {
+            title: isFailure ? 'Task failed' : 'Task completed',
+            body: `${agentName} · ${name} · ${notification.summary}`,
+            data: {
+                type: 'task-notification',
+                sessionId: session.id,
+                url: this.buildSessionPath(session.id)
+            }
+        }
+
+        await this.deliverWebOrToast(session, payload, ctx, 'task')
     }
 }

@@ -13,7 +13,8 @@ export type FcmDataPayload = {
     /**
      * Visual urgency hint for the client. Drives the notification accent
      * color on Wear OS / phone, and may be used for sound channel routing
-     * later.
+     * later. Independent of `type` because `task-notification` is one
+     * type that splits across success and failure outcomes.
      *
      *  - `info`     ready / input request                -> blue
      *  - `success`  task completed                       -> green

@@ -38,6 +38,7 @@ class FakeSyncEngine {
 class StubChannel implements NotificationChannel {
     readonly readySessions: Session[] = []
     readonly permissionSessions: Session[] = []
+    readonly taskNotifications: Array<{ session: Session; notification: TaskNotification }> = []
     readonly sessionCompletions: Session[] = []
     readonly modelErrors: Array<{ session: Session; notification: ModelErrorNotification }> = []
 
@@ -47,6 +48,10 @@ class StubChannel implements NotificationChannel {
 
     async sendPermissionRequest(session: Session): Promise<void> {
         this.permissionSessions.push(session)
+    }
+
+    async sendTaskNotification(session: Session, notification: TaskNotification): Promise<void> {
+        this.taskNotifications.push({ session, notification })
     }
 
     async sendSessionCompletion(session: Session): Promise<void> {
@@ -175,52 +180,48 @@ describe('NotificationHub', () => {
         hub.stop()
     })
 
-    it('does not notify for agent-internal background task notifications', async () => {
+    it('sends task notifications for task_notification system messages', async () => {
         const engine = new FakeSyncEngine()
         const channel = new StubChannel()
         const hub = new NotificationHub(engine as unknown as SyncEngine, [channel], {
             permissionDebounceMs: 1,
-            readyCooldownMs: 1
+            readyCooldownMs: 20
         })
 
         const session = createSession()
         engine.setSession(session)
 
-        const outputEvent = (seq: number, data: Record<string, unknown>): SyncEvent => ({
+        const taskEvent: SyncEvent = {
             type: 'message-received',
             sessionId: session.id,
             message: {
-                id: `message-${seq}`,
-                seq,
+                id: 'message-task',
+                seq: 2,
                 localId: null,
                 createdAt: 0,
                 content: {
                     role: 'agent',
-                    content: { type: 'output', data }
+                    content: {
+                        type: 'output',
+                        data: {
+                            type: 'system',
+                            subtype: 'task_notification',
+                            status: 'completed',
+                            summary: 'Commit T4 finished'
+                        }
+                    }
                 }
             }
-        })
+        }
 
-        // Claude Code feeds background task completion back to the model;
-        // it is not a user-facing turn boundary.
-        engine.emit(outputEvent(2, {
-            type: 'system',
-            subtype: 'task_notification',
-            status: 'failed',
-            summary: 'Background command failed'
-        }))
-        engine.emit(outputEvent(3, {
-            type: 'user',
-            message: {
-                role: 'user',
-                content: '<task-notification> <summary>Done</summary> <status>completed</status> </task-notification>'
-            }
-        }))
+        engine.emit(taskEvent)
         await sleep(5)
 
-        expect(channel.readySessions).toHaveLength(0)
-        expect(channel.permissionSessions).toHaveLength(0)
-        expect(channel.sessionCompletions).toHaveLength(0)
+        expect(channel.taskNotifications).toHaveLength(1)
+        expect(channel.taskNotifications[0]?.notification).toEqual({
+            status: 'completed',
+            summary: 'Commit T4 finished'
+        })
 
         hub.stop()
     })

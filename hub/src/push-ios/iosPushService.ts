@@ -15,7 +15,7 @@ export type IosPushNotificationPayload = {
     url?: string
     title: string
     body: string
-    severity?: 'info' | 'warning'
+    severity?: 'info' | 'success' | 'warning' | 'error'
     contractVersion: string
     requestId?: string
     notifySummary?: string

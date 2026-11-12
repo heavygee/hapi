@@ -7,7 +7,7 @@
  * - No E2E encryption; data is stored as JSON in SQLite
  */
 
-import { type SessionReadStateRequest, BLOCKED_NOTIFY_STALE_MS, isKnownFlavor, matchesClaudeSessionId, isLiveLifecycleState, isSteeringSupportedForSession, MACHINE_CAPABILITIES, type LocalResumeTarget, type ResumableSession, type SessionEndReason } from '@hapi/protocol'
+import { type SessionReadStateRequest, BLOCKED_NOTIFY_STALE_MS, isKnownFlavor, matchesClaudeSessionId, isLiveLifecycleState, isSteeringSupportedForSession, type LocalResumeTarget, type ResumableSession, type SessionEndReason } from '@hapi/protocol'
 import {
     cliBinaryUpdatedOnDisk,
     isMachineCapabilitySkewed,
@@ -2823,7 +2823,7 @@ recordSessionActivity(sessionId: string, updatedAt: number): void {
         await this.rpcGateway.abortSession(sessionId)
     }
 
-    private assertConversationHistoryIdle(session: Session): void {
+    private assertConversationHistoryIdle(session: Session, allowRunningHistoricalFork = false): void {
         if (!session.active) {
             throw new Error('Session must be active')
         }
@@ -3058,7 +3058,12 @@ recordSessionActivity(sessionId: string, updatedAt: number): void {
             || source.metadata?.capabilities?.conversationHistory?.forkLatestCompleted !== true)) {
             return { type: 'error', message: 'No verified completed turn is available for this session' }
         }
-        if (!source.active) return this.forkArchivedCodexSession(source, namespace, messageLocalId)
+        // Upstream forks an archived Codex session here via
+        // forkArchivedCodexSession, which needs the ForkArchivedCodex machine
+        // capability, metadata.codexArchivedFork and setArchivedForkAttempt --
+        // a subsystem this fork has never carried. Refuse rather than import
+        // the call site without its machinery.
+        if (!source.active) return { type: 'error', message: 'Forking an archived session is not supported on this hub' }
         try {
             this.assertConversationHistoryIdle(source, (Boolean(messageLocalId) || latestCompleted) && this.resolveFlavor(source) === 'codex')
         } catch (error) {
@@ -3095,6 +3100,12 @@ recordSessionActivity(sessionId: string, updatedAt: number): void {
             return { type: 'error', message: error instanceof Error ? error.message : String(error) }
         }
 
+        // ForkConversationRpcResponse is a union: the generic RPC layer can
+        // serialise a handler failure. Narrow it, and surface that message
+        // instead of reporting it as a missing session id.
+        if (rpcResult && 'error' in rpcResult) {
+            return { type: 'error', message: rpcResult.error }
+        }
         if (!rpcResult?.nativeSessionId) {
             return { type: 'error', message: 'Native fork did not return a session id' }
         }
