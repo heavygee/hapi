@@ -305,6 +305,7 @@ export default {
   'session.modelChange.cursorAutoRestart': 'Авто (для переключения обратно нужен перезапуск)',
   'session.modelChange.pendingTooltip': 'Модель изменится, когда текущая задача завершится.',
   'session.item.worktree': 'рабочее дерево',
+  'session.item.idle': 'Простаивает (только keepalive)',
   'session.item.pending': 'ожидание',
   'session.item.thinking': 'размышление',
   'session.item.running': 'Выполняется',
