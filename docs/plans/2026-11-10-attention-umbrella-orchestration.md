@@ -199,6 +199,10 @@ Gate exit=0 (web 432/432, cli 5031/0, surface 22/22, sentinels clean). Generatio
 
 `GET /cli/features` on CLI router (inherits CLI auth); shared `readGithubPrAwareness()` with `/api`; PATCH not on `/cli`. Live: CLI-token 200 enabled=true/source=file; anon 401; PATCH 404. Fresh-session HTTP MCP **16 tools · `link_pr` PRESENT** (not argv). Pre-restart bridges correctly still 15 without it. Regression test fail-direction checked. Gate exit=0. Both breakages closed (tool-name entry + routing). Surface gate still cannot see runtime enablement — known limit.
 
+**In-process confirm:** [proof peer](/sessions/5966390d-22a1-40ae-bde5-519b87acccb1) — `link_pr` PRESENT on first look (16 tools). Same protocol previously reported absent — calibrated both ways.
+
+**Meta next (non-blocking):** `ctx_execute(shell)` bypasses Bash pre-tool guards; Bash guard also *redirects* `curl` into `ctx_execute`, so agents following the redirect leave production-mutation checks without intending to. Fix must cover the steer-into-ungarded path, not only a matcher list.
+
 ## #987 rebased to 0.35.0 (2026-11-12)
 
 [Peer](/sessions/290c588b-5f7c-4391-80ad-6078f695d4be) tip `d18a6a38b` on parent `06d9e51f5`. Prior tip 10/10 CLEAN; round 6 CI running. Five bot findings fixed — all absorb re-sequencing, none original feature. Model-error dot kept **separate** ahead of #2380 activity/unread chain.
