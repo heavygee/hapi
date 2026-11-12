@@ -629,6 +629,22 @@ if [[ "$VERIFY" -eq 1 ]]; then
     echo "Verify stamp: $STAMP ($(cat "$STAMP" | head -c 12)…)"
 fi
 
+# A promote that succeeded but published nothing is the one failure mode here
+# with no symptom: the live tip moves, every gate is green, and the dogfood tag
+# silently stays where it was. On 2026-11-12 the skip flag was carried from an
+# iteration loop into the successful runs and `latest` sat 176 commits behind
+# the kitchen for three days, until an operator noticed the fleet missing an
+# upstream capability. Say it out loud instead.
+if [[ "$VERIFY" -eq 1 && "$BUILD_WEB" -eq 1 && "${PROMOTED:-0}" -eq 1 && "${HAPI_SKIP_SOUP_SINGLE_EXE:-}" == "1" ]]; then
+    echo "" >&2
+    echo "WARN: promote succeeded but HAPI_SKIP_SOUP_SINGLE_EXE=1 — NOTHING WAS PUBLISHED." >&2
+    echo "      Live tip moved to ${WIP_SHA:0:12}; the dogfood tag still points at the previous" >&2
+    echo "      publish, so fleet/dogfood consumers will not see this promote." >&2
+    echo "      Fine while iterating. On the run you intend to keep, publish it:" >&2
+    echo "        hapi-soup-publish-single-exe $DRIVER" >&2
+    echo "" >&2
+fi
+
 # Stage 0 golden artifact: self-contained single-exe per platform (oos foundry only).
 if [[ "$VERIFY" -eq 1 && "$BUILD_WEB" -eq 1 && "${PROMOTED:-0}" -eq 1 && "${HAPI_SKIP_SOUP_SINGLE_EXE:-}" != "1" ]]; then
     # shellcheck source=lib/driver-soup-single-exe-publish.sh
