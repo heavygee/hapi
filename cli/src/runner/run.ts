@@ -17,7 +17,7 @@ import { isBunCompiled } from '@/projectPath';
 import { describeChildFatalContext } from './childFatalDiagnostics';
 import { writeRunnerState, RunnerLocallyPersistedState, readRunnerState, acquireRunnerLock, releaseRunnerLock } from '@/persistence';
 import { getCliArgs } from '@/utils/cliArgs';
-import { getProcessStartMarker, getSystemBootId, getProcessThreadGroupId, normalizeBootId, isProcessAlive, isWindows, killProcess, killProcessByChildProcess, killProcessTreeByPid } from '@/utils/process';
+import { getProcessStartMarker, isProcessAlive, isWindows, killProcess, killProcessByChildProcess, killProcessTreeByPid } from '@/utils/process';
 import { findStopSessionOrphanTargets, listWindowsProcessesWithCommandLine, reapRunnerSpawnedOrphans } from '@/runner/orphanReap';
 import { decideUntrackedRunnerWebhook } from '@/runner/lateRunnerWebhook';
 import { cleanupFailedStartupAfterExit, sessionStartupTimeout, waitForRecoverableStartup } from './sessionStartup';
@@ -121,14 +121,9 @@ export function createSpawnDeduplicator(
 export function classifyRecoveredProcessGeneration(
   processAlive: boolean,
   currentMarker: string | null,
-  persistedMarker: string,
-  evidence?: { pid: number; threadGroupId: number | null; currentBootId: string | null; persistedBootId?: string }
+  persistedMarker: string
 ): 'verified' | 'quarantined' | 'exited' {
   if (!processAlive) return 'exited';
-  if (evidence?.persistedBootId && evidence.currentBootId && evidence.persistedBootId !== evidence.currentBootId) return 'exited';
-  // A runner child is a process leader. kill(pid, 0) also succeeds for Linux
-  // thread IDs, while ps -p does not report their start time.
-  if (evidence?.threadGroupId != null && evidence.threadGroupId !== evidence.pid) return 'exited';
   if (currentMarker === null) return 'quarantined';
   return currentMarker === persistedMarker ? 'verified' : 'exited';
 }
@@ -361,7 +356,6 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       confirmedSessionId?: string;
       pid: number;
       processStartMarker: string;
-      bootId?: string;
     };
     const resumeProcessFile = `${configuration.runnerStateFile}.resume-processes.json`;
     const persistedResumeProcesses = (() => {
@@ -381,7 +375,6 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             confirmedSessionId: typeof record.confirmedSessionId === 'string' ? record.confirmedSessionId : undefined,
             pid: record.pid,
             processStartMarker: record.processStartMarker,
-            bootId: normalizeBootId(record.bootId) ?? undefined,
           }]];
         }));
       } catch (error) {
@@ -401,12 +394,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     for (const [pid, record] of [...persistedResumeProcesses]) {
       const alive = isProcessAlive(pid);
       const marker = alive ? getProcessStartMarker(pid) : null;
-      const generation = classifyRecoveredProcessGeneration(alive, marker, record.processStartMarker, {
-        pid,
-        threadGroupId: getProcessThreadGroupId(pid),
-        currentBootId: getSystemBootId(),
-        persistedBootId: record.bootId,
-      });
+      const generation = classifyRecoveredProcessGeneration(alive, marker, record.processStartMarker);
       if (generation === 'verified') {
         pidToRequestedSessionId.set(pid, record.requestedSessionId);
         if (record.confirmedSessionId) pidToConfirmedSessionId.set(pid, record.confirmedSessionId);
@@ -511,7 +499,6 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
               confirmedSessionId: sessionId,
               pid,
               processStartMarker,
-              bootId: getSystemBootId() ?? undefined,
             });
             persistResumeProcesses();
           }
@@ -585,7 +572,6 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
               confirmedSessionId: sessionId,
               pid,
               processStartMarker,
-              bootId: getSystemBootId() ?? undefined,
             });
             persistResumeProcesses();
           }
@@ -1014,7 +1000,6 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
               requestedSessionId: trackedSession.requestedHappySessionId,
               pid,
               processStartMarker,
-              bootId: getSystemBootId() ?? undefined,
             });
             persistResumeProcesses();
           }
