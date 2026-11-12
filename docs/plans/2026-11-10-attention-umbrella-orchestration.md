@@ -176,3 +176,9 @@ Promote composed all 87 layers then gate rolled back on **cli** (14 blocking). L
 2. **intentionalStop (3) + agentQuotas (2):** revert orphaned upstream tests to fork versions. Do **not** port `reportStop` / generation probes / stop-flow into this remat.
 3. **Stop-flow port:** separate work later; out of blast radius for this promote.
 4. Re-promote when cli green; keep surface 22/22 + `link_pr`.
+
+## Soup 0.35.0 live + MCP regression (2026-11-12)
+
+Promote landed tip `66b6b7d6f` (DB 32→35). Bridge fatal: `Tool session_job is already registered` — duplicate `if (toolNames.has(SESSION_JOB_TOOL_NAME))` block in `happyMcpStdioBridge.ts`. All MCP tools gone for sessions started after swap; pre-swap bridges OK. Gates missed it (surface = present; mock Map overwrites vs SDK throw).
+
+**Meta fixing:** dedupe block + mock throws like SDK. **Orchestrator:** approve hub restart with MCP fix. **Generation-probe port Meta added early: strip it** in that same promote (not needed for green). Keep call-site restores (rate-limit / `getAccountIdentity`). `reportStop` et al. stay unported. Require live bridge/`listTools` proof after restart — not source grep.
