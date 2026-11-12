@@ -203,7 +203,13 @@ Gate exit=0 (web 432/432, cli 5031/0, surface 22/22, sentinels clean). Generatio
 
 **Attribution correction:** `/cli/features` 404 was **not** pre-absorb. Consumer `fetchGithubPrAwareness.ts` entered via Meta `baf529bbf` (Nov 11) without the hub half; `feat/boards` carries both but is not a manifest layer. Causal claim retracted.
 
-**Durability (Option 1 authorized, not tonight):** land `link_pr` soup work (registration + gate consumer + hub GET `/cli/features`) on **fork main** so `full-recipe` keeps it. Reject option 2 (add `feat/boards` layer) and option 3 (tip-only + surface gate after the fact). Next quiet window / promote cycle.
+**Durability (Option 1 authorized, standalone next cycle):** land on **fork main** so `full-recipe` keeps it. Reject options 2/3. `ctx_execute` promote already done (`49f1e53c8`) — nothing to ride with. Concrete brief:
+1. MCP tool-name registration — `startHappyServer.ts` `['set_voice_mode', 'link_issue', 'link_pr']` loop
+2. `cli/src/api/fetchGithubPrAwareness.ts` (absent on `origin/main`)
+3. Hub `GET /features` on CLI router → shared `readGithubPrAwareness()` (helper lands too); no second `createFeaturesRoutes()` mount; PATCH stays off `/cli`
+4. Tests: CLI-token GET 200 both ways / anon 401 / PATCH 404 in `cli.test.ts` + `link_pr` catalog tests
+5. Proof: symbols on fork main; enablement path intact under **main-isolation** containment (not composed tip)
+Attribution: one-sided gate was Meta `baf529bbf` (consumer from `feat/boards` without route) — cherry-pick both halves together.
 
 **Meta next (non-blocking):** `ctx_execute(shell)` bypasses Bash pre-tool guards; Bash guard also *redirects* `curl` into `ctx_execute`, so agents following the redirect leave production-mutation checks without intending to. Fix must cover the steer-into-ungarded path, not only a matcher list.
 
