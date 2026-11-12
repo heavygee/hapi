@@ -36,33 +36,69 @@ export function compactUrlLabel(url: string, maxLen = 64): string {
     }
 }
 
-/** Hub event payload embeds the originating transcript message id when known. */
-export function parseSessionLogMessageId(payloadJson: string | null): string | null {
+function parsePayloadObject(payloadJson: string | null): Record<string, unknown> | null {
     if (!payloadJson) return null
     try {
         const parsed: unknown = JSON.parse(payloadJson)
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
-        const messageId = (parsed as { messageId?: unknown }).messageId
-        if (typeof messageId !== 'string') return null
-        const trimmed = messageId.trim()
-        return trimmed.length > 0 ? trimmed : null
+        return parsed as Record<string, unknown>
     } catch {
         return null
     }
 }
 
+function nonEmptyString(value: unknown): string | null {
+    if (typeof value !== 'string') return null
+    const trimmed = value.trim()
+    return trimmed.length > 0 ? trimmed : null
+}
+
+/** Hub event payload embeds the originating transcript message id when known. */
+export function parseSessionLogMessageId(payloadJson: string | null): string | null {
+    return nonEmptyString(parsePayloadObject(payloadJson)?.messageId)
+}
+
+/**
+ * Pins store the exact chat block id (e.g. `agent-reasoning:<uuid>:0`) alongside the hub UUID.
+ * Prefer this for jump anchors when present.
+ */
+export function parseSessionLogTargetMessageId(payloadJson: string | null): string | null {
+    return nonEmptyString(parsePayloadObject(payloadJson)?.targetMessageId)
+}
+
+/** Block kinds that use `${kind}:${hubUuid}:${idx}` DOM ids (see outline / reducerTimeline). */
+const INDEXED_SESSION_LOG_BLOCK_KINDS = [
+    'agent-text',
+    'agent-reasoning',
+    'cli-output',
+    'agent-event',
+    'codex-review',
+] as const
+
 /**
  * DOM anchors are `hapi-message-${kind}:${blockId}` (see outline.ts).
- * Hub stores the bare message UUID; chat blocks use `${uuid}:${idx}` for agent text.
+ * Hub stores the bare message UUID; chat blocks use `${uuid}:${idx}` for agent text/reasoning.
+ * Prefer `targetMessageId` from the pin/notify payload when the operator pinned a specific block.
  */
-export function sessionLogTargetMessageIds(hubMessageId: string): string[] {
-    return [
-        `agent-text:${hubMessageId}:0`,
-        `agent-text:${hubMessageId}`,
-        `agent-text:${hubMessageId}:1`,
-        `user-text:${hubMessageId}`,
-        `cli-output:${hubMessageId}:0`,
-    ]
+export function sessionLogTargetMessageIds(
+    hubMessageId: string,
+    preferredTargetMessageId?: string | null
+): string[] {
+    const ids: string[] = []
+    const push = (id: string | null | undefined) => {
+        const trimmed = id?.trim()
+        if (!trimmed || ids.includes(trimmed)) return
+        ids.push(trimmed)
+    }
+
+    push(preferredTargetMessageId)
+    for (const kind of INDEXED_SESSION_LOG_BLOCK_KINDS) {
+        push(`${kind}:${hubMessageId}:0`)
+        push(`${kind}:${hubMessageId}`)
+        push(`${kind}:${hubMessageId}:1`)
+    }
+    push(`user-text:${hubMessageId}`)
+    return ids
 }
 
 /** Case-insensitive filter over event summaries (and link labels) — stopgap before transcript search. */
@@ -80,7 +116,7 @@ export function eventMatchesSessionLogQuery(event: SystemEventRow, query: string
 function SessionLogEventRow(props: {
     event: SystemEventRow
     filter: SessionLogFilter
-    onSelectMessage?: (messageId: string) => void
+    onSelectMessage?: (messageId: string, targetMessageId?: string | null) => void
 }) {
     const { t } = useTranslation()
     const url = primaryUrl(props.event)
@@ -88,7 +124,12 @@ function SessionLogEventRow(props: {
     const relative = formatRelativeTime(props.event.ts, t) ?? ''
     const absolute = formatAbsoluteDateTime(props.event.ts) ?? undefined
     const messageId = parseSessionLogMessageId(props.event.payloadJson)
+    const targetMessageId = parseSessionLogTargetMessageId(props.event.payloadJson)
     const jumpable = Boolean(messageId && props.onSelectMessage)
+    const select = () => {
+        if (!messageId) return
+        props.onSelectMessage?.(messageId, targetMessageId)
+    }
 
     const meta = (
         <div className="flex min-w-0 items-baseline gap-2">
@@ -133,11 +174,11 @@ function SessionLogEventRow(props: {
                     tabIndex={0}
                     aria-label={label}
                     className="w-full cursor-pointer rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                    onClick={() => props.onSelectMessage?.(messageId)}
+                    onClick={select}
                     onKeyDown={(event) => {
                         if (event.key === 'Enter' || event.key === ' ') {
                             event.preventDefault()
-                            props.onSelectMessage?.(messageId)
+                            select()
                         }
                     }}
                 >
@@ -162,7 +203,7 @@ export function SessionLogPanel(props: {
     title: string
     onClose: () => void
     initialFilter?: SessionLogFilter
-    onSelectMessage?: (messageId: string) => void
+    onSelectMessage?: (messageId: string, targetMessageId?: string | null) => void
 }) {
     const { t } = useTranslation()
     const [filter, setFilter] = useState<SessionLogFilter>(props.initialFilter ?? 'all')

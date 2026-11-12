@@ -47,10 +47,10 @@ Long-lived agent sessions make **loaded-message TOC** (Outline) incomplete: olde
 
 ### Jump-to-message
 
-- Parse `messageId` from `payloadJson`.
-- Reuse Outline locate path (`locateOutlineTargetMessage` → load older if needed → `scrollIntoView`).
-- DOM anchors: `hapi-message-${kind}:${id}` (e.g. `agent-text:<hubUuid>:0`).
-- **Keep Session Log open** after jump (unlike Outline, which closes on select).
+- Parse `messageId` from `payloadJson`; prefer `targetMessageId` when present (pins often store `agent-reasoning:<uuid>:0`).
+- Seek via `aroundId` when the block is outside the loaded window, then `scrollIntoView`.
+- DOM anchors: `hapi-message-${kind}:${id}` — probe preferred target first, then `agent-text` / `agent-reasoning` / `user-text` / `cli-output` / …
+- **Close Session Log after jump** (same as Outline). Dogfood 2026-11-12: keeping Log open made mobile jumps feel like a no-op under the full-bleed panel; close then scroll (`heavygee/hapi#330`).
 - Rows without `messageId` stay non-clickable.
 - Links tab: URL stays external; row click still jumps when `messageId` present.
 

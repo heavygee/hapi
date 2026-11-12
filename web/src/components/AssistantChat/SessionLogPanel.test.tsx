@@ -7,6 +7,7 @@ import {
     compactUrlLabel,
     eventMatchesSessionLogQuery,
     parseSessionLogMessageId,
+    parseSessionLogTargetMessageId,
     sessionLogTargetMessageIds,
     SessionLogPanel
 } from '@/components/AssistantChat/SessionLogPanel'
@@ -119,10 +120,32 @@ describe('parseSessionLogMessageId', () => {
     })
 })
 
+describe('parseSessionLogTargetMessageId', () => {
+    it('reads targetMessageId from pin payloads', () => {
+        expect(parseSessionLogTargetMessageId(JSON.stringify({
+            messageId: HUB_MESSAGE_ID,
+            targetMessageId: `agent-reasoning:${HUB_MESSAGE_ID}:0`
+        }))).toBe(`agent-reasoning:${HUB_MESSAGE_ID}:0`)
+    })
+
+    it('returns null when targetMessageId is missing or blank', () => {
+        expect(parseSessionLogTargetMessageId(null)).toBeNull()
+        expect(parseSessionLogTargetMessageId(JSON.stringify({ messageId: HUB_MESSAGE_ID }))).toBeNull()
+        expect(parseSessionLogTargetMessageId(JSON.stringify({ targetMessageId: '  ' }))).toBeNull()
+    })
+})
+
 describe('sessionLogTargetMessageIds', () => {
     it('prefers agent-text block ids Outline/DOM use (kind:hubId:idx)', () => {
         expect(sessionLogTargetMessageIds(HUB_MESSAGE_ID)[0]).toBe(`agent-text:${HUB_MESSAGE_ID}:0`)
         expect(sessionLogTargetMessageIds(HUB_MESSAGE_ID)).toContain(`agent-text:${HUB_MESSAGE_ID}`)
+        expect(sessionLogTargetMessageIds(HUB_MESSAGE_ID)).toContain(`agent-reasoning:${HUB_MESSAGE_ID}:0`)
+    })
+
+    it('puts payload targetMessageId first so reasoning pins resolve', () => {
+        const preferred = `agent-reasoning:${HUB_MESSAGE_ID}:0`
+        expect(sessionLogTargetMessageIds(HUB_MESSAGE_ID, preferred)[0]).toBe(preferred)
+        expect(sessionLogTargetMessageIds(HUB_MESSAGE_ID, preferred)).toContain(`agent-text:${HUB_MESSAGE_ID}:0`)
     })
 })
 
@@ -225,7 +248,7 @@ describe('SessionLogPanel', () => {
         })
 
         fireEvent.click(screen.getByRole('button', { name: /Working on Session Log/i }))
-        expect(onSelectMessage).toHaveBeenCalledWith(HUB_MESSAGE_ID)
+        expect(onSelectMessage).toHaveBeenCalledWith(HUB_MESSAGE_ID, null)
     })
 
     it('does not make rows without messageId clickable', async () => {
@@ -264,7 +287,7 @@ describe('SessionLogPanel', () => {
         })
 
         fireEvent.click(screen.getByRole('button', { name: /example.com\/pr\/1/i }))
-        expect(onSelectMessage).toHaveBeenCalledWith(HUB_MESSAGE_ID)
+        expect(onSelectMessage).toHaveBeenCalledWith(HUB_MESSAGE_ID, null)
 
         onSelectMessage.mockClear()
         fireEvent.click(screen.getByRole('link', { name: 'example.com/pr/1' }))
@@ -272,6 +295,7 @@ describe('SessionLogPanel', () => {
     })
 
     it('Pinned tab lists operator_pin events and filter box narrows summaries', async () => {
+        const pinTarget = `agent-reasoning:${HUB_MESSAGE_ID}:0`
         const pinEvent: SystemEventRow = {
             id: 9,
             ts: NOW - 10_000,
@@ -283,7 +307,7 @@ describe('SessionLogPanel', () => {
             artifactRefs: null,
             provenance: 'operator pin',
             relatedSessionId: 'sess-1',
-            payloadJson: JSON.stringify({ messageId: HUB_MESSAGE_ID }),
+            payloadJson: JSON.stringify({ messageId: HUB_MESSAGE_ID, targetMessageId: pinTarget }),
             severity: 1
         }
         const fetchSystemEvents = vi.fn(async (params: { eventType?: string }) => {
@@ -292,7 +316,7 @@ describe('SessionLogPanel', () => {
             }
             return { total: sampleEvents.length, events: sampleEvents }
         })
-        renderPanel({}, fetchSystemEvents as ApiClient['fetchSystemEvents'])
+        const { onSelectMessage } = renderPanel({}, fetchSystemEvents as ApiClient['fetchSystemEvents'])
 
         await waitFor(() => {
             expect(screen.getByText('Working on Session Log')).toBeInTheDocument()
@@ -304,6 +328,9 @@ describe('SessionLogPanel', () => {
         await waitFor(() => {
             expect(screen.getByText('Pinned summary about rematerialize hold')).toBeInTheDocument()
         })
+
+        fireEvent.click(screen.getByRole('button', { name: /Pinned summary about rematerialize hold/i }))
+        expect(onSelectMessage).toHaveBeenCalledWith(HUB_MESSAGE_ID, pinTarget)
 
         fireEvent.change(screen.getByPlaceholderText('Filter summaries…'), {
             target: { value: 'rematerialize' }
