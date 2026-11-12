@@ -211,6 +211,8 @@ Gate exit=0 (web 432/432, cli 5031/0, surface 22/22, sentinels clean). Generatio
 
 Adapter normalises ctx_execute / ctx_execute_file / ctx_batch_execute payload into Bash `.tool_input.command` shape; punctuation-stripped copy catches argv lists. Both `.claude/settings.json` and `generateHookSettings.ts` updated (runner sessions). Fail-direction tests + Bash control. **Promote+restart authorized when stack free** — proof = runner-spawned session hook matcher expanded, not only manual launch. Estate `estate-android-gradle-gate.sh` left outside (operator/estate). Unrelated `claude.test.ts` resume identity / #2396 not touched.
 
+**Promoted tip `49f1e53c8`:** gate exit=0, patient restart, WORKING drained to 0 (no yank). Promoted CLI `generateHookSettingsFile` emits Bash + three `mcp__plugin_context-mode_context-mode__ctx_*` matchers. Pre-restart sessions still `matcher: Bash` only until relaunch — new spawns only. Awaiting runner-peer `--settings` forward.
+
 ## #987 rebased to 0.35.0 (2026-11-12)
 
 [Peer](/sessions/290c588b-5f7c-4391-80ad-6078f695d4be) tip `d18a6a38b` on parent `06d9e51f5`. Prior tip 10/10 CLEAN; round 6 CI running. Five bot findings fixed — all absorb re-sequencing, none original feature. Model-error dot kept **separate** ahead of #2380 activity/unread chain.
