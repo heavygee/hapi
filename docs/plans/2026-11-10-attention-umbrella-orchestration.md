@@ -183,6 +183,12 @@ Promote landed tip `66b6b7d6f` (DB 32→35). Bridge fatal: `Tool session_job is 
 
 **Meta fixing:** dedupe block + mock throws like SDK. **Orchestrator:** approve hub restart with MCP fix. **Generation-probe port Meta added early: strip it** in that same promote (not needed for green). Keep call-site restores (rate-limit / `getAccountIdentity`). `reportStop` et al. stay unported. Require live bridge/`listTools` proof after restart — not source grep.
 
-### Closed — tip `f0d8e29b2` (one bounce)
+### Tip `f0d8e29b2` — absorb closed; `link_pr` NOT restored
 
-Gate exit=0 (web 432/432, cli 5031/0, surface 22/22, sentinels clean). Generation probes stripped (`-18/+3`); stop-flow symbols at 0. `treeTerminationVerified` scope fix kept (fork bug). Live bridge `tools/list` returns 15 tools incl. `session_job`. Fresh-session argv proves `link_pr`+`session_job` PRESENT; long-lived MCP processes (Oct 27–Nov 9) stay stale until those sessions restart. Tag `soup-absorb-0.35.0-round2` → final tip. **Follow-ups (not blocking):** drop absorbed `feat/agent-session-import-picker` from `driver-manifest.yaml` (re-resolves every base move); leave ~6947 unreachable objects alone (shared checkout — no prune).
+Gate exit=0 (web 432/432, cli 5031/0, surface 22/22, sentinels clean). Generation probes stripped; stop-flow at 0. MCP bridge fixed (was 0 tools from dup `session_job`; now serves 15). Tag `soup-absorb-0.35.0-round2` → tip.
+
+**Retract:** earlier "fresh-session `link_pr` PRESENT" was wrong — that was bridge `--tools` argv, not the enabled tool list. Peer in-process list: `link_pr` **absent**, `session_job` present.
+
+**Open — path mismatch (pre-absorb):** CLI `GET ${apiUrl}/cli/features` (CLI bearer) → 404; hub mounts features only at `/api` (JWT). Fail-closed → awareness false forever despite `settings.json` githubPrAwareness true. Surface gate cannot see runtime enablement.
+
+**Orchestrator call (bounce authorized):** hub-side — expose `GET /cli/features` under existing CLI auth (same response shape as `/api/features`). Do **not** point CLI at `/api/features` (CLI token ≠ JWT → 401 forever). Include a regression test that CLI-token GET succeeds. Proof bar after restart: in-process tool list shows `link_pr` (not argv, not source grep). Manifest de-churn (`feat/agent-session-import-picker`) can ride same bounce if ready; leave gc pile alone.
