@@ -203,13 +203,9 @@ Gate exit=0 (web 432/432, cli 5031/0, surface 22/22, sentinels clean). Generatio
 
 **Attribution correction:** `/cli/features` 404 was **not** pre-absorb. Consumer `fetchGithubPrAwareness.ts` entered via Meta `baf529bbf` (Nov 11) without the hub half; `feat/boards` carries both but is not a manifest layer. Causal claim retracted.
 
-**Durability (Option 1 authorized, standalone next cycle):** land on **fork main** so `full-recipe` keeps it. Reject options 2/3. `ctx_execute` promote already done (`49f1e53c8`) — nothing to ride with. Concrete brief:
-1. MCP tool-name registration — `startHappyServer.ts` `['set_voice_mode', 'link_issue', 'link_pr']` loop
-2. `cli/src/api/fetchGithubPrAwareness.ts` (absent on `origin/main`)
-3. Hub `GET /features` on CLI router → shared `readGithubPrAwareness()` (helper lands too); no second `createFeaturesRoutes()` mount; PATCH stays off `/cli`
-4. Tests: CLI-token GET 200 both ways / anon 401 / PATCH 404 in `cli.test.ts` + `link_pr` catalog tests
-5. Proof: symbols on fork main; enablement path intact under **main-isolation** containment (not composed tip)
-Attribution: one-sided gate was Meta `baf529bbf` (consumer from `feat/boards` without route) — cherry-pick both halves together.
+**Durability — Option 1 CANCELLED (operator 2026-11-12):** fork main is for fork-private only. `link_pr` / PR awareness is upstream-bound (#1163) — must **not** land on fork main. Durability = merge #1163 upstream (or keep tip/layer until then). Meta stand down.
+
+**Orchestrator remit (hard):** umbrella dogfood + PR babysit only. No Meta kitchen scope unless it blocks an umbrella PR's dogfood or chips.
 
 **Meta next (non-blocking):** `ctx_execute(shell)` bypasses Bash pre-tool guards; Bash guard also *redirects* `curl` into `ctx_execute`, so agents following the redirect leave production-mutation checks without intending to. Fix must cover the steer-into-ungarded path, not only a matcher list.
 
@@ -227,4 +223,4 @@ Adapter normalises ctx_execute / ctx_execute_file / ctx_batch_execute payload in
 
 **Calls:** keep rounds while productive; Ready-YES at next green+CLEAN with no mid-round actionable findings. Prepare-only. Pattern noted: conflict count ≠ risk on long-drift forks; prefer earlier rebases next time. `ctx_execute(shell)` bypasses Bash pre-tool guards → Meta tooling backlog (028d0a86 superseded).
 
-**Dogfood re-stamp — Option 1 (revised):** peer correctly refused CI-green-alone stamp (attestation + 48h merge-intent). Peer does **not** stack-switch / does **not** stamp yet. After Ready-YES: Operator/Meta live-dogfoods the tip when stack free; peer posts `dogfooded since <that UTC>` once told. Option 3 (admin re-date without live run) rejected — absorb moved control flow. Label may stay; countdown only moves on a truthful stamp.
+**Dogfood re-stamp — operator override 2026-11-12:** #987 has lived in soup and been dogfooded; rebase alone does not void that. **No re-stamp / no Option 1 live re-run.** Keep existing `dogfooded` label; do not re-date the countdown. Ready-YES/CLEAN when CI lands; prepare-only.
