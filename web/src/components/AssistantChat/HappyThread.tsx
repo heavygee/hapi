@@ -2235,8 +2235,14 @@ export function HappyThread(props: {
         props.onOutlineOpenChange(false)
     }, [loadOlderForOutline, props.onOutlineItemClick, props.onOutlineOpenChange])
 
-    const handleSessionLogSelect = useCallback(async (hubMessageId: string) => {
-        const candidates = sessionLogTargetMessageIds(hubMessageId)
+    const handleSessionLogSelect = useCallback(async (
+        hubMessageId: string,
+        preferredTargetMessageId?: string | null
+    ) => {
+        // Close first so the transcript is visible (esp. full-bleed mobile Log).
+        props.onSessionLogOpenChange?.(false)
+
+        const candidates = sessionLogTargetMessageIds(hubMessageId, preferredTargetMessageId)
         const findTarget = (): HTMLElement | null => {
             for (const targetMessageId of candidates) {
                 const el = document.getElementById(getConversationMessageAnchorId(targetMessageId))
@@ -2259,8 +2265,7 @@ export function HappyThread(props: {
             target.scrollIntoView({ block: 'start', behavior: 'smooth' })
             autoScrollEnabledRef.current = false
         }
-        // Keep Session Log open after jump (unlike Outline).
-    }, [props.onSeekToMessage])
+    }, [props.onSeekToMessage, props.onSessionLogOpenChange])
 
     useEffect(() => {
         if (searchTargetHistoryLockRef.current) {
@@ -2671,8 +2676,8 @@ export function HappyThread(props: {
                             sessionId={props.sessionId}
                             title={props.metadata?.name ?? props.metadata?.summary?.text ?? props.metadata?.path ?? props.sessionId.slice(0, 8)}
                             onClose={() => props.onSessionLogOpenChange?.(false)}
-                            onSelectMessage={(messageId) => {
-                                void handleSessionLogSelect(messageId)
+                            onSelectMessage={(messageId, targetMessageId) => {
+                                void handleSessionLogSelect(messageId, targetMessageId)
                             }}
                         />
                     </>
