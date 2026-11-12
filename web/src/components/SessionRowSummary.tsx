@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
 import type { SessionSummary } from '@/types/api'
 import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
-import { ScheduleIcon } from '@/components/icons'
+import { ScheduleIcon, StoppedBadgeIcon } from '@/components/icons'
 import { HoverTooltip, SESSION_ROW_TOOLTIP_FOCUS_CLASS, useSessionRowTooltipIds } from '@/components/HoverTooltip'
 import { getAttentionLabel, SessionAttentionIndicator, SessionSpinner } from '@/components/SessionAttentionIndicator'
 import {
@@ -103,6 +103,13 @@ function getSessionTimeLabel(
  * rows or spinners; unread sessions have a separate accent dot.
  * Used by the session list and by rich-composer mention chip tooltips.
  */
+const PRESENCE_BADGE_CLASS = {
+    working: 'bg-[var(--app-badge-success-text)] animate-pulse',
+    background: 'bg-blue-400 animate-pulse',
+    waiting: 'border-2 border-[var(--app-badge-success-text)] bg-[var(--app-bg)]',
+    stopped: 'bg-[var(--app-bg)] text-[var(--app-hint)]',
+} as const
+
 export function SessionRowSummary(props: {
     session: SessionSummary
     showPath?: boolean
@@ -194,6 +201,19 @@ export function SessionRowSummary(props: {
     const timeStamp = getSessionTimeStamp(s, importedAt)
     const timeAbsolute = timeStamp !== null ? formatAbsoluteDateTime(timeStamp) : null
     const attachedJob = s.attachedJob?.status === 'running' ? s.attachedJob : null
+    // The badge carries *which* state on inspection; the row-level residency
+    // fade carries *which rows* at a glance. Same predicate (!active), two
+    // scales — a 10px mark doesn't survive a long-list scan on its own, which
+    // is why the badge sits OUTSIDE the faded container.
+    const presenceIsRunning = s.active && s.thinking
+    const presenceIsBackgroundOnly = s.active && !s.thinking && (s.backgroundTaskCount ?? 0) > 0
+    const presence: 'working' | 'background' | 'waiting' | 'stopped' = presenceIsBackgroundOnly
+        ? 'background'
+        : presenceIsRunning || attachedJob
+            ? 'working'
+            : s.active
+                ? 'waiting'
+                : 'stopped'
     // Tick once a minute so elapsed wall-time advances without waiting for a heartbeat SSE.
     const [nowMs, setNowMs] = useState(() => Date.now())
     useEffect(() => {
@@ -216,9 +236,19 @@ export function SessionRowSummary(props: {
         <div className={`flex w-full min-w-0 flex-col gap-1 ${className ?? ''}`}>
             {/* Fade = residency (RAM) only. Running attached jobs must not un-dim
                 a disconnected row — the job chip/progress below carries that signal. */}
-            <div className={`grid grid-cols-[minmax(9rem,1fr)_minmax(0,max-content)] items-center gap-2 ${!s.active ? 'opacity-50' : ''}`}>
+            <div className="flex w-full min-w-0 items-center gap-2">
+                <span className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center -translate-y-px">
+                    <AgentFlavorIcon flavor={s.metadata?.flavor} className="h-4 w-4" />
+                    <span
+                        data-testid="session-presence"
+                        data-presence={presence}
+                        className={`absolute -bottom-0.5 -right-0.5 box-border flex h-2.5 w-2.5 items-center justify-center rounded-full ring-2 ring-[var(--app-bg)] ${PRESENCE_BADGE_CLASS[presence]}`}
+                    >
+                        {presence === 'stopped' ? <StoppedBadgeIcon className="h-2.5 w-2.5" /> : null}
+                    </span>
+                </span>
+            <div className={`grid min-w-0 flex-1 grid-cols-[minmax(9rem,1fr)_minmax(0,max-content)] items-center gap-2 ${!s.active ? 'opacity-50' : ''}`}>
                 <div className="flex min-w-0 items-center gap-2">
-                    <AgentFlavorIcon flavor={s.metadata?.flavor} className="h-4 w-4 shrink-0 -translate-y-px" />
                     <div
                         className={`min-w-0 flex-1 truncate text-sm ${isUnread ? 'font-semibold' : 'font-medium'} ${s.active ? 'text-[var(--app-fg)]' : 'text-[var(--app-hint)]'}`}
                         title={sessionName}
@@ -339,6 +369,7 @@ export function SessionRowSummary(props: {
                         </span>
                     ) : null}
                 </div>
+            </div>
             </div>
             {attachedJob && jobProgressLabel ? (
                 <div

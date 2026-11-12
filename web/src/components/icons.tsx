@@ -186,6 +186,17 @@ export function ScheduleIcon(props: IconProps) {
 }
 
 /** Spinner spokes; callers add the spin animation and color. */
+export function StoppedBadgeIcon(props: IconProps) {
+    return createIcon(
+        <>
+            <path d="M7.2 6.2a8.6 8.6 0 1 0 9.6 0" />
+            <path d="M12 2v8.4" />
+        </>,
+        props,
+        3.6
+    )
+}
+
 export function ArchiveIcon(props: IconProps) {
     return createIcon(
         <>
