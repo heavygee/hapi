@@ -2127,13 +2127,6 @@ const SessionItem = memo(function SessionItem(props: {
         }
     }
 
-    const supportsCurrentFork = s.active && s.metadata?.flavor === 'codex'
-        && s.metadata?.conversationHistory?.forkCurrent === true
-    const supportsArchivedFork = !s.active && s.metadata?.flavor === 'codex'
-        && s.metadata?.lifecycleState === 'archived'
-        && Boolean(s.metadata.agentSessionId && s.metadata.machineId)
-    const supportsCompletedFork = s.metadata?.conversationHistory?.forkLatestCompleted === true
-    const forkDisabledReason = supportsCurrentFork && s.thinking && !supportsCompletedFork ? t(s.metadata?.conversationHistory?.forkLatestCompleted === false ? 'session.action.forkNoCompleted' : 'session.action.forkRunning') : undefined
 
     const longPressHandlers = useLongPress({
         onLongPress: (point) => {

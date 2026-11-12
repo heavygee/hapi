@@ -49,8 +49,6 @@ export async function claudeRemote(opts: {
     onSessionFound: (id: string, extras?: { forkedFrom?: string }) => void,
     onThinkingChange?: (thinking: boolean) => void,
     onMessage: (message: SDKMessage) => void,
-    onContextUsage?: (usage: { model?: string, maxTokens?: number }) => void,
-    onAccountIdentity?: (accountIdentity: string | null) => void,
     onFirstResult?: (initialMessage: string) => void,
     onCompletionEvent?: (message: string) => void,
     onSessionReset?: () => void
@@ -302,12 +300,6 @@ export async function claudeRemote(opts: {
             );
             logger.debugLargeJson(`[claudeRemote] Message ${message.type}`, message);
 
-            // Upstream's steer-replay + compact_boundary handling is NOT taken
-            // here: it depends on pushedUuids / pendingSteers / pushUserMessage,
-            // a ~437-line steering subsystem this fork never absorbed (436 vs 873
-            // lines). Taking its call sites without that machinery is the
-            // kept-call-site / lost-declaration failure. Port the subsystem as its
-            // own change if we want it.
             // Handle messages
             opts.onMessage(message);
 
@@ -336,37 +328,6 @@ export async function claudeRemote(opts: {
                 updateThinking(true);
 
                 const systemInit = message as SDKSystemMessage;
-
-                if (opts.onContextUsage) {
-                    // Older CLIs may not support get_context_usage; the converter's seed stays.
-                    response.getContextUsage().then(opts.onContextUsage, (e) => {
-                        logger.debug('[claudeRemote] get_context_usage failed', e);
-                    });
-                }
-
-                if (
-                    opts.onAccountIdentity
-                    && typeof (response as { getAccountIdentity?: () => Promise<string | null> }).getAccountIdentity === 'function'
-                ) {
-                    response.getAccountIdentity().then(opts.onAccountIdentity, (e) => {
-                        logger.debug('[claudeRemote] getAccountIdentity failed', e);
-                    });
-                }
-
-                // Claude silently starts in default when plan/auto is unavailable
-                // (e.g. auto disabled by settings); surface it instead of
-                // showing a mode that is not in effect.
-                const launchedMode = systemInit.permissionMode;
-                if (
-                    switchesInFlight === 0
-                    && (nativeMode === 'auto' || nativeMode === 'plan')
-                    && launchedMode
-                    && launchedMode !== nativeMode
-                ) {
-                    const requested = nativeMode;
-                    nativeMode = 'default';
-                    opts.onPermissionModeRejected?.('default', `Claude could not start in ${requested} mode, so it is running in default mode`);
-                }
 
                 // Session id is still in memory, wait until session file is written to disk
                 // Start a watcher for to detect the session id

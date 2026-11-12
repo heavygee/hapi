@@ -32,7 +32,7 @@ it('upgrades to read-state columns (upstream ladder v29→v30)', () => {
         expect((restarted as any).db?.prepare?.('PRAGMA user_version') || null)
         restarted.close()
         const versionDb = new Database(path)
-        expect((versionDb.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(34)
+        expect((versionDb.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(35)
         versionDb.close()
     } finally { Bun.gc(true); rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }) }
 })

@@ -1,26 +1,26 @@
 import React from "react";
-import { Session } from './session'
-import { RemoteModeDisplay } from '@/ui/ink/RemoteModeDisplay'
-import { claudeRemote } from './claudeRemote'
-import { ClaudeResumeUnavailableError } from './utils/claudeResumeUnavailableError'
-import { resolveClaudeRemoteResumeTarget } from './utils/claudeResumeGuard'
-import { PermissionHandler } from './utils/permissionHandler'
-import { Future } from '@/utils/future'
-import { SDKAssistantMessage, SDKMessage, SDKUserMessage } from './sdk'
-import { formatClaudeMessageForInk } from '@/ui/messageFormatterInk'
-import { logger } from '@/ui/logger'
-import { SDKToLogConverter } from './utils/sdkToLogConverter'
-import { PLAN_FAKE_REJECT } from './sdk/prompts'
-import { EnhancedMode } from './loop'
-import { OutgoingMessageQueue } from './utils/OutgoingMessageQueue'
-import type { ClaudePermissionMode } from '@hapi/protocol/types'
-import { applySessionTitleFallback } from './utils/sessionTitleFallback'
+import { Session } from "./session";
+import { RemoteModeDisplay } from "@/ui/ink/RemoteModeDisplay";
+import { claudeRemote } from "./claudeRemote";
+import { ClaudeResumeUnavailableError } from "./utils/claudeResumeUnavailableError";
+import { resolveClaudeRemoteResumeTarget } from "./utils/claudeResumeGuard";
+import { PermissionHandler } from "./utils/permissionHandler";
+import { Future } from "@/utils/future";
+import { SDKAssistantMessage, SDKMessage, SDKUserMessage } from "./sdk";
+import { formatClaudeMessageForInk } from "@/ui/messageFormatterInk";
+import { logger } from "@/ui/logger";
+import { SDKToLogConverter } from "./utils/sdkToLogConverter";
+import { PLAN_FAKE_REJECT } from "./sdk/prompts";
+import { EnhancedMode } from "./loop";
+import { OutgoingMessageQueue } from "./utils/OutgoingMessageQueue";
+import type { ClaudePermissionMode } from "@hapi/protocol/types";
+import { applySessionTitleFallback } from './utils/sessionTitleFallback';
 import {
     RemoteLauncherBase,
     type RemoteLauncherDisplayContext,
     type RemoteLauncherExitReason
 } from "@/modules/common/remote/RemoteLauncherBase";
-import { isUnrecoverableClaudeResumeError } from './utils/claudeResumeError'
+import { isUnrecoverableClaudeResumeError } from "./utils/claudeResumeError";
 
 interface PermissionsField {
     date: number;
@@ -496,8 +496,6 @@ class ClaudeRemoteLauncher extends RemoteLauncherBase {
                         claudeEnvVars: session.claudeEnvVars,
                         claudeArgs: session.claudeArgs,
                         onMessage,
-                        onContextUsage: (usage) => sdkToLogConverter.applyContextUsage(usage.model, usage.maxTokens),
-                        onAccountIdentity: (identity) => sdkToLogConverter.updateAccountIdentity?.(identity),
                         onFirstResult: (initialMessage) => {
                             applySessionTitleFallback(session.client, initialMessage);
                         },

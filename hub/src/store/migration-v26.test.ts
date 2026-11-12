@@ -79,7 +79,7 @@ describe('schema migration v26 to v27', () => {
 
         const migrated = new Store(dbPath)
         const internalDb = (migrated as unknown as { db: Database }).db
-        expect((internalDb.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(34)
+        expect((internalDb.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(35)
         const table = internalDb.prepare(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'machine_reenroll_replays'"
         ).get() as { name: string } | undefined
@@ -120,7 +120,7 @@ describe('schema migration v26 to v27', () => {
         const minPlan = minPlanStatement.all('a', 'b', 123) as Array<{ detail: string }>
         minPlanStatement.finalize()
 
-        expect(version.user_version).toBe(34)
+        expect(version.user_version).toBe(35)
         expect(countPlan.some((row) => row.detail.includes('idx_messages_future_scheduled_queued'))).toBe(true)
         expect(minPlan.some((row) => row.detail.includes('idx_messages_future_scheduled_queued'))).toBe(true)
         migrated.close()

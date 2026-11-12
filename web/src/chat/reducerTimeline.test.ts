@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { reduceTimeline } from './reducerTimeline'
 import { normalizeAgentRecord } from './normalizeAgent'
+import { buildMessageMetadataLabels } from '@/components/AssistantChat/messages/MessageMetadata'
 import { aggregateResponseGroups } from '@/lib/assistant-runtime'
 import { buildVisibleChatBlocks } from './toolGroups'
 import { toolDurationMs } from '@/components/ToolCard/toolDuration'

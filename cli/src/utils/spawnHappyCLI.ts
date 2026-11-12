@@ -26,6 +26,7 @@
  */
 
 import { spawn, spawnSync, SpawnOptions, type ChildProcess } from 'child_process';
+import crossSpawn from 'cross-spawn';
 import { join, isAbsolute, resolve, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isBunCompiled, projectPath } from '@/projectPath';

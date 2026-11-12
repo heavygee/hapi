@@ -250,6 +250,10 @@ export function toSessionSummaryMetadata(metadata: Metadata | null | undefined):
         hapiMcpUrl: metadata.hapiMcpUrl ?? undefined,
         lastModelError: metadata.lastModelError,
         externalRefs: metadata.externalRefs,
+        // Without this the fork-from-list capability checks in SessionList
+        // (forkCurrent / forkLatestCompleted) never see a value, so the menu
+        // item silently never offers itself.
+        conversationHistory: metadata.capabilities?.conversationHistory,
     }
 }
 

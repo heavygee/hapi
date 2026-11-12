@@ -727,7 +727,7 @@ function applyLatestResponse(
         : previous.messages
     const authoritative = mergeMessages(preserved, retainedResponseMessages)
     const incoming = mergeMessages(authoritative, concurrentServerRows)
-    const { kept, dropped, oldest: oldestKept } = trimPreservingQueued(incoming, options.trimLimit ?? VISIBLE_WINDOW_SIZE, 'append')
+    const { kept, dropped } = trimPreservingQueued(incoming, options.trimLimit ?? VISIBLE_WINDOW_SIZE, 'append')
     const snapshotHead = pagePosition(response.page.snapshotHeadAt, response.page.snapshotHeadSeq)
         ?? derivePosition(response.messages, 'newest')
     const newestKept = derivePosition(kept, 'newest')

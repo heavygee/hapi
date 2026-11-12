@@ -638,10 +638,6 @@ export default {
   'session.action.delete': 'Delete',
   'session.action.copy': 'Copy',
   'session.action.copyReference': 'Copy reference',
-  'session.action.fork': 'Fork session',
-  'session.action.forkNoCompleted': 'No completed turn is available to fork.',
-  'dialog.sessionFork.completedDescription': 'Fork through the last completed turn. The running turn is excluded and the source keeps running.',
-  'session.action.forkRunning': 'Wait for the current turn to finish before forking this session.',
 
   // Dialogs
   'dialog.uri.title': 'Open this link?',

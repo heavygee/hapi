@@ -2,7 +2,6 @@ import axios from 'axios'
 import type { AgentState, ClearOpencodeSessionCallbackRequest, ClearOpencodeSessionResponse, CreateMachineResponse, CreateSessionResponse, RunnerState, Machine, MachineMetadata, Metadata, Session } from '@/api/types'
 import { applyHubSessionSummaryContract } from '@/modules/common/sessionSummaryInstruction'
 import { applyVoiceModePreference } from '@/modules/common/voiceModeInstruction'
-import type { LocalResumeTarget, ResumableSession } from '@hapi/protocol'
 import type { LocalResumeTarget, LocalResumeTargetByAgentResponse, ResumableSession } from '@hapi/protocol'
 import {
     AgentStateSchema,
