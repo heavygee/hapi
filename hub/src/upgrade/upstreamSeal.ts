@@ -394,8 +394,23 @@ export async function materializeUpstreamSeal(options: {
     mkdirSync(tipDir, { recursive: true })
     writeFileSync(join(tipDir, 'manifest.json'), `${JSON.stringify(options.manifest, null, 2)}\n`)
 
-    // NOTES before binary flip — banner reads tip NOTES; GH is source of truth (#304).
-    await downloadFleetNotesToTip(options.manifestUrl, tipDir)
+    // Notes ride inside the manifest we already hold, so by the time a host
+    // knows this tip exists it also has the notes — no second request, nothing
+    // to lag or 404. That is the whole point: artifact availability and notes
+    // availability are the same event.
+    //
+    // The network fetch remains only for manifests published before the field
+    // existed. It was the sole path until 2026-11-12, which is why a host could
+    // end up with the software installed and the banner saying no notes had
+    // been published (#304, twice).
+    const manifestNotes = typeof options.manifest.releaseNotes === 'string'
+        ? options.manifest.releaseNotes.trim()
+        : ''
+    if (manifestNotes.length > 0) {
+        writeFileSync(join(tipDir, 'NOTES.md'), `${manifestNotes}\n`)
+    } else {
+        await downloadFleetNotesToTip(options.manifestUrl, tipDir)
+    }
 
     const destBinary = join(tipDir, options.binary.path)
     const downloadUrl = resolveBinaryDownloadUrl(options.manifestUrl, options.binary)

@@ -216,3 +216,53 @@ describe('ensureSoupCliArtifact', () => {
         }
     })
 })
+
+describe('release notes ride inside the manifest (#304 — Ian empty "what\'s new")', () => {
+    // Notes used to be a SECOND fetch after manifest.json. That request could
+    // 404 on CDN lag or be skipped entirely, and the banner then degraded to
+    // "No release notes published for this tip yet" while the software was
+    // installed and working. GitHub already solves this — a release holds its
+    // body and its assets as one object — so the notes now ship inside the
+    // manifest every host already fetches. Artifact availability and notes
+    // availability become the same event.
+    const writeTip = (dir: string, manifest: Record<string, unknown>, notesFile?: string) => {
+        mkdirSync(dir, { recursive: true })
+        writeFileSync(join(dir, 'manifest.json'), JSON.stringify(manifest))
+        if (notesFile !== undefined) writeFileSync(join(dir, 'NOTES.md'), notesFile)
+    }
+    const base = {
+        schema: 1,
+        tag: 'hapi-soup-v2026.11.12-49f1e53',
+        composedTipSha: '49f1e53c8007',
+        binaries: [{ platform: 'linux', arch: 'x64', path: 'linux-x64-baseline/hapi', sha256: 'x', sizeBytes: 1 }],
+    }
+
+    it('serves notes from the manifest with NO NOTES.md on disk', () => {
+        const root = mkdtempSync(join(tmpdir(), 'soup-notes-'))
+        const dir = join(root, base.tag)
+        // The case that matters: the separate file never arrived.
+        writeTip(dir, { ...base, releaseNotes: 'Atomic notes from the manifest.' })
+        writeFileSync(join(root, 'latest-tag.txt'), base.tag)
+        const tip = readPublishedSoupTip(root, {} as NodeJS.ProcessEnv)
+        expect(tip?.releaseNotes).toBe('Atomic notes from the manifest.')
+        rmSync(root, { recursive: true, force: true })
+    })
+
+    it('prefers the manifest over a stale NOTES.md', () => {
+        const root = mkdtempSync(join(tmpdir(), 'soup-notes-'))
+        const dir = join(root, base.tag)
+        writeTip(dir, { ...base, releaseNotes: 'fresh' }, 'stale from a previous tip')
+        writeFileSync(join(root, 'latest-tag.txt'), base.tag)
+        expect(readPublishedSoupTip(root, {} as NodeJS.ProcessEnv)?.releaseNotes).toBe('fresh')
+        rmSync(root, { recursive: true, force: true })
+    })
+
+    it('falls back to NOTES.md for tips published before the field existed', () => {
+        const root = mkdtempSync(join(tmpdir(), 'soup-notes-'))
+        const dir = join(root, base.tag)
+        writeTip(dir, base, 'legacy notes on disk')
+        writeFileSync(join(root, 'latest-tag.txt'), base.tag)
+        expect(readPublishedSoupTip(root, {} as NodeJS.ProcessEnv)?.releaseNotes).toBe('legacy notes on disk')
+        rmSync(root, { recursive: true, force: true })
+    })
+})

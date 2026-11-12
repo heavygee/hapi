@@ -36,6 +36,13 @@ export type SoupManifest = {
     tag: string
     composedTipSha: string
     binaries: SoupBinaryEntry[]
+    /**
+     * Release notes, carried inside the manifest so they are atomic with the
+     * artifact — the same guarantee a GitHub release gives by holding its body
+     * and its assets as one object. Optional only because tips published before
+     * 2026-11-12 predate the field; new publishes always set it.
+     */
+    releaseNotes?: string
 }
 
 export type PublishedSoupTip = {
@@ -151,7 +158,15 @@ export function readPublishedSoupTip(
             composedTipSha: typeof parsed.composedTipSha === 'string' ? parsed.composedTipSha : '',
             manifestPath,
             binaries: parsed.binaries,
-            releaseNotes: readSoupReleaseNotes(tipDir),
+            // The manifest is the atomic carrier: it ships with the artifact,
+            // so notes cannot be missing while the software is present. The
+            // on-disk NOTES.md is a fallback for tips published before this
+            // field existed, and for nothing else — a separately-fetched file
+            // is exactly how "no release notes published for this tip yet"
+            // kept reaching users (#304).
+            releaseNotes: typeof parsed.releaseNotes === 'string' && parsed.releaseNotes.trim().length > 0
+                ? parsed.releaseNotes
+                : readSoupReleaseNotes(tipDir),
         }
     } catch {
         return null
