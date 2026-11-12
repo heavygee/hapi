@@ -5,7 +5,7 @@ import { safeCopyToClipboard } from '@/lib/clipboard'
 import { buildSessionReferenceText } from '@/lib/sessionReference'
 import { usePlatform } from '@/hooks/usePlatform'
 import { useAnchoredMenu } from '@/hooks/useAnchoredMenu'
-import { CopyIcon } from '@/components/icons'
+import { CopyIcon, ForkIcon } from '@/components/icons'
 
 export type SessionActionMenuLinkedPr = {
     /** Chip glyph (emoji / `PR` / `?`) — leading the status explanation. */
@@ -32,6 +32,8 @@ type SessionActionMenuProps = {
     onMarkUnread?: () => void
     /** #1717: present only when the session currently reads as blocked. */
     onMarkUnblocked?: () => void
+    onForkSession?: () => void
+    forkDisabledReason?: string
     onSyncCodex?: () => void
     onSyncPi?: () => void
     onArchive: () => void
@@ -216,6 +218,8 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         onExport,
         onMarkUnread,
         onMarkUnblocked,
+        onForkSession,
+        forkDisabledReason,
         onSyncCodex,
         onSyncPi,
         onArchive,
@@ -300,6 +304,11 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
 
     // The left text inset includes the icon and gap; mirror it on the right so
     // the text-to-border distance is symmetric without counting the icon twice.
+    const handleForkSession = () => {
+        onClose()
+        onForkSession?.()
+    }
+
     const baseItemClassName =
         'flex w-full items-center gap-3 rounded-md py-2 pl-3 pr-[42px] text-left text-base transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]'
 
@@ -377,6 +386,32 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                     <CopyIcon className="h-[18px] w-[18px] text-[var(--app-hint)]" />
                     {t('session.action.copyReference')}
                 </button>
+
+                {onForkSession || forkDisabledReason ? (
+                    <HoverTooltip
+                        id={`${resolvedMenuId}-fork-tooltip`}
+                        className="w-full [&>span:first-child]:w-full"
+                        align="start"
+                        revealOnParentFocusClass="group-focus-within:opacity-100 group-focus-within:visible"
+                        target={(
+                            <button
+                                type="button"
+                                role="menuitem"
+                                aria-disabled={forkDisabledReason ? true : undefined}
+                                aria-describedby={forkDisabledReason ? `${resolvedMenuId}-fork-tooltip` : undefined}
+                                className={`${baseItemClassName} ${forkDisabledReason
+                                    ? 'cursor-not-allowed opacity-50'
+                                    : 'hover:bg-[var(--app-subtle-bg)]'}`}
+                                onClick={forkDisabledReason ? undefined : handleForkSession}
+                            >
+                                <ForkIcon className="h-[18px] w-[18px] text-[var(--app-hint)]" />
+                                {t('session.action.fork')}
+                            </button>
+                        )}
+                    >
+                        {forkDisabledReason ?? t('session.action.fork')}
+                    </HoverTooltip>
+                ) : null}
 
                 {onMarkUnblocked ? (
                     <button

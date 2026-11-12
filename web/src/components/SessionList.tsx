@@ -1984,6 +1984,8 @@ const SessionItem = memo(function SessionItem(props: {
     const [linkPrOpen, setLinkPrOpen] = useState(false)
     const [exportOpen, setExportOpen] = useState(false)
     const [archiveOpen, setArchiveOpen] = useState(false)
+    const [forkOpen, setForkOpen] = useState(false)
+    const [forkPending, setForkPending] = useState(false)
     // Read from the shared mutation cache, not row state: the row remounts when
     // an archived session moves between sections (e.g. out of Active), and the
     // spinner must survive that until the request settles.
@@ -2067,6 +2069,20 @@ const SessionItem = memo(function SessionItem(props: {
             setReopenError(formatReopenError(error))
         }
     }
+
+    // #2263 fork-from-list: Codex only. A running turn can still fork from the
+    // last completed turn when the transcript exposes one.
+    const supportsCurrentFork = s.active && s.metadata?.flavor === 'codex'
+        && s.metadata?.conversationHistory?.forkCurrent === true
+    const supportsArchivedFork = !s.active && s.metadata?.flavor === 'codex'
+        && s.metadata?.lifecycleState === 'archived'
+        && Boolean(s.metadata.agentSessionId && s.metadata.machineId)
+    const supportsCompletedFork = s.metadata?.conversationHistory?.forkLatestCompleted === true
+    const forkDisabledReason = supportsCurrentFork && s.thinking && !supportsCompletedFork
+        ? t(s.metadata?.conversationHistory?.forkLatestCompleted === false
+            ? 'session.action.forkNoCompleted'
+            : 'session.action.forkRunning')
+        : undefined
 
     const handleQuickArchive = async () => {
         if (archiveNeedsConfirmation) {
@@ -2257,6 +2273,10 @@ const SessionItem = memo(function SessionItem(props: {
                 onExport={() => setExportOpen(true)}
                 onMarkUnread={() => markSessionUnread(s.id, s.readState)}
                 onMarkUnblocked={blocked ? () => setUnblockOpen(true) : undefined}
+                onForkSession={api && ((supportsCurrentFork && (!s.thinking || supportsCompletedFork)) || supportsArchivedFork)
+                    ? () => setForkOpen(true)
+                    : undefined}
+                forkDisabledReason={forkDisabledReason}
                 onArchive={() => setArchiveOpen(true)}
                 onReopen={cursorReopenDisabledReason ? undefined : handleReopen}
                 reopenDisabledReason={cursorReopenDisabledReason}
@@ -2288,6 +2308,34 @@ const SessionItem = memo(function SessionItem(props: {
                     onConfirm={async () => setReopenError(null)}
                     isPending={false}
                     centerTitle
+                />
+            ) : null}
+
+            {forkOpen ? (
+                <ConfirmDialog
+                    isOpen={true}
+                    onClose={() => { if (!forkPending) setForkOpen(false) }}
+                    title={t('dialog.sessionFork.title')}
+                    description={t(s.thinking && supportsCompletedFork
+                        ? 'dialog.sessionFork.completedDescription'
+                        : 'dialog.sessionFork.description')}
+                    confirmLabel={t('dialog.sessionFork.confirm')}
+                    confirmingLabel={t('dialog.sessionFork.confirming')}
+                    isPending={forkPending}
+                    destructive
+                    centerTitle
+                    onConfirm={async () => {
+                        if (!api) return
+                        setForkPending(true)
+                        try {
+                            const result = s.thinking && supportsCompletedFork
+                                ? await api.forkConversation(s.id, undefined, true)
+                                : await api.forkConversation(s.id)
+                            onSelect(result.sessionId)
+                        } finally {
+                            setForkPending(false)
+                        }
+                    }}
                 />
             ) : null}
 
