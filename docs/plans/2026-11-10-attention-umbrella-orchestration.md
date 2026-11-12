@@ -224,3 +224,7 @@ Adapter normalises ctx_execute / ctx_execute_file / ctx_batch_execute payload in
 **Calls:** keep rounds while productive; Ready-YES at next green+CLEAN with no mid-round actionable findings. Prepare-only. Pattern noted: conflict count ≠ risk on long-drift forks; prefer earlier rebases next time. `ctx_execute(shell)` bypasses Bash pre-tool guards → Meta tooling backlog (028d0a86 superseded).
 
 **Dogfood re-stamp — operator override 2026-11-12:** #987 has lived in soup and been dogfooded; rebase alone does not void that. **No re-stamp / no Option 1 live re-run.** Keep existing `dogfooded` label; do not re-date the countdown. Ready-YES/CLEAN when CI lands; prepare-only.
+
+### READY-YES / CLEAN @ `cdd6bcbc0` (2026-11-12)
+
+Three-dim PASS (CI 10/10, 0 threads, bot pass). MERGEABLE/CLEAN on 0.35.0 parent. `dogfooded` kept untouched. Prepare-only / not merged. Peer idling. Two CI reds were flakes (Android scratchlist / iOS typography) — verified outside our diffs, passed on rerun.
