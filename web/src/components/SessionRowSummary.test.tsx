@@ -77,17 +77,27 @@ describe('SessionRowSummary background status', () => {
         expect(idleBadge).not.toHaveClass('bg-[var(--app-badge-success-text)]')
     })
 
-    it('does not dim disconnected rows and gives them a stopped badge instead of nothing', () => {
+    // The merge resurrected the 832c5922f-era version of this test, which
+    // asserted the INVERSE ('does not dim') and had been superseded on both
+    // sides -- it also contradicted 'fades inactive rows' further down this
+    // same file. This is upstream's current version, which agrees with the
+    // fork's behaviour.
+    it('dims disconnected rows and gives them a stopped badge instead of nothing', () => {
         const { container } = render(
             <I18nProvider>
                 <SessionRowSummary session={makeSummary({ active: false, backgroundTaskCount: 0 })} />
             </I18nProvider>
         )
-        expect(container.querySelector('.opacity-50')).toBeNull()
+        // Two scales of the same fact: the badge names the state on inspection,
+        // the row fade makes it legible while scanning a long list.
+        const faded = container.querySelector('.opacity-50')
+        expect(faded).not.toBeNull()
         const badge = container.querySelector('[data-testid="session-presence"]')
         expect(badge).toHaveAttribute('data-presence', 'stopped')
         expect(badge).not.toHaveClass('animate-pulse')
         expect(badge?.querySelector('svg')).not.toBeNull()
+        // The mark must not be dimmed along with the title line.
+        expect(faded!.contains(badge)).toBe(false)
     })
 
     it('shows a detailed background tooltip on the agent icon in Extended mode', () => {

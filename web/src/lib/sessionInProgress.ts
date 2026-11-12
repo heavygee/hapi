@@ -20,9 +20,10 @@ export function isAgentForegroundThinking(session: SessionSummary): boolean {
     if ((session.pendingRequestsCount ?? 0) > 0) {
         return false
     }
-    if (hasRunningAttachedJob(session)) {
-        return false
-    }
+    // No attached-job suppression here: the CLI filters ambient ACP chatter
+    // (#1553), so a running job alongside thinking=true is a real agent turn.
+    // The merge kept the soup's suppression under upstream's docstring, which
+    // said the opposite, and hid genuinely-running sessions from Running.
     return true
 }
 
