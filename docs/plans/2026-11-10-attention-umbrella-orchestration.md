@@ -182,3 +182,15 @@ Promote composed all 87 layers then gate rolled back on **cli** (14 blocking). L
 Promote landed tip `66b6b7d6f` (DB 32→35). Bridge fatal: `Tool session_job is already registered` — duplicate `if (toolNames.has(SESSION_JOB_TOOL_NAME))` block in `happyMcpStdioBridge.ts`. All MCP tools gone for sessions started after swap; pre-swap bridges OK. Gates missed it (surface = present; mock Map overwrites vs SDK throw).
 
 **Meta fixing:** dedupe block + mock throws like SDK. **Orchestrator:** approve hub restart with MCP fix. **Generation-probe port Meta added early: strip it** in that same promote (not needed for green). Keep call-site restores (rate-limit / `getAccountIdentity`). `reportStop` et al. stay unported. Require live bridge/`listTools` proof after restart — not source grep.
+
+### Tip `f0d8e29b2` — absorb closed; `link_pr` NOT restored
+
+Gate exit=0 (web 432/432, cli 5031/0, surface 22/22, sentinels clean). Generation probes stripped; stop-flow at 0. MCP bridge fixed (was 0 tools from dup `session_job`; now serves 15). Tag `soup-absorb-0.35.0-round2` → tip.
+
+**Retract:** earlier "fresh-session `link_pr` PRESENT" was wrong — that was bridge `--tools` argv, not the enabled tool list. Peer in-process list: `link_pr` **absent**, `session_job` present.
+
+**Open — path mismatch (pre-absorb):** CLI `GET ${apiUrl}/cli/features` (CLI bearer) → 404; hub mounts features only at `/api` (JWT). Fail-closed → awareness false forever despite `settings.json` githubPrAwareness true. Surface gate cannot see runtime enablement.
+
+**Orchestrator call (bounce authorized):** hub-side — expose `GET /cli/features` under existing CLI auth (same response shape as `/api/features`). Do **not** point CLI at `/api/features` (CLI token ≠ JWT → 401 forever). Include a regression test that CLI-token GET succeeds. Proof bar after restart: in-process tool list shows `link_pr` (not argv, not source grep). Leave gc pile alone.
+
+**Import-picker layer — drop retracted.** `feat/agent-session-import-picker` stays until upstream #945 merges (manifest condition). Tip-forward: already ancestor / clean skip / containment 0. `full-recipe` would lose the feature if dropped (symbols absent on `origin/main`). Layer is stale (`SidebarToggle.tsx` not on tip) — retire promptly when #945 lands.
