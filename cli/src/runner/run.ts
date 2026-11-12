@@ -121,9 +121,14 @@ export function createSpawnDeduplicator(
 export function classifyRecoveredProcessGeneration(
   processAlive: boolean,
   currentMarker: string | null,
-  persistedMarker: string
+  persistedMarker: string,
+  evidence?: { pid: number; threadGroupId: number | null; currentBootId: string | null; persistedBootId?: string }
 ): 'verified' | 'quarantined' | 'exited' {
   if (!processAlive) return 'exited';
+  if (evidence?.persistedBootId && evidence.currentBootId && evidence.persistedBootId !== evidence.currentBootId) return 'exited';
+  // A runner child is a process leader. kill(pid, 0) also succeeds for Linux
+  // thread IDs, while ps -p does not report their start time.
+  if (evidence?.threadGroupId != null && evidence.threadGroupId !== evidence.pid) return 'exited';
   if (currentMarker === null) return 'quarantined';
   return currentMarker === persistedMarker ? 'verified' : 'exited';
 }
@@ -356,6 +361,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       confirmedSessionId?: string;
       pid: number;
       processStartMarker: string;
+      bootId?: string;
     };
     const resumeProcessFile = `${configuration.runnerStateFile}.resume-processes.json`;
     const persistedResumeProcesses = (() => {
@@ -375,6 +381,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             confirmedSessionId: typeof record.confirmedSessionId === 'string' ? record.confirmedSessionId : undefined,
             pid: record.pid,
             processStartMarker: record.processStartMarker,
+            bootId: normalizeBootId(record.bootId) ?? undefined,
           }]];
         }));
       } catch (error) {
@@ -394,7 +401,12 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     for (const [pid, record] of [...persistedResumeProcesses]) {
       const alive = isProcessAlive(pid);
       const marker = alive ? getProcessStartMarker(pid) : null;
-      const generation = classifyRecoveredProcessGeneration(alive, marker, record.processStartMarker);
+      const generation = classifyRecoveredProcessGeneration(alive, marker, record.processStartMarker, {
+        pid,
+        threadGroupId: getProcessThreadGroupId(pid),
+        currentBootId: getSystemBootId(),
+        persistedBootId: record.bootId,
+      });
       if (generation === 'verified') {
         pidToRequestedSessionId.set(pid, record.requestedSessionId);
         if (record.confirmedSessionId) pidToConfirmedSessionId.set(pid, record.confirmedSessionId);
@@ -498,7 +510,8 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
               requestedSessionId: existingSession.requestedHappySessionId ?? sessionId,
               confirmedSessionId: sessionId,
               pid,
-              processStartMarker
+              processStartMarker,
+              bootId: getSystemBootId() ?? undefined,
             });
             persistResumeProcesses();
           }
@@ -572,6 +585,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
               confirmedSessionId: sessionId,
               pid,
               processStartMarker,
+              bootId: getSystemBootId() ?? undefined,
             });
             persistResumeProcesses();
           }
@@ -999,7 +1013,8 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             persistedResumeProcesses.set(pid, {
               requestedSessionId: trackedSession.requestedHappySessionId,
               pid,
-              processStartMarker
+              processStartMarker,
+              bootId: getSystemBootId() ?? undefined,
             });
             persistResumeProcesses();
           }
@@ -1536,6 +1551,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             return await finishKeepWrapperDetach(pid);
           }
 
+          let treeTerminationVerified = false;
           if (session.startedBy === 'runner') {
             // Adopted post-restart sessions have no ChildProcess handle — still
             // tree-kill so agent grandchildren cannot outlive the wrapper.
@@ -1566,7 +1582,6 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
               }
             }
             try {
-          let treeTerminationVerified = false;
               const treeStopped = session.childProcess
                 ? await killProcessByChildProcess(session.childProcess)
                 : await killProcessTreeByPid(pid);
@@ -1600,10 +1615,12 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             spawnSession.markChildStopping(existingSessionId);
           }
           const deadline = Date.now() + 5_000;
-          while (isProcessAlive(pid) && Date.now() < deadline) {
+          // Full-tree termination already proved this generation exited. A
+          // second raw-PID probe can observe an unrelated, newly reused PID.
+          while (!treeTerminationVerified && isProcessAlive(pid) && Date.now() < deadline) {
             await new Promise(resolve => setTimeout(resolve, 50));
           }
-          if (isProcessAlive(pid)) {
+          if (!treeTerminationVerified && isProcessAlive(pid)) {
             logger.debug(`[RUNNER RUN] Session ${sessionId} process ${pid} is still alive after stop request`);
             return 'still_alive';
           }

@@ -80,6 +80,18 @@ vi.mock('@/api/api', () => ({
                 shutdown: vi.fn(),
                 updateRunnerState: async () => {},
                 reportSessionChildExited: mocks.reportChildExit,
+                // Fork-only machine-client surface. This suite came from
+                // upstream, whose runner only awaits connect(); the fork's
+                // runner awaits connectUntilRpcReady() (#288 handoff overlap)
+                // and hands RPC ownership to a spawning child (#1473 runner
+                // proof). Without these the runner throws
+                // "connectUntilRpcReady is not a function" during startup and
+                // every case fails on a half-started runner, not on its own
+                // assertion.
+                connectUntilRpcReady: async () => {},
+                releaseRpcOwnership: vi.fn(),
+                restoreRpcOwnership: vi.fn(),
+                rebindStoredRunnerProof: async () => {},
             }),
         }),
     },
