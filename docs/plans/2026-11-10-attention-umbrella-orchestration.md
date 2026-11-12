@@ -201,6 +201,10 @@ Gate exit=0 (web 432/432, cli 5031/0, surface 22/22, sentinels clean). Generatio
 
 **In-process confirm:** [proof peer](/sessions/5966390d-22a1-40ae-bde5-519b87acccb1) — `link_pr` PRESENT on first look (16 tools). Same protocol previously reported absent — calibrated both ways.
 
+**Attribution correction:** `/cli/features` 404 was **not** pre-absorb. Consumer `fetchGithubPrAwareness.ts` entered via Meta `baf529bbf` (Nov 11) without the hub half; `feat/boards` carries both but is not a manifest layer. Causal claim retracted.
+
+**Durability (Option 1 authorized, not tonight):** land `link_pr` soup work (registration + gate consumer + hub GET `/cli/features`) on **fork main** so `full-recipe` keeps it. Reject option 2 (add `feat/boards` layer) and option 3 (tip-only + surface gate after the fact). Next quiet window / promote cycle.
+
 **Meta next (non-blocking):** `ctx_execute(shell)` bypasses Bash pre-tool guards; Bash guard also *redirects* `curl` into `ctx_execute`, so agents following the redirect leave production-mutation checks without intending to. Fix must cover the steer-into-ungarded path, not only a matcher list.
 
 ### `ctx_execute` guard closed on main `60c6a9850` (2026-11-12)
