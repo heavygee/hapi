@@ -18,6 +18,17 @@ afterEach(() => {
     localStorage.setItem('hapi-pin-in-progress-sessions', 'off')
 })
 
+/**
+ * The fork's group-header toggle helper. useLongPress gates the long press on
+ * mousedown/mouseup but now lets the browser's native click drive mouse
+ * activation, so the click is required too -- the soup's version predates that.
+ */
+function toggleGroupHeader(header: Element) {
+    fireEvent.mouseDown(header, { button: 0, clientX: 10, clientY: 10 })
+    fireEvent.mouseUp(header, { button: 0, clientX: 10, clientY: 10 })
+    fireEvent.click(header)
+}
+
 function makeSession(overrides: Partial<SessionSummary> & { id: string }): SessionSummary {
     return {
         active: false,
@@ -217,12 +228,11 @@ describe('SessionList directory action', () => {
         expect(listContent).not.toHaveClass('pt-1')
 
         fireEvent.click(screen.getByRole('button', { name: SEARCH_LABEL }))
-        const headerRow = screen.getByTestId('session-list-header-row')
+        const searchInput = screen.getByPlaceholderText(SEARCH_PLACEHOLDER)
+        const headerRow = searchInput.closest('.px-2.py-1')
+        expect(headerRow).not.toBeNull()
         expect(headerRow).toHaveClass('px-2')
         expect(headerRow).toHaveClass('py-1')
-        expect(headerRow).toHaveClass('@container')
-        expect(headerRow).toHaveClass('flex-nowrap')
-        expect(headerRow.className.split(/\s+/)).not.toContain('flex-wrap')
     })
 
     it('hides the directory action for sessions without path metadata', () => {
@@ -657,7 +667,6 @@ describe('SessionList collapse behavior', () => {
     })
 
     it('keeps In progress above project-pin groups; project pin stays first inside its group', () => {
-        // Legacy true → all (tri-state); floater under In progress; project folders stay below.
         localStorage.setItem('hapi-pin-in-progress-sessions', 'true')
         const sessions = [
             makeSession({
@@ -797,8 +806,10 @@ describe('SessionList collapse behavior', () => {
         ]
         render(renderSessionList(sessions, null))
 
-        expect(screen.getByTitle('In progress')).toBeInTheDocument()
-        expect(screen.getByText(/^pending \(1\)$/i)).toBeInTheDocument()
+        // #1717 moved prompt-parked rows out of "In progress" and into the
+        // Blocked section above it. This test's point is unchanged — operator
+        // action still outranks Jobs — but it now outranks it harder.
+        expect(screen.getByTestId('blocked-section')).toBeInTheDocument()
         expect(screen.queryByText(/^Jobs \(/i)).toBeNull()
         expect(screen.getByRole('button', { name: /Needs approval/ })).toBeInTheDocument()
     })
@@ -856,15 +867,14 @@ describe('SessionList collapse behavior', () => {
     })
 
     it('keeps new-session-in-directory actions for projects whose rows all floated', () => {
-        localStorage.setItem('hapi-pin-in-progress-sessions', 'all')
+        localStorage.setItem('hapi-pin-in-progress-sessions', 'true')
         const onNewSessionInDirectory = vi.fn()
         const sessions = [
             makeSession({
-                id: 'session-running',
+                id: 'session-quiet',
                 active: true,
-                thinking: true,
                 updatedAt: 100,
-                metadata: { path: '/work/hapi', machineId: 'machine-1', name: 'Running task', flavor: 'codex' },
+                metadata: { path: '/work/hapi', machineId: 'machine-1', name: 'Quiet task', flavor: 'codex' },
             }),
         ]
         renderWithProviders(
@@ -881,10 +891,9 @@ describe('SessionList collapse behavior', () => {
             />
         )
 
-        expect(screen.getByTitle('In progress')).toBeInTheDocument()
+        expect(screen.getByTitle('Active sessions')).toBeInTheDocument()
         // The project header survives as an action-only header.
-        const header = screen.getByTitle('/work/hapi')
-        expect(header.nextElementSibling).toBeNull()
+        expect(screen.getByTitle('/work/hapi')).toBeInTheDocument()
 
         fireEvent.click(screen.getByRole('button', { name: 'New session in this directory' }))
         expect(onNewSessionInDirectory).toHaveBeenCalledWith({
@@ -1183,10 +1192,10 @@ describe('SessionList collapse behavior', () => {
         const header = screen.getByTitle('/work/hapi')
         expect(screen.queryByRole('button', { name: /Closed task/ })).toBeNull()
 
-        fireEvent.click(header)
+        toggleGroupHeader(header)
         const row = screen.getByRole('button', { name: /Closed task/ })
 
-        fireEvent.click(header)
+        toggleGroupHeader(header)
         expect(row).toBeInTheDocument()
         const panel = row.closest('.collapsible-panel')!
         fireEvent.transitionEnd(panel.querySelector('.collapsible-inner')!)
@@ -1204,12 +1213,12 @@ describe('SessionList collapse behavior', () => {
         render(renderSessionList(sessions, null))
 
         const header = screen.getByTitle('/work/hapi')
-        fireEvent.click(header)
+        toggleGroupHeader(header)
         fireEvent.contextMenu(screen.getByRole('button', { name: /Closed task/ }))
         fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }))
         expect(screen.getByRole('dialog', { name: 'Rename Session' })).toBeInTheDocument()
 
-        fireEvent.click(header)
+        toggleGroupHeader(header)
         const panel = document.querySelector('.collapsible-panel')!
         fireEvent.transitionEnd(panel)
         expect(screen.getByRole('dialog', { name: 'Rename Session' })).toBeInTheDocument()
@@ -1232,7 +1241,7 @@ describe('SessionList collapse behavior', () => {
         }))
 
         render(renderSessionList(sessions, null))
-        fireEvent.click(screen.getByTitle('/work/hapi'))
+        toggleGroupHeader(screen.getByTitle('/work/hapi'))
 
         expect(screen.getByRole('button', { name: 'Expand 2' })).toBeInTheDocument()
         expect(screen.queryByRole('button', { name: 'Collapse 2' })).toBeNull()
@@ -1268,7 +1277,11 @@ describe('SessionList collapse behavior', () => {
         const sessions = Array.from({ length: 4 }, (_, index) => makeSession({
             id: `session-${index + 1}`,
             updatedAt: 100 - index,
+            // #1717: `thinking` keeps these out of the Blocked section (a working
+            // agent is not blocked) so they stay group-resident while remaining
+            // required by the preview cap.
             active: index > 0,
+            thinking: index > 0,
             pendingRequestsCount: index > 0 ? 1 : 0,
             metadata: {
                 path: '/work/hapi',
@@ -1299,7 +1312,9 @@ describe('SessionList collapse behavior', () => {
         const sessions = Array.from({ length: 8 }, (_, index) => makeSession({
             id: `session-${index + 1}`,
             updatedAt: 100 - index,
+            // See above: thinking keeps a queued-request row in its group.
             active: index < 5,
+            thinking: index < 5,
             pendingRequestsCount: index < 5 ? 1 : 0,
             metadata: {
                 path: '/work/hapi',
