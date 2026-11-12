@@ -142,3 +142,25 @@ Absorb green on `driver/integration-wip` @ `ebe57ea37` (web 4677/4677, surface 2
 **Calls:** (a) dirt owners commit — dogfood-fit [9bb5920b](/sessions/9bb5920b-604b-48c3-9864-bd868b28e58c); overseer-open-items [4230142b](/sessions/4230142b-8abe-4a31-af35-c22922bb649b); unfiled sweep → meta watcher. (b) **second absorb stays with [tooling/meta](/sessions/cbd1073e-4fd3-4f4a-bff8-cf9ba97bca6d)** (ladder ownership) — fresh turn OK, do not hand to 2ec10899.
 
 **(b)** Meta keeps second absorb (revised: measured ~25 files / 885 lines; ladder cheap/additive v35). 2ec10899 keeps #2147. Mirror dirt mostly cleared 2026-11-12; remaining `union-resolve.py` is Meta's to commit before sync.
+
+## Daily sweep complete (2026-11-12T07:03Z — 24/24)
+
+No third-party pushback on #2355/#2356. Signal: **#987 CONFLICTING/DIRTY** from 00:03Z (peer woken).
+
+| PR | Status |
+|---|---|
+| #1725 | CLEAN + **dogfood ready** (window elapsed); low-impact Lane B candidate |
+| #1733 | CLEAN + **dogfood ready**; low-impact Lane B candidate |
+| #1772 | CLEAN + **dogfood ready**; community / stack base for #2376 |
+| #987 | CONFLICTING — rebase peer woken |
+| #2376 | CLEAN + dogfooded (~26h left) |
+| #2375 | CONFLICTING — fade peer woken |
+| #1163 | CLEAN tip `6adaad77e` Lane A |
+
+## #2375 → test-only; #2373 closed (2026-11-12)
+
+#2380 fixed the stacking defect incidentally. #2375 tip `ea1006e11` is **test-only** regression guard (kept). No dogfood stamp. #2373 closed as fixed by #2380. Stray Codex P2s from fork #329 → **#2406** / **#2407**.
+
+## Fork Actions blackout (2026-11-12)
+
+`heavygee/hapi` produced **no workflow runs since 2026-11-10T21:54Z** (~33h+). Permissions still enabled — likely minutes/spending limit. Blocks fork-stage CI for #326 (rebased locally green @ `b3642db08`). Escalated to [tooling/meta](/sessions/cbd1073e-4fd3-4f4a-bff8-cf9ba97bca6d) + **operator billing**. Meta confirmed: push `5574fa53a` to fork `main` created **zero** runs. Do not hold soup promote for Actions. #326 = locally green / CI dark. #2375 **Ready-YES** tip `ea1006e11` three-dim CLEAN; Lane B / low-impact / test-only / no dogfood.
