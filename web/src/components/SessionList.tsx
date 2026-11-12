@@ -1778,13 +1778,19 @@ export function SessionListSearch(props: {
                           * query) stays a magnifier: there is no scope in effect yet,
                           * and this is also the button that opens search.
                           */}
-                        {holdConfirmed ? (
-                            <span className="h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-[#007AFF]" aria-hidden="true" />
-                        ) : hasTextQuery && searchMode === 'content' ? (
-                            <ScopeContentIcon className="h-5 w-5 shrink-0" />
-                        ) : (
-                            <SearchIcon className="h-5 w-5 shrink-0" />
-                        )}
+                        <span
+                            data-toolbar-chrome=""
+                            data-search-scope={hasTextQuery ? searchMode : undefined}
+                            className="inline-flex shrink-0"
+                        >
+                            {holdConfirmed ? (
+                                <span className="h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-[#007AFF]" aria-hidden="true" />
+                            ) : hasTextQuery && searchMode === 'content' ? (
+                                <ScopeContentIcon className="h-5 w-5 shrink-0" />
+                            ) : (
+                                <SearchIcon className="h-5 w-5 shrink-0" />
+                            )}
+                        </span>
                         {hasTextQuery ? (
                             <span className="min-w-0 truncate text-xs font-medium">{props.value}</span>
                         ) : null}
