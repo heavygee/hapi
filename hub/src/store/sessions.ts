@@ -12,6 +12,7 @@ import type { Metadata } from '@hapi/protocol/types'
 import { detachSessionEvents, tombstoneDeletedSession } from './events'
 import { detachSessionInboxItems } from './inboxItems'
 import { removeMessageContentSearchForSession } from './messageContentSearch'
+import { preserveSessionTitle } from './sessionTitleLock'
 
 function runInTransaction<T>(db: Database, operation: () => T): T {
     return db.inTransaction ? operation() : db.transaction(operation)()
@@ -551,7 +552,7 @@ export function updateSessionMetadata(
     metadata: unknown,
     expectedVersion: number,
     namespace: string,
-    options?: { touchUpdatedAt?: boolean; allowUnarchive?: boolean; replaceExternalRefs?: boolean }
+    options?: { touchUpdatedAt?: boolean; allowUnarchive?: boolean; replaceExternalRefs?: boolean; allowTitleUpdate?: boolean; titleLocked?: boolean; inheritTitleLockFrom?: string }
 ): VersionedUpdateResult<unknown | null> {
     const now = Date.now()
     const touchUpdatedAt = options?.touchUpdatedAt !== false
@@ -565,7 +566,18 @@ export function updateSessionMetadata(
             }
 
             const prior = existing.metadata
-            let merged = mergeSessionMetadata(prior, metadata, { replaceExternalRefs: options?.replaceExternalRefs })
+            // #2072 title lock: only a user title save may change the lock, and a
+            // locked title survives agent metadata writes. Enforced against the
+            // raw persisted row, not the merged result.
+            const sourceTitle = options?.inheritTitleLockFrom
+                ? getSessionByNamespace(db, options.inheritTitleLockFrom, namespace)?.metadata : null
+            const titleOwner = isPlainObject(prior) && prior.titleLocked === true ? prior
+                : isPlainObject(sourceTitle) && sourceTitle.titleLocked === true ? sourceTitle : prior
+            let merged = preserveSessionTitle(
+                titleOwner,
+                mergeSessionMetadata(prior, metadata, { replaceExternalRefs: options?.replaceExternalRefs }),
+                options
+            )
 
             // #1911 M1: unauthorized un-archive of hub-archived rows.
             // Return success + merge-preserved archive fields — NOT version-mismatch

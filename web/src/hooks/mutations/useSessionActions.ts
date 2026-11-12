@@ -27,10 +27,10 @@ export function useSessionActions(
     setModelReasoningEffort: (modelReasoningEffort: string | null) => Promise<void>
     setEffort: (effort: string | null) => Promise<void>
     setServiceTier: (serviceTier: string | null) => Promise<void>
-    renameSession: (name: string) => Promise<void>
+    renameSession: (name: string | undefined, titleLocked?: boolean) => Promise<void>
     setExternalRefs: (refs: import('@/types/api').ExternalRef[]) => Promise<void>
     suggestSessionTitle: () => Promise<string>
-    updateSessionSummary: (text: string) => Promise<void>
+    updateSessionSummary: (text: string, titleLocked?: boolean) => Promise<void>
     setPinMode: (mode: 'none' | 'project' | 'global') => Promise<void>
     /** #1717: dismiss blocked chrome with a required rationale. */
     acknowledgeBlocked: (reason: string) => Promise<void>
@@ -233,11 +233,11 @@ export function useSessionActions(
     })
 
     const renameMutation = useMutation({
-        mutationFn: async (name: string) => {
+        mutationFn: async ({ name, titleLocked }: { name: string | undefined; titleLocked?: boolean }) => {
             if (!api || !sessionId) {
                 throw new Error('Session unavailable')
             }
-            await api.renameSession(sessionId, name)
+            await api.renameSession(sessionId, name, titleLocked)
         },
         onSuccess: () => void invalidateSession(),
     })
@@ -263,11 +263,11 @@ export function useSessionActions(
     })
 
     const summaryMutation = useMutation({
-        mutationFn: async (text: string) => {
+        mutationFn: async ({ text, titleLocked }: { text: string; titleLocked?: boolean }) => {
             if (!api || !sessionId) {
                 throw new Error('Session unavailable')
             }
-            await api.updateSessionSummary(sessionId, text)
+            await api.updateSessionSummary(sessionId, text, titleLocked)
         },
         onSuccess: () => void invalidateSession(),
     })
@@ -315,10 +315,10 @@ export function useSessionActions(
         setModelReasoningEffort: modelReasoningEffortMutation.mutateAsync,
         setEffort: effortMutation.mutateAsync,
         setServiceTier: serviceTierMutation.mutateAsync,
-        renameSession: renameMutation.mutateAsync,
+        renameSession: (name: string | undefined, titleLocked?: boolean) => renameMutation.mutateAsync({ name, titleLocked }),
         setExternalRefs: externalRefsMutation.mutateAsync,
         suggestSessionTitle: titleSuggestionMutation.mutateAsync,
-        updateSessionSummary: summaryMutation.mutateAsync,
+        updateSessionSummary: (text: string, titleLocked?: boolean) => summaryMutation.mutateAsync({ text, titleLocked }),
         setPinMode: pinMutation.mutateAsync,
         acknowledgeBlocked: blockedAckMutation.mutateAsync,
         deleteSession: deleteMutation.mutateAsync,

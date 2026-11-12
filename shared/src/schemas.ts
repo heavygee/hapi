@@ -430,6 +430,8 @@ export const MetadataSchema = z.object({
     // native session-title sync must not overwrite it, including after
     // launcher recreation or session resume.
     acpManualTitle: z.boolean().optional(),
+    /** #2072: a user-set title the agent may not overwrite. */
+    titleLocked: z.boolean().optional(),
     summary: MetadataSummarySchema.optional(),
     machineId: z.string().optional(),
     claudeSessionId: z.string().optional(),

@@ -144,7 +144,7 @@ describe('SessionList directory action', () => {
         )
 
         fireEvent.contextMenu(screen.getByTitle('/work/proj'))
-        expect(screen.getByRole('menuitem', { name: 'Copy path' })).toBeInTheDocument()
+        expect(screen.getByRole('menuitem', { name: 'Copy Path' })).toBeInTheDocument()
         fireEvent.click(screen.getByRole('menuitem', { name: 'Archive all' }))
         expect(screen.getByText('Archive 2 sessions in "work/proj"?')).toBeInTheDocument()
         fireEvent.click(screen.getByRole('button', { name: 'Archive' }))
@@ -171,7 +171,7 @@ describe('SessionList directory action', () => {
         const header = screen.getByTitle('/work/proj')
         expect(header).toHaveAttribute('tabindex', '0')
         fireEvent.keyDown(header, { key: 'F10', shiftKey: true })
-        expect(screen.getByRole('menuitem', { name: 'Copy path' })).toBeInTheDocument()
+        expect(screen.getByRole('menuitem', { name: 'Copy Path' })).toBeInTheDocument()
     })
 
     it('keeps the sticky project header opaque and aligned with the list viewport', () => {

@@ -162,11 +162,13 @@ describe('SessionList issue-ref chip isolation', () => {
             />
         )
 
-        // useLongPress's own click detection runs off mousedown/mouseup
-        // timing, not a native 'click' event — mirror that sequence.
+        // useLongPress gates the long-press on mousedown/mouseup but now lets
+        // the browser's native click drive mouse activation, so the full
+        // sequence is required — mousedown/mouseup alone no longer selects.
         const title = screen.getByText('Fix the thing')
         fireEvent.mouseDown(title, { button: 0 })
         fireEvent.mouseUp(title)
+        fireEvent.click(title)
         expect(onSelect).toHaveBeenCalledWith('session-1')
     })
 })

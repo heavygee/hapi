@@ -1242,7 +1242,7 @@ recordSessionActivity(sessionId: string, updatedAt: number): void {
         throw new Error('Session was modified concurrently while archiving from hub')
     }
 
-    async renameSession(sessionId: string, name: string): Promise<void> {
+    async renameSession(sessionId: string, name: string | undefined, titleLocked?: boolean): Promise<void> {
         // tiann/hapi#919: retry-with-refresh on version-mismatch instead of
         // throwing on the first contention. Mirrors the good pattern in
         // mergeSessions (~L780) and in syncEngine's metadata helpers. Without
@@ -1255,14 +1255,14 @@ recordSessionActivity(sessionId: string, updatedAt: number): void {
             }
 
             const currentMetadata = session.metadata ?? { path: '', host: '' }
-            const newMetadata = { ...currentMetadata, name }
+            const newMetadata = name === undefined ? { ...currentMetadata } : { ...currentMetadata, name }
 
             const result = this.store.sessions.updateSessionMetadata(
                 sessionId,
                 newMetadata,
                 session.metadataVersion,
                 session.namespace,
-                { touchUpdatedAt: false }
+                { touchUpdatedAt: false, allowTitleUpdate: true, titleLocked }
             )
 
             if (result.result === 'error') {
@@ -1482,7 +1482,7 @@ recordSessionActivity(sessionId: string, updatedAt: number): void {
         throw new Error('Session was modified concurrently. Please try again.')
     }
 
-    async updateSessionSummary(sessionId: string, text: string): Promise<void> {
+    async updateSessionSummary(sessionId: string, text: string, titleLocked?: boolean): Promise<void> {
         // Keep the generated/native title separate from metadata.name. A
         // manually chosen name must continue to win in the Web title helper,
         // while the summary remains available as the agent-authored fallback.
@@ -1506,7 +1506,7 @@ recordSessionActivity(sessionId: string, updatedAt: number): void {
                 newMetadata,
                 session.metadataVersion,
                 session.namespace,
-                { touchUpdatedAt: false }
+                { touchUpdatedAt: false, allowTitleUpdate: true, titleLocked }
             )
 
             if (result.result === 'error') {

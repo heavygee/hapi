@@ -544,13 +544,17 @@ export type SessionServiceTierRequest = z.infer<typeof SessionServiceTierRequest
 export const SESSION_NAME_MAX_LENGTH = 255
 
 export const RenameSessionRequestSchema = z.object({
-    name: z.string().min(1).max(SESSION_NAME_MAX_LENGTH)
+    name: z.string().min(1).max(SESSION_NAME_MAX_LENGTH).optional(),
+    titleLocked: z.boolean().optional()
+}).refine(value => value.name !== undefined || value.titleLocked !== undefined, {
+    message: 'name or titleLocked is required'
 })
 
 export type RenameSessionRequest = z.infer<typeof RenameSessionRequestSchema>
 
 export const UpdateSessionSummaryRequestSchema = z.object({
-    text: z.string().trim().min(1).max(255)
+    text: z.string().trim().min(1).max(255),
+    titleLocked: z.boolean().optional()
 })
 
 export type UpdateSessionSummaryRequest = z.infer<typeof UpdateSessionSummaryRequestSchema>

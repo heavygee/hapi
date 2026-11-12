@@ -3762,16 +3762,16 @@ recordSessionActivity(sessionId: string, updatedAt: number): void {
         await this.rpcGateway.switchSession(sessionId, to)
     }
 
-    async renameSession(sessionId: string, name: string): Promise<void> {
-        await this.sessionCache.renameSession(sessionId, name)
+    async renameSession(sessionId: string, name: string | undefined, titleLocked?: boolean): Promise<void> {
+        await this.sessionCache.renameSession(sessionId, name, titleLocked)
     }
 
     async suggestSessionTitle(sessionId: string): Promise<string> {
         return await this.titleSuggestionService.suggestTitle(sessionId)
     }
 
-    async updateSessionSummary(sessionId: string, text: string): Promise<void> {
-        await this.sessionCache.updateSessionSummary(sessionId, text)
+    async updateSessionSummary(sessionId: string, text: string, titleLocked?: boolean): Promise<void> {
+        await this.sessionCache.updateSessionSummary(sessionId, text, titleLocked)
     }
 
     async linkIssue(sessionId: string, ref: ExternalRef): Promise<void> {
