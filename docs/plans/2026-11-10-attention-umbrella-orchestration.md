@@ -182,3 +182,7 @@ Promote composed all 87 layers then gate rolled back on **cli** (14 blocking). L
 Promote landed tip `66b6b7d6f` (DB 32→35). Bridge fatal: `Tool session_job is already registered` — duplicate `if (toolNames.has(SESSION_JOB_TOOL_NAME))` block in `happyMcpStdioBridge.ts`. All MCP tools gone for sessions started after swap; pre-swap bridges OK. Gates missed it (surface = present; mock Map overwrites vs SDK throw).
 
 **Meta fixing:** dedupe block + mock throws like SDK. **Orchestrator:** approve hub restart with MCP fix. **Generation-probe port Meta added early: strip it** in that same promote (not needed for green). Keep call-site restores (rate-limit / `getAccountIdentity`). `reportStop` et al. stay unported. Require live bridge/`listTools` proof after restart — not source grep.
+
+### Closed — tip `f0d8e29b2` (one bounce)
+
+Gate exit=0 (web 432/432, cli 5031/0, surface 22/22, sentinels clean). Generation probes stripped (`-18/+3`); stop-flow symbols at 0. `treeTerminationVerified` scope fix kept (fork bug). Live bridge `tools/list` returns 15 tools incl. `session_job`. Fresh-session argv proves `link_pr`+`session_job` PRESENT; long-lived MCP processes (Oct 27–Nov 9) stay stale until those sessions restart. Tag `soup-absorb-0.35.0-round2` → final tip. **Follow-ups (not blocking):** drop absorbed `feat/agent-session-import-picker` from `driver-manifest.yaml` (re-resolves every base move); leave ~6947 unreachable objects alone (shared checkout — no prune).
