@@ -24,7 +24,10 @@ import re
 import sys
 from pathlib import Path
 
-ID = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,}")
+# Any length. A {2,} threshold made two DIFFERENT short-named declarations look
+# like identical identifier sets, so a genuine two-way conflict classified as
+# SUPERSET and got resolved silently in favour of one side.
+ID = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 START, MID, END = "<<<<<<<", "=======", ">>>>>>>"
 
 
@@ -57,13 +60,80 @@ def split_hunks(text: str):
 
 def classify(ours: str, theirs: str) -> str:
     o, t = ids(ours), ids(theirs)
+    # FIRST, before any containment rule: if both sides declare the SAME name,
+    # they are competing implementations and only a human can pick. Identifier
+    # sets cannot see the difference when two bodies differ solely in literals
+    # or operators — `function aa() { return 1 }` vs `{ return 2 }` have
+    # identical identifier sets, so a containment rule would silently take one.
+    od, td = set(DECL.findall(ours)), set(DECL.findall(theirs))
+    if od & td:
+        return "MANUAL"
+    # One side empty is a PURE ADDITION, not a competing version: the other side
+    # simply gained a block here. Taking the non-empty side cannot drop anything.
+    # (Missed on the first pass because both rules below require a non-empty set,
+    # which left dozens of pure-addition hunks sitting in MANUAL.)
+    if not ours.strip() and theirs.strip():
+        return "SUPERSET_THEIRS"
+    if not theirs.strip() and ours.strip():
+        return "SUPERSET_OURS"
     if o and t and o <= t:
         return "SUPERSET_THEIRS"
     if o and t and t <= o:
         return "SUPERSET_OURS"
     if is_imports(ours) and is_imports(theirs):
         return "IMPORT_UNION"
+    if additive(ours, theirs):
+        return "ADDITIVE_UNION"
     return "MANUAL"
+
+
+DECL = re.compile(
+    r"\b(?:export\s+)?(?:async\s+)?"
+    r"(?:function|const|let|var|class|type|interface|enum)\s+([A-Za-z_][A-Za-z0-9_]*)"
+)
+
+
+def balanced(text: str) -> bool:
+    """Braces/parens/brackets balanced, ignoring those inside strings."""
+    depth = {"{": 0, "(": 0, "[": 0}
+    close = {"}": "{", ")": "(", "]": "["}
+    quote = None
+    prev = ""
+    for ch in text:
+        if quote:
+            if ch == quote and prev != "\\":
+                quote = None
+            prev = ch
+            continue
+        if ch in "\"'`":
+            quote = ch
+        elif ch in depth:
+            depth[ch] += 1
+        elif ch in close:
+            depth[close[ch]] -= 1
+            if depth[close[ch]] < 0:
+                return False
+        prev = ch
+    return quote is None and all(v == 0 for v in depth.values())
+
+
+def additive(ours: str, theirs: str) -> bool:
+    """Both sides are self-contained blocks declaring different things.
+
+    Concatenation is then a real union rather than a guess: neither side is a
+    competing version of the other's statement, so keeping both cannot drop
+    behaviour. Refused when either side is unbalanced (we would be splicing a
+    fragment) or when they declare a name in common (that IS a competing
+    version, e.g. two implementations of the same function).
+    """
+    if not ours.strip() or not theirs.strip():
+        return False
+    if not balanced(ours) or not balanced(theirs):
+        return False
+    od, td = set(DECL.findall(ours)), set(DECL.findall(theirs))
+    if not od or not td:
+        return False
+    return od.isdisjoint(td)
 
 
 def resolve(path: Path, apply: bool):
@@ -80,6 +150,12 @@ def resolve(path: Path, apply: bool):
             pieces.append(theirs)
         elif v == "SUPERSET_OURS":
             pieces.append(ours)
+        elif v == "ADDITIVE_UNION":
+            # Self-contained blocks declaring different things: keeping both IS
+            # the union. (Classification without a handler here silently did
+            # nothing for a whole pass — the hunks fell through to MANUAL.)
+            pieces.append(ours if ours.endswith("\n") or not ours else ours + "\n")
+            pieces.append(theirs)
         elif v == "IMPORT_UNION":
             seen, merged = set(), []
             for line in ours.splitlines(True) + theirs.splitlines(True):
