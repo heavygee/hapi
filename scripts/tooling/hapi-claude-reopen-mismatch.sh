@@ -113,8 +113,12 @@ for s in sessions:
     md = (s.get("metadata") or {})
     if md.get("flavor") != "claude":
         continue
+    if (md.get("lifecycleState") or "") == "archived":
+        continue
     d = get(f"/api/sessions/{s['id']}").get("session", s)
     md = d.get("metadata") or {}
+    if (md.get("lifecycleState") or d.get("lifecycleState") or "") == "archived":
+        continue
     hname = md.get("host") or "?"
     pid = md.get("hostPid")
     name = md.get("name") or "?"

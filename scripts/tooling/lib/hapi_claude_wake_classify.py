@@ -199,6 +199,17 @@ def classify_active_claude(
         md = s.get("metadata") or {}
         if md.get("flavor") != "claude":
             continue
+        # Soft archive can leave a process up while dropping the seat off the
+        # working list — never continue those (re-reports of finished work).
+        if (md.get("lifecycleState") or "") == "archived":
+            skip.append(
+                {
+                    "id": s["id"],
+                    "reason": "lifecycle-archived",
+                    "name": (md.get("name") or "?")[:50],
+                }
+            )
+            continue
         if self_id and s["id"] == self_id:
             continue
         if only_ids is not None and s["id"] not in only_ids:
@@ -213,6 +224,16 @@ def classify_active_claude(
             )
             continue
         detail = get(host, jwt, f"/api/sessions/{s['id']}").get("session", s)
+        dmd = detail.get("metadata") or {}
+        if (dmd.get("lifecycleState") or detail.get("lifecycleState") or "") == "archived":
+            skip.append(
+                {
+                    "id": s["id"],
+                    "reason": "lifecycle-archived",
+                    "name": (dmd.get("name") or "?")[:50],
+                }
+            )
+            continue
         action, reason = classify_session(host, jwt, s["id"], detail, mode)
         row = {
             "id": s["id"],

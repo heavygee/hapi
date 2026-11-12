@@ -29,7 +29,7 @@ WAKE_ALL=0
 CLASSIFY_ONLY=0
 IDS_FILE=""
 WAKE_MODE=thinking
-MSG='Continue. You were mid-turn when Claude auth rotated — resume that work. No ack if this does not apply.'
+MSG='[hapi-claude-continue-fleet] Continue. You were mid-turn when Claude auth rotated — resume that work. No ack if this does not apply. Sweep from the Claude dual-slot cutover tooling (docs/tooling/claude-auth-slots.md).'
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -80,7 +80,10 @@ for s in json.loads(urllib.request.urlopen(urllib.request.Request(
 ), timeout=30).read())["sessions"]:
     if not s.get("active"):
         continue
-    if (s.get("metadata") or {}).get("flavor") != "claude":
+    md = s.get("metadata") or {}
+    if md.get("flavor") != "claude":
+        continue
+    if (md.get("lifecycleState") or "") == "archived":
         continue
     if self_id and s["id"] == self_id:
         continue
@@ -106,6 +109,45 @@ with open(path_ids, "w") as fh:
         fh.write(r["id"] + "\t" + r["reason"] + "\n")
 PY
 fi
+
+# Final gate: drop archived / inactive before ping (ids-file + race after snapshot).
+python3 - "$HAPI_HOST" "$TMP_IDS" <<'PY'
+import json, os, sys, urllib.request
+host, path = sys.argv[1], sys.argv[2]
+lines = [ln.strip() for ln in open(path) if ln.strip() and not ln.startswith("#")]
+if not lines:
+    raise SystemExit(0)
+settings = json.load(open(os.path.expanduser("~/.hapi/settings.json")))
+jwt = json.loads(urllib.request.urlopen(urllib.request.Request(
+    host + "/api/auth",
+    data=json.dumps({"accessToken": settings["cliApiToken"] + ":default"}).encode(),
+    headers={"Content-Type": "application/json"},
+    method="POST",
+), timeout=15).read())["token"]
+kept = []
+dropped = 0
+for line in lines:
+    sid = line.split("\t", 1)[0]
+    try:
+        d = json.loads(urllib.request.urlopen(urllib.request.Request(
+            host + f"/api/sessions/{sid}",
+            headers={"Authorization": f"Bearer {jwt}"},
+        ), timeout=20).read())["session"]
+    except Exception:
+        dropped += 1
+        continue
+    md = d.get("metadata") or {}
+    life = md.get("lifecycleState") or d.get("lifecycleState") or ""
+    if not d.get("active") or life == "archived":
+        print(f"DROP {sid[:8]} active={d.get('active')} lifecycle={life or '?'}", file=sys.stderr)
+        dropped += 1
+        continue
+    kept.append(line)
+with open(path, "w") as fh:
+    fh.write("\n".join(kept) + ("\n" if kept else ""))
+if dropped:
+    print(f"pre-ping dropped archived/inactive={dropped}", file=sys.stderr)
+PY
 
 mapfile -t LINES <"$TMP_IDS"
 echo "continue-fleet targets=${#LINES[@]} dry=$DRY mode=$MODE"

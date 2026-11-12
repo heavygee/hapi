@@ -61,6 +61,8 @@ Do **not** hand-roll JWT/archive/reopen Python each time — that is what these 
 
 Inspect: `hapi-claude-continue-fleet --classify-only`. Opt out: `~/.hapi/claude-auth/wake-skip`.
 
+**Never continue `lifecycleState=archived`.** Soft archive drops the seat without always killing the process; continuing it re-reports finished work. Continue messages are tagged `[hapi-claude-continue-fleet]` so recipients can verify the source.
+
 ## Why reopen is separate
 
 Toggle restarts runners so **new** spawns inherit the slot. Already-running Claude children keep the old `CLAUDE_CODE_OAUTH_TOKEN` in their process environ. Same rule as Cursor after `hapi-cursor-account-toggle` → `hapi-cursor-session-assess` → kill/reopen.
