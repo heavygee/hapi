@@ -29,6 +29,19 @@ function toggleGroupHeader(header: Element) {
     fireEvent.click(header)
 }
 
+/**
+ * The fork renders two pinned tiers -- "In progress" (jobs/working/pending) and
+ * "Active sessions" (connected but quiet). Upstream has only the first, so its
+ * tests assert placement by the absence of the second. Assert real containment
+ * instead: which tier a row actually lands in.
+ */
+function sectionContains(title: string, rowName: string): boolean {
+    const section = screen.getByTitle(title).parentElement
+    if (!section) return false
+    return [...section.querySelectorAll('[role="button"]')]
+        .some(el => (el.textContent ?? '').includes(rowName))
+}
+
 function makeSession(overrides: Partial<SessionSummary> & { id: string }): SessionSummary {
     return {
         active: false,
@@ -276,7 +289,9 @@ describe('SessionList collapsed search', () => {
         const searchGroup = screen.getByTestId('session-list-search')
         expect(searchGroup).toHaveAttribute('data-expanded', 'false')
         // #2039: collapsed search must not shrink under neighbors (overlap).
-        expect(searchGroup).toHaveClass('relative', 'gap-1', 'shrink-0', 'max-w-full')
+        // shrink-0 + max-w-full are the load-bearing part and both hold; the
+        // fork's chrome spacing is gap-1.5 rather than upstream's gap-1.
+        expect(searchGroup).toHaveClass('relative', 'gap-1.5', 'shrink-0', 'max-w-full')
         expect(searchGroup.className.split(/\s+/)).not.toContain('min-w-0')
         expect(searchGroup.nextElementSibling).toBe(screen.getByTestId('session-list-header-actions'))
         expect(screen.getByTestId('session-list-header-row')).toHaveClass('flex-nowrap', '@container')
@@ -858,12 +873,22 @@ describe('SessionList collapse behavior', () => {
 
         expect(screen.getByTitle('In progress')).toBeInTheDocument()
         expect(screen.getByText(/Running \(1\)/)).toBeInTheDocument()
-        expect(screen.getByText(/pending \(1\)/)).toBeInTheDocument()
+        // #1717 parks prompt-waiting rows in the Blocked section above
+        // "In progress" rather than a pending bucket inside it -- the same
+        // adaptation the fork already made to "puts pending operator action
+        // ahead of Jobs". Upstream has no Blocked section and expects a
+        // "pending (n)" bucket here.
+        expect(screen.getByTestId('blocked-section')).toBeInTheDocument()
+        expect(sectionContains('In progress', 'Pending task')).toBe(false)
+        expect(screen.getByRole('button', { name: /Pending task/ })).toBeInTheDocument()
         expect(screen.queryByText(/Idle \(/)).toBeNull()
-        // Quiet active stays under its project directory, not an Idle pin bucket.
+        // Quiet active is still not an "Idle" pin bucket -- in the fork it goes
+        // to the "Active sessions" tier. Upstream has no such tier and keeps it
+        // under the project, so it asserts the project panel here. With both of
+        // /work/hapi's rows floated the fork leaves an action-only group header
+        // and no panel at all, which is why getProjectPanel() cannot be used.
         expect(screen.getByTitle('/work/hapi')).toBeInTheDocument()
-        expect(screen.getByRole('button', { name: /Quiet task/ })).toBeInTheDocument()
-        expect(getProjectPanel().getAttribute('data-open')).toBe('true')
+        expect(sectionContains('Active sessions', 'Quiet task')).toBe(true)
     })
 
     it('keeps new-session-in-directory actions for projects whose rows all floated', () => {
@@ -979,12 +1004,15 @@ describe('SessionList collapse behavior', () => {
         ]
         render(renderSessionList(sessions, null))
 
+        // The point of #1404 holds in the fork's two-tier layout: a quiet
+        // connected socket is never "in progress". Upstream keeps it in the
+        // project group because it has no second tier; the fork floats it to
+        // "Active sessions". Either way it must not sit in "In progress".
         expect(screen.getByTitle('In progress')).toBeInTheDocument()
-        expect(screen.queryByTitle('Active sessions')).toBeNull()
-        expect(screen.getByRole('button', { name: /Quiet task/ })).toBeInTheDocument()
-        expect(getProjectPanel().getAttribute('data-open')).toBe('true')
-        // Quiet connected stays under the project; working floats.
-        expect(screen.getByRole('button', { name: /Running task/ })).toBeInTheDocument()
+        expect(sectionContains('In progress', 'Running task')).toBe(true)
+        expect(sectionContains('In progress', 'Quiet task')).toBe(false)
+        expect(sectionContains('Active sessions', 'Quiet task')).toBe(true)
+        expect(sectionContains('Active sessions', 'Running task')).toBe(false)
     })
 
     it('keeps the running section open while searching even when collapsed', () => {
@@ -1025,7 +1053,7 @@ describe('SessionList collapse behavior', () => {
         expect(screen.getByTitle('In progress').getAttribute('aria-expanded')).toBe('true')
     })
 
-    it('allows a directory group to collapse while searching', () => {
+    it('keeps a directory group open while searching, and restores its collapse after', () => {
         const sessions = [
             makeSession({
                 id: 'session-match',
@@ -1058,12 +1086,15 @@ describe('SessionList collapse behavior', () => {
 
         expect(projectPanel?.getAttribute('data-open')).toBe('true')
 
-        fireEvent.click(projectHeader)
-        expect(projectPanel?.getAttribute('data-open')).toBeNull()
-
+        // FORK BEHAVIOUR: a filtered group stays open and header clicks do not
+        // collapse it, so matches can never be hidden behind a closed group.
+        // Upstream allows collapsing mid-search via a second, filter-scoped
+        // override map (filterCollapseOverrides); the fork keeps one map and
+        // short-circuits on isFiltering. Asserting what :3006 actually does.
         fireEvent.click(projectHeader)
         expect(projectPanel?.getAttribute('data-open')).toBe('true')
 
+        // ...and the pre-filter collapsed state is restored once the query goes.
         fireEvent.change(searchInput, { target: { value: '' } })
         expect(projectPanel?.getAttribute('data-open')).toBeNull()
     })
@@ -1934,7 +1965,12 @@ describe('SessionList search toggle', () => {
         expect(within(actions).getByRole('button', { name: 'Sort and filter' })).toBeInTheDocument()
         expect(within(actions).getByRole('button', { name: 'New Session' })).toBeInTheDocument()
         expect(within(actions).getByRole('button', { name: 'Settings' })).toBeInTheDocument()
-        expect(within(actions).getByRole('button', { name: 'Filter sessions by machine' })).toBeInTheDocument()
+        // The fork has no standalone machine-filter button in the header: machine
+        // filtering lives inside "Sort and filter" (SessionListViewMenu), and the
+        // MachineFilterBar chip row is max-md:hidden so it is not in the row at
+        // 320px at all. The #2040 point -- nothing sheds into an overflow at this
+        // width -- is what the next assertion checks, and it still holds.
+        expect(within(actions).queryByRole('button', { name: /machine/i })).toBeNull()
         expect(screen.queryByTestId('session-list-header-overflow')).toBeNull()
 
         vi.unstubAllGlobals()
@@ -2011,13 +2047,17 @@ describe('SessionList search toggle', () => {
         // Chip text may shrink; More (+ machine menu) must not be crushed offscreen.
         expect(searchGroup).toHaveClass('min-w-0')
         expect(actions).toHaveClass('flex-1', 'min-w-0')
-        // row 320 - pad 16 - gap - machine - gap - More ≈ 201 at 130% metrics.
+        // The fork reserves room for More but not for a machine menu: it has no
+        // standalone machine control in the header (machine filtering lives in
+        // "Sort and filter"), so session-list-header-machine-menu is upstream-only
+        // and its 47px is not budgeted here. The #2040 point is unchanged -- the
+        // chip yields and More stays on-screen rather than being crushed off it.
         const maxWidth = Number.parseFloat(searchGroup.style.maxWidth)
         expect(maxWidth).toBeGreaterThan(0)
-        expect(maxWidth).toBeLessThanOrEqual(320 - machineMenuPx - morePx)
+        expect(maxWidth).toBeLessThanOrEqual(320 - morePx)
         expect(screen.getByTestId('session-list-header-overflow')).toBeInTheDocument()
         expect(within(actions).getByRole('button', { name: /more/i })).toBeInTheDocument()
-        expect(within(actions).getByTestId('session-list-header-machine-menu')).toBeInTheDocument()
+        expect(within(actions).queryByTestId('session-list-header-machine-menu')).toBeNull()
 
         if (originalOffset) {
             Object.defineProperty(HTMLElement.prototype, 'offsetWidth', originalOffset)
@@ -2161,9 +2201,17 @@ describe('SessionList search toggle', () => {
         expect(clearButton.className).toMatch(/min-h-\[48px\]/)
         expect(clearButton.className).toMatch(/min-w-\[48px\]/)
 
+        // Layout A (operator 2026-10-15): the calendar sits INSIDE the expanded
+        // field, immediately left of the clear end-cap, so clear stays furthest
+        // right. Upstream has no embedded date filter and expects the input
+        // directly before clear. The #2019 point -- a 48px end-cap at the END of
+        // the field -- is asserted above and still holds.
         const fieldChildren = Array.from(clearButton.parentElement?.children ?? [])
         expect(fieldChildren.at(-1)).toBe(clearButton)
-        expect(fieldChildren.at(-2)).toBe(input)
+        expect(fieldChildren.at(-2)).toBe(
+            screen.getByTestId('session-list-search-date-embedded').parentElement
+        )
+        expect(fieldChildren.indexOf(input)).toBeLessThan(fieldChildren.indexOf(clearButton))
     })
 
     it('stays expanded with focus on the input after clearing the query', () => {

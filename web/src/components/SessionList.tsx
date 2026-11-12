@@ -3361,7 +3361,14 @@ export function SessionList(props: {
             // (e.g. it moved to the pinned "in progress" section). Drop the
             // guard so it auto-expands again when it transitions back into a
             // group later.
-            autoExpandedSelectedSessionKeyRef.current = null
+            //
+            // NOT while filtering: a search that simply does not match the
+            // selected session removes it from `groups` the same way, and
+            // dropping the guard there made clearing the search re-expand a
+            // group the operator had collapsed by hand.
+            if (!isFiltering) {
+                autoExpandedSelectedSessionKeyRef.current = null
+            }
             return
         }
 
@@ -3370,7 +3377,7 @@ export function SessionList(props: {
         autoExpandedSelectedSessionKeyRef.current = autoExpandKey
 
         setCollapseOverrides(prev => expandSelectedSessionCollapseOverrides(prev, group))
-    }, [selectedSessionId, groups])
+    }, [selectedSessionId, groups, isFiltering])
 
     // Same idea for the pinned sections, which collapse by hand and so can hide
     // the selected row with nothing left to reveal. Guarded on the
