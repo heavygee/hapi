@@ -1192,9 +1192,37 @@ driver_soup_single_exe_publish() {
         return 1
     fi
 
+    # Notes are computed BEFORE the manifest so they can ship INSIDE it.
+    #
+    # GitHub already solves "artifact and its notes arrive together": a release
+    # carries its body and its assets as one object. Our consumers did not use
+    # that — they fetched manifest.json, then made a SECOND, independent request
+    # for NOTES.md. That second fetch can 404 on CDN lag, be skipped by a code
+    # path, or simply fail, and when it does the banner degrades to "no release
+    # notes published for this tip yet" rather than to anything anyone notices.
+    # Ian has now hit that twice (#304, and again on 2026-11-12).
+    #
+    # Putting the notes in manifest.json makes them atomic with the artifact by
+    # construction: the manifest is the one file every host already fetches to
+    # learn the tag and the binaries, so there is no longer a window where the
+    # software is available and its notes are not. NOTES.md is still written as
+    # a release asset and a local cache, but it is no longer load-bearing.
+    local notes_for_disk repo_for_notes
+    repo_for_notes="$(driver_soup_single_exe_github_repo)"
+    if [[ -n "$tip_sha" ]] && { [[ -d "$driver/.git" ]] || [[ -f "$driver/.git" ]]; }; then
+        notes_for_disk="$(driver_soup_single_exe_release_notes "$driver" "$tip_sha" "$tag" "$repo_for_notes")"
+    else
+        notes_for_disk="Soup single-exe fleet artifact \`${tag}\`."
+        if [[ -n "$tip_sha" ]]; then
+            notes_for_disk+=$'\n\n'"**Composed tip:** \`${tip_sha}\`"
+        fi
+        notes_for_disk+=$'\n\n'"Download per-platform binaries as \`hapi-<platform-dir>\` (see \`manifest.json\` for sha256)."
+    fi
+
     jq -n \
         --arg schema "1" \
         --arg tag "$tag" \
+        --arg releaseNotes "$notes_for_disk" \
         --arg composedTipSha "$tip_sha" \
         --arg composedTreeOid "$tree_oid" \
         --argjson layerCount "$layer_count" \
@@ -1207,6 +1235,7 @@ driver_soup_single_exe_publish() {
         '{
             schema: ($schema|tonumber),
             tag: $tag,
+            releaseNotes: $releaseNotes,
             composedTipSha: $composedTipSha,
             composedTreeOid: $composedTreeOid,
             layerCount: $layerCount,
@@ -1218,21 +1247,11 @@ driver_soup_single_exe_publish() {
             binaries: $binaries
         }' >"$dest/manifest.json"
 
-    # Persist the same notes the GitHub release will use so the hub can serve
-    # "what's new" on the fleet skew banner without calling gh at runtime (#248).
-    local notes_for_disk repo_for_notes
-    repo_for_notes="$(driver_soup_single_exe_github_repo)"
-    if [[ -n "$tip_sha" ]] && { [[ -d "$driver/.git" ]] || [[ -f "$driver/.git" ]]; }; then
-        notes_for_disk="$(driver_soup_single_exe_release_notes "$driver" "$tip_sha" "$tag" "$repo_for_notes")"
-    else
-        notes_for_disk="Soup single-exe fleet artifact \`${tag}\`."
-        if [[ -n "$tip_sha" ]]; then
-            notes_for_disk+=$'\n\n'"**Composed tip:** \`${tip_sha}\`"
-        fi
-        notes_for_disk+=$'\n\n'"Download per-platform binaries as \`hapi-<platform-dir>\` (see \`manifest.json\` for sha256)."
-    fi
+    # Same text as manifest.releaseNotes above and as the GitHub release body.
+    # Kept as a release asset and local cache for older consumers; the manifest
+    # is now the authoritative, atomic carrier (#248 / #304).
     printf '%s\n' "$notes_for_disk" >"$dest/NOTES.md"
-    echo "soup-artifact: NOTES.md written ($dest/NOTES.md)"
+    echo "soup-artifact: NOTES.md written ($dest/NOTES.md); manifest.releaseNotes ${#notes_for_disk} chars"
 
     if ! driver_soup_single_exe_assert_not_retagging_stale "$dest" "$tip_sha"; then
         rm -rf "$dest"
