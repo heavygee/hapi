@@ -133,3 +133,69 @@ Expect the same pattern to recur through the absorb's cli/ third.
 - remat hold cleared; lease unheld; `hapi-driver-status` exits 0.
 - The two re-cut layers (`ced18eaaa`, `2bf6ef8a8`) are verified to clear the fat-tip
   gate unforced and are waiting on this absorb, not on anything of their own.
+
+---
+
+## Correction: the session-jobs "parallel implementation" was wrong
+
+**The operator caught this and was right.** An earlier revision of this doc claimed
+upstream's `#1424` session-jobs was an *independent parallel implementation* of the
+fork's, making 56% of the absorb a product decision. That was wrong, and the way it was
+wrong is the point.
+
+The test used was `git rev-list --count e5237f366 ^upstream/main` → non-zero, read as
+"different implementation". But `tiann/hapi` **squash-merges**, so a fork commit never
+appears as an upstream ancestor even when the code is byte-identical. Both commits are
+authored by HeavyGee: `ee73f3a84` is **our own PR**, merged upstream 2026-11-10 00:37Z.
+
+**A provenance check was used to answer a content question** — the same
+ancestry-vs-presence error this whole plan set exists to document, committed while
+documenting it.
+
+The content comparison says the opposite of the ancestry one:
+
+| | soup | fork main (= upstream, post-review) |
+|---|---|---|
+| `hub/src/store/sessionJobs.ts` | 350 lines | **579 lines** |
+| exported symbols | — | **+11** (terminal-wake machinery, richer result types) |
+
+Upstream's version is a **superset**: our work matured through review. The one
+soup-only symbol, `ensureSessionJobWakeColumns`, is a runtime migration helper made
+obsolete by main carrying `wake_on_terminal` / `wake_prompt` / `wake_emitted_run_id`
+first-class in the schema. Every `hapi job` flag this seat depends on
+(`--progress unknown|fraction|until`, `--wake-on-terminal`, `--wake-prompt`) is present
+in main's `cli/src/commands/job.ts`.
+
+**So there is no product decision.** Session-jobs resolves as "take main" — accept our
+own reviewed work back.
+
+## Where the absorb actually stands
+
+**28 of 91 resolved**, by two rules that were validated rather than assumed:
+
+1. **`bun.lock` — restore the pre-conflict lockfile, never delete-and-reinstall.**
+   Straight from session `2ec10899`, who did this wrong once on `#2147` and caught it
+   in their own cold review: a bare `bun install` re-resolved the whole graph against
+   loose semver and floated 44+ unrelated packages to new majors (uuid 11→14, hono
+   4.11→4.13), which broke `permissions.test.ts`. **That also retracts an earlier
+   "hub flake" report — `permissions.test.ts` was never flaky, it was a dependency
+   float. Do not quarantine it.**
+2. **Take main's side only where it provably drops nothing.** Per file, compare the
+   identifier sets of stage 2 (ours) and stage 3 (theirs); resolve as theirs only when
+   `comm -23 ours theirs` is empty. 10 purely-session-jobs files plus 17 others passed;
+   all 27 verified clean afterwards.
+
+Lists are committed so this is reproducible in one scripted pass, not re-work:
+`scripts/tooling/absorb/2026-11-10-safe-theirs.txt`,
+`scripts/tooling/absorb/2026-11-10-needs-union.txt`.
+
+**63 files remain and need genuine per-hunk union**, because the soup is main *plus* 88
+layers — taking main there would delete fork features wholesale. Worst cases by fork
+identifiers at risk: `SessionList.tsx` (665), `en.ts` (409), `shared/src/schemas.ts`
+(404), `syncEngine.ts` (396).
+
+Inherit rather than rediscover: `2ec10899` already absorbed this upstream range on two
+branches and found a real bug in `sessionCache.ts` — upstream's second, **unprotected**
+`mergeSessionMetadata()` call bypasses the fork's `ExternalRefsMergeCapExceededError`
+handling, reintroducing the hard throw that `mergeSessionHistory`'s carve-out exists to
+avoid. Wrap it in the same try/catch as the function's other protected call site.

@@ -699,15 +699,16 @@ layers:
   # (ee73f3a84814). Progress until / sleep-refuse now on upstream main.
   # - branch: driver/session-job-progress-until
 
-  # Fork-only: row fade = residency (RAM), not "has attached job".
-  # Operator decision 2026-11-09 — non-resident + running job → faded + job chip.
-  # Not upstream (no opacity-50 in the merged session-jobs PR). Layer owner: /sessions/6e70f97b.
-  # Tip: a740628eb on soup HEAD 26e5eebc3. Worktree: session-row-residency-fade.
-  # Gate A note: do NOT cite the merged upstream PR number here — meta-wave
-  # attributes any #N mention on an active - branch: line as soup dirt for that PR.
-  - branch: driver/session-row-residency-fade
-    sentinel: opacity-50
-    sentinel_path: web/src/components/SessionRowSummary.tsx
+  # DROPPED 2026-11-11: driver/session-row-residency-fade — the residency fade is
+  # on upstream main (merged as a29fe7b32, released in 0.34.6). Row fade = residency
+  # (RAM), not "has attached job"; operator decision 2026-11-09 now upstream.
+  # Follow-up still unlanded: the fade sits on the title grid, which also holds the
+  # inline z-30 schedule/attention tooltip panels, so it forms a stacking context that
+  # washes them out and traps their z-index. Fix + regression test are on the fork at
+  # fix/session-row-fade-tooltip-stacking (0cd8475d3) awaiting an upstream PR decision.
+  # - branch: driver/session-row-residency-fade
+  #   sentinel: opacity-50
+  #   sentinel_path: web/src/components/SessionRowSummary.tsx
 
   # DROPPED 2026-11-10: driver/slim-session-job-mcp — MERGED tiann/hapi#1424
   # - branch: driver/slim-session-job-mcp

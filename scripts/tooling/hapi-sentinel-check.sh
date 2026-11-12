@@ -46,6 +46,8 @@ TREE="${HAPI_DRIVER:-$HOME/coding/hapi/driver}"
 MANIFEST=""
 QUIET=0
 AUTO=0
+REQUIRED=0
+REQFILE=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -53,6 +55,8 @@ while [[ $# -gt 0 ]]; do
         --manifest) MANIFEST="$2"; shift 2 ;;
         --quiet) QUIET=1; shift ;;
         --auto) AUTO=1; shift ;;
+        --required) REQUIRED=1; shift ;;
+        --required-file) REQFILE="$2"; shift 2 ;;
         # --auto-sample is gone: --auto now reads every identifier, so there is
         # nothing to size. Accepted and ignored so an older caller still runs.
         --auto-sample) err "--auto-sample is obsolete (coverage is complete); ignoring"; shift 2 ;;
@@ -175,6 +179,73 @@ run_auto() {
     [[ "$flagged" -eq 0 ]]
 }
 
+
+# --required: assert the soup's REQUIRED SURFACE, independent of any layer.
+#
+# A layer sentinel asks "did this layer survive". That cannot protect a symbol
+# whose owning layer was re-cut away or that predates every current layer —
+# which is precisely how `link_pr` vanished: carried for months by #1163, then
+# dropped by a "restore fork tools" commit whose inventory simply omitted it,
+# with no layer left claiming it.
+#
+# Entries live in config/soup-required-surface.yaml. Each is a promise that the
+# symbol must be present on :3006 after a remat; a miss fails the rebuild.
+run_required() {
+    local file="$1" total=0 gone=0 sym path
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^[[:space:]]*-[[:space:]]*symbol:[[:space:]]*(.+)$ ]]; then
+            [[ -n "${sym:-}" ]] && { _req_one "$sym" "${path:-}"; }
+            sym="$(echo "${BASH_REMATCH[1]}" | sed 's/[[:space:]]*$//; s/^"//; s/"$//')"
+            path=""
+            total=$((total+1))
+            continue
+        fi
+        if [[ "$line" =~ ^[[:space:]]+path:[[:space:]]*(.+)$ ]]; then
+            path="$(echo "${BASH_REMATCH[1]}" | sed 's/[[:space:]]*$//')"
+        fi
+    done < "$file"
+    [[ -n "${sym:-}" ]] && _req_one "$sym" "${path:-}"
+    say ""
+    say "required surface: $total entr(ies) checked, $REQ_GONE missing"
+    [[ "$REQ_GONE" -eq 0 ]]
+}
+
+REQ_GONE=0
+_req_one() {
+    local sym="$1" path="$2"
+    if [[ -n "$path" ]]; then
+        if [[ ! -e "$TREE/$path" ]]; then
+            echo "GONE     $sym" >&2
+            echo "         required path missing from the composed tree: $path" >&2
+            REQ_GONE=$((REQ_GONE+1)); return
+        fi
+        if grep -qF -- "$sym" "$TREE/$path" 2>/dev/null; then
+            say "ok       $sym  ($path)"
+        else
+            echo "GONE     $sym" >&2
+            echo "         required surface absent from $path — remat produced a quietly reduced estate" >&2
+            REQ_GONE=$((REQ_GONE+1))
+        fi
+    else
+        if git -C "$TREE" grep -qF -- "$sym" 2>/dev/null; then
+            say "ok       $sym"
+        else
+            echo "GONE     $sym" >&2
+            echo "         required surface absent from the composed tree" >&2
+            REQ_GONE=$((REQ_GONE+1))
+        fi
+    fi
+}
+
+if [[ "$REQUIRED" -eq 1 ]]; then
+    [[ -n "$REQFILE" ]] || REQFILE="$TREE/config/soup-required-surface.yaml"
+    [[ -f "$REQFILE" ]] || die "required-surface file not found: $REQFILE"
+    if run_required "$REQFILE"; then exit 0; fi
+    err "the composed tree is missing surface the fork promises to keep"
+    err "see config/soup-required-surface.yaml"
+    exit 1
+fi
+
 if [[ "$AUTO" -eq 1 ]]; then
     command -v git >/dev/null 2>&1 || die "git not on PATH (tool failure, not a finding)"
     TIP="$(git -C "$TREE" rev-parse HEAD 2>/dev/null)" || die "cannot resolve HEAD in $TREE (tool failure, not a finding)"
@@ -188,50 +259,73 @@ fi
 
 # Walk the manifest line by line, same shape as parse-driver-manifest.mjs, so a
 # sentinel always binds to the branch entry directly above it.
-declared=0; missing=0; checked=0; current=""
+declared=0; missing=0; checked=0; current=""; sentinels=(); spath=""
+
+# One layer may declare MANY sentinels. The operator's standing rule (2026-11-11)
+# is that everything the manifest claims to keep on the soup gets one, so a
+# single `sentinel:` per entry is not expressive enough — a layer that ships
+# four MCP tools needs four assertions, not whichever one happened to be last.
+# (The previous loop overwrote: a second `sentinel:` line silently replaced the
+# first, so only the last was ever checked. That is the same silent-pass class
+# this tool exists to close, in the tool itself.)
+check_one() {
+    local layer="$1" sym="$2" path="$3"
+    checked=$((checked+1))
+    if [[ -n "$path" ]]; then
+        if [[ ! -e "$TREE/$path" ]]; then
+            echo "MISSING  $layer" >&2
+            echo "         sentinel_path does not exist in the composed tree: $path" >&2
+            missing=$((missing+1))
+        elif grep -q -- "$sym" "$TREE/$path" 2>/dev/null; then
+            say "ok       $layer  ($sym in $path)"
+        else
+            echo "MISSING  $layer" >&2
+            echo "         '$sym' absent from $path — the layer is an ancestor but its behaviour is gone" >&2
+            missing=$((missing+1))
+        fi
+    else
+        if git -C "$TREE" grep -q -- "$sym" 2>/dev/null; then
+            say "ok       $layer  ($sym present)"
+        else
+            echo "MISSING  $layer" >&2
+            echo "         '$sym' absent from the composed tree — the layer is an ancestor but its behaviour is gone" >&2
+            missing=$((missing+1))
+        fi
+    fi
+}
+
+flush_sentinels() {
+    local sym
+    for sym in ${sentinels+"${sentinels[@]}"}; do
+        check_one "$current" "$sym" "$spath"
+    done
+    sentinels=(); spath=""
+}
+
 while IFS= read -r line; do
     if [[ "$line" =~ ^[[:space:]]*-[[:space:]]*branch:[[:space:]]*(.+)$ ]]; then
+        flush_sentinels
         current="$(echo "${BASH_REMATCH[1]}" | sed 's/[[:space:]]*$//')"
-        sentinel=""; spath=""
         continue
     fi
     if [[ "$line" =~ ^[[:space:]]+sentinel:[[:space:]]*(.+)$ ]]; then
-        sentinel="$(echo "${BASH_REMATCH[1]}" | sed 's/[[:space:]]*$//; s/^["'"'"']//; s/["'"'"']$//')"
-        [[ -n "$current" ]] || { err "sentinel with no preceding branch entry: $sentinel"; exit 2; }
-        declared=$((declared+1))
+        sym="$(echo "${BASH_REMATCH[1]}" | sed 's/[[:space:]]*$//; s/^["'"'"']//; s/["'"'"']$//')"
+        [[ -n "$current" ]] || { err "sentinel with no preceding branch entry: $sym"; exit 2; }
+        # comma-separated list is accepted too, so one line can carry a set
+        local_ifs="$IFS"; IFS=','
+        for part in $sym; do
+            part="$(echo "$part" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+            [[ -n "$part" ]] && { sentinels+=("$part"); declared=$((declared+1)); }
+        done
+        IFS="$local_ifs"
         continue
     fi
     if [[ "$line" =~ ^[[:space:]]+sentinel_path:[[:space:]]*(.+)$ ]]; then
         spath="$(echo "${BASH_REMATCH[1]}" | sed 's/[[:space:]]*$//')"
-    fi
-
-    # A blank line or the next entry closes the current one — run its check.
-    if [[ -n "${sentinel:-}" ]]; then
-        checked=$((checked+1))
-        if [[ -n "${spath:-}" ]]; then
-            if [[ ! -e "$TREE/$spath" ]]; then
-                echo "MISSING  $current" >&2
-                echo "         sentinel_path does not exist in the composed tree: $spath" >&2
-                missing=$((missing+1))
-            elif grep -q -- "$sentinel" "$TREE/$spath" 2>/dev/null; then
-                say "ok       $current  ($sentinel in $spath)"
-            else
-                echo "MISSING  $current" >&2
-                echo "         '$sentinel' absent from $spath — the layer is an ancestor but its behaviour is gone" >&2
-                missing=$((missing+1))
-            fi
-        else
-            if git -C "$TREE" grep -q -- "$sentinel" 2>/dev/null; then
-                say "ok       $current  ($sentinel present)"
-            else
-                echo "MISSING  $current" >&2
-                echo "         '$sentinel' absent from the composed tree — the layer is an ancestor but its behaviour is gone" >&2
-                missing=$((missing+1))
-            fi
-        fi
-        sentinel=""; spath=""
+        continue
     fi
 done < "$MANIFEST"
+flush_sentinels
 
 total_layers="$(grep -c '^[[:space:]]*-[[:space:]]*branch:' "$MANIFEST" || echo 0)"
 say ""

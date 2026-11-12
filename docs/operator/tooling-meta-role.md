@@ -115,6 +115,99 @@ Then **abort the WIP and clear your own hold** (`hapi-remat-hold clear` with
 remat and build-web; leaving one set while a peer reshapes freezes the fleet for no
 reason. The previous tip stays live and serving throughout.
 
+## 3b. Upstream absorb — cadence is the whole game
+
+**PRACTICE (predecessor 028d0a86, consulted 2026-11-10 after a 91-file absorb).**
+
+The seat's most expensive failure is not a bad merge — it is **deferral**. Tip-forward
+makes small syncs cheap; batching many upstream commits against a fat soup tip is how
+you get a minefield.
+
+| | conflict files |
+|---|---|
+| predecessor's typical tip-forward absorb | **~17** |
+| full-recipe, same era | ~114 |
+| 2026-11-10, after 18 upstream commits landed at once | **91 (332 hunks)** |
+
+The predecessor was explicit that there was **no holy "remat after every upstream tick"
+cadence** — practice was opportunistic: sync when something refused behind, remat when a
+hold / feature / seal / wave-unlock demanded a tip. *"That is deferral… I under-invested
+in that relative to 'remat when someone needs soup.'"*
+
+**POLICY for this seat going forward: pay the absorb tax in small bites.** Sync+remat
+when upstream moves a handful of hot files, not when eighteen commits land. A 91-file
+night is the bill for skipping several 17-file ones.
+
+Also: after a sync, drop or thin layers that are now ancestors **before** expecting a
+clean tip-forward. Tip-forward skips ancestor layers, but a fat tip still carrying
+overlapping hunks explodes on the `origin/main` merge itself.
+
+### When the absorb does blow up, the sanctioned path is narrow
+
+There is **no fourth option**. Confirmed with the predecessor:
+
+- **Resolve in the remat worktree**, never by editing live `driver/` (production-mutation class).
+- **`--theirs` on hot chat files is forbidden by scar tissue** — it burned the fleet
+  twice, deleting soup helpers while leaving their call sites (`getTodoProgress is not
+  defined`). An identifier-set gate before taking a side is *"exactly the right
+  refusal"*.
+- **full-recipe is worse, not better,** for this shape.
+- **soup-heals cannot help mid-absorb** — they apply *during* a remat, which dies at the
+  absorb, and tip-forward warn-skips them anyway.
+
+What makes the job survivable rather than shorter:
+
+1. Prepare the merge offline in the remat WT while the live tip keeps serving.
+2. **Commit replay lists** under `scripts/tooling/absorb/` so a killed turn loses nothing.
+3. **Hot-file union rules:** `SessionList` / `HappyComposer` / `SessionChat` — keep
+   **both** the call site and the declaration; prefer the fuller send-intent / helper
+   module (`sessionRowHelpers`) over a partial HEAD stub. `playwright.config` is the
+   other usual landmine.
+4. Ping layer owners **only** when a *layer tip* is fat or moved — that is a different
+   failure from "main vs soup tip", and re-thinning 88 layers does not fix an
+   `origin/main` merge.
+5. Once the merge commit exists **and typechecks** in the remat WT, resume as owner
+   (`HAPI_REMAT_RESUME=1`) so promote + verify + restart run as one kitchen job. **Never
+   promote by hand onto live `driver/`.**
+6. **One absorb owner, one remat WT.** Do not start a second remat hoping the flock
+   saves you.
+
+**The soup sitting on an older main while the absorb is prepared is the DESIGN, not a
+degraded state.** Atomic remat leaves the pre-remat SHA serving. Live tip up with the
+hold cleared is the correct trade: remat is blocked, the fleet is not dark. An
+operator-visible fix waiting is annoying and is *not* a licence to `--theirs` a hot file
+or yank a half-merged tip onto `:3006`.
+
+## 3c. Squash-merge: ancestry lies about our own upstream PRs
+
+**POLICY, written after this seat got it wrong on 2026-11-10 and the operator caught it.**
+
+> **Ancestry answers "is our commit reachable?" Content answers "is our change present?"
+> Squash-merge makes those diverge on purpose.**
+
+`tiann/hapi` squash-merges. A fork commit therefore **never** appears as an ancestor of
+`upstream/main` even when the merged code is byte-identical to ours. So
+`git rev-list --count <fork-sha> ^upstream/main` returning non-zero means *nothing*
+about whether upstream has our feature.
+
+This seat used exactly that test and concluded upstream's `#1424` session-jobs was an
+independent parallel implementation — declaring 56% of an absorb a "product decision"
+that did not exist. It was **our own PR**, merged upstream hours earlier, and upstream's
+copy was a *superset* (579 lines vs the soup's 350, +11 exported symbols).
+
+**Before ever calling upstream work a parallel implementation:**
+
+1. Did a heavygee → `tiann/hapi` PR merge for it? Check `gh pr view`, the merge commit
+   message, and **the author field** — ours come back authored by us.
+2. Is the *behaviour* present on `upstream/main` — file content, exported symbols,
+   tests — regardless of SHA?
+3. Only then absorb it as **ours coming home**: prefer main's side where content
+   matches, and preserve only the soup-only deltas main genuinely lacks.
+
+**Generalise it:** any provenance tool that keys on SHA ancestry will lie exactly on the
+PRs we care about most — our own upstream merges. That includes
+`hapi-sentinel-check --auto`'s absorbed-layer test. Provenance is not presence.
+
 ## 4. Other routines of the seat
 
 - **Same-turn commit of utensil dirt** on the mirror before stopping (tooling-commit ledger / stop hook). Do not leave `scripts/tooling/` or `docs/` edits uncommitted across a turn.

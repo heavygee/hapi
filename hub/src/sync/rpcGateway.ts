@@ -3,6 +3,7 @@ import { PERMISSION_REQUEST_NOT_FOUND_MESSAGE, RPC_METHODS } from '@hapi/protoco
 import {
     ArchiveCodexSessionRpcResponseSchema,
     AgentAvailabilityResponseSchema,
+    AgentQuotasResponseSchema,
     CursorChatStoreStatusSchema,
     ClaudeTranscriptStatusSchema,
     ListCodexSessionsRpcResponseSchema,
@@ -13,6 +14,7 @@ import type {
     AgyModelsResponse,
     ClaudeModelsResponse,
     AgentAvailabilityResponse,
+    AgentQuotasResponse,
     CodexModelSummary,
     CodexModelsResponse,
     CommandResponse,
@@ -378,6 +380,12 @@ export class RpcGateway {
         return AgentAvailabilityResponseSchema.parse(result)
     }
 
+    async getAgentQuotas(machineId: string, options?: { refresh?: boolean }): Promise<AgentQuotasResponse> {
+        const params = options?.refresh ? { refresh: true } : {}
+        const result = await this.machineRpc(machineId, RPC_METHODS.AgentQuotas, params, 20_000)
+        return AgentQuotasResponseSchema.parse(result)
+    }
+
     async checkPathsExist(machineId: string, paths: string[]): Promise<PathExistsResponse> {
         const result = await this.machineRpc(machineId, RPC_METHODS.PathExists, { paths }) as RpcPathExistsResponse | unknown
         if (!result || typeof result !== 'object') {
@@ -661,7 +669,7 @@ export class RpcGateway {
 
     async forkConversation(
         sessionId: string,
-        params: { messageLocalId?: string }
+        params: { messageLocalId?: string; latestCompleted?: boolean }
     ): Promise<import('@hapi/protocol/apiTypes').ForkConversationRpcResponse> {
         return await this.sessionRpc(
             sessionId,

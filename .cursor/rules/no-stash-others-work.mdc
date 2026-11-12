@@ -43,6 +43,8 @@ If you absolutely must stash, **label your stash** with your agent id / Cursor s
 git stash push -m "wip <agent-name> <session-id-prefix> <topic>" -u
 ```
 
+**Repo-global trap:** stash lives in the shared `.git`, not the worktree. Another agent can push between your push and pop; `stash@{0}` is then **theirs**. Prefer `git checkout HEAD -- <path>` / temp copy (worktree-local). If you stash: `git stash list` before apply, prefer `apply` over `pop`. See `docs/tooling/git-stash-policy.md`.
+
 ## Backstop
 
 `pre-push` hook + `scripts/tooling/check-stash-advisory.sh` surface stashes older than 30 minutes with WIP-style messages. If you see one and do not own it, do not drop it - leave it for the operator.

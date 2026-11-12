@@ -1,0 +1,83 @@
+# Files needing genuine per-hunk union. Taking origin/main's side here
+# provably DELETES fork content — verified by comparing identifier sets of
+# merge stage 2 (soup) vs stage 3 (main).
+#
+# CORRECTION 2026-11-10: an earlier pass took --theirs on 10 'purely
+# session-jobs' files after a verification that silently returned nothing.
+# Re-running the check on a fresh merge showed those 10 would have deleted
+# real fork features: registry.ts -> archivePeer/displayLinks/linkIssue,
+# BasePermissionHandler.ts -> archive_peer/hapi_search_peers/hapi_session_job.
+# They are in this list now. 73 files need union, not 63.
+cli/src/agent/runners/runAgentSession.test.ts
+cli/src/claude/claudeRemoteLauncher.ts
+cli/src/claude/utils/startHappyServer.test.ts
+cli/src/claude/utils/startHappyServer.ts
+cli/src/claude/utils/systemPrompt.ts
+cli/src/codex/happyMcpStdioBridge.test.ts
+cli/src/codex/happyMcpStdioBridge.ts
+cli/src/codex/shared/launch.ts
+cli/src/codex/utils/appServerConfig.test.ts
+cli/src/codex/utils/buildHapiMcpBridge.test.ts
+cli/src/codex/utils/buildHapiMcpBridge.ts
+cli/src/codex/utils/systemPrompt.ts
+cli/src/commands/registry.ts
+cli/src/cursor/cursorAcpRemoteLauncher.test.ts
+cli/src/cursor/utils/cursorNotifyRuleOverlay.test.ts
+cli/src/cursor/utils/cursorNotifyRuleOverlay.ts
+cli/src/grok/utils/systemPrompt.ts
+cli/src/modules/common/permission/BasePermissionHandler.test.ts
+cli/src/modules/common/permission/BasePermissionHandler.ts
+cli/src/modules/common/sessionJobInstruction.ts
+cli/src/modules/sessionJob/runSessionJob.ts
+cli/src/modules/sessionJob/sessionJobMcp.ts
+cli/src/runner/run.ts
+cli/src/test/globalSetup.ts
+cli/src/utils/process.ts
+docs/guide/session-jobs.md
+hub/src/socket/handlers/cli/index.ts
+hub/src/socket/handlers/cli/sessionHandlers.test.ts
+hub/src/socket/handlers/cli/sessionHandlers.ts
+hub/src/socket/server.ts
+hub/src/startHub.ts
+hub/src/store/index.ts
+hub/src/store/migration-v23.test.ts
+hub/src/store/migration-v24.test.ts
+hub/src/store/migration-v25.test.ts
+hub/src/store/migration-v26.test.ts
+hub/src/store/migration-v30.test.ts
+hub/src/store/sessionJobWakeClaim.test.ts
+hub/src/store/sessionJobs.ts
+hub/src/store/sessionJobsStore.ts
+hub/src/store/sessions.ts
+hub/src/store/types.ts
+hub/src/sync/messageService.test.ts
+hub/src/sync/messageService.ts
+hub/src/sync/sessionCache.ts
+hub/src/sync/sessionJobWake.engine.test.ts
+hub/src/sync/syncEngine.ts
+hub/src/web/routes/sessions.test.ts
+hub/src/web/routes/sessions.ts
+shared/src/schemas.ts
+shared/src/sessionSummary.ts
+web/src/components/AssistantChat/HappyComposer.tsx
+web/src/components/RenameSessionDialog.tsx
+web/src/components/SessionChat.tsx
+web/src/components/SessionList.directory-action.test.tsx
+web/src/components/SessionList.machine-filter.test.tsx
+web/src/components/SessionList.test.ts
+web/src/components/SessionList.tsx
+web/src/components/SessionListViewMenu.tsx
+web/src/components/SessionRowSummary.test.tsx
+web/src/components/SessionRowSummary.tsx
+web/src/components/icons.tsx
+web/src/hooks/usePinInProgressSessions.ts
+web/src/hooks/useSSE.test.ts
+web/src/hooks/useSSE.ts
+web/src/lib/locales/en.ts
+web/src/lib/locales/ru.ts
+web/src/lib/locales/zh-CN.ts
+web/src/lib/sessionInProgress.test.ts
+web/src/lib/sessionInProgress.ts
+web/src/lib/sessionReference.test.ts
+web/src/routes/settings/display.tsx
+web/src/routes/settings/index.test.tsx

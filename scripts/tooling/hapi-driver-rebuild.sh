@@ -540,6 +540,18 @@ if [[ "$VERIFY" -eq 1 ]]; then
         if ! "$SENTINEL_SCRIPT" --tree "$DRIVER" --manifest "$DRIVER/config/driver-manifest.yaml"; then
             remat_rollback_live_tip "layer sentinel missing (behaviour lost despite being composed)"
         fi
+        # Required surface: everything the fork promises to keep on :3006,
+        # independent of which layer happens to carry it. Layer sentinels cannot
+        # protect a symbol whose owning layer was re-cut away — which is exactly
+        # how MCP link_pr vanished and stayed gone for weeks with green
+        # typecheck and green tests. Operator directive 2026-11-11.
+        if [[ -f "$DRIVER/config/soup-required-surface.yaml" ]]; then
+            echo "Checking the soup's required surface..."
+            if ! "$SENTINEL_SCRIPT" --tree "$DRIVER" --required \
+                 --required-file "$DRIVER/config/soup-required-surface.yaml"; then
+                remat_rollback_live_tip "required surface missing (remat produced a quietly reduced estate)"
+            fi
+        fi
         # --auto needs no declaration: it checks every identifier each layer
         # added against the composed tree. REPORT-ONLY, deliberately — a rename
         # is textually identical to a deletion, and 3 of the first 7 flags were

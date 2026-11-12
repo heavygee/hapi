@@ -42,6 +42,19 @@ case "$cmd" in
         ;;
     set)
         reason="${1:?usage: hapi-remat-hold set \"reason\" [remat_wt] [prev_tip] [wip] [merge_ref]}"
+        # The reason is POSITIONAL. Passing `--reason "text"` silently stored
+        # "--reason" as the reason and shifted the real text into remat_wt —
+        # which made the hold banner read `reason: --reason` at the exact
+        # moment it mattered (2026-11-10, an in-flight absorb whose whole point
+        # was telling other agents not to reset the merge). A hold that cannot
+        # say why it exists is barely a hold.
+        case "$reason" in
+            --*)
+                echo "hapi-remat-hold: reason is positional, not a flag — you passed '$reason'." >&2
+                echo "  Use: hapi-remat-hold set \"why this hold exists\" [remat_wt] [prev_tip] [wip] [merge_ref]" >&2
+                exit 2
+                ;;
+        esac
         shift || true
         driver_remat_hold_set "$reason" "${1:-}" "${2:-}" "${3:-}" "${4:-}"
         exit 0
