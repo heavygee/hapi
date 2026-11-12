@@ -2782,8 +2782,11 @@ export function SessionList(props: {
         }
 
         const controller = new AbortController()
+        // Before the debounce, not inside it: otherwise stale results stay on
+        // screen for the whole debounce window with nothing saying a new search
+        // is coming.
+        setContentSearchLoading(true)
         const timer = window.setTimeout(() => {
-            setContentSearchLoading(true)
             const limit = Math.min(100, Math.max(50, contentSearchSessionIds.length))
             void api.searchSessionContent(
                 normalizedQuery,

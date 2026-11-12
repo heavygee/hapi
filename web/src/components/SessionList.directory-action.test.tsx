@@ -145,13 +145,23 @@ describe('SessionList directory action', () => {
 
         fireEvent.contextMenu(screen.getByTitle('/work/proj'))
         expect(screen.getByRole('menuitem', { name: 'Copy Path' })).toBeInTheDocument()
-        fireEvent.click(screen.getByRole('menuitem', { name: 'Archive all' }))
-        expect(screen.getByText('Archive 2 sessions in "work/proj"?')).toBeInTheDocument()
-        fireEvent.click(screen.getByRole('button', { name: 'Archive' }))
+        // The fork's own copy for this flow: the menu item names the scope and
+        // the dialog says what archiving costs. Upstream's shorter strings
+        // ('Archive all' / 'Archive {n} sessions in ...' / 'Archive') are what
+        // this assertion was written against.
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Archive All Sessions' }))
+        expect(screen.getByText('Archive all active sessions in "work/proj"? This will disconnect them.')).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Archive All' }))
 
-        await waitFor(() => expect(archiveSession).toHaveBeenCalledTimes(2))
+        // "Live" here is the fork's isSessionArchivable: active, or
+        // lifecycleState 'running'. 'stale' is idle-and-not-active, so it is
+        // not archivable and 'done' is already archived -- only 'live' goes.
+        // Upstream archives everything not already archived and expects two;
+        // the fork's narrower scope is what its own dialog copy promises
+        // ("all active sessions") and matches this test's name.
+        await waitFor(() => expect(archiveSession).toHaveBeenCalledTimes(1))
         expect(archiveSession).toHaveBeenCalledWith('live')
-        expect(archiveSession).toHaveBeenCalledWith('stale')
+        expect(archiveSession).not.toHaveBeenCalledWith('stale')
     })
 
     it('opens the project menu from the keyboard with Shift+F10', () => {
