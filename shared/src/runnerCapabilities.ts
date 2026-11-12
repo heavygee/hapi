@@ -30,6 +30,7 @@ export type RunnerCapabilities = typeof RUNNER_CAPABILITIES
  */
 export const MACHINE_CAPABILITIES = {
     AgentAvailability: RPC_METHODS.AgentAvailability,
+    AgentQuotas: RPC_METHODS.AgentQuotas,
     CursorChatStoreStatus: RPC_METHODS.CursorChatStoreStatus,
     ClaudeTranscriptStatus: RPC_METHODS.ClaudeTranscriptStatus,
     StopRunner: RPC_METHODS.StopRunner,
@@ -49,6 +50,7 @@ export type MachineCapability =
 /** Capabilities this CLI generation registers on the machine socket. */
 export const CURRENT_MACHINE_CAPABILITIES: readonly MachineCapability[] = [
     MACHINE_CAPABILITIES.AgentAvailability,
+    MACHINE_CAPABILITIES.AgentQuotas,
     MACHINE_CAPABILITIES.CursorChatStoreStatus,
     MACHINE_CAPABILITIES.ClaudeTranscriptStatus,
     MACHINE_CAPABILITIES.StopRunner,

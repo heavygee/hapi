@@ -152,6 +152,51 @@ describe('deduplicateSessionsByAgentId', () => {
         expect(result[0].id).toBe('a') // active wins despite older updatedAt
     })
 
+    it('keeps a job-bearing duplicate when the winner has no attached job', () => {
+        const sessions = [
+            makeSession({
+                id: 'winner-active',
+                active: true,
+                metadata: { path: '/p', agentSessionId: 'thread-1', flavor: 'codex' },
+                updatedAt: 300,
+            }),
+            makeSession({
+                id: 'job-loser',
+                active: false,
+                metadata: { path: '/p', agentSessionId: 'thread-1', flavor: 'codex' },
+                updatedAt: 100,
+                attachedJob: {
+                    key: 'beets',
+                    label: 'beets',
+                    status: 'running',
+                    heartbeatAt: 1,
+                    startedAt: 1,
+                    updatedAt: 1,
+                },
+            }),
+        ]
+        const result = deduplicateSessionsByAgentId(sessions)
+        expect(result.map((s) => s.id).sort()).toEqual(['job-loser', 'winner-active'])
+    })
+
+    it('keeps every live Claude duplicate visible (hub does not merge two live rows)', () => {
+        const sessions = [
+            makeSession({ id: 'runner', active: true, metadata: { path: '/p', agentSessionId: 'claude-1', flavor: 'claude' }, updatedAt: 100 }),
+            makeSession({ id: 'terminal', active: true, metadata: { path: '/p', agentSessionId: 'claude-1', flavor: 'claude' }, updatedAt: 200 }),
+            makeSession({ id: 'old', metadata: { path: '/p', agentSessionId: 'claude-1', flavor: 'claude' }, updatedAt: 300 })
+        ]
+        const result = deduplicateSessionsByAgentId(sessions)
+        expect(result.map((s) => s.id)).toEqual(['terminal', 'runner'])
+    })
+
+    it('still collapses live Codex duplicates', () => {
+        const sessions = [
+            makeSession({ id: 'a', active: true, metadata: { path: '/p', agentSessionId: 'thread-1', flavor: 'codex' }, updatedAt: 100 }),
+            makeSession({ id: 'b', active: true, metadata: { path: '/p', agentSessionId: 'thread-1', flavor: 'codex' }, updatedAt: 200 })
+        ]
+        expect(deduplicateSessionsByAgentId(sessions).map((s) => s.id)).toEqual(['b'])
+    })
+
     it('prefers selected session among inactive duplicates', () => {
         const sessions = [
             makeSession({ id: 'a', metadata: { path: '/p', agentSessionId: 'thread-1' }, updatedAt: 100 }),

@@ -1,0 +1,112 @@
+# Everything the soup is REQUIRED to carry, asserted on every remat.
+#
+# WHY THIS EXISTS, separate from per-layer `sentinel:` entries.
+#
+# A layer sentinel answers "did THIS layer's behaviour survive composition".
+# That is the right question for a layer, and useless for a symbol that
+# predates every current layer or whose owning layer has been re-cut away.
+# `link_pr` was exactly that: registered by #1163, carried for months, dropped
+# by `e08eb8b69` ("restore fork tools the 0.34.4 absorb stripped") whose own
+# restore inventory simply did not list it. No layer sentinel would have fired,
+# because no layer still claimed it.
+#
+# THE KILL CRITERION this closes: a surface that can vanish with a GREEN
+# typecheck and GREEN tests. An MCP tool that stops being advertised breaks no
+# build — the catalog is assembled at runtime. A CLI command dropped from the
+# registry array compiles perfectly. A web affordance removed from a component
+# renders fine. Every one of those is invisible to every gate we had.
+#
+# Checked by `hapi-sentinel-check --required`, which runs inside
+# `hapi-driver-rebuild --verify` as a HARD gate: a missing entry fails the
+# rebuild and rolls the live tip back, rather than shipping a quietly reduced
+# surface.
+#
+# ADDING AN ENTRY IS A PROMISE. Only list things that must be present on :3006
+# after a remat. If a symbol is deliberately retired, delete its line in the
+# same change that retires it — a stale entry here fails every remat until
+# someone deletes it in frustration, which is how gates get disabled.
+#
+# `path:` is optional and narrows the search. Prefer a call-site or
+# registration string over a declaration: a declaration can survive while its
+# only caller is deleted, which is the loss shape we keep hitting.
+
+required:
+
+  # --- MCP tools advertised by the Claude HTTP server ------------------------
+  # Fork-only tools. Upstream's builder has no notion of these, so every
+  # upstream absorb of startHappyServer.ts is an opportunity to drop one — it
+  # already happened to search_content (caught by an unrelated typecheck) and
+  # to link_pr (not caught at all).
+  - symbol: "'search_content'"
+    path: cli/src/claude/utils/startHappyServer.ts
+    why: fork transcript search; omitted by upstream's enabledTools builder
+  - symbol: "'search_peers'"
+    path: cli/src/claude/utils/startHappyServer.ts
+    why: fork peer discovery
+  - symbol: "'archive_peer'"
+    path: cli/src/claude/utils/startHappyServer.ts
+    why: fork peer lifecycle
+  - symbol: "'link_issue'"
+    path: cli/src/claude/utils/startHappyServer.ts
+    why: fork issue chips
+  - symbol: "'display_links'"
+    path: cli/src/claude/utils/startHappyServer.ts
+    why: Cursor-only clickable URL cards
+  - symbol: "'set_voice_mode'"
+    path: cli/src/claude/utils/startHappyServer.ts
+    why: fork voice-mode toggle
+
+  - symbol: "'link_pr'"
+    path: cli/src/claude/utils/startHappyServer.ts
+    why: >-
+      MCP half of github-pr-awareness. Registered by #1163, carried for months,
+      silently dropped by e08eb8b69 whose restore inventory omitted it. Docs
+      tell agents to use it; the catalog has not offered it since. THIS ENTRY
+      IS CURRENTLY RED ON PURPOSE — it goes green when the thin restore layer
+      lands, and fails the remat until then.
+  - symbol: "'link_pr'"
+    path: cli/src/codex/happyMcpStdioBridge.ts
+
+  # --- MCP tools advertised by the Codex stdio bridge ------------------------
+  # Same surface, different transport. The 0.34.4 absorb rewrote this file's
+  # DEFAULT_TOOL_NAMES wholesale and had to be hand-restored.
+  - symbol: "'search_content'"
+    path: cli/src/codex/happyMcpStdioBridge.ts
+    why: bridge must advertise what the HTTP server does
+  - symbol: "'search_peers'"
+    path: cli/src/codex/happyMcpStdioBridge.ts
+  - symbol: "'archive_peer'"
+    path: cli/src/codex/happyMcpStdioBridge.ts
+  - symbol: "'link_issue'"
+    path: cli/src/codex/happyMcpStdioBridge.ts
+
+  # --- fork CLI commands -----------------------------------------------------
+  # A command dropped from the registry array still compiles.
+  - symbol: linkPrCommand
+    path: cli/src/commands/registry.ts
+    why: hapi link-pr; the CLI half of the awareness feature
+  - symbol: linkIssueCommand
+    path: cli/src/commands/registry.ts
+  - symbol: searchContentCommand
+    path: cli/src/commands/registry.ts
+  - symbol: searchPeersCommand
+    path: cli/src/commands/registry.ts
+  - symbol: archivePeerCommand
+    path: cli/src/commands/registry.ts
+  - symbol: displayLinksCommand
+    path: cli/src/commands/registry.ts
+  - symbol: spawnPeerCommand
+    path: cli/src/commands/registry.ts
+  - symbol: inspectPeerCommand
+    path: cli/src/commands/registry.ts
+  - symbol: pingPeerCommand
+    path: cli/src/commands/registry.ts
+
+  # --- web affordances -------------------------------------------------------
+  # These render fine when removed; only a human notices.
+  - symbol: data-fue-callout
+    path: web/src/components/SessionList.tsx
+    why: >-
+      operator-reported 2026-11-11 — without this guard the portalled FUE
+      callout's "Got it" reads as focus leaving and collapses the search bar,
+      so dismissal never runs

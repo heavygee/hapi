@@ -48,7 +48,7 @@ describe('fork schema self-heal: reenroll grants (was soup ladder v26→v27)', (
             ORDER BY seq ASC
         `).all('session-id') as Array<{ detail: string }>
 
-        expect(version.user_version).toBe(34)
+        expect(version.user_version).toBe(35)
         expect(plan.some((row) => row.detail.includes('idx_messages_immediate_queued'))).toBe(true)
         migrated.close()
     })

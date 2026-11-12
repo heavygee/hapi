@@ -293,12 +293,6 @@ final class PushCoordinator: NSObject {
                 intentIdentifiers: [],
                 options: []
             ),
-            UNNotificationCategory(
-                identifier: "task-notification",
-                actions: [reply],
-                intentIdentifiers: [],
-                options: []
-            ),
         ])
     }
 
@@ -374,8 +368,7 @@ extension PushCoordinator: UNUserNotificationCenterDelegate {
             )
             await reportIfFailed(outcome, payload: payload)
         case ActionID.reply:
-            guard payload.supportsActions,
-                  payload.type == .ready || payload.type == .taskNotification else { return }
+            guard payload.supportsActions, payload.type == .ready else { return }
             let text = (response as? UNTextInputNotificationResponse)?
                 .userText.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             guard !text.isEmpty else { return }

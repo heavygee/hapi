@@ -87,6 +87,36 @@ directory browsing and session creation.
 | Usage and storage | Available only to the hub owner (`default` namespace). |
 | Display | English/Simplified Chinese, theme preferences, system text scaling and machine filtering on the session list. |
 
+### Share to an Android session
+
+In another app, choose **Share → HAPI**, then select a session. Use the hub
+menu to choose another paired hub, or search the session list. A stopped
+session asks for restoration before files can upload. HAPI adds the files and
+any accompanying text to the session composer, preserving its existing draft;
+review the content and tap **Send**.
+
+Files use the existing attachment limits and image compression policy. Failed
+files must be retried or removed before continuing. Before import, pending
+content stays in private local storage for up to 24 hours, including while
+pairing or recovering from process recreation. After import, ordinary Android
+attachment behavior applies: leaving the chat discards unsent attachments.
+
+### Session-list parity
+
+Android and iOS use the shared base session-list order: global-pinned sessions,
+project-pinned sessions, then your most recent input (`lastUserMessageAt`,
+falling back to creation time) descending, with creation time and session ID
+breaking ties; see [Session list](./session-list.md#ordering-and-grouping). The
+Web sidebar adds directory grouping, client-side search ranking and a sort and
+filter menu. Both native apps mirror that menu: sort by last message or date
+created, **Active first** (on by default; manual pins still come first), show
+all, active or archived sessions, and an unread-only lens, alongside machine
+filtering and relevance-ranked text search. Android adds a date range; iOS adds
+**Mark All as Read**. Rows in all three clients use the same presence badges
+and show a running [attached job](./session-jobs.md). Android and iOS README
+files describe their platform-specific filter presentation and session-row
+differences.
+
 Selecting an attachment starts its upload after preparation, before you send
 the message or save the Scratchlist entry. Removing it requests cleanup of
 unused uploads on a best-effort basis. See the [Privacy Policy](../privacy.md)

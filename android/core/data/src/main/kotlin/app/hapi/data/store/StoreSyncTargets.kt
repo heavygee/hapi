@@ -6,6 +6,7 @@ import app.hapi.protocol.wire.SyncEvent
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
 /**
@@ -134,6 +135,49 @@ class StoreSyncTargets(
                 } catch (_: Exception) {
                     // Failure lands in the window's warning state.
                 }
+                try {
+                    machines.refresh()
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (_: Exception) {
+                }
+                // A session-pipe gap means that window's replay is unproven:
+                // run the window's gap recovery (web
+                // `recoverWindowAfterGapResume`: cursor catch-up + latest-page
+                // upsert) AND reconcile queued optimistic sends against the
+                // hub verdict (web `queued-state-reconciliation` — the drain
+                // includes the ensureAfterCurrent tail sync). The two steps
+                // run concurrently like web's two post-gap calls; the queued
+                // reconciliation's drain joins the recovery's run.
+                if (scope is SseSubscriptionKey.Session) {
+                    val store = messageWindows?.peek(scope.sessionId) ?: return@launch
+                    try {
+                        coroutineScope {
+                            launch {
+                                try {
+                                    store.recoverAfterGapResume()
+                                } catch (cancellation: CancellationException) {
+                                    throw cancellation
+                                } catch (_: Exception) {
+                                    // Failure lands in the window's warning state.
+                                }
+                            }
+                            try {
+                                store.reconcileQueuedState()
+                            } catch (cancellation: CancellationException) {
+                                throw cancellation
+                            } catch (_: Exception) {
+                                // Failure lands in the window's warning state.
+                            }
+                        }
+                    } catch (cancellation: CancellationException) {
+                        throw cancellation
+                    } catch (_: Exception) {
+                        // Failures land in the window's warning state.
+                    }
+                }
+            } finally {
+                onResyncEvent(false)
             }
         }
     }

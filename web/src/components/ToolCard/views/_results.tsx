@@ -10,6 +10,8 @@ import { getInputStringAny } from '@/lib/toolInputUtils'
 import { useShowAgentContract } from '@/hooks/useShowAgentContract'
 import { isSubagentToolName } from '@/chat/subagentTool'
 import { isGoalToolName, parseGoalToolResult } from '@/components/ToolCard/goalTools'
+import { isAskUserQuestionToolName } from '@/components/ToolCard/askUserQuestion'
+import { isRequestUserInputToolName } from '@/components/ToolCard/requestUserInput'
 import { resolveToolNameAlias } from '@/components/ToolCard/toolNameAliases'
 import { isTerminalToolBlock } from '@/chat/toolGroups'
 import { GoalView } from '@/components/ToolCard/views/GoalView'
@@ -316,7 +318,14 @@ function renderText(text: string, opts: { mode: 'markdown' | 'code' | 'auto'; la
     return renderResultBody(renderMarkdown(text, opts.surface), opts.surface)
 }
 
-function placeholderForState(state: ToolViewProps['block']['tool']['state']): string {
+function placeholderForState(block: ToolViewProps['block']): string {
+    const state = block.tool.state
+    // A pending question has no result to show and its state is 'running'
+    // until the reply lands; label it as waiting instead of running.
+    if (state === 'running' && block.tool.permission?.status === 'pending'
+        && (isAskUserQuestionToolName(block.tool.name) || isRequestUserInputToolName(block.tool.name))) {
+        return 'Waiting for your reply'
+    }
     if (state === 'pending') return 'Waiting for permission…'
     if (state === 'running') return 'Running…'
     return '(no output)'
@@ -503,7 +512,7 @@ const BashResultView: ToolViewComponent = (props: ToolViewProps) => {
     const result = props.block.tool.result
 
     if (result === undefined || result === null) {
-        return <ResultStatusPill text={placeholderForState(props.block.tool.state)} />
+        return <ResultStatusPill text={placeholderForState(props.block)} />
     }
 
     if (typeof result === 'string') {
@@ -552,7 +561,7 @@ const CodexBashResultView: ToolViewComponent = (props: ToolViewProps) => {
     const result = props.block.tool.result
 
     if (result === undefined || result === null) {
-        return <ResultStatusPill text={placeholderForState(props.block.tool.state)} />
+        return <ResultStatusPill text={placeholderForState(props.block)} />
     }
 
     const display = extractCodexBashDisplay(result)
@@ -584,7 +593,7 @@ const MarkdownResultView: ToolViewComponent = (props: ToolViewProps) => {
     const { showAgentContract } = useShowAgentContract()
 
     if (result === undefined || result === null) {
-        return <ResultStatusPill text={placeholderForState(props.block.tool.state)} />
+        return <ResultStatusPill text={placeholderForState(props.block)} />
     }
 
     const rawText = extractTextFromResult(result)
@@ -612,7 +621,7 @@ const LineListResultView: ToolViewComponent = (props: ToolViewProps) => {
     const result = props.block.tool.result
 
     if (result === undefined || result === null) {
-        return <ResultStatusPill text={placeholderForState(props.block.tool.state)} />
+        return <ResultStatusPill text={placeholderForState(props.block)} />
     }
 
     const text = extractTextFromResult(result)
@@ -665,7 +674,7 @@ const ReadResultView: ToolViewComponent = (props: ToolViewProps) => {
     const result = props.block.tool.result
 
     if (result === undefined || result === null) {
-        return <ResultStatusPill text={placeholderForState(props.block.tool.state)} />
+        return <ResultStatusPill text={placeholderForState(props.block)} />
     }
 
     const file = extractReadFileContent(result)
@@ -712,7 +721,7 @@ const MutationResultView: ToolViewComponent = (props: ToolViewProps) => {
         if (state === 'completed') {
             return <ResultStatusPill text="Done" />
         }
-        return <ResultStatusPill text={placeholderForState(state)} />
+        return <ResultStatusPill text={placeholderForState(props.block)} />
     }
 
     const text = extractTextFromResult(result)
@@ -752,7 +761,7 @@ const CodexPatchResultView: ToolViewComponent = (props: ToolViewProps) => {
     if (result === undefined || result === null) {
         return props.block.tool.state === 'completed'
             ? <ResultStatusPill text="Done" />
-            : <ResultStatusPill text={placeholderForState(props.block.tool.state)} />
+            : <ResultStatusPill text={placeholderForState(props.block)} />
     }
 
     return (
@@ -766,7 +775,7 @@ const CodexPatchResultView: ToolViewComponent = (props: ToolViewProps) => {
 const CodexReasoningResultView: ToolViewComponent = (props: ToolViewProps) => {
     const result = props.block.tool.result
     if (result === undefined || result === null) {
-        return <ResultStatusPill text={placeholderForState(props.block.tool.state)} />
+        return <ResultStatusPill text={placeholderForState(props.block)} />
     }
 
     const text = extractTextFromResult(result)
@@ -792,7 +801,7 @@ const CodexDiffResultView: ToolViewComponent = (props: ToolViewProps) => {
     if (result === undefined || result === null) {
         return props.block.tool.state === 'completed'
             ? <ResultStatusPill text="Done" />
-            : <ResultStatusPill text={placeholderForState(props.block.tool.state)} />
+            : <ResultStatusPill text={placeholderForState(props.block)} />
     }
 
     const text = extractTextFromResult(result)
@@ -816,7 +825,7 @@ const CodexDiffResultView: ToolViewComponent = (props: ToolViewProps) => {
 const TodoWriteResultView: ToolViewComponent = (props: ToolViewProps) => {
     const todos = extractTodoChecklist(props.block.tool.input, props.block.tool.result)
     if (todos.length === 0) {
-        return <ResultStatusPill text={placeholderForState(props.block.tool.state)} />
+        return <ResultStatusPill text={placeholderForState(props.block)} />
     }
 
     return <ChecklistList items={todos} />
@@ -838,7 +847,7 @@ const CodexAgentResultView: ToolViewComponent = (props: ToolViewProps) => {
     const visibleText = (text: string) => (showAgentContract ? text : stripAgentContract(text))
 
     if (result === undefined || result === null) {
-        return <ResultStatusPill text={getCodexAgentActivity(input) ?? placeholderForState(state)} />
+        return <ResultStatusPill text={getCodexAgentActivity(input) ?? placeholderForState(props.block)} />
     }
 
     if (state === 'error') {
@@ -966,7 +975,7 @@ const CodexAgentResultView: ToolViewComponent = (props: ToolViewProps) => {
     const text = extractTextFromResult(result)
     if (text) {
         if (!showDetails) {
-            return <ResultStatusPill text={state === 'completed' ? 'Done' : placeholderForState(state)} />
+            return <ResultStatusPill text={state === 'completed' ? 'Done' : placeholderForState(props.block)} />
         }
 
         return (
@@ -977,7 +986,7 @@ const CodexAgentResultView: ToolViewComponent = (props: ToolViewProps) => {
         )
     }
 
-    return <ResultStatusPill text={state === 'completed' ? 'Done' : placeholderForState(state)} />
+    return <ResultStatusPill text={state === 'completed' ? 'Done' : placeholderForState(props.block)} />
 }
 
 const SkillResultView: ToolViewComponent = (props: ToolViewProps) => {
@@ -987,7 +996,7 @@ const SkillResultView: ToolViewComponent = (props: ToolViewProps) => {
         if (state === 'completed') {
             return <ResultStatusPill text="Skill loaded" />
         }
-        return <ResultStatusPill text={placeholderForState(state)} />
+        return <ResultStatusPill text={placeholderForState(props.block)} />
     }
 
     // For errors, show the error text
@@ -1009,7 +1018,7 @@ const GenericResultView: ToolViewComponent = (props: ToolViewProps) => {
     const result = props.block.tool.result
 
     if (result === undefined || result === null) {
-        return <ResultStatusPill text={placeholderForState(props.block.tool.state)} />
+        return <ResultStatusPill text={placeholderForState(props.block)} />
     }
 
     // Detect codex bash output format and render accordingly

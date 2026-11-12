@@ -83,7 +83,7 @@ import { useSessionBrowserTitle } from '@/hooks/useSessionBrowserTitle'
 import { clearCodexImportedSession, markCodexSessionsImported } from '@/lib/codexImportedSessions'
 import { clearClaudeImportedSession, markClaudeSessionsImported } from '@/lib/claudeImportedSessions'
 import type { CodexDuplicateSessionGroup, CodexLocalSessionSummary, ClaudeLocalSessionSummary, AgentImportFlavor, CursorImportableSessionSummary, CursorImportRowOutcome } from '@/types/api'
-import { getSupersedingSessionId, prepareFollowSupersedingSession, shouldFollowSupersedingSession } from '@/routes/sessions/followSupersedingSession'
+import { getMergedSessionRedirectId, getSupersedingSessionId, prepareFollowSupersedingSession, shouldFollowSupersedingSession } from '@/routes/sessions/followSupersedingSession'
 import { migrateSuppressedSendError } from '@/lib/suppressed-send-error'
 import { useConsumedMessageTarget } from '@/lib/useConsumedMessageTarget'
 import FilesPage from '@/routes/sessions/files'
@@ -2035,12 +2035,34 @@ function SessionDetailRoute() {
         })
     }, [navigate, session, sessionId, supersedingSessionId])
 
+    // A merged-away id resolves to the surviving session on the hub; move the
+    // URL there so SSE updates (keyed by the live id) reach this view.
+    const mergedRedirectId = getMergedSessionRedirectId(sessionId, session)
+    useEffect(() => {
+        if (!mergedRedirectId) return
+        prepareFollowSupersedingSession(sessionId, mergedRedirectId)
+        navigate({
+            to: '/sessions/$sessionId',
+            params: { sessionId: mergedRedirectId },
+            replace: true,
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
+        })
+    }, [navigate, mergedRedirectId, sessionId])
+
     useEffect(() => {
         if (!sessionNotFound) {
             return
         }
         navigate({ to: '/sessions', replace: true })
     }, [navigate, sessionNotFound, sessionId])
+
+    if (mergedRedirectId) {
+        return (
+            <div className="flex-1 flex items-center justify-center p-4">
+                <LoadingState label="Opening session…" className="text-sm" />
+            </div>
+        )
+    }
 
     if (sessionNotFound) {
         return (

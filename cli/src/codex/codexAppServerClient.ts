@@ -6,6 +6,8 @@ import { JsonLineParser } from '@/utils/jsonLineParser';
 import { killProcessByChildProcess } from '@/utils/process';
 import { CODEX_WEBSOCKET_MAX_PAYLOAD } from './websocketLimits';
 import type {
+    AccountRateLimitsReadResponse,
+    AccountReadResponse,
     CollaborationModeListResponse,
     InitializeParams,
     InitializeResponse,
@@ -361,6 +363,20 @@ export class CodexAppServerClient extends JsonLineParser {
             timeoutMs: 30_000
         });
         return response as ModelListResponse;
+    }
+
+    async readAccount(): Promise<AccountReadResponse> {
+        const response = await this.sendRequest('account/read', {}, {
+            timeoutMs: 15_000
+        });
+        return response as AccountReadResponse;
+    }
+
+    async readRateLimits(): Promise<AccountRateLimitsReadResponse> {
+        const response = await this.sendRequest('account/rateLimits/read', {}, {
+            timeoutMs: 15_000
+        });
+        return response as AccountRateLimitsReadResponse;
     }
 
     async listSkills(params: SkillsListParams): Promise<SkillsListResponse> {

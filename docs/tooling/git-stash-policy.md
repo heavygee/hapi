@@ -50,6 +50,31 @@ Rebase in the **branch's own worktree**, not in the primary `~/coding/hapi`. Eve
 
 Make a WIP commit on a branch. Stashes are not checkpoints - they have no parent commit and no name resolution. A WIP commit can be force-pushed, amended, dropped via `git reset` - all auditable. A stash cannot.
 
+### "I want to A/B something mid-merge" — never stash with `MERGE_HEAD` set
+
+`git stash` (including `push -u` with a unique message) **clears `MERGE_HEAD`**. After that, a plain `git commit` is a **single-parent** commit — the second parent from the in-progress merge is gone unless you rebuild it by hand (`git commit-tree <tree> -p <ours> -p <theirs>` + `update-ref`, or re-run the merge).
+
+Incident (boards #2147, 2026-11-04): stash mid-conflict to A/B-check; MERGE_HEAD vanished; restored via `stash apply` (not pop) and rebuilt the 2-parent merge with `commit-tree`. Caught by a disk-change warning — lucky.
+
+**Rule:** if `test -f .git/MERGE_HEAD` (or `git rev-parse -q --verify MERGE_HEAD`), do **not** stash. Finish or `merge --abort`, or copy trees aside without stash. Same class of footgun for an in-progress rebase (`REBASE_HEAD` / `.git/rebase-merge`).
+
+### Stash is repo-global across worktrees — `pop` takes whoever stashed last
+
+`git stash` lives in the **shared** `.git` of the clone, not in the worktree. With ~30 parallel agents, another session can `stash push` between your push and your pop. Then `git stash pop` resolves `stash@{0}` to **their** entry, not yours.
+
+Incident (2026-11-10, #2362 residency fade): peer lost a local "before" screenshot path and briefly acquired a foreign conflicted `hub/src/store/migration-v24.test.ts` (UU) that was never theirs. Their work was still safe (a conflicted pop does not drop the stash entry), but the tree was polluted.
+
+**Safe pattern when you only need one file out of the way** (worktree-local, no stash):
+
+```bash
+# edit aside, then restore from HEAD
+cp path/to/file /tmp/mine-backup
+# ... or just:
+git checkout HEAD -- path/to/file
+```
+
+If you must stash: label with session id, prefer `git stash apply` over `pop`, and **inspect `git stash list` before apply** — do not assume `stash@{0}` is still yours.
+
 ## Backstops
 
 | Layer | What it does |

@@ -1,0 +1,39 @@
+# Weekly Dogfood-fit triage wake — pings the dedicated dogfood-fit HAPI session.
+#
+# Fork-local (heavygee estate). NOT upstream. NOT Tier-1.
+# Install: sudo bash scripts/tooling/install-hapi-dogfood-fit-timer.sh
+#
+# Scores OPEN tiann/hapi PRs not authored by heavygee for estate dogfood
+# priority. Deliberately separate from hapi-meta-daily (chip/ping machinery) —
+# see docs/plans/2026-10-21-dogfood-fit-triage-rubric.md § 5 Cadence.
+
+[Unit]
+Description=HAPI dogfood-fit triage weekly wake (ping dogfood-fit session)
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/home/heavygee/.hapi/settings.json
+ConditionPathExists=/home/heavygee/.hapi/dogfood-fit.env
+ConditionPathExists=/home/heavygee/coding/hapi/scripts/tooling/hapi-dogfood-fit-weekly.sh
+
+[Service]
+Type=oneshot
+User=heavygee
+Group=heavygee
+Nice=10
+Environment=HOME=/home/heavygee
+Environment=USER=heavygee
+Environment=PATH=/home/heavygee/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HAPI_HOST=http://127.0.0.1:3006
+Environment=HAPI_HOME=/var/lib/hapi
+Environment=HAPI_PRIMARY=/home/heavygee/coding/hapi
+Environment=HAPI_SETTINGS=/home/heavygee/.hapi/settings.json
+Environment=NO_COLOR=1
+Environment=CLICOLOR=0
+EnvironmentFile=-/home/heavygee/.hapi/dogfood-fit.env
+WorkingDirectory=/home/heavygee/coding/hapi
+ExecStartPre=/usr/bin/mkdir -p /home/heavygee/.local/state/hapi
+ExecStart=/usr/bin/flock -w 300 /home/heavygee/.local/state/hapi/dogfood-fit-weekly.lock \
+    /home/heavygee/coding/hapi/scripts/tooling/hapi-dogfood-fit-weekly.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hapi-dogfood-fit-weekly

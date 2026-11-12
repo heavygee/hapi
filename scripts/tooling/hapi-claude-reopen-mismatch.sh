@@ -6,18 +6,16 @@
 # reopen step that hapi-claude-session-assess flags with "NEEDS REOPEN".
 #
 # Reopen alone does NOT resume agents — they sit idle until a continue wake.
-# Default: after reopen, selectively continue-wake sessions that looked
-# interrupted / needing attention BEFORE the kill (thinking, lastNotify
-# attention, usage-limit text, pending user turn). Sessions already
-# lastNotify=done are left quiet — otherwise the operator gets dozens of
-# "I didn't need that" pings. Use --continue-all for the old wake-everyone
-# behaviour, or --no-continue for auth-only.
+# Default after reopen: wake ONLY sessions that had thinking=true at pre-kill
+# (actual mid-turn). Broader heuristics (lastNotify / usage-limit text) flooded
+# the operator with "nothing to resume" — do not use them unless asked.
 #
 # Usage:
-#   hapi-claude-reopen-mismatch                 # drifted/dead + selective wake
-#   hapi-claude-reopen-mismatch --all           # migrate every API-active Claude
-#   hapi-claude-reopen-mismatch --continue-all  # wake every migrated session
-#   hapi-claude-reopen-mismatch --no-continue
+#   hapi-claude-reopen-mismatch                    # migrate + thinking-only wake
+#   hapi-claude-reopen-mismatch --no-continue      # auth migrate only
+#   hapi-claude-reopen-mismatch --continue-attention
+#   hapi-claude-reopen-mismatch --continue-all
+#   hapi-claude-reopen-mismatch --all              # migrate every API-active Claude
 #   hapi-claude-reopen-mismatch --dry-run
 
 set -euo pipefail
@@ -31,12 +29,15 @@ DRY=0
 ALL=0
 DO_CONTINUE=1
 CONTINUE_ALL=0
+WAKE_MODE=thinking
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run) DRY=1; shift ;;
         --all) ALL=1; shift ;;
         --no-continue) DO_CONTINUE=0; shift ;;
-        --continue) DO_CONTINUE=1; shift ;;
+        --continue) DO_CONTINUE=1; WAKE_MODE=thinking; shift ;;
+        --continue-attention) DO_CONTINUE=1; WAKE_MODE=attention; shift ;;
+        --continue-aggressive) DO_CONTINUE=1; WAKE_MODE=aggressive; shift ;;
         --continue-all) DO_CONTINUE=1; CONTINUE_ALL=1; shift ;;
         -h|--help)
             sed -n '2,/^set -euo/p' "$0" | sed 's/^# \?//' | head -28
@@ -55,7 +56,7 @@ WAKE_IDS="$(mktemp)"
 trap 'rm -f "$WAKE_IDS"' EXIT
 
 set +e
-python3 - "$DRY" "$ALL" "$HAPI_HOST" "$HAPI_PROXMOX_SSH" "$WANT" "$SCRIPT_DIR/lib" "$WAKE_IDS" <<'PY'
+python3 - "$DRY" "$ALL" "$HAPI_HOST" "$HAPI_PROXMOX_SSH" "$WANT" "$SCRIPT_DIR/lib" "$WAKE_IDS" "$WAKE_MODE" <<'PY'
 import hashlib, json, os, subprocess, sys, time, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
@@ -63,6 +64,7 @@ dry, do_all = sys.argv[1] == "1", sys.argv[2] == "1"
 host, proxmox_ssh, want = sys.argv[3], sys.argv[4], sys.argv[5]
 LIB_DIR = sys.argv[6]
 WAKE_IDS_PATH = sys.argv[7]
+WAKE_MODE = sys.argv[8]
 sys.path.insert(0, LIB_DIR)
 from hapi_claude_wake_classify import classify_active_claude  # noqa: E402
 
@@ -177,13 +179,13 @@ for sid, name, hname, pid, sha, alive in targets:
 
 # Pre-kill wake snapshot — must happen before archive/reopen contaminates state.
 only = {t[0] for t in targets}
-classified = classify_active_claude(host, only_ids=only)
+classified = classify_active_claude(host, only_ids=only, mode=WAKE_MODE)
 with open(WAKE_IDS_PATH, "w") as fh:
     for row in classified["wake"]:
         fh.write(row["id"] + "\n")
 print(
-    f"pre-kill wake={classified['counts']['wake']} skip={classified['counts']['skip']} "
-    f"(selective continue after reopen)"
+    f"pre-kill mode={WAKE_MODE} wake={classified['counts']['wake']} "
+    f"skip={classified['counts']['skip']} (continue after reopen)"
 )
 for row in classified["wake"]:
     print(f"  WAKE {row['id'][:8]} {row['reason']} {row['name'][:40]}")

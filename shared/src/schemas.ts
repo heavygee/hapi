@@ -21,6 +21,7 @@ const MetadataSummarySchema = z.object({
 
 const ConversationHistoryCapabilitiesSchema = z.object({
     forkCurrent: z.boolean().optional(),
+    forkLatestCompleted: z.boolean().optional(),
     forkAtMessage: z.boolean().optional(),
     rewindToMessage: z.boolean().optional()
 })
@@ -435,6 +436,10 @@ export const MetadataSchema = z.object({
     summary: MetadataSummarySchema.optional(),
     machineId: z.string().optional(),
     claudeSessionId: z.string().optional(),
+    // Earlier Claude session ids of this HAPI session (Claude rotates the id on
+    // some resumes / local↔remote switches). Lets a resume by an older Claude
+    // id find the same HAPI session instead of minting a duplicate.
+    claudeSessionIdHistory: z.array(z.string()).optional(),
     // Parent HAPI session id when this session was created by message-level fork
     // (`claude --resume <id> --fork-session`). Lets the web list mark the new
     // session as a branch of `<id>` instead of an unrelated duplicate.

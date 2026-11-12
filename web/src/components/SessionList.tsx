@@ -707,7 +707,17 @@ export function deduplicateSessionsByAgentId(sessions: SessionSummary[], selecte
             if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1
             return b.updatedAt - a.updatedAt
         })
-        result.push(group[0])
+        const winner = group[0]!
+        result.push(winner)
+        // Hub skips merge when two rows stay active — keep job-bearing losers so the
+        // outliving meter is not hidden behind a jobless duplicate winner.
+        // A second live Claude row is a real process the hub will not merge;
+        // hiding it would leave no way to reach (or stop) it.
+        for (const duplicate of group.slice(1)) {
+            if (hasRunningAttachedJob(duplicate) || (duplicate.active && duplicate.metadata?.flavor === 'claude')) {
+                result.push(duplicate)
+            }
+        }
     }
 
     return result
@@ -2116,6 +2126,14 @@ const SessionItem = memo(function SessionItem(props: {
             })
         }
     }
+
+    const supportsCurrentFork = s.active && s.metadata?.flavor === 'codex'
+        && s.metadata?.conversationHistory?.forkCurrent === true
+    const supportsArchivedFork = !s.active && s.metadata?.flavor === 'codex'
+        && s.metadata?.lifecycleState === 'archived'
+        && Boolean(s.metadata.agentSessionId && s.metadata.machineId)
+    const supportsCompletedFork = s.metadata?.conversationHistory?.forkLatestCompleted === true
+    const forkDisabledReason = supportsCurrentFork && s.thinking && !supportsCompletedFork ? t(s.metadata?.conversationHistory?.forkLatestCompleted === false ? 'session.action.forkNoCompleted' : 'session.action.forkRunning') : undefined
 
     const longPressHandlers = useLongPress({
         onLongPress: (point) => {

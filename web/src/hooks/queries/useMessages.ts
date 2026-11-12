@@ -30,6 +30,7 @@ export const EMPTY_STATE: MessageWindowState = {
     isSyncingTail: false,
     isLoadingMore: false,
     warning: null,
+    pendingGapRecovery: false,
     viewMode: 'tail',
     requiresLatestReset: false,
     hasMoreNewer: false,

@@ -9,6 +9,7 @@ import app.hapi.companion.feature.pairing.PairingClient
 import app.hapi.companion.feature.pairing.PairingClientFactory
 import app.hapi.companion.feature.settings.AppLanguage
 import app.hapi.companion.feature.settings.LanguagePrefs
+import app.hapi.companion.feature.sessions.SessionListOrderPrefs
 import app.hapi.companion.feature.settings.ThemePrefs
 import app.hapi.data.push.EncryptedPrefsPushIdentityStore
 import app.hapi.data.push.PushIdentityManager
@@ -95,6 +96,9 @@ class AppGraph(context: Context) {
 
     /** Appearance choice (B-M4e); MainActivity reads it at setContent. */
     val themePrefs: ThemePrefs = ThemePrefs(appContext.hapiDataStore)
+
+    /** Session-list sort + Active first, app-wide like web's localStorage view keys. */
+    val sessionListOrderPrefs: SessionListOrderPrefs = SessionListOrderPrefs(appContext.hapiDataStore)
 
     /** Language choice (B-M5a: applied via per-app locales; Settings writes it). */
     val languagePrefs: LanguagePrefs = LanguagePrefs(appContext.hapiDataStore)

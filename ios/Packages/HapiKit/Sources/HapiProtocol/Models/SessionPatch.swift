@@ -68,6 +68,9 @@ public struct SessionPatch: Equatable, Sendable {
     /// Bare refetch trigger for `GET /api/sessions/:id/scratchlist`; never
     /// applied onto the `Session` (which carries no such field).
     public var scratchlistUpdatedAt: Int?
+    /// tiann/hapi#1404: the list row's primary attached job; `value: nil`
+    /// clears it. Summary-only — the detail `Session` has no such field.
+    public var attachedJob: VersionedValue<AttachedJob>?
 
     public init(
         active: Bool? = nil,
@@ -87,7 +90,8 @@ public struct SessionPatch: Equatable, Sendable {
         collaborationMode: CodexCollaborationMode? = nil,
         copilotAgentMode: CopilotAgentMode? = nil,
         backgroundTaskCount: Int? = nil,
-        scratchlistUpdatedAt: Int? = nil
+        scratchlistUpdatedAt: Int? = nil,
+        attachedJob: VersionedValue<AttachedJob>? = nil
     ) {
         self.active = active
         self.thinking = thinking
@@ -107,6 +111,7 @@ public struct SessionPatch: Equatable, Sendable {
         self.copilotAgentMode = copilotAgentMode
         self.backgroundTaskCount = backgroundTaskCount
         self.scratchlistUpdatedAt = scratchlistUpdatedAt
+        self.attachedJob = attachedJob
     }
 }
 
@@ -130,6 +135,9 @@ extension SessionPatch: Codable {
         case copilotAgentMode
         case backgroundTaskCount
         case scratchlistUpdatedAt
+        case attachedJob
+        // Web-only status-panel list; accepted so the patch is not refetched.
+        case backgroundTasks
     }
 
     public init(from decoder: Decoder) throws {
@@ -158,6 +166,7 @@ extension SessionPatch: Codable {
         copilotAgentMode = try container.decodeIfPresent(CopilotAgentMode.self, forKey: .copilotAgentMode)
         backgroundTaskCount = try container.decodeIfPresent(Int.self, forKey: .backgroundTaskCount)
         scratchlistUpdatedAt = try container.decodeIfPresent(Int.self, forKey: .scratchlistUpdatedAt)
+        attachedJob = try container.decodeIfPresent(VersionedValue<AttachedJob>.self, forKey: .attachedJob)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -180,6 +189,7 @@ extension SessionPatch: Codable {
         try container.encodeIfPresent(copilotAgentMode, forKey: .copilotAgentMode)
         try container.encodeIfPresent(backgroundTaskCount, forKey: .backgroundTaskCount)
         try container.encodeIfPresent(scratchlistUpdatedAt, forKey: .scratchlistUpdatedAt)
+        try container.encodeIfPresent(attachedJob, forKey: .attachedJob)
     }
 
     private static func decodePatchField<Value: Codable & Equatable & Sendable>(
