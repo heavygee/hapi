@@ -49,26 +49,42 @@ path, repo = sys.argv[1], sys.argv[2]
 prs = json.load(open(path))
 owner, name = repo.split("/", 1)
 rows = []
+# `after: $cursor` with cursor omitted on the first call — GraphQL treats the
+# absent variable as null, which is the start of the connection. Without this
+# the query returned a silent first-100 prefix, so a long-lived PR's newest
+# threads simply vanished from the debt report (#2147 class, 2026-11-12).
 q = """
-query($o:String!,$n:String!,$num:Int!){
+query($o:String!,$n:String!,$num:Int!,$cursor:String){
   repository(owner:$o,name:$n){
     pullRequest(number:$num){
-      reviewThreads(first:100){
+      reviewThreads(first:100, after:$cursor){
+        pageInfo{ hasNextPage endCursor }
         nodes{ isResolved isOutdated comments(first:1){ nodes{ author{ login } } } }
       }
     }
   }
 }
 """
+
+
+def fetch_threads(num):
+    """All review-thread nodes for a PR, following pagination."""
+    nodes, cursor = [], None
+    while True:
+        args = ["gh", "api", "graphql", "-f", f"query={q}",
+                "-F", f"o={owner}", "-F", f"n={name}", "-F", f"num={num}"]
+        if cursor:
+            args += ["-f", f"cursor={cursor}"]
+        conn = json.loads(subprocess.check_output(args, text=True)) \
+            ["data"]["repository"]["pullRequest"]["reviewThreads"]
+        nodes.extend(conn.get("nodes") or [])
+        page = conn.get("pageInfo") or {}
+        if not page.get("hasNextPage") or not page.get("endCursor"):
+            return nodes
+        cursor = page["endCursor"]
 for p in prs:
     num = p["number"]
-    out = subprocess.check_output(
-        ["gh","api","graphql",
-         "-f", f"query={q}",
-         "-F", f"o={owner}", "-F", f"n={name}", "-F", f"num={num}"],
-        text=True,
-    )
-    nodes = json.loads(out)["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
+    nodes = fetch_threads(num)
     unres = [t for t in nodes if not t["isResolved"] and not t.get("isOutdated")]
     codex = []
     for t in unres:

@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 # Shared helpers for open-PR push enforcement. Source only.
 
+# Paginated review-thread fetch (prt_fetch_threads). Guarded so repeated
+# sourcing from hook chains stays cheap and a missing lib is loud, not a
+# silently empty thread list.
+if ! declare -F prt_fetch_threads >/dev/null 2>&1; then
+    # shellcheck source=/dev/null
+    source "$(dirname "${BASH_SOURCE[0]}")/pr-review-threads.sh"
+fi
+
 pr_extract_push_branch() {
     local cmd="$1"
     if [[ ! "$cmd" =~ (^|[;&|[:space:]])git[[:space:]]+push ]]; then
@@ -88,26 +96,34 @@ pr_repo_for_number() {
 # Usage: pr_unresolved_thread_count <owner> <repo> <pr_number>
 # Echoes integer (0 on lookup failure).
 pr_unresolved_thread_count() {
-    local owner="$1" repo="$2" pr="$3"
-    gh api graphql \
-        -f query="{ repository(owner:\"$owner\", name:\"$repo\") { pullRequest(number: $pr) { reviewThreads(first: 100) { nodes { isResolved } } } } }" \
-        --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length' \
-        2>/dev/null || echo 0
+    local owner="$1" repo="$2" pr="$3" nodes
+    # Paginated: a bare `first: 100` silently truncates on longer PRs and an
+    # under-count here reads as "no threads to reply to" (#2147, 2026-11-12).
+    # Predicate deliberately unchanged — this gate counts every unresolved
+    # thread, including outdated ones, because an outdated finding still wants
+    # a threaded reply rather than a top-level comment.
+    # The 0-on-failure contract above is also deliberate and preserved: hard
+    # failing here would block every `gh pr comment` whenever GitHub is flaky.
+    nodes="$(prt_fetch_threads "$owner" "$repo" "$pr" 'isResolved' 2>/dev/null)" || { echo 0; return 0; }
+    printf '%s' "$nodes" \
+        | jq '[.[] | select(.isResolved == false)] | length' 2>/dev/null \
+        || echo 0
 }
 
 # Summarize unresolved threads on a PR for an agent message.
 # Usage: pr_unresolved_thread_summary <owner> <repo> <pr_number>
 pr_unresolved_thread_summary() {
-    local owner="$1" repo="$2" pr="$3"
-    gh api graphql \
-        -f query="{ repository(owner:\"$owner\", name:\"$repo\") { pullRequest(number: $pr) { reviewThreads(first: 100) { nodes { isResolved comments(first:1) { nodes { databaseId path line body author { login } } } } } } } }" \
-        --jq '
-            .data.repository.pullRequest.reviewThreads.nodes
-            | map(select(.isResolved == false))
-            | .[]
-            | (.comments.nodes[0])
-            | "  - comment_id=\(.databaseId)  by=\(.author.login)  path=\(.path):\(.line // "?")  body=\(.body | gsub("\n"; " ") | .[0:120])"
-        ' 2>/dev/null || true
+    local owner="$1" repo="$2" pr="$3" nodes
+    # Paginated for the same reason as the count: a truncated summary omits
+    # exactly the newest threads, which are the ones still wanting a reply.
+    nodes="$(prt_fetch_threads "$owner" "$repo" "$pr" \
+        'isResolved comments(first:1) { nodes { databaseId path line body author { login } } }' 2>/dev/null)" || return 0
+    printf '%s' "$nodes" | jq -r '
+        map(select(.isResolved == false))
+        | .[]
+        | (.comments.nodes[0])
+        | "  - comment_id=\(.databaseId)  by=\(.author.login)  path=\(.path):\(.line // "?")  body=\(.body | gsub("\n"; " ") | .[0:120])"
+    ' 2>/dev/null || true
 }
 
 # Extract a PR number from common gh argument shapes.
