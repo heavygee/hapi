@@ -134,3 +134,9 @@ Promotes applied: fork-stage non-draft guidance (`pr-review-loop.md` + `hapi-pr-
 ## Meta absorb promote call (2026-11-12)
 
 Web ~430/431; 8 remaining failures = upstream-structure asserts vs fork UI. **Orchestrator call: adapt tests to fork, then promote** (do not change fork UI to upstream). `link_pr` + required-surface 22/22 already green on WIP. [tooling/meta](/sessions/cbd1073e-4fd3-4f4a-bff8-cf9ba97bca6d).
+
+## Soup promote blocked (2026-11-12)
+
+Absorb green on `driver/integration-wip` @ `ebe57ea37` (web 4677/4677, surface 22/22, link_pr catalog proven). Promote refused: fork main 28 behind upstream 0.35.0 + mirror dirt.
+
+**Calls:** (a) dirt owners commit — dogfood-fit [9bb5920b](/sessions/9bb5920b-604b-48c3-9864-bd868b28e58c); overseer-open-items [4230142b](/sessions/4230142b-8abe-4a31-af35-c22922bb649b); unfiled sweep → meta watcher. (b) **second absorb stays with [tooling/meta](/sessions/cbd1073e-4fd3-4f4a-bff8-cf9ba97bca6d)** (ladder ownership) — fresh turn OK, do not hand to 2ec10899.
