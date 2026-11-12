@@ -147,6 +147,33 @@ REMAT="$(HAPI_REMAT_RESUME=1 HAPI_REMAT_MODE=tip-forward driver_remat_prepare "$
 [[ -f "$REMAT/resume.txt" ]] || { echo "FAIL: resume lost resolution file"; exit 1; }
 echo "OK: HAPI_REMAT_RESUME=1 keeps WIP tip"
 
+# Resume must survive a DIRTY tree. A post-promote rollback (failed web build,
+# failed gate) reliably leaves working-tree dirt behind, and until 2026-11-12
+# that dirt forced a hard reset that discarded every committed layer merge and
+# hand-resolved conflict on the WIP. Tree state is regenerable; commits are not.
+echo "uncommitted dirt" >"$REMAT/post-promote-dirt.txt"
+echo "clobbered" >>"$REMAT/resume.txt"
+REMAT="$(HAPI_REMAT_RESUME=1 HAPI_REMAT_MODE=tip-forward driver_remat_prepare "$PRIMARY" "driver/integration-wip" "$PREV")"
+[[ "$(git -C "$REMAT" rev-parse HEAD)" == "$RESUME_SHA" ]] || { echo "FAIL: dirty tree wiped committed WIP"; exit 1; }
+[[ -f "$REMAT/resume.txt" ]] || { echo "FAIL: resume lost resolution file"; exit 1; }
+[[ "$(cat "$REMAT/resume.txt")" == "resume-me" ]] || { echo "FAIL: tree not restored to committed state"; exit 1; }
+[[ ! -f "$REMAT/post-promote-dirt.txt" ]] || { echo "FAIL: untracked dirt survived"; exit 1; }
+echo "OK: dirty WIP tree keeps commits, discards only tree state"
+
+# Same, mid-merge: an unresolved merge in the WT must not cost the commits either.
+echo conflict-c >"$REMAT/clash.txt"
+git -C "$REMAT" add clash.txt
+git -C "$REMAT" commit -q -m "clash on wip for mid-merge resume case"
+RESUME_SHA="$(git -C "$REMAT" rev-parse HEAD)"
+set +e
+git -C "$REMAT" merge --no-edit feat/conflict >/dev/null 2>&1
+set -e
+git -C "$REMAT" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1 || { echo "FAIL: expected merge in progress"; exit 1; }
+REMAT="$(HAPI_REMAT_RESUME=1 HAPI_REMAT_MODE=tip-forward driver_remat_prepare "$PRIMARY" "driver/integration-wip" "$PREV")"
+[[ "$(git -C "$REMAT" rev-parse HEAD)" == "$RESUME_SHA" ]] || { echo "FAIL: mid-merge wiped committed WIP"; exit 1; }
+git -C "$REMAT" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1 && { echo "FAIL: merge still in progress"; exit 1; }
+echo "OK: mid-merge WIP keeps commits, aborts only the merge"
+
 # Force reset still works
 REMAT="$(HAPI_REMAT_RESUME=0 HAPI_REMAT_MODE=tip-forward driver_remat_prepare "$PRIMARY" "driver/integration-wip" "$PREV")"
 [[ "$(git -C "$REMAT" rev-parse HEAD)" == "$PREV" ]] || { echo "FAIL: RESUME=0 should reset to PREV"; exit 1; }
