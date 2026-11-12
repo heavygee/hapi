@@ -140,3 +140,5 @@ Web ~430/431; 8 remaining failures = upstream-structure asserts vs fork UI. **Or
 Absorb green on `driver/integration-wip` @ `ebe57ea37` (web 4677/4677, surface 22/22, link_pr catalog proven). Promote refused: fork main 28 behind upstream 0.35.0 + mirror dirt.
 
 **Calls:** (a) dirt owners commit — dogfood-fit [9bb5920b](/sessions/9bb5920b-604b-48c3-9864-bd868b28e58c); overseer-open-items [4230142b](/sessions/4230142b-8abe-4a31-af35-c22922bb649b); unfiled sweep → meta watcher. (b) **second absorb stays with [tooling/meta](/sessions/cbd1073e-4fd3-4f4a-bff8-cf9ba97bca6d)** (ladder ownership) — fresh turn OK, do not hand to 2ec10899.
+
+**(b)** Meta keeps second absorb (revised: measured ~25 files / 885 lines; ladder cheap/additive v35). 2ec10899 keeps #2147. Mirror dirt mostly cleared 2026-11-12; remaining `union-resolve.py` is Meta's to commit before sync.
