@@ -444,8 +444,12 @@ describe('responsive settings pages', () => {
         expect(screen.getByRole('checkbox', { name: 'Created time' })).not.toBeChecked()
         expect(screen.getByRole('checkbox', { name: 'Updated time' })).not.toBeChecked()
         expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
-        // Fixed session order removed — SessionListView owns list order (#2263).
-        expect(screen.queryByRole('checkbox', { name: 'Fixed session order' })).not.toBeInTheDocument()
+        // Upstream removed Fixed session order in #2263 and asserts it is gone.
+        // The fork still ships it as a Settings -> Display toggle, and deleting
+        // a shipped setting to satisfy an upstream assertion is an operator
+        // call, not a merge one. Asserting the fork's actual surface; see the
+        // matching note in SessionList.order.test.tsx.
+        expect(screen.getByRole('checkbox', { name: 'Fixed session order' })).toBeInTheDocument()
         expect(screen.getByRole('radio', { name: 'Long-running jobs' })).toBeInTheDocument()
     })
 

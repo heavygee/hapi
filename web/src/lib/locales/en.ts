@@ -1259,7 +1259,7 @@ export default {
   'settings.general.sessionSummary.title': 'Session status summaries',
   'settings.general.sessionSummary.description': 'Choose whether supported agents emit status summaries and whether they appear in chat.',
   'settings.general.sessionSummaryContract': 'Emit status summaries',
-  'settings.general.sessionSummaryContract.desc': 'Off by default. When enabled, supported agents are asked to add a trailing AGENT_NOTIFY_SUMMARY line after each turn for notifications and background work records. Applies to new/resumed sessions. (Supported: Claude, Codex, OpenCode, remote Grok; not yet supported: local Grok, Cursor)',
+  'settings.general.sessionSummaryContract.desc': 'Off by default. When enabled, supported agents are asked to add a trailing AGENT_NOTIFY_SUMMARY line after each turn for notifications and background work records. Applies to new/resumed sessions. (Supported: Claude, Codex, OpenCode, remote Grok, Cursor ACP; not yet supported: local Grok)',
   'settings.general.operatorDock': 'Show operator tools',
   'settings.general.operatorDock.desc': 'Same unlock as /opmic. Shows the operator dock (settings, markup, sessions, mic) on this device only. Uses the hub gate secret (HAPI_INLINE_SECRET) — not the HAPI login / CLI token / JWT. Enabling probes the secret; a wrong stored secret is cleared. Not a public mic.',
   'settings.general.operatorDock.gateLabel': 'Operator gate secret',
