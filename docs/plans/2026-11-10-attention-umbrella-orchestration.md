@@ -194,3 +194,9 @@ Gate exit=0 (web 432/432, cli 5031/0, surface 22/22, sentinels clean). Generatio
 **Orchestrator call (bounce authorized):** hub-side — expose `GET /cli/features` under existing CLI auth (same response shape as `/api/features`). Do **not** point CLI at `/api/features` (CLI token ≠ JWT → 401 forever). Include a regression test that CLI-token GET succeeds. Proof bar after restart: in-process tool list shows `link_pr` (not argv, not source grep). Leave gc pile alone.
 
 **Import-picker layer — drop retracted.** `feat/agent-session-import-picker` stays until upstream #945 merges (manifest condition). Tip-forward: already ancestor / clean skip / containment 0. `full-recipe` would lose the feature if dropped (symbols absent on `origin/main`). Layer is stale (`SidebarToggle.tsx` not on tip) — retire promptly when #945 lands.
+
+## #987 rebased to 0.35.0 (2026-11-12)
+
+[Peer](/sessions/290c588b-5f7c-4391-80ad-6078f695d4be) tip `d18a6a38b` on parent `06d9e51f5`. Prior tip 10/10 CLEAN; round 6 CI running. Five bot findings fixed — all absorb re-sequencing, none original feature. Model-error dot kept **separate** ahead of #2380 activity/unread chain.
+
+**Calls:** keep rounds while productive; Ready-YES at next green+CLEAN with no mid-round actionable findings. **Re-stamp dogfood** after that tip (absorb moved control flow). Prepare-only. Pattern noted: conflict count ≠ risk on long-drift forks; prefer earlier rebases next time. `ctx_execute(shell)` bypasses Bash pre-tool guards → Meta tooling backlog (028d0a86 superseded).
