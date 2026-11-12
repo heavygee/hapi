@@ -271,12 +271,31 @@ The scary number is misleading. The genuinely *old* cohort is small and tractabl
 
 | Pass | When | Shape | Owner |
 |---|---|---|---|
-| **Weekly deep** | Mon ~09:00 Europe/London | Full prompt above; ≤60d candidates + oldest 10 untriaged; ≤3 DOGFOOD NEXT | Dedicated session, timer-pinged on the `hapi-issue-labelling-daily.sh` pattern (fixed remit, env `…_SESSION_ID`, resumes inactive via `hapi-ping-peer`) |
-| **Daily thin** | With the existing 09:00-ish window | Only PRs opened/state-changed in last 24h, max 10; emit `DOGFOOD NEXT` / `WATCH` only | Same session |
+| **Weekly deep** | Mon 09:00 Europe/London | Full prompt above; ≤60d candidates + oldest 10 untriaged; ≤3 DOGFOOD NEXT | **Shipped 2026-11-09:** `hapi-dogfood-fit-weekly.sh` + `hapi-dogfood-fit-weekly.timer` (built on the `hapi-issue-labelling-daily.sh` pattern — fixed remit, `HAPI_DOGFOOD_FIT_SESSION_ID`, resumes inactive via `hapi-ping-peer`) |
+| **Daily thin** | Not installed | Only PRs opened/state-changed in last 24h, max 10 | Same script: `hapi-dogfood-fit-weekly.sh --thin`. Add a second timer only if the weekly queue proves too slow |
 | **Historical** | One-off, bounded | Pass 1 = the 11 pre-June PRs; Pass 2 = the 14 July PRs. Then it's over — this is not recurring cost | Same session, operator-triggered |
 | **Countdown** | Already live | `hapi-meta-daily.sh` already prints `🟢 DOGFOODED COUNTDOWN` | Meta PR watcher (unchanged) |
 
 Keeping it in its own session also keeps PR watcher's inbound policy intact — peers must not start pinging the watcher with dogfood results.
+
+**Install (shipped 2026-11-09):**
+
+```bash
+# 1. Point it at the session that will do the scoring
+printf 'HAPI_DOGFOOD_FIT_SESSION_ID=<full-uuid>\n' > ~/.hapi/dogfood-fit.env
+
+# 2. Preview the exact ping without sending anything
+scripts/tooling/hapi-dogfood-fit-weekly.sh --dry-run
+scripts/tooling/hapi-dogfood-fit-weekly.sh --thin --dry-run
+
+# 3. Enable (Mon 09:00 Europe/London, +≤5min jitter, Persistent=true)
+sudo bash scripts/tooling/install-hapi-dogfood-fit-timer.sh
+sudo bash scripts/tooling/install-hapi-dogfood-fit-timer.sh --disable   # back out
+```
+
+Files: `scripts/tooling/hapi-dogfood-fit-weekly.sh` · `scripts/tooling/install-hapi-dogfood-fit-timer.sh` · `scripts/tooling/systemd/hapi-dogfood-fit-weekly.{service,timer}`.
+
+The timer only **wakes** the session and hands it the § 3 prompt — it never scores, labels, comments, or merges. Jitter is 5min (not the 2min the other timers use) so a Monday fire does not stampede `hapi-meta-daily`, which fires at `:00` every hour on the same host. `OnCalendar` uses the timezone **suffix** form; the prefix form is rejected on this host.
 
 **Must stay human / operator:**
 

@@ -1,0 +1,27 @@
+# Dogfood-fit triage — weekly wake, Monday 09:00 Europe/London.
+#
+# Fork-local. Install: sudo bash scripts/tooling/install-hapi-dogfood-fit-timer.sh
+#
+# Wall-clock is Europe/London (BST in summer, GMT in winter) — NOT host TZ.
+# oos-linux stays Etc/UTC; the OnCalendar timezone SUFFIX is what makes 09:00
+# mean the operator-local hour. Suffix form only — the prefix form is rejected
+# on this host (same footgun documented in hapi-meta-daily.timer).
+#
+# Monday so the week opens with a fresh DOGFOOD NEXT queue. Persistent=true
+# catches a fire missed over a weekend reboot / downtime.
+
+[Unit]
+Description=HAPI dogfood-fit triage weekly timer (Mon 09:00 Europe/London)
+Documentation=file:///home/heavygee/coding/hapi/docs/plans/2026-10-21-dogfood-fit-triage-rubric.md
+
+[Timer]
+OnCalendar=Mon *-*-* 09:00:00 Europe/London
+# Scatter off the top of the hour so it does not stampede hapi-meta-daily,
+# which fires every hour at :00 on the same host.
+RandomizedDelaySec=5min
+AccuracySec=1min
+Persistent=true
+Unit=hapi-dogfood-fit-weekly.service
+
+[Install]
+WantedBy=timers.target
