@@ -10,6 +10,24 @@ import {
     resolveHapiToolingRoot
 } from '@/modules/common/hooks/resolveHapiToolingRoot';
 
+/**
+ * Tools the HAPI PreToolUse guard must see. Bash is the obvious one; the
+ * context-mode tools matter because they execute arbitrary code in a
+ * subprocess, which makes them a second shell. Until 2026-11-12 this matcher
+ * was 'Bash' alone, so every runner-spawned session — i.e. most of the estate —
+ * could reach production mutations through ctx_execute without passing a single
+ * guard. A #987 peer ran a raw gradle build that way, past the estate lock.
+ *
+ * Keep in sync with the PreToolUse matcher in the hapi repo's
+ * .claude/settings.json, which covers manually-launched sessions.
+ */
+const HAPI_GUARD_MATCHER = [
+    'Bash',
+    'mcp__plugin_context-mode_context-mode__ctx_execute',
+    'mcp__plugin_context-mode_context-mode__ctx_execute_file',
+    'mcp__plugin_context-mode_context-mode__ctx_batch_execute'
+].join('|');
+
 type HookCommandConfig = {
     matcher?: string;
     hooks: Array<{
@@ -128,7 +146,7 @@ export function buildHookSettings(
         if (existsSync(guardScript)) {
             const guardCommand = shellJoin([guardScript]);
             const guardEntry: HookCommandConfig = {
-                matcher: 'Bash',
+                matcher: HAPI_GUARD_MATCHER,
                 hooks: [
                     {
                         type: 'command',
