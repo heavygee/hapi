@@ -199,4 +199,6 @@ Gate exit=0 (web 432/432, cli 5031/0, surface 22/22, sentinels clean). Generatio
 
 [Peer](/sessions/290c588b-5f7c-4391-80ad-6078f695d4be) tip `d18a6a38b` on parent `06d9e51f5`. Prior tip 10/10 CLEAN; round 6 CI running. Five bot findings fixed — all absorb re-sequencing, none original feature. Model-error dot kept **separate** ahead of #2380 activity/unread chain.
 
-**Calls:** keep rounds while productive; Ready-YES at next green+CLEAN with no mid-round actionable findings. **Re-stamp dogfood** after that tip (absorb moved control flow). Prepare-only. Pattern noted: conflict count ≠ risk on long-drift forks; prefer earlier rebases next time. `ctx_execute(shell)` bypasses Bash pre-tool guards → Meta tooling backlog (028d0a86 superseded).
+**Calls:** keep rounds while productive; Ready-YES at next green+CLEAN with no mid-round actionable findings. Prepare-only. Pattern noted: conflict count ≠ risk on long-drift forks; prefer earlier rebases next time. `ctx_execute(shell)` bypasses Bash pre-tool guards → Meta tooling backlog (028d0a86 superseded).
+
+**Dogfood re-stamp — Option 1 (revised):** peer correctly refused CI-green-alone stamp (attestation + 48h merge-intent). Peer does **not** stack-switch / does **not** stamp yet. After Ready-YES: Operator/Meta live-dogfoods the tip when stack free; peer posts `dogfooded since <that UTC>` once told. Option 3 (admin re-date without live run) rejected — absorb moved control flow. Label may stay; countdown only moves on a truthful stamp.
