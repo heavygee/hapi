@@ -169,8 +169,10 @@ No third-party pushback on #2355/#2356. Signal: **#987 CONFLICTING/DIRTY** from 
 
 Promote composed all 87 layers then gate rolled back on **cli** (14 blocking). Live tip safe at `e3b1e11a8`; remat-hold ACTIVE (`tests failed`). Absorb recovered as tag `soup-absorb-0.35.0-round2`. Tooling fixes committed (`caa4a796f`): install-before-web-build; resume no longer hard-resets dirty post-rollback trees.
 
-**Orchestrator scope call (acked to Meta):**
-1. **Windows killProcess + pwsh (8):** restore fork `#1911 B1` hardening into upstream `process.ts` structure. Mandatory — not quarantine.
-2. **intentionalStop (3) + agentQuotas (2):** revert orphaned upstream tests to fork versions. Do **not** port upstream stop-flow / generation probes in this remat.
+**Meta correction (Windows):** `#1911` was absorbed upstream into `cli/src/utils/windowsProcessStop.ts` (stricter root-probe-before-taskkill). Not a lost-behaviour regression — fork `process.test.ts` cases were stale. Fix = adopt upstream Windows test files (8 green; 56/56 across three Windows files). Prior "restore B1 into process.ts" call **cancelled**.
+
+**Narrowed orchestrator scope call (remaining 5 only):**
+1. `modelCatalog` (1) + Windows tests (8): already green — no further action.
+2. **intentionalStop (3) + agentQuotas (2):** revert orphaned upstream tests to fork versions. Do **not** port `reportStop` / generation probes / stop-flow into this remat.
 3. **Stop-flow port:** separate work later; out of blast radius for this promote.
-4. `modelCatalog` orphan-import fix already done. Re-promote when cli green; keep surface 22/22 + `link_pr`.
+4. Re-promote when cli green; keep surface 22/22 + `link_pr`.
