@@ -238,7 +238,7 @@ No third-party pushback on #2355/#2356. Upstream `main` @ `6ea40f9e4`. Signals f
 | #1725 | CLEAN + dogfooded |
 | #1733 | CLEAN + dogfooded |
 | #2375 | CLEAN (test-only Lane B) |
-| #1772 | **CONFLICTING** — assist refreshed tip `350c11186` ([branch](https://github.com/tiann/hapi/compare/main...heavygee:rebase-assist/1772-onto-upstream-main)); only README union conflict (author already self-merged hard SessionList work). **Offer comment authorized; no push** until author/operator yes. [peer](/sessions/3c5af7c8-540d-4d7c-b7a1-5df17abe5b37) |
+| #1772 | **CONFLICTING** — assist tip `350c11186`; offer posted ([comment](https://github.com/tiann/hapi/pull/1772#issuecomment-6845716136)); **awaiting author/operator yes** before maintainerCanModify push. [peer](/sessions/3c5af7c8-540d-4d7c-b7a1-5df17abe5b37) idle |
 | #987 | **CONFLICTING** — [peer](/sessions/290c588b-5f7c-4391-80ad-6078f695d4be) woken; tip was `cdd6bcbc0` |
 | #2376 | **CONFLICTING** — [peer](/sessions/ea9e52cc-cf3d-4f5d-95d8-9944bf08b0d6) waiting: throwaway rebase showed conflicts are #1772's `6dd0183b6`, not their files; will rebase 2 commits onto fresh CLEAN #1772 tip |
 
