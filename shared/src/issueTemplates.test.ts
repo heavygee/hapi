@@ -30,6 +30,17 @@ describe('formatIssueBody', () => {
         expect(body).toBe('### Notes\n\n_No response_')
     })
 
+    it('preserves internal indentation in an unfenced multi-line textarea too', () => {
+        const fields: IssueFormField[] = [
+            { kind: 'textarea', id: 'notes', label: 'Notes', required: false }
+        ]
+        const answers: IssueFormAnswer[] = [
+            { kind: 'textarea', id: 'notes', value: '\n    indented line\nflush line\n' }
+        ]
+        const body = formatIssueBody(fields, answers)
+        expect(body).toBe('### Notes\n\n\n    indented line\nflush line\n')
+    })
+
     it('still trims a single-line input field', () => {
         const fields: IssueFormField[] = [
             { kind: 'input', id: 'title', label: 'Title', required: true }
