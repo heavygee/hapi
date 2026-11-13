@@ -44,6 +44,7 @@ import {
     searchSessionContent,
 } from "@/modules/searchContent/searchContent";
 import { applySessionDisplayRename, normalizeSessionDisplayTitle } from "@/agent/sessionDisplayRename";
+import { applyLinkIssue } from "@/agent/sessionIssueLink";
 import {
     SESSION_JOB_TOOL_DESCRIPTION,
     SESSION_JOB_TOOL_NAME,
@@ -55,6 +56,7 @@ import { SpawnPeerError, spawnPeer } from "@/modules/spawnPeer/spawnPeer";
 
 export type HapiMcpToolName =
     | 'change_title'
+    | 'link_issue'
     | 'display_image'
     | 'display_video'
     | 'display_media'
@@ -383,6 +385,41 @@ function createHapiMcpServer(
             };
         });
     }
+
+    // Always-on, no opt-in toggle (hapi#235/#238 operator decision: "unless
+    // someone uses it, they're not gonna see it" — no chrome to gate for
+    // operators who never link an issue). Still routes through registerTool()
+    // so an explicit enabledTools allowlist that omits it can still exclude it.
+    const linkIssueInputSchema: z.ZodTypeAny = z.object({
+        url: z.string().describe('GitHub issue URL (https://github.com/<owner>/<repo>/issues/<n>) or the [host:]<owner>/<repo>#<n> shorthand'),
+    });
+    registerTool('link_issue', {
+        description: 'Attach a GitHub issue reference to the current HAPI session (self-session only). Shows as a chip on the session row/detail. Re-linking the same issue refreshes it rather than duplicating.',
+        title: 'Link GitHub Issue',
+        inputSchema: linkIssueInputSchema,
+    }, async (args: { url: string }) => {
+        const outcome = await applyLinkIssue(client, args.url);
+        if (outcome.ok) {
+            return {
+                content: [
+                    {
+                        type: 'text' as const,
+                        text: `Linked ${outcome.ref.repo}#${outcome.ref.number}`,
+                    },
+                ],
+                isError: false,
+            };
+        }
+        return {
+            content: [
+                {
+                    type: 'text' as const,
+                    text: `Failed to link issue: ${outcome.error}`,
+                },
+            ],
+            isError: true,
+        };
+    });
 
     registerTool('display_image', {
         description: `Display a local image file to the human user inline in the current HAPI chat session. ${DISPLAY_IMAGE_PROMPT_CURSOR}`,
@@ -808,6 +845,9 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
     const peerToolsDisabled = isPeerToolsDisabled();
     const toolNames: HapiMcpToolName[] = [];
     if (enableChangeTitle && includeTool('change_title')) toolNames.push('change_title');
+    // Fork tool: always-on (hapi#235/#238), but still gated like the rest so
+    // an explicit enabledTools allowlist that omits it can exclude it.
+    if (includeTool('link_issue')) toolNames.push('link_issue');
     for (const name of ['display_image', 'display_video', 'display_media'] as const) {
         if (includeTool(name)) toolNames.push(name);
     }

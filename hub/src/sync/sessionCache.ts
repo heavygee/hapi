@@ -1,5 +1,6 @@
 import { mergeClaudeSessionIdHistory, mergeReadState } from '@hapi/protocol'
 import { SESSION_LIFECYCLE_IDLE, SESSION_LIFECYCLE_RUNNING } from '@hapi/protocol'
+import { mergeExternalRefs, toValidExternalRefs, upsertExternalRef, type ExternalRef } from '@hapi/protocol/schemas'
 import { AgentStateSchema, MetadataSchema, SessionPatchSchema, TeamStateSchema } from '@hapi/protocol/schemas'
 import type { BackgroundTask, CodexCollaborationMode, CopilotAgentMode, PermissionMode, Session, SessionPatch } from '@hapi/protocol/types'
 import type { SessionTurnEndReason, SessionTurnTrigger, Store } from '../store'
@@ -1347,6 +1348,47 @@ export class SessionCache {
     }
 
     /**
+     * Attach a structured external reference to a session (hapi#235/#238).
+     * Upserts by `repo`+`number` — re-linking the same issue refreshes
+     * `linkedAt` in place rather than appending a duplicate chip.
+     */
+    async linkIssue(sessionId: string, ref: ExternalRef): Promise<void> {
+        for (let attempt = 0; attempt < METADATA_RETRY_ATTEMPTS; attempt += 1) {
+            const session = this.sessions.get(sessionId) ?? this.refreshSession(sessionId)
+            if (!session) {
+                throw new Error('Session not found')
+            }
+
+            const currentMetadata = session.metadata ?? { path: '', host: '' }
+            const newMetadata = {
+                ...currentMetadata,
+                externalRefs: upsertExternalRef(currentMetadata.externalRefs ?? [], ref)
+            }
+
+            const result = this.store.sessions.updateSessionMetadata(
+                sessionId,
+                newMetadata,
+                session.metadataVersion,
+                session.namespace,
+                { touchUpdatedAt: false }
+            )
+
+            if (result.result === 'error') {
+                throw new Error('Failed to update session metadata')
+            }
+
+            if (result.result === 'success') {
+                this.refreshSession(sessionId)
+                return
+            }
+
+            this.refreshSession(sessionId)
+        }
+
+        throw new Error('Session was modified concurrently. Please try again.')
+    }
+
+    /**
      * Persist the first prompt as a display-only title while the session is
      * untitled. It lives outside `summary`, so later title sources still apply.
      */
@@ -2401,6 +2443,25 @@ export class SessionCache {
         if (typeof oldObj.preferredCopilotAgentMode === 'string' && typeof newObj.preferredCopilotAgentMode !== 'string') {
             merged.preferredCopilotAgentMode = oldObj.preferredCopilotAgentMode
             changed = true
+        }
+
+        // The old session is deleted after this merge — any externalRefs
+        // (issue/PR links) that only exist there would otherwise be lost for
+        // good (Codex review, hapi#238). toValidExternalRefs, not an
+        // unchecked `Array.isArray(...) ? (value as ExternalRef[]) : []`
+        // cast (Codex review, hapi#238, second finding on this path): either
+        // persisted row's externalRefs can contain a malformed element
+        // (legacy row, out-of-band writer) that would otherwise reach
+        // mergeExternalRefs' identity comparison and throw, aborting this
+        // session-consolidation merge after earlier merge work has already run.
+        const oldRefs = toValidExternalRefs(oldObj.externalRefs)
+        const newRefs = toValidExternalRefs(newObj.externalRefs)
+        if (oldRefs.length > 0) {
+            const combinedRefs = mergeExternalRefs(newRefs, oldRefs)
+            if (combinedRefs.length !== newRefs.length) {
+                merged.externalRefs = combinedRefs
+                changed = true
+            }
         }
 
         const claudeHistory = mergeClaudeSessionIdHistory(oldObj, newObj)

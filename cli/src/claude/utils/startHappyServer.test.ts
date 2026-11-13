@@ -43,12 +43,16 @@ describe('startHappyServer skill_lookup', () => {
         await rm(sandboxDir, { recursive: true, force: true })
     })
 
-    async function connect(enableSkillLookup = true): Promise<Client> {
+    async function connect(enableSkillLookup = true, flushMetadataResult = true): Promise<Client> {
         sendAgentMessage = vi.fn()
+        let metadataState: Record<string, unknown> = { name: 'Parent', path: workingDirectory, flavor: 'codex' }
         const sessionClient = {
             sessionId: 'parent-id',
-            getMetadata: () => ({ name: 'Parent', path: workingDirectory, flavor: 'codex' }),
-            updateMetadata: vi.fn(),
+            getMetadata: vi.fn(() => metadataState),
+            updateMetadata: vi.fn((handler: (current: Record<string, unknown>) => Record<string, unknown>) => {
+                metadataState = handler(metadataState)
+            }),
+            flushMetadata: vi.fn(async () => flushMetadataResult),
             sendAgentMessage,
             sendClaudeSessionMessage: vi.fn()
         } as unknown as ApiSessionClient
@@ -117,6 +121,7 @@ describe('startHappyServer skill_lookup', () => {
             'display_media',
             'display_video',
             'inspect_peer',
+            'link_issue',
             'list_peers',
             'ping_peer',
             'search_content',
@@ -419,6 +424,30 @@ describe('startHappyServer skill_lookup', () => {
         }))
     })
 
+    it('links a github issue and reports success only after the metadata write is acked', async () => {
+        const mcp = await connect(false, true)
+
+        const result = await mcp.callTool({
+            name: 'link_issue',
+            arguments: { url: 'heavygee/hapi#235' }
+        }) as ToolResult
+
+        expect(result.isError).toBe(false)
+        expect(result.content?.[0]?.text).toContain('Linked heavygee/hapi#235')
+    })
+
+    it('reports failure instead of a false success when the metadata write never gets acked', async () => {
+        const mcp = await connect(false, false)
+
+        const result = await mcp.callTool({
+            name: 'link_issue',
+            arguments: { url: 'heavygee/hapi#235' }
+        }) as ToolResult
+
+        expect(result.isError).toBe(true)
+        expect(result.content?.[0]?.text).toContain('Failed to link issue')
+    })
+
     it('preserves the source extension when display_media title omits one', async () => {
         const path = join(sandboxDir, 'plan-a.zip')
         await writeFile(path, Buffer.from([0x50, 0x4b, 0x03, 0x04]))
@@ -455,6 +484,7 @@ describe('startHappyServer skill_lookup', () => {
         const tools = await mcp.listTools()
 
         expect(server.toolNames).toEqual([
+            'link_issue',
             'display_image',
             'display_video',
             'display_media',
@@ -470,6 +500,7 @@ describe('startHappyServer skill_lookup', () => {
             'display_media',
             'display_video',
             'inspect_peer',
+            'link_issue',
             'list_peers',
             'ping_peer',
             'search_content',
@@ -806,9 +837,10 @@ describe('startHappyServer peer tools kill switch', () => {
     it('omits peer tools from registration and toolNames when HAPI_DISABLE_PEER_TOOLS is set', async () => {
         process.env.HAPI_DISABLE_PEER_TOOLS = '1'
         const { toolNames } = await startServer()
-        // session_job is own-session (not peer) — stays available when peer tools are off.
+        // link_issue and session_job are own-session (not peer) — stay available when peer tools are off.
         expect(toolNames).toEqual([
             'change_title',
+            'link_issue',
             'display_image',
             'display_video',
             'display_media',
