@@ -178,13 +178,21 @@ export function formatIssueBody(fields: IssueFormField[], answers: IssueFormAnsw
         let valueText: string
 
         if (field.kind === 'input' || field.kind === 'textarea') {
-            const raw = answer && answer.kind === field.kind ? answer.value.trim() : ''
-            if (!raw) {
+            // Trim only to detect an unanswered field — trimming the emitted
+            // value itself would strip leading whitespace from just the
+            // first line of a multi-line textarea (an indented code sample's
+            // opening line), corrupting the body actually submitted to
+            // GitHub while every other line keeps its indentation (review
+            // finding, heavygee/hapi#238).
+            const value = answer && answer.kind === field.kind ? answer.value : ''
+            if (!value.trim()) {
                 valueText = '_No response_'
             } else if (field.kind === 'textarea' && field.render) {
-                valueText = `\`\`\`${field.render}\n${raw}\n\`\`\``
+                valueText = `\`\`\`${field.render}\n${value}\n\`\`\``
+            } else if (field.kind === 'textarea') {
+                valueText = value
             } else {
-                valueText = raw
+                valueText = value.trim()
             }
         } else if (field.kind === 'dropdown') {
             const selected = answer && answer.kind === 'dropdown' ? answer.selected : []
