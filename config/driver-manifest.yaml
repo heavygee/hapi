@@ -235,8 +235,8 @@ layers:
   # - branch: feat/claude-session-import  # RETIRED: subsumed by #945 soup layer
 
   # Multi-agent session import (#945) — SOLE soup layer (Claude+Codex+Cursor).
-  # Tip bacfd20b9+ ; agentImport.tooltip; includes #942 product surface.
-  # Hub+web+cli → --build-web + hapi-restart-hub.
+  # Tip 67f01d6b2 (2026-11-12); agentImport.tooltip; includes #942 product surface.
+  # Hub+web+cli → --build-web + hapi-restart-hub. dogfooded merge path stamped.
   # Brief: docs/plans/peer-briefings/2026-07-24-peer-942-945-import-picker-rebase.md
   # Worktree: agent-import-picker. Drop when upstream #945 merges.
   # Heals 52/53/54 parked while this cluster is souped.
@@ -1542,6 +1542,16 @@ layers:
   - branch: driver/fue-unlabelled-controls
     sentinel: FueCallout
     sentinel_path: web/src/components/SessionList.tsx
+
+  # 2026-11-12 heavygee/hapi#330 — Session Log pinned click must close panel and
+  # scroll to payload targetMessageId (agent-reasoning pins were agent-text-only
+  # probes → silent no-op under full-bleed Log). Thin tip on soup HEAD cfd704c26:
+  # driver/session-log-pin-jump-330 @ 77f09803f (+4 files). Web-only → remat
+  # --build-web; hard-reload (no hub restart). Worktree: legacy
+  # /work/coding/hapi-worktrees/1112-db7c (session Pin click: close Session Log + scroll).
+  - branch: driver/session-log-pin-jump-330
+    sentinel: parseSessionLogTargetMessageId
+    sentinel_path: web/src/components/AssistantChat/SessionLogPanel.tsx
 
   # PARKED 2026-11-09: driver/2296-presence-badges (tiann/hapi#2296, IanMStevenson)
   # does not re-thin onto live soup — SessionRowSummary.tsx's icon-corner presence

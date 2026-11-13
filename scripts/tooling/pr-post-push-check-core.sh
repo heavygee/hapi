@@ -28,15 +28,15 @@ owner_repo=$(gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>/dev/null
 owner=$(echo "$owner_repo" | cut -d/ -f1)
 repo=$(echo "$owner_repo" | cut -d/ -f2)
 
-unresolved_count=$(gh api graphql -f query="{
-  repository(owner:\"$owner\", name:\"$repo\") {
-    pullRequest(number: $pr) {
-      reviewThreads(first: 50) {
-        nodes { id isResolved }
-      }
-    }
-  }
-}" --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length' 2>/dev/null || echo "?")
+# Paginated: `first: 50` returned a silent prefix, so any PR past 50 threads
+# under-reported — and an under-count reads exactly like "nothing to fix".
+# tiann/hapi#2147 had 52 threads with both unresolved ones on the far side of
+# that boundary (2026-11-12).
+# shellcheck source=/dev/null
+source "$(dirname "$(readlink -f "$0")")/lib/pr-review-threads.sh"
+unresolved_count=$(prt_fetch_threads "$owner" "$repo" "$pr" 'id isResolved isOutdated' 2>/dev/null \
+    | prt_count_blocking 2>/dev/null)
+[ -n "$unresolved_count" ] || unresolved_count="?"
 
 latest=$(gh pr view "$pr" --comments 2>/dev/null | tail -40 || echo "(could not fetch comments)")
 

@@ -32,7 +32,8 @@
     },
     "sideEffects": false,
     "scripts": {
-        "test": "bun test"
+        "test": "bun test",
+        "typecheck": "tsc --noEmit -p tsconfig.typecheck.json"
     },
     "dependencies": {
         "mdast-util-from-markdown": "^2.0.2",

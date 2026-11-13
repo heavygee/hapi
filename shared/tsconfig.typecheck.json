@@ -1,0 +1,18 @@
+{
+  // Source-only typecheck for the remat gate.
+  //
+  // `shared` was the one package the gate's `bun typecheck` never ran
+  // (cli/web/hub/relay only), which mattered more than it looks: the silent
+  // auto-merge class — a fork relocates or renames a helper, upstream later
+  // adds a brand-new file importing the old name, and git has no overlapping
+  // lines to conflict on — is caught by tsc and by nothing else. A package
+  // excluded from tsc has no detector for it at all, and `shared` is exactly
+  // where fork relocations of types and helpers happen.
+  //
+  // It was excluded because its *tests* carry 9 pre-existing errors. Its
+  // source has none, so checking source alone closes the gap today instead of
+  // waiting on that debt. Fix the test errors and this file can go away in
+  // favour of plain tsconfig.json.
+  "extends": "./tsconfig.json",
+  "exclude": ["node_modules", "src/**/*.test.ts", "src/**/*.test.tsx"]
+}

@@ -111,7 +111,16 @@ describe('generateHookSettingsFile', () => {
 
         expect(settings.hooks.SessionStart).toHaveLength(1);
         expect(settings.hooks.PreToolUse).toHaveLength(1);
-        expect(settings.hooks.PreToolUse?.[0]?.matcher).toBe('Bash');
+        // Bash alone is not enough: context-mode executes arbitrary code in a
+        // subprocess, so a matcher that omits it leaves every runner-spawned
+        // session able to reach production mutations without passing a guard.
+        const matcher = settings.hooks.PreToolUse?.[0]?.matcher ?? '';
+        expect(matcher.split('|')).toEqual([
+            'Bash',
+            'mcp__plugin_context-mode_context-mode__ctx_execute',
+            'mcp__plugin_context-mode_context-mode__ctx_execute_file',
+            'mcp__plugin_context-mode_context-mode__ctx_batch_execute'
+        ]);
         expect(settings.hooks.PreToolUse?.[0]?.hooks[0]?.command).toContain(
             'hapi-claude-pretooluse-guard.sh'
         );

@@ -1047,7 +1047,9 @@ driver_soup_fleet_seal() {
 driver_soup_single_exe_assert_not_retagging_stale() {
     local dest="${1:?}"
     local tip_sha="${2:?}"
+    local driver="${3:-}"
     local root prev_manifest prev_tip prev_bin new_bin name prev_sha new_sha
+    local binary_sources_changed=1 stamp_file stamp
     root="$(driver_soup_single_exe_artifacts_root)"
     prev_manifest="$root/latest/manifest.json"
     [[ -f "$prev_manifest" ]] || return 0
@@ -1057,6 +1059,32 @@ driver_soup_single_exe_assert_not_retagging_stale() {
         # Same tip republish (e.g. fixing a bad prior upload) — allow digest churn.
         return 0
     fi
+    # Identical bytes under a new tip have two very different causes, and this
+    # guard used to treat them the same:
+    #
+    #   1. the compile never ran (the 2026-10 silent-stale case) — must refuse
+    #   2. the compile ran and the binary's inputs did not change — expected
+    #
+    # The single-exe is built from cli/ (+ shared/). A hub-only tip, e.g. the
+    # 2026-11-12 release-notes fix which touched hub/src/upgrade and nothing
+    # else, legitimately produces byte-identical binaries on a reproducible
+    # build. Failing that is a false positive that blocks a correct publish.
+    #
+    # Distinguish them with evidence rather than assumption: the dist-exe
+    # .composed-tip-sha stamp proves the compile ran for THIS tip, and the
+    # cli/shared diff proves whether the bytes had any reason to change.
+    if [[ -n "$driver" ]]; then
+        stamp_file="$(driver_soup_single_exe_tip_stamp_path "$driver" 2>/dev/null || true)"
+        stamp=""
+        [[ -n "$stamp_file" && -f "$stamp_file" ]] && stamp="$(tr -d '[:space:]' <"$stamp_file")"
+        if [[ -n "$stamp" && "$stamp" == "$tip_sha" ]] \
+            && git -C "$driver" rev-parse --verify "$prev_tip" >/dev/null 2>&1; then
+            if git -C "$driver" diff --quiet "$prev_tip" "$tip_sha" -- cli shared 2>/dev/null; then
+                binary_sources_changed=0
+            fi
+        fi
+    fi
+
     shopt -s nullglob
     for prev_bin in "$root/latest"/*/hapi "$root/latest"/*/hapi.exe; do
         [[ -f "$prev_bin" ]] || continue
@@ -1065,6 +1093,11 @@ driver_soup_single_exe_assert_not_retagging_stale() {
         [[ -f "$new_bin" ]] || continue
         prev_sha="$(driver_soup_single_exe_sha256_file "$prev_bin")"
         new_sha="$(driver_soup_single_exe_sha256_file "$new_bin")"
+        if [[ "$prev_sha" == "$new_sha" ]] && [[ "$binary_sources_changed" -eq 0 ]]; then
+            echo "soup-artifact: $name identical across tip change — cli/shared unchanged" >&2
+            echo "                (dist-exe stamp matches ${tip_sha:0:12}; reproducible build, not stale)" >&2
+            continue
+        fi
         if [[ "$prev_sha" == "$new_sha" ]]; then
             echo "ERROR: soup-artifact: binary $name sha256 unchanged across tip change" >&2
             echo "       prev tip ${prev_tip:0:12} → new tip ${tip_sha:0:12}" >&2
@@ -1192,9 +1225,37 @@ driver_soup_single_exe_publish() {
         return 1
     fi
 
+    # Notes are computed BEFORE the manifest so they can ship INSIDE it.
+    #
+    # GitHub already solves "artifact and its notes arrive together": a release
+    # carries its body and its assets as one object. Our consumers did not use
+    # that — they fetched manifest.json, then made a SECOND, independent request
+    # for NOTES.md. That second fetch can 404 on CDN lag, be skipped by a code
+    # path, or simply fail, and when it does the banner degrades to "no release
+    # notes published for this tip yet" rather than to anything anyone notices.
+    # Ian has now hit that twice (#304, and again on 2026-11-12).
+    #
+    # Putting the notes in manifest.json makes them atomic with the artifact by
+    # construction: the manifest is the one file every host already fetches to
+    # learn the tag and the binaries, so there is no longer a window where the
+    # software is available and its notes are not. NOTES.md is still written as
+    # a release asset and a local cache, but it is no longer load-bearing.
+    local notes_for_disk repo_for_notes
+    repo_for_notes="$(driver_soup_single_exe_github_repo)"
+    if [[ -n "$tip_sha" ]] && { [[ -d "$driver/.git" ]] || [[ -f "$driver/.git" ]]; }; then
+        notes_for_disk="$(driver_soup_single_exe_release_notes "$driver" "$tip_sha" "$tag" "$repo_for_notes")"
+    else
+        notes_for_disk="Soup single-exe fleet artifact \`${tag}\`."
+        if [[ -n "$tip_sha" ]]; then
+            notes_for_disk+=$'\n\n'"**Composed tip:** \`${tip_sha}\`"
+        fi
+        notes_for_disk+=$'\n\n'"Download per-platform binaries as \`hapi-<platform-dir>\` (see \`manifest.json\` for sha256)."
+    fi
+
     jq -n \
         --arg schema "1" \
         --arg tag "$tag" \
+        --arg releaseNotes "$notes_for_disk" \
         --arg composedTipSha "$tip_sha" \
         --arg composedTreeOid "$tree_oid" \
         --argjson layerCount "$layer_count" \
@@ -1207,6 +1268,7 @@ driver_soup_single_exe_publish() {
         '{
             schema: ($schema|tonumber),
             tag: $tag,
+            releaseNotes: $releaseNotes,
             composedTipSha: $composedTipSha,
             composedTreeOid: $composedTreeOid,
             layerCount: $layerCount,
@@ -1218,23 +1280,13 @@ driver_soup_single_exe_publish() {
             binaries: $binaries
         }' >"$dest/manifest.json"
 
-    # Persist the same notes the GitHub release will use so the hub can serve
-    # "what's new" on the fleet skew banner without calling gh at runtime (#248).
-    local notes_for_disk repo_for_notes
-    repo_for_notes="$(driver_soup_single_exe_github_repo)"
-    if [[ -n "$tip_sha" ]] && { [[ -d "$driver/.git" ]] || [[ -f "$driver/.git" ]]; }; then
-        notes_for_disk="$(driver_soup_single_exe_release_notes "$driver" "$tip_sha" "$tag" "$repo_for_notes")"
-    else
-        notes_for_disk="Soup single-exe fleet artifact \`${tag}\`."
-        if [[ -n "$tip_sha" ]]; then
-            notes_for_disk+=$'\n\n'"**Composed tip:** \`${tip_sha}\`"
-        fi
-        notes_for_disk+=$'\n\n'"Download per-platform binaries as \`hapi-<platform-dir>\` (see \`manifest.json\` for sha256)."
-    fi
+    # Same text as manifest.releaseNotes above and as the GitHub release body.
+    # Kept as a release asset and local cache for older consumers; the manifest
+    # is now the authoritative, atomic carrier (#248 / #304).
     printf '%s\n' "$notes_for_disk" >"$dest/NOTES.md"
-    echo "soup-artifact: NOTES.md written ($dest/NOTES.md)"
+    echo "soup-artifact: NOTES.md written ($dest/NOTES.md); manifest.releaseNotes ${#notes_for_disk} chars"
 
-    if ! driver_soup_single_exe_assert_not_retagging_stale "$dest" "$tip_sha"; then
+    if ! driver_soup_single_exe_assert_not_retagging_stale "$dest" "$tip_sha" "$driver"; then
         rm -rf "$dest"
         return 1
     fi

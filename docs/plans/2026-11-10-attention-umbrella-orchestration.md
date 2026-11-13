@@ -156,3 +156,90 @@ No third-party pushback on #2355/#2356. Signal: **#987 CONFLICTING/DIRTY** from 
 | #2376 | CLEAN + dogfooded (~26h left) |
 | #2375 | CONFLICTING — fade peer woken |
 | #1163 | CLEAN tip `6adaad77e` Lane A |
+
+## #2375 → test-only; #2373 closed (2026-11-12)
+
+#2380 fixed the stacking defect incidentally. #2375 tip `ea1006e11` is **test-only** regression guard (kept). No dogfood stamp. #2373 closed as fixed by #2380. Stray Codex P2s from fork #329 → **#2406** / **#2407**.
+
+## Fork Actions blackout (2026-11-12)
+
+`heavygee/hapi` produced **no workflow runs since 2026-11-10T21:54Z** (~33h+). Permissions still enabled — likely minutes/spending limit. Blocks fork-stage CI for #326 (rebased locally green @ `b3642db08`). Escalated to [tooling/meta](/sessions/cbd1073e-4fd3-4f4a-bff8-cf9ba97bca6d) + **operator billing**. Meta confirmed: push `5574fa53a` to fork `main` created **zero** runs. Do not hold soup promote for Actions. #326 = locally green / CI dark. #2375 **Ready-YES** tip `ea1006e11` three-dim CLEAN; Lane B / low-impact / test-only / no dogfood.
+
+## Soup promote rollback / scope call (2026-11-12)
+
+Promote composed all 87 layers then gate rolled back on **cli** (14 blocking). Live tip safe at `e3b1e11a8`; remat-hold ACTIVE (`tests failed`). Absorb recovered as tag `soup-absorb-0.35.0-round2`. Tooling fixes committed (`caa4a796f`): install-before-web-build; resume no longer hard-resets dirty post-rollback trees.
+
+**Meta correction (Windows):** `#1911` was absorbed upstream into `cli/src/utils/windowsProcessStop.ts` (stricter root-probe-before-taskkill). Not a lost-behaviour regression — fork `process.test.ts` cases were stale. Fix = adopt upstream Windows test files (8 green; 56/56 across three Windows files). Prior "restore B1 into process.ts" call **cancelled**.
+
+**Narrowed orchestrator scope call (remaining 5 only):**
+1. `modelCatalog` (1) + Windows tests (8): already green — no further action.
+2. **intentionalStop (3) + agentQuotas (2):** revert orphaned upstream tests to fork versions. Do **not** port `reportStop` / generation probes / stop-flow into this remat.
+3. **Stop-flow port:** separate work later; out of blast radius for this promote.
+4. Re-promote when cli green; keep surface 22/22 + `link_pr`.
+
+## Soup 0.35.0 live + MCP regression (2026-11-12)
+
+Promote landed tip `66b6b7d6f` (DB 32→35). Bridge fatal: `Tool session_job is already registered` — duplicate `if (toolNames.has(SESSION_JOB_TOOL_NAME))` block in `happyMcpStdioBridge.ts`. All MCP tools gone for sessions started after swap; pre-swap bridges OK. Gates missed it (surface = present; mock Map overwrites vs SDK throw).
+
+**Meta fixing:** dedupe block + mock throws like SDK. **Orchestrator:** approve hub restart with MCP fix. **Generation-probe port Meta added early: strip it** in that same promote (not needed for green). Keep call-site restores (rate-limit / `getAccountIdentity`). `reportStop` et al. stay unported. Require live bridge/`listTools` proof after restart — not source grep.
+
+### Tip `f0d8e29b2` — absorb closed; `link_pr` NOT restored
+
+Gate exit=0 (web 432/432, cli 5031/0, surface 22/22, sentinels clean). Generation probes stripped; stop-flow at 0. MCP bridge fixed (was 0 tools from dup `session_job`; now serves 15). Tag `soup-absorb-0.35.0-round2` → tip.
+
+**Retract:** earlier "fresh-session `link_pr` PRESENT" was wrong — that was bridge `--tools` argv, not the enabled tool list. Peer in-process list: `link_pr` **absent**, `session_job` present.
+
+**Open — path mismatch (pre-absorb):** CLI `GET ${apiUrl}/cli/features` (CLI bearer) → 404; hub mounts features only at `/api` (JWT). Fail-closed → awareness false forever despite `settings.json` githubPrAwareness true. Surface gate cannot see runtime enablement.
+
+**Orchestrator call (bounce authorized):** hub-side — expose `GET /cli/features` under existing CLI auth (same response shape as `/api/features`). Do **not** point CLI at `/api/features` (CLI token ≠ JWT → 401 forever). Include a regression test that CLI-token GET succeeds. Proof bar after restart: in-process tool list shows `link_pr` (not argv, not source grep). Leave gc pile alone.
+
+**Import-picker layer — drop retracted.** `feat/agent-session-import-picker` stays until upstream #945 merges (manifest condition). Tip-forward: already ancestor / clean skip / containment 0. `full-recipe` would lose the feature if dropped (symbols absent on `origin/main`). Layer is stale (`SidebarToggle.tsx` not on tip) — retire promptly when #945 lands.
+
+### Closed — tip `d8311eda3` (`link_pr` runtime)
+
+`GET /cli/features` on CLI router (inherits CLI auth); shared `readGithubPrAwareness()` with `/api`; PATCH not on `/cli`. Live: CLI-token 200 enabled=true/source=file; anon 401; PATCH 404. Fresh-session HTTP MCP **16 tools · `link_pr` PRESENT** (not argv). Pre-restart bridges correctly still 15 without it. Regression test fail-direction checked. Gate exit=0. Both breakages closed (tool-name entry + routing). Surface gate still cannot see runtime enablement — known limit.
+
+**In-process confirm:** [proof peer](/sessions/5966390d-22a1-40ae-bde5-519b87acccb1) — `link_pr` PRESENT on first look (16 tools). Same protocol previously reported absent — calibrated both ways.
+
+**Attribution correction:** `/cli/features` 404 was **not** pre-absorb. Consumer `fetchGithubPrAwareness.ts` entered via Meta `baf529bbf` (Nov 11) without the hub half; `feat/boards` carries both but is not a manifest layer. Causal claim retracted.
+
+**Durability — Option 1 CANCELLED (operator 2026-11-12):** fork main is for fork-private only. `link_pr` / PR awareness is upstream-bound (#1163) — must **not** land on fork main. Durability = merge #1163 upstream (or keep tip/layer until then). Meta stand down.
+
+**Orchestrator remit (hard):** umbrella dogfood + PR babysit only. No Meta kitchen scope unless it blocks an umbrella PR's dogfood or chips.
+
+**Meta next (non-blocking):** `ctx_execute(shell)` bypasses Bash pre-tool guards; Bash guard also *redirects* `curl` into `ctx_execute`, so agents following the redirect leave production-mutation checks without intending to. Fix must cover the steer-into-ungarded path, not only a matcher list.
+
+### `ctx_execute` guard closed on main `60c6a9850` (2026-11-12)
+
+Adapter normalises ctx_execute / ctx_execute_file / ctx_batch_execute payload into Bash `.tool_input.command` shape; punctuation-stripped copy catches argv lists. Both `.claude/settings.json` and `generateHookSettings.ts` updated (runner sessions). Fail-direction tests + Bash control. **Promote+restart authorized when stack free** — proof = runner-spawned session hook matcher expanded, not only manual launch. Estate `estate-android-gradle-gate.sh` left outside (operator/estate). Unrelated `claude.test.ts` resume identity / #2396 not touched.
+
+**Promoted tip `49f1e53c8`:** gate exit=0, patient restart, WORKING drained to 0 (no yank). Promoted CLI `generateHookSettingsFile` emits Bash + three `mcp__plugin_context-mode_context-mode__ctx_*` matchers. Pre-restart sessions still `matcher: Bash` only until relaunch — new spawns only.
+
+**Runner proof:** Cursor peer [29656ad1](/sessions/29656ad1-e922-43fd-9cbf-b555b17ac8a5) correctly saw Bash-only (no Claude launched post-restart yet). Meta then spawned Claude: `~/.hapi/tmp/hooks/session-hook-2762686.json` (mtime 09:31:31) has Bash + three ctx_* matchers. Criterion met. Note: Cursor defaults leave no hook-settings evidence until a Claude actually spawns.
+
+## #987 rebased to 0.35.0 (2026-11-12)
+
+[Peer](/sessions/290c588b-5f7c-4391-80ad-6078f695d4be) tip `d18a6a38b` on parent `06d9e51f5`. Prior tip 10/10 CLEAN; round 6 CI running. Five bot findings fixed — all absorb re-sequencing, none original feature. Model-error dot kept **separate** ahead of #2380 activity/unread chain.
+
+**Calls:** keep rounds while productive; Ready-YES at next green+CLEAN with no mid-round actionable findings. Prepare-only. Pattern noted: conflict count ≠ risk on long-drift forks; prefer earlier rebases next time. `ctx_execute(shell)` bypasses Bash pre-tool guards → Meta tooling backlog (028d0a86 superseded).
+
+**Dogfood re-stamp — operator override 2026-11-12:** #987 has lived in soup and been dogfooded; rebase alone does not void that. **No re-stamp / no Option 1 live re-run.** Keep existing `dogfooded` label; do not re-date the countdown. Ready-YES/CLEAN when CI lands; prepare-only.
+
+### READY-YES / CLEAN @ `cdd6bcbc0` (2026-11-12)
+
+Three-dim PASS (CI 10/10, 0 threads, bot pass). MERGEABLE/CLEAN on 0.35.0 parent. `dogfooded` kept untouched. Prepare-only / not merged. Peer idling. Two CI reds were flakes (Android scratchlist / iOS typography) — verified outside our diffs, passed on rerun.
+
+## Daily sweep complete (2026-11-13T06:06Z — 24/24)
+
+No third-party pushback on #2355/#2356. Upstream `main` @ `6ea40f9e4`. Signals from sweep 19 onward:
+
+| PR | Status |
+|---|---|
+| #1725 | CLEAN + dogfooded |
+| #1733 | CLEAN + dogfooded |
+| #2375 | CLEAN (test-only Lane B) |
+| #1772 | **CONFLICTING** — assist tip `350c11186`; offer posted ([comment](https://github.com/tiann/hapi/pull/1772#issuecomment-6845716136)); **awaiting author/operator yes** before maintainerCanModify push. [peer](/sessions/3c5af7c8-540d-4d7c-b7a1-5df17abe5b37) idle |
+| #987 | Tip `ef8aef3e3` **Ready-pending-upstream** (9/10; main red via #2423). Unblock [#2426](https://github.com/tiann/hapi/pull/2426). Fork #331 closed/cleaned. Peer authorized brief non-blocking public comment on #2426 suggesting `code === 'archive-cleanup-timeout'` assert. Idle until #2426 merges. |
+| #2376 | **CONFLICTING** — [peer](/sessions/ea9e52cc-cf3d-4f5d-95d8-9944bf08b0d6) waiting: throwaway rebase showed conflicts are #1772's `6dd0183b6`, not their files; will rebase 2 commits onto fresh CLEAN #1772 tip |
+
+Prepare-only. Re-armed next 24h sweep watching the same six PRs.
