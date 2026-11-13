@@ -239,7 +239,7 @@ No third-party pushback on #2355/#2356. Upstream `main` @ `6ea40f9e4`. Signals f
 | #1733 | CLEAN + dogfooded |
 | #2375 | CLEAN (test-only Lane B) |
 | #1772 | **CONFLICTING** — assist tip `350c11186`; offer posted ([comment](https://github.com/tiann/hapi/pull/1772#issuecomment-6845716136)); **awaiting author/operator yes** before maintainerCanModify push. [peer](/sessions/3c5af7c8-540d-4d7c-b7a1-5df17abe5b37) idle |
-| #987 | Rebased tip `ef8aef3e3` on `6ea40f9e4` — MERGEABLE, bot pass, 0 threads; **9/10 CI** (inherited red `test` from main: 504→503 miss after #2423). Fix already open as [#2426](https://github.com/tiann/hapi/pull/2426) (CLEAN, all checks green). **Parked Ready-pending-upstream**; peer idle. No duplicate one-liner. Silent #2402 label rename fixed in the rebase. |
+| #987 | Rebased tip `ef8aef3e3` on `6ea40f9e4` — MERGEABLE, bot pass, 0 threads; **9/10 CI** (inherited red `test` from main: 504→503 miss after #2423). Unblock = [#2426](https://github.com/tiann/hapi/pull/2426) (CLEAN). Peer briefly opened fork [#331](https://github.com/heavygee/hapi/pull/331) (huge vs diverged fork main) — **ordered closed; no upstream file**. `code` assert addendum deferred. **Parked Ready-pending-upstream.** |
 | #2376 | **CONFLICTING** — [peer](/sessions/ea9e52cc-cf3d-4f5d-95d8-9944bf08b0d6) waiting: throwaway rebase showed conflicts are #1772's `6dd0183b6`, not their files; will rebase 2 commits onto fresh CLEAN #1772 tip |
 
 Prepare-only. Re-armed next 24h sweep watching the same six PRs.
