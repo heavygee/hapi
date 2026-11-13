@@ -29,6 +29,11 @@ curl -fsSL https://raw.githubusercontent.com/heavygee/hapi/main/scripts/install-
 `--with-systemd` works via `curl | bash` (units are embedded in the installer — no git
 checkout required). After install: `systemctl --user status hapi-hub hapi-runner`.
 
+Run it with a real terminal attached and no other flags, and it asks first whether you
+want a new hub+runner here or to join an existing hub as a runner only — see "Joining an
+existing hub as a runner only" below. Piped through something that strips the terminal
+(CI, a non-interactive script) always gets the hub+runner-here default without asking.
+
 **Headless / service accounts** (no interactive login, no `$XDG_RUNTIME_DIR`): systemd
 `--user` is not running until linger is enabled. The installer **fails fast** with
 copy-paste for a sudo-capable person — it does **not** silently fall back to nohup:
@@ -80,6 +85,29 @@ instead — it regenerates the token and relaunches hub + runner.
 
 Run the exact same install command again. Nothing you've done is lost — it swaps the
 HAPI binary in place and restarts.
+
+## Joining an existing hub as a runner only
+
+Adding a personal device (phone, spare laptop) as a worker machine under a hub you
+already run elsewhere — not setting up a new standalone instance here. No local hub gets
+created, nothing to do with fleet-policy/auto-upgrade channels below applies (those are
+for a standalone hub's own binary; a runner-only machine just gets upgraded by re-running
+the install command with newer code, same as any other machine already in a fleet).
+
+Interactively, pick option 2 at the prompt and it asks for the rest. Non-interactively:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/heavygee/hapi/main/scripts/install-hapi-pet.sh \
+  | HAPI_RUNNER_TOKEN=<token-from-the-hub-you-are-joining> bash -s -- --runner-only --hub-url=https://your-hub.example.com
+```
+
+Get `<token-from-the-hub-you-are-joining>` from that hub's own `~/.hapi/settings.json`
+(`cliApiToken` field) — treat it like a password, same as any other HAPI access token.
+Paste **only** the token value, nothing else; the installer checks the shape of what you
+paste and refuses a bad copy loudly instead of silently saving something broken.
+
+Not yet supported: `--runner-only` together with `--with-systemd` (nohup only for now —
+tracked as a follow-up on [#332](https://github.com/heavygee/hapi/issues/332)).
 
 ## Staying on the fleet
 
