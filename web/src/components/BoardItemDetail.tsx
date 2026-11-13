@@ -365,10 +365,15 @@ export function BoardItemDetail(props: {
     const [bodyDraft, setBodyDraft] = useState(item.body ?? '')
 
     const handleSendComment = async () => {
-        const body = commentDraft.trim()
-        if (!body) return
+        // Trim only to check whether the draft is empty — pass the original,
+        // untrimmed draft to onComment. .trim() strips whitespace contiguous
+        // with just the start/end of the string, so trimming the emitted
+        // value would corrupt a comment starting with an indented code
+        // block (leading indentation stripped from its first line only,
+        // same issue as handleSaveBody below; review finding, heavygee/hapi#238).
+        if (!commentDraft.trim()) return
         try {
-            await props.onComment(body)
+            await props.onComment(commentDraft)
             setCommentDraft('')
         } catch {
             // Failure is already surfaced as a toast by the caller — keep the

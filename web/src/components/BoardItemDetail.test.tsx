@@ -166,6 +166,16 @@ describe('BoardItemDetail', () => {
         await vi.waitFor(() => expect(textarea.value).toBe('Looks good'))
     })
 
+    it('sends a comment starting with an indented code block, preserving its leading indentation verbatim', async () => {
+        const onComment = vi.fn().mockResolvedValue(undefined)
+        renderDetail({ onComment })
+        const textarea = screen.getByPlaceholderText('Leave a comment…')
+        const indented = '\n    if x:\n        do_thing()\n    else:\n        other_thing()\n'
+        fireEvent.change(textarea, { target: { value: indented } })
+        fireEvent.click(screen.getByRole('button', { name: 'Comment' }))
+        expect(onComment).toHaveBeenCalledWith(indented)
+    })
+
     it('disables the comment button for a blank/whitespace-only draft', () => {
         renderDetail()
         const textarea = screen.getByPlaceholderText('Leave a comment…')
