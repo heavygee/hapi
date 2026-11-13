@@ -228,3 +228,18 @@ Adapter normalises ctx_execute / ctx_execute_file / ctx_batch_execute payload in
 ### READY-YES / CLEAN @ `cdd6bcbc0` (2026-11-12)
 
 Three-dim PASS (CI 10/10, 0 threads, bot pass). MERGEABLE/CLEAN on 0.35.0 parent. `dogfooded` kept untouched. Prepare-only / not merged. Peer idling. Two CI reds were flakes (Android scratchlist / iOS typography) — verified outside our diffs, passed on rerun.
+
+## Daily sweep complete (2026-11-13T06:06Z — 24/24)
+
+No third-party pushback on #2355/#2356. Upstream `main` @ `6ea40f9e4`. Signals from sweep 19 onward:
+
+| PR | Status |
+|---|---|
+| #1725 | CLEAN + dogfooded |
+| #1733 | CLEAN + dogfooded |
+| #2375 | CLEAN (test-only Lane B) |
+| #1772 | **CONFLICTING** — [rebase-assist](/sessions/3c5af7c8-540d-4d7c-b7a1-5df17abe5b37) woken (offer only; no force-push) |
+| #987 | **CONFLICTING** — [peer](/sessions/290c588b-5f7c-4391-80ad-6078f695d4be) woken; tip was `cdd6bcbc0` |
+| #2376 | **CONFLICTING** — [peer](/sessions/ea9e52cc-cf3d-4f5d-95d8-9944bf08b0d6) woken; wait for fresh #1772 tip then rebase |
+
+Prepare-only. Re-armed next 24h sweep watching the same six PRs.
