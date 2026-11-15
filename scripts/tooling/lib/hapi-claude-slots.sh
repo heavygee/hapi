@@ -1,20 +1,73 @@
-# lib/hapi-claude-slots.sh — shared Claude dual-slot helpers (source only).
-# Slots live under ~/.hapi/claude-auth/{primary,secondary}/.
+# lib/hapi-claude-slots.sh — shared Claude multi-slot helpers (source only).
+# Slots live under ~/.hapi/claude-auth/<name>/ (primary, secondary, ultra, …).
 # shellcheck shell=bash
 
 HAPI_CLAUDE_AUTH_ROOT="${HAPI_CLAUDE_AUTH_ROOT:-$HOME/.hapi/claude-auth}"
 HAPI_PROXMOX_SSH="${HAPI_PROXMOX_SSH:-heavygee@192.168.86.73}"
 HAPI_HOST="${HAPI_HOST:-http://127.0.0.1:3006}"
 
+# Reserved non-slot names under claude-auth/
+HAPI_CLAUDE_SLOT_RESERVED_RE='^(active|auth-bak|wake-skip)$'
+
 hapi_claude_slot_token_file() {
     local slot="$1"
     printf '%s\n' "$HAPI_CLAUDE_AUTH_ROOT/$slot/claude-setup-token.env"
+}
+
+hapi_claude_slot_cred_file() {
+    local slot="$1"
+    printf '%s\n' "$HAPI_CLAUDE_AUTH_ROOT/$slot/.credentials.json"
 }
 
 hapi_claude_active_slot() {
     local f="$HAPI_CLAUDE_AUTH_ROOT/active"
     [[ -f "$f" ]] || { echo ""; return 1; }
     tr -d '[:space:]' <"$f"
+}
+
+# True if name is a safe slot id (alnum + _-).
+hapi_claude_slot_name_ok() {
+    local slot="$1"
+    [[ "$slot" =~ ^[a-zA-Z][a-zA-Z0-9_-]*$ ]] || return 1
+    [[ ! "$slot" =~ $HAPI_CLAUDE_SLOT_RESERVED_RE ]] || return 1
+    return 0
+}
+
+# List installed slot names that have a token file (one per line).
+hapi_claude_list_slots() {
+    local d name
+    [[ -d "$HAPI_CLAUDE_AUTH_ROOT" ]] || return 0
+    for d in "$HAPI_CLAUDE_AUTH_ROOT"/*/; do
+        [[ -d "$d" ]] || continue
+        name="$(basename "$d")"
+        hapi_claude_slot_name_ok "$name" || continue
+        [[ -f "$d/claude-setup-token.env" ]] || continue
+        printf '%s\n' "$name"
+    done | sort
+}
+
+# Require slot dir + token (+ credentials unless --token-only).
+hapi_claude_assert_slot() {
+    local slot="$1"
+    local token_only="${2:-0}"
+    hapi_claude_slot_name_ok "$slot" || {
+        echo "invalid slot name: $slot (use [a-zA-Z][a-zA-Z0-9_-]*)" >&2
+        return 1
+    }
+    local cred token
+    cred="$(hapi_claude_slot_cred_file "$slot")"
+    token="$(hapi_claude_slot_token_file "$slot")"
+    [[ -f "$token" ]] || {
+        echo "missing slot token: $token (run hapi-claude-slot-ingest $slot)" >&2
+        return 1
+    }
+    if [[ "$token_only" != "1" ]]; then
+        [[ -f "$cred" ]] || {
+            echo "missing slot credentials: $cred (run hapi-claude-slot-ingest $slot)" >&2
+            return 1
+        }
+    fi
+    return 0
 }
 
 hapi_claude_read_token() {

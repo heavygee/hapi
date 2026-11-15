@@ -1,13 +1,9 @@
 #!/usr/bin/env bash
-# hapi-claude-usage — smoke Claude dual-slot quota (primary | secondary).
-#
-# Cursor twin: smoke half of hapi-cursor-account-toggle (Claude has two Max
-# slots with independent reset clocks, so quota needs its own command).
+# hapi-claude-usage — smoke Claude slot quota (any installed slot).
 #
 # Usage:
-#   hapi-claude-usage                  # both slots + mark active
-#   hapi-claude-usage secondary        # one slot
-#   hapi-claude-usage primary secondary
+#   hapi-claude-usage                  # every installed slot + mark active
+#   hapi-claude-usage secondary ultra  # named slots
 #   hapi-claude-usage --active         # only ~/.hapi/claude-auth/active
 #   hapi-claude-usage --json
 #
@@ -37,9 +33,22 @@ while [[ $# -gt 0 ]]; do
             sed -n '2,/^set -euo/p' "$0" | sed 's/^# \?//' | head -25
             exit 0
             ;;
-        primary|secondary) SLOTS+=("$1"); shift ;;
-        both|all) SLOTS+=(primary secondary); shift ;;
-        *) echo "hapi-claude-usage: unknown arg: $1" >&2; exit 2 ;;
+        both|all)
+            mapfile -t SLOTS < <(hapi_claude_list_slots)
+            shift
+            ;;
+        -*)
+            echo "hapi-claude-usage: unknown arg: $1" >&2
+            exit 2
+            ;;
+        *)
+            hapi_claude_slot_name_ok "$1" || {
+                echo "hapi-claude-usage: bad slot name: $1" >&2
+                exit 2
+            }
+            SLOTS+=("$1")
+            shift
+            ;;
     esac
 done
 
@@ -50,7 +59,11 @@ if [[ "$WANT_ACTIVE" -eq 1 ]]; then
     SLOTS=("$ACTIVE")
 fi
 if [[ ${#SLOTS[@]} -eq 0 ]]; then
-    SLOTS=(primary secondary)
+    mapfile -t SLOTS < <(hapi_claude_list_slots)
+fi
+if [[ ${#SLOTS[@]} -eq 0 ]]; then
+    echo "hapi-claude-usage: no slots under $HAPI_CLAUDE_AUTH_ROOT" >&2
+    exit 2
 fi
 
 # de-dupe while preserving order

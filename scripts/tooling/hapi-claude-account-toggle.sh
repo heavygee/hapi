@@ -18,14 +18,14 @@
 #   hapi-claude-reopen-mismatch
 #
 # Usage:
-#   hapi-claude-account-toggle.sh primary|secondary [--skip-restart] [--skip-smoke] [--skip-proxmox]
+#   hapi-claude-account-toggle.sh <slot> [--skip-restart] [--skip-smoke] [--skip-proxmox]
+#   slot = any installed name under ~/.hapi/claude-auth/ (primary, secondary, ultra, …)
 #
 # Runner restart is a production mutation — run from a real TTY with operator approval.
 set -euo pipefail
 
 SLOT="${1:-}"
-[[ -n "$SLOT" ]] || { echo "Usage: $0 primary|secondary [--skip-restart] [--skip-smoke] [--skip-proxmox]" >&2; exit 1; }
-[[ "$SLOT" == primary || "$SLOT" == secondary ]] || { echo "slot must be primary or secondary" >&2; exit 1; }
+[[ -n "$SLOT" ]] || { echo "Usage: $0 <slot> [--skip-restart] [--skip-smoke] [--skip-proxmox]" >&2; exit 1; }
 
 SKIP_RESTART=0
 SKIP_SMOKE=0
@@ -45,9 +45,11 @@ source "$SCRIPT_DIR/lib/hapi-claude-oauth-dropin.sh"
 # shellcheck source=lib/hapi-claude-slots.sh
 source "$SCRIPT_DIR/lib/hapi-claude-slots.sh"
 
-ROOT="$HOME/.hapi/claude-auth"
-CRED="$ROOT/$SLOT/.credentials.json"
-TOKEN="$ROOT/$SLOT/claude-setup-token.env"
+hapi_claude_assert_slot "$SLOT" || exit 1
+
+ROOT="$HAPI_CLAUDE_AUTH_ROOT"
+CRED="$(hapi_claude_slot_cred_file "$SLOT")"
+TOKEN="$(hapi_claude_slot_token_file "$SLOT")"
 # Canonical EnvironmentFile for hapi-runner-oos (root-controlled; not ~/.hapi/).
 CANON="$(hapi_claude_oauth_system_token_file)"
 

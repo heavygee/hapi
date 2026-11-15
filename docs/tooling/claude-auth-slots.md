@@ -1,6 +1,6 @@
-# Claude auth slots (primary ↔ secondary)
+# Claude auth slots (primary / secondary / ultra / …)
 
-**Fork-local ops.** Dual Claude Max accounts with independent usage clocks. Keep oos + proxmox runners and live session processes on the same slot.
+**Fork-local ops.** Multiple Claude subscriptions with independent usage clocks. Keep oos + proxmox runners and live session processes on the same slot.
 
 Cursor twin doc: [`cursor-auth-fleet-sync.md`](./cursor-auth-fleet-sync.md).
 
@@ -15,20 +15,23 @@ Slot storage (never committed):
 
 ```
 ~/.hapi/claude-auth/active
-~/.hapi/claude-auth/{primary,secondary}/claude-setup-token.env
-~/.hapi/claude-auth/{primary,secondary}/.credentials.json
+~/.hapi/claude-auth/<slot>/claude-setup-token.env
+~/.hapi/claude-auth/<slot>/.credentials.json
 ```
+
+Installed slots today: `primary` / `secondary` (Teams Max 5×), plus optional `ultra` (personal Ultra — ingest via `hapi-claude-slot-ingest`).
 
 ## Tooling (Cursor-shaped)
 
 | Job | Command |
 |-----|---------|
-| Check quota / reset time | `hapi-claude-usage` / `hapi-claude-usage secondary` / `--json` |
-| Switch fleet slot (oos + proxmox runners) | `hapi-claude-account-toggle primary\|secondary` |
+| Check quota / reset time | `hapi-claude-usage` / `hapi-claude-usage ultra` / `--json` |
+| Ingest a new account into a slot | `hapi-claude-slot-ingest ultra` |
+| Switch fleet slot (oos + proxmox runners) | `hapi-claude-account-toggle <slot>` |
 | Host files + runner env match active slot? | `hapi-claude-auth-audit` |
 | Live session process tokens match? | `hapi-claude-session-assess` |
-| Kill+archive+reopen drifted sessions | `hapi-claude-reopen-mismatch` (selective continue-wake after) |
-| Continue-only wake after cutover | `hapi-claude-continue-fleet` (default: interrupted/attention only) |
+| Kill+archive+reopen drifted sessions | `hapi-claude-reopen-mismatch` (thinking-only continue-wake after) |
+| Continue-only wake after cutover | `hapi-claude-continue-fleet` (default: thinking-only) |
 
 Install/refresh PATH symlinks: `bash scripts/tooling/install-hapi-local-bin.sh`
 
@@ -36,14 +39,31 @@ Install/refresh PATH symlinks: `bash scripts/tooling/install-hapi-local-bin.sh`
 
 ```bash
 hapi-claude-usage                    # see which slot still works / reset clock
-hapi-claude-account-toggle secondary # or primary — fleet runners + active marker
+hapi-claude-account-toggle secondary # or primary / ultra
 hapi-claude-auth-audit               # host/runner sha12 must match
 hapi-claude-session-assess           # expect NEEDS REOPEN until next step
-hapi-claude-reopen-mismatch          # respawn + selective continue-wake
+hapi-claude-reopen-mismatch          # respawn + thinking-only continue-wake
 hapi-claude-session-assess           # should be clean
 ```
 
 Do **not** hand-roll JWT/archive/reopen Python each time — that is what these scripts are for.
+
+## Adding a personal Ultra slot (third account)
+
+Teams Max slots (`primary`/`secondary`) and personal Ultra are different subscriptions — capture Ultra under an **isolated** Claude config so you do not overwrite the Teams interactive login.
+
+```bash
+hapi-claude-slot-ingest ultra
+# follow the printed steps:
+#   export CLAUDE_CONFIG_DIR=~/.hapi/claude-auth/ultra/capture-config
+#   claude /login          # browser → personal Ultra
+#   claude setup-token     # copy sk-ant-oat01-… into capture-config/claude-setup-token.env
+hapi-claude-slot-ingest ultra --from-dir ~/.hapi/claude-auth/ultra/capture-config
+hapi-claude-usage ultra
+hapi-claude-account-toggle ultra   # when you want the fleet on it
+```
+
+Never paste the token into chat. `setup-token` output goes only into the env file (mode 600).
 
 ## Does cutover stop agents mid-flow?
 
