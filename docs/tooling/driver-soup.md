@@ -795,3 +795,42 @@ Move an existing feature branch off primary into its own worktree before switchi
 hapi-worktree-create pluggable-voice --branch feat/pluggable-voice-backend
 cd ~/coding/hapi && git checkout main
 ```
+
+## Runner currency — from-source zones
+
+**An enabled systemd timer or unit is not proof a currency path is live.** Verify
+the `ExecStart` path exists on the active branch (`main`), or treat the
+mechanism as dead.
+
+That is not hypothetical. `hapi-stars-watch-poll.timer` was enabled and visible
+in `systemctl` for thirteen days while `ExecStart` pointed at
+`scripts/hapi/stars-watch-poll.sh` — a file that has never existed on
+`main`. It lives only on the unmerged branch `feat/github-stars-watcher`
+([server-setup#171](https://github.com/heavygee/server-setup/pull/171)). The
+units were installed while that branch was checked out, the branch never
+landed, and the timer ENOENT'd every 20 minutes from then on. Green `systemctl`
+chrome read as "mechanism is live"; nothing contradicted it unless you read the
+logs.
+
+Consequence: `hapi-runner-stars.service` sat on its 2026-11-03 boot at CLI
+0.31.6 while the soup tree moved to 0.35.0, and surfaced to the operator only
+as a skew banner with both actions greyed out.
+
+**How currency actually works for these runners.** A from-source zone runner
+(`WorkingDirectory=.../driver/cli`, `ExecStart` naming `src/index.ts`) has no
+artifact to swap — its version is whatever the tree held at process start, so
+its only upgrade is a **service re-exec**:
+
+- They stay on `HAPI_DISABLE_VERSION_HANDOFF=1` deliberately. Hub Upgrade would
+  install bytes systemd never runs. This is policy, not an oversight, and is
+  **not** a reason to suppress their skew from the banner.
+- Currency comes from re-exec: a dedicated poll (once #171 lands) or the
+  freshness sweep in `hapi-runner-watchdog.sh`, which restarts any from-source
+  runner whose start time predates the newest `hub/ cli/ shared/` commit.
+- A runner that also sets `HAPI_RUNNER_SUPERVISED=1` additionally unlocks the
+  banner's Restart button; without it the hub refuses, because
+  `versionHandoffDisabled` alone is not proof a supervisor will relaunch.
+
+`hapi-stars-watch-poll.timer` is **disabled as of 2026-11-16** — ops hygiene
+only. PR #171 stays open; landing or closing it is an operator call. Re-enable
+the timer once #171 is on `main` and the script path exists.
