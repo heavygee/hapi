@@ -122,13 +122,34 @@ hapi_watchdog_check_freshness() {
     [[ "$code_at" =~ ^[0-9]+$ ]] || return 0
 
     source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/hapi-systemd-units.sh" 2>/dev/null || return 0
-    unit="$(hapi_systemd_runner_unit 2>/dev/null)" || return 0
-    svc_at="$(date -d "$(systemctl show -p ActiveEnterTimestamp --value "$unit" 2>/dev/null)" +%s 2>/dev/null || true)"
-    [[ "$svc_at" =~ ^[0-9]+$ ]] || return 0
+    local primary; primary="$(hapi_systemd_runner_unit 2>/dev/null)" || return 0
 
-    (( code_at > svc_at )) || return 0
+    # EVERY runner unit on this host, not just the primary. The 2026-11-16
+    # banner was hapi-runner-stars.service — a sandboxed zone runner execing
+    # from the same soup tree, 13 days stale at CLI 0.31.6 while the tree was
+    # 0.35.0. It cannot self-heal: HAPI_DISABLE_VERSION_HANDOFF=1 blocks
+    # Upgrade, and it never sets HAPI_RUNNER_SUPERVISED=1 so the hub refuses
+    # Restart too. Its unit says it "runs straight from the live soup tree",
+    # so trailing the tree is a bug, not a pin. A sweep scoped to one unit
+    # could never clear that banner.
+    local units=() u
+    while read -r u; do [[ -n "$u" ]] && units+=("$u"); done < <(
+        systemctl list-units --type=service --state=active --no-legend 'hapi-runner-*.service' 2>/dev/null \
+            | awk '{print $1}' | grep -v 'watchdog' || true
+    )
+    [[ ${#units[@]} -gt 0 ]] || units=("$primary")
 
-    log "FRESHNESS: $unit started $(( (code_at - svc_at) / 60 ))min before the newest hub/cli/shared commit — running stale code"
+    local stale=() 
+    for u in "${units[@]}"; do
+        svc_at="$(date -d "$(systemctl show -p ActiveEnterTimestamp --value "$u" 2>/dev/null)" +%s 2>/dev/null || true)"
+        [[ "$svc_at" =~ ^[0-9]+$ ]] || continue
+        if (( code_at > svc_at )); then
+            stale+=("$u")
+            log "FRESHNESS: $u started $(( (code_at - svc_at) / 60 ))min before the newest hub/cli/shared commit — running stale code"
+        fi
+    done
+    [[ ${#stale[@]} -gt 0 ]] || return 0
+    unit="${stale[0]}"
 
     if [[ -n "$(~/.local/bin/hapi-remat-hold status 2>/dev/null | grep -i 'ACTIVE' || true)" ]]; then
         log "FRESHNESS: remat hold active — deferring (promote in flight)"; return 0
@@ -146,18 +167,78 @@ hapi_watchdog_check_freshness() {
     fi
 
     if [[ "${HAPI_WATCHDOG_DRY_RUN:-}" == "1" ]]; then
-        log "FRESHNESS: DRY_RUN — would run hapi-restart-hub (patient)"; return 0
+        # Name the ACTUAL action per unit — the primary gets a patient
+        # hapi-restart-hub, a zone runner gets a plain systemctl restart. A
+        # dry run that misreports which of those it would do is worse than no
+        # dry run, because it is read as reassurance.
+        local u
+        for u in "${stale[@]}"; do
+            if [[ "$u" == "$primary" ]]; then
+                log "FRESHNESS: DRY_RUN — would run hapi-restart-hub (patient; hub+$u)"
+            elif hapi_watchdog_zone_busy "$u"; then
+                log "FRESHNESS: DRY_RUN — $u stale but has live sessions; would defer"
+            else
+                log "FRESHNESS: DRY_RUN — would 'systemctl restart $u' (zone runner)"
+            fi
+        done
+        return 0
     fi
 
     # Patient restart: drains WORKING agents, restarts hub AND runner together,
     # and finishes any deferred web/dist swap. Never a bare systemctl here.
     touch "$marker" 2>/dev/null || true
-    if ~/.local/bin/hapi-restart-hub >/dev/null 2>&1; then
-        log "FRESHNESS: hapi-restart-hub OK — services now on current source"
-    else
-        log "FRESHNESS: ERROR hapi-restart-hub failed (rc=$?) — will retry after cooldown"
-    fi
+    local u
+    for u in "${stale[@]}"; do
+        if [[ "$u" == "$primary" ]]; then
+            # Patient: drains WORKING agents and moves hub+runner together.
+            if ~/.local/bin/hapi-restart-hub >/dev/null 2>&1; then
+                log "FRESHNESS: hapi-restart-hub OK — $u now on current source"
+            else
+                log "FRESHNESS: ERROR hapi-restart-hub failed — will retry after cooldown"
+            fi
+            continue
+        fi
+        # Zone runner: hapi-restart-hub does not know about it. Skip while it
+        # has live sessions rather than interrupt another zone's work.
+        if hapi_watchdog_zone_busy "$u"; then
+            log "FRESHNESS: $u has live sessions — deferring"
+            continue
+        fi
+        if systemctl restart "$u" 2>/dev/null || sudo -n systemctl restart "$u" 2>/dev/null; then
+            log "FRESHNESS: restarted $u — now on current source"
+        else
+            log "FRESHNESS: ERROR could not restart $u (permission?)"
+        fi
+    done
 }
+
+# True if the zone served by this unit has live sessions.
+#
+# Scoped to the unit's OWN machine, not the whole hub: an early version counted
+# every active session, so a busy primary zone would have blocked the stars
+# restart forever and it would never have self-healed. The unit's HOME maps to
+# a machine via metadata.homeDir — the zone's own settings.json is unreadable
+# from here (separate sandboxed user), but the hub already knows the mapping.
+#
+# Conservative: anything unresolved returns busy, so a lookup failure defers a
+# restart rather than licensing one.
+hapi_watchdog_zone_busy() {
+    local unit="$1" home mid n
+    home="$(systemctl show -p Environment --value "$unit" 2>/dev/null | tr ' ' '\n' \
+            | grep -m1 '^HOME=' | cut -d= -f2-)"
+    [[ -n "$home" ]] || return 0
+
+    mid="$(sqlite3 "file:/var/lib/hapi/hapi.db?mode=ro" \
+        "select id from machines where json_extract(metadata,'\$.homeDir')='$home' and active=1 limit 1;" \
+        2>/dev/null || echo "")"
+    [[ -n "$mid" ]] || return 0
+
+    n="$(sqlite3 "file:/var/lib/hapi/hapi.db?mode=ro" \
+        "select count(*) from sessions where active=1 and machine_id='$mid';" 2>/dev/null || echo "")"
+    [[ "$n" =~ ^[0-9]+$ ]] || return 0
+    (( n > 0 ))
+}
+
 
 # Look up THIS machine. Hub returns either a top-level array (older) or
 # { "machines": [ ... ] } (current). runnerState.status is the live field.
