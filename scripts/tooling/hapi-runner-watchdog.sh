@@ -132,12 +132,25 @@ hapi_watchdog_check_freshness() {
     # Restart too. Its unit says it "runs straight from the live soup tree",
     # so trailing the tree is a bug, not a pin. A sweep scoped to one unit
     # could never clear that banner.
-    local units=() u
-    while read -r u; do [[ -n "$u" ]] && units+=("$u"); done < <(
+    # Only FROM-SOURCE runners. Governance call 2026-11-16: globbing every
+    # hapi-runner-* is the wrong generalisation — a fleet-binary runner does not
+    # exec from the driver tree, so comparing it against driver commits is
+    # meaningless and re-execing it changes nothing. Detect rather than hardcode
+    # a list, so a new soup zone is covered the day it appears: the unit must
+    # run `src/index.ts` out of a WorkingDirectory inside a driver tree.
+    local units=() u wd exec_line
+    while read -r u; do
+        [[ -n "$u" ]] || continue
+        wd="$(systemctl show -p WorkingDirectory --value "$u" 2>/dev/null)"
+        exec_line="$(systemctl show -p ExecStart --value "$u" 2>/dev/null)"
+        [[ "$wd" == */driver/cli ]] || continue
+        [[ "$exec_line" == *src/index.ts* ]] || continue
+        units+=("$u")
+    done < <(
         systemctl list-units --type=service --state=active --no-legend 'hapi-runner-*.service' 2>/dev/null \
             | awk '{print $1}' | grep -v 'watchdog' || true
     )
-    [[ ${#units[@]} -gt 0 ]] || units=("$primary")
+    [[ ${#units[@]} -gt 0 ]] || return 0
 
     local stale=() 
     for u in "${units[@]}"; do
