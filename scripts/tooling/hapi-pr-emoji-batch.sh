@@ -350,7 +350,19 @@ classify_one() {
     #
     # Fail-closed: only an explicit "merges clean" (exit 0) clears the flag.
     # A real conflict (1) or an undeterminable result (2) keeps it set.
-    if [[ "$merge_state" == "dirty" || "$merge_state" == "behind" ]]; then
+    # `unknown` must be treated as suspect, not as fine. GitHub returns it while
+    # recomputing mergeability — which is exactly what happens right after main
+    # moves, i.e. the moment a PR is most likely to have just gone dirty. Letting
+    # it fall through made this classifier NON-DETERMINISTIC on an unchanging PR:
+    # #945 sat continuously CONFLICTING and the hourly sweep alternated
+    #   2026-11-16 23:07  ⚠️  #945 — same blocker
+    #   2026-11-17 00:07  ✅  #945 — "full green - self-merge eligible"
+    # one hour apart, with GitHub's cached mergeable_state the only varying input.
+    # The ✅ branch then overlays merge-lane text, so an unmergeable PR was
+    # announced as eligible to merge. The fail-closed handling below was already
+    # correct — it was simply unreachable for the undeterminable case.
+    if [[ "$merge_state" == "dirty" || "$merge_state" == "behind" \
+       || "$merge_state" == "unknown" || -z "$merge_state" ]]; then
         merge_bad=1
         local _verdict="$SCRIPT_DIR/hapi-pr-merge-verdict.sh"
         if [[ -x "$_verdict" ]] \
