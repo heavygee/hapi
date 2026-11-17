@@ -834,3 +834,42 @@ its only upgrade is a **service re-exec**:
 `hapi-stars-watch-poll.timer` is **disabled as of 2026-11-16** — ops hygiene
 only. PR #171 stays open; landing or closing it is an operator call. Re-enable
 the timer once #171 is on `main` and the script path exists.
+
+### Binary-only pets cannot show release notes (instrument contract gap)
+
+`offer.releaseNotes` has exactly one source: `soupTipToUpgradeOffer()`, reached
+only when `readPublishedSoupTip()` finds a materialised tip under
+`soup-artifacts/<tag>/`. No other offer path sets it — not npm, not a bare
+`hub-artifact` offer. **A hub with no local tip tree cannot display notes no
+matter what is published**, and the banner then renders
+`runner.skew.banner.whatsNewEmpty`: *"No release notes published for this tip
+yet."*
+
+That message is misleading in exactly the case it fires. It reads as a
+publishing failure and points at the foundry and GitHub; the actual condition
+is "this hub has nowhere local to read notes from". On 2026-11-12..17 that
+wording sent several days of investigation to the publishing side — notes were
+correct in the `hapi-fleet` manifest the whole time — while the real gap sat on
+the consuming host.
+
+**Who this hits.** Externally-managed *instrument* hosts — any host where a
+config-management layer owns which build is installed. They install the sealed
+`hapi-fleet` **binary** with `HAPI_UPGRADE_CHANNEL=off` and no
+`HAPI_UPSTREAM_SEAL_URL`. Their updater swaps the `hapi` binary on `PATH` and
+never materialises `soup-artifacts/<tip>/`. They are fleet members by binary,
+not by seal subscription, so the overlay that carries notes never applies.
+Shipping a corrected consumer binary does not help them — there is still no tip
+tree to read.
+
+**Therefore:** sealing again can never fix such a host's banner. Either the
+consuming host gains tip metadata (its installer stages the manifest alongside
+the binary), or the offer path stops depending on `soup-artifacts` for hosts
+whose channel is `off` — e.g. the tag and notes embedded in the binary at build
+time, as `hub/src/web/embeddedAssets.generated.ts` already does for web assets.
+
+Tracked as **heavygee/hapi#335**; site-neutral triage steps in
+[`fleet-release-notes-missing.md`](./fleet-release-notes-missing.md).
+
+This side owns: correct notes in the published manifest, and any product change
+to the offer path. The deploying side owns: on-box verification and its own
+install role.
