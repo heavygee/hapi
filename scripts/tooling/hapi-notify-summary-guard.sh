@@ -21,6 +21,14 @@
 #
 # Loop-capped like the sibling dirt guard: nag at most 3 times, then let the
 # turn end rather than trap it.
+#
+# CAVEAT, learned the hard way within an hour of writing this: hooks are read
+# from .claude/settings.json at SESSION START. This guard cannot protect the
+# session that installs it. The same session emitted a fifth malformed line
+# immediately after committing the guard, and the guard was not consulted —
+# replaying it against that transcript at the exact Stop point blocks correctly.
+# If you add or change a Stop hook and want it live now, restart the session;
+# otherwise assume zero coverage until then.
 set -euo pipefail
 
 INPUT="$(cat || true)"
