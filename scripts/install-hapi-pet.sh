@@ -1067,6 +1067,24 @@ export HAPI_HOME
 hapi_pet_seed_fleet_upgrade_policy
 
 # --- 7. Launch ---
+# Layer A subscription is what makes a host an actual fleet MEMBER: without
+# HAPI_UPSTREAM_SEAL_URL the hub never polls the moving hapi-fleet channel,
+# never materialises soup-artifacts/<tag>/, and therefore never auto-updates
+# and can never display release notes — offer.releaseNotes comes only from a
+# locally materialised tip.
+#
+# Until 2026-11-17 the default URL was resolved INSIDE the systemd-only
+# drop-in helper, so the plain documented one-liner (no --with-systemd) left it
+# empty, the nohup branch's `-n` check failed, and the installed hub silently
+# came up unsubscribed. It worked, registered, ran sessions — and showed
+# "No release notes published for this tip yet" forever, which reads as a
+# publishing fault rather than a missing subscription. Resolve it here so BOTH
+# paths join the channel.
+if [[ "${HAPI_SKIP_UPSTREAM_SEAL}" != "1" && -z "${HAPI_UPSTREAM_SEAL_URL}" ]]; then
+    HAPI_UPSTREAM_SEAL_URL="$(hapi_pet_default_seal_manifest_url)"
+    log "Layer A channel: ${HAPI_UPSTREAM_SEAL_URL}"
+fi
+
 # With --with-systemd: systemd owns hub+runner (skip nohup so we do not race :3006).
 # Without: nohup background processes (local-only; --relay still broken as of 2026-09-13).
 if [[ "$WITH_SYSTEMD" -eq 1 ]]; then
