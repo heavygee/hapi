@@ -28,6 +28,10 @@
           {
             "type": "command",
             "command": "./scripts/tooling/hapi-tooling-commit-guard.sh stop"
+          },
+          {
+            "type": "command",
+            "command": "./scripts/tooling/hapi-notify-summary-guard.sh"
           }
         ]
       }
