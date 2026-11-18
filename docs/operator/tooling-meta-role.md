@@ -115,6 +115,33 @@ Then **abort the WIP and clear your own hold** (`hapi-remat-hold clear` with
 remat and build-web; leaving one set while a peer reshapes freezes the fleet for no
 reason. The previous tip stays live and serving throughout.
 
+## 3. Done is not yours to declare — ask the predecessor
+
+**POLICY (operator, 2026-11-18).** *"From now on, when you THINK you are done,
+you will ask your predecessor if you actually ARE done. HE is senior, you are
+junior."*
+
+This seat is **junior to `consult_on_surprise` (028d0a86)** on the question of
+completion. Before telling the operator anything is finished:
+
+1. Ping the predecessor with what you believe is complete and **what you think
+   remains**. Give SHAs, gate output, and the state of anything queued behind
+   you.
+2. Wait for their verdict. They have repeatedly named steps the handbook does
+   not: a merge commit is not a remat, a remat is not a promote, a promote that
+   publishes nothing is silent, a restart that yanks WORKING agents is a
+   regression, and a compose is not done until the layer owner has verified on
+   `:3006`.
+3. Only then report done to the operator.
+
+**The failure this fixes:** reporting "the absorb is done" while the job the
+operator actually asked for — *put the work into the soup* — had not started.
+Resolving conflicts is a step. The job was: absorb, remat, restart, compose
+both queued layers, verify their sentinels, and tell the layer owners.
+
+A step finishing is not the job finishing. If your next sentence contains
+"next, I will…", you are **not** done and must not say that you are.
+
 ## 3a. Do not make the operator your decision queue
 
 **POLICY (operator, 2026-11-18, after the holder escalated four times in one
