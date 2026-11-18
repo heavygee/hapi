@@ -305,3 +305,37 @@ here would silently delete fork PR-chip statuses — the exact scar §3b records
 ### Hot files still ahead (union rules, §3b)
 SessionList.tsx 32 · sessionCache.ts 22 · syncEngine.ts 16 ·
 startHappyServer.ts 16 · NewSession/index.tsx 15 · SessionChat.tsx 13
+
+## Deferred debt (deliberate, not forgotten)
+
+**`cli/src/claude/utils/startHappyServer.ts` — took the fork side whole.**
+Upstream refactored tool registration into a gated `registerTool()` helper and
+moved descriptions into `*_TOOL_DESCRIPTION` constants. Good change. But the
+fork registers **16** tools to upstream's 11, and the fork set is a strict
+superset: `archive_peer`, `display_links`, `link_issue`, `search_peers` and
+`set_voice_mode` exist only on the fork. Adopting upstream's structure in this
+pass meant re-porting five registrations by hand into a new helper, in the one
+file whose mis-registration served ZERO tools to every new session earlier today
+(duplicate `session_job`). Verified the fork side still gates via
+`includeTool()` — no blind registration — and that all 16 names are present.
+
+Re-port onto upstream's `registerTool()` shape as its own layer when the kitchen
+is calm. Doing it mid-731-hunk-absorb is how you lose a tool silently.
+
+## Passes that moved the needle (731 -> 396)
+
+| pass | basis | result |
+|---|---|---|
+| delete-vs-modify | upstream dead-code removal (`175b768ff`) vs soup layer refactors | 56 files |
+| retired-layer AA | manifest DROP + identifier gate; **unioned, not `--theirs`** | 15 files |
+| additive hunks | diff3 base empty = both sides added | 34 files |
+| import hunks | union specifier sets, respect fork deletions | 38 hunks |
+| android | component-survival check, then soup-tip consistency | 14 files |
+| locales | key-union, upstream first, fork wins on clash | 2 files |
+
+## Passes tested and REFUTED (do not retry)
+- Droppable ancestor layers: 0 by ancestry, 0 by content. Squash-merge does not
+  hide any here, and per the predecessor it would not shrink this MERGE_HEAD
+  anyway — tip-forward merges into a tip that already contains the layers.
+- One-sided hunks (`base == theirs` or `base == ours`): 0.
+- Strict-superset hunks: 0.
