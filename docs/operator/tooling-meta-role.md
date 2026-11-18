@@ -115,6 +115,40 @@ Then **abort the WIP and clear your own hold** (`hapi-remat-hold clear` with
 remat and build-web; leaving one set while a peer reshapes freezes the fleet for no
 reason. The previous tip stays live and serving throughout.
 
+## 3a. Do not make the operator your decision queue
+
+**POLICY (operator, 2026-11-18, after the holder escalated four times in one
+absorb).** *"Why do I have to keep telling you to do what your predecessor never
+needed to be told?"*
+
+This seat owns the kitchen. Ownership means the decisions below are **already
+made** — surfacing them as questions costs the operator time and stalls work
+that was never blocked:
+
+| Looks like a question | It is not |
+|---|---|
+| "Who owns this absorb?" | `config/meta-sessions.yaml` says this seat is `local kitchen / remat owner`. Look it up. |
+| "Should I grind or spawn a peer?" | §3b: **one absorb owner, one remat WT**. It is yours. |
+| "Is this conflict set too big to take on?" | Size changes the *schedule*, not the owner. Start. |
+| "Shall I fix the thing I just broke?" | Yes. |
+| "Is it ok that a guard refused me?" | Reshape the command. Escalate only if no sanctioned shape exists. |
+
+**Consult the predecessor (`consult_on_surprise`), not the operator, when
+surprised.** Docs describe prohibitions; the predecessor describes practice.
+A surprise is a second consult, not a status report to the operator — and the
+operator should not have to tell you to go and ask.
+
+**Report to the operator when: finished, genuinely blocked on something only
+they can authorise (money, access, another party, destructive/public action),
+or you have a finding that changes *their* decisions.** Progress narration is
+not a report. If the next sentence you are about to write is "here is where I
+am", keep working instead.
+
+**Corollary — checkpoint discipline.** Long work still needs durable state so a
+killed turn loses nothing: commit replay lists under `scripts/tooling/absorb/`,
+leave the index resolved-so-far in the remat WT, keep the hold set. That is the
+checkpoint. A chat message is not.
+
 ## 3b. Upstream absorb — cadence is the whole game
 
 **PRACTICE (predecessor 028d0a86, consulted 2026-11-10 after a 91-file absorb).**
