@@ -1,16 +1,24 @@
 import { Hono } from 'hono'
+import { compress } from 'hono/compress'
 import { z } from 'zod'
 import {
     CreateOrLoadMachineRequestSchema,
     CreateOrLoadSessionRequestSchema,
     ClearOpencodeSessionCallbackRequestSchema,
     CursorMigrateToAcpRequestSchema,
-    PROTOCOL_VERSION
+    PROTOCOL_VERSION,
+    SetExternalRefsRequestSchema,
+    UpsertExternalRefRequestSchema,
+    upsertGithubPrIntoExternalRefs
 } from '@hapi/protocol'
 import { getConfiguration } from '../../configuration'
+import { readAutoBridgeTransientModelErrorsEnabled } from '../../config/autoBridgeTransientModelErrors'
 import { readSessionSummaryContractEnabled } from '../../config/sessionSummaryContract'
+import { stripExternalRefsWhenAwarenessDisabled, externalRefsInMetadataValid } from '../../sync/externalRefsPolicy'
+import { mapExternalRefRouteError } from '../../sync/externalRefErrors'
 import { constantTimeEquals } from '../../utils/crypto'
 import { parseAccessToken } from '../../utils/accessToken'
+import { acceptsGzip } from '../sseCompression'
 import type { Machine, Session, SyncEngine } from '../../sync/syncEngine'
 import { SessionIdentityConflictError, SessionNotAdoptableError } from '../../store/sessions'
 
@@ -93,6 +101,21 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
         return await next()
     })
 
+    const gzipCompress = compress({ encoding: 'gzip' })
+    app.use('*', async (c, next) => {
+        if (acceptsGzip(c.req.header('Accept-Encoding'))) {
+            await gzipCompress(c, next)
+        } else {
+            await next()
+        }
+        const vary = c.res.headers.get('Vary')
+        if (!vary) {
+            c.res.headers.set('Vary', 'Accept-Encoding')
+        } else if (!vary.split(',').some((token) => token.trim().toLowerCase() === 'accept-encoding')) {
+            c.res.headers.set('Vary', `${vary}, Accept-Encoding`)
+        }
+    })
+
     app.post('/sessions', async (c) => {
         const engine = getSyncEngine()
         if (!engine) {
@@ -120,11 +143,18 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
         }
 
         try {
+            const metadata = stripExternalRefsWhenAwarenessDisabled(
+                parsed.data.metadata,
+                getConfiguration().githubPrAwareness
+            )
+            if (!externalRefsInMetadataValid(metadata)) {
+                return c.json({ error: 'Invalid metadata.externalRefs' }, 400)
+            }
             const session = parsed.data.adopt === true && parsed.data.id
                 ? engine.adoptPreallocatedSession(
                     parsed.data.id,
                     parsed.data.tag,
-                    parsed.data.metadata,
+                    metadata,
                     parsed.data.agentState ?? null,
                     namespace,
                     parsed.data.model,
@@ -133,7 +163,7 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
                 )
                 : engine.getOrCreateSession(
                     parsed.data.tag,
-                    parsed.data.metadata,
+                    metadata,
                     parsed.data.agentState ?? null,
                     namespace,
                     parsed.data.model,
@@ -141,10 +171,13 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
                     parsed.data.modelReasoningEffort,
                     parsed.data.id
                 )
-            const sessionSummaryContract = await readSessionSummaryContractEnabled(
-                getConfiguration().dataDir
-            )
-            return c.json({ session, sessionSummaryContract })
+            const dataDir = getConfiguration().dataDir
+            const sessionSummaryContract = await readSessionSummaryContractEnabled(dataDir)
+            // Owner-only hub setting — never enable auto-bridge for tenant namespaces.
+            const autoBridgeTransientModelErrors = namespace === 'default'
+                ? await readAutoBridgeTransientModelErrorsEnabled(dataDir)
+                : false
+            return c.json({ session, sessionSummaryContract, autoBridgeTransientModelErrors })
         } catch (error) {
             if (error instanceof SessionIdentityConflictError) {
                 return c.json({ error: error.message }, 409)
@@ -209,7 +242,7 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
         return c.json({ target: result.target })
     })
 
-    app.post('/sessions/:id/prepare-local-resume', async (c) => {
+app.post('/sessions/:id/prepare-local-resume', async (c) => {
         const engine = getSyncEngine()
         if (!engine) {
             return c.json({ error: 'Not ready' }, 503)
@@ -229,6 +262,40 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
             return c.json({ error: result.message, code: result.code }, status)
         }
         return c.json({ ok: true, revived: result.revived })
+    })
+
+    app.post('/sessions/:id/opencode-rewind', async (c) => {
+        const engine = getSyncEngine()
+        if (!engine) return c.json({ error: 'Not ready' }, 503)
+        const { OpenCodeRewindReportSchema } = await import('@hapi/protocol/apiTypes')
+        const parsed = z.object({ report: OpenCodeRewindReportSchema, expectedVersion: z.number().int().nonnegative() }).safeParse(await c.req.json().catch(() => null))
+        if (!parsed.success) return c.json({ error: 'Invalid rewind report' }, 400)
+        try {
+            const operation = engine.reportOpenCodeRewind(c.req.param('id'), c.get('namespace'), parsed.data.report, parsed.data.expectedVersion)
+            return c.json({ operation })
+        } catch (error) {
+            return c.json({ error: error instanceof Error ? error.message : String(error) }, 409)
+        }
+    })
+
+    app.post('/sessions/:id/prepare-stop', async (c) => {
+        const engine = getSyncEngine()
+        if (!engine) return c.json({ error: 'Not ready' }, 503)
+        const access = resolveSessionForNamespace(engine, c.req.param('id'), c.get('namespace'))
+        if (!access.ok) return c.json({ error: access.error }, access.status)
+        const body = z.object({ machineId: z.string().min(1), pid: z.number().int().positive(),
+            processStartMarker: z.string().min(1), preparationLease: z.object({ id: z.string().min(1),
+                expiresAt: z.number().int().positive() }) }).safeParse(await c.req.json().catch(() => null))
+        if (!body.success) return c.json({ error: 'Invalid body' }, 400)
+        if (access.session.metadata?.machineId !== body.data.machineId) {
+            return c.json({ error: 'Session machine does not match runner' }, 403)
+        }
+        try {
+            const status = await engine.prepareOpenCodeSessionStop(access.sessionId, body.data.pid, body.data.processStartMarker, body.data.preparationLease, body.data.machineId)
+            return c.json({ status, ...(status === 'ready' ? { preparationLease: body.data.preparationLease } : {}) })
+        } catch {
+            return c.json({ error: 'Session shutdown preparation was not confirmed' }, 503)
+        }
     })
 
     app.post('/sessions/:id/handoff-local', async (c) => {
@@ -309,10 +376,16 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
         if (!resolved.ok) {
             return c.json({ error: resolved.error }, resolved.status)
         }
-        const sessionSummaryContract = await readSessionSummaryContractEnabled(
-            getConfiguration().dataDir
-        )
-        return c.json({ session: resolved.session, sessionSummaryContract })
+        const dataDir = getConfiguration().dataDir
+        const sessionSummaryContract = await readSessionSummaryContractEnabled(dataDir)
+        const autoBridgeTransientModelErrors = namespace === 'default'
+            ? await readAutoBridgeTransientModelErrorsEnabled(dataDir)
+            : false
+        return c.json({
+            session: resolved.session,
+            sessionSummaryContract,
+            autoBridgeTransientModelErrors
+        })
     })
 
     app.get('/sessions/:id/messages', (c) => {
@@ -343,6 +416,151 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
             now: Date.now()
         })
         return c.json({ messages })
+    })
+
+    app.get('/features', (c) => {
+        const configuration = getConfiguration()
+        return c.json({
+            githubPrAwareness: {
+                enabled: configuration.githubPrAwareness,
+                source: configuration.sources.githubPrAwareness
+            }
+        })
+    })
+
+    app.get('/sessions/:id/external-refs', async (c) => {
+        const configuration = getConfiguration()
+        if (!configuration.githubPrAwareness) {
+            return c.json({
+                error: 'GitHub PR awareness is disabled',
+                code: 'github_pr_awareness_disabled'
+            }, 403)
+        }
+
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ error: 'Not ready' }, 503)
+        }
+
+        const sessionId = c.req.param('id')
+        const namespace = c.get('namespace')
+        const resolved = resolveSessionForNamespace(engine, sessionId, namespace)
+        if (!resolved.ok) {
+            return c.json({ error: resolved.error }, resolved.status)
+        }
+
+        const externalRefs = resolved.session.metadata?.externalRefs ?? []
+        return c.json({ externalRefs })
+    })
+
+    app.put('/sessions/:id/external-refs', async (c) => {
+        const configuration = getConfiguration()
+        if (!configuration.githubPrAwareness) {
+            return c.json({
+                error: 'GitHub PR awareness is disabled',
+                code: 'github_pr_awareness_disabled'
+            }, 403)
+        }
+
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ error: 'Not ready' }, 503)
+        }
+
+        const sessionId = c.req.param('id')
+        const namespace = c.get('namespace')
+        const resolved = resolveSessionForNamespace(engine, sessionId, namespace)
+        if (!resolved.ok) {
+            return c.json({ error: resolved.error }, resolved.status)
+        }
+
+        const body = await c.req.json().catch(() => null)
+        const parsed = SetExternalRefsRequestSchema.safeParse(body)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body: externalRefs is required' }, 400)
+        }
+
+        try {
+            await engine.setSessionExternalRefs(resolved.sessionId, parsed.data.externalRefs)
+            return c.json({ ok: true, externalRefs: parsed.data.externalRefs })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to update external refs'
+            if (message.includes('concurrently') || message.includes('version')) {
+                return c.json({ error: message }, 409)
+            }
+            return c.json({ error: message }, 500)
+        }
+    })
+
+    app.post('/sessions/:id/external-refs/upsert', async (c) => {
+        const configuration = getConfiguration()
+        if (!configuration.githubPrAwareness) {
+            return c.json({
+                error: 'GitHub PR awareness is disabled',
+                code: 'github_pr_awareness_disabled'
+            }, 403)
+        }
+
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ error: 'Not ready' }, 503)
+        }
+
+        const sessionId = c.req.param('id')
+        const namespace = c.get('namespace')
+        const resolved = resolveSessionForNamespace(engine, sessionId, namespace)
+        if (!resolved.ok) {
+            return c.json({ error: resolved.error }, resolved.status)
+        }
+
+        const body = await c.req.json().catch(() => null)
+        const parsed = UpsertExternalRefRequestSchema.safeParse(body)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body: ref is required' }, 400)
+        }
+
+        const ref = parsed.data.ref
+        try {
+            const externalRefs = await engine.mutateSessionExternalRefs(resolved.sessionId, (current) =>
+                upsertGithubPrIntoExternalRefs(current, ref)
+            )
+            return c.json({ ok: true, externalRefs })
+        } catch (error) {
+            const mapped = mapExternalRefRouteError(error, 'Failed to upsert external ref')
+            return c.json({ error: mapped.message }, mapped.status)
+        }
+    })
+
+    app.post('/sessions/:id/external-refs/remove-primary', async (c) => {
+        const configuration = getConfiguration()
+        if (!configuration.githubPrAwareness) {
+            return c.json({
+                error: 'GitHub PR awareness is disabled',
+                code: 'github_pr_awareness_disabled'
+            }, 403)
+        }
+
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ error: 'Not ready' }, 503)
+        }
+
+        const sessionId = c.req.param('id')
+        const namespace = c.get('namespace')
+        const resolved = resolveSessionForNamespace(engine, sessionId, namespace)
+        if (!resolved.ok) {
+            return c.json({ error: resolved.error }, resolved.status)
+        }
+
+        try {
+            const externalRefs = await engine.mutateSessionExternalRefs(resolved.sessionId, (current) =>
+                current.filter((candidate) => candidate.kind !== 'github_pr' || candidate.role !== 'primary')
+            )
+            return c.json({ ok: true, externalRefs })
+        } catch (error) {
+            const mapped = mapExternalRefRouteError(error, 'Failed to remove primary external ref')
+            return c.json({ error: mapped.message }, mapped.status)
+        }
     })
 
     app.post('/sessions/:id/migrate-to-acp', async (c) => {

@@ -29,6 +29,8 @@ Choose a supported coding agent from your terminal and control its sessions remo
 - `hapi claude` - Start a Claude Code session (passes through Claude CLI flags).
 - `hapi codex` - Start Codex mode. See `src/codex/runCodex.ts`.
 - `hapi codex resume <native-thread-id>` - Resume a Codex conversation by its native thread ID. For a HAPI session ID, use `hapi resume <id>`.
+- `hapi attach <native-thread-id> --socket /absolute/private/engine.sock` - Experimental macOS foreground bridge to an already-loaded external Codex thread. Independent of owned `hapi codex`; no server launch, native config injection or automatic Runner discovery. `--list` lists eligible loaded threads; `--new-view` explicitly replaces a history-rewrite-frozen projection.
+- `hapi detach <hapi-session-id>` - Disconnect an attached worker only; leave the external server, turn and native queue intact. See [external bridge limits and acceptance status](../docs/guide/codex-shared-sessions.md#experimental-external-desktop-bridge-macos).
 - `hapi cursor` - Start Cursor Agent mode. See `src/cursor/runCursor.ts`.
   Supports `hapi cursor resume <chatId>`, `hapi cursor --continue`, `--mode plan|ask`, `--yolo`, `--model`.
   Local and remote modes supported; new remote sessions use `agent acp`. Pre-ACP sessions retain the legacy `agent -p` stream-json resume path.
@@ -43,7 +45,7 @@ Choose a supported coding agent from your terminal and control its sessions remo
   DSH is remote-only and its ACP server must be configured separately.
 - `hapi resume [sessionId]` - List resumable sessions for this machine or resume one locally.
 - `hapi ping-peer <session-id-prefix> <message>` - Message another session. Inactive targets are refused (exit 5) unless `--wake` resumes them first. Prefer this or MCP `ping_peer` / `list_peers` over reinventing JWT+curl. Also `--message-file` / `--list [--all]` (active sessions with machine and cwd; `--all` includes inactive).
-- `hapi spawn-peer --dir PATH --name TITLE --message-file -` - Spawn a session and deliver a required first message. Optional `--machine ID|hostname` targets another runner (resolved via GET /api/machines); `--dir` must exist on the target. Machine spawn HTTP 200 is not a working peer; this command fails if the remit does not land. Prefer MCP `spawn_peer`.
+- `hapi spawn-peer --dir PATH --name TITLE --message-file -` - Spawn a session and deliver a required first message. Optional `--machine ID|hostname` targets another runner (resolved via GET /api/machines); `--dir` must exist on the target, and `--session-type worktree` requires it to be a git repository. Machine spawn HTTP 200 is not a working peer; this command fails if the remit does not land. Prefer MCP `spawn_peer`.
 - `hapi usage [--since 24h|7d|<ISO>|<ms>] [--until …] [--json]` - When agents were working across every machine on the hub, from `GET /api/activity`. `--json` prints one `hapi.activity.v1` report for other tools (time trackers); errors go to stderr with exit codes 2 (arguments), 3 (no token or refused), 4 (hub too old), 1 (other).
 - `hapi inspect-peer <session-id-or-prefix>` - Read-only peer metadata + recent message text (no resume). Prefer this or MCP `inspect_peer` when a user cites `[title](/sessions/<id>)` or Copy-reference `See session "…" (/sessions/<id>) for context`. `/sessions/<id>` is a hub path, not a local file. Optional `--limit`.
 - `hapi set-mode <session-id-or-prefix> <mode>` - Change the permission mode of an existing session, like the web permission picker. Active sessions switch immediately; inactive ones use it on next resume. An invalid mode prints the modes allowed for that agent.
@@ -436,15 +438,19 @@ From the repository root, `bun run release-all <version>` updates the CLI packag
 shared app version, iOS `MARKETING_VERSION` (app and notification extension, all
 configurations), and Android's default `versionName`, then commits, tags `v<version>`,
 and pushes. It requires a clean working tree on `main`. Use `--dry-run` to preview
-without changing files. Native build numbers (`CURRENT_PROJECT_VERSION` / `versionCode`)
-remain managed separately; Android's `-PhapiVersionName` override is preserved.
+without changing files. iOS `CURRENT_PROJECT_VERSION` remains managed separately; Android's
+`versionCode` is the git commit count, and its `-PhapiVersionName` override is preserved.
 
 The pushed tag triggers `.github/workflows/release.yml`, which builds all binaries,
 runs `bun run --cwd cli publish-npm`, and creates the GitHub Release. npm publishing
 uses [Trusted Publishing](https://docs.npmjs.com/trusted-publishers) (OIDC), so no npm
 token is involved; each `@twsxtd/hapi*` package must list `tiann/hapi` /
-`release.yml` as its trusted publisher on npmjs.com. Packages already on npm are
-skipped, so a failed release can be retried by re-running the workflow.
+`release.yml` as its trusted publisher on npmjs.com. The main npm package is
+published only once every platform version is visible in the public npm registry.
+The visibility check waits up to 30 minutes by default; set the repository Actions
+variable `NPM_PUBLISH_WAIT_TIMEOUT_SECONDS` to override it. If it times out, wait
+until the listed versions are visible and re-run the same workflow. Already
+published packages are skipped.
 
 `setup-bun` reads the build version from the root `package.json`'s `packageManager`.
 Keep local release builds on that version too. Bun 1.4.0 produces invalid

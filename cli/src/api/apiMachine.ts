@@ -42,10 +42,6 @@ import {
     type ListOpencodeModelsForCwdResponse
 } from '../modules/common/opencodeModels'
 import {
-    listLocalOpencodeSessionSummaries,
-    listLocalOpencodeSessionsWithMessagesByIds
-} from '../modules/common/opencodeSessions'
-import {
     listOpencodeModelVariants,
     type ListOpencodeModelVariantsResponse
 } from '../modules/common/opencodeModelVariants'
@@ -70,8 +66,19 @@ import {
 } from '../modules/common/kimiModels'
 import type { SpawnSessionOptions, SpawnSessionResult } from '../modules/common/rpcTypes'
 import { applyVersionedAck } from './versionedUpdate'
-import { archiveLocalCodexSession, listLocalCodexSessionSummaries, listLocalCodexSessionsWithMessagesByIds } from '../modules/common/codexSessions'
+import {
+    archiveLocalCodexSession,
+    listLocalCodexSessionSummaries,
+    listLocalCodexSessionsWithMessagesByIds
+} from '../modules/common/codexSessions'
 import { listLocalPiSessionSummaries, listLocalPiSessionsWithMessagesByIds } from '../modules/common/piSessions'
+import { listLocalOpencodeSessionSummaries, listLocalOpencodeSessionsWithMessagesByIds } from '../modules/common/opencodeSessions'
+import { registerLocalSessionHandlers } from '../modules/common/localSessions/rpcHandlers'
+import { registerLocalSessionSource } from '../modules/common/localSessions/registry'
+import { codexLocalSessionSource } from '../modules/common/localSessions/sources/codex'
+import { piLocalSessionSource } from '../modules/common/localSessions/sources/pi'
+import { opencodeLocalSessionSource } from '../modules/common/localSessions/sources/opencode'
+import { claudeLocalSessionSource } from '../modules/common/localSessions/sources/claude'
 import { buildSocketIoExtraHeaderOptions } from './hubExtraHeaders'
 import { collectMachineHealth } from '@/utils/machineHealth'
 import { inspectCursorChatStore } from '@/cursor/cursorChatStoreStatus'
@@ -80,6 +87,13 @@ import { homedir } from 'node:os'
 import type { ClaudeTranscriptStatus, CursorChatStoreStatus } from '@hapi/protocol/apiTypes'
 import { MachinePathPolicy } from './machinePathPolicy'
 import { getAgentAvailabilityResponse } from '@/agent/agentAvailability'
+import {
+    QueryUsageRequestSchema,
+    SaveUsageQuerySettingsRequestSchema,
+    TestUsageQueryRequestSchema,
+    UsageQueryAgentRequestSchema
+} from '@hapi/protocol/usageQuery'
+import { UsageQueryService } from '@/usageQuery/service'
 import { getAgentQuotasResponse } from '@/agent/agentQuotas'
 
 export { normalizeWindowsDriveRoot } from './machinePathPolicy'
@@ -179,6 +193,7 @@ export class ApiMachineClient {
     private failoverAfter = DEFAULT_FAILOVER_AFTER
     private primaryEntryRetryTimer: ReturnType<typeof setTimeout> | null = null
     private rpcHandlerManager: RpcHandlerManager
+    private readonly usageQueryService: UsageQueryService
 
     private readonly pathPolicy: MachinePathPolicy
 
@@ -194,6 +209,9 @@ export class ApiMachineClient {
         this.rpcHandlerManager = new RpcHandlerManager({
             scopePrefix: this.machine.id,
             logger: (msg, data) => logger.debug(msg, data)
+        })
+        this.usageQueryService = new UsageQueryService({
+            settingsFile: join(configuration.happyHomeDir, 'usage-query.json')
         })
 
         registerCommonHandlers(this.rpcHandlerManager, getInvokedCwd())
@@ -211,6 +229,38 @@ export class ApiMachineClient {
         this.rpcHandlerManager.registerHandler<unknown, AgentAvailabilityResponse>(
             RPC_METHODS.AgentAvailability,
             async () => getAgentAvailabilityResponse()
+        )
+
+        this.rpcHandlerManager.registerHandler(
+            RPC_METHODS.UsageQueryGetSettings,
+            async (params) => {
+                const parsed = UsageQueryAgentRequestSchema.parse(params)
+                return await this.usageQueryService.getSettings(parsed.agent)
+            }
+        )
+
+        this.rpcHandlerManager.registerHandler(
+            RPC_METHODS.UsageQuerySaveSettings,
+            async (params) => {
+                const parsed = SaveUsageQuerySettingsRequestSchema.parse(params)
+                return await this.usageQueryService.saveSettings(parsed.agent, parsed)
+            }
+        )
+
+        this.rpcHandlerManager.registerHandler(
+            RPC_METHODS.UsageQueryTest,
+            async (params) => {
+                const parsed = TestUsageQueryRequestSchema.parse(params)
+                return await this.usageQueryService.test(parsed.agent, parsed.template)
+            }
+        )
+
+        this.rpcHandlerManager.registerHandler(
+            RPC_METHODS.UsageQuery,
+            async (params) => {
+                const parsed = QueryUsageRequestSchema.parse(params)
+                return await this.usageQueryService.query(parsed.agent, parsed.force === true)
+            }
         )
 
         this.rpcHandlerManager.registerHandler<AgentQuotasRequest, AgentQuotasResponse>(
@@ -519,6 +569,16 @@ export class ApiMachineClient {
                 return { success: true, sessions }
             }
         )
+
+        for (const source of [codexLocalSessionSource, piLocalSessionSource, opencodeLocalSessionSource, claudeLocalSessionSource]) {
+            registerLocalSessionSource(source)
+        }
+        registerLocalSessionHandlers({
+            registerHandler: (method, handler) => this.rpcHandlerManager.registerHandler(method, handler),
+            resolveForCheck: (path) => this.pathPolicy.resolveForCheck(path),
+            isWithinSpawnRoots: (path) => this.pathPolicy.isWithinSpawnRoots(path),
+            isSessionWithinWorkspaceRoots: (session) => this.isLocalSessionWithinWorkspaceRoots(session)
+        })
     }
 
     private async isLocalSessionWithinWorkspaceRoots(session: { cwd?: string | null }): Promise<boolean> {
@@ -536,7 +596,7 @@ export class ApiMachineClient {
             return forkArchivedCodex(request, () => this.pathPolicy.allowsSpawn(request.directory))
         })
         this.rpcHandlerManager.registerHandler(RPC_METHODS.SpawnHappySession, async (params: any) => {
-            const { directory, sessionId, existingSessionId, reservedSessionId, resumeSessionId, machineId, approvedNewDirectoryCreation, agent, model, effort, modelReasoningEffort, yolo, permissionMode, serviceTier, collaborationMode, copilotAgentMode, token, sessionType, worktreeName, startingMode, forkSession } = params || {}
+            const { directory, sessionId, existingSessionId, reservedSessionId, resumeSessionId, machineId, approvedNewDirectoryCreation, agent, model, effort, modelReasoningEffort, yolo, permissionMode, serviceTier, collaborationMode, copilotAgentMode, token, sessionType, worktreeName, startingMode, forkSession, resumeSessionAt } = params || {}
 
             if (!directory) {
                 throw new Error('Directory is required')
@@ -575,6 +635,7 @@ export class ApiMachineClient {
                 worktreeName,
                 startingMode,
                 forkSession: forkSession === true,
+                resumeSessionAt: typeof resumeSessionAt === 'string' ? resumeSessionAt : undefined,
                 validateDirectory: async (path) => await this.pathPolicy.allowsSpawn(path),
             })
 

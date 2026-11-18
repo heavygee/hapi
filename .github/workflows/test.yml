@@ -4,13 +4,72 @@ on:
     push:
     pull_request:
 
-# heavygee/hapi: prefer oos-linux self-hosted (`hapi` label) so we do not burn
-# GitHub-hosted minutes. Upstream / other forks keep ubuntu-latest.
-# Runner: actions.runner.heavygee-hapi.oos-linux-hapi-ci.service
-# See docs/tooling/local-ci.md and server-setup runbook github-self-hosted-runners.md.
-
 jobs:
-    test:
+    browser:
+        runs-on: ${{ github.repository_owner == 'heavygee' && fromJSON('["self-hosted","Linux","X64","hapi"]') || 'ubuntu-latest' }}
+        steps:
+            - uses: actions/checkout@v4
+            - uses: oven-sh/setup-bun@v2
+            - run: bun install --frozen-lockfile
+            - run: bunx playwright install --with-deps chromium
+            - name: Shared Web/App Passkey browser regression
+              run: bun run test:passkey:browser
+            - name: Playwright regressions
+              run: >-
+                  bun run test:e2e --
+                  terminal-wrap-fidelity.spec.ts
+                  session-list-fork-menu.spec.ts
+                  composer-copy.spec.ts
+                  session-list-scroll.spec.ts
+                  session-activity.spec.ts
+                  cold-initial-tail.spec.ts
+                  scrollbar-auto-hide.spec.ts
+                  attachment-removal.spec.ts
+                  history-navigation-layout.spec.ts
+                  share-turn.spec.ts
+                  share-turn-blob-export.spec.ts
+                  composer-attachment-controls.spec.ts
+                  image-preview-back.spec.ts
+                  opencode-fork-buttons.spec.ts
+
+    unit-cli:
+        runs-on: ${{ github.repository_owner == 'heavygee' && fromJSON('["self-hosted","Linux","X64","hapi"]') || 'ubuntu-latest' }}
+        steps:
+            - uses: actions/checkout@v4
+            - uses: oven-sh/setup-bun@v2
+            - run: bun install --frozen-lockfile
+            # Required by cli/src/utils/windowsProcessTree.pwsh.test.ts — image
+            # inspect alone does not pull; silent skip was fake B1 coverage (#1911).
+            - run: docker pull mcr.microsoft.com/powershell:latest
+            # Fork: cli tests run through the flaky-quarantine gate (same
+            # script the local remat gate uses — config/flaky-quarantine.yaml
+            # is fork-only data, see docs/tooling/flaky-quarantine.md).
+            # Upstream/other forks: unchanged plain `bun run test:cli`.
+            - name: Run cli tests
+              env:
+                  # flaky-quarantine.mjs validate/check shell out to `gh issue
+                  # view` to confirm a quarantine entry's issue is still open
+                  # (a closed-issue entry must fail loudly, not sit forever).
+                  # Without this every gh call returns UNKNOWN on a fresh
+                  # runner and the gate fails for the wrong reason.
+                  GH_TOKEN: ${{ github.token }}
+                  GITHUB_TOKEN: ${{ github.token }}
+              run: |
+                  if [[ "${{ github.repository_owner }}" == "heavygee" ]]; then
+                      bash scripts/tooling/flaky-quarantine-gate.sh "$PWD"
+                  else
+                      bun run test:cli
+                  fi
+
+    unit-web:
+        runs-on: ${{ github.repository_owner == 'heavygee' && fromJSON('["self-hosted","Linux","X64","hapi"]') || 'ubuntu-latest' }}
+        steps:
+            - uses: actions/checkout@v4
+            - uses: oven-sh/setup-bun@v2
+            - run: bun install --frozen-lockfile
+            - run: bun run test:web
+
+    core:
         runs-on: ${{ github.repository_owner == 'heavygee' && fromJSON('["self-hosted","Linux","X64","hapi"]') || 'ubuntu-latest' }}
         steps:
             - uses: actions/checkout@v4
@@ -19,36 +78,28 @@ jobs:
             - uses: oven-sh/setup-bun@v2
             - run: bun install --frozen-lockfile
             - run: bun typecheck
-            - run: bunx playwright install --with-deps chromium
-            # Required by cli/src/utils/windowsProcessTree.pwsh.test.ts — image
-            # inspect alone does not pull; silent skip was fake B1 coverage (#1911).
-            - run: docker pull mcr.microsoft.com/powershell:latest
-            - run: bun run test:e2e -- terminal-wrap-fidelity.spec.ts session-list-fork-menu.spec.ts composer-copy.spec.ts session-list-scroll.spec.ts session-activity.spec.ts cold-initial-tail.spec.ts scrollbar-auto-hide.spec.ts attachment-removal.spec.ts history-navigation-layout.spec.ts share-turn.spec.ts share-turn-blob-export.spec.ts composer-attachment-controls.spec.ts image-preview-back.spec.ts
-            # Fork: cli tests run through the flaky-quarantine gate (same
-            # script the local remat gate uses — config/flaky-quarantine.yaml
-            # is fork-only data, see docs/tooling/flaky-quarantine.md).
-            # Upstream/other forks: unchanged plain `bun run test`.
-            - name: Run tests
+            - run: bun run test:hub
+            - run: bun run test:shared
+            - run: bun run test:relay
+
+    # Keep the required check name used by auto-merge. A skipped check may
+    # count as passing, so run the gate even if a dependency did not succeed.
+    # Fork: this gate stays GitHub-hosted on purpose. The work jobs run on
+    # the estate self-hosted runner; if that runner is down they fail or
+    # never start, and a gate that also needed it would simply never
+    # report — turning a runner outage into a silently missing required
+    # check instead of a loud failure.
+    test:
+        needs: [browser, unit-cli, unit-web, core]
+        if: ${{ always() }}
+        runs-on: ubuntu-latest
+        steps:
+            - name: Require all test jobs to succeed
               env:
-                  # flaky-quarantine.mjs validate/check shell out to `gh issue
-                  # view` to confirm a quarantine entry's issue is still open
-                  # (requirement: a closed-issue entry must fail loudly, not
-                  # sit there forever). Without this, every gh call returns
-                  # UNKNOWN on a fresh runner and the gate fails for the wrong
-                  # reason — matches the GH_TOKEN/GITHUB_TOKEN pattern already
-                  # used by codex-mention-response.yml / issue-auto-response.yml.
-                  GH_TOKEN: ${{ github.token }}
-                  GITHUB_TOKEN: ${{ github.token }}
+                  TEST_JOBS: ${{ toJSON(needs) }}
               run: |
-                  if [[ "${{ github.repository_owner }}" == "heavygee" ]]; then
-                      bash scripts/tooling/flaky-quarantine-gate.sh "$PWD"
-                  else
-                      bun run test
-                  fi
-            # Fork has no windows-latest budget; cover the same file on Linux.
-            - name: Codex MCP proxy unit (Linux stand-in for windows-codex-mcp)
-              if: github.repository_owner == 'heavygee'
-              run: bun run --cwd cli test -- src/codex/utils/codexMcpProxy.test.ts
+                  jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<< "$TEST_JOBS"
+                  jq -e 'length > 0 and all(.[]; .result == "success")' <<< "$TEST_JOBS" > /dev/null
 
     # Serial runner-integration suite: starts real detached runner/session
     # process trees against an isolated temp hub, so it runs in its own job
@@ -61,12 +112,10 @@ jobs:
             - run: bun install --frozen-lockfile
             - run: bun run test:cli:integration
 
-    # Hosted Windows minutes — skip on the heavygee fork (covered above on Linux).
     windows-codex-mcp:
-        if: github.repository_owner != 'heavygee'
         runs-on: windows-latest
         steps:
             - uses: actions/checkout@v4
             - uses: oven-sh/setup-bun@v2
             - run: bun install --frozen-lockfile
-            - run: bun run --cwd cli test -- src/codex/utils/codexMcpProxy.test.ts src/codex/shared/launch.test.ts
+            - run: bun run --cwd cli test -- src/codex/shared/launch.test.ts

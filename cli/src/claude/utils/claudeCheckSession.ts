@@ -3,6 +3,7 @@ import { closeSync, existsSync, openSync, readdirSync, readSync, realpathSync } 
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { getProjectPath } from "./path";
+import { findClaudeSessionFileSync } from "./transcriptEntry";
 
 function encodeProjectId(workingDirectory: string): string {
     return resolve(workingDirectory).replace(/[^a-zA-Z0-9]/g, '-');
@@ -112,6 +113,19 @@ export function inspectClaudeTranscript(opts: {
             return { onDisk: true };
         }
         logger.debug(`[claudeCheckSession] Path ${sessionFile} does not exist or lacks uuid lines`);
+    }
+
+    // Upstream (absorbed): Claude Code relocates the transcript into the new
+    // cwd's project dir when a session enters or leaves a git worktree, and the
+    // newest same-id transcript across project dirs wins. The fork's capped
+    // validity probe still gates it — upstream readFileSync's the whole
+    // transcript, which is what TRANSCRIPT_PROBE_MAX_BYTES exists to avoid.
+    const relocated = findClaudeSessionFileSync(sessionId, {
+        projectDir: getProjectPath(opts.workspacePath)
+    });
+    if (transcriptLooksValid(relocated)) {
+        logger.debug(`[claudeCheckSession] Found ${sessionId} at relocated path ${relocated}`);
+        return { onDisk: true };
     }
 
     // Cross-project: Claude --resume <uuid> searches every project drawer.

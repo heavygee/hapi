@@ -1,7 +1,9 @@
-import { beforeAll, describe, expect, it, mock } from 'bun:test'
+import { afterEach, beforeAll, describe, expect, it, mock } from 'bun:test'
+import { gunzipSync } from 'node:zlib'
 import { Hono } from 'hono'
 import type { SyncEngine } from '../../sync/syncEngine'
-import { createConfiguration } from '../../configuration'
+import { createConfiguration, getConfiguration } from '../../configuration'
+import { writeAutoBridgeTransientModelErrorsEnabled } from '../../config/autoBridgeTransientModelErrors'
 import { createCliRoutes } from './cli'
 import { SessionIdentityConflictError } from '../../store/sessions'
 
@@ -20,6 +22,43 @@ function authHeaders() {
 beforeAll(async () => {
     const config = await createConfiguration()
     config._setCliApiToken('test-token', 'env', false)
+    await config.setGithubPrAwareness(true)
+})
+
+describe('cli shutdown preparation', () => {
+    function fixture(machineId = 'machine-1') {
+        let calls = 0
+        let fail = false
+        const app = createApp({
+            resolveSessionAccess: (_id: string, namespace: string) => namespace === 'default'
+                ? { ok: true, sessionId: 'session-1', session: { metadata: { machineId } } }
+                : { ok: false, reason: 'access-denied' },
+            prepareOpenCodeSessionStop: async () => { calls++; if (fail) throw new Error('offline'); return 'ready' }
+        } as never)
+        const request = (runner: string, token = 'test-token') => app.request('/cli/sessions/session-1/prepare-stop', {
+            method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+            body: JSON.stringify({ machineId: runner, pid: 123, processStartMarker: 'gen-a',
+                preparationLease: { id: 'fixture', expiresAt: 123456 } })
+        })
+        return { request, calls: () => calls, offline: () => { fail = true } }
+    }
+
+    it('requires the same namespace and runner machine before requesting shutdown', async () => {
+        const f = fixture()
+        expect((await f.request('machine-1', 'test-token:other')).status).toBe(403)
+        expect((await f.request('machine-2')).status).toBe(403)
+        expect(f.calls()).toBe(0)
+        const response = await f.request('machine-1')
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ status: 'ready', preparationLease: { id: 'fixture', expiresAt: 123456 } })
+        expect(f.calls()).toBe(1)
+    })
+
+    it('returns an unconfirmed failure when the OpenCode drain cannot be acknowledged', async () => {
+        const f = fixture()
+        f.offline()
+        expect((await f.request('machine-1')).status).toBe(503)
+    })
 })
 
 describe('cli resume routes', () => {
@@ -318,6 +357,48 @@ describe('cli lazy session creation', () => {
         )
     })
 
+    it('rejects session create with invalid metadata.externalRefs when awareness is enabled', async () => {
+        const getOrCreateSession = mock(() => ({ id: sessionId }))
+        const app = createApp({
+            getOrCreateSession
+        } as never)
+
+        const response = await app.request('/cli/sessions', {
+            method: 'POST',
+            headers: {
+                ...authHeaders(),
+                'content-type': 'application/json'
+            },
+            body: JSON.stringify({
+                id: sessionId,
+                tag: 'lazy-tag',
+                metadata: {
+                    path: '/tmp/project',
+                    externalRefs: [
+                        {
+                            kind: 'github_pr',
+                            repo: 'tiann/hapi',
+                            number: 1,
+                            url: 'https://github.com/tiann/hapi/pull/1',
+                            role: 'primary'
+                        },
+                        {
+                            kind: 'github_pr',
+                            repo: 'tiann/hapi',
+                            number: 2,
+                            url: 'https://github.com/tiann/hapi/pull/2',
+                            role: 'primary'
+                        }
+                    ]
+                }
+            })
+        })
+
+        expect(response.status).toBe(400)
+        expect(await response.json()).toEqual({ error: 'Invalid metadata.externalRefs' })
+        expect(getOrCreateSession).not.toHaveBeenCalled()
+    })
+
     it('rejects an embedded machine owned by another namespace', async () => {
         const getOrCreateMachine = mock(() => ({ id: 'machine-1' }))
         const getOrCreateSession = mock(() => ({ id: sessionId }))
@@ -367,5 +448,124 @@ describe('cli lazy session creation', () => {
         })
 
         expect(response.status).toBe(409)
+    })
+})
+
+describe('cli features and external-refs read', () => {
+    it('returns githubPrAwareness for CLI token auth', async () => {
+        const app = createApp({} as never)
+        const response = await app.request('/cli/features', { headers: authHeaders() })
+        expect(response.status).toBe(200)
+        const body = await response.json() as { githubPrAwareness: { enabled: boolean; source: string } }
+        expect(body.githubPrAwareness).toMatchObject({
+            enabled: expect.any(Boolean),
+            source: expect.any(String)
+        })
+    })
+})
+
+describe('cli autoBridgeTransientModelErrors namespace gate', () => {
+    afterEach(async () => {
+        await writeAutoBridgeTransientModelErrorsEnabled(getConfiguration().dataDir, false)
+    })
+
+    it('returns hub auto-bridge only for the default namespace', async () => {
+        await writeAutoBridgeTransientModelErrorsEnabled(getConfiguration().dataDir, true)
+        const sessionId = '22222222-2222-4222-8222-222222222222'
+        const app = createApp({
+            getOrCreateSession: () => ({ id: sessionId }),
+            resolveSessionAccess: () => ({
+                ok: true,
+                session: { id: sessionId },
+                sessionId
+            })
+        } as never)
+
+        const defaultCreate = await app.request('/cli/sessions', {
+            method: 'POST',
+            headers: {
+                ...authHeaders(),
+                'content-type': 'application/json'
+            },
+            body: JSON.stringify({
+                id: sessionId,
+                tag: 'auto-bridge-default',
+                metadata: {}
+            })
+        })
+        expect(defaultCreate.status).toBe(200)
+        const defaultBody = await defaultCreate.json() as { autoBridgeTransientModelErrors?: boolean }
+        expect(defaultBody.autoBridgeTransientModelErrors).toBe(true)
+
+        const tenantCreate = await app.request('/cli/sessions', {
+            method: 'POST',
+            headers: {
+                authorization: 'Bearer test-token:tenant-a',
+                'content-type': 'application/json'
+            },
+            body: JSON.stringify({
+                id: sessionId,
+                tag: 'auto-bridge-tenant',
+                metadata: {}
+            })
+        })
+        expect(tenantCreate.status).toBe(200)
+        const tenantCreateBody = await tenantCreate.json() as { autoBridgeTransientModelErrors?: boolean }
+        expect(tenantCreateBody.autoBridgeTransientModelErrors).toBe(false)
+
+        const tenantGet = await app.request(`/cli/sessions/${sessionId}`, {
+            headers: { authorization: 'Bearer test-token:tenant-a' }
+        })
+        expect(tenantGet.status).toBe(200)
+        const tenantGetBody = await tenantGet.json() as { autoBridgeTransientModelErrors?: boolean }
+        expect(tenantGetBody.autoBridgeTransientModelErrors).toBe(false)
+    })
+})
+
+describe('cli HTTP gzip compression', () => {
+    it('compresses large /cli responses with gzip and honors q=0 refusal', async () => {
+        const sessionId = '33333333-3333-4333-8333-333333333333'
+        const messages = Array.from({ length: 40 }, (_, index) => ({
+            id: `msg-${index + 1}`,
+            sessionId,
+            seq: index + 1,
+            localId: `local-${index + 1}`,
+            createdAt: 1_700_000_000_000 + index,
+            invokedAt: 1_700_000_000_000 + index,
+            content: { role: 'assistant', content: { type: 'text', text: `Repeated backfill payload line ${index} `.repeat(6) } }
+        }))
+        const app = createApp({
+            resolveSessionAccess: () => ({
+                ok: true,
+                session: { id: sessionId },
+                sessionId
+            }),
+            getDeliverableMessagesAfter: () => messages
+        } as never)
+
+        const gzipRes = await app.request(`/cli/sessions/${sessionId}/messages?afterSeq=0`, {
+            headers: {
+                ...authHeaders(),
+                'accept-encoding': 'gzip'
+            }
+        })
+        expect(gzipRes.status).toBe(200)
+        expect(gzipRes.headers.get('content-encoding')).toBe('gzip')
+        expect(gzipRes.headers.get('vary')).toContain('Accept-Encoding')
+        const compressedBytes = new Uint8Array(await gzipRes.arrayBuffer())
+        const decompressed = gunzipSync(compressedBytes).toString('utf8')
+        expect(JSON.parse(decompressed)).toEqual({ messages })
+        expect(compressedBytes.byteLength).toBeLessThan(Buffer.byteLength(decompressed, 'utf8') / 2)
+
+        const refusedRes = await app.request(`/cli/sessions/${sessionId}/messages?afterSeq=0`, {
+            headers: {
+                ...authHeaders(),
+                'accept-encoding': 'gzip;q=0'
+            }
+        })
+        expect(refusedRes.status).toBe(200)
+        expect(refusedRes.headers.get('content-encoding')).toBeNull()
+        expect(refusedRes.headers.get('vary')).toContain('Accept-Encoding')
+        expect(await refusedRes.json()).toEqual({ messages })
     })
 })

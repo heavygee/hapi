@@ -1,4 +1,4 @@
-import { useMemo, useSyncExternalStore } from 'react'
+import { useMemo, useRef, useSyncExternalStore } from 'react'
 import type { SessionSummary } from '@/types/api'
 import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
 import { InfoIcon, LoaderIcon, ScheduleIcon, StoppedBadgeIcon } from '@/components/icons'
@@ -10,14 +10,18 @@ import { formatRelativeTime } from '@/lib/relativeTime'
 import { formatScheduledTooltipDetail } from '@/lib/scheduledTime'
 import { getCodexImportedAt, subscribeCodexImportedSessions } from '@/lib/codexImportedSessions'
 import { useMinuteTick } from '@/hooks/useMinuteTick'
+import { LOW_RATE_STRIPES_CLASS, useLowRateAnimation } from '@/hooks/useLowRateAnimation'
 import { getSessionTitle } from '@/lib/sessionTitle'
 import { useTranslation } from '@/lib/use-translation'
 import { getWorktreeSessionLabel } from '@/lib/sessionWorktreeLabel'
+import { SessionPrChip } from '@/components/SessionPrChip'
+import { getPrimaryGithubPrRef, type PrChipDisplayProfile } from '@hapi/protocol'
 import {
     attachedJobFraction,
     formatAttachedJobProgress,
     isAttachedJobStale
 } from '@/lib/attachedJob'
+import { hasUrgentModelError } from '@/components/ModelErrorBanner'
 
 function BulbIcon(props: { className?: string }) {
     return (
@@ -75,8 +79,7 @@ function getSessionTimeLabel(
 }
 
 const PRESENCE_BADGE_CLASS = {
-    working: 'bg-[var(--app-badge-success-text)] animate-pulse',
-    background: 'bg-blue-400 animate-pulse',
+    working: 'bg-[var(--app-badge-success-text)]',
     waiting: 'border-2 border-[var(--app-badge-success-text)] bg-[var(--app-bg)]',
     stopped: 'bg-[var(--app-bg)] text-[var(--app-hint)]',
 } as const
@@ -106,6 +109,16 @@ export function SessionRowSummary(props: {
     lastSeenVersion?: number
     scheduleTooltipId?: string
     className?: string
+    /** When enabled, show primary GitHub PR chip left of the time column (ADR D8). */
+    githubPrAwarenessEnabled?: boolean
+    /**
+     * When false, omit the inline PR chip (parent renders an interactive chip
+     * beside the row button to avoid nesting `<a>` inside `<button>`).
+     */
+    showPrChip?: boolean
+    prChipDisplay?: PrChipDisplayProfile
+    /** Shared minute clock from the session list (avoids per-row timers). */
+    prNowMs?: number
     /** Rows inside the pinned "in progress" section skip the pending text label. */
     inRunningSection?: boolean
     /** Short project name shown under the title (pinned "in progress" rows). */
@@ -129,6 +142,10 @@ export function SessionRowSummary(props: {
         lastSeenVersion,
         scheduleTooltipId: scheduleTooltipIdProp,
         className,
+        githubPrAwarenessEnabled = false,
+        showPrChip = true,
+        prChipDisplay,
+        prNowMs,
         inRunningSection = false,
         projectLabel,
         machineLabel,
@@ -151,8 +168,13 @@ export function SessionRowSummary(props: {
         [s, selected, showDetailedStatus, lastSeenVersion]
     )
     const attentionLabel = attention ? getAttentionLabel(attention, t) : null
+    // Unread rows hand the agent icon to the attention tooltip as the "unread"
+    // symbol, so it is no longer the presence badge and must not pulse.
+    const plainUnreadTarget = attention?.kind === 'unread' && nestedTooltips && !attentionTooltipIdProp
     const urgentAttention = attention !== null
         && (attention.kind === 'permission' || attention.kind === 'input')
+    const modelErrorActive = hasUrgentModelError(s.metadata)
+    const modelErrorLabel = t('session.modelError.listIndicator')
     const scheduledLabel = s.futureScheduledMessageCount > 1
         ? t('session.item.scheduledMessages', { count: s.futureScheduledMessageCount })
         : t('session.item.scheduledMessage')
@@ -167,7 +189,8 @@ export function SessionRowSummary(props: {
     useMinuteTick()
     const nowMs = Date.now()
     const codexSessionId = s.metadata?.flavor === 'codex' ? s.metadata?.agentSessionId : null
-    const importedAt = useSyncExternalStore(subscribeCodexImportedSessions, () => getCodexImportedAt(codexSessionId))
+    const legacyImportedAt = useSyncExternalStore(subscribeCodexImportedSessions, () => getCodexImportedAt(codexSessionId))
+    const importedAt = s.metadata?.codexImportedAt !== undefined ? s.metadata.codexImportedAt : legacyImportedAt
     const timeLabel = getSessionTimeLabel(s, importedAt, t)
     const attachedJob = s.attachedJob?.status === 'running' ? s.attachedJob : null
     const jobStale = attachedJob ? isAttachedJobStale(attachedJob, nowMs) : false
@@ -179,24 +202,22 @@ export function SessionRowSummary(props: {
             noHeartbeat: t('session.item.attachedJob.noHeartbeat'),
         })
         : null
+    const primaryPrRef = githubPrAwarenessEnabled
+        ? getPrimaryGithubPrRef(s.metadata?.externalRefs)
+        : null
 
-    // Presence lives on the agent icon and every state has its own mark, so no
-    // state is shown by the absence of one: solid = working (pulsing), ring =
-    // connected and waiting, power mark = stopped or archived. Blue is the
-    // existing background-work state. An outliving attached job counts as
-    // working even when the agent itself is idle or disconnected.
-    // The badge carries *which* state on inspection; the row-level residency
-    // fade below carries *which rows* at a glance. Same predicate (!active),
-    // two scales — a 10px mark doesn't survive a long-list scan on its own.
+    // Presence represents work and connection state on the agent icon. Work
+    // that outlives the `thinking` flag — background tasks (e.g. a background
+    // subagent), derived tool work (hub transcript sweep) and an attached job —
+    // is still work, so it renders working: a waiting badge would read as done.
+    const derivedWork = s.derivedToolWork === true
     const isRunning = s.active && s.thinking
     const isBackgroundOnly = s.active && !s.thinking && (s.backgroundTaskCount ?? 0) > 0
-    const presence: 'working' | 'background' | 'waiting' | 'stopped' = isBackgroundOnly
-        ? 'background'
-        : isRunning || attachedJob
-            ? 'working'
-            : s.active
-                ? 'waiting'
-                : 'stopped'
+    const presence: 'working' | 'waiting' | 'stopped' = isRunning || attachedJob || derivedWork || isBackgroundOnly
+        ? 'working'
+        : s.active
+            ? 'waiting'
+            : 'stopped'
     const isUnread = sessionIsUnread(s, {
         lastSeenAt: getSessionLastSeenAt(s.id),
         manualUnreadAt: getSessionManualUnreadAt(s.id, s.readState),
@@ -209,19 +230,45 @@ export function SessionRowSummary(props: {
     // `thinking` is authoritative for foreground activity. A pending input can
     // be blocking or async, and summaries do not distinguish the two, so keep
     // the spinner rather than hiding real work behind the request symbol.
-    // Independent background work/jobs still count, even if the agent is
-    // disconnected. No work running is not a claim of successful completion:
-    // summaries carry no turn-outcome field, and the dot only means unread.
-    const hasRunningWork = Boolean(attachedJob)
-        || (s.active && (s.backgroundTaskCount ?? 0) > 0)
-        || isRunning
-    const activityLabel = isBackgroundOnly
-        ? t('session.item.background')
-        : t('session.item.running')
+    // An attached job keeps its own running spinner because it outlives the
+    // agent and is independently visible; hub-derived open tool work
+    // (autonomous rounds) spins for the same reason — the transcript proves the
+    // agent is mid-call. Background-only work spins too: a static dot reads as
+    // "finished" while the work is still going. Its label tells the two apart.
+    const hasForegroundWork = Boolean(attachedJob) || derivedWork || isRunning
+    const hasRunningWork = hasForegroundWork || isBackgroundOnly
+    // While any work runs, the spinner colour carries unread; the bold title and
+    // accented time are the at-rest look.
+    const emphasizeUnread = isUnread && !hasRunningWork
+    const activityLabel = hasForegroundWork ? t('session.item.running') : t('session.item.background')
+    const pendingRequestId = s.pendingRequests?.[0]?.id
+
+    // Idle indicators are animated by the one shared low-rate ticker, not CSS.
+    // Refs are only read inside effects, so an unanimated render (presence
+    // 'waiting', no model error) simply leaves a detached ref unused.
+    const presenceRef = useRef<HTMLSpanElement | null>(null)
+    const modelErrorRef = useRef<HTMLSpanElement | null>(null)
+    const activityRef = useRef<SVGSVGElement | null>(null)
+    const jobDotRef = useRef<HTMLSpanElement | null>(null)
+    const jobStripesRef = useRef<HTMLSpanElement | null>(null)
+    // Gated on the same conditions that mount the elements (hooks stay
+    // unconditional), so a row with no idle indicator runs no ticker listener.
+    // The presence badge lives in `agentIcon`, which may be handed to
+    // `SessionAttentionIndicator` as a tooltip target, so the badge only pulses
+    // in the plain (non-background-attention, non-unread) render path.
+    useLowRateAnimation(presenceRef, 'pulse', presence === 'working' && !plainUnreadTarget)
+    // The halo expands and fades (a ping), not a rotation: rotating a uniformly
+    // colored circle shows no motion, so the attention cue would disappear.
+    useLowRateAnimation(modelErrorRef, 'ping', modelErrorActive)
+    useLowRateAnimation(activityRef, 'spin', hasRunningWork)
+    useLowRateAnimation(jobDotRef, 'pulse', attachedJob !== null && !jobStale)
+    useLowRateAnimation(jobStripesRef, 'stripes', attachedJob !== null && jobFraction === null)
+
     const agentIcon = (
         <span className="relative inline-flex h-6 w-6 shrink-0 items-center justify-center">
             <AgentFlavorIcon flavor={s.metadata?.flavor} className="h-6 w-6" />
             <span
+                ref={presenceRef}
                 data-testid="session-presence"
                 data-presence={presence}
                 className={`absolute -bottom-0.5 -right-0.5 box-border flex h-2.5 w-2.5 items-center justify-center rounded-full ring-2 ring-[var(--app-bg)] ${PRESENCE_BADGE_CLASS[presence]}`}
@@ -245,17 +292,30 @@ export function SessionRowSummary(props: {
             <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                 {/* Fade the disconnected title, keeping activity/unread indicators
                     and outliving job progress at full contrast. */}
-                <div className="grid grid-cols-[minmax(9rem,1fr)_minmax(0,max-content)] items-center gap-2">
+                <div className="session-row-header grid grid-cols-[minmax(9rem,1fr)_minmax(0,max-content)] items-center gap-2">
                     <div className="flex min-w-0 items-center gap-2">
                         <div
-                            className={`min-w-0 flex-1 truncate text-sm text-[var(--app-fg)] ${isUnread ? 'font-semibold' : 'font-normal'} ${!s.active ? 'opacity-50' : ''}`}
+                            className={`min-w-0 flex-1 truncate text-sm text-[var(--app-fg)] ${emphasizeUnread ? 'font-semibold' : 'font-normal'} ${!s.active ? 'opacity-50' : ''}`}
                             title={sessionName}
                         >
                             {sessionName}
                         </div>
+                        {/* Model error outranks activity/unread: the turn looked
+                            finished but failed, so this must not be collapsed
+                            into the combined indicator below. */}
+                        {modelErrorActive ? (
+                            <span
+                                className="relative inline-flex h-2 w-2 shrink-0"
+                                title={modelErrorLabel}
+                                aria-label={modelErrorLabel}
+                            >
+                                <span data-testid="session-model-error-halo" ref={modelErrorRef} className="absolute inline-flex h-full w-full rounded-full bg-amber-500" />
+                                <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500" />
+                            </span>
+                        ) : null}
                         {hasRunningWork ? (
-                            <span data-testid="session-activity" role="img" aria-label={activityLabel} title={activityLabel} className="inline-flex shrink-0">
-                                <LoaderIcon className={`h-3.5 w-3.5 animate-spin-slow ${isUnread ? 'text-blue-500' : 'text-[var(--app-hint)]'}`} />
+                            <span data-testid="session-activity" data-activity={hasForegroundWork ? 'foreground' : 'background'} role="img" aria-label={activityLabel} title={activityLabel} className="inline-flex shrink-0">
+                                <LoaderIcon ref={activityRef} className={`h-3.5 w-3.5 ${isUnread ? 'text-blue-500' : 'text-[var(--app-hint)]'}`} />
                             </span>
                         ) : isUnread && !requestKind ? (
                             <span data-testid="session-unread" className="h-2 w-2 shrink-0 rounded-full bg-[var(--app-fg)]" aria-hidden="true" />
@@ -271,12 +331,14 @@ export function SessionRowSummary(props: {
                                 summary={s}
                                 label={attentionLabel ?? ''}
                                 tooltipId={attentionId}
+                                pendingRequestId={pendingRequestId}
                             />
                         ) : requestKind ? (
                             <span className="inline-flex shrink-0 items-center gap-1 text-[var(--app-badge-warning-text)]">
                                 <SessionRequestIcon
                                     kind={requestKind}
                                     label={attentionLabel ?? t('session.item.pending')}
+                                    requestId={pendingRequestId}
                                 />
                                 {!urgentAttention && !inRunningSection ? (
                                     <span className="text-[11px] font-medium leading-none">{t('session.item.pending')}</span>
@@ -317,9 +379,17 @@ export function SessionRowSummary(props: {
                                 {t('session.item.pending')} {s.pendingRequestsCount}
                             </span>
                         ) : null}
+                        {primaryPrRef && showPrChip ? (
+                            <SessionPrChip
+                                refs={s.metadata?.externalRefs}
+                                displayProfile={prChipDisplay}
+                                nowMs={prNowMs}
+                                interactive={false}
+                            />
+                        ) : null}
                         {timeLabel ? (
-                            <span className={`min-w-0 truncate whitespace-nowrap tabular-nums ${
-                                isUnread ? 'font-semibold text-[var(--app-link)]' : 'text-[var(--app-hint)]'
+                            <span className={`min-w-0 translate-y-[0.5px] truncate whitespace-nowrap tabular-nums ${
+                                emphasizeUnread ? 'font-semibold text-[var(--app-link)]' : 'text-[var(--app-hint)]'
                             }`}>{timeLabel}</span>
                         ) : null}
                     </div>
@@ -340,7 +410,8 @@ export function SessionRowSummary(props: {
                         }
                     >
                         <span
-                            className={`h-1.5 w-1.5 shrink-0 rounded-full bg-current ${jobStale ? '' : 'animate-pulse'}`}
+                            ref={jobDotRef}
+                            className="h-1.5 w-1.5 shrink-0 rounded-full bg-current"
                             aria-hidden="true"
                         />
                         {/* The label gives way first: progress, elapsed time and the stale
@@ -384,7 +455,8 @@ export function SessionRowSummary(props: {
                             >
                                 {/* No aria-valuenow: unknown amount (ARIA indeterminate). No inline width%. */}
                                 <span
-                                    className="animate-attached-job-indeterminate"
+                                    ref={jobStripesRef}
+                                    className={LOW_RATE_STRIPES_CLASS}
                                     aria-hidden="true"
                                 />
                             </span>

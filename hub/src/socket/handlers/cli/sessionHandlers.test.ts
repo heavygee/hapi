@@ -108,6 +108,37 @@ function toolCallResultContent(callId: string, output: unknown): unknown {
 }
 
 describe('cli session handlers', () => {
+    it('advances the agent-progress clock when a tool-call tick merges into its row', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('merge-progress', {}, null, 'default')
+        const socket = new FakeSocket()
+        const progressTimes: number[] = []
+        registerSessionHandlers(socket as unknown as CliSocketWithData, {
+            store, resolveSessionAccess: () => ({ ok: true, value: session }), emitAccessError() {},
+            onAgentProgress: (sid, at) => progressTimes.push(at)
+        })
+        const now = Date.now()
+        // Two ticks of one live call, two minutes apart per the CLI's own
+        // transcript timestamps. The merged row keeps its first snapshot's
+        // createdAt for stable ordering — but each tick must still advance
+        // the keepalive-idle clock, or an ACP call with thinking=false and no
+        // background task can be marked idle despite fresh updates.
+        socket.trigger('message', {
+            sid: session.id,
+            message: toolCallContent('call-1', { status: 'running' }),
+            createdAt: now - 120_000
+        })
+        expect(progressTimes).toHaveLength(1)
+        socket.trigger('message', {
+            sid: session.id,
+            message: toolCallContent('call-1', { status: 'running', input: { file: 'b' } }),
+            createdAt: now - 60_000
+        })
+        expect(progressTimes).toHaveLength(2)
+        expect(progressTimes[1]!).toBeGreaterThan(progressTimes[0]!)
+        expect(store.messages.getAllMessages(session.id)).toHaveLength(1)
+        store.close()
+    })
     it.each([undefined, 'terminated', 'error'] as const)('preserves shared Codex pending input on execution exit (%s)', reason => {
         const store = new Store(':memory:')
         const session = store.sessions.getOrCreateSession('shared-end', { flavor: 'codex', capabilities: { concurrentClients: true } }, null, 'default')
@@ -184,6 +215,68 @@ describe('cli session handlers', () => {
         socket.trigger('message', { sid: session.id, message: reasoningContent('stream-2', 'more', true) })
 
         expect(store.messages.getAllMessages(session.id).map(reasoningTextOf)).toEqual(['thinking', 'more'])
+    })
+
+    it('collapses a live text stream into its settled boundary message', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('text-stream-session', {}, null, 'default')
+        const socket = new FakeSocket()
+
+        registerSessionHandlers(socket as unknown as CliSocketWithData, {
+            store,
+            resolveSessionAccess: () => ({ ok: true, value: session as StoredSession }),
+            emitAccessError: () => {
+                throw new Error('unexpected access error')
+            }
+        })
+
+        // Idle flushes: the CLI re-sends the growing buffer under one id,
+        // marked live; the boundary flush re-sends the full text with only
+        // the snapshot marker. Only the settled row may survive.
+        const textContent = (streamId: string, text: string, live: boolean) => ({
+            role: 'agent',
+            content: {
+                type: AGENT_MESSAGE_PAYLOAD_TYPE,
+                data: {
+                    type: 'message',
+                    message: text,
+                    id: streamId,
+                    streamSnapshot: true,
+                    ...(live ? { live: true } : {})
+                }
+            }
+        })
+        for (const text of ['He', 'Hello', 'Hello wor', 'Hello world, the ans']) {
+            socket.trigger('message', { sid: session.id, message: textContent('text-1', text, true) })
+        }
+        socket.trigger('message', { sid: session.id, message: textContent('text-1', 'Hello world, the answer.', false) })
+
+        const bodies = store.messages.getAllMessages(session.id)
+            .map((message) => (message.content as { content: { data: { message: string } } }).content.data.message)
+        expect(bodies).toEqual(['Hello world, the answer.'])
+    })
+
+    it('keeps plain text messages without a stream id untouched', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('plain-text-session', {}, null, 'default')
+        const socket = new FakeSocket()
+
+        registerSessionHandlers(socket as unknown as CliSocketWithData, {
+            store,
+            resolveSessionAccess: () => ({ ok: true, value: session as StoredSession }),
+            emitAccessError: () => {
+                throw new Error('unexpected access error')
+            }
+        })
+
+        for (const text of ['one', 'two']) {
+            socket.trigger('message', {
+                sid: session.id,
+                message: { role: 'agent', content: { type: AGENT_MESSAGE_PAYLOAD_TYPE, data: { type: 'message', message: text } } }
+            })
+        }
+
+        expect(store.messages.getAllMessages(session.id)).toHaveLength(2)
     })
 
     it('keeps every reasoning snapshot that carries no stream id', () => {
@@ -493,9 +586,11 @@ describe('cli session handlers', () => {
         expect(uuids).toEqual(['msg-1', 'msg-2'])
     })
 
-    it.each([
+it.each([
+        ['codexImportedAt', 1234],
         ['supersededBySessionId', 'foreign-session'],
         ['opencodeClearOperation', { replacementSessionId: 'foreign-session', state: 'reserved', updatedAt: Date.now() }],
+        ['opencodeForkPending', true],
         ['titleSuggestionAutoAttemptedAt', 1234],
         ['titleSuggestionTurn', { first: false, completed: true }],
         ['promptTitle', 'Forged title'],
@@ -525,12 +620,37 @@ describe('cli session handlers', () => {
         }
     )
 
+    it.each([1234, null])('preserves Codex import state %s across CLI bootstrap replacements', (codexImportedAt) => {
+        const store = new Store(':memory:')
+        try {
+            const session = store.sessions.getOrCreateSession('preserve-import-state', {
+                path: '/tmp/project', codexImportedAt
+            }, null, 'default')
+            const socket = new FakeSocket()
+            registerSessionHandlers(socket as unknown as CliSocketWithData, {
+                store,
+                resolveSessionAccess: () => ({ ok: true, value: session as StoredSession }),
+                emitAccessError: () => { throw new Error('unexpected access error') }
+            })
+            socket.trigger('update-metadata', {
+                sid: session.id,
+                expectedVersion: session.metadataVersion,
+                metadata: { path: '/tmp/project' }
+            }, () => {})
+            expect(store.sessions.getSessionByNamespace(session.id, 'default')?.metadata)
+                .toHaveProperty('codexImportedAt', codexImportedAt)
+        } finally {
+            store.close()
+        }
+    })
+
     it('preserves existing hub-owned clear and job-redirect metadata across CLI metadata updates', () => {
         const store = new Store(':memory:')
         const operation = { replacementSessionId: 'owned-target', state: 'completed', updatedAt: Date.now() }
         const session = store.sessions.getOrCreateSession('preserve-clear-link', {
             supersededBySessionId: 'owned-target',
             opencodeClearOperation: operation,
+            opencodeForkPending: true,
             jobsAcceptedFromSessionIds: ['old-session'],
             jobsTransferredToSessionId: 'merge-target',
             jobKeyRedirects: { 'old-session/beets': 'beets.oldsess1' },
@@ -546,7 +666,7 @@ describe('cli session handlers', () => {
             expectedVersion: session.metadataVersion,
             metadata: {
                 lifecycleState: 'archived',
-                supersededBySessionId: 'forged-target',
+                supersededBySessionId: 'forged-target', opencodeForkPending: false,
                 opencodeClearOperation: { replacementSessionId: 'forged-target', state: 'reserved', updatedAt: 0 },
                 jobsAcceptedFromSessionIds: ['forged-session'],
                 jobsTransferredToSessionId: 'forged-target',
@@ -556,6 +676,7 @@ describe('cli session handlers', () => {
         expect(store.sessions.getSessionByNamespace(session.id, 'default')?.metadata).toMatchObject({
             supersededBySessionId: 'owned-target',
             opencodeClearOperation: operation,
+            opencodeForkPending: true,
             jobsAcceptedFromSessionIds: ['old-session'],
             jobsTransferredToSessionId: 'merge-target',
             jobKeyRedirects: { 'old-session/beets': 'beets.oldsess1' },
