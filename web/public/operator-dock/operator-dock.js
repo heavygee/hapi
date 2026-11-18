@@ -53,6 +53,8 @@
   /** #466: lightweight STT into replies compose (not primary mic / send). */
   var repliesDict = null;
   var pendingShot = null, liveTranscript = '', liveInterim = '', recordLabel = null;
+  // #569: mic asked AndroidOperator.requestMarkupCapture; next beginMarkup(dataUrl) → pendingShot.
+  var nativeMicShotPending = false;
   // #343: true only after setTranscript/appendTranscript (speech). Host listening
   // hints must use setRecordStatus — otherwise finishRecording can Send the hint
   // when onCaptureDone() returns empty (Meta SR often delivers zero partials).
@@ -596,21 +598,37 @@
     }
   }
   /** Operator-facing labels never use session ids / UUID prefixes (#201). */
+  /**
+   * #201 / #575: full UUID, exact session id, or matching 8-char hub id prefix
+   * are not operator-visible titles. Keep in sync with lib/operator-mic.ts.
+   */
+  function isSessionIdStyleLabel(label, sessionId) {
+    var n = label != null ? String(label).trim() : '';
+    if (!n) return false;
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(n)) return true;
+    var sid = sessionId != null ? String(sessionId).trim() : '';
+    if (sid && n.toLowerCase() === sid.toLowerCase()) return true;
+    if (!/^[0-9a-f]{8}$/i.test(n)) return false;
+    if (!sid) return true;
+    return sid.toLowerCase().indexOf(n.toLowerCase()) === 0;
+  }
   function hostSessionName() {
     var n = cfg && cfg.sessionName != null ? String(cfg.sessionName).trim() : '';
     return n || '';
   }
   function operatorSessionLabel(name, kind) {
     var n = name != null ? String(name).trim() : '';
-    if (n) return n;
+    // #201/#575: never paint UUID / bare 8-hex id stubs as the operator label.
+    if (n && !isSessionIdStyleLabel(n)) return n;
     var host = hostSessionName();
-    if (host) return host;
+    if (host && !isSessionIdStyleLabel(host)) return host;
     return kind === 'picker' ? 'Unknown session' : 'Pinned session';
   }
   function resolvePinnedLabel(secret) {
     var id = getPinnedSession();
     if (!id) return Promise.resolve(null);
     var cached = getPinnedSessionLabel();
+    if (cached && isSessionIdStyleLabel(cached, id)) cached = null;
     if (!secret) return Promise.resolve(cached || operatorSessionLabel(null, 'pinned'));
     return listProjectSessions(secret).then(function (sessions) {
       for (var i = 0; i < sessions.length; i++) {
@@ -738,12 +756,37 @@
     if (collapsed.length <= cap) return collapsed;
     return collapsed.slice(0, cap).replace(/\s+$/, '');
   }
+  /** #566: keep in sync with lib/operator-mic.ts provisionalSpawnSessionName. */
+  function provisionalSpawnSessionName(text, opts) {
+    opts = opts || {};
+    var maxLen = typeof opts.maxLen === 'number' && opts.maxLen > 0 ? Math.floor(opts.maxLen) : 56;
+    var slug = slugSessionNameFromUtterance(text, Math.max(maxLen * 4, 200));
+    if (slug) {
+      if (slug.length <= maxLen) return slug;
+      var hard = slug.slice(0, maxLen);
+      var minKeep = Math.min(40, maxLen);
+      var lastSpace = hard.lastIndexOf(' ');
+      if (lastSpace >= minKeep) return hard.slice(0, lastSpace).replace(/\s+$/, '');
+      return hard.replace(/\s+$/, '');
+    }
+    var hint = String(opts.hint != null ? opts.hint : 'opmic').trim() || 'opmic';
+    var appId = String(opts.appId != null ? opts.appId : '').trim();
+    if (appId) {
+      var labeled = appId + ' · ' + hint;
+      return labeled.length <= Math.max(maxLen, hint.length)
+        ? labeled
+        : labeled.slice(0, Math.max(maxLen, hint.length));
+    }
+    return hint;
+  }
   /** #497: keep in sync with lib/operator-mic.ts repliesSessionLabelFallback — never "New session". */
+  /** #575 / #201: never paints sid.slice(0, 8) as chrome — use Agent replies. */
   function repliesSessionLabelFallback(opts) {
     opts = opts || {};
+    var sid = opts.sessionId != null ? String(opts.sessionId).trim() : '';
     function usable(v) {
       var n = v != null ? String(v).trim() : '';
-      if (!n || n === 'New session') return '';
+      if (!n || n === 'New session' || isSessionIdStyleLabel(n, sid || null)) return '';
       return n;
     }
     var last = usable(opts.lastOutbound);
@@ -754,15 +797,15 @@
     if (pathSeg) return pathSeg;
     var flavor = usable(opts.flavor);
     if (flavor) return flavor + ' session';
-    var sid = opts.sessionId != null ? String(opts.sessionId).trim() : '';
-    if (sid) return sid.slice(0, 8);
     return 'Agent replies';
   }
   function resolveSessionLabel(secret, sessionId) {
     var id = sessionId != null ? String(sessionId).trim() : '';
     if (!id) return Promise.resolve(operatorSessionLabel(null, 'pinned'));
-    if (getPinnedSession() === id && getPinnedSessionLabel()) {
-      return Promise.resolve(getPinnedSessionLabel());
+    var cachedPinned = getPinnedSession() === id ? getPinnedSessionLabel() : null;
+    // #575: do not sticky-cache an 8-char hub id as the replies title.
+    if (cachedPinned && !isSessionIdStyleLabel(cachedPinned, id)) {
+      return Promise.resolve(cachedPinned);
     }
     if (!secret) {
       return Promise.resolve(repliesSessionLabelFallback({
@@ -775,8 +818,8 @@
       if (!row) return '';
       var flavor = row.flavor ? String(row.flavor).trim() : '';
       var raw = row.name != null ? String(row.name).trim() : '';
-      // #201/#259: never surface UUID prefixes as the title.
-      if (raw && !/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(raw) && raw !== id) return raw;
+      // #201/#259/#575: never surface UUID / matching 8-char hub id as the title.
+      if (raw && !isSessionIdStyleLabel(raw, id)) return raw;
       if (flavor) return flavor + ' session';
       return '';
     }
@@ -1599,6 +1642,79 @@
     if (locked) window.scrollTo(locked.x, locked.y);
   }
 
+  /**
+   * #569 / QAR MarkupCaptureBitmap — packed ARGB ints (0xAARRGGBB).
+   * Near-black = almost every sample max(R,G,B) <= maxChannel and mean luma <= maxMeanLuma.
+   */
+  function isNearBlackPixels(pixels, width, height, maxChannel, maxMeanLuma, sampleStride) {
+    if (maxChannel == null) maxChannel = 12;
+    if (maxMeanLuma == null) maxMeanLuma = 8;
+    if (sampleStride == null) sampleStride = 16;
+    if (width <= 0 || height <= 0 || !pixels || !pixels.length) return true;
+    var samples = 0;
+    var blackish = 0;
+    var lumaSum = 0;
+    var y = 0;
+    while (y < height) {
+      var x = 0;
+      while (x < width) {
+        var c = pixels[y * width + x] | 0;
+        var r = (c >> 16) & 0xff;
+        var g = (c >> 8) & 0xff;
+        var b = c & 0xff;
+        samples++;
+        lumaSum += 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        if (r <= maxChannel && g <= maxChannel && b <= maxChannel) blackish++;
+        x += sampleStride;
+      }
+      y += sampleStride;
+    }
+    if (samples === 0) return true;
+    return (blackish / samples) >= 0.98 && (lumaSum / samples) <= maxMeanLuma;
+  }
+
+  /** #569: pure-black / unique_colors=1 JPEGs are capture failures — never attach. */
+  function isNearBlackDataUrl(dataUrl) {
+    return new Promise(function (resolve) {
+      if (!dataUrl || typeof dataUrl !== 'string') { resolve(true); return; }
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var w = img.naturalWidth | 0;
+          var h = img.naturalHeight | 0;
+          if (w <= 0 || h <= 0) { resolve(true); return; }
+          var canvas = document.createElement('canvas');
+          var maxDim = 64;
+          var scale = Math.min(1, maxDim / Math.max(w, h));
+          var cw = Math.max(1, Math.round(w * scale));
+          var ch = Math.max(1, Math.round(h * scale));
+          canvas.width = cw;
+          canvas.height = ch;
+          var ctx = canvas.getContext && canvas.getContext('2d');
+          if (!ctx) { resolve(true); return; }
+          ctx.drawImage(img, 0, 0, cw, ch);
+          var data = ctx.getImageData(0, 0, cw, ch).data;
+          var packed = new Array(cw * ch);
+          for (var i = 0, p = 0; i < data.length; i += 4, p++) {
+            packed[p] = (0xff << 24) | (data[i] << 16) | (data[i + 1] << 8) | data[i + 2];
+          }
+          resolve(isNearBlackPixels(packed, cw, ch));
+        } catch (e) {
+          resolve(true);
+        }
+      };
+      img.onerror = function () { resolve(true); };
+      try { img.src = dataUrl; } catch (e) { resolve(true); }
+    });
+  }
+
+  function resolveUsableMicShot(shot) {
+    if (!shot) return Promise.resolve(null);
+    return isNearBlackDataUrl(shot).then(function (bad) {
+      return bad ? null : shot;
+    });
+  }
+
   function captureScreenshot() {
     if (typeof html2canvas !== 'function') return Promise.resolve(null);
     // Prefer documentElement so html background fills viewport; body max-width leaves white (#200).
@@ -2351,6 +2467,24 @@
         });
     });
   }
+  /** #566: browser-hub post-spawn rename (hub machine spawn ignores `name`). */
+  function hapiPatch(path, credential, body) {
+    return authHeaders(credential, false).then(function (headers) {
+      headers['Content-Type'] = 'application/json';
+      var url = requestTarget(path);
+      return fetch(url, { method: 'PATCH', headers: headers, body: JSON.stringify(body), cache: 'no-store' })
+        .then(function (res) {
+          noteComposedResponse('PATCH', url, res);
+          if (cfg.mode !== MODE_BROWSER_HUB || res.status !== 401 || looksLikeJwt(credential)) return res;
+          return authHeaders(credential, true).then(function (retryHeaders) {
+            retryHeaders['Content-Type'] = 'application/json';
+            var retryUrl = requestTarget(path);
+            return fetch(retryUrl, { method: 'PATCH', headers: retryHeaders, body: JSON.stringify(body), cache: 'no-store' })
+              .then(function (retryRes) { return noteComposedResponse('PATCH', retryUrl, retryRes); });
+          });
+        });
+    });
+  }
   function hapiGet(path, credential) {
     return authHeaders(credential, false).then(function (headers) {
       var url = requestTarget(path);
@@ -2619,6 +2753,7 @@
     if (recognition) { try { recognition.stop(); } catch (e) {} }
     recognizing = false;
     recording = false;
+    nativeMicShotPending = false;
     stopMediaCapture(true);
     liveTranscript = '';
     liveInterim = '';
@@ -2645,6 +2780,7 @@
     }
     if (!recording) return;
     recording = false;
+    nativeMicShotPending = false;
     stopWebRecognition();
     stopMediaCapture(true);
     liveTranscript = '';
@@ -2895,37 +3031,41 @@
     // #527: busy from tap — not only after spawn/upload resolves.
     setBtnState('sending');
     // #530: outer catch — resolveTargetSession / flatten throws must clear busy.
-    resolveTargetSession(secret, transcript).then(function (session) {
-      if (!session) {
-        stashPendingOutbound(transcript, shotDataUrl, false);
-        toast('No target session — pick one to send what you just said', 'err');
-        return null;
-      }
-      pendingOutbound = null;
-      var nav = collectNav();
-      var text = renderText(nav, (transcript || '').trim(), false);
-      var b64 = shotToB64(shotDataUrl);
-      var post = function (attachments) {
-        return hapiPost('/api/sessions/' + encodeURIComponent(session) + '/messages', secret, { text: text, attachments: attachments || [] });
-      };
-      var chain = b64
-        ? uploadAttachment(secret, session, 'operator-screenshot.jpg', b64, 'image/jpeg').then(function (att) { return post([att]); })
-        : post([]);
-      return chain.then(function (res) {
-        if (res.status === 401 || res.status === 403) {
-          var msgPath = '/api/sessions/' + encodeURIComponent(session) + '/messages';
-          return readRejectDetail(res, msgPath, session).then(function (d) {
-            onAuthRejected(d.status, d);
-            return null;
-          });
+    // #569: refuse near-black JPEGs at upload — never attach silent black operator-screenshot.jpg.
+    resolveUsableMicShot(shotDataUrl).then(function (usableShot) {
+      if (shotDataUrl && !usableShot) toast('Screenshot capture failed — blank shot omitted', 'err');
+      return resolveTargetSession(secret, transcript).then(function (session) {
+        if (!session) {
+          stashPendingOutbound(transcript, usableShot, false);
+          toast('No target session — pick one to send what you just said', 'err');
+          return null;
         }
-        // #557: missing session on messages — sticky, not toast-only.
-        if (res.status === 404) { failClosedDeadPin(); return null; }
-        if (!res.ok) { toast('HAPI error ' + res.status, 'err'); return null; }
-        toast('Sent to agent 🎙️', 'ok');
-        setBtnState('idle');
-        openReplies(secret, session);
-        return 'sent';
+        pendingOutbound = null;
+        var nav = collectNav();
+        var text = renderText(nav, (transcript || '').trim(), false);
+        var b64 = shotToB64(usableShot);
+        var post = function (attachments) {
+          return hapiPost('/api/sessions/' + encodeURIComponent(session) + '/messages', secret, { text: text, attachments: attachments || [] });
+        };
+        var chain = b64
+          ? uploadAttachment(secret, session, 'operator-screenshot.jpg', b64, 'image/jpeg').then(function (att) { return post([att]); })
+          : post([]);
+        return chain.then(function (res) {
+          if (res.status === 401 || res.status === 403) {
+            var msgPath = '/api/sessions/' + encodeURIComponent(session) + '/messages';
+            return readRejectDetail(res, msgPath, session).then(function (d) {
+              onAuthRejected(d.status, d);
+              return null;
+            });
+          }
+          // #557: missing session on messages — sticky, not toast-only.
+          if (res.status === 404) { failClosedDeadPin(); return null; }
+          if (!res.ok) { toast('HAPI error ' + res.status, 'err'); return null; }
+          toast('Sent to agent 🎙️', 'ok');
+          setBtnState('idle');
+          openReplies(secret, session);
+          return 'sent';
+        });
       });
     }).catch(function (e) {
       var st = e && e.status;
@@ -3307,6 +3447,7 @@
     head.title = 'Collapse or expand replies';
     var initialLabel = lastOutboundSessionLabel
       || (getPinnedSession() === session ? getPinnedSessionLabel() : null);
+    if (initialLabel && isSessionIdStyleLabel(initialLabel, session)) initialLabel = null;
     var title = $('span', 'opdock-replies-title', collapsed ? '🤖' : repliesExpandedTitle(initialLabel));
     title._opdockSessionLabel = initialLabel || '';
     var unread = $('span', 'opdock-replies-unread');
@@ -3370,7 +3511,7 @@
     function applyRepliesSessionLabel(label) {
       if (!replies || !title.isConnected) return;
       var next = label != null ? String(label).trim() : '';
-      if (!next || next === 'New session') return;
+      if (!next || next === 'New session' || isSessionIdStyleLabel(next, session)) return;
       if (title._opdockSessionLabel === next) return;
       title._opdockSessionLabel = next;
       lastOutboundSessionLabel = next;
@@ -3511,7 +3652,8 @@
           }
           if (row) {
             var named = row.name != null ? String(row.name).trim() : '';
-            if (named && !/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(named) && named !== session) {
+            // #575: 8-char hub id from mapPickerSession is not a real name — keep polling.
+            if (named && !isSessionIdStyleLabel(named, session)) {
               applyRepliesSessionLabel(named);
             } else if (row.flavor) {
               applyRepliesSessionLabel(String(row.flavor).trim() + ' session');
@@ -3855,11 +3997,29 @@
         armed(null);
         return true;
       }
-      if (providedShot) armed(providedShot);
-      else {
+      // #569: prefer host PixelCopy (requestMarkupCapture) over html2canvas of transparent WebView.
+      if (providedShot) {
+        resolveUsableMicShot(providedShot).then(function (usable) {
+          if (!recording) return;
+          if (providedShot && !usable) toast('Screenshot capture failed — blank shot omitted', 'err');
+          armed(usable);
+        });
+      } else if (hasNativeMarkupCapture()) {
+        nativeMicShotPending = true;
+        armed(null);
+        try {
+          window.AndroidOperator.requestMarkupCapture();
+        } catch (e) {
+          nativeMicShotPending = false;
+        }
+      } else {
         captureScreenshot().then(function (shot) {
           if (!recording) return;
-          armed(shot);
+          resolveUsableMicShot(shot).then(function (usable) {
+            if (!recording) return;
+            if (shot && !usable) toast('Screenshot capture failed — blank shot omitted', 'err');
+            armed(usable);
+          });
         });
       }
       return true;
@@ -3876,10 +4036,11 @@
   }
 
   function finishRecording() {
-    if (refuseNonExecute('finishRecording')) { recording = false; return; }
+    if (refuseNonExecute('finishRecording')) { recording = false; nativeMicShotPending = false; return; }
     if (!recording) return;
     var fromMarkup = !!overlay;
     recording = false;
+    nativeMicShotPending = false;
     stopWebRecognition();
     // #334: native host owns STT. onCaptureDone is synchronous and may return the
     // final text — do not discard it. liveTranscript is often still empty here
@@ -4009,6 +4170,17 @@
     strokes = [];
     // #437: lock host scroll BEFORE capture — html2canvas-pro can scroll the parent.
     freezeHostScroll();
+    // #569: mic reused requestMarkupCapture — divert host JPEG into pendingShot, not overlay.
+    if (nativeMicShotPending) {
+      nativeMicShotPending = false;
+      unfreezeHostScroll();
+      resolveUsableMicShot(providedShot || null).then(function (usable) {
+        if (!recording || overlay) return;
+        if (providedShot && !usable) toast('Screenshot capture failed — blank shot omitted', 'err');
+        pendingShot = usable;
+      });
+      return;
+    }
     var shot = providedShot || (recording ? pendingShot : null);
     if (shot) {
       // Host JPEG may arrive while markupOpening is true (#51 / #473) — accept before guard.
@@ -4498,8 +4670,8 @@
       if (!canSpawnPerSend()) return Promise.reject(new Error(spawnUnavailableReason() || 'spawn not configured'));
       var configuredMid = resolveEffectiveMachineId();
       var hubBody = spawnHubBody();
-      // #497: best-effort display name when the hub spawn schema accepts it.
-      if (spawnName) hubBody.name = spawnName;
+      // #566: hub POST /api/machines/:id/spawn ignores `name` — rename via PATCH after spawn
+      // (same pattern as proxy + hapi spawn-peer). Do not set hubBody.name.
       return resolveSpawnMachineAgainstHub(secret, configuredMid).then(function (resolved) {
         if (resolved.healedFrom) {
           toast(
@@ -4516,7 +4688,11 @@
       }).then(function (out) {
         var id = out && out.type === 'success' ? out.sessionId : (out && out.id);
         if (!id) return Promise.reject(new Error('spawn returned no session'));
-        return id;
+        if (!spawnName) return id;
+        // Best-effort provisional title; spawn still succeeds if rename fails.
+        return hapiPatch('/api/sessions/' + encodeURIComponent(id), secret, { name: spawnName })
+          .then(function () { return id; })
+          .catch(function () { return id; });
       });
     }
     var body = spawnName ? { name: spawnName } : {};
@@ -4541,7 +4717,8 @@
       }
       // #419: spinner while spawn POST runs — zero feedback was the dogfood failure mode.
       setBtnState('sending');
-      var suggestedName = slugSessionNameFromUtterance(utterance);
+      // #566: always send a short provisional name (never full STT rant, never omit).
+      var suggestedName = provisionalSpawnSessionName(utterance, { appId: cfg && cfg.appId });
       return spawnProjectSession(secret, suggestedName).then(function (id) {
         return resolveSessionLabel(secret, id).then(function (label) {
           var shown = repliesSessionLabelFallback({
@@ -5202,7 +5379,7 @@
     return entries.slice(0, 16);
   }
   /* BEGIN GENERATED bundled-changelog */
-  var BUNDLED_CHANGELOG_FALLBACK = "## [0.22.4](https://github.com/heavygee/hapi-inline/compare/v0.22.3...v0.22.4) (2026-10-27)\n\n\n### Bug Fixes\n\n* **dock:** fail closed on deleted pin session ([#558](https://github.com/heavygee/hapi-inline/issues/558)) ([e7abbf9](https://github.com/heavygee/hapi-inline/commit/e7abbf973abad004ac36335fb430f059ecae1990)), closes [#557](https://github.com/heavygee/hapi-inline/issues/557)\n\n\n### Documentation\n\n* remove mic-FAB exception; host shapes by technology ([#553](https://github.com/heavygee/hapi-inline/issues/553)) ([f913726](https://github.com/heavygee/hapi-inline/commit/f913726605bee5309416bb94e8bbdbba3ca761c2))\n\n## [0.22.3](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.22.2...v0.22.3) (2026-10-17)\n\n\n### Bug Fixes\n\n* **dock:** clear Send busy before native dismiss ([#531](https://github.com/Heavygee-Projects/hapi-inline/issues/531)) ([76999cb](https://github.com/Heavygee-Projects/hapi-inline/commit/76999cb92db99f67400eb06cff583a567c6f2def))\n* **dock:** fail closed on stale spawn machineId ([#535](https://github.com/Heavygee-Projects/hapi-inline/issues/535)) ([0f5a5cf](https://github.com/Heavygee-Projects/hapi-inline/commit/0f5a5cfcdd00fcb75114b8f3102b075bd28691ab))\n* **dock:** spinner on Send/mic until replies open ([#528](https://github.com/Heavygee-Projects/hapi-inline/issues/528)) ([985ee42](https://github.com/Heavygee-Projects/hapi-inline/commit/985ee429d1742cd408312fa2a401cdc9eca02ad6)), closes [#527](https://github.com/Heavygee-Projects/hapi-inline/issues/527)\n* **dock:** sweep orphan opdock-send--busy on clear ([#533](https://github.com/Heavygee-Projects/hapi-inline/issues/533)) ([886f453](https://github.com/Heavygee-Projects/hapi-inline/commit/886f45320084ffccd826a747fa56862a7968beb9))\n\n## [0.22.2](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.22.1...v0.22.2) (2026-10-14)\n\n\n### Bug Fixes\n\n* **dock:** clear CodeQL xss-through-dom on location.assign ([#514](https://github.com/Heavygee-Projects/hapi-inline/issues/514)) ([#516](https://github.com/Heavygee-Projects/hapi-inline/issues/516)) ([7eeae37](https://github.com/Heavygee-Projects/hapi-inline/commit/7eeae37c818f7a4d37c6e29ddbb2ed31e487d1c3))\n\n## [0.22.1](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.22.0...v0.22.1) (2026-10-14)\n\n\n### Bug Fixes\n\n* consumer-verify main guard through symlinks ([#507](https://github.com/Heavygee-Projects/hapi-inline/issues/507)) ([5ea33f7](https://github.com/Heavygee-Projects/hapi-inline/commit/5ea33f7c1a25fa350eb05a2385f8d7494c6dfce0)), closes [#506](https://github.com/Heavygee-Projects/hapi-inline/issues/506)\n* **dock:** harden Open in HAPI location.assign for CodeQL XSS ([#508](https://github.com/Heavygee-Projects/hapi-inline/issues/508)) ([1392e22](https://github.com/Heavygee-Projects/hapi-inline/commit/1392e223cc12ff249dee7bc7b025f4e0bce1f41f)), closes [#503](https://github.com/Heavygee-Projects/hapi-inline/issues/503)\n\n## [0.22.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.21.0...v0.22.0) (2026-10-14)\n\n\n### Features\n\n* **dock:** Open in HAPI control on replies header ([#499](https://github.com/Heavygee-Projects/hapi-inline/issues/499)) ([6ef8b10](https://github.com/Heavygee-Projects/hapi-inline/commit/6ef8b10e8738a0812cce865acc3832cdba1becdb))\n\n\n### Bug Fixes\n\n* **dock:** refresh replies title; never strand on New session ([#500](https://github.com/Heavygee-Projects/hapi-inline/issues/500)) ([6471f84](https://github.com/Heavygee-Projects/hapi-inline/commit/6471f84c33cf569c2eef0c13d68d8d68102f46e6))\n\n## [0.21.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.20.2...v0.21.0) (2026-10-13)\n\n\n### Features\n\n* **dock:** search filter on Project Sessions picker ([#493](https://github.com/Heavygee-Projects/hapi-inline/issues/493)) ([29c1654](https://github.com/Heavygee-Projects/hapi-inline/commit/29c1654d4139f5b25b53e8f25208a13197fcfb4f)), closes [#492](https://github.com/Heavygee-Projects/hapi-inline/issues/492)\n\n## [0.20.2](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.20.1...v0.20.2) (2026-10-12)\n\n\n### Bug Fixes\n\n* **android:** remint Compose hub JWT before exp and on STT 401 ([#489](https://github.com/Heavygee-Projects/hapi-inline/issues/489)) ([24741f0](https://github.com/Heavygee-Projects/hapi-inline/commit/24741f0985946b1e17bcae749b8764f9b75c6190)), closes [#488](https://github.com/Heavygee-Projects/hapi-inline/issues/488)\n\n\n### Documentation\n\n* remat tiers R/B/O and batch flush (--due) ([#485](https://github.com/Heavygee-Projects/hapi-inline/issues/485)) ([48669a4](https://github.com/Heavygee-Projects/hapi-inline/commit/48669a48f5c1ef894377e21316fd8af800722294))\n\n## [0.20.1](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.20.0...v0.20.1) (2026-10-12)\n\n\n### Bug Fixes\n\n* **dock:** route markup through AndroidOperator.requestMarkupCapture ([#474](https://github.com/Heavygee-Projects/hapi-inline/issues/474)) ([2c8e191](https://github.com/Heavygee-Projects/hapi-inline/commit/2c8e19172cf339fe317297cbd6830b1f447f6c60)), closes [#473](https://github.com/Heavygee-Projects/hapi-inline/issues/473)\n\n## [0.20.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.6...v0.20.0) (2026-10-12)\n\n\n### Features\n\n* **dock:** mic on replies interrupt composer ([#466](https://github.com/Heavygee-Projects/hapi-inline/issues/466)) ([#467](https://github.com/Heavygee-Projects/hapi-inline/issues/467)) ([5f42620](https://github.com/Heavygee-Projects/hapi-inline/commit/5f42620305d961d2787fb69eb267fa816c292ca3))\n\n## [0.19.6](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.5...v0.19.6) (2026-10-12)\n\n\n### Documentation\n\n* hubJwtProvider / getHubJwt must be hub JWT ([#460](https://github.com/Heavygee-Projects/hapi-inline/issues/460)) ([#461](https://github.com/Heavygee-Projects/hapi-inline/issues/461)) ([2e3d17c](https://github.com/Heavygee-Projects/hapi-inline/commit/2e3d17cfe4eabce680203c1ee096a3499f75ab08))\n\n## [0.19.5](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.4...v0.19.5) (2026-10-12)\n\n\n### Bug Fixes\n\n* **compose:** derive browser-hub STT when sttUrl is null ([#453](https://github.com/Heavygee-Projects/hapi-inline/issues/453)) ([7d51a9c](https://github.com/Heavygee-Projects/hapi-inline/commit/7d51a9c2e6a18e180ce7dcbca7a0c4112973422a))\n\n\n### Documentation\n\n* dock-spawned sessions are workers, not nested routers ([#443](https://github.com/Heavygee-Projects/hapi-inline/issues/443)) ([6337c9e](https://github.com/Heavygee-Projects/hapi-inline/commit/6337c9e0a1d54ae67a3ea122b16b007bc5f677b5)), closes [#442](https://github.com/Heavygee-Projects/hapi-inline/issues/442)\n\n## [0.19.4](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.3...v0.19.4) (2026-10-10)\n\n\n### Bug Fixes\n\n* **dock:** freeze host scroll before markup capture ([#439](https://github.com/Heavygee-Projects/hapi-inline/issues/439)) ([1dffa4d](https://github.com/Heavygee-Projects/hapi-inline/commit/1dffa4dd11a4da95990ea8064edd31feac450cb0)), closes [#437](https://github.com/Heavygee-Projects/hapi-inline/issues/437)\n\n## [0.19.3](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.2...v0.19.3) (2026-10-10)\n\n\n### Bug Fixes\n\n* **dock:** align markup capture to visible viewport ([#432](https://github.com/Heavygee-Projects/hapi-inline/issues/432)) ([bf92ad0](https://github.com/Heavygee-Projects/hapi-inline/commit/bf92ad0202b6f6231b237120806e5af5e3f5708f)), closes [#430](https://github.com/Heavygee-Projects/hapi-inline/issues/430)\n\n## [0.19.2](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.1...v0.19.2) (2026-10-10)\n\n\n### Bug Fixes\n\n* **dock:** keep relative /hapi through requestTarget sync ([#421](https://github.com/Heavygee-Projects/hapi-inline/issues/421)) ([200b9bc](https://github.com/Heavygee-Projects/hapi-inline/commit/200b9bcd02e634f57638ab92010813fc8cb6f561))\n\n## [0.19.1](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.0...v0.19.1) (2026-10-10)\n\n\n### Bug Fixes\n\n* **ci:** no-daemon Gradle + empty browser-hub fail-closed ([#425](https://github.com/Heavygee-Projects/hapi-inline/issues/425)) ([#426](https://github.com/Heavygee-Projects/hapi-inline/issues/426)) ([0239196](https://github.com/Heavygee-Projects/hapi-inline/commit/02391963824587609edb5d255b8ac5f893ab8cfc)), closes [#422](https://github.com/Heavygee-Projects/hapi-inline/issues/422)\n\n## [0.19.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.18.6...v0.19.0) (2026-10-10)\n\n\n### Features\n\n* **android:** Compose browser-hub remote hub URL ([#422](https://github.com/Heavygee-Projects/hapi-inline/issues/422)) ([#423](https://github.com/Heavygee-Projects/hapi-inline/issues/423)) ([93fa328](https://github.com/Heavygee-Projects/hapi-inline/commit/93fa3289008937f4d32e1a8e1493f9cdb9a569c4))\n";
+  var BUNDLED_CHANGELOG_FALLBACK = "## [0.23.1](https://github.com/heavygee/hapi-inline/compare/v0.23.0...v0.23.1) (2026-11-18)\n\n\n### Bug Fixes\n\n* **dock:** stop sticky 8-char hub id in replies chrome ([#576](https://github.com/heavygee/hapi-inline/issues/576)) ([dad1f3a](https://github.com/heavygee/hapi-inline/commit/dad1f3a279381e4951981f44cfc30de84cd6be13)), closes [#575](https://github.com/heavygee/hapi-inline/issues/575)\n\n## [0.23.0](https://github.com/heavygee/hapi-inline/compare/v0.22.4...v0.23.0) (2026-11-09)\n\n\n### Features\n\n* provisional short title on opmic spawn-per-send ([#567](https://github.com/heavygee/hapi-inline/issues/567)) ([6e041fe](https://github.com/heavygee/hapi-inline/commit/6e041fe2716862c994dc486d3bf370af04710d38)), closes [#566](https://github.com/heavygee/hapi-inline/issues/566)\n\n\n### Bug Fixes\n\n* **dock:** Android mic pendingShot uses PixelCopy, refuses near-black ([#570](https://github.com/heavygee/hapi-inline/issues/570)) ([900f994](https://github.com/heavygee/hapi-inline/commit/900f9944cc2f9acafeed4804ac073644703719ee)), closes [#569](https://github.com/heavygee/hapi-inline/issues/569)\n\n## [0.22.4](https://github.com/heavygee/hapi-inline/compare/v0.22.3...v0.22.4) (2026-10-27)\n\n\n### Bug Fixes\n\n* **dock:** fail closed on deleted pin session ([#558](https://github.com/heavygee/hapi-inline/issues/558)) ([e7abbf9](https://github.com/heavygee/hapi-inline/commit/e7abbf973abad004ac36335fb430f059ecae1990)), closes [#557](https://github.com/heavygee/hapi-inline/issues/557)\n\n\n### Documentation\n\n* remove mic-FAB exception; host shapes by technology ([#553](https://github.com/heavygee/hapi-inline/issues/553)) ([f913726](https://github.com/heavygee/hapi-inline/commit/f913726605bee5309416bb94e8bbdbba3ca761c2))\n\n## [0.22.3](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.22.2...v0.22.3) (2026-10-17)\n\n\n### Bug Fixes\n\n* **dock:** clear Send busy before native dismiss ([#531](https://github.com/Heavygee-Projects/hapi-inline/issues/531)) ([76999cb](https://github.com/Heavygee-Projects/hapi-inline/commit/76999cb92db99f67400eb06cff583a567c6f2def))\n* **dock:** fail closed on stale spawn machineId ([#535](https://github.com/Heavygee-Projects/hapi-inline/issues/535)) ([0f5a5cf](https://github.com/Heavygee-Projects/hapi-inline/commit/0f5a5cfcdd00fcb75114b8f3102b075bd28691ab))\n* **dock:** spinner on Send/mic until replies open ([#528](https://github.com/Heavygee-Projects/hapi-inline/issues/528)) ([985ee42](https://github.com/Heavygee-Projects/hapi-inline/commit/985ee429d1742cd408312fa2a401cdc9eca02ad6)), closes [#527](https://github.com/Heavygee-Projects/hapi-inline/issues/527)\n* **dock:** sweep orphan opdock-send--busy on clear ([#533](https://github.com/Heavygee-Projects/hapi-inline/issues/533)) ([886f453](https://github.com/Heavygee-Projects/hapi-inline/commit/886f45320084ffccd826a747fa56862a7968beb9))\n\n## [0.22.2](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.22.1...v0.22.2) (2026-10-14)\n\n\n### Bug Fixes\n\n* **dock:** clear CodeQL xss-through-dom on location.assign ([#514](https://github.com/Heavygee-Projects/hapi-inline/issues/514)) ([#516](https://github.com/Heavygee-Projects/hapi-inline/issues/516)) ([7eeae37](https://github.com/Heavygee-Projects/hapi-inline/commit/7eeae37c818f7a4d37c6e29ddbb2ed31e487d1c3))\n\n## [0.22.1](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.22.0...v0.22.1) (2026-10-14)\n\n\n### Bug Fixes\n\n* consumer-verify main guard through symlinks ([#507](https://github.com/Heavygee-Projects/hapi-inline/issues/507)) ([5ea33f7](https://github.com/Heavygee-Projects/hapi-inline/commit/5ea33f7c1a25fa350eb05a2385f8d7494c6dfce0)), closes [#506](https://github.com/Heavygee-Projects/hapi-inline/issues/506)\n* **dock:** harden Open in HAPI location.assign for CodeQL XSS ([#508](https://github.com/Heavygee-Projects/hapi-inline/issues/508)) ([1392e22](https://github.com/Heavygee-Projects/hapi-inline/commit/1392e223cc12ff249dee7bc7b025f4e0bce1f41f)), closes [#503](https://github.com/Heavygee-Projects/hapi-inline/issues/503)\n\n## [0.22.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.21.0...v0.22.0) (2026-10-14)\n\n\n### Features\n\n* **dock:** Open in HAPI control on replies header ([#499](https://github.com/Heavygee-Projects/hapi-inline/issues/499)) ([6ef8b10](https://github.com/Heavygee-Projects/hapi-inline/commit/6ef8b10e8738a0812cce865acc3832cdba1becdb))\n\n\n### Bug Fixes\n\n* **dock:** refresh replies title; never strand on New session ([#500](https://github.com/Heavygee-Projects/hapi-inline/issues/500)) ([6471f84](https://github.com/Heavygee-Projects/hapi-inline/commit/6471f84c33cf569c2eef0c13d68d8d68102f46e6))\n\n## [0.21.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.20.2...v0.21.0) (2026-10-13)\n\n\n### Features\n\n* **dock:** search filter on Project Sessions picker ([#493](https://github.com/Heavygee-Projects/hapi-inline/issues/493)) ([29c1654](https://github.com/Heavygee-Projects/hapi-inline/commit/29c1654d4139f5b25b53e8f25208a13197fcfb4f)), closes [#492](https://github.com/Heavygee-Projects/hapi-inline/issues/492)\n\n## [0.20.2](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.20.1...v0.20.2) (2026-10-12)\n\n\n### Bug Fixes\n\n* **android:** remint Compose hub JWT before exp and on STT 401 ([#489](https://github.com/Heavygee-Projects/hapi-inline/issues/489)) ([24741f0](https://github.com/Heavygee-Projects/hapi-inline/commit/24741f0985946b1e17bcae749b8764f9b75c6190)), closes [#488](https://github.com/Heavygee-Projects/hapi-inline/issues/488)\n\n\n### Documentation\n\n* remat tiers R/B/O and batch flush (--due) ([#485](https://github.com/Heavygee-Projects/hapi-inline/issues/485)) ([48669a4](https://github.com/Heavygee-Projects/hapi-inline/commit/48669a48f5c1ef894377e21316fd8af800722294))\n\n## [0.20.1](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.20.0...v0.20.1) (2026-10-12)\n\n\n### Bug Fixes\n\n* **dock:** route markup through AndroidOperator.requestMarkupCapture ([#474](https://github.com/Heavygee-Projects/hapi-inline/issues/474)) ([2c8e191](https://github.com/Heavygee-Projects/hapi-inline/commit/2c8e19172cf339fe317297cbd6830b1f447f6c60)), closes [#473](https://github.com/Heavygee-Projects/hapi-inline/issues/473)\n\n## [0.20.0](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.6...v0.20.0) (2026-10-12)\n\n\n### Features\n\n* **dock:** mic on replies interrupt composer ([#466](https://github.com/Heavygee-Projects/hapi-inline/issues/466)) ([#467](https://github.com/Heavygee-Projects/hapi-inline/issues/467)) ([5f42620](https://github.com/Heavygee-Projects/hapi-inline/commit/5f42620305d961d2787fb69eb267fa816c292ca3))\n\n## [0.19.6](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.5...v0.19.6) (2026-10-12)\n\n\n### Documentation\n\n* hubJwtProvider / getHubJwt must be hub JWT ([#460](https://github.com/Heavygee-Projects/hapi-inline/issues/460)) ([#461](https://github.com/Heavygee-Projects/hapi-inline/issues/461)) ([2e3d17c](https://github.com/Heavygee-Projects/hapi-inline/commit/2e3d17cfe4eabce680203c1ee096a3499f75ab08))\n\n## [0.19.5](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.4...v0.19.5) (2026-10-12)\n\n\n### Bug Fixes\n\n* **compose:** derive browser-hub STT when sttUrl is null ([#453](https://github.com/Heavygee-Projects/hapi-inline/issues/453)) ([7d51a9c](https://github.com/Heavygee-Projects/hapi-inline/commit/7d51a9c2e6a18e180ce7dcbca7a0c4112973422a))\n\n\n### Documentation\n\n* dock-spawned sessions are workers, not nested routers ([#443](https://github.com/Heavygee-Projects/hapi-inline/issues/443)) ([6337c9e](https://github.com/Heavygee-Projects/hapi-inline/commit/6337c9e0a1d54ae67a3ea122b16b007bc5f677b5)), closes [#442](https://github.com/Heavygee-Projects/hapi-inline/issues/442)\n\n## [0.19.4](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.3...v0.19.4) (2026-10-10)\n\n\n### Bug Fixes\n\n* **dock:** freeze host scroll before markup capture ([#439](https://github.com/Heavygee-Projects/hapi-inline/issues/439)) ([1dffa4d](https://github.com/Heavygee-Projects/hapi-inline/commit/1dffa4dd11a4da95990ea8064edd31feac450cb0)), closes [#437](https://github.com/Heavygee-Projects/hapi-inline/issues/437)\n\n## [0.19.3](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.2...v0.19.3) (2026-10-10)\n\n\n### Bug Fixes\n\n* **dock:** align markup capture to visible viewport ([#432](https://github.com/Heavygee-Projects/hapi-inline/issues/432)) ([bf92ad0](https://github.com/Heavygee-Projects/hapi-inline/commit/bf92ad0202b6f6231b237120806e5af5e3f5708f)), closes [#430](https://github.com/Heavygee-Projects/hapi-inline/issues/430)\n\n## [0.19.2](https://github.com/Heavygee-Projects/hapi-inline/compare/v0.19.1...v0.19.2) (2026-10-10)\n\n\n### Bug Fixes\n\n* **dock:** keep relative /hapi through requestTarget sync ([#421](https://github.com/Heavygee-Projects/hapi-inline/issues/421)) ([200b9bc](https://github.com/Heavygee-Projects/hapi-inline/commit/200b9bcd02e634f57638ab92010813fc8cb6f561))\n";
   /* END GENERATED bundled-changelog */
   function loadBundledChangelog() {
     if (bundledChangelogPromise) return bundledChangelogPromise;
@@ -5755,7 +5932,7 @@
 
   window.HapiInline = {
     init: init,
-    _version: '0.22.4', // x-release-please-version
+    _version: '0.23.1', // x-release-please-version
     openCluster: function () { return openCluster(); },
     /** #287 — host Settings can offer the same hide/show the dock sheet does. */
     hideForThisUser: function () { setUserHidden(true); hideDockChrome(); },
