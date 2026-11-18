@@ -109,18 +109,26 @@ See the caveat below before relying on `alert`.
 
 ---
 
-## Known defect: `alert` does not currently deliver notes either
+## What `alert` does and does not get you
 
 `alert` is documented as "hub surfaces the skew banner; operator upgrades
 manually" — the right tier for a host you want notified but not touched.
-Today it does not get you a changelog, because the policy governs what the hub
-*does* with an offer, not what the offer *contains*. Notes and tag still arrive
-only via the subscription overlay.
 
-So at present, "tell me but don't touch anything" yields a bare version number.
-That is **heavygee/hapi#335**: tag and notes should reach the offer regardless
-of channel and policy, with channel and policy gating only the apply. Until
-that lands, **A** is the way to get notes without granting upgrade rights.
+**On a host that has a materialised tip, `alert` works today**: it shows the
+notes and does not auto-apply. If you installed with the pet one-liner you are
+in this case already, because the seal subscription is on by default. Choosing
+`alert` is the correct way to get "tell me, let me decide" and you should not
+avoid it.
+
+The gap is narrower than it first appears. Policy governs what the hub *does*
+with an offer, not what the offer *contains*, and tag plus notes are added by
+an overlay that reads a materialised tip. So on a host with **no tip at all**,
+no policy value helps — `alert` yields a bare version number there. That is
+**heavygee/hapi#335**: tag and notes should reach the offer irrespective of
+channel and policy, with channel and policy gating only the apply.
+
+Until that lands, **A** is how an unsubscribed host gets notes without granting
+any upgrade rights.
 
 ---
 
