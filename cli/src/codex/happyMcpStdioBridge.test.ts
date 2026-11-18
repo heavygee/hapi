@@ -192,6 +192,38 @@ describe('runHappyMcpStdioBridge tool forwarding', () => {
             'inspect_peer'
         ])
     })
+    it('registers and forwards link_issue when included in --tools', async () => {
+        await runHappyMcpStdioBridge([
+            '--url',
+            'http://127.0.0.1:43006',
+            '--tools',
+            'change_title,link_issue'
+        ])
+
+        expect([...harness.tools.keys()]).toEqual(['change_title', 'link_issue'])
+
+        const handler = harness.tools.get('link_issue')
+        await expect(handler?.({ url: 'heavygee/hapi#235' })).resolves.toEqual({
+            content: [{ type: 'text', text: 'forwarded' }],
+            isError: false
+        })
+        expect(harness.callTool).toHaveBeenCalledWith({
+            name: 'link_issue',
+            arguments: { url: 'heavygee/hapi#235' }
+        })
+    })
+
+    it('keeps link_issue hidden when the upstream HTTP server does not enable it', async () => {
+        await runHappyMcpStdioBridge([
+            '--url',
+            'http://127.0.0.1:43006',
+            '--tools',
+            'change_title'
+        ])
+
+        expect([...harness.tools.keys()]).toEqual(['change_title'])
+    })
+
     it('registers spawn_peer when included in --tools', async () => {
         await runHappyMcpStdioBridge([
             '--url',
@@ -253,6 +285,7 @@ describe('runHappyMcpStdioBridge tool forwarding', () => {
 
         expect([...harness.tools.keys()]).toEqual([
             'change_title',
+            'link_issue',
             'display_image',
             'display_video',
             'display_media',
@@ -274,6 +307,7 @@ describe('runHappyMcpStdioBridge tool forwarding', () => {
             // session_job is own-session — kept when peer tools are stripped.
             expect([...harness.tools.keys()]).toEqual([
                 'change_title',
+                'link_issue',
                 'display_image',
                 'display_video',
                 'display_media',
