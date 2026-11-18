@@ -12,6 +12,7 @@ import {
     upsertGithubPrIntoExternalRefs
 } from '@hapi/protocol'
 import { getConfiguration } from '../../configuration'
+import { readAgentTitlePolicy } from '../../config/agentTitlePolicy'
 import { readAutoBridgeTransientModelErrorsEnabled } from '../../config/autoBridgeTransientModelErrors'
 import { readSessionSummaryContractEnabled } from '../../config/sessionSummaryContract'
 import { stripExternalRefsWhenAwarenessDisabled, externalRefsInMetadataValid } from '../../sync/externalRefsPolicy'
@@ -177,7 +178,8 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
             const autoBridgeTransientModelErrors = namespace === 'default'
                 ? await readAutoBridgeTransientModelErrorsEnabled(dataDir)
                 : false
-            return c.json({ session, sessionSummaryContract, autoBridgeTransientModelErrors })
+            const agentTitlePolicy = await readAgentTitlePolicy(dataDir)
+            return c.json({ session, sessionSummaryContract, autoBridgeTransientModelErrors, agentTitlePolicy })
         } catch (error) {
             if (error instanceof SessionIdentityConflictError) {
                 return c.json({ error: error.message }, 409)
@@ -381,10 +383,12 @@ app.post('/sessions/:id/prepare-local-resume', async (c) => {
         const autoBridgeTransientModelErrors = namespace === 'default'
             ? await readAutoBridgeTransientModelErrorsEnabled(dataDir)
             : false
+        const agentTitlePolicy = await readAgentTitlePolicy(dataDir)
         return c.json({
             session: resolved.session,
             sessionSummaryContract,
-            autoBridgeTransientModelErrors
+            autoBridgeTransientModelErrors,
+            agentTitlePolicy
         })
     })
 

@@ -368,7 +368,7 @@ Source: `hub/src/web/routes/hubSettings.ts`.
 
 | Method & path | Response |
 |---|---|
-| `GET /api/hub-settings` | `{sessionSummaryContract: boolean, sessionSummaryInChat: boolean}` — readable by any namespace |
+| `GET /api/hub-settings` | `{sessionSummaryContract: boolean, sessionSummaryInChat: boolean, autoBridgeTransientModelErrors: boolean, agentTitlePolicy: 'allow_rename'\|'name_once', peerSpawnDefaults}` — readable by any namespace |
 
 ### SSE
 
@@ -405,6 +405,13 @@ preserves the existing name/summary fields. A manual rename alone does not lock 
 session. Agent metadata writes cannot set or clear this flag. While locked, the
 Hub preserves both `name` and `summary` across agent writes; user title saves
 remain allowed. Unlocking preserves the current title until a future update.
+
+Owner hub setting `agentTitlePolicy` (`allow_rename` default, or `name_once`)
+controls naming vs renaming. Under `name_once`, the Hub auto-sets `titleLocked`
+after the first durable title (`name` / `summary.text`; not provisional
+`promptTitle`), including spawn names and user renames that omit an explicit
+unlock. Agents cannot clear the lock; unlocking still allows one more agent
+title write, which then re-locks.
 
 `metadata.promptTitle` is an optional, Hub-owned provisional title: the first
 non-command user prompt, with whitespace collapsed and capped at 80 characters.

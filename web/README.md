@@ -75,6 +75,13 @@ Save applies the title and lock together; Cancel discards both changes. Unlockin
 allows future agent title updates without immediately changing the current title.
 The Hub persists and enforces the lock across clients, restarts, and resume.
 
+### Agent title policy (hub Settings → General)
+
+Owner hub setting `agentTitlePolicy` (`allow_rename` default, or `name_once`).
+`name_once` auto-locks after the first durable title (`metadata.name` /
+`summary.text` — not provisional `promptTitle`), so agents cannot keep renaming.
+Per-session padlock unlock remains the escape hatch for a bad spawn name.
+
 ### Chat interface (`src/components/SessionChat.tsx`)
 
 - Message thread with infinite scroll.

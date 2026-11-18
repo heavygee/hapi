@@ -149,6 +149,37 @@ export default function SettingsGeneralPage() {
             ) : null}
             {isOwner ? (
                 <SettingsSection
+                    title={t('settings.general.agentTitlePolicy.title')}
+                    description={t('settings.general.agentTitlePolicy.description')}
+                >
+                    {hubSettingsQuery.data ? (
+                        <SettingsChoiceGroup
+                            hideLabel
+                            label={t('settings.general.agentTitlePolicy.title')}
+                            description={t('settings.general.agentTitlePolicy.desc')}
+                            value={hubSettingsQuery.data.agentTitlePolicy}
+                            options={[
+                                {
+                                    value: 'allow_rename',
+                                    label: t('settings.general.agentTitlePolicy.allow_rename')
+                                },
+                                {
+                                    value: 'name_once',
+                                    label: t('settings.general.agentTitlePolicy.name_once')
+                                }
+                            ]}
+                            onChange={(policy) => {
+                                if (hubSettingsMutation.isPending) return
+                                hubSettingsMutation.mutate({
+                                    agentTitlePolicy: policy as 'allow_rename' | 'name_once'
+                                })
+                            }}
+                        />
+                    ) : null}
+                </SettingsSection>
+            ) : null}
+            {isOwner ? (
+                <SettingsSection
                     title={t('settings.general.agents.title')}
                     description={t('settings.general.agents.description')}
                 >

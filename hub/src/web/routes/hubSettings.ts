@@ -2,6 +2,11 @@ import { Hono } from 'hono'
 import { UpdateHubSettingsRequestSchema, type HubSettingsResponse } from '@hapi/protocol'
 import { mergePeerSpawnDefaults } from '@hapi/protocol/peerSpawnDefaults'
 import {
+    agentTitlePolicyFromSettings,
+    applyAgentTitlePolicyRuntime,
+    normalizeAgentTitlePolicy
+} from '../../config/agentTitlePolicy'
+import {
     getSettingsFile,
     readSettingsOrThrowCached,
     updateSettings,
@@ -15,10 +20,13 @@ import type { WebAppEnv } from '../middleware/auth'
 const OWNER_ONLY_ERROR = 'Hub settings are only available to the hub owner'
 
 function toHubSettings(settings: Settings): HubSettingsResponse {
+    const agentTitlePolicy = agentTitlePolicyFromSettings(settings)
+    applyAgentTitlePolicyRuntime(agentTitlePolicy)
     return {
         sessionSummaryContract: settings.sessionSummaryContract === true,
         sessionSummaryInChat: settings.sessionSummaryInChat === true,
         autoBridgeTransientModelErrors: settings.autoBridgeTransientModelErrors === true,
+        agentTitlePolicy,
         peerSpawnDefaults: mergePeerSpawnDefaults(settings.peerSpawnDefaults)
     }
 }
@@ -49,7 +57,8 @@ export function createHubSettingsRoutes(
         const providedFieldCount = [
             parsed.data.sessionSummaryContract,
             parsed.data.sessionSummaryInChat,
-            parsed.data.autoBridgeTransientModelErrors
+            parsed.data.autoBridgeTransientModelErrors,
+            parsed.data.agentTitlePolicy
         ].filter((value) => value !== undefined).length
         if (providedFieldCount > 1) {
             return c.json({ error: 'Update one hub setting per request' }, 400)
@@ -84,6 +93,9 @@ export function createHubSettingsRoutes(
             }
             if (parsed.data.sessionSummaryInChat !== undefined) {
                 settings.sessionSummaryInChat = parsed.data.sessionSummaryInChat
+            }
+            if (parsed.data.agentTitlePolicy !== undefined) {
+                settings.agentTitlePolicy = normalizeAgentTitlePolicy(parsed.data.agentTitlePolicy)
             }
             if (parsed.data.peerSpawnDefaults !== undefined) {
                 settings.peerSpawnDefaults = applyPeerSpawnDefaultsPatch(

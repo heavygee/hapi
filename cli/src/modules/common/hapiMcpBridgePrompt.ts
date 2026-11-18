@@ -1,4 +1,5 @@
 import { trimIdent } from '@/utils/trimIdent';
+import { buildAgentTitleSteer, isNameOnceAgentTitlePolicy } from '@/modules/common/agentTitlePolicy';
 
 /** Shell fallback for `hapi doctor inline-media` only — not injected into agent prompts. */
 export const INLINE_MEDIA_SHELL_FALLBACK = trimIdent(`
@@ -9,10 +10,16 @@ export const INLINE_MEDIA_SHELL_FALLBACK = trimIdent(`
 `);
 
 /**
- * Title instructions for OpenCode first-prompt /
+ * Default (allow_rename) title instructions for OpenCode first-prompt /
  * hapi-instructions.md. Cursor uses native MCP overlay + tool descriptions instead
  * (no user-turn prepend — that path was prompt-taint).
  */
 export const HAPI_MCP_BRIDGE_PROMPT = trimIdent(`
     Use the title tool sparingly. For a new chat, call the tool "hapi_change_title" once after the user's initial request is clear, and set a concise task title. Do not rename the chat for routine progress, substeps, implementation details, or a slightly better wording. Rename only when the user's primary objective changes substantially and the existing title would be misleading.
 `);
+
+/** Resolve title steer for the active hub/env agentTitlePolicy (tiann/hapi#271). */
+export function getHapiMcpBridgePrompt(env: NodeJS.ProcessEnv = process.env): string {
+    if (!isNameOnceAgentTitlePolicy(env)) return HAPI_MCP_BRIDGE_PROMPT
+    return trimIdent(buildAgentTitleSteer('hapi_change_title', env))
+}

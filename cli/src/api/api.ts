@@ -2,6 +2,7 @@ import axios from 'axios'
 import { randomUUID } from 'node:crypto'
 import { DEFAULT_RPC_TIMEOUT_MS, type SessionStopPreparationLease } from '@hapi/protocol/rpcMethods'
 import type { AgentState, ClearOpencodeSessionCallbackRequest, ClearOpencodeSessionResponse, CreateMachineResponse, CreateSessionResponse, RunnerState, Machine, MachineMetadata, Metadata, Session } from '@/api/types'
+import { applyHubAgentTitlePolicy } from '@/modules/common/agentTitlePolicy'
 import { applyHubSessionSummaryContract } from '@/modules/common/sessionSummaryInstruction'
 import { setAutoBridgeTransientModelErrors } from '@/cursor/cursorModelErrorBridgePrefs'
 import type { LocalResumeTarget, LocalResumeTargetByAgentResponse, ResumableSession } from '@hapi/protocol'
@@ -125,6 +126,9 @@ export class ApiClient {
         if (typeof parsed.data.autoBridgeTransientModelErrors === 'boolean') {
             setAutoBridgeTransientModelErrors(parsed.data.autoBridgeTransientModelErrors)
         }
+        if (parsed.data.agentTitlePolicy === 'name_once' || parsed.data.agentTitlePolicy === 'allow_rename') {
+            applyHubAgentTitlePolicy(parsed.data.agentTitlePolicy)
+        }
 
         const raw = parsed.data.session
 
@@ -183,6 +187,9 @@ export class ApiClient {
         }
         if (typeof parsed.data.autoBridgeTransientModelErrors === 'boolean') {
             setAutoBridgeTransientModelErrors(parsed.data.autoBridgeTransientModelErrors)
+        }
+        if (parsed.data.agentTitlePolicy === 'name_once' || parsed.data.agentTitlePolicy === 'allow_rename') {
+            applyHubAgentTitlePolicy(parsed.data.agentTitlePolicy)
         }
 
         const raw = parsed.data.session

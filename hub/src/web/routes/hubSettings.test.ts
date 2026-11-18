@@ -42,6 +42,7 @@ describe('GET/PUT /api/hub-settings', () => {
             sessionSummaryContract: false,
             sessionSummaryInChat: false,
             autoBridgeTransientModelErrors: false,
+            agentTitlePolicy: 'allow_rename',
             peerSpawnDefaults: stockPeerSpawnDefaults
         })
     })
@@ -58,6 +59,7 @@ describe('GET/PUT /api/hub-settings', () => {
             sessionSummaryContract: true,
             sessionSummaryInChat: false,
             autoBridgeTransientModelErrors: false,
+            agentTitlePolicy: 'allow_rename',
             peerSpawnDefaults: stockPeerSpawnDefaults
         })
 
@@ -66,6 +68,7 @@ describe('GET/PUT /api/hub-settings', () => {
             sessionSummaryContract: true,
             sessionSummaryInChat: false,
             autoBridgeTransientModelErrors: false,
+            agentTitlePolicy: 'allow_rename',
             peerSpawnDefaults: stockPeerSpawnDefaults
         })
     })
@@ -84,6 +87,7 @@ describe('GET/PUT /api/hub-settings', () => {
             sessionSummaryContract: true,
             sessionSummaryInChat: true,
             autoBridgeTransientModelErrors: false,
+            agentTitlePolicy: 'allow_rename',
             peerSpawnDefaults: stockPeerSpawnDefaults
         })
     })
@@ -100,8 +104,28 @@ describe('GET/PUT /api/hub-settings', () => {
             sessionSummaryContract: false,
             sessionSummaryInChat: false,
             autoBridgeTransientModelErrors: true,
+            agentTitlePolicy: 'allow_rename',
             peerSpawnDefaults: stockPeerSpawnDefaults
         })
+    })
+
+    it('persists agentTitlePolicy name_once for owner', async () => {
+        const { app } = await createApp()
+        const put = await app.request('/api/hub-settings', {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ agentTitlePolicy: 'name_once' })
+        })
+        expect(put.status).toBe(200)
+        expect(await put.json()).toEqual({
+            sessionSummaryContract: false,
+            sessionSummaryInChat: false,
+            autoBridgeTransientModelErrors: false,
+            agentTitlePolicy: 'name_once',
+            peerSpawnDefaults: stockPeerSpawnDefaults
+        })
+        const get = await app.request('/api/hub-settings')
+        expect(await get.json()).toMatchObject({ agentTitlePolicy: 'name_once' })
     })
 
     it('persists peer spawn defaults', async () => {
@@ -122,6 +146,7 @@ describe('GET/PUT /api/hub-settings', () => {
             sessionSummaryContract: false,
             sessionSummaryInChat: false,
             autoBridgeTransientModelErrors: false,
+            agentTitlePolicy: 'allow_rename',
             peerSpawnDefaults: {
                 agent: 'cursor',
                 permissionMode: 'yolo',
@@ -163,6 +188,7 @@ describe('GET/PUT /api/hub-settings', () => {
             sessionSummaryContract: false,
             sessionSummaryInChat: false,
             autoBridgeTransientModelErrors: false,
+            agentTitlePolicy: 'allow_rename',
             peerSpawnDefaults: {
                 agent: 'codex',
                 permissionMode: 'default',
@@ -236,6 +262,7 @@ describe('GET/PUT /api/hub-settings', () => {
             sessionSummaryContract: false,
             sessionSummaryInChat: true,
             autoBridgeTransientModelErrors: false,
+            agentTitlePolicy: 'allow_rename',
             peerSpawnDefaults: stockPeerSpawnDefaults
         })
 
@@ -257,6 +284,7 @@ describe('GET/PUT /api/hub-settings', () => {
             sessionSummaryContract: true,
             sessionSummaryInChat: true,
             autoBridgeTransientModelErrors: true,
+            agentTitlePolicy: 'allow_rename',
             peerSpawnDefaults: stockPeerSpawnDefaults
         })
     })
