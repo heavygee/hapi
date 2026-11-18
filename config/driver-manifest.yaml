@@ -1561,12 +1561,13 @@ layers:
   # in soup). Worktree: ~/coding/hapi/worktrees/2296-presence-badges
   # Upstream review of #2296 does not require this layer — proceeds independently.
 
-  # 2026-11-18 tiann/hapi#271 — Settings agentTitlePolicy name-once vs allow-rename.
-  # Thin tip on soup HEAD 360c9d58d: driver/agent-title-name-once @ 0f0c452f1
-  # Hub+cli+shared+web → remat --build-web --verify + hapi-restart-hub (hub/cli/shared).
+  # 2026-11-18 tiann/hapi#271 - Settings agentTitlePolicy name-once vs allow-rename.
+  # Thin tip on soup HEAD 360c9d58d: driver/agent-title-name-once @ c32d363ca
+  # (+ refine-survival test; re-thin after fork absorb lands autoBridgeTransientModelErrors).
+  # Hub+cli+shared+web -> remat --build-web --verify + hapi-restart-hub (hub/cli/shared).
   # Tip-unique: agentTitlePolicy / settings.general.agentTitlePolicy
   # Worktree: ~/coding/hapi/worktrees/agent-title-name-once
-  # Upstream PR after operator dogfood on :3006 (feat/agent-title-name-once @ 3e522744a).
+  # Upstream PR after operator dogfood on :3006 (feat/agent-title-name-once @ 313d956fa).
   - branch: driver/agent-title-name-once
     sentinel: agentTitlePolicy
     sentinel_path: shared/src/apiTypes.ts
