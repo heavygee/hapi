@@ -576,16 +576,12 @@ layers:
   # PR #947 (also Closes #1129 — bare ACP catalog + nested variant drill-down).
   # On upstream/main @ 3c83fe58c; next rematerialize picks it up from base.
 
-  # tiann/hapi#1160/#1161/#1162/#1163 — opt-in GitHub PR awareness + session↔PR
-  # attach (externalRefs chip, Settings toggle, hapi link-pr, MCP link_pr).
-  # Tip 2026-07-29: ac95f9f65 on soup (driver HEAD 9d506f30e). Remat stacked after
-  # cursor-picker as d0a3d6473 (not 12814cf6b — hashes differ across remat runs).
-  # Fat bak: backup/github-pr-awareness-b9b488ed0 (+ backup/github-pr-awareness-fat-pre1195remake).
-  # Drop when #1161+#1163 land upstream. Enable Settings → General → GitHub PR awareness
-  # (or HAPI_GITHUB_PR_AWARENESS=1). Meta: hapi-meta-daily --backfill-refs.
-  # UNPARKED 2026-07-28 (meta): chips restored after accidental remake park — do NOT
-  # park this layer again to unblock rematerialize; re-thin in place instead.
-  - branch: driver/github-pr-awareness
+  # DROPPED 2026-11-18: driver/github-pr-awareness MERGED UPSTREAM as
+  # tiann/hapi#1163 (squash merge e55d29c056 — opt-in GitHub PR awareness +
+  # session↔PR attach; #1160/#1161 closed into this PR). Fat bak refs retained
+  # as backup/github-pr-awareness-* only. Feature is on upstream/main; next
+  # rematerialize picks it up from base. Do not re-enable this layer.
+  # - branch: driver/github-pr-awareness
 
   # DROPPED 2026-07-29: feat/session-at-mention-autocomplete MERGED as tiann/hapi#1217 (tip 0c8a34e1a / merge e32fe146c).
 
