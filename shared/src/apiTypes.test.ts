@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest'
 import {
     ClearOpencodeSessionCallbackRequestSchema,
     ClearOpencodeSessionResponseSchema,
+    HubSettingsResponseSchema,
     ListCodexSessionsRpcResponseSchema,
     ListPiSessionsRpcResponseSchema,
     MessagesQuerySchema,
     SendMessageRequestSchema,
+    UpdateHubSettingsRequestSchema,
     isSessionId
 } from './apiTypes'
 
@@ -152,6 +154,71 @@ describe('isSessionId', () => {
         expect(isSessionId('6212dae5-8a60-4284-b7a5-c09aa3571ce4')).toBe(true)
         expect(isSessionId('not-a-uuid')).toBe(false)
         expect(isSessionId('')).toBe(false)
+    })
+})
+
+/**
+ * Silent-merge guard for HubSettings update refine (tiann/hapi#271).
+ * Fork absorb can auto-merge `apiTypes.ts` while dropping one adjacent
+ * `|| data.<field> !== undefined` clause — clean build, one setting stops
+ * round-tripping. Every shape key must alone satisfy the refine; when both
+ * agentTitlePolicy and autoBridgeTransientModelErrors exist, both must.
+ */
+describe('UpdateHubSettingsRequestSchema refine survival', () => {
+    const sampleByField: Record<string, unknown> = {
+        sessionSummaryContract: true,
+        sessionSummaryInChat: true,
+        autoBridgeTransientModelErrors: true,
+        agentTitlePolicy: 'name_once',
+        peerSpawnDefaults: { agent: 'claude' },
+        sessionStartTimeoutMs: 60_000
+    }
+
+    it('rejects an empty patch', () => {
+        expect(UpdateHubSettingsRequestSchema.safeParse({}).success).toBe(false)
+    })
+
+    it('accepts every declared update field alone', () => {
+        const fields = Object.keys(UpdateHubSettingsRequestSchema.shape)
+        expect(fields.length).toBeGreaterThan(0)
+        for (const field of fields) {
+            const sample = sampleByField[field]
+            expect(sample, `missing sample for UpdateHubSettings field ${field}`).toBeDefined()
+            const parsed = UpdateHubSettingsRequestSchema.safeParse({ [field]: sample })
+            expect(parsed.success, `refine dropped lone field ${field}`).toBe(true)
+            if (parsed.success) {
+                expect(parsed.data).toEqual({ [field]: sample })
+            }
+        }
+    })
+
+    it('keeps agentTitlePolicy and autoBridgeTransientModelErrors when both exist', () => {
+        const updateFields = new Set(Object.keys(UpdateHubSettingsRequestSchema.shape))
+        const responseFields = new Set(Object.keys(HubSettingsResponseSchema.shape))
+        const hasTitle = updateFields.has('agentTitlePolicy')
+        const hasBridge = updateFields.has('autoBridgeTransientModelErrors')
+
+        expect(hasTitle).toBe(true)
+        expect(responseFields.has('agentTitlePolicy')).toBe(true)
+
+        expect(UpdateHubSettingsRequestSchema.safeParse({
+            agentTitlePolicy: 'name_once'
+        }).success).toBe(true)
+
+        // Present after upstream absorb / on feat tip; absent on pre-absorb soup.
+        if (!hasBridge) {
+            expect(responseFields.has('autoBridgeTransientModelErrors')).toBe(false)
+            return
+        }
+
+        expect(responseFields.has('autoBridgeTransientModelErrors')).toBe(true)
+        expect(UpdateHubSettingsRequestSchema.safeParse({
+            autoBridgeTransientModelErrors: true
+        }).success).toBe(true)
+        expect(UpdateHubSettingsRequestSchema.safeParse({
+            agentTitlePolicy: 'name_once',
+            autoBridgeTransientModelErrors: true
+        }).success).toBe(true)
     })
 })
 
