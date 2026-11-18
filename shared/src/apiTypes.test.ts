@@ -160,7 +160,7 @@ describe('isSessionId', () => {
 /**
  * Silent-merge guard for HubSettings update refine (tiann/hapi#271).
  * Fork absorb can auto-merge `apiTypes.ts` while dropping one adjacent
- * `|| data.<field> !== undefined` clause — clean build, one setting stops
+ * `|| data.<field> !== undefined` clause - clean build, one setting stops
  * round-tripping. Every shape key must alone satisfy the refine; when both
  * agentTitlePolicy and autoBridgeTransientModelErrors exist, both must.
  */
