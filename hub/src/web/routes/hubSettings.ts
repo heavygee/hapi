@@ -2,6 +2,11 @@ import { Hono } from 'hono'
 import { UpdateHubSettingsRequestSchema, clampSessionStartTimeoutMs, type HubSettingsResponse } from '@hapi/protocol'
 import { mergePeerSpawnDefaults } from '@hapi/protocol/peerSpawnDefaults'
 import {
+    agentTitlePolicyFromSettings,
+    applyAgentTitlePolicyRuntime,
+    normalizeAgentTitlePolicy
+} from '../../config/agentTitlePolicy'
+import {
     getSettingsFile,
     readSettingsOrThrowCached,
     updateSettings,
@@ -13,9 +18,12 @@ import type { WebAppEnv } from '../middleware/auth'
 const OWNER_ONLY_ERROR = 'Hub settings are only available to the hub owner'
 
 function toHubSettings(settings: Settings): HubSettingsResponse {
+    const agentTitlePolicy = agentTitlePolicyFromSettings(settings)
+    applyAgentTitlePolicyRuntime(agentTitlePolicy)
     return {
         sessionSummaryContract: settings.sessionSummaryContract === true,
         sessionSummaryInChat: settings.sessionSummaryInChat === true,
+        agentTitlePolicy,
         peerSpawnDefaults: mergePeerSpawnDefaults(settings.peerSpawnDefaults),
         sessionStartTimeoutMs: clampSessionStartTimeoutMs(settings.sessionStartTimeoutMs)
     }
@@ -48,6 +56,9 @@ export function createHubSettingsRoutes(dataDir: string): Hono<WebAppEnv> {
             }
             if (parsed.data.sessionSummaryInChat !== undefined) {
                 settings.sessionSummaryInChat = parsed.data.sessionSummaryInChat
+            }
+            if (parsed.data.agentTitlePolicy !== undefined) {
+                settings.agentTitlePolicy = normalizeAgentTitlePolicy(parsed.data.agentTitlePolicy)
             }
             if (parsed.data.peerSpawnDefaults !== undefined) {
                 settings.peerSpawnDefaults = applyPeerSpawnDefaultsPatch(

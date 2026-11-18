@@ -31,6 +31,7 @@ const { context, navigate, setAppearance, setColorTheme, setFontScale, setTermin
 const hubSettingsFixture = {
     sessionSummaryContract: false,
     sessionSummaryInChat: false,
+    agentTitlePolicy: 'allow_rename' as const,
     peerSpawnDefaults: {
         agent: 'claude' as const,
         permissionMode: 'bypassPermissions' as const,

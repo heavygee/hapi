@@ -1,5 +1,6 @@
 import axios from 'axios'
 import type { AgentState, ClearOpencodeSessionCallbackRequest, ClearOpencodeSessionResponse, CreateMachineResponse, CreateSessionResponse, RunnerState, Machine, MachineMetadata, Metadata, Session } from '@/api/types'
+import { applyHubAgentTitlePolicy } from '@/modules/common/agentTitlePolicy'
 import { applyHubSessionSummaryContract } from '@/modules/common/sessionSummaryInstruction'
 import { applyVoiceModePreference } from '@/modules/common/voiceModeInstruction'
 import type { LocalResumeTarget, LocalResumeTargetByAgentResponse, ResumableSession } from '@hapi/protocol'
@@ -167,6 +168,9 @@ export class ApiClient {
         if (typeof parsed.data.sessionSummaryContract === 'boolean') {
             applyHubSessionSummaryContract(parsed.data.sessionSummaryContract)
         }
+        if (parsed.data.agentTitlePolicy === 'name_once' || parsed.data.agentTitlePolicy === 'allow_rename') {
+            applyHubAgentTitlePolicy(parsed.data.agentTitlePolicy)
+        }
 
         const raw = parsed.data.session
 
@@ -227,6 +231,9 @@ export class ApiClient {
 
         if (typeof parsed.data.sessionSummaryContract === 'boolean') {
             applyHubSessionSummaryContract(parsed.data.sessionSummaryContract)
+        }
+        if (parsed.data.agentTitlePolicy === 'name_once' || parsed.data.agentTitlePolicy === 'allow_rename') {
+            applyHubAgentTitlePolicy(parsed.data.agentTitlePolicy)
         }
 
         const raw = parsed.data.session

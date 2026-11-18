@@ -42,6 +42,7 @@ describe('GET/PUT /api/hub-settings', () => {
         expect(await response.json()).toEqual({
             sessionSummaryContract: false,
             sessionSummaryInChat: false,
+            agentTitlePolicy: 'allow_rename',
             peerSpawnDefaults: stockPeerSpawnDefaults,
             sessionStartTimeoutMs: null
         })
@@ -58,6 +59,7 @@ describe('GET/PUT /api/hub-settings', () => {
         expect(await put.json()).toEqual({
             sessionSummaryContract: true,
             sessionSummaryInChat: false,
+            agentTitlePolicy: 'allow_rename',
             peerSpawnDefaults: stockPeerSpawnDefaults,
             sessionStartTimeoutMs: null
         })
@@ -66,6 +68,7 @@ describe('GET/PUT /api/hub-settings', () => {
         expect(await get.json()).toEqual({
             sessionSummaryContract: true,
             sessionSummaryInChat: false,
+            agentTitlePolicy: 'allow_rename',
             peerSpawnDefaults: stockPeerSpawnDefaults,
             sessionStartTimeoutMs: null
         })
@@ -84,9 +87,23 @@ describe('GET/PUT /api/hub-settings', () => {
         expect(await put.json()).toEqual({
             sessionSummaryContract: true,
             sessionSummaryInChat: true,
+            agentTitlePolicy: 'allow_rename',
             peerSpawnDefaults: stockPeerSpawnDefaults,
             sessionStartTimeoutMs: null
         })
+    })
+
+    it('persists agentTitlePolicy name_once for owner', async () => {
+        const { app } = await createApp()
+        const put = await app.request('/api/hub-settings', {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ agentTitlePolicy: 'name_once' })
+        })
+        expect(put.status).toBe(200)
+        expect(await put.json()).toMatchObject({ agentTitlePolicy: 'name_once' })
+        const get = await app.request('/api/hub-settings')
+        expect(await get.json()).toMatchObject({ agentTitlePolicy: 'name_once' })
     })
 
     it('persists peer spawn defaults', async () => {
@@ -106,6 +123,7 @@ describe('GET/PUT /api/hub-settings', () => {
         expect(await put.json()).toEqual({
             sessionSummaryContract: false,
             sessionSummaryInChat: false,
+            agentTitlePolicy: 'allow_rename',
             peerSpawnDefaults: {
                 agent: 'cursor',
                 permissionMode: 'yolo',
@@ -154,6 +172,7 @@ describe('GET/PUT /api/hub-settings', () => {
         expect(await get.json()).toEqual({
             sessionSummaryContract: false,
             sessionSummaryInChat: true,
+            agentTitlePolicy: 'allow_rename',
             peerSpawnDefaults: stockPeerSpawnDefaults,
             sessionStartTimeoutMs: null
         })
@@ -178,6 +197,7 @@ describe('GET/PUT /api/hub-settings', () => {
         expect(await put.json()).toEqual({
             sessionSummaryContract: false,
             sessionSummaryInChat: false,
+            agentTitlePolicy: 'allow_rename',
             peerSpawnDefaults: stockPeerSpawnDefaults,
             sessionStartTimeoutMs: 60_000
         })
@@ -186,6 +206,7 @@ describe('GET/PUT /api/hub-settings', () => {
         expect(await get.json()).toEqual({
             sessionSummaryContract: false,
             sessionSummaryInChat: false,
+            agentTitlePolicy: 'allow_rename',
             peerSpawnDefaults: stockPeerSpawnDefaults,
             sessionStartTimeoutMs: 60_000
         })
@@ -198,6 +219,7 @@ describe('GET/PUT /api/hub-settings', () => {
         expect(await cleared.json()).toEqual({
             sessionSummaryContract: false,
             sessionSummaryInChat: false,
+            agentTitlePolicy: 'allow_rename',
             peerSpawnDefaults: stockPeerSpawnDefaults,
             sessionStartTimeoutMs: null
         })
@@ -234,6 +256,7 @@ describe('GET/PUT /api/hub-settings', () => {
         expect(await response.json()).toEqual({
             sessionSummaryContract: true,
             sessionSummaryInChat: true,
+            agentTitlePolicy: 'allow_rename',
             peerSpawnDefaults: stockPeerSpawnDefaults,
             sessionStartTimeoutMs: null
         })

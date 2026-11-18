@@ -155,6 +155,28 @@ export default function SettingsGeneralPage() {
                                     hubSettingsMutation.mutate({ sessionSummaryInChat: checked })
                                 }}
                             />
+                            <SettingsChoiceGroup
+                                hideLabel
+                                label={t('settings.general.agentTitlePolicy.title')}
+                                description={t('settings.general.agentTitlePolicy.desc')}
+                                value={hubSettingsQuery.data.agentTitlePolicy}
+                                options={[
+                                    {
+                                        value: 'allow_rename',
+                                        label: t('settings.general.agentTitlePolicy.allow_rename')
+                                    },
+                                    {
+                                        value: 'name_once',
+                                        label: t('settings.general.agentTitlePolicy.name_once')
+                                    }
+                                ]}
+                                onChange={(policy) => {
+                                    if (hubSettingsMutation.isPending) return
+                                    hubSettingsMutation.mutate({
+                                        agentTitlePolicy: policy as 'allow_rename' | 'name_once'
+                                    })
+                                }}
+                            />
                             {peerDefaults ? (
                                 <>
                                     <SettingsChoiceGroup

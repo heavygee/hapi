@@ -84,10 +84,19 @@ export const CliMessagesResponseSchema = z.object({
 
 export type CliMessagesResponse = z.infer<typeof CliMessagesResponseSchema>
 
+/** Hub policy for agent-driven session titles (tiann/hapi#271). */
+export const AgentTitlePolicySchema = z.enum(['allow_rename', 'name_once'])
+export type AgentTitlePolicy = z.infer<typeof AgentTitlePolicySchema>
+
 export const CreateSessionResponseSchema = z.object({
     session: SessionSchema,
     /** Hub opt-in for AGENT_NOTIFY_SUMMARY prompt injection (default off when omitted). */
     sessionSummaryContract: z.boolean().optional(),
+    /**
+     * Hub agent title policy. Default `allow_rename` when omitted (older hubs).
+     * `name_once` lets agents set a title only while untitled, then locks.
+     */
+    agentTitlePolicy: AgentTitlePolicySchema.optional(),
     /**
      * Session-scoped peer-delivery capability (#1203). HMAC over hub JWT secret;
      * required for attributed `POST /cli/sessions/:id/peer-messages`. Never an
@@ -102,6 +111,8 @@ export const HubSettingsResponseSchema = z.object({
     sessionSummaryContract: z.boolean(),
     /** Show compact AGENT_NOTIFY_SUMMARY in chat (default off / hide). */
     sessionSummaryInChat: z.boolean(),
+    /** Agent title naming vs renaming policy (default allow_rename). */
+    agentTitlePolicy: AgentTitlePolicySchema,
     peerSpawnDefaults: ResolvedPeerSpawnDefaultsSchema,
     /**
      * How long a runner waits for a freshly spawned session to report back
@@ -117,6 +128,7 @@ export const UpdateHubSettingsRequestSchema = z
     .object({
         sessionSummaryContract: z.boolean().optional(),
         sessionSummaryInChat: z.boolean().optional(),
+        agentTitlePolicy: AgentTitlePolicySchema.optional(),
         peerSpawnDefaults: PeerSpawnDefaultsSchema.optional(),
         /** `null` clears the override and restores the runner default. */
         sessionStartTimeoutMs: z
@@ -131,6 +143,7 @@ export const UpdateHubSettingsRequestSchema = z
         (data) =>
             data.sessionSummaryContract !== undefined
             || data.sessionSummaryInChat !== undefined
+            || data.agentTitlePolicy !== undefined
             || data.peerSpawnDefaults !== undefined
             || data.sessionStartTimeoutMs !== undefined,
         { message: 'At least one hub setting field is required' }

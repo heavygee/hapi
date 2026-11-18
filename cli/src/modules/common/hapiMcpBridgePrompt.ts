@@ -1,5 +1,6 @@
 import { trimIdent } from '@/utils/trimIdent';
 import { DISPLAY_TOOLS_PROMPT_HAPI_MCP } from './displayImagePrompt';
+import { buildAgentTitleSteer, isNameOnceAgentTitlePolicy } from './agentTitlePolicy';
 
 /** Shell fallback for `hapi doctor inline-media` only — not injected into agent prompts. */
 export const INLINE_MEDIA_SHELL_FALLBACK = trimIdent(`
@@ -22,3 +23,14 @@ export const HAPI_MCP_BRIDGE_PROMPT = trimIdent(`
     ${HAPI_MCP_TITLE_INSTRUCTION}
     ${DISPLAY_TOOLS_PROMPT_HAPI_MCP}
 `);
+
+/** Resolve title + display steer for the active hub/env agentTitlePolicy (tiann/hapi#271). */
+export function getHapiMcpBridgePrompt(env: NodeJS.ProcessEnv = process.env): string {
+    const title = isNameOnceAgentTitlePolicy(env)
+        ? trimIdent(buildAgentTitleSteer('hapi_change_title', env))
+        : HAPI_MCP_TITLE_INSTRUCTION
+    return trimIdent(`
+        ${title}
+        ${DISPLAY_TOOLS_PROMPT_HAPI_MCP}
+    `)
+}

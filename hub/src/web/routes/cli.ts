@@ -15,6 +15,7 @@ import { resolvePeerMetaFromSourceSession } from './messages'
 import { readGithubPrAwareness } from './features'
 import { getConfiguration } from '../../configuration'
 import { mapExternalRefRouteError } from '../../sync/externalRefErrors'
+import { readAgentTitlePolicy } from '../../config/agentTitlePolicy'
 import { readSessionSummaryContractEnabled } from '../../config/sessionSummaryContract'
 import { constantTimeEquals } from '../../utils/crypto'
 import { verifyRunnerProof } from '../../utils/runnerProof'
@@ -176,10 +177,10 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
                     parsed.data.modelReasoningEffort,
                     parsed.data.id
                 )
-            const sessionSummaryContract = await readSessionSummaryContractEnabled(
-                getConfiguration().dataDir
-            )
-            return c.json({ session, sessionSummaryContract })
+            const dataDir = getConfiguration().dataDir
+            const sessionSummaryContract = await readSessionSummaryContractEnabled(dataDir)
+            const agentTitlePolicy = await readAgentTitlePolicy(dataDir)
+            return c.json({ session, sessionSummaryContract, agentTitlePolicy })
         } catch (error) {
             if (error instanceof SessionIdentityConflictError) {
                 return c.json({ error: error.message }, 409)
@@ -344,10 +345,10 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
         if (!resolved.ok) {
             return c.json({ error: resolved.error }, resolved.status)
         }
-        const sessionSummaryContract = await readSessionSummaryContractEnabled(
-            getConfiguration().dataDir
-        )
-        return c.json({ session: resolved.session, sessionSummaryContract })
+        const dataDir = getConfiguration().dataDir
+        const sessionSummaryContract = await readSessionSummaryContractEnabled(dataDir)
+        const agentTitlePolicy = await readAgentTitlePolicy(dataDir)
+        return c.json({ session: resolved.session, sessionSummaryContract, agentTitlePolicy })
     })
 
     app.get('/sessions/:id/external-refs', (c) => {

@@ -56,6 +56,13 @@ export interface Settings {
      * into supported flavor system / developer instructions. Default off.
      */
     sessionSummaryContract?: boolean
+    /**
+     * Agent session-title policy (tiann/hapi#271).
+     * `allow_rename` (default): sparing renames + per-session padlock.
+     * `name_once`: first durable title sticks; hub auto-locks against further
+     * agent renames (unlock padlock to allow one more).
+     */
+    agentTitlePolicy?: 'allow_rename' | 'name_once'
     /** Hub-wide defaults for MCP/CLI spawn_peer (Layer 0 A2A). */
     peerSpawnDefaults?: import('@hapi/protocol/peerSpawnDefaults').PeerSpawnDefaults
     /**

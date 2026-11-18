@@ -8,27 +8,34 @@
 import { trimIdent } from '@/utils/trimIdent';
 import { buildSessionCitationSteerInstruction, SESSION_CITATION_DISABLED_STEER } from '@hapi/protocol/sessionCitation';
 import { isPeerToolsDisabled } from '@/modules/common/peerTools';
-import { HAPI_MCP_BRIDGE_PROMPT } from '@/modules/common/hapiMcpBridgePrompt';
+import { getHapiMcpBridgePrompt, HAPI_MCP_BRIDGE_PROMPT } from '@/modules/common/hapiMcpBridgePrompt';
 import { SKILL_LOOKUP_INSTRUCTION } from '@/modules/common/skillLookupInstruction';
 import { withSessionJobInstruction } from '@/modules/common/sessionJobInstruction';
 import { withSessionSummaryInstruction } from '@/modules/common/sessionSummaryInstruction';
+
+const PEER_STEER = isPeerToolsDisabled() ? SESSION_CITATION_DISABLED_STEER : buildSessionCitationSteerInstruction({
+    inspectTool: 'hapi_inspect_peer',
+    pingTool: 'hapi_ping_peer',
+    listPeersTool: 'hapi_list_peers',
+    spawnTool: 'hapi_spawn_peer',
+});
 
 /**
  * Title and display_image / display_video / display_media instructions for OpenCode to call the hapi MCP tools.
  */
 export const TITLE_INSTRUCTION = trimIdent(`
     ${HAPI_MCP_BRIDGE_PROMPT}
-    ${isPeerToolsDisabled() ? SESSION_CITATION_DISABLED_STEER : buildSessionCitationSteerInstruction({
-        inspectTool: 'hapi_inspect_peer',
-        pingTool: 'hapi_ping_peer',
-        listPeersTool: 'hapi_list_peers',
-        spawnTool: 'hapi_spawn_peer',
-    })}
+    ${PEER_STEER}
     ${SKILL_LOOKUP_INSTRUCTION}
 `);
 
 export function getTitleInstruction(env: NodeJS.ProcessEnv = process.env): string {
-    return withSessionSummaryInstruction(withSessionJobInstruction(TITLE_INSTRUCTION), env)
+    const body = trimIdent(`
+        ${getHapiMcpBridgePrompt(env)}
+        ${PEER_STEER}
+        ${SKILL_LOOKUP_INSTRUCTION}
+    `)
+    return withSessionSummaryInstruction(withSessionJobInstruction(body), env)
 }
 
 /**
@@ -37,17 +44,17 @@ export function getTitleInstruction(env: NodeJS.ProcessEnv = process.env): strin
  */
 export const OPENCODE_NATIVE_TOOL_INSTRUCTION = trimIdent(`
     ${HAPI_MCP_BRIDGE_PROMPT}
-    ${isPeerToolsDisabled() ? SESSION_CITATION_DISABLED_STEER : buildSessionCitationSteerInstruction({
-        inspectTool: 'hapi_inspect_peer',
-        pingTool: 'hapi_ping_peer',
-        listPeersTool: 'hapi_list_peers',
-        spawnTool: 'hapi_spawn_peer',
-    })}
+    ${PEER_STEER}
     ${SKILL_LOOKUP_INSTRUCTION}
 `);
 
 export function getOpencodeNativeToolInstruction(env: NodeJS.ProcessEnv = process.env): string {
-    return withSessionSummaryInstruction(withSessionJobInstruction(OPENCODE_NATIVE_TOOL_INSTRUCTION), env)
+    const body = trimIdent(`
+        ${getHapiMcpBridgePrompt(env)}
+        ${PEER_STEER}
+        ${SKILL_LOOKUP_INSTRUCTION}
+    `)
+    return withSessionSummaryInstruction(withSessionJobInstruction(body), env)
 }
 
 /**
