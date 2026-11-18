@@ -268,3 +268,40 @@ PENDING     0  android/app/src/main/kotlin/app/hapi/companion/feature/chat/Permi
 PENDING     0  android/app/src/main/kotlin/app/hapi/companion/feature/chat/MessageMetadataViews.kt
 PENDING     0  android/app/src/main/kotlin/app/hapi/companion/feature/chat/ContextUsageChip.kt
 PENDING     0  android/app/src/androidTest/kotlin/app/hapi/companion/feature/chat/composer/ScheduleComposerTest.kt
+
+
+## Progress — 2026-11-18, owner cbd1073e
+
+RESOLVED 56 of 253 (delete-vs-modify, decided not merged):
+- 21x UD (soup modified, main deleted): main deleted them in `175b768ff chore:
+  remove dead tests and the unreachable code they covered`. Took the deletion —
+  the code is dead upstream and has nowhere to land.
+- 35x DU (soup layer deleted, main modified): kept the soup's deletion. These
+  are layer refactors (android chat UI etc). Upstream's edits to files a layer
+  removed are moot; porting them is the layer owner's call, not the absorb's.
+
+REMAINING 197: 177 UU + 20 AA, ~675 hunks.
+
+### The 20 AA are one family and must NOT take --theirs
+`linkPr.ts`, `LinkPrDialog.tsx`, `SessionPrChip.tsx`, `externalRefs.ts`,
+`features.ts`, `modelErrorCopy.ts`, `cursorModelErrorBridge.ts` + tests — fork
+features that upstream later landed its own version of, so both sides added the
+same paths.
+
+Checked before choosing a side (provenance != currency):
+
+| file | soup | main |
+|---|---|---|
+| shared/src/externalRefs.ts | **301** | 204 |
+| web/src/components/SessionPrChip.tsx | **211** | 197 |
+| cli/src/commands/linkPr.ts | **86** | 60 |
+| hub/src/web/routes/features.ts | 88 | **92** |
+
+The soup side is LARGER on three of four and carries `needs_work`, which main
+does not have at all. Upstream's landed copy is **not** a superset. `--theirs`
+here would silently delete fork PR-chip statuses — the exact scar §3b records
+(deleted soup helpers, call sites left behind). Union required, per file.
+
+### Hot files still ahead (union rules, §3b)
+SessionList.tsx 32 · sessionCache.ts 22 · syncEngine.ts 16 ·
+startHappyServer.ts 16 · NewSession/index.tsx 15 · SessionChat.tsx 13
