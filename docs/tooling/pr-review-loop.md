@@ -363,6 +363,20 @@ Operator declined the OpenAI API spend (ChatGPT Plus subscription only). So **we
 
 **Operational implication:** budget for 1-3 upstream-bot rounds on every promoted PR. The fork-stage SaaS gate compresses what would be 3-5 upstream rounds down to 1-3 — that is the value, not zero upstream rounds. It is a **second cold read by a different reviewer**, not a parity check.
 
+### Full green + your own COMMENTED rows is not review
+
+Two states look like "reviewed" and are not. Both were hit on `tiann/hapi#2481` (2026-11-17) and neither is exotic.
+
+**1. Replying in-thread creates a review row under *your* login.** Answering a bot's review comment produces a review with state `COMMENTED` attributed to you. #2481 finished with **four `heavygee: COMMENTED` rows** that were purely reply artifacts, `reviewDecision` empty, and the only other reviewer `github-actions[bot]`. Anything counting non-bot review rows reads that as four human reviews. It was zero.
+
+Check outside review explicitly — `prt_external_review_count` in [`lib/pr-review-threads.sh`](../../scripts/tooling/lib/pr-review-threads.sh) excludes bots **and** estate logins — or read `reviewDecision`, which stays empty until someone actually reviews.
+
+**2. "All checks settled" fires on no data, and before the finding generator exists.** A watcher that decides settled from a pending-count of zero passes vacuously when `gh pr checks` returns **zero rows** (there is such a window right after a push), and again when checks arrive in waves and every *visible* check has finished while `pr-review` has not been created. On 2026-11-17 two sessions wrote that loop independently, within an hour, watching the same PR — both fired early, one reporting `ALL CHECKS SETTLED, BLOCKING=0` against a commit whose checks did not yet exist.
+
+Use `prt_checks_settled` (same lib): it requires a non-empty rollup, zero pending, **and** `pr-review` present *and finished* — and prints the head SHA so a verdict against a superseded commit is visible rather than silent. Note "settled" means **finished, not passed**; read the conclusions yourself.
+
+**Rule of thumb:** `mergeStateStatus=CLEAN` describes the merge lane, not mergeability and not review (see [PR chip mismeaning, #334](https://github.com/heavygee/hapi/issues/334)). Before any green claim: thread count from a paginated fetch, checks from `prt_checks_settled`, review from `reviewDecision` or an external-reviewer count — and re-read all three **after** CI settles, never before.
+
 ### Levers we have / don't have
 
 | Lever | Status |

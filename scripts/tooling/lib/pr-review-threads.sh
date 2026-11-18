@@ -70,3 +70,92 @@ query(\$cursor: String) {
 prt_count_blocking() {
     jq '[.[] | select((.isResolved == false) and (.isOutdated != true))] | length'
 }
+
+# prt_checks_settled <owner> <name> <pr> [required_check]
+#
+# Exit 0 only when CI has genuinely finished. Prints `<head_sha> total=<n>
+# pending=<n> <required>=<state>` on every path so a caller can log it.
+# Exit 1 = not settled yet. Exit 2 = could not read (fail closed).
+#
+# Why this exists: "settled" is almost always implemented as a pending-count of
+# zero, and that fires on NO DATA. On 2026-11-17 two sessions wrote that loop
+# independently within an hour, watching the same PR, and both fired early:
+#
+#   1. `gh pr checks` returns zero rows during the window just after a push.
+#      `grep -c pending` on an empty response is 0, so "nothing pending" passes
+#      with nothing to pass on. One watcher reported ALL CHECKS SETTLED,
+#      BLOCKING=0 against a commit whose checks did not exist yet.
+#   2. Checks are created in waves. There is a real window where every visible
+#      check has finished and `pr-review` — the one that generates findings —
+#      has not been created. Zero pending, zero findings, and a review comment
+#      lands two minutes later.
+#
+# So a row floor and an explicit required-check gate, not just a pending count.
+# Default required check is `pr-review` because that is the finding generator;
+# pass "" to disable only if the repo has no such check.
+prt_checks_settled() {
+    local owner="${1:?owner}" name="${2:?name}" pr="${3:?pr}"
+    local required="${4-pr-review}"
+    local gh="${PRT_GH_BIN:-gh}" resp total pending req_state head
+
+    resp="$("$gh" pr view "$pr" -R "${owner}/${name}" --json statusCheckRollup,headRefOid 2>/dev/null)" || return 2
+    printf '%s' "$resp" | jq -e '.statusCheckRollup' >/dev/null 2>&1 || return 2
+
+    head="$(printf '%s' "$resp" | jq -r '.headRefOid // "unknown" | .[0:9]')"
+    total="$(printf '%s' "$resp" | jq '[.statusCheckRollup[]?] | length')"
+    # CheckRun: status QUEUED/IN_PROGRESS/COMPLETED. StatusContext: state PENDING.
+    pending="$(printf '%s' "$resp" | jq '
+        [ .statusCheckRollup[]?
+          | select((.status // "") != "COMPLETED" and (.state // "") == "PENDING"
+                   or ((.status // "") | IN("QUEUED","IN_PROGRESS","WAITING","PENDING","REQUESTED")))
+        ] | length')"
+    req_state="absent"
+    if [[ -n "$required" ]]; then
+        req_state="$(printf '%s' "$resp" | jq -r --arg r "$required" '
+            [ .statusCheckRollup[]? | select((.name // .context) == $r) ] as $m
+            | if ($m | length) == 0 then "absent"
+              else ($m[0].conclusion // $m[0].state // $m[0].status // "unknown") end')"
+    fi
+
+    printf '%s total=%s pending=%s %s=%s\n' "$head" "$total" "$pending" "${required:-none}" "$req_state"
+
+    # Fail closed on an empty rollup: no rows is not "nothing to wait for".
+    [[ "${total:-0}" -ge 1 ]] || return 1
+    [[ "${pending:-1}" -eq 0 ]] || return 1
+    if [[ -n "$required" ]]; then
+        case "$req_state" in
+            absent|unknown|PENDING|QUEUED|IN_PROGRESS|WAITING|REQUESTED) return 1 ;;
+        esac
+    fi
+    return 0
+}
+
+# prt_external_review_count <owner> <name> <pr> [self_logins_csv]
+#
+# Prints the number of reviews from accounts that are neither bots nor our own,
+# i.e. actual outside review. Exit 2 if unreadable.
+#
+# Why this exists: a merge-readiness check that asks "are there human reviews?"
+# counts our own in-thread replies. Replying to a review comment creates a
+# review row with state COMMENTED under YOUR login. tiann/hapi#2481 finished
+# with four `heavygee: COMMENTED` rows that were purely reply artifacts, an
+# empty reviewDecision, and no outside reviewer at all — a state that reads as
+# "four human reviews" to anything counting non-bot logins.
+#
+# Green CI plus self-authored COMMENTED rows is not review. Default self list
+# is the estate's GitHub identities; override for other setups.
+prt_external_review_count() {
+    local owner="${1:?owner}" name="${2:?name}" pr="${3:?pr}"
+    local selves="${4:-heavygee,gavinc,sterlingchad}"
+    local gh="${PRT_GH_BIN:-gh}" resp
+
+    resp="$("$gh" api "repos/${owner}/${name}/pulls/${pr}/reviews" 2>/dev/null)" || return 2
+    printf '%s' "$resp" | jq -e 'type == "array"' >/dev/null 2>&1 || return 2
+
+    printf '%s' "$resp" | jq --arg selves "$selves" '
+        ($selves | split(",")) as $mine
+        | [ .[]
+            | select((.user.login // "") | test("bot$|\\[bot\\]|^github-actions"; "i") | not)
+            | select(([.user.login] - $mine) | length > 0)
+          ] | length'
+}
