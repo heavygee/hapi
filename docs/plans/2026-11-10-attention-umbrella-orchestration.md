@@ -244,18 +244,18 @@ No third-party pushback on #2355/#2356. Upstream `main` @ `6ea40f9e4`. Signals f
 | #1733 | **MERGED** 2026-11-19 (operator-directed Lane B / elapsed dogfooded). Gate A + exit reflection filed; peer idle for Meta archive. Promote filed: mirror-hygiene `~` expand. |
 | #1772 | **MERGED** 2026-11-19 (Lane B / elapsed dogfooded + operator umbrella auth). Squash `3ae9c77c4` (38 files). Gate A' done — retro `2026-11-19-1772-session-list-filters-exit.md` (promote none), emit+archive [assist](/sessions/3c5af7c8-540d-4d7c-b7a1-5df17abe5b37); assist wt removed. Soup layers for stack left for Meta. |
 | #2376 | **MERGED** 2026-11-19 (Lane B / elapsed dogfooded + umbrella auth). Squash `fa9fd8cc0`. Gate A' done — retro `2026-11-19-2002-active-working-lenses-exit.md`; promote applied (`rebase --onto` recipe → `driver-soup.md`); soup layer 3/3 dropped; [peer](/sessions/ea9e52cc-cf3d-4f5d-95d8-9944bf08b0d6) archived. Layers 1–2 (#1772/#1996) left for Meta remat re-thread. |
-| #1717 | **UPSTREAM [#2520](https://github.com/tiann/hapi/pull/2520)** tip `48739a6dc` — round-7 6/6 (seq-domain clear boundary; core SUCCESS on tip). Soup HARD HOLD. Dogfood ~42h; **no laneb**. [peer](/sessions/83d28e01-5852-4926-b163-99a95f46c931) |
-| #1996 | **UPSTREAM [#2530](https://github.com/tiann/hapi/pull/2530)** tip `39565e230` atop #2520 `48739a6dc`. Idle-hold. [peer](/sessions/eddfb230-ebc4-4196-b2b7-c33a2f5f71f8) |
+| #1717 | **UPSTREAM [#2520](https://github.com/tiann/hapi/pull/2520)** tip `51fe4a04d` — round-8 5/5 (`invoked_seq` delivery domain; footer-vs-footer `at` restored). Soup HARD HOLD. Dogfood ~41h; **no laneb**. [peer](/sessions/83d28e01-5852-4926-b163-99a95f46c931) |
+| #1996 | **UPSTREAM [#2530](https://github.com/tiann/hapi/pull/2530)** — rebase onto `51fe4a04d` kicked. [peer](/sessions/eddfb230-ebc4-4196-b2b7-c33a2f5f71f8) |
 
 Operator umbrella merge auth active (2026-11-19): merge attention children when three-dim CLEAN. #2515 closed absorbed into #2376. Orch resumed after parking wrongly post-#2376.
 
-### #2520 status (2026-11-19T22:59Z)
+### #2520 status (2026-11-19T23:21Z)
 
-- Tip `48739a6dc`: round-7 6/6 fixed+RESOLVED (0 unresolved). `core` SUCCESS on this exact SHA.
-- Headline: clear boundary moved to hub message **seq** (shared domain) — hub-now vs runner clock was still wrong in r6.
-- Also: jump flash sentinel/order, merge revision from row, local-command clear audit, unbounded merge delivery lookup, overflow kind stop-guessing.
-- Tooling trap: bare `npx vitest` → 4.0.16 vs 4.1.12 → 731 phantom jest-dom fails; use `bun run test`.
-- Soup HARD HOLD. #2530 rebase kicked. No laneb (~42h dogfood calendar).
+- Tip `51fe4a04d`: round-8 5/5 fixed+RESOLVED. Prior tip `48739a6dc` full CI green; `core` already SUCCESS on new tip.
+- Headline: `messages.invoked_seq` (hub high-water at delivery) — footer-vs-footer by `at`, footer-vs-reply by `seq`; live/backfill/rewind/merge aligned. r7 seq-for-everything overreach fixed.
+- Also: `agent_delivered` persisted; `pendingRequestRefs` `{id,kind,since}` (overflow special-case removed).
+- Pre-existing debt logged: shared has no typecheck script; direct `tsc` red in 4 test files outside project check surface.
+- Soup HARD HOLD. #2530 rebase kicked. No laneb (~41h calendar).
 
 
 ### #2530 status (2026-11-19T21:25Z)
