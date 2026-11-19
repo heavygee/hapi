@@ -289,6 +289,19 @@ hapi-worktree-create stacked --branch feat/my-thing --after pr:692
 
 Each creates `~/coding/hapi-<name>`, branch from `upstream/main` (or `--base`), optional `--after` merges.
 
+### After the base PR squash-merges (rebase `--onto`)
+
+Git does **not** treat a squash commit as tree-equivalent to the pre-squash chain. A plain `git rebase upstream/main` on your stacked branch will replay the dependency's entire superseded history and re-hit the same conflict storm.
+
+Replay **only** your commits past the old dependency tip:
+
+```bash
+# <old-dep-tip> = the SHA your branch was last based on (pre-squash PR tip)
+git rebase --onto upstream/main <old-dep-tip> <your-branch>
+```
+
+Exit reflection: `docs/plans/retros/2026-11-19-2002-active-working-lenses-exit.md` (#2376 / #1772).
+
 Before every commit / `gh pr create`:
 
 ```bash
