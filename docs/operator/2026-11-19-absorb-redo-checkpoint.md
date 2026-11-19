@@ -92,6 +92,40 @@ Recovery branches:
 | `soup/broken-absorb-20261119` | the bad tip `a5cf1b95f`, kept as evidence |
 | `soup/restore-attempt-20261119` | file-only restore of the 209 (577 tsc errors — proof that restoring files without their deps does not work) |
 
+## Course change: full-recipe, not an absorb redo
+
+The absorb redo was abandoned part-way on purpose. After `resolve-safe-hunks`
+cleared the mechanical 258 hunks, the remaining 534 were classified by shape:
+57 import blocks, 31 object-field blocks, 13 locale key blocks — and **422
+genuine code conflicts**. There is no automation lever for 422 judgement
+hunks, and hand-merging them produces exactly the conditions that caused the
+original damage: hours of fatigue-prone splices into a tip whose base is
+already suspect.
+
+`HAPI_REMAT_MODE=full-recipe` composes the soup from the **manifest base
+(fork main) + all 84 layers** instead of merging upstream into the old tip.
+That is strictly better here:
+
+- the base *is* `origin/main`, so the tree contains every upstream file by
+  construction and the completeness gate can actually pass
+- each layer merge is small and scoped, with the existing heal machinery,
+  instead of one 422-hunk pile
+- nothing inherits `360c9d58`'s accumulated drift — including the empty
+  `ProjectGroupRow.tsx` that tip-forward kept carrying
+
+Cost: 84 individual layer merges, some of which will conflict against newer
+upstream, and genuinely stale layers will surface as failures rather than
+being silently skipped. That is the right trade — a layer that cannot merge
+onto current upstream is information, not an obstacle.
+
+Work completed on the abandoned path is kept because it is still correct and
+reusable: `shared/src/apiTypes.ts` was resolved properly by symbol arithmetic
+(53 fork-only definitions ported onto upstream's carrier, 7 field-level unions
+re-adding `sessionCapability`, `sessionStartTimeoutMs`, `tag`/`runnerProof`,
+`aroundId` paging, `originator`/`cliVersion`), and
+`scripts/tooling/absorb/port-fork-symbols.mjs` generalises that method for any
+contract file where picking a side loses exports.
+
 ## Remaining work
 
 1. Resolve the 534 judgement hunks (168 files). Largest: `SessionList.tsx` 61,
