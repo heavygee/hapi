@@ -1082,7 +1082,18 @@ layers:
   # tip-forwarding a divergent copy, or drop them if #1772 landed upstream —
   # test with the §3b PR-identity checklist, not `merge-base --is-ancestor`,
   # which squash makes lie.
-  - branch: driver/1772-techotaku-base-wip
+  # DROPPED 2026-11-19: tiann/hapi#1772 MERGED UPSTREAM (squash 3ae9c77c4,
+  # "feat(web): add combined session list filters"). Verified by the §3b
+  # PR-identity checklist, NOT by ancestry — the layer tip is 160 commits short
+  # of the merge base and `merge-base --is-ancestor` reports it unmerged, which
+  # is the squash lie of §3c. Checks that actually passed:
+  #   - gh pr view 1772 -R tiann/hapi -> state=MERGED, merge=3ae9c77c4
+  #   - 3ae9c77c4 reachable from upstream/main
+  #   - content present in the post-absorb tip without this layer:
+  #     e2e/session-list-filter.spec.ts, filterSessionsByStatus in
+  #     web/src/lib/sessionListOrder.ts
+  # Feature now arrives from base. Do not re-enable this layer.
+# - branch: driver/1772-techotaku-base-wip
 
   # Layer 2/3 — tiann/hapi#1996 (blocked-only filter), stacked on
   # driver/1772-techotaku-base-wip above. Re-adds the blocked-only lens as one ephemeral
