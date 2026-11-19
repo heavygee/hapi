@@ -244,18 +244,17 @@ No third-party pushback on #2355/#2356. Upstream `main` @ `6ea40f9e4`. Signals f
 | #1733 | **MERGED** 2026-11-19 (operator-directed Lane B / elapsed dogfooded). Gate A + exit reflection filed; peer idle for Meta archive. Promote filed: mirror-hygiene `~` expand. |
 | #1772 | **MERGED** 2026-11-19 (Lane B / elapsed dogfooded + operator umbrella auth). Squash `3ae9c77c4` (38 files). Gate A' done — retro `2026-11-19-1772-session-list-filters-exit.md` (promote none), emit+archive [assist](/sessions/3c5af7c8-540d-4d7c-b7a1-5df17abe5b37); assist wt removed. Soup layers for stack left for Meta. |
 | #2376 | **MERGED** 2026-11-19 (Lane B / elapsed dogfooded + umbrella auth). Squash `fa9fd8cc0`. Gate A' done — retro `2026-11-19-2002-active-working-lenses-exit.md`; promote applied (`rebase --onto` recipe → `driver-soup.md`); soup layer 3/3 dropped; [peer](/sessions/ea9e52cc-cf3d-4f5d-95d8-9944bf08b0d6) archived. Layers 1–2 (#1772/#1996) left for Meta remat re-thread. |
-| #1717 | **UPSTREAM [#2520](https://github.com/tiann/hapi/pull/2520)** tip `8ab5173d9` — r5 done. **Soup re-thin HARD HOLD** (Meta absorb broken; live tip `360c9d58` ok). Dogfood calendar ≠ honest until remat survives guard. [peer](/sessions/83d28e01-5852-4926-b163-99a95f46c931) |
-| #1996 | **UPSTREAM [#2530](https://github.com/tiann/hapi/pull/2530)** tip `c1311e6a6` atop #2520 `8ab5173d9`. Idle-hold. [peer](/sessions/eddfb230-ebc4-4196-b2b7-c33a2f5f71f8) |
+| #1717 | **UPSTREAM [#2520](https://github.com/tiann/hapi/pull/2520)** tip `a67af1240` — round-6 7/7 (corrected false CollapsiblePanelHold claim; swept_at read-path caught pre-push). Soup HARD HOLD. Dogfood ~42h; **no laneb**. [peer](/sessions/83d28e01-5852-4926-b163-99a95f46c931) |
+| #1996 | **UPSTREAM [#2530](https://github.com/tiann/hapi/pull/2530)** — rebase onto `a67af1240` kicked. [peer](/sessions/eddfb230-ebc4-4196-b2b7-c33a2f5f71f8) |
 
 Operator umbrella merge auth active (2026-11-19): merge attention children when three-dim CLEAN. #2515 closed absorbed into #2376. Orch resumed after parking wrongly post-#2376.
 
-### #2520 status (2026-11-19T21:55Z)
+### #2520 status (2026-11-19T22:19Z)
 
-- Tip `8ab5173d9`: round-5 9/9 fixed+RESOLVED (0 unresolved). Prior green tip `2bac56a63`.
-- BLOCKER: v26 fast-path hand-enumerated migrations skipped new steps → SCHEMA_VERSION stamped, columns missing → hub won't start. Fixed via `stepMigrations` by index + `parseAckKeys` harden.
-- Process notes from peer: red/green every test (first draft greenwashed); look for existing pattern before new mechanism (`CollapsiblePanelHoldContext`).
-- Soup re-thin still held for Meta post-absorb + SCHEMA_VERSION. Running total ~48 defects across 11 rounds.
-- #2530 rebase onto `8ab5173d9` kicked. No laneb.
+- Tip `a67af1240`: round-6 7/7 fixed+RESOLVED. Prior green tip `8ab5173d9` (3rd consecutive full CI green).
+- Peer corrected round-5 claim: `CollapsiblePanelHoldContext` does not keep a row alive after it leaves `blockedSectionSessions` — real fix shipped; admitted in-thread.
+- Standing pattern r4–r6: persisted field without read path (`refreshSession` ×2, `toStoredMessage`/`sweptAt` caught pre-push).
+- Soup HARD HOLD (Meta absorb). No laneb. #2530 rebase kicked.
 
 
 ### #2530 status (2026-11-19T21:25Z)
