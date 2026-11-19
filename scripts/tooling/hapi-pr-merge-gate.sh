@@ -184,6 +184,9 @@ else
           | select(.body | test("dogfooded since"; "i") | not)
           | select(.body | test("New tracker: #|Related tracker: #"; "i") | not)
           | select(.body | test("plan to merge this after"; "i") | not)
+          # MaintainerCanModify push receipts (posted after the push they announce)
+          # are not asks — same class as dogfood stamps.
+          | select(.body | test("Pushed a refresh via maintainer|Merged current .main. into this branch"; "i") | not)
           | .author.login] | unique | join(", ")' \
         <<<"$CMTS_JSON" 2>/dev/null || echo "ERR")"
 fi
