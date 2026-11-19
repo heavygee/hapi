@@ -145,6 +145,10 @@ fi
 # The helper's predicate is `isOutdated != true`, not the `== false` this used
 # to carry: a null isOutdated means unknown, and a gate must count an unknown
 # rather than wave it through.
+# Source before first use (was previously sourced only after dogfood check —
+# exit 127 / empty THREADS on every merge).
+# shellcheck source=/dev/null
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/pr-review-threads.sh"
 THREADS="$(
     PRT_GH_BIN="$REAL_GH" prt_fetch_threads \
         "${REPO%%/*}" "${REPO##*/}" "$PR" \
