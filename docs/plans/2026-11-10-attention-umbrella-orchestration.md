@@ -241,7 +241,7 @@ No third-party pushback on #2355/#2356. Upstream `main` @ `6ea40f9e4`. Signals f
 | #2375 | **MERGED** (2026-11-13) |
 | #2426 | **MERGED** (unblocked #987) |
 | #1725 | **MERGED** 2026-11-19 (operator-directed Lane B / elapsed dogfooded). Soft-steer deferred [#2509](https://github.com/tiann/hapi/issues/2509); bridge-drop [#2508](https://github.com/tiann/hapi/issues/2508). |
-| #1733 | **MERGED** 2026-11-19 (operator-directed Lane B / elapsed dogfooded). Scrollbar-rail polish Minor deferred at merge. |
+| #1733 | **MERGED** 2026-11-19 (operator-directed Lane B / elapsed dogfooded). Gate A + exit reflection filed; peer idle for Meta archive. Promote filed: mirror-hygiene `~` expand. |
 | #1772 | **CONFLICTING** tip `22c897a83`; Nov-13 assist `350c11186` **stale**. Author never said yes to push. Assist peer stood down — no weekly re-cuts; stale-offer comment posted. Awaiting author ask or operator push auth. |
 | #2376 | **HOLD** — stop chasing moving #1772 assist. Sit on `b6ae3dd28` until #1772 PR tip is actually CLEAN/merged, then rebase 2 commits onto that tip. |
 
