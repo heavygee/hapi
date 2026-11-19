@@ -59,4 +59,19 @@ expect_deny "$(jq -cn --arg c "cat > $ROOT/e2e/peer/x.spec.ts <<'EOF'
 test
 EOF" '{command:$c}')" 'redirect into mirror e2e'
 
+# Root-spelling equivalence (heavygee: retro Promote, 2026-11-19).
+# $HOME/coding/hapi, its realpath (/work/coding/hapi here) and a literal
+# ~/coding/hapi all name the SAME directory. The guard matched only the first,
+# so a legitimate worktree install was denied via the realpath spelling — the
+# guard blocking exactly what its own deny message instructs.
+REAL="$(readlink -f "$ROOT" 2>/dev/null || printf '%s' "$ROOT")"
+expect_allow "$(printf '{"tool_input":{"command":"cd %s/worktrees/demo && bun install"}}' "$REAL")" \
+    "worktree install via realpath spelling"
+expect_allow '{"tool_input":{"command":"cd ~/coding/hapi/worktrees/demo && bun install"}}' \
+    "worktree install via literal ~ spelling"
+expect_deny '{"tool_input":{"command":"cd ~/coding/hapi && bun install"}}' \
+    "mirror root install via literal ~ still denied"
+expect_deny "$(printf '{"tool_input":{"command":"cd %s && bun install"}}' "$REAL")" \
+    "mirror root install via realpath still denied"
+
 echo "hapi-mirror-hygiene-guard.test.sh: all patterns OK"

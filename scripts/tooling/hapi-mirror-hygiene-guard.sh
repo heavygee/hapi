@@ -17,6 +17,26 @@ set -uo pipefail
 INPUT=$(cat)
 
 HAPI_ROOT="${HAPI_ROOT_OVERRIDE:-$HOME/coding/hapi}"
+
+# Root spellings that all name the SAME directory. The mirror is reachable as
+# $HOME/coding/hapi, as its realpath (/work/coding/hapi on this estate), and as
+# a literal `~/coding/hapi` the agent never expanded. Matching only the first
+# meant `cd /work/coding/hapi/worktrees/<wt> && bun install` was DENIED while
+# the identical `cd ~/coding/hapi/worktrees/<wt>` form was allowed — the guard
+# blocking the very thing its deny message tells you to do.
+HAPI_ROOT_REAL="$(readlink -f "$HAPI_ROOT" 2>/dev/null || printf '%s' "$HAPI_ROOT")"
+_root_alt() {
+    local seen="" out="" r
+    for r in "$HAPI_ROOT" "$HAPI_ROOT_REAL" "~/coding/hapi" "\$HOME/coding/hapi"; do
+        [ -n "$r" ] || continue
+        case "$seen" in *"|$r|"*) continue ;; esac
+        seen="$seen|$r|"
+        r="$(printf '%s' "$r" | sed -e 's/[.[\*^$()+?{}|]/\\&/g')"
+        out="${out:+$out|}$r"
+    done
+    printf '%s' "$out"
+}
+HAPI_ROOT_ALT="$(_root_alt)"
 # Normalize trailing slash
 HAPI_ROOT="${HAPI_ROOT%/}"
 
@@ -188,7 +208,7 @@ if [ "$_pkg_install" = "1" ]; then
     _allow_install=0
 
     # Explicit cd / pushd into a worktree before install → allow
-    if printf '%s' "$CMD" | grep -qE "(cd|pushd)[[:space:]]+[\"']?${HAPI_ROOT}/worktrees/"; then
+    if printf '%s' "$CMD" | grep -qE "(cd|pushd)[[:space:]]+[\"']?(${HAPI_ROOT_ALT})/worktrees/"; then
         _allow_install=1
     fi
 
@@ -198,9 +218,9 @@ if [ "$_pkg_install" = "1" ]; then
     fi
 
     # Explicit cd to mirror root (or bare HAPI_ROOT) → deny (even if somehow also worktree — root wins)
-    if printf '%s' "$CMD" | grep -qE "(cd|pushd)[[:space:]]+[\"']?${HAPI_ROOT}([\"'[:space:]|&;]|$)"; then
+    if printf '%s' "$CMD" | grep -qE "(cd|pushd)[[:space:]]+[\"']?(${HAPI_ROOT_ALT})([\"'[:space:]|&;]|$)"; then
         # Exception: cd to worktrees already allowed above; re-check not worktree-only
-        if ! printf '%s' "$CMD" | grep -qE "(cd|pushd)[[:space:]]+[\"']?${HAPI_ROOT}/worktrees/"; then
+        if ! printf '%s' "$CMD" | grep -qE "(cd|pushd)[[:space:]]+[\"']?(${HAPI_ROOT_ALT})/worktrees/"; then
             _allow_install=0
             _deny "$(cat <<EOF
 Mirror bun/npm install BLOCKED (soup hygiene).
