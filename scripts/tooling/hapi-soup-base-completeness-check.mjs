@@ -137,6 +137,43 @@ if (absorbed) {
     }
 }
 
+/**
+ * Paired impl+test loss, measured against what is CURRENTLY SERVING rather than
+ * against the base.
+ *
+ * This is the check that would have caught 2026-11-19 on its own. The gate read
+ * EXIT=0 — hub 2357 pass / 0 fail, web 4776, typecheck clean — because every
+ * lost implementation file had its test emptied or dropped in the same
+ * resolution pass. A suite cannot fail for code that is no longer there to
+ * test, so "tests are green" says nothing when the tests left with the code.
+ *
+ * A test file disappearing alone is weak evidence (upstream retires tests). A
+ * test disappearing TOGETHER WITH its implementation is the false-green shape,
+ * so that pairing fails closed while a bare count only reports.
+ */
+const prevRef = process.env.HAPI_SOUP_PREV_TIP ?? 'driver/integration'
+const pairedLoss = []
+let testsLost = 0
+let prevSizes = null
+try {
+    prevSizes = treeSizes(prevRef)
+} catch {
+    prevSizes = null
+}
+if (prevSizes) {
+    const goneOrHollow = (p) => !tipSizes.has(p) || tipSizes.get(p) === 0
+    for (const [path, size] of prevSizes) {
+        if (size === 0) continue
+        const isTest = /\.(test|spec)\.tsx?$/.test(path)
+        if (!isTest || !goneOrHollow(path)) continue
+        testsLost++
+        const impl = path.replace(/\.(test|spec)(\.tsx?)$/, '$2')
+        if (prevSizes.has(impl) && prevSizes.get(impl) > 0 && goneOrHollow(impl) && !allowed.has(path)) {
+            pairedLoss.push(`${impl} + ${path}`)
+        }
+    }
+}
+
 const sample = (list, n = 15) =>
     list
         .slice(0, n)
@@ -168,6 +205,17 @@ if (symbolLoss.length) {
     console.error('      Importers across packages resolve these by name; losing them breaks')
     console.error('      consumers that the composed tip does not itself compile.')
     console.error(sample(symbolLoss))
+}
+
+if (pairedLoss.length) {
+    failed = true
+    console.error(`\nFAIL: ${pairedLoss.length} implementation+test pair(s) vanished together vs ${prevRef}.`)
+    console.error('      A green suite proves nothing here — the tests left with the code they')
+    console.error('      covered. This is the exact shape that let the 2026-11-19 absorb report')
+    console.error('      EXIT=0 while missing 209 upstream files.')
+    console.error(sample(pairedLoss))
+} else if (testsLost > 0) {
+    console.log(`soup-base-completeness note: ${testsLost} test file(s) gone or hollow vs ${prevRef}, none paired with their implementation`)
 }
 
 if (failed) {

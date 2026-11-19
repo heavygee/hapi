@@ -99,4 +99,34 @@ printf 'hub/src/alpha.ts\n' > "$d/config/soup-base-completeness-allow.txt"
 git -C "$d" add -A && git -C "$d" commit -qm "empty + allow"
 expect_fail "$d" "zero-byte ignores allowlist" "ZERO BYTES"
 
+# 8. Paired impl+test loss vs the serving tip fails closed, because a green
+#    suite proves nothing when the tests left with the code they covered.
+d=$(new_fixture paired)
+printf 'export const impl = 1\n' > "$d/hub/src/thing.ts"
+printf 'test("thing", () => {})\n' > "$d/hub/src/thing.test.ts"
+git -C "$d" add -A && git -C "$d" commit -qm "impl + test"
+git -C "$d" branch -M serving
+git -C "$d" checkout -q -b tip2
+git -C "$d" rm -q hub/src/thing.ts hub/src/thing.test.ts
+git -C "$d" commit -qm "drop both"
+if out=$(HAPI_SOUP_PREV_TIP=serving HAPI_SOUP_BASE_REF=base "$BUN" run "$CHECK" "$d" 2>&1); then
+    echo "FAIL expected failure: paired impl+test loss" >&2; echo "$out" >&2; exit 1
+fi
+printf '%s' "$out" | grep -q "vanished together" \
+    && echo "OK fail: paired impl+test loss vs serving tip" \
+    || { echo "FAIL wrong reason: paired loss" >&2; echo "$out" >&2; exit 1; }
+
+# 9. A lone test removal is only reported, not failed: upstream retires tests.
+git -C "$d" checkout -q serving
+git -C "$d" checkout -q -b tip3
+git -C "$d" rm -q hub/src/thing.test.ts
+git -C "$d" commit -qm "drop only the test"
+if out=$(HAPI_SOUP_PREV_TIP=serving HAPI_SOUP_BASE_REF=base "$BUN" run "$CHECK" "$d" 2>&1); then
+    printf '%s' "$out" | grep -q "none paired with their implementation" \
+        && echo "OK pass: lone test removal reported, not failed" \
+        || { echo "FAIL: lone test removal should be reported" >&2; echo "$out" >&2; exit 1; }
+else
+    echo "FAIL expected pass: lone test removal" >&2; echo "$out" >&2; exit 1
+fi
+
 echo "all soup-base-completeness cases passed"
