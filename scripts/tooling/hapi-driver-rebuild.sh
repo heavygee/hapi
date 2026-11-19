@@ -232,7 +232,12 @@ if [[ "$REMAT_MODE" == "tip-forward" ]]; then
             echo "Tip-forward: merging manifest base $base_merge_ref into WIP..."
             if ! git -C "$REMAT" merge --no-edit "$base_merge_ref"; then
                 unmerged="$(git -C "$REMAT" diff --name-only --diff-filter=U 2>/dev/null)"
-                markers="$(git -C "$REMAT" grep -lE '^<<<<<<< |^>>>>>>> ' 2>/dev/null || true)"
+                # Exclude docs/: plan write-ups quote real conflict markers at line
+        # start (docs/plans/2026-11-10-soup-upstream-absorb-91-files.md does),
+        # and one prose false positive silently disables this fast path — every
+        # layer then re-conflicts on every compose and no resolution progress
+        # can accumulate. Source paths stay strict.
+        markers="$(git -C "$REMAT" grep -lE '^<<<<<<< |^>>>>>>> ' -- . ':(exclude)docs/' 2>/dev/null || true)"
                 if [[ -z "$unmerged" && -z "$markers" ]]; then
                     git -C "$REMAT" commit --no-edit --no-verify -q
                 else
@@ -317,7 +322,12 @@ for i in $(seq 0 $((layer_count - 1))); do
         # of rerere-train.sh - the operator already taught git how to
         # resolve these collisions on a prior rebuild.
         unmerged="$(git -C "$REMAT" diff --name-only --diff-filter=U 2>/dev/null)"
-        markers="$(git -C "$REMAT" grep -lE '^<<<<<<< |^>>>>>>> ' 2>/dev/null || true)"
+        # Exclude docs/: plan write-ups quote real conflict markers at line
+        # start (docs/plans/2026-11-10-soup-upstream-absorb-91-files.md does),
+        # and one prose false positive silently disables this fast path — every
+        # layer then re-conflicts on every compose and no resolution progress
+        # can accumulate. Source paths stay strict.
+        markers="$(git -C "$REMAT" grep -lE '^<<<<<<< |^>>>>>>> ' -- . ':(exclude)docs/' 2>/dev/null || true)"
         if [[ -z "$unmerged" && -z "$markers" ]]; then
             echo "Layer $((i + 1))/$layer_count: conflicts auto-resolved by git rerere; committing replay"
             git -C "$REMAT" commit --no-edit --no-verify -q

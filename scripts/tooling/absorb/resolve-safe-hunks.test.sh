@@ -4,11 +4,22 @@
 # bulk transform over conflict regions is what damaged ~34 files on
 # 2026-11-19 by stripping braces and commas, so parser correctness and
 # refusal-to-guess matter more here than coverage.
+#
+# Conflict markers are assembled at runtime and never written literally at the
+# start of a line in this file. The remat greps the whole tree for a
+# line-leading '<<<<<<< ' to decide whether a merge left markers behind, so
+# literal fixtures here made every compose believe the working tree still had
+# an unresolved conflict — which silently disabled the rerere auto-resolve
+# fast path that an 84-layer compose depends on.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 TOOL="$ROOT/scripts/tooling/absorb/resolve-safe-hunks.mjs"
 BUN="${BUN:-bun}"
+
+O='<<<<<<<'
+S='======='
+T='>>>>>>>'
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -41,65 +52,54 @@ check() {
 }
 
 # Case 1: ours is a strict superset -> take ours, structure intact.
-cat > "$TMP/superset.ts" <<'EOF'
-const before = 1
-<<<<<<< HEAD
-export const a = 1
-export const b = 2
-=======
-export const a = 1
->>>>>>> origin/main
-const after = 2
-EOF
-cat > "$TMP/superset.expect" <<'EOF'
-const before = 1
-export const a = 1
-export const b = 2
-const after = 2
-EOF
+{
+    printf 'const before = 1\n'
+    printf '%s HEAD\n' "$O"
+    printf 'export const a = 1\n'
+    printf 'export const b = 2\n'
+    printf '%s\n' "$S"
+    printf 'export const a = 1\n'
+    printf '%s origin/main\n' "$T"
+    printf 'const after = 2\n'
+} > "$TMP/superset.ts"
+{
+    printf 'const before = 1\n'
+    printf 'export const a = 1\n'
+    printf 'export const b = 2\n'
+    printf 'const after = 2\n'
+} > "$TMP/superset.expect"
 
 # Case 2: genuine divergence -> MUST stay conflicted, byte-identical.
-cat > "$TMP/judge.ts" <<'EOF'
-<<<<<<< HEAD
-export const mode = 'soup'
-=======
-export const flavour = 'upstream'
->>>>>>> origin/main
-EOF
+{
+    printf '%s HEAD\n' "$O"
+    printf "export const mode = 'soup'\n"
+    printf '%s\n' "$S"
+    printf "export const flavour = 'upstream'\n"
+    printf '%s origin/main\n' "$T"
+} > "$TMP/judge.ts"
 cp "$TMP/judge.ts" "$TMP/judge.expect"
 
 # Case 3: brace-bearing superset — the 2026-11-19 corruption shape.
-cat > "$TMP/braces.ts" <<'EOF'
-function f() {
-<<<<<<< HEAD
-    const x = {
-        a: 1,
-        b: 2,
-    }
-    return x
-=======
-    const x = {
-        a: 1,
-    }
-    return x
->>>>>>> origin/main
-}
-EOF
-cat > "$TMP/braces.expect" <<'EOF'
-function f() {
-    const x = {
-        a: 1,
-        b: 2,
-    }
-    return x
-}
-EOF
+{
+    printf 'function f() {\n'
+    printf '%s HEAD\n' "$O"
+    printf '    const x = {\n        a: 1,\n        b: 2,\n    }\n    return x\n'
+    printf '%s\n' "$S"
+    printf '    const x = {\n        a: 1,\n    }\n    return x\n'
+    printf '%s origin/main\n' "$T"
+    printf '}\n'
+} > "$TMP/braces.ts"
+{
+    printf 'function f() {\n'
+    printf '    const x = {\n        a: 1,\n        b: 2,\n    }\n    return x\n'
+    printf '}\n'
+} > "$TMP/braces.expect"
 
 # Case 4: malformed region (no separator) -> copied verbatim, never guessed.
-cat > "$TMP/malformed.ts" <<'EOF'
-<<<<<<< HEAD
-const dangling = true
-EOF
+{
+    printf '%s HEAD\n' "$O"
+    printf 'const dangling = true\n'
+} > "$TMP/malformed.ts"
 cp "$TMP/malformed.ts" "$TMP/malformed.expect"
 
 for f in superset judge braces malformed; do make_unmerged "$f.ts"; done

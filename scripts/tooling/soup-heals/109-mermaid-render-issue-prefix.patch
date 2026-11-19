@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: HeavyGee <gc@lockhouse.systems>
+Date: Thu, 19 Nov 2026 22:30:00 +0000
+Subject: [PATCH] fix(soup): keep <render-issue> as a system-injection prefix
+
+feat/mermaid-parse-failure-feedback carried its own inline
+SYSTEM_INJECTION_PREFIXES list in cli/src/api/apiSession.ts. Upstream
+since moved that classification into cli/src/claude/utils/transcriptEntry.ts,
+so the layer-side list is dead code in the composed tree and the layer
+merge correctly takes the base. But upstream's list does NOT carry
+<render-issue>, which is the layer's own tag.
+
+hub/src/sync/mermaid.ts wraps render hints in <render-issue> and injects
+them as type:user messages. Without this prefix they are classified as
+external user text, so mermaid parse-failure feedback renders in the
+transcript as if the human typed it.
+
+This lives in a heal rather than in the merge resolution because rerere
+only replays files that actually conflicted. transcriptEntry.ts does not
+conflict, so a hand edit there is silently discarded by the next compose.
+
+diff --git a/cli/src/claude/utils/transcriptEntry.ts b/cli/src/claude/utils/transcriptEntry.ts
+index 0070ef3a4..b361aa894 100644
+--- a/cli/src/claude/utils/transcriptEntry.ts
++++ b/cli/src/claude/utils/transcriptEntry.ts
+@@ -15,6 +15,10 @@ const SYSTEM_INJECTION_PREFIXES = [
+     '<command-name>',
+     '<local-command-caveat>',
+     '<system-reminder>',
++    // Mermaid parse-failure feedback (driver/feat-mermaid-parse-failure-feedback):
++    // hub/src/sync/mermaid.ts wraps render hints in these tags and injects
++    // them as user messages, so they are bookkeeping, not human text.
++    '<render-issue>',
+ ]
+ 
+ export function extractRawUserTextContent(content: unknown): string | null {
+-- 
+2.47.3

@@ -58,9 +58,18 @@ error and the feature together.
 
 ## Hard rules for the remainder of this redo
 
-- **`rerere` stays off.** Repo config now `rerere.enabled=false`; the poisoned
-  cache is preserved at `.git/rr-cache.poisoned-20261119` (291 entries). Do not
-  restore it. If a merge prints `using previous resolution`, stop.
+- **`rerere` stays ON, with a clean cache.** Correcting an earlier call in this
+  work: disabling rerere outright was wrong. In full-recipe mode every remat run
+  recomposes from the base, so rerere is the *only* thing that carries layer
+  resolutions across runs — with it off, each run re-conflicts all 84 layers and
+  no progress ever accumulates (observed: a hand-resolved layer 1 was discarded
+  by the next run). The hazard was never the mechanism, it was the **contents**.
+  So: the poisoned cache is preserved aside at `.git/rr-cache.poisoned-20261119`
+  (291 entries — do not restore it), the live cache starts empty, and
+  `rerere.autoupdate=false` so replayed resolutions land in the working tree for
+  review instead of being staged silently. The completeness gate is what makes
+  this safe now: a bad resolution can still be recorded, but it can no longer
+  reach a promote.
 - **Never empty a file** to clear a compile error, and never delete a file
   present on either side. If a restored file does not compile, its dependencies
   were lost too — fix those, do not delete the file.
