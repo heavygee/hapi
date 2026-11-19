@@ -233,6 +233,55 @@ What makes the job survivable rather than shorter:
 6. **One absorb owner, one remat WT.** Do not start a second remat hoping the flock
    saves you.
 
+### Choosing the mode — and why "full-recipe is worse" is about work assignment
+
+The line above is right, but it was never qualified, so it reads as a blanket ban and
+one seat talked itself out of it in an hour. The actual reason:
+
+`driver_remat_layer_gate` refuses any layer diverging by more than **20 commits or 40
+files**, and **in tip-forward mode only** such a layer is SKIPPED — *"re-thin onto
+current soup tip"*, i.e. the **layer owner's** job. full-recipe has no such gate, so
+every one of the 84 layers must merge for the compose to finish, which converts 84
+owners' re-thin work into this seat's hand-merging and makes point 4 above
+structurally impossible. Measured 2026-11-19: `feat/overseer-readonly-entity` alone
+came out at **66 MANUAL hunks across 26 files** under full-recipe.
+
+So the hunk count is NOT the deciding axis. Tip-forward + `union-resolve` left 405
+MANUAL hunks; full-recipe's per-layer total is the same order. **Who owns the work is
+the deciding axis.**
+
+The obvious counter-argument — "tip-forward merges into a tip that already lied, so it
+inherits hollow files and orphan drift" — is answered by the **guard**, not by the
+mode, and this was checked rather than assumed:
+
+- `web/src/components/ProjectGroupRow.tsx` was **0 bytes on the serving tip** (since
+  `b97537bd1`, 2026-11-11, with no importers — the sidebar project-group menu was
+  dead). In the tip-forward WIP it came back at **8107 bytes**, restored mechanically
+  as SUPERSET_THEIRS, and the WIP finished with **zero** zero-byte tracked sources.
+- Orphan drift the tip-forward merge cannot see (e.g. `ensureMessageDeliveryStateColumn`
+  still executing although `driver/job-complete-wake` left the manifest on 2026-11-10)
+  is caught by checking the base actually supplies the behaviour — fork main carries
+  `delivery_state`, its v24→v25 migration, and the same idempotent tolerate-ahead
+  `ADD COLUMN` guard.
+
+**Rule:** tip-forward is the default, including when the tip is known-hollow, *provided*
+the completeness gate runs before promote. Reach for full-recipe only for a deliberate
+recipe audit — not as a repair tool for a bad tip, because repairing a tip costs one
+seat what re-thinning costs 84 owners.
+
+### Kill criteria for "the absorb is done"
+
+1. Completeness gate red → **do not promote.** Not negotiable, and it runs always.
+2. A resolution that "fixes" `tsc` by **emptying or deleting a file present in main** →
+   abort that resolution and fix the dependencies instead. **Never empty a file to clear
+   a compile error.** `b97537bd1` ("make the merged tree compile — 180 errors to zero")
+   emptied 15 files and created `ProjectGroupRow.tsx` empty; that is how a shipped
+   feature dies silently with its own error message.
+3. A fat layer with an unreasonable conflict surface → re-thin or heal **that layer**.
+   Do not `--theirs` a hot file to reach EXIT=0.
+4. After all layers: completeness vs `origin/main` must be green **before** package
+   tests are treated as meaning anything.
+
 ### Additions are not overlaps (2026-11-19 — read this before resolving anything)
 
 **"Soup wins overlapping edits" is only a rule where there IS an overlap.** Applied to
