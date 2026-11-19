@@ -240,7 +240,7 @@ No third-party pushback on #2355/#2356. Upstream `main` @ `6ea40f9e4`. Signals f
 | #987 | **MERGED** (2026-11-13) |
 | #2375 | **MERGED** (2026-11-13) |
 | #2426 | **MERGED** (unblocked #987) |
-| #1725 | Tip `19d340797` **Ready-YES / CLEAN** (bot pass; audit held). Two Minors: (1) cheap `.raw`→`rawSnippetForFailure` **authorized**; (2) silent bridge drop in `persistBridgeReplayGateBeforeDispatch` → **separate upstream issue**, not this PR. Prepare-only. [peer](/sessions/1e75a008-dda1-4549-af61-1f69150e1795) |
+| #1725 | Tip `e6fc92614` — snippet fix + [#2508](https://github.com/tiann/hapi/issues/2508) filed; bot 4th round Needs changes. Calls: fix duplicate stderr chat error now; **investigate** soft-steer-before-Continue (no code yet); verify 3rd Minor vs #2508. Prepare-only. [peer](/sessions/1e75a008-dda1-4549-af61-1f69150e1795) |
 | #1733 | **Ready-YES / CLEAN** tip `57d01bfba` on `225d686e8` — trivial import union; flake in unrelated cli.test rerun-verified. Prepare-only. [peer](/sessions/fd5a0161-6f7e-40b7-81e6-3f19cef1cbbe) idle |
 | #1772 | **CONFLICTING** tip `22c897a83`; Nov-13 assist `350c11186` **stale**. Author never said yes to push. Assist peer stood down — no weekly re-cuts; stale-offer comment posted. Awaiting author ask or operator push auth. |
 | #2376 | **HOLD** — stop chasing moving #1772 assist. Sit on `b6ae3dd28` until #1772 PR tip is actually CLEAN/merged, then rebase 2 commits onto that tip. |
