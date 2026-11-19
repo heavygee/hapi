@@ -84,6 +84,8 @@ def classify(ours: str, theirs: str) -> str:
         return "IMPORT_UNION"
     if additive(ours, theirs):
         return "ADDITIVE_UNION"
+    if field_union(ours, theirs) is not None:
+        return "FIELD_UNION"
     return "MANUAL"
 
 
@@ -190,6 +192,34 @@ def additive(ours: str, theirs: str) -> bool:
     return od.isdisjoint(td)
 
 
+FIELD_LINE = re.compile(r"^\s*(?://.*|/\*.*\*/|['\"]?[A-Za-z0-9_$.:\-]+['\"]?\s*:\s*.*)$")
+FIELD_KEY = re.compile(r"^\s*['\"]?([A-Za-z0-9_$.:\-]+)['\"]?\s*:")
+
+
+def field_union(ours: str, theirs: str):
+    """Both sides are only `key: value,` entries, and the key sets are disjoint.
+
+    This is the locale/translation-table shape: upstream adds strings, the fork
+    adds strings, nobody edits the same key. Concatenation is then the real
+    union. Refused the moment a key appears on both sides (that IS a competing
+    value) or a line is not a field entry, so it cannot be used to splice code.
+
+    Deliberately narrow: it does not fall back to `additive()`, which requires a
+    declaration on each side and therefore never fires inside an object literal.
+    """
+    o = [l for l in ours.splitlines() if l.strip()]
+    t = [l for l in theirs.splitlines() if l.strip()]
+    if not o or not t:
+        return None
+    if not all(FIELD_LINE.match(l) for l in o + t):
+        return None
+    ok = {m.group(1) for m in (FIELD_KEY.match(l) for l in o) if m}
+    tk = {m.group(1) for m in (FIELD_KEY.match(l) for l in t) if m}
+    if not ok or not tk or not ok.isdisjoint(tk):
+        return None
+    return ours.rstrip("\n") + "\n" + theirs.rstrip("\n") + "\n"
+
+
 def resolve(path: Path, apply: bool):
     text = path.read_text()
     hunks, tail = split_hunks(text)
@@ -210,6 +240,8 @@ def resolve(path: Path, apply: bool):
             # nothing for a whole pass — the hunks fell through to MANUAL.)
             pieces.append(ours if ours.endswith("\n") or not ours else ours + "\n")
             pieces.append(theirs)
+        elif v == "FIELD_UNION":
+            pieces.append(field_union(ours, theirs))
         elif v == "IMPORT_UNION":
             merged = merge_imports(ours, theirs)
             if merged is None:

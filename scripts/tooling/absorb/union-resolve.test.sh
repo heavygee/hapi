@@ -161,6 +161,25 @@ conflict "$TMP/frag.ts" \
 run "$TMP/frag.ts"
 expect_manual "$TMP/frag.ts" "multi-line import fragment refused"
 
+# 5e. Field union: the locale-table shape. Both sides add entries, no key is
+#     touched twice, so concatenation is the real union.
+conflict "$TMP/locale.ts" \
+    "    'fork.one': 'Fork one'," "    'fork.two': 'Fork two'," -- \
+    "    'main.one': 'Main one',"
+run "$TMP/locale.ts"
+expect_resolved "$TMP/locale.ts" "disjoint key union resolved"
+for k in fork.one fork.two main.one; do
+    expect_contains "$TMP/locale.ts" "$k" "key union kept $k"
+done
+
+# 5f. REFUSAL: the same key on both sides is a competing VALUE, not an addition.
+#     Taking either silently picks one translation over the other.
+conflict "$TMP/locale-clash.ts" \
+    "    'shared.key': 'fork wording'," -- \
+    "    'shared.key': 'main wording',"
+run "$TMP/locale-clash.ts"
+expect_manual "$TMP/locale-clash.ts" "same key with different values refused"
+
 # 6. REFUSAL: an unbalanced fragment must never be concatenated, even though the
 #    two sides declare different names. This is the brace/comma corruption shape.
 conflict "$TMP/unbalanced.ts" \
