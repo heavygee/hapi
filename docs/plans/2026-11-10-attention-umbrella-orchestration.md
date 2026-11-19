@@ -265,3 +265,9 @@ Operator umbrella merge auth active (2026-11-19): merge attention children when 
 - Fork #337 CRC applied; `hapi-pr-status` tip-match fixed for Codex zero-findings tracker comments.
 - No dogfood stamp / no merge until #2520 lands + honest live confirm. Peer prepare-only babysit.
 
+### Soup / dogfood honesty (2026-11-19T21:28Z) — Meta correction
+
+Orch wrongly asked Meta to "tip-forward `847b5c7bc`". Layer `driver/blocked-list-ux` is a **soup-variant** tip `bcfe1cadf` (2026-09-04), not the PR branch — 2904 files differ. Remat would dogfood September chrome. **Refused correctly.**
+
+**Call: option 3** — Meta composes post-absorb + queued layers now (state blocked-chrome on `:3006` = September / not under test for #2520). Layer owner ([Peer #1717](/sessions/83d28e01-5852-4926-b163-99a95f46c931)) **re-thins** `driver/blocked-list-ux` from `847b5c7bc` onto current soup tip (1–3 commits, not fat tip-forward); Meta folds when ready. Honest #2520 dogfood starts only after that compose.
+
