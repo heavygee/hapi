@@ -125,6 +125,42 @@ if [[ "$(grep -c "from './s'" "$TMP/imports.ts")" != "1" ]]; then
 fi
 echo "OK: import union deduped the shared import"
 
+# 5b. Same specifier, overlapping bindings -> ONE merged statement. Line-level
+#     dedupe shipped a duplicate `from 'react'` on 2026-11-19 and TypeScript saw
+#     duplicate identifiers; the union has to be per module specifier.
+conflict "$TMP/same-spec.ts" \
+    "import { useCallback, useState } from 'react'" -- \
+    "import { lazy, Suspense, useCallback, useState } from 'react'"
+run "$TMP/same-spec.ts"
+expect_resolved "$TMP/same-spec.ts" "same-specifier import union resolved"
+if [[ "$(grep -c "from 'react'" "$TMP/same-spec.ts")" != "1" ]]; then
+    echo "FAIL: same-specifier union left more than one react import" >&2
+    cat "$TMP/same-spec.ts" >&2
+    exit 1
+fi
+echo "OK: same-specifier union collapsed to one statement"
+for name in useCallback useState lazy Suspense; do
+    expect_contains "$TMP/same-spec.ts" "$name" "merged import kept $name"
+done
+
+# 5c. `import type` is keyed separately from the value import of the same
+#     module — both are legal and must survive as distinct statements.
+conflict "$TMP/type-spec.ts" \
+    "import { value } from './m'" -- \
+    "import type { Thing } from './m'"
+run "$TMP/type-spec.ts"
+expect_resolved "$TMP/type-spec.ts" "type + value import of one module resolved"
+expect_contains "$TMP/type-spec.ts" "import type { Thing } from './m'" "type import kept separate"
+expect_contains "$TMP/type-spec.ts" "import { value } from './m'" "value import kept separate"
+
+# 5d. REFUSAL: a multi-line import fragment is not a statement. Splicing those
+#     by line would emit a broken import.
+conflict "$TMP/frag.ts" \
+    "import {" "    aa," "} from './a'" -- \
+    "import { bb } from './b'"
+run "$TMP/frag.ts"
+expect_manual "$TMP/frag.ts" "multi-line import fragment refused"
+
 # 6. REFUSAL: an unbalanced fragment must never be concatenated, even though the
 #    two sides declare different names. This is the brace/comma corruption shape.
 conflict "$TMP/unbalanced.ts" \

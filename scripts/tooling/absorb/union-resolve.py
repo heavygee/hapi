@@ -93,6 +93,60 @@ DECL = re.compile(
 )
 
 
+SINGLE_IMPORT = re.compile(
+    r"^\s*import\s+(type\s+)?\{([^}]*)\}\s*from\s*(['\"][^'\"]+['\"])\s*;?\s*$"
+)
+WHOLE_STATEMENT = re.compile(
+    r"^\s*(?:import\s+[^{}]*from\s*['\"][^'\"]+['\"]\s*;?|import\s*['\"][^'\"]+['\"]\s*;?)\s*$"
+)
+
+
+def merge_imports(ours: str, theirs: str):
+    """Union two import blocks by MODULE SPECIFIER, not by line text.
+
+    Line-level dedupe is wrong and shipped a real bug on 2026-11-19: ours had
+    `import { useCallback, ... } from 'react'` and theirs had
+    `import { lazy, Suspense, useCallback, ... } from 'react'`, so both lines
+    survived and TypeScript saw duplicate identifiers. Overlapping bindings on
+    the same specifier have to be merged into one statement.
+
+    Returns merged text, or None to refuse (caller falls back to MANUAL).
+    Refuses anything it cannot parse with confidence — notably fragments of a
+    multi-line import, where keeping lines verbatim would splice a broken
+    statement. `import type` is keyed separately from the value import of the
+    same module, which is legal and must stay separate.
+    """
+    groups, order, passthrough = {}, [], []
+    for line in ours.splitlines() + theirs.splitlines():
+        if not line.strip():
+            continue
+        m = SINGLE_IMPORT.match(line)
+        if m:
+            key = ("type" if m.group(1) else "value", m.group(3))
+            if key not in groups:
+                groups[key] = []
+                order.append(key)
+            for name in m.group(2).split(","):
+                name = name.strip()
+                if name and name not in groups[key]:
+                    groups[key].append(name)
+            continue
+        if WHOLE_STATEMENT.match(line) or line.lstrip().startswith("//"):
+            if line not in passthrough:
+                passthrough.append(line)
+            continue
+        # Unrecognised: most likely a fragment of a multi-line import. Refuse
+        # rather than guess at statement boundaries.
+        return None
+
+    out = list(passthrough)
+    for key in order:
+        kind, spec = key
+        prefix = "import type " if kind == "type" else "import "
+        out.append(f"{prefix}{{ {', '.join(groups[key])} }} from {spec}")
+    return "\n".join(out) + "\n"
+
+
 def balanced(text: str) -> bool:
     """Braces/parens/brackets balanced, ignoring those inside strings."""
     depth = {"{": 0, "(": 0, "[": 0}
@@ -157,12 +211,14 @@ def resolve(path: Path, apply: bool):
             pieces.append(ours if ours.endswith("\n") or not ours else ours + "\n")
             pieces.append(theirs)
         elif v == "IMPORT_UNION":
-            seen, merged = set(), []
-            for line in ours.splitlines(True) + theirs.splitlines(True):
-                if line.strip() and line not in seen:
-                    seen.add(line)
-                    merged.append(line)
-            pieces.append("".join(merged))
+            merged = merge_imports(ours, theirs)
+            if merged is None:
+                # Could not parse confidently (multi-line import fragment, odd
+                # form) — hand it back as a conflict instead of splicing.
+                verdicts[-1] = "MANUAL"
+                pieces.append(f"{START} HEAD\n{ours}{MID}\n{theirs}{END} origin/main\n")
+            else:
+                pieces.append(merged)
         else:  # MANUAL — put the conflict back exactly as it was
             pieces.append(f"{START} HEAD\n{ours}{MID}\n{theirs}{END} origin/main\n")
     if apply:
