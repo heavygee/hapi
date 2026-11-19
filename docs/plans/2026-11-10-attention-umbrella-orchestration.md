@@ -240,7 +240,7 @@ No third-party pushback on #2355/#2356. Upstream `main` @ `6ea40f9e4`. Signals f
 | #987 | **MERGED** (2026-11-13) |
 | #2375 | **MERGED** (2026-11-13) |
 | #2426 | **MERGED** (unblocked #987) |
-| #1725 | Tip `b1be69a49` — stderr duplicate fixed; #2508 confirmed for bridge-drop Minor; soft-steer Major **deferred** (common case guarded; gap shared with normal retry). Await CI → Ready-YES. Prepare-only. [peer](/sessions/1e75a008-dda1-4549-af61-1f69150e1795) |
+| #1725 | **Ready-YES / CLEAN** tip `b1be69a49` — CI 8/8, MERGEABLE/CLEAN. Soft-steer deferred ([#2509](https://github.com/tiann/hapi/issues/2509)); bridge-drop = [#2508](https://github.com/tiann/hapi/issues/2508). Label may lag `codex-review:changes` from pre-reply wave. Prepare-only. [peer](/sessions/1e75a008-dda1-4549-af61-1f69150e1795) idle |
 | #1733 | **Ready-YES / CLEAN** tip `57d01bfba` on `225d686e8` — trivial import union; flake in unrelated cli.test rerun-verified. Prepare-only. [peer](/sessions/fd5a0161-6f7e-40b7-81e6-3f19cef1cbbe) idle |
 | #1772 | **CONFLICTING** tip `22c897a83`; Nov-13 assist `350c11186` **stale**. Author never said yes to push. Assist peer stood down — no weekly re-cuts; stale-offer comment posted. Awaiting author ask or operator push auth. |
 | #2376 | **HOLD** — stop chasing moving #1772 assist. Sit on `b6ae3dd28` until #1772 PR tip is actually CLEAN/merged, then rebase 2 commits onto that tip. |
