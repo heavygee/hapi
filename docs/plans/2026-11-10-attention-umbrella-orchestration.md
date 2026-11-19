@@ -244,7 +244,14 @@ No third-party pushback on #2355/#2356. Upstream `main` @ `6ea40f9e4`. Signals f
 | #1733 | **MERGED** 2026-11-19 (operator-directed Lane B / elapsed dogfooded). Gate A + exit reflection filed; peer idle for Meta archive. Promote filed: mirror-hygiene `~` expand. |
 | #1772 | **MERGED** 2026-11-19 (Lane B / elapsed dogfooded + operator umbrella auth). Squash `3ae9c77c4` (38 files). Gate A' done — retro `2026-11-19-1772-session-list-filters-exit.md` (promote none), emit+archive [assist](/sessions/3c5af7c8-540d-4d7c-b7a1-5df17abe5b37); assist wt removed. Soup layers for stack left for Meta. |
 | #2376 | **MERGED** 2026-11-19 (Lane B / elapsed dogfooded + umbrella auth). Squash `fa9fd8cc0`. Gate A' done — retro `2026-11-19-2002-active-working-lenses-exit.md`; promote applied (`rebase --onto` recipe → `driver-soup.md`); soup layer 3/3 dropped; [peer](/sessions/ea9e52cc-cf3d-4f5d-95d8-9944bf08b0d6) archived. Layers 1–2 (#1772/#1996) left for Meta remat re-thread. |
-| #1717 | **IN FLIGHT** — tip `030d5caf3` on main+#1772+#2376; fork [#325](https://github.com/heavygee/hapi/pull/325) CONFLICTING + 4 tip-matched Codex P2s. Operator GO 2026-11-19: clear threads → local-CI → open upstream → merge under umbrella. [peer](/sessions/83d28e01-5852-4926-b163-99a95f46c931) |
-| #1996 | **HOT** — warm on current main; RE-WAKE the moment #1717 upstream PR exists. [peer](/sessions/eddfb230-ebc4-4196-b2b7-c33a2f5f71f8) |
+| #1717 | **UPSTREAM [#2520](https://github.com/tiann/hapi/pull/2520)** tip `d347f2ffa` — 6/6 bot findings fixed+resolved (schema v39 `last_notify_cleared_at`); 0 unresolved. Dogfood stamped 2026-11-19T16:50Z (~44h left) → needs `hapi-laneb-authorise 2520` for immediate Lane B, or wait window. CI: watch `core` ENOENT lock flake (`cli.test.ts`); not tip-owned. [peer](/sessions/83d28e01-5852-4926-b163-99a95f46c931) |
+| #1996 | **HOT / WIP** — uncommitted fold work in `worktrees/1996-fold-blocked-filter` (7 files); peer re-woken past Claude five-hour. Stack on #2520 tip after green. [peer](/sessions/eddfb230-ebc4-4196-b2b7-c33a2f5f71f8) |
 
 Operator umbrella merge auth active (2026-11-19): merge attention children when three-dim CLEAN. #2515 closed absorbed into #2376. Orch resumed after parking wrongly post-#2376.
+
+### #2520 status (2026-11-19T20:56Z)
+
+- Opened via `--skip-fork-stage` (fork #325 structural CONFLICTING — leave alone).
+- Bot round on tip `d347f2ffa`: Majors (observedAt watermark, notifyUpdatedAt SSE, persisted clear boundary) + Minors (delivered-reply predicate, jump filters, CollapsiblePanel) — all fixed, threads RESOLVED.
+- Gate blockers remaining: checks green on tip + laneb (or dogfood elapsed). Thread helper path broken in installed `hapi-pr-merge-gate` (`lib/pr-review-threads.sh` missing) — GraphQL says 0 unresolved.
+- Meta FYI'd on ENOENT lock race still biting `core`.
