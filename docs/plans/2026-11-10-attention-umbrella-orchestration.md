@@ -231,15 +231,18 @@ Three-dim PASS (CI 10/10, 0 threads, bot pass). MERGEABLE/CLEAN on 0.35.0 parent
 
 ## Daily sweep complete (2026-11-13T06:06Z — 24/24)
 
-No third-party pushback on #2355/#2356. Upstream `main` @ `6ea40f9e4`. Signals from sweep 19 onward:
+No third-party pushback on #2355/#2356. Upstream `main` @ `6ea40f9e4`. Signals from sweep 19 onward — superseded by 2026-11-19 flock check below.
+
+## Flock check (2026-11-19) — main @ `225d686e8`
 
 | PR | Status |
 |---|---|
-| #1725 | CLEAN + dogfooded |
-| #1733 | CLEAN + dogfooded |
-| #2375 | CLEAN (test-only Lane B) |
-| #1772 | **CONFLICTING** — assist tip `350c11186`; offer posted ([comment](https://github.com/tiann/hapi/pull/1772#issuecomment-6845716136)); **awaiting author/operator yes** before maintainerCanModify push. [peer](/sessions/3c5af7c8-540d-4d7c-b7a1-5df17abe5b37) idle |
-| #987 | Tip `ef8aef3e3` **Ready-pending-upstream** (9/10; main red via #2423). Unblock [#2426](https://github.com/tiann/hapi/pull/2426). Fork #331 closed/cleaned. Peer authorized brief non-blocking public comment on #2426 suggesting `code === 'archive-cleanup-timeout'` assert. Idle until #2426 merges. |
-| #2376 | **CONFLICTING** — [peer](/sessions/ea9e52cc-cf3d-4f5d-95d8-9944bf08b0d6) waiting: throwaway rebase showed conflicts are #1772's `6dd0183b6`, not their files; will rebase 2 commits onto fresh CLEAN #1772 tip |
+| #987 | **MERGED** (2026-11-13) |
+| #2375 | **MERGED** (2026-11-13) |
+| #2426 | **MERGED** (unblocked #987) |
+| #1725 | **CONFLICTING** — rebase peer woken |
+| #1733 | **CONFLICTING** — rebase peer woken |
+| #1772 | **CONFLICTING** tip `22c897a83`; Nov-13 assist `350c11186` **stale**. Author never said yes to push. Assist peer stood down — no weekly re-cuts; stale-offer comment posted. Awaiting author ask or operator push auth. |
+| #2376 | **HOLD** — stop chasing moving #1772 assist. Sit on `b6ae3dd28` until #1772 PR tip is actually CLEAN/merged, then rebase 2 commits onto that tip. |
 
-Prepare-only. Re-armed next 24h sweep watching the same six PRs.
+Prepare-only.
