@@ -201,13 +201,18 @@ HEAD_SHA=$(gh pr view "$PR" --repo "$REPO" --json headRefOid --jq '.headRefOid' 
 # (false CLEAN when an older page ended Findings:None, or false FINDINGS when
 # an older page still had [Major]). --slurp + jq `add` merges pages first.
 if [[ "$OWNER" == "heavygee" ]]; then
-    # Fork Codex posts TWO shapes:
+    # Fork Codex posts THREE shapes:
     #   - findings waves → formal PR reviews (### 💡 Codex Review + Reviewed commit)
-    #   - zero-findings → often a plain issue comment ("Didn't find any major issues"
-    #     + Reviewed commit) with NO review object — must merge both timelines by time
-    #     or tip-match falsely sticks on an older findings review (#238 2026-10-14).
+    #   - zero-findings (legacy) → plain issue comment ("Didn't find any major issues"
+    #     + Reviewed commit) with NO review object
+    #   - zero-findings (2026-11+) → edits a single tracker issue-comment in place with
+    #     `<!-- codex-review-state:v1 {...commit_sha...,has_any_findings:false...} -->`
+    #     and often NO "Reviewed commit" prose + NO new formal review. Must merge all
+    #     three by time (use comment *updated_at* — the tracker is edited in place) or
+    #     tip-match falsely sticks on an older findings review (#238 2026-10-14;
+    #     #337 2026-11-19 zero-findings after rebase).
     BOT_DESC="chatgpt-codex-connector[bot]"
-    CLEAN_REGEX="Codex Review:.*Didn.t find any|Codex Review:.*No.*issues|Didn.t find any major|No reportable (code )?issues found|No findings"
+    CLEAN_REGEX="Codex Review:.*Didn.t find any|Codex Review:.*No.*issues|Didn.t find any major|No reportable (code )?issues found|No findings|Codex Review Summary.*Completed|has_any_findings.:false"
     # Temp files — PR review payloads are too large for jq --argjson argv limits.
     REVIEWS_TMP=$(mktemp)
     COMMENTS_TMP=$(mktemp)
@@ -219,13 +224,15 @@ if [[ "$OWNER" == "heavygee" ]]; then
         def is_codex: (.user.login == "chatgpt-codex-connector[bot]"
             or .user.login == "chatgpt-codex-connector");
         def has_reviewed_commit: ((.body // "") | test("Reviewed commit"));
+        def has_state_v1: ((.body // "") | test("codex-review-state:v1"));
+        def is_codex_verdict: (has_reviewed_commit or has_state_v1);
         def pages: if type == "array" and length > 0 and (.[0]|type) == "array" then add else . end;
         ($reviews[0] | pages // []) as $r
         | ($comments[0] | pages // []) as $c
-        | ([ $r[]? | select(is_codex and has_reviewed_commit)
+        | ([ $r[]? | select(is_codex and is_codex_verdict)
              | {kind:"review", at:.submitted_at, body:(.body // "")} ]
-           + [ $c[]? | select(is_codex and has_reviewed_commit)
-             | {kind:"comment", at:.created_at, body:(.body // "")} ])
+           + [ $c[]? | select(is_codex and is_codex_verdict)
+             | {kind:"comment", at:(.updated_at // .created_at), body:(.body // "")} ])
         | sort_by(.at) | reverse | .[0] // null
         ' 2>/dev/null || echo "null")
     # Quota notices can arrive as either a plain issue comment OR a formal
@@ -258,15 +265,22 @@ if [[ "$OWNER" == "heavygee" ]]; then
         KIND=$(echo "$LATEST_EVENT" | jq -r '.kind')
         SUBMITTED=$(echo "$LATEST_EVENT" | jq -r '.at')
         BODY=$(echo "$LATEST_EVENT" | jq -r '.body // empty')
+        # pipefail + set -e: greps that miss must not abort the script (zero-findings
+        # tracker comments have commit_sha JSON, not "Reviewed commit" prose).
         REVIEWED_SHA=$(printf '%s' "$BODY" | grep -oE 'Reviewed commit:\*\* `[0-9a-f]{7,40}`|Reviewed commit: `[0-9a-f]{7,40}`' \
-            | head -1 | grep -oE '[0-9a-f]{7,40}' | head -1)
+            | head -1 | grep -oE '[0-9a-f]{7,40}' | head -1 || true)
+        # Tracker comment shape: <!-- codex-review-state:v1 {"code_review":{"commit_sha":"...","has_any_findings":false,...}} -->
+        if [[ -z "$REVIEWED_SHA" ]] && printf '%s' "$BODY" | grep -q 'codex-review-state:v1'; then
+            REVIEWED_SHA=$(printf '%s' "$BODY" | grep -oE '"commit_sha":"[0-9a-f]{40}"' \
+                | head -1 | grep -oE '[0-9a-f]{40}' || true)
+        fi
         echo "     Source: ${BOT_DESC} ${KIND}"
         echo "     Last run: ${SUBMITTED}"
         [[ -n "$REVIEWED_SHA" ]] && echo "     Reviewed commit: ${REVIEWED_SHA}"
         echo "$BODY" | head -c 300 | sed 's/^/     /'
         echo ""
     else
-        echo "     ? No ${BOT_DESC} review/comment with Reviewed commit found"
+        echo "     ? No ${BOT_DESC} review/comment with Reviewed commit / codex-review-state found"
         BODY=""
     fi
 
