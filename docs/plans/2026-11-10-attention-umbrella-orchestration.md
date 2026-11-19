@@ -278,3 +278,11 @@ Meta **withholding** post-absorb SHA. 110-commit absorb broken: 46 zero-byte, 16
 
 Stale comment note: `hub/src/store/index.ts` still says SCHEMA_VERSION=23; actual is 35 (#2520 works from real number).
 
+### Meta absorb progress (2026-11-19T22:40Z)
+
+- SHA still withheld; remat hold Meta-owned; live tip `360c9d58` serving.
+- Compose **4/84** layers; heals for mermaid `<render-issue>` prefix + serial `/stop-session` test.
+- SCHEMA_VERSION=23 comment was soup-only drift (never on fork main); redo drops it. Fork main = 36.
+- **User-visible on :3006 now:** `ProjectGroupRow.tsx` is zero-byte (from `b97537bd1` 2026-11-11 compile-fix) — project-group right-click/long-press menu (#881/#2357) dead. Restored by absorb redo; not spinning a separate peer.
+- Tip-forward vs full-recipe: Meta flagged to 028d0a86 for ruling.
+
