@@ -1109,7 +1109,12 @@ layers:
   # its own merits, no override needed. Verified standalone: typecheck clean, web
   # vitest green, full suite 4578/4578 (same one pre-existing garden/xr failure as
   # layer 1/3, unrelated).
-  - branch: driver/2002-session-filter-active-working-wip
+  #
+  # DROPPED 2026-11-19: MERGED upstream as tiann/hapi#2376 (squash fa9fd8cc0 —
+  # feat(web) Active + Working lenses, rebased onto #1772 post-squash main via
+  # `git rebase --onto`, plus the #2514 hub hook-timeout CI unblocker cherry-picked
+  # in before merge). Session fda1dbdf; exit reflection docs/plans/retros/2026-11-19-2002-active-working-lenses-exit.md.
+  # - branch: driver/2002-session-filter-active-working-wip
 
   # FOOTGUN FOUND while swapping #1772 (2026-11-09, session 3c5af7c8): the `- pr: N`
   # manifest layer type (scripts/tooling/hapi-driver-rebuild.sh resolve_merge_ref) fetches
