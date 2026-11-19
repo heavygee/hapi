@@ -183,12 +183,73 @@ assumed to supply it — on the one case found: fork main **does** carry
 idempotent tolerate-ahead `ALTER TABLE ... ADD COLUMN` guard, so that drop was
 sound and the soup's bespoke function is genuinely superseded.
 
-Not thrashing between approaches mid-compose. Staying on full-recipe until the
-predecessor or operator rules otherwise; switching is cheap in one direction
-only, since rerere resolutions are keyed to conflict content and layer-merge
-resolutions do not transfer to a single `origin/main` merge.
+### Resolved — canon was right, and now I know why
 
-## Where the compose actually stands (resume here)
+**Corrected myself back to tip-forward.** Layer 7 (`feat/overseer-readonly-entity`)
+produced **66 MANUAL hunks across 26 files**, only 1 of 26 files fully
+resolvable. That is absorb-scale work inside a single layer, and it exposed the
+mechanism §3b never spelled out:
+
+`driver_remat_layer_gate` (`scripts/tooling/lib/driver-remat-layer-gate.sh`)
+refuses any layer diverging by more than 20 commits or 40 files, and in
+**tip-forward mode only** such a layer is SKIPPED — *"Re-thin onto current soup
+tip, then remat again to refresh this layer"*, i.e. the **layer owner's** job.
+Full-recipe has no such gate, so it silently converts 84 layer owners' re-thin
+work into one seat's hand-merging. That is the real content of "full-recipe is
+worse, not better" — not the hunk count, the **work assignment**. §3b point 4
+says ping owners when a layer tip is fat or moved; full-recipe makes that
+impossible, because every layer must merge for the compose to complete.
+
+The drift objection that drove me to full-recipe is answered by the guard
+rather than by the mode: tip-forward + `union-resolve` restores
+`ProjectGroupRow.tsx` mechanically (SUPERSET_THEIRS), and the completeness gate
+now fails closed on any empty or dropped file that survives. That was the
+predecessor's plan from the start — guard first, then tip-forward.
+
+Six layers' worth of resolutions remain cached in rerere. They do not transfer
+to the `origin/main` merge (different conflicts), but they are not wasted:
+every one of those layers still has to merge after the absorb, and three of
+them taught real findings — the mermaid `<render-issue>` prefix, the
+serial-stop flake fix, and the Garden chip re-placement, all now heals
+(`soup-heals/109`, `110`, `111`) rather than resolutions that a recompose would
+discard.
+
+## CURRENT STATE — tip-forward absorb, resume here
+
+Live tip `360c9d58` UNCHANGED and serving. Remat hold owned by `cbd1073e`.
+Mode is now **tip-forward** (the default — do not pass `HAPI_REMAT_MODE`).
+
+The remat stopped where it should: `merge conflict merging origin/main into
+tip-forward WIP`, **258 files**. That merge is the absorb proper and is this
+seat's work; the 84 layers replay afterwards, and fat ones get skipped for
+their owners to re-thin.
+
+`union-resolve.py --apply` over all 258 (after the import-merge fix):
+
+| Verdict | Hunks |
+|---|---|
+| SUPERSET_THEIRS | 283 |
+| SUPERSET_OURS | 67 |
+| IMPORT_UNION | 23 |
+| ADDITIVE_UNION | 14 |
+| **MANUAL** | **405** |
+
+**115 files staged clean. 143 files / 405 hunks remain for hand union.** Zero
+zero-byte source files after the pass, so the mechanical half hollowed nothing.
+
+`IMPORT_UNION` fell 27→23 and MANUAL rose correspondingly *after* the
+specifier-merge fix: four import hunks that the old line-dedupe would have
+spliced into duplicate-identifier errors are now correctly refused.
+
+Next: hand-union the 405. Hot files to expect, from the earlier measurement —
+`SessionList.tsx` (61), `sessionCache.ts` (22), `syncEngine.ts` (16),
+`startHappyServer.ts` (16), `NewSession/index.tsx` (15), `SessionChat.tsx` (13).
+§3b hot-file rule applies: keep **both** the call site and the declaration,
+prefer the fuller helper module over a partial stub. Then the completeness gate
+must pass **before** any typecheck celebration, then layers, then promote, then
+`hapi-restart-hub` (patient — live WORKING sessions).
+
+## Superseded: where the full-recipe compose got to
 
 Live tip `360c9d58` UNCHANGED and serving throughout. Remat hold ACTIVE, owned
 by `cbd1073e`, reason `merge conflict on feat/garden-route`.
