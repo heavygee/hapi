@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: HeavyGee <gc@lockhouse.systems>
+Date: Thu, 19 Nov 2026 22:35:00 +0000
+Subject: [PATCH] test(soup): stop runner sessions serially in the concurrency test
+
+feat/tier-b-reattach-orphan-runner-children serialised the stop loop in
+the runner concurrency integration test because parallel /stop-session
+under load races the control server and flakes with intermittent HTTP
+failures on busy hosts. This host runs ~30 agents, so it is the busy
+case. Upstream went back to Promise.all(...map(stopRunnerSession)).
+
+The layer merge takes the base for this file (the base has 13 tests to
+the layer's 12, and a richer 'stopped' | 'already_gone' return contract
+that the layer's boolean[] would not typecheck against), so the fix is
+reapplied here on top of the base contract rather than by taking the
+layer side.
+
+It has to be a heal, not a merge resolution: those lines sit OUTSIDE the
+conflict region (git treated them as common context), and rerere only
+replays conflicted regions, so a hand edit there is silently discarded
+by the next compose.
+
+diff --git a/cli/src/runner/runner.integration.test.ts b/cli/src/runner/runner.integration.test.ts
+index 7a100916a..baece18fe 100644
+--- a/cli/src/runner/runner.integration.test.ts
++++ b/cli/src/runner/runner.integration.test.ts
+@@ -662,8 +662,14 @@ if (process.argv[2] === 'runner' && process.argv[3] === 'start-sync') {
+       const sessions = await listRunnerSessions();
+       expect(sessions).toHaveLength(sessionCount);
+ 
+-      // Stop all sessions
+-      const stopResults = await Promise.all(sessionIds.map(sessionId => stopRunnerSession(sessionId)));
++      // Stop serially. Parallel /stop-session under load races the control
++      // server and flakes with intermittent HTTP failures on busy hosts (this
++      // one runs ~30 agents), which is why the fork's tier-b layer serialised
++      // it. The base's richer 'stopped' | 'already_gone' contract is kept.
++      const stopResults: Array<Awaited<ReturnType<typeof stopRunnerSession>>> = [];
++      for (const sessionId of sessionIds) {
++        stopResults.push(await stopRunnerSession(sessionId));
++      }
+       expect(stopResults.every(r => r === 'stopped' || r === 'already_gone'), 'Not all sessions reported stopped').toBe(true);
+ 
+       // Verify all sessions are stopped
+-- 
+2.47.3
