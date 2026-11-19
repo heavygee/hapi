@@ -135,6 +135,59 @@ re-adding `sessionCapability`, `sessionStartTimeoutMs`, `tag`/`runnerProof`,
 `scripts/tooling/absorb/port-fork-symbols.mjs` generalises that method for any
 contract file where picking a side loses exports.
 
+## Open divergence from canon — full-recipe vs tip-forward
+
+**I diverged from documented canon and the predecessor's prescription, and this
+needs their ruling.** `tooling-meta-role.md` §3b says plainly *"full-recipe is
+worse, not better, for this shape"*, confirmed with the predecessor, and their
+2026-11-19 verdict prescribed step 3 as: re-merge `origin/main` into the
+**tip-forward** WIP with additions-always-from-main, `union-resolve.py --check`
+then apply, hand-union the remainder. I went full-recipe instead.
+
+Measured both, so the choice is not on vibes. `union-resolve.py` over the
+tip-forward merge of `origin/main` into `360c9d58` (258 conflicted files,
+~792 hunks):
+
+| Verdict | Hunks |
+|---|---|
+| SUPERSET_THEIRS | 283 |
+| SUPERSET_OURS | 67 |
+| IMPORT_UNION | 27 |
+| ADDITIVE_UNION | 14 |
+| **MANUAL** | **401** |
+
+Only **61 of 258 files** come out fully clean. So the sanctioned path still
+leaves ~401 hand-judgement hunks — my earlier 422 figure was not an artefact of
+using a weaker classifier, which was the obvious suspicion once the predecessor
+pointed at `union-resolve.py`.
+
+Argument for staying on full-recipe: the recurring scar is **inherited tip
+drift**, and tip-forward preserves it by construction. Two concrete instances
+found today — `ProjectGroupRow.tsx` sitting empty in the serving tip since
+2026-11-11, and `ensureMessageDeliveryStateColumn` still live in the serving tip
+although its layer (`driver/job-complete-wake`) was dropped from the manifest on
+2026-11-10, meaning code was executing that no manifest layer supplied. A
+full-recipe base is fork main exactly, so the completeness gate passes
+structurally rather than by repair, stale layers surface as information (layer 2
+is already a drop candidate), and every resolution is cached in rerere as a
+durable asset for later remats.
+
+Argument for canon: one merge instead of 84, and tip-forward + `union-resolve`
+would have restored `ProjectGroupRow.tsx` mechanically (it classifies
+SUPERSET_THEIRS). Several layers are large — `feat/garden-route` alone is 56
+files.
+
+Checked the biggest full-recipe risk — a layer retired because the base was
+assumed to supply it — on the one case found: fork main **does** carry
+`delivery_state` in the messages table, a v24→v25 migration for it, and the same
+idempotent tolerate-ahead `ALTER TABLE ... ADD COLUMN` guard, so that drop was
+sound and the soup's bespoke function is genuinely superseded.
+
+Not thrashing between approaches mid-compose. Staying on full-recipe until the
+predecessor or operator rules otherwise; switching is cheap in one direction
+only, since rerere resolutions are keyed to conflict content and layer-merge
+resolutions do not transfer to a single `origin/main` merge.
+
 ## Where the compose actually stands (resume here)
 
 Live tip `360c9d58` UNCHANGED and serving throughout. Remat hold ACTIVE, owned

@@ -233,6 +233,42 @@ What makes the job survivable rather than shorter:
 6. **One absorb owner, one remat WT.** Do not start a second remat hoping the flock
    saves you.
 
+### Additions are not overlaps (2026-11-19 — read this before resolving anything)
+
+**"Soup wins overlapping edits" is only a rule where there IS an overlap.** Applied to
+a file or hunk where upstream was *adding* exports or files, it is not a tie-break —
+it is silent deletion. An addition has no competing lines to lose to.
+
+That mistake composed a tip missing **209 of the 293 files upstream had added** (163
+absent, 46 present but zero bytes) plus **61 exported symbols** from
+`shared/src/apiTypes.ts`. The full gate reported **EXIT=0** — hub 2357 pass / 0 fail,
+web 4776, shared 670, relay 118, cli 5005, typecheck clean in every package — because
+every lost implementation file had its test emptied or dropped in the same pass.
+Nothing was left to fail. `tsc` cannot see it either: an empty `.ts` is a legal
+module, and a dropped file whose only importer also went missing is just absent.
+
+So: **a green gate is not evidence that an absorb is done.** Treat paired
+implementation+test disappearance as a kill criterion, not a curiosity.
+
+- Upstream additions are **always** taken. Soup wins genuine competing edits only.
+- Use `scripts/tooling/absorb/union-resolve.py` (`--check` first). Do not write another
+  resolver — it already classifies pure additions, refuses same-name competing bodies,
+  refuses unbalanced fragments, and refuses to write if a fork identifier would vanish.
+- The gate is `scripts/tooling/hapi-soup-base-completeness-check.mjs`, wired into the
+  remat **before promote, always** — not only under `--verify`.
+- `rerere` replays **conflicted regions only.** A fork fix on a line git treated as
+  common context is discarded by the next compose; that belongs in `soup-heals/`.
+  The poisoned 291-entry cache that was replaying 191-of-258 bad resolutions is parked
+  at `.git/rr-cache.poisoned-20261119` — do not restore it.
+- Recurring, not a one-off: `scripts/tooling/absorb/2026-11-12-ROUND2-STATE.md` already
+  recorded "upstream additions the merge dropped — restore from `origin/main`".
+
+On the "full-recipe is worse" line above: measured on 2026-11-19, tip-forward +
+`union-resolve.py` still leaves **401 MANUAL hunks** (61 of 258 files fully clean), so
+it is not the cheap path it reads as. The open question of which to prefer when the
+tip's own base is corrupt is recorded in
+`docs/operator/2026-11-19-absorb-redo-checkpoint.md` for the predecessor to rule on.
+
 **The soup sitting on an older main while the absorb is prepared is the DESIGN, not a
 degraded state.** Atomic remat leaves the pre-remat SHA serving. Live tip up with the
 hold cleared is the correct trade: remat is blocked, the fleet is not dark. An
