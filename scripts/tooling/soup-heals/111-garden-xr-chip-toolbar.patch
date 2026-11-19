@@ -1,0 +1,41 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: HeavyGee <gc@lockhouse.systems>
+Date: Thu, 19 Nov 2026 22:45:00 +0000
+Subject: [PATCH] fix(soup): reinstate the Garden/XR entry chip in the sessions toolbar
+
+feat/garden-route placed <GardenXrEntryChip /> inline in the sessions
+header in web/src/router.tsx, beside the session count. Upstream has since
+moved that whole header into <SessionList renderHeader toolbarExtras={[...]}>,
+so the layer merge takes the base for that region — otherwise the composed
+tip would render a second header the base no longer renders.
+
+That leaves the chip with nowhere to live, so it is reinstated here as a
+toolbarExtras entry (id 'garden-xr', keep 4) alongside browse and settings.
+
+A heal rather than part of the merge resolution: toolbarExtras is outside
+the conflict region, git treated it as context, and rerere replays
+conflicted regions only — so a hand edit there is silently dropped by the
+next compose, and in full-recipe mode every run recomposes from the base.
+
+diff --git a/web/src/router.tsx b/web/src/router.tsx
+--- a/web/src/router.tsx
++++ b/web/src/router.tsx
+@@ -345,6 +345,16 @@
+                                 )
+                             }] : []),
+                             {
++                                // Garden/XR entry (fork). It used to sit inline
++                                // beside the session count; upstream moved that
++                                // header into <SessionList renderHeader>, so the
++                                // chip belongs in the toolbar rather than in a
++                                // header this file no longer renders.
++                                id: 'garden-xr',
++                                keep: 4,
++                                node: <GardenXrEntryChip />
++                            },
++                            {
+                                 id: 'settings',
+                                 keep: 6,
+                                 node: (
+-- 
+2.47.3
