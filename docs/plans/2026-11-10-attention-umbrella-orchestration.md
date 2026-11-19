@@ -242,7 +242,7 @@ No third-party pushback on #2355/#2356. Upstream `main` @ `6ea40f9e4`. Signals f
 | #2426 | **MERGED** (unblocked #987) |
 | #1725 | **MERGED** 2026-11-19 (operator-directed Lane B / elapsed dogfooded). Soft-steer deferred [#2509](https://github.com/tiann/hapi/issues/2509); bridge-drop [#2508](https://github.com/tiann/hapi/issues/2508). |
 | #1733 | **MERGED** 2026-11-19 (operator-directed Lane B / elapsed dogfooded). Gate A + exit reflection filed; peer idle for Meta archive. Promote filed: mirror-hygiene `~` expand. |
-| #1772 | **MERGED** 2026-11-19 (Lane B / elapsed dogfooded + operator umbrella auth). Squash `3ae9c77c4` (38 files). [assist](/sessions/3c5af7c8-540d-4d7c-b7a1-5df17abe5b37) → Gate A exit reflection then idle. |
+| #1772 | **MERGED** 2026-11-19 (Lane B / elapsed dogfooded + operator umbrella auth). Squash `3ae9c77c4` (38 files). Gate A' done — retro `2026-11-19-1772-session-list-filters-exit.md` (promote none), emit+archive [assist](/sessions/3c5af7c8-540d-4d7c-b7a1-5df17abe5b37); assist wt removed. Soup layers for stack left for Meta. |
 | #2376 | **In flight** — ephemeral Active lens (bot ⚠️ real; Ready-YES revoked). Now CONFLICTING vs main after #1772 squash; rebase onto `3ae9c77c4` + Active fix + bot/CI clear. Lane B auth covers merge when CLEAN. [peer](/sessions/ea9e52cc-cf3d-4f5d-95d8-9944bf08b0d6) |
 | #1717 | **Open upstream now** via local CI (`oos-linux/test`) + cold-review-clean + `hapi-pr-create` — not Actions billing. Fork [#325](https://github.com/heavygee/hapi/pull/325). [peer](/sessions/83d28e01-5852-4926-b163-99a95f46c931) |
 | #1996 | **Armed** — stack `#2376 → #1996` once #1717 has an upstream PR and #2376 tip is CLEAN. [peer](/sessions/eddfb230-ebc4-4196-b2b7-c33a2f5f71f8) |
