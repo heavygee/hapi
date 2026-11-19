@@ -245,7 +245,7 @@ No third-party pushback on #2355/#2356. Upstream `main` @ `6ea40f9e4`. Signals f
 | #1772 | **MERGED** 2026-11-19 (Lane B / elapsed dogfooded + operator umbrella auth). Squash `3ae9c77c4` (38 files). Gate A' done — retro `2026-11-19-1772-session-list-filters-exit.md` (promote none), emit+archive [assist](/sessions/3c5af7c8-540d-4d7c-b7a1-5df17abe5b37); assist wt removed. Soup layers for stack left for Meta. |
 | #2376 | **MERGED** 2026-11-19 (Lane B / elapsed dogfooded + umbrella auth). Squash `fa9fd8cc0`. Gate A' done — retro `2026-11-19-2002-active-working-lenses-exit.md`; promote applied (`rebase --onto` recipe → `driver-soup.md`); soup layer 3/3 dropped; [peer](/sessions/ea9e52cc-cf3d-4f5d-95d8-9944bf08b0d6) archived. Layers 1–2 (#1772/#1996) left for Meta remat re-thread. |
 | #1717 | **UPSTREAM [#2520](https://github.com/tiann/hapi/pull/2520)** tip `d347f2ffa` — round-1 bot 6/6 fixed; **round-2 bot 8 unresolved (4 Major + 4 Minor)** just landed — peer kicked. tip `bdc18fc5f` — round-2 8/8 fixed+resolved; ENOENT lock parent-mkdir **real fix** in tip. Dogfood wait (~43h); **no laneb**. CI running. [peer](/sessions/83d28e01-5852-4926-b163-99a95f46c931) |
-| #1996 | **HOT** — fork [#337](https://github.com/heavygee/hapi/pull/337) cold-review; rebase onto `bdc18fc5f`; waiting operator `cold-review-clean` for upstream. [peer](/sessions/eddfb230-ebc4-4196-b2b7-c33a2f5f71f8) |
+| #1996 | **UPSTREAM [#2530](https://github.com/tiann/hapi/pull/2530)** tip `9497e5698` atop #2520 `bdc18fc5f`. Fork [#337](https://github.com/heavygee/hapi/pull/337) CRC+CLEAN. Prepare-only; merge after #2520. [peer](/sessions/eddfb230-ebc4-4196-b2b7-c33a2f5f71f8) |
 
 Operator umbrella merge auth active (2026-11-19): merge attention children when three-dim CLEAN. #2515 closed absorbed into #2376. Orch resumed after parking wrongly post-#2376.
 
@@ -255,4 +255,12 @@ Operator umbrella merge auth active (2026-11-19): merge attention children when 
 - ENOENT `settings.json.hapi.lock`: **real upstream bug** — `withSettingsLock` mkdir'd lock before parent existed; fixed in tip (parent before lock + timing-bound regression). Latent on main; tip's new SyncEngine-on-fresh-datadir tests made it deterministic. Writeup on PR.
 - Operator: **no laneb** — wait remaining dogfood (~43h). After green, Meta/orch tip-forward this tip to `:3006` for honest dogfood.
 - CI on `bdc18fc5f` running; watch next Codex wave.
+
+
+### #2530 status (2026-11-19T21:25Z)
+
+- Upstream lodged: https://github.com/tiann/hapi/pull/2530 (Fixes #1996; Depends on #2520; umbrella #2356).
+- Tip `9497e5698` = fold commit atop #2520 `bdc18fc5f` (fat stack until #2520 squash-merges).
+- Fork #337 CRC applied; `hapi-pr-status` tip-match fixed for Codex zero-findings tracker comments.
+- No dogfood stamp / no merge until #2520 lands + honest live confirm. Peer prepare-only babysit.
 
