@@ -244,15 +244,15 @@ No third-party pushback on #2355/#2356. Upstream `main` @ `6ea40f9e4`. Signals f
 | #1733 | **MERGED** 2026-11-19 (operator-directed Lane B / elapsed dogfooded). Gate A + exit reflection filed; peer idle for Meta archive. Promote filed: mirror-hygiene `~` expand. |
 | #1772 | **MERGED** 2026-11-19 (Lane B / elapsed dogfooded + operator umbrella auth). Squash `3ae9c77c4` (38 files). Gate A' done — retro `2026-11-19-1772-session-list-filters-exit.md` (promote none), emit+archive [assist](/sessions/3c5af7c8-540d-4d7c-b7a1-5df17abe5b37); assist wt removed. Soup layers for stack left for Meta. |
 | #2376 | **MERGED** 2026-11-19 (Lane B / elapsed dogfooded + umbrella auth). Squash `fa9fd8cc0`. Gate A' done — retro `2026-11-19-2002-active-working-lenses-exit.md`; promote applied (`rebase --onto` recipe → `driver-soup.md`); soup layer 3/3 dropped; [peer](/sessions/ea9e52cc-cf3d-4f5d-95d8-9944bf08b0d6) archived. Layers 1–2 (#1772/#1996) left for Meta remat re-thread. |
-| #1717 | **UPSTREAM [#2520](https://github.com/tiann/hapi/pull/2520)** tip `d347f2ffa` — round-1 bot 6/6 fixed; **round-2 bot 8 unresolved (4 Major + 4 Minor)** just landed — peer kicked. Dogfood ~44h → needs `hapi-laneb-authorise 2520` or wait. `core` ENOENT sticky 2/2 on tip (prior tip green). [peer](/sessions/83d28e01-5852-4926-b163-99a95f46c931) |
+| #1717 | **UPSTREAM [#2520](https://github.com/tiann/hapi/pull/2520)** tip `d347f2ffa` — round-1 bot 6/6 fixed; **round-2 bot 8 unresolved (4 Major + 4 Minor)** just landed — peer kicked. Dogfood wait remaining (~44h); **no laneb** (operator: tip too churned to claim dogfood). `core` ENOENT sticky 2/2 on tip (prior tip green). [peer](/sessions/83d28e01-5852-4926-b163-99a95f46c931) |
 | #1996 | **HOT** — committed `b50b43f51` fold; mid cold-review / still dirty `SessionList.tsx`. Stack Related #2520. [peer](/sessions/eddfb230-ebc4-4196-b2b7-c33a2f5f71f8) |
 
 Operator umbrella merge auth active (2026-11-19): merge attention children when three-dim CLEAN. #2515 closed absorbed into #2376. Orch resumed after parking wrongly post-#2376.
 
-### #2520 status (2026-11-19T21:01Z)
+### #2520 status (2026-11-19T21:05Z)
 
 - Opened via `--skip-fork-stage` (fork #325 structural CONFLICTING — leave alone).
 - Round 1 on `d347f2ffa`: Majors (observedAt, notifyUpdatedAt, `last_notify_cleared_at` v39) + Minors — fixed, threads RESOLVED.
 - Round 2 (Codex on same tip): refresh drops notifyUpdatedAt; rewind clear-boundary; delayed first footer; merge ack bleed; + 4 Minors. Peer fixing.
-- CI: all non-core green; `core` ENOENT `cli.test.ts` fail→rerun→fail on same SHA. Prior tip `c5cd7844c` core SUCCESS. Peer to prove tip-vs-env before green claim.
-- Gate still needs: threads 0 + checks green + laneb (or dogfood elapsed).
+- CI: all non-core green; `core` ENOENT sticky 2/2 on tip (prior tip green). Peer to prove tip-vs-env after bot round.
+- **Operator 2026-11-19:** no `hapi-laneb-authorise` — tip churned too hard to claim dogfood honesty; wait remaining ~48h window. Gate = threads 0 + checks green + dogfood elapsed. After round-2 green, tip must be what `:3006` runs or the wait is calendar theater.
