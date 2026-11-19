@@ -244,17 +244,18 @@ No third-party pushback on #2355/#2356. Upstream `main` @ `6ea40f9e4`. Signals f
 | #1733 | **MERGED** 2026-11-19 (operator-directed Lane B / elapsed dogfooded). Gate A + exit reflection filed; peer idle for Meta archive. Promote filed: mirror-hygiene `~` expand. |
 | #1772 | **MERGED** 2026-11-19 (Lane B / elapsed dogfooded + operator umbrella auth). Squash `3ae9c77c4` (38 files). Gate A' done — retro `2026-11-19-1772-session-list-filters-exit.md` (promote none), emit+archive [assist](/sessions/3c5af7c8-540d-4d7c-b7a1-5df17abe5b37); assist wt removed. Soup layers for stack left for Meta. |
 | #2376 | **MERGED** 2026-11-19 (Lane B / elapsed dogfooded + umbrella auth). Squash `fa9fd8cc0`. Gate A' done — retro `2026-11-19-2002-active-working-lenses-exit.md`; promote applied (`rebase --onto` recipe → `driver-soup.md`); soup layer 3/3 dropped; [peer](/sessions/ea9e52cc-cf3d-4f5d-95d8-9944bf08b0d6) archived. Layers 1–2 (#1772/#1996) left for Meta remat re-thread. |
-| #1717 | **UPSTREAM [#2520](https://github.com/tiann/hapi/pull/2520)** tip `d347f2ffa` — round-1 bot 6/6 fixed; **round-2 bot 8 unresolved (4 Major + 4 Minor)** just landed — peer kicked. tip `bdc18fc5f` — round-2 8/8 fixed+resolved; ENOENT lock parent-mkdir **real fix** in tip. Dogfood wait (~43h); **no laneb**. CI running. [peer](/sessions/83d28e01-5852-4926-b163-99a95f46c931) |
-| #1996 | **UPSTREAM [#2530](https://github.com/tiann/hapi/pull/2530)** tip `9497e5698` atop #2520 `bdc18fc5f`. Fork [#337](https://github.com/heavygee/hapi/pull/337) CRC+CLEAN. Prepare-only; merge after #2520. [peer](/sessions/eddfb230-ebc4-4196-b2b7-c33a2f5f71f8) |
+| #1717 | **UPSTREAM [#2520](https://github.com/tiann/hapi/pull/2520)** tip `847b5c7bc` — round-3 6/6 (ack identity fixed properly after 3 deferrals). Round-2 tip `bdc18fc5f` was full CI green. Dogfood wait (~43h); **no laneb**. [peer](/sessions/83d28e01-5852-4926-b163-99a95f46c931) |
+| #1996 | **UPSTREAM [#2530](https://github.com/tiann/hapi/pull/2530)** — rebase onto `847b5c7bc` kicked. [peer](/sessions/eddfb230-ebc4-4196-b2b7-c33a2f5f71f8) |
 
 Operator umbrella merge auth active (2026-11-19): merge attention children when three-dim CLEAN. #2515 closed absorbed into #2376. Orch resumed after parking wrongly post-#2376.
 
-### #2520 status (2026-11-19T21:12Z)
+### #2520 status (2026-11-19T21:27Z)
 
-- Tip `bdc18fc5f`: round-2 8/8 fixed+RESOLVED (0 unresolved). Round-1 was `d347f2ffa`.
-- ENOENT `settings.json.hapi.lock`: **real upstream bug** — `withSettingsLock` mkdir'd lock before parent existed; fixed in tip (parent before lock + timing-bound regression). Latent on main; tip's new SyncEngine-on-fresh-datadir tests made it deterministic. Writeup on PR.
-- Operator: **no laneb** — wait remaining dogfood (~43h). After green, Meta/orch tip-forward this tip to `:3006` for honest dogfood.
-- CI on `bdc18fc5f` running; watch next Codex wave.
+- Tip `847b5c7bc`: round-3 6/6 fixed+RESOLVED (0 unresolved). Prior: `bdc18fc5f` (r2, CI full green incl. settings-lock), `d347f2ffa` (r1).
+- Headline: ack **identity** (`notify:<at>` / `request:<id>`) after bot raised it 3x — deferred twice as "larger model"; that deferral was generating findings. Merge both directions + delete one-directional guard.
+- Also: clear on confirmed consumption; REST list revision reconcile; jump exemption above status filter; dialog returnFocusTo.
+- Operator: **no laneb** — wait remaining dogfood. Meta tip-forward `847b5c7bc` to `:3006`.
+- #2530 must rebase onto this tip.
 
 
 ### #2530 status (2026-11-19T21:25Z)
