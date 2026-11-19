@@ -242,7 +242,9 @@ No third-party pushback on #2355/#2356. Upstream `main` @ `6ea40f9e4`. Signals f
 | #2426 | **MERGED** (unblocked #987) |
 | #1725 | **MERGED** 2026-11-19 (operator-directed Lane B / elapsed dogfooded). Soft-steer deferred [#2509](https://github.com/tiann/hapi/issues/2509); bridge-drop [#2508](https://github.com/tiann/hapi/issues/2508). |
 | #1733 | **MERGED** 2026-11-19 (operator-directed Lane B / elapsed dogfooded). Gate A + exit reflection filed; peer idle for Meta archive. Promote filed: mirror-hygiene `~` expand. |
-| #1772 | **CONFLICTING** tip `22c897a83`; Nov-13 assist `350c11186` **stale**. Author never said yes to push. Assist peer stood down — no weekly re-cuts; stale-offer comment posted. Awaiting author ask or operator push auth. |
-| #2376 | **HOLD** — stop chasing moving #1772 assist. Sit on `b6ae3dd28` until #1772 PR tip is actually CLEAN/merged, then rebase 2 commits onto that tip. |
+| #1772 | **OPERATOR YES (2026-11-19)** — maintainerCanModify push authorized. [Assist peer](/sessions/3c5af7c8-540d-4d7c-b7a1-5df17abe5b37): refresh vs today's main, push to `techotaku39:investigate/draft-session-filter`, confirm CLEAN. |
+| #2376 | **Armed** — rebase onto fresh CLEAN #1772 tip when it lands; Ready-YES; prepare-only. [peer](/sessions/ea9e52cc-cf3d-4f5d-95d8-9944bf08b0d6) |
+| #1717 | **Open upstream now** via local CI (`oos-linux/test`) + cold-review-clean + `hapi-pr-create` — not Actions billing. Fork [#325](https://github.com/heavygee/hapi/pull/325). [peer](/sessions/83d28e01-5852-4926-b163-99a95f46c931) |
+| #1996 | **Armed** — stack `#1772 → #2376 → #1996` once #1717 has an upstream PR and #2376 tip exists. [peer](/sessions/eddfb230-ebc4-4196-b2b7-c33a2f5f71f8) |
 
 Prepare-only.
