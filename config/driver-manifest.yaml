@@ -1072,16 +1072,7 @@ layers:
   # Worktree: ~/coding/hapi/worktrees/1772-techotaku-reshape (reconciliation + commit).
   # Remat order: #1607 → this layer → layer 2/3 → layer 3/3. Remat owner: tooling/meta —
   # no self-remat. Re-thin after dogfood bump if tip-forward SKIP.
-  # LANDMINE 2026-11-19 (umbrella c89dc806, Gate A' #1772 exit): this layer and
-  # the #1996/#2002 pair below still track PRE-MERGE techotaku SHAs — 160 commits
-  # short of the merged base 3ae9c77c4. Checked during the post-absorb remat:
-  # the FEATURE is intact in the tip (session-list-filter.spec.ts present,
-  # filterSessionsByStatus exported), so this is the squash ancestry lie of §3c,
-  # NOT a content regression. No action needed for that remat.
-  # NEXT stack remat: re-cut these three onto the merged base rather than
-  # tip-forwarding a divergent copy, or drop them if #1772 landed upstream —
-  # test with the §3b PR-identity checklist, not `merge-base --is-ancestor`,
-  # which squash makes lie.
+
   # DROPPED 2026-11-19: tiann/hapi#1772 MERGED UPSTREAM (squash 3ae9c77c4,
   # "feat(web): add combined session list filters"). Verified by the §3b
   # PR-identity checklist, NOT by ancestry — the layer tip is 160 commits short
