@@ -135,6 +135,55 @@ re-adding `sessionCapability`, `sessionStartTimeoutMs`, `tag`/`runnerProof`,
 `scripts/tooling/absorb/port-fork-symbols.mjs` generalises that method for any
 contract file where picking a side loses exports.
 
+## Where the compose actually stands (resume here)
+
+Live tip `360c9d58` UNCHANGED and serving throughout. Remat hold ACTIVE, owned
+by `cbd1073e`, reason `merge conflict on feat/garden-route`.
+
+Layers **1–4 of 84** merged and their resolutions recorded in rerere (10 cache
+entries), so they now replay automatically — `Layer N: conflicts auto-resolved
+by git rerere; committing replay`. WIP branch `driver/integration-wip` is at
+the tier-b merge.
+
+| # | Layer | Resolution |
+|---|---|---|
+| 1 | `feat/mermaid-parse-failure-feedback` | base wins; `<render-issue>` ported via soup-heals/109 |
+| 2 | `soup/cursor-model-error-fcm-bridge` | base wins; layer cannot compile (needs a `TaskNotification` it never adds) — drop candidate |
+| 3 | `fix/cursor-flat-picker-default-highlight` | base's #1129 test kept (merge-base arithmetic: base added it, layer never had it) |
+| 4 | `feat/tier-b-reattach-orphan-runner-children` | base wins (has `decideUntrackedRunnerWebhook` + `discardStaleProcess`); serial-stop flake fix via soup-heals/110 |
+
+**Layer 5 `feat/garden-route` is the open conflict** and is a big one — 56
+files, the XR/garden feature. Three conflicted files:
+
+- `web/src/router.tsx` (3 hunks) — hunks 1 and 2 are plain import unions (base
+  adds `NativeAppPromo*` and `retargetSharePendingTransfer`/`parseShareSearch`;
+  layer adds `lazy`/`Suspense` and `GardenXrEntryChip`). **Hunk 3 needs real
+  judgement**: the layer carries the old sessions header inline (codex import /
+  refresh / browse / settings / new buttons) *with* `<GardenXrEntryChip />` in
+  it, while the base has refactored that header away and left a plain
+  container. Taking the layer duplicates a header the base moved; taking the
+  base silently drops the Garden XR entry chip. The chip needs re-placing into
+  the base's header component, which is a heal, not a merge resolution.
+- `web/src/components/SessionChat.tsx` (2 hunks) — hunk 1 is a union (base adds
+  `isScratchlistParking`, layer adds the `useMarkGardenSeenFromChat` call).
+- `bun.lock` (50 hunks) — do **not** hand-merge. The layer changes
+  `web/package.json` (which merged cleanly), so the base lockfile would drop
+  the garden/XR deps. Regenerate the lock against the merged package.json.
+
+Resume loop (the hold guard reads env from its own process, so the clear must
+be a SEPARATE shell call from the rebuild, not a prefix on the same line):
+
+```
+hapi-remat-hold clear          # with HAPI_REMAT_OWNER=1 + token + label
+HAPI_REMAT_MODE=full-recipe HAPI_AGENT_LABEL=meta-soup HAPI_DRIVER_NO_RESTART=1 \
+  hapi-driver-rebuild --build-web --verify
+# resolve the named layer, git rerere, git add, commit on the WIP, repeat
+```
+
+Fork `main` must be pushed before each run (the precheck refuses when local
+main is ahead) — and other agents commit docs to the shared checkout, so
+expect to push commits that are not yours.
+
 ## Remaining work
 
 1. Resolve the 534 judgement hunks (168 files). Largest: `SessionList.tsx` 61,
