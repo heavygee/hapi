@@ -439,6 +439,20 @@ if [[ -f "$MOUNT_CHECK" ]]; then
     fi
 fi
 
+# Base completeness (always — not only --verify). A resolution that applies
+# "soup wins" to upstream ADDITIONS deletes them silently: 2026-11-19 promoted
+# a tip missing 209 of 293 upstream-added files (163 absent, 46 zero-byte) plus
+# 61 apiTypes exports, and the full gate still read EXIT=0 because each lost
+# implementation file had its test emptied in the same pass. tsc cannot see it
+# either — an empty .ts is a legal module. Fail closed before promote.
+COMPLETENESS_CHECK="$PRIMARY/scripts/tooling/hapi-soup-base-completeness-check.mjs"
+if [[ -f "$COMPLETENESS_CHECK" ]]; then
+    echo "Checking soup base completeness (empty/dropped upstream files)..."
+    if ! "$BUN" run "$COMPLETENESS_CHECK" "$REMAT"; then
+        heal_fail "soup base completeness failed (hapi-soup-base-completeness-check)"
+    fi
+fi
+
 WIP_SHA="$(git -C "$REMAT" rev-parse HEAD)"
 echo "Promoting live tip $DRIVER_BRANCH → ${WIP_SHA:0:12} (layers+heals OK)..."
 driver_remat_promote "$DRIVER" "$DRIVER_BRANCH" "$WIP_SHA"
