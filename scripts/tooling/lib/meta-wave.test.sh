@@ -340,6 +340,11 @@ if mw_broom_latch "🔧" "not_archived+branch"; then bad "branch must not recove
 if mw_broom_latch "🔧" "layer+worktree"; then bad "soup dirt must not recover"; else ok; fi
 if mw_broom_latch "" "complete"; then bad "complete reason must not latch here"; else ok; fi
 
+# --- pipefail + grep -q SIGPIPE false negative (cite looks missing) ---
+# Match mid-file so grep -q would close the pipe early under the old printf|grep.
+big="$(printf '%s\n' "# padding" {1..5000} "# DROPPED as tiann/hapi#2376" "# - branch: driver/x")"
+if mw_manifest_pr_cited "$big" 2376; then ok; else bad "mw_manifest_pr_cited under pipefail (no SIGPIPE 141)"; fi
+
 # --- watch-only / third-party merged (#2526 sticky-🔧, 2026-11-20) ---
 MANIFEST_NO_2526=$(cat <<'EOF'
 base: upstream/main

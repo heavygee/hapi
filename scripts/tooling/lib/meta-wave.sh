@@ -26,6 +26,23 @@
 # NO network. Callers inject manifest text + worktree existence checks.
 # Optional: HAPI_META_WORKTREES_ROOT — override …/worktrees dir for declared names.
 
+# Quiet grep against a string. NEVER `printf '%s' "$text" | grep -q` under
+# `set -o pipefail` (meta-daily): on match, grep -q closes the pipe early →
+# printf SIGPIPE → pipeline status 141 → false negative. That made owned
+# DROPPED cites look uncited and sticky-🔧'd #2376 as watch-only (2026-11-20).
+_mw_str_grep_iq() {
+    local pattern="$1" text="$2"
+    grep -Eiq -- "$pattern" <<<"$text"
+}
+_mw_str_grep_eq() {
+    local pattern="$1" text="$2"
+    grep -Eq -- "$pattern" <<<"$text"
+}
+_mw_str_grep_fxq() {
+    local fixed="$1" text="$2"
+    grep -Fxq -- "$fixed" <<<"$text"
+}
+
 # Subject branch refs inside a DROPPED/Was comment block (newline-separated).
 # Only `Was:` and `- branch:` lines — NOT every feat|driver|soup/ token in prose.
 # Parent stack notes ("stacked on driver/1996-… above") must not keep a DROPPED
@@ -114,7 +131,7 @@ mw_manifest_pr_layer_active() {
     [[ -n "$pr" && "$pr" =~ ^[0-9]+$ ]] || return 1
 
     # Active `- pr: N` layer
-    if printf '%s\n' "$text" | grep -Eiq "^[[:space:]]*-[[:space:]]*pr:[[:space:]]*${pr}[[:space:]]*$"; then
+    if _mw_str_grep_iq "^[[:space:]]*-[[:space:]]*pr:[[:space:]]*${pr}[[:space:]]*$" "$text"; then
         return 0
     fi
 
@@ -155,7 +172,7 @@ mw_manifest_pr_layer_active() {
 _mw_block_mentions_pr() {
     local block="$1" pr="$2"
     # PR #N / hapi#N / bare #N not immediately after digit, /, or hyphen
-    printf '%s' "$block" | grep -Eiq "(PR[[:space:]]*#|hapi#|(^|[^0-9/#-])#)${pr}\\b"
+    _mw_str_grep_iq "(PR[[:space:]]*#|hapi#|(^|[^0-9/#-])#)${pr}\\b" "$block"
 }
 
 # Comment block already marks this PR as DROPPED (layer should be commented out).
@@ -163,8 +180,9 @@ _mw_block_dropped_pr() {
     local block="$1" pr="$2"
     # Accept: DROPPED … #N | #N … DROPPED | MERGED as #N | MERGED as PR #N
     # | MERGED as tiann/hapi#N (owner/repo#N)
-    printf '%s' "$block" | grep -Eiq \
-        "DROPPED.*#${pr}\\b|#${pr}\\b.*DROPPED|MERGED[[:space:]]+(UPSTREAM[[:space:]]+)?as[[:space:]]+(PR[[:space:]]*)?#${pr}\\b|MERGED[[:space:]]+(UPSTREAM[[:space:]]+)?as[[:space:]]+[[:alnum:]._-]+/[[:alnum:]._-]+#${pr}\\b"
+    _mw_str_grep_iq \
+        "DROPPED.*#${pr}\\b|#${pr}\\b.*DROPPED|MERGED[[:space:]]+(UPSTREAM[[:space:]]+)?as[[:space:]]+(PR[[:space:]]*)?#${pr}\\b|MERGED[[:space:]]+(UPSTREAM[[:space:]]+)?as[[:space:]]+[[:alnum:]._-]+/[[:alnum:]._-]+#${pr}\\b" \
+        "$block"
 }
 
 # mw_worktree_present <path> — exit 0 if a real checkout exists under …/worktrees/
@@ -256,7 +274,7 @@ mw_path_attributable_to_pr() {
     [[ -n "$base" && "$base" != "/" && "$base" != "." ]] || return 1
     names="$(mw_pr_worktree_basenames "$manifest" "$pr")"
     [[ -n "$names" ]] || return 1
-    printf '%s\n' "$names" | grep -Fxq "$base"
+    _mw_str_grep_fxq "$base" "$names"
 }
 
 # Exit 0 if any PR-declared worktree basename still has a live checkout.
@@ -280,7 +298,7 @@ mw_manifest_branch_layer_active() {
     [[ -n "$branch" && "$branch" != HEAD ]] || return 1
     # Escape nothing exotic — soup refs are [A-Za-z0-9._/-]+; fail closed on oddballs.
     [[ "$branch" =~ ^[A-Za-z0-9._/-]+$ ]] || return 1
-    printf '%s\n' "$text" | grep -Eq "^[[:space:]]*-[[:space:]]*branch:[[:space:]]*${branch}[[:space:]]*$"
+    _mw_str_grep_eq "^[[:space:]]*-[[:space:]]*branch:[[:space:]]*${branch}[[:space:]]*$" "$text"
 }
 
 # mw_extract_title_paren_issues <title> — newline-separated issue numbers from "(#N)".
@@ -375,7 +393,7 @@ mw_worktree_dirty_for_pr() {
     local base hint_bases
     base="$(basename "$path")"
     hint_bases="$(_mw_hint_basenames "$hints")"
-    if [[ -n "$base" && -n "$hint_bases" ]] && printf '%s\n' "$hint_bases" | grep -Fxq "$base"; then
+    if [[ -n "$base" && -n "$hint_bases" ]] && _mw_str_grep_fxq "$base" "$hint_bases"; then
         return 0
     fi
     # Fail-closed while soup layer still active: any live session worktree counts.
@@ -480,11 +498,11 @@ mw_member_complete() {
 mw_manifest_pr_cited() {
     local text="$1" pr="$2"
     [[ -n "$pr" && "$pr" =~ ^[0-9]+$ ]] || return 1
-    if printf '%s\n' "$text" | grep -Eiq "^[[:space:]]*-[[:space:]]*pr:[[:space:]]*${pr}[[:space:]]*$"; then
+    if _mw_str_grep_iq "^[[:space:]]*-[[:space:]]*pr:[[:space:]]*${pr}[[:space:]]*$" "$text"; then
         return 0
     fi
     # Same subject matcher as _mw_block_mentions_pr (avoid incidental 25260 etc.).
-    if printf '%s' "$text" | grep -Eiq "(PR[[:space:]]*#|hapi#|(^|[^0-9/#-])#)${pr}\\b"; then
+    if _mw_str_grep_iq "(PR[[:space:]]*#|hapi#|(^|[^0-9/#-])#)${pr}\\b" "$text"; then
         return 0
     fi
     return 1

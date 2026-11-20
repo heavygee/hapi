@@ -1008,8 +1008,12 @@ main() {
             fi
             if [[ "$emoji_sess" == "🔧" ]]; then
                 local complete_reason="" gate_a_reason=""
+                # Peer cleanup Gate A reads the *repo recipe* (provenance), not the
+                # HAPI_META_MANIFEST ~/.config cook mirror. Stale composition can
+                # still list a DROPPED layer as active (related #2002 → #2376 hourly
+                # drop-soup loop, 2026-11-20); wave-clear below still uses composition.
                 if complete_reason="$(mw_member_complete \
-                    "$manifest_text_early" \
+                    "$provenance_text_early" \
                     "${SESS_PATH[$sid8]:-}" \
                     "$p" \
                     "${SESS_LIFECYCLE[$sid8]:-}" \
@@ -1024,7 +1028,7 @@ main() {
                     # Gate A already clean (layer+worktree gone) but archive/branch
                     # still owed — stop nagging "drop soup layer" (#958→#1405 retro).
                     if gate_a_reason="$(mw_wave_member_clean \
-                        "$manifest_text_early" \
+                        "$provenance_text_early" \
                         "${SESS_PATH[$sid8]:-}" \
                         "$p" \
                         "${PR_BY_REPO_RELATED[$pair_sess]:-${PR_RELATED[$p]:-}}" \
@@ -1032,13 +1036,15 @@ main() {
                         # Watch-only / third-party: never cited in soup manifest →
                         # nothing to drop, no peer to archive. Do not sticky-🔧
                         # forever (tiann/hapi#2526, 2026-11-20).
+                        # Gate A for watch-only also uses provenance (recipe); cook
+                        # mirror staleness must not keep a third-party 🔧.
                         if mw_merged_nothing_owed \
                             "$provenance_text_early" \
                             "${SESS_PATH[$sid8]:-}" \
                             "$p" \
                             "${PR_BY_REPO_RELATED[$pair_sess]:-${PR_RELATED[$p]:-}}" \
                             "${PR_BY_REPO_HINTS[$pair_sess]:-${PR_HINTS[$p]:-}}" \
-                            "$manifest_text_early"; then
+                            "$provenance_text_early"; then
                             emoji_sess="🧹"
                             action_sess="MERGED — nothing owed (watch-only / third-party; no soup layer ever)"
                         # Latch 🧹: resume must not demote complete → merged solely
@@ -1357,7 +1363,7 @@ main() {
                     "$p" \
                     "${PR_BY_REPO_RELATED[$pair_o]:-${PR_RELATED[$p]:-}}" \
                     "${PR_BY_REPO_HINTS[$pair_o]:-${PR_HINTS[$p]:-}}" \
-                    "$manifest_text_early"; then
+                    "$provenance_text_early"; then
                     Q_ORPHAN+=("$r_o#$p 🧹 merged, nothing owed (watch-only / third-party; no soup / no owner)")
                 else
                     Q_ORPHAN+=("$r_o#$p 🔧 merged, no owning session — confirm wave cleanup done / archive")
