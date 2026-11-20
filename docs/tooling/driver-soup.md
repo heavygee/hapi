@@ -70,7 +70,7 @@ A first-sidecar-wins lookup plus `retained.version !== offer.targetVersion` → 
 
 ## Daily driver (soup)
 
-**Manifest:** **Repo** `config/driver-manifest.yaml` is the recipe (tracked, commit on fork `main`). Rebuild reads it via `hapi-manifest-path.sh`. `~/.config/hapi/driver-manifest.yaml` is a **generated mirror** (`scripts/tooling/hapi-manifest-mirror-to-config.sh`). Legacy override: `HAPI_DRIVER_MANIFEST` env only.
+**Manifest:** **Repo** `config/driver-manifest.yaml` is the recipe (tracked, commit on fork `main`). Rebuild reads it via `hapi-manifest-path.sh`. `~/.config/hapi/driver-manifest.yaml` is a **generated mirror** (`scripts/tooling/hapi-manifest-mirror-to-config.sh`). Legacy override: `HAPI_DRIVER_MANIFEST` env only. Meta may set `HAPI_META_MANIFEST` to the `~/.config` mirror for *composition* (active layers); DROPPED/cite provenance and watch-only overlay always read the repo recipe via `hapi_manifest_provenance_path` — a stale mirror must not reclassify owned merges as third-party.
 
 **Composed soup tree:** `~/coding/hapi/driver` on branch `driver/integration` — output of rebuild, not a substitute for the manifest when adding layers.
 

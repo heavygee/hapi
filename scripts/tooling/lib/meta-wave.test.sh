@@ -365,6 +365,27 @@ ov="$(mw_overlay_merged_watch_only "$MANIFEST_NO_2526" "" 2376 "🔧" "MERGED �
 eq "overlay owned keeps wrench" "${ov%%$'\t'*}" "🔧"
 eq "overlay owned keeps action" "${ov#*$'\t'}" "MERGED — notify peer: drop soup"
 
+# Stale composition mirror lacks DROPPED cite; provenance recipe still has it —
+# must NOT reclassify owned #2376 as watch-only (dance inverse bug, 2026-11-20).
+MANIFEST_STALE_COMPOSITION=$(cat <<'EOF'
+base: upstream/main
+layers:
+  - branch: driver/1996-consolidate-blocked-filter-wip
+EOF
+)
+if mw_merged_nothing_owed "$MANIFEST_NO_2526" "" 2376 "" "" "$MANIFEST_STALE_COMPOSITION"; then
+    bad "provenance DROPPED cite must beat stale composition (no #2376)"
+else
+    ok
+fi
+if mw_merged_nothing_owed "$MANIFEST_STALE_COMPOSITION" "" 2376 "" "" "$MANIFEST_STALE_COMPOSITION"; then
+    ok  # both stale → looks watch-only (the bug mode); provenance arg prevents it above
+else
+    bad "stale-only pair should look watch-only when cite text is also stale"
+fi
+ov="$(mw_overlay_merged_watch_only "$MANIFEST_NO_2526" "" 2376 "🔧" "drop soup" "" "" "$MANIFEST_STALE_COMPOSITION")"
+eq "overlay provenance wins over stale composition" "${ov%%$'\t'*}" "🔧"
+
 rm -rf "$GIT_TMP"
 
 echo ""

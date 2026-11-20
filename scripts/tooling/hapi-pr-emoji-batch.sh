@@ -44,12 +44,17 @@ MERGE_POLICY_JSON="$(pmp_load_policy)"
 source "$SCRIPT_DIR/lib/require-gh-version.sh"
 require_gh_version
 
-# Wave overlay for MERGED rows (watch-only → 🧹). Same predicate as hapi-meta-daily;
-# without it --table disagrees with the hourly dance (#2526, 2026-11-20).
+# Wave overlay for MERGED rows (watch-only → 🧹). Cite provenance = repo recipe
+# (never HAPI_META_MANIFEST / stale ~/.config mirror). Composition override is
+# optional for Gate A layer checks only (#2376 inverse under the dance, 2026-11-20).
 HAPI_PRIMARY="${HAPI_PRIMARY:-$HOME/coding/hapi}"
-MANIFEST_PATH="${HAPI_META_MANIFEST:-$(hapi_manifest_path "$HAPI_PRIMARY")}"
-MANIFEST_TEXT=""
-[[ -f "$MANIFEST_PATH" ]] && MANIFEST_TEXT="$(cat "$MANIFEST_PATH")"
+PROVENANCE_PATH="$(hapi_manifest_provenance_path "$HAPI_PRIMARY")"
+COMPOSITION_PATH="${HAPI_META_MANIFEST:-$(hapi_manifest_path "$HAPI_PRIMARY")}"
+PROVENANCE_TEXT=""
+COMPOSITION_TEXT=""
+[[ -f "$PROVENANCE_PATH" ]] && PROVENANCE_TEXT="$(cat "$PROVENANCE_PATH")"
+[[ -f "$COMPOSITION_PATH" ]] && COMPOSITION_TEXT="$(cat "$COMPOSITION_PATH")"
+[[ -n "$COMPOSITION_TEXT" ]] || COMPOSITION_TEXT="$PROVENANCE_TEXT"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -570,7 +575,7 @@ export -f classify_one gh_t fetch_latest_bot_review pec_attestation_is_stale _em
 # After parallel classify: rewrite watch-only MERGED rows to 🧹 so --table matches
 # hapi-meta-daily (pec_decide_emoji alone always emits the owned-cleanup brief).
 _apply_merged_watch_overlays() {
-    [[ -n "$MANIFEST_TEXT" ]] || return 0
+    [[ -n "$PROVENANCE_TEXT" ]] || return 0
     local n f decided emoji action related hints sticky
     for n in "${PRS[@]}"; do
         f="$TMPDIR/$n.json"
@@ -581,7 +586,8 @@ _apply_merged_watch_overlays() {
         related="$(jq -r '.relatedRefs // empty' "$f")"
         hints="$(jq -r '.branchHints // empty' "$f")"
         decided="$(mw_overlay_merged_watch_only \
-            "$MANIFEST_TEXT" "" "$n" "$emoji" "$action" "$related" "$hints")"
+            "$PROVENANCE_TEXT" "" "$n" "$emoji" "$action" "$related" "$hints" \
+            "$COMPOSITION_TEXT")"
         emoji="${decided%%$'\t'*}"
         action="${decided#*$'\t'}"
         [[ "$emoji" == "🧹" ]] || continue

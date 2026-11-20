@@ -490,27 +490,32 @@ mw_manifest_pr_cited() {
     return 1
 }
 
-# mw_merged_nothing_owed <manifest_text> <session_path> <pr_number> [related] [hints]
-# Exit 0 when a merged PR owes no estate cleanup: Gate A clean AND never cited in
-# the manifest (watch-only / third-party). Owned soup work always cites the PR
-# (live or DROPPED), so archive-pending peers stay 🔧 until Meta archives.
+# mw_merged_nothing_owed <cite_manifest> <session_path> <pr_number> [related] [hints] [composition_manifest]
+# Exit 0 when a merged PR owes no estate cleanup: never cited in the *provenance*
+# recipe AND Gate A clean on the *composition* manifest (active layers).
+# cite_manifest = repo config/driver-manifest.yaml (DROPPED notes live here).
+# composition_manifest = optional; defaults to cite_manifest. When Meta points
+# HAPI_META_MANIFEST at a stale ~/.config mirror, pass that as composition only —
+# cite must stay on the repo recipe or owned DROPPED PRs look watch-only
+# (#2376 inverse under the dance, 2026-11-20).
 mw_merged_nothing_owed() {
-    local manifest="$1" path="$2" pr="$3" related="${4:-}" hints="${5:-}"
-    mw_manifest_pr_cited "$manifest" "$pr" && return 1
+    local cite_m="$1" path="$2" pr="$3" related="${4:-}" hints="${5:-}"
+    local comp_m="${6:-$1}"
+    mw_manifest_pr_cited "$cite_m" "$pr" && return 1
     local clean_reason
-    clean_reason="$(mw_wave_member_clean "$manifest" "$path" "$pr" "$related" "$hints")" || true
+    clean_reason="$(mw_wave_member_clean "$comp_m" "$path" "$pr" "$related" "$hints")" || true
     [[ "$clean_reason" == "clean" ]] || return 1
     return 0
 }
 
-# mw_overlay_merged_watch_only <manifest> <path> <pr> <emoji> <action> [related] [hints]
+# mw_overlay_merged_watch_only <cite_manifest> <path> <pr> <emoji> <action> [related] [hints] [composition_manifest]
 # Align batch/table consumers with meta-daily: pec_decide_emoji's MERGED brief is
 # the owned-cleanup default; when nothing is owed, rewrite to 🧹 (sticky false via
 # emoji). Prints "<emoji>\t<action>".
 mw_overlay_merged_watch_only() {
-    local manifest="$1" path="$2" pr="$3" emoji="$4" action="$5"
-    local related="${6:-}" hints="${7:-}"
-    if [[ "$emoji" == "🔧" ]] && mw_merged_nothing_owed "$manifest" "$path" "$pr" "$related" "$hints"; then
+    local cite_m="$1" path="$2" pr="$3" emoji="$4" action="$5"
+    local related="${6:-}" hints="${7:-}" comp_m="${8:-$1}"
+    if [[ "$emoji" == "🔧" ]] && mw_merged_nothing_owed "$cite_m" "$path" "$pr" "$related" "$hints" "$comp_m"; then
         printf '%s\t%s' "🧹" "MERGED — nothing owed (watch-only / third-party; no soup layer ever)"
         return 0
     fi

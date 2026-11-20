@@ -71,7 +71,10 @@
 #   HAPI_META_SESSION_NAME — optional chip name (default "meta - PR watcher")
 #   HAPI_META_TOOLING_SESSION_ID — Meta tooling bot session (unlock ping target)
 #   HAPI_META_WAVE_COLLECT_SECS (default 1800) — inbox collect fuse
-#   HAPI_META_MANIFEST — manifest path override (tests)
+#   HAPI_META_MANIFEST — composition manifest override (active layers; may be
+#                        ~/.config mirror). Provenance/DROPPED cites always read
+#                        $HAPI_PRIMARY/config/driver-manifest.yaml via
+#                        hapi_manifest_provenance_path — never this override.
 #   HAPI_META_DRIVER_STATUS_BIN — hapi-driver-status override (tests)
 # Install/upgrade gh: scripts/tooling/install-gh-official.sh
 set -euo pipefail
@@ -931,11 +934,21 @@ main() {
 
     # Manifest once for 🧹 complete promotion (same path as wave-clear).
     local manifest_path_early manifest_text_early
+    local provenance_path_early provenance_text_early
     manifest_path_early="${HAPI_META_MANIFEST:-$(hapi_manifest_path "$HAPI_PRIMARY")}"
+    provenance_path_early="$(hapi_manifest_provenance_path "$HAPI_PRIMARY")"
     if [[ -f "$manifest_path_early" ]]; then
         manifest_text_early="$(cat "$manifest_path_early")"
     else
         manifest_text_early=""
+    fi
+    if [[ -f "$provenance_path_early" ]]; then
+        provenance_text_early="$(cat "$provenance_path_early")"
+    else
+        provenance_text_early="$manifest_text_early"
+    fi
+    if [[ -n "${HAPI_META_MANIFEST:-}" && "$manifest_path_early" != "$provenance_path_early" ]]; then
+        vlog "composition manifest $manifest_path_early (override); provenance cites from $provenance_path_early"
     fi
 
     # --- per-session: rename + policy ping; build next state ---
@@ -1020,11 +1033,12 @@ main() {
                         # nothing to drop, no peer to archive. Do not sticky-🔧
                         # forever (tiann/hapi#2526, 2026-11-20).
                         if mw_merged_nothing_owed \
-                            "$manifest_text_early" \
+                            "$provenance_text_early" \
                             "${SESS_PATH[$sid8]:-}" \
                             "$p" \
                             "${PR_BY_REPO_RELATED[$pair_sess]:-${PR_RELATED[$p]:-}}" \
-                            "${PR_BY_REPO_HINTS[$pair_sess]:-${PR_HINTS[$p]:-}}"; then
+                            "${PR_BY_REPO_HINTS[$pair_sess]:-${PR_HINTS[$p]:-}}" \
+                            "$manifest_text_early"; then
                             emoji_sess="🧹"
                             action_sess="MERGED — nothing owed (watch-only / third-party; no soup layer ever)"
                         # Latch 🧹: resume must not demote complete → merged solely
@@ -1338,11 +1352,12 @@ main() {
                 # Third-party / watch-only merge: no soup cite + Gate A clean →
                 # nothing owed (same predicate as session overlay for #2526).
                 if mw_merged_nothing_owed \
-                    "$manifest_text_early" \
+                    "$provenance_text_early" \
                     "" \
                     "$p" \
                     "${PR_BY_REPO_RELATED[$pair_o]:-${PR_RELATED[$p]:-}}" \
-                    "${PR_BY_REPO_HINTS[$pair_o]:-${PR_HINTS[$p]:-}}"; then
+                    "${PR_BY_REPO_HINTS[$pair_o]:-${PR_HINTS[$p]:-}}" \
+                    "$manifest_text_early"; then
                     Q_ORPHAN+=("$r_o#$p 🧹 merged, nothing owed (watch-only / third-party; no soup / no owner)")
                 else
                     Q_ORPHAN+=("$r_o#$p 🔧 merged, no owning session — confirm wave cleanup done / archive")
