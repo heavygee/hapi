@@ -26,6 +26,15 @@
 #   HAPI_FLEET_UPGRADE_POLICY=alert bash install-hapi-pet.sh --with-systemd  # opt out of auto
 #   HAPI_SKIP_UPSTREAM_SEAL=1 bash install-hapi-pet.sh   # break-glass: no Layer A
 #
+# Runner-only (join an existing hub instead of standing up a local one — #339):
+#   bash install-hapi-pet.sh --runner-only --hub-url=https://your-hub --token=<CLI_API_TOKEN>
+#   HAPI_PET_MODE=runner-only HAPI_HUB_URL=https://your-hub HAPI_RUNNER_TOKEN=<token> bash install-hapi-pet.sh
+# With no mode flag/env and a real terminal attached, the script asks interactively.
+# curl|bash with no mode flag/env and no terminal always defaults to hub+runner
+# (today's unattended-safe behavior — nothing changes for existing automation).
+# --with-systemd is not yet supported together with --runner-only (#339 tracks it);
+# the nohup runner-only path works today.
+#
 # See docs/plans/2026-09-04-fleet-vm-swap-strategy.md §6 for the full history of what
 # this script encodes and why each step exists — every step here was a real bug found
 # by literally following a hand-written cheat sheet on a fresh box, then by literally
@@ -50,6 +59,19 @@ NVM_VERSION="v0.39.7"
 NODE_MIN_MAJOR=22
 STOP_TIMEOUT_SECS=15
 WITH_SYSTEMD=0
+# Runner-only join mode (#339): skip standing up a local hub entirely, point the
+# runner at an existing one instead. RUNNER_ONLY_SET tracks whether a flag/env
+# explicitly chose a mode, so we know whether to prompt interactively below.
+RUNNER_ONLY=0
+RUNNER_ONLY_SET=0
+HAPI_HUB_URL="${HAPI_HUB_URL:-}"
+HAPI_RUNNER_TOKEN="${HAPI_RUNNER_TOKEN:-}"
+if [[ "${HAPI_PET_MODE:-}" == "runner-only" ]]; then
+    RUNNER_ONLY=1
+    RUNNER_ONLY_SET=1
+elif [[ -n "${HAPI_PET_MODE:-}" ]]; then
+    RUNNER_ONLY_SET=1
+fi
 
 # curl|bash leaves BASH_SOURCE[0] empty under `set -u`. Never rely on a repo-relative
 # path for --with-systemd — that only works from a real git checkout.
@@ -68,6 +90,20 @@ for arg in "$@"; do
             HAPI_FLEET_UPGRADE_POLICY="${arg#--fleet-policy=}"
             ;;
         --skip-upstream-seal) HAPI_SKIP_UPSTREAM_SEAL=1 ;;
+        --runner-only)
+            RUNNER_ONLY=1
+            RUNNER_ONLY_SET=1
+            ;;
+        --hub-and-runner)
+            RUNNER_ONLY=0
+            RUNNER_ONLY_SET=1
+            ;;
+        --hub-url=*)
+            HAPI_HUB_URL="${arg#--hub-url=}"
+            ;;
+        --token=*)
+            HAPI_RUNNER_TOKEN="${arg#--token=}"
+            ;;
         -h|--help)
             cat <<'HELP'
 hapi-pet-install: one-shot install/upgrade for a standalone ("pet") HAPI instance.
@@ -77,15 +113,31 @@ Usage:
   curl -fsSL …/install-hapi-pet.sh | bash
   curl -fsSL …/install-hapi-pet.sh | bash -s -- --with-systemd
   bash install-hapi-pet.sh --with-systemd --fleet-policy=alert
+  bash install-hapi-pet.sh --runner-only --hub-url=https://your-hub --token=<CLI_API_TOKEN>
 
 --with-systemd         Install user-level systemd units (works via curl|bash;
                        units are embedded — no git checkout required).
                        Needs a working systemd --user bus for this account.
                        Headless/service users: linger + user@UID.service first
                        (script fails fast with copy-paste if the bus is missing).
+                       Not yet supported together with --runner-only (#339).
 --fleet-policy=POLE    silent | alert | auto (default auto). Seeds settings.json
                        fleetUpgradePolicy when unset. alert/silent are opt-outs.
+                       Ignored in --runner-only mode (no local hub to seed).
 --skip-upstream-seal   Do not wire HAPI_UPSTREAM_SEAL_URL (foundry/break-glass).
+                       Ignored in --runner-only mode.
+--runner-only          Join an EXISTING hub as a runner only — do not stand up a
+                       local hub at all. Needs --hub-url= and --token= (or the
+                       HAPI_HUB_URL / HAPI_RUNNER_TOKEN env vars). With neither
+                       flags nor env set, and a real terminal attached, you are
+                       asked interactively instead.
+--hub-and-runner       Explicitly choose the default (local hub + runner),
+                       skipping the interactive prompt in a scripted context.
+--hub-url=URL          Target hub for --runner-only (same value as HAPI_API_URL
+                       on that hub). Also settable via HAPI_HUB_URL.
+--token=TOKEN          CLI_API_TOKEN for --runner-only, from the target hub's
+                       own settings.json/terminal output. Also settable via
+                       HAPI_RUNNER_TOKEN. Never printed back by this script.
 
 Default artifact + Layer A poll use the FORK fleet channel
   https://github.com/heavygee/hapi/releases/download/hapi-fleet/…
@@ -861,6 +913,64 @@ EOF
     fi
 }
 
+# --- 0. Mode: local hub+runner, or runner-only joining an existing hub (#339).
+#     Only prompts when nothing already chose a mode AND a real terminal is
+#     attached — curl|bash with no flags/env, piped into a non-interactive
+#     context, keeps today's exact default (local hub+runner, unattended-safe).
+hapi_pet_tty_readable() {
+    # A controlling terminal can be absent (containers, CI, services) even
+    # when /dev/tty exists as a device node and passes -r/-c — opening it
+    # then fails with ENXIO. Only a real open (not just stat) tells the truth.
+    { : < /dev/tty; } 2>/dev/null || return 1
+    { : > /dev/tty; } 2>/dev/null || return 1
+    return 0
+}
+
+if [[ "$RUNNER_ONLY_SET" -eq 0 ]] && hapi_pet_tty_readable; then
+    choice=""
+    {
+        printf '\nSet up this box as:\n'
+        printf '  1) A new hub + runner here (default)\n'
+        printf '  2) A runner only, joining an existing hub\n'
+        printf 'Choice [1]: '
+    } > /dev/tty
+    read -r choice < /dev/tty || choice=""
+    if [[ "$choice" == "2" ]]; then
+        RUNNER_ONLY=1
+        if [[ -z "$HAPI_HUB_URL" ]]; then
+            printf 'Hub URL (e.g. https://your-hub.example.ts.net): ' > /dev/tty
+            read -r HAPI_HUB_URL < /dev/tty || true
+        fi
+        if [[ -z "$HAPI_RUNNER_TOKEN" ]]; then
+            printf 'CLI_API_TOKEN (from that hub'"'"'s settings.json/terminal output): ' > /dev/tty
+            read -r HAPI_RUNNER_TOKEN < /dev/tty || true
+        fi
+    fi
+fi
+
+# Base token validation lives in driver/cli (hapi auth login); the install
+# script's own prompt/flag path gets a cheap sanity check too, since a bad
+# paste here used to be saved silently and only fail much later (#339).
+hapi_pet_token_looks_sane() {
+    local t="$1"
+    [[ -n "$t" ]] || return 1
+    [[ "${#t}" -ge 16 ]] || return 1
+    [[ "$t" =~ ^[A-Za-z0-9_-]+$ ]] || return 1
+    return 0
+}
+
+if [[ "$RUNNER_ONLY" -eq 1 ]]; then
+    [[ "$WITH_SYSTEMD" -eq 0 ]] \
+        || fail "--runner-only + --with-systemd is not supported yet (#339) — drop --with-systemd, or use --hub-and-runner for a local hub."
+    [[ "$HAPI_HUB_URL" =~ ^https?:// ]] \
+        || fail "--runner-only needs a hub URL (--hub-url=https://... or HAPI_HUB_URL) — got: '${HAPI_HUB_URL}'"
+    hapi_pet_token_looks_sane "$HAPI_RUNNER_TOKEN" \
+        || fail "--runner-only needs a CLI_API_TOKEN (--token=... or HAPI_RUNNER_TOKEN) that looks like a real token — got ${#HAPI_RUNNER_TOKEN} chars"
+    log "Mode: runner-only, joining ${HAPI_HUB_URL}"
+else
+    log "Mode: local hub + runner"
+fi
+
 # --- 1. Architecture detection ---
 ARCH="$(uname -m)"
 case "$ARCH" in
@@ -1058,15 +1168,85 @@ case ":${PATH}:" in
 esac
 log "hapi binary installed at $INSTALL_DIR/hapi ($(sha256sum "$INSTALL_DIR/hapi" | cut -d' ' -f1))"
 
+# --- 5b. Node.js (via nvm, no sudo needed) + Claude Code CLI. Deliberately
+#     BEFORE any hub/runner launch below (#339): a nohup/systemd process's
+#     environment is a snapshot at spawn time, so installing Node/Claude into
+#     THIS shell's PATH after the runner is already forked does nothing for
+#     it — the runner (and `hapi runner start`'s own PATH check inside
+#     `hapi doctor`) would report Claude as not_found forever despite the
+#     install printing success, until a human happened to restart it by hand.
+#
+#     Deliberately does NOT pre-check the existing Node version and skip nvm on
+#     "looks new enough" — a box can have a root-owned Node >=22 (e.g. from
+#     another admin's earlier system-wide install) where `npm install -g`
+#     would still hit the same no-write-access EACCES this whole nvm path
+#     exists to avoid. Try the plain install first; ANY failure (too old, no
+#     write access, no npm at all) falls through to nvm, which is always safe
+#     to run again if already installed (idempotent, confirmed 2026-09-13).
+if ! command -v claude >/dev/null 2>&1; then
+    log "Installing Claude Code CLI"
+    if ! npm install -g @anthropic-ai/claude-code 2>/tmp/hapi-pet-npm-err.log; then
+        log "System npm install failed (no npm, Node too old, or no write access) — installing Node ${NODE_MIN_MAJOR}+ via nvm instead"
+        NVM_INSTALLER="$(mktemp "$HOME/.cache/nvm-install.XXXXXX")"
+        curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh" -o "$NVM_INSTALLER" \
+            || fail "nvm installer download failed — check network/GitHub reachability"
+        bash "$NVM_INSTALLER"
+        rm -f "$NVM_INSTALLER"
+        export NVM_DIR="$HOME/.nvm"
+        # shellcheck source=/dev/null
+        source "$NVM_DIR/nvm.sh"
+        nvm install "$NODE_MIN_MAJOR"
+        npm install -g @anthropic-ai/claude-code || fail "Claude Code CLI install failed even under nvm Node ${NODE_MIN_MAJOR} — see above"
+    fi
+    rm -f /tmp/hapi-pet-npm-err.log
+fi
+
 # --- 6. Directories + persistent env (the hub does not create these itself) ---
 mkdir -p "$HAPI_HOME/logs" "$HAPI_WORKSPACE"
 if ! grep -q '^export HAPI_HOME=' ~/.bashrc 2>/dev/null; then
     echo "export HAPI_HOME=\"$HAPI_HOME\"" >> ~/.bashrc
 fi
 export HAPI_HOME
-hapi_pet_seed_fleet_upgrade_policy
+if [[ "$RUNNER_ONLY" -eq 0 ]]; then
+    hapi_pet_seed_fleet_upgrade_policy
+fi
 
 # --- 7. Launch ---
+if [[ "$RUNNER_ONLY" -eq 1 ]]; then
+    # Runner-only (#339): no local hub, no Layer A (that's a standalone-hub
+    # concept — a runner-only box's upgrade story is "re-run this installer" +
+    # version handoff, per docs/guide/installation.md § Multi-machine hubs).
+    # The CLI itself persists HAPI_API_URL/CLI_API_TOKEN into THIS box's own
+    # settings.json the first time they're seen from env (documented behavior,
+    # "Configuration priority: ENV > settings.json > default") — no need to
+    # shell out to the interactive `hapi auth login` prompt at all, which
+    # sidesteps the copy-paste-corruption failure mode that prompt has.
+    if ! curl -fsS --max-time 10 "${HAPI_HUB_URL%/}/health" >/dev/null 2>&1; then
+        fail "cannot reach ${HAPI_HUB_URL%/}/health — check the URL and that the hub is actually up before joining it as a runner"
+    fi
+    log "Target hub reachable: ${HAPI_HUB_URL}"
+
+    hapi_pet_migrate_legacy_oauth_if_needed "${HAPI_HOME}/claude-setup-token.env"
+    (
+        unset CLAUDE_CODE_OAUTH_TOKEN
+        if [[ -f "$HAPI_HOME/claude-setup-token.env" && ! -L "$HAPI_HOME/claude-setup-token.env" ]]; then
+            chmod 600 "$HAPI_HOME/claude-setup-token.env"
+            hapi_pet_export_oauth_from_env_file "$HAPI_HOME/claude-setup-token.env" || true
+        fi
+        export HAPI_API_URL="$HAPI_HUB_URL"
+        export CLI_API_TOKEN="$HAPI_RUNNER_TOKEN"
+        nohup "$INSTALL_DIR/hapi" runner start-sync --workspace-root "$HAPI_WORKSPACE" \
+            > "$HAPI_HOME/logs/runner.log" 2>&1 &
+        echo $! > "$HAPI_HOME/runner.pid"
+    )
+    RUNNER_PID="$(cat "$HAPI_HOME/runner.pid" 2>/dev/null || true)"
+    sleep 2
+    if ! kill -0 "$RUNNER_PID" 2>/dev/null; then
+        fail "runner exited immediately — check $HAPI_HOME/logs/runner.log (common cause: bad token — it is not validated against the hub until the runner actually tries to connect)"
+    fi
+    log "Runner started, joined ${HAPI_HUB_URL}, restricted to $HAPI_WORKSPACE."
+    log "Check that hub's Machines list to confirm this box registered."
+else
 # Layer A subscription is what makes a host an actual fleet MEMBER: without
 # HAPI_UPSTREAM_SEAL_URL the hub never polls the moving hapi-fleet channel,
 # never materialises soup-artifacts/<tag>/, and therefore never auto-updates
@@ -1150,30 +1330,6 @@ else
     fi
     log "Runner started, restricted to $HAPI_WORKSPACE."
 fi
-
-# --- 8. Node.js (via nvm, no sudo needed) + Claude Code CLI ---
-# Deliberately does NOT pre-check the existing Node version and skip nvm on "looks new
-# enough" — a box can have a root-owned Node >=22 (e.g. from another admin's earlier
-# system-wide install) where `npm install -g` would still hit the same no-write-access
-# EACCES this whole nvm path exists to avoid. Try the plain install first; ANY failure
-# (too old, no write access, no npm at all) falls through to nvm, which is always safe
-# to run again if already installed (idempotent, confirmed 2026-09-13).
-if ! command -v claude >/dev/null 2>&1; then
-    log "Installing Claude Code CLI"
-    if ! npm install -g @anthropic-ai/claude-code 2>/tmp/hapi-pet-npm-err.log; then
-        log "System npm install failed (no npm, Node too old, or no write access) — installing Node ${NODE_MIN_MAJOR}+ via nvm instead"
-        NVM_INSTALLER="$(mktemp "$HOME/.cache/nvm-install.XXXXXX")"
-        curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh" -o "$NVM_INSTALLER" \
-            || fail "nvm installer download failed — check network/GitHub reachability"
-        bash "$NVM_INSTALLER"
-        rm -f "$NVM_INSTALLER"
-        export NVM_DIR="$HOME/.nvm"
-        # shellcheck source=/dev/null
-        source "$NVM_DIR/nvm.sh"
-        nvm install "$NODE_MIN_MAJOR"
-        npm install -g @anthropic-ai/claude-code || fail "Claude Code CLI install failed even under nvm Node ${NODE_MIN_MAJOR} — see above"
-    fi
-    rm -f /tmp/hapi-pet-npm-err.log
 fi
 
 q_token_file="$(printf '%q' "${HAPI_HOME}/claude-setup-token.env")"
@@ -1203,7 +1359,7 @@ cat <<EOF
       # if you used --with-systemd:
       systemctl --user restart hapi-runner.service
       # if you did NOT (nohup path): stop+wait+restart with the token exported
-      # literally (do NOT `source` the env file — shell expands $, backticks, etc).
+      # literally (do NOT source the env file — shell expands \$, backticks, etc).
       # Prefer 'hapi runner start' (stops the old runner and waits) over a raw
       # kill + start-sync race that can leave you with no runner at all.
       export CLAUDE_CODE_OAUTH_TOKEN='<token>'
