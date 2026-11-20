@@ -1055,6 +1055,12 @@ main() {
                         elif mw_broom_latch "$prev_emoji_early" "$complete_reason"; then
                             emoji_sess="🧹"
                             action_sess="fully cleaned — babysit ended"
+                        elif [[ "${SESS_LIFECYCLE[$sid8]:-}" == "archived" ]]; then
+                            # Recipe clean + already archived: do not keep re-PUTting 🔧
+                            # forever because origin still has provenance branch tips
+                            # (Meta keeps those on purpose; #2376 2026-11-20).
+                            emoji_sess="🧹"
+                            action_sess="fully cleaned — babysit ended"
                         else
                             action_sess="Gate A clean — exit reflection (or skip:) then ack + idle; archive pending (Meta archives from outside; do not rematerialize / self-archive mid-turn)"
                         fi
@@ -1410,15 +1416,21 @@ main() {
     done
 
     # --- wave-clear (gate A): owned 🔧 only; orphans never block ---
+    # Drop-state (layer still active?) is a *recipe* question — use provenance,
+    # not HAPI_META_MANIFEST ~/.config. A stale mirror that still lists a DROPPED
+    # layer as active must not defer the wave or keep sticky 🔧 (#2376, 2026-11-20).
+    # Rebuild already cooks from the repo recipe; composition drift is remirror hygiene.
     local -a Q_WAVE
     local WAVE_UNLOCK=0 WAVE_DEFER="" WAVE_ID=""
     local manifest_path manifest_text members_json wave_adv prev_wave
-    manifest_path="${HAPI_META_MANIFEST:-$(hapi_manifest_path "$HAPI_PRIMARY")}"
-    if [[ -f "$manifest_path" ]]; then
+    manifest_path="$(hapi_manifest_provenance_path "$HAPI_PRIMARY")"
+    if [[ -n "${provenance_text_early:-}" ]]; then
+        manifest_text="$provenance_text_early"
+    elif [[ -f "$manifest_path" ]]; then
         manifest_text="$(cat "$manifest_path")"
     else
         manifest_text=""
-        vlog "wave: manifest missing at $manifest_path — treating layers as clean"
+        vlog "wave: provenance manifest missing at $manifest_path — treating layers as clean"
     fi
     members_json='[]'
     for sid8 in "${!SESS_ID[@]}"; do
