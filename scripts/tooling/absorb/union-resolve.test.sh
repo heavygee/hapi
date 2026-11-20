@@ -172,6 +172,24 @@ for k in fork.one fork.two main.one; do
     expect_contains "$TMP/locale.ts" "$k" "key union kept $k"
 done
 
+# 5g. REFUSAL: a key already present OUTSIDE the hunk. Disjoint within the hunk
+#     is not enough — concatenating then yields a duplicate object property.
+#     This shipped on 2026-11-20 and added 35 duplicate keys across the en/ru/
+#     zh-CN locale tables, where both sides had zero.
+{
+    printf "export const locale = {\n"
+    printf "    'already.present': 'from the rest of the file',\n"
+    printf '%s HEAD\n' "$O"
+    printf "    'fork.only': 'fork',\n"
+    printf '%s\n' "$S"
+    printf "    'already.present': 'incoming wording',\n"
+    printf '%s origin/main\n' "$T"
+    printf "}\n"
+} > "$TMP/dupkey.ts"
+make_unmerged dupkey.ts
+run "$TMP/dupkey.ts"
+expect_manual "$TMP/dupkey.ts" "key already present outside the hunk refused"
+
 # 5f. REFUSAL: the same key on both sides is a competing VALUE, not an addition.
 #     Taking either silently picks one translation over the other.
 conflict "$TMP/locale-clash.ts" \

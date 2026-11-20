@@ -58,6 +58,9 @@ def split_hunks(text: str):
     return out, rest
 
 
+_OUTSIDE_KEYS: set = set()
+
+
 def classify(ours: str, theirs: str) -> str:
     o, t = ids(ours), ids(theirs)
     # FIRST, before any containment rule: if both sides declare the SAME name,
@@ -84,7 +87,7 @@ def classify(ours: str, theirs: str) -> str:
         return "IMPORT_UNION"
     if additive(ours, theirs):
         return "ADDITIVE_UNION"
-    if field_union(ours, theirs) is not None:
+    if field_union(ours, theirs, _OUTSIDE_KEYS) is not None:
         return "FIELD_UNION"
     return "MANUAL"
 
@@ -196,7 +199,7 @@ FIELD_LINE = re.compile(r"^\s*(?://.*|/\*.*\*/|['\"]?[A-Za-z0-9_$.:\-]+['\"]?\s*
 FIELD_KEY = re.compile(r"^\s*['\"]?([A-Za-z0-9_$.:\-]+)['\"]?\s*:")
 
 
-def field_union(ours: str, theirs: str):
+def field_union(ours: str, theirs: str, outside_keys: set | None = None):
     """Both sides are only `key: value,` entries, and the key sets are disjoint.
 
     This is the locale/translation-table shape: upstream adds strings, the fork
@@ -217,6 +220,14 @@ def field_union(ours: str, theirs: str):
     tk = {m.group(1) for m in (FIELD_KEY.match(l) for l in t) if m}
     if not ok or not tk or not ok.isdisjoint(tk):
         return None
+    # Disjoint WITHIN the hunk is not enough. A key can already exist elsewhere
+    # in the same object, and concatenating then produces a duplicate property —
+    # which is exactly what this did on 2026-11-20, adding 35 duplicate keys
+    # across en/ru/zh-CN locale tables (both sides had zero). Refuse instead of
+    # picking: when the outside copy has a different value, dropping either one
+    # silently changes a shipped string.
+    if outside_keys and (ok | tk) & outside_keys:
+        return None
     return ours.rstrip("\n") + "\n" + theirs.rstrip("\n") + "\n"
 
 
@@ -225,6 +236,12 @@ def resolve(path: Path, apply: bool):
     hunks, tail = split_hunks(text)
     if not hunks:
         return None
+    # Keys present outside the conflict regions, so field_union can refuse a
+    # union that would duplicate an existing property.
+    outside = "".join(prefix for prefix, _, _ in hunks) + tail
+    outside_keys = {m.group(1) for m in (FIELD_KEY.match(l) for l in outside.split("\n")) if m}
+    global _OUTSIDE_KEYS
+    _OUTSIDE_KEYS = outside_keys
     verdicts, pieces = [], []
     for prefix, ours, theirs in hunks:
         v = classify(ours, theirs)
@@ -241,7 +258,7 @@ def resolve(path: Path, apply: bool):
             pieces.append(ours if ours.endswith("\n") or not ours else ours + "\n")
             pieces.append(theirs)
         elif v == "FIELD_UNION":
-            pieces.append(field_union(ours, theirs))
+            pieces.append(field_union(ours, theirs, outside_keys))
         elif v == "IMPORT_UNION":
             merged = merge_imports(ours, theirs)
             if merged is None:
