@@ -1650,7 +1650,9 @@ _do_wave_unlock_ping() {
 Owned merged PR(s) cleaned (gate A: soup layer gone + worktree gone): #${prs_csv//,/, #}
 
 You MAY rematerialize without waiting for further operator approval:
-1. \`hapi-driver-status --quiet\` (exit 0 idle; 75 = rebuild/switch already in progress — wait)
+1. \`hapi-driver-status --quiet\` (exit 0 idle; 75 = rebuild/switch in progress — wait;
+   76 = remat escalation hold ACTIVE — someone owns a broken compose, only that
+   Meta owner may proceed, so ping them rather than rebuilding; 2 = stale status)
 2. \`hapi-sync-fork-main && git push origin main\` (if fork main behind upstream)
 3. \`hapi-driver-rebuild --build-web --verify\`
 4. \`hapi-verify-web-dist\` + \`hapi-restart-hub\` if hub/cli changed
