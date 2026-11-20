@@ -472,6 +472,37 @@ mw_member_complete() {
     return 1
 }
 
+# mw_manifest_pr_cited <manifest_text> <pr_number>
+# Exit 0 if the PR number appears as an estate subject anywhere in the manifest
+# (active `- pr: N`, or `#N` / `hapi#N` / `PR #N` in comments — including DROPPED).
+# Exit 1 if never cited: third-party / evidence-only watch, no soup ownership ever
+# (tiann/hapi#2526 sticky-🔧 after merge, 2026-11-20).
+mw_manifest_pr_cited() {
+    local text="$1" pr="$2"
+    [[ -n "$pr" && "$pr" =~ ^[0-9]+$ ]] || return 1
+    if printf '%s\n' "$text" | grep -Eiq "^[[:space:]]*-[[:space:]]*pr:[[:space:]]*${pr}[[:space:]]*$"; then
+        return 0
+    fi
+    # Same subject matcher as _mw_block_mentions_pr (avoid incidental 25260 etc.).
+    if printf '%s' "$text" | grep -Eiq "(PR[[:space:]]*#|hapi#|(^|[^0-9/#-])#)${pr}\\b"; then
+        return 0
+    fi
+    return 1
+}
+
+# mw_merged_nothing_owed <manifest_text> <session_path> <pr_number> [related] [hints]
+# Exit 0 when a merged PR owes no estate cleanup: Gate A clean AND never cited in
+# the manifest (watch-only / third-party). Owned soup work always cites the PR
+# (live or DROPPED), so archive-pending peers stay 🔧 until Meta archives.
+mw_merged_nothing_owed() {
+    local manifest="$1" path="$2" pr="$3" related="${4:-}" hints="${5:-}"
+    mw_manifest_pr_cited "$manifest" "$pr" && return 1
+    local clean_reason
+    clean_reason="$(mw_wave_member_clean "$manifest" "$path" "$pr" "$related" "$hints")" || true
+    [[ "$clean_reason" == "clean" ]] || return 1
+    return 0
+}
+
 # mw_broom_latch <prev_emoji> <complete_reason>
 # When Gate A is already clean, decide whether the chip should be 🧹 even though
 # mw_member_complete failed (typically not_archived after ping-peer resume).

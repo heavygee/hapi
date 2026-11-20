@@ -59,6 +59,9 @@ states:
     stickyPing: false
     # Never ping on transition or hourly rouse — babysit ended.
     meaning: Fully cleaned by estate definition; Meta babysit ended.
+    # Also: watch-only / third-party merges never cited in driver-manifest
+    # (no soup ownership) → nothing owed without requiring session archive
+    # (tiann/hapi#2526, 2026-11-20). Owned DROPPED cites still require archive.
     requires:
       github: merged
       # Manifest: no active (uncommented) layer for this PR — DROPPED/commented is enough.
@@ -69,6 +72,8 @@ states:
       # Unknown headRef → fail closed (stay 🔧).
       branch: absent
       session: archived  # metadata.lifecycleState == archived
+      # Exception: mw_merged_nothing_owed (uncited + Gate A clean) → complete
+      # without session/branch predicates.
 
   needs_operator:
     emoji: "🛑"

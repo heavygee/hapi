@@ -1016,15 +1016,27 @@ main() {
                         "$p" \
                         "${PR_BY_REPO_RELATED[$pair_sess]:-${PR_RELATED[$p]:-}}" \
                         "${PR_BY_REPO_HINTS[$pair_sess]:-${PR_HINTS[$p]:-}}")"; then
-                        action_sess="Gate A clean — exit reflection (or skip:) then ack + idle; archive pending (Meta archives from outside; do not rematerialize / self-archive mid-turn)"
+                        # Watch-only / third-party: never cited in soup manifest →
+                        # nothing to drop, no peer to archive. Do not sticky-🔧
+                        # forever (tiann/hapi#2526, 2026-11-20).
+                        if mw_merged_nothing_owed \
+                            "$manifest_text_early" \
+                            "${SESS_PATH[$sid8]:-}" \
+                            "$p" \
+                            "${PR_BY_REPO_RELATED[$pair_sess]:-${PR_RELATED[$p]:-}}" \
+                            "${PR_BY_REPO_HINTS[$pair_sess]:-${PR_HINTS[$p]:-}}"; then
+                            emoji_sess="🧹"
+                            action_sess="MERGED — nothing owed (watch-only / third-party; no soup layer ever)"
                         # Latch 🧹: resume must not demote complete → merged solely
                         # because lifecycle left archived (2026-08-11 e4d152f3).
                         # Recoverable: if prev_emoji was already overwritten to 🔧
                         # (hitchhike demotion), still broom when complete_reason is
                         # only not_archived/no_branch (mw_broom_latch; #1598 2026-11-04).
-                        if mw_broom_latch "$prev_emoji_early" "$complete_reason"; then
+                        elif mw_broom_latch "$prev_emoji_early" "$complete_reason"; then
                             emoji_sess="🧹"
                             action_sess="fully cleaned — babysit ended"
+                        else
+                            action_sess="Gate A clean — exit reflection (or skip:) then ack + idle; archive pending (Meta archives from outside; do not rematerialize / self-archive mid-turn)"
                         fi
                     else
                         vlog "gate A dirty #$p [$sid8] → $gate_a_reason"
@@ -1322,7 +1334,20 @@ main() {
         [[ -n "${PAIR_OWNED[$pair_o]:-}" ]] && continue
         local e="${PR_BY_REPO_EMOJI[$pair_o]:-${PR_EMOJI[$p]:-?}}"
         case "$e" in
-            🔧) Q_ORPHAN+=("$r_o#$p 🔧 merged, no owning session — confirm wave cleanup done / archive") ;;
+            🔧)
+                # Third-party / watch-only merge: no soup cite + Gate A clean →
+                # nothing owed (same predicate as session overlay for #2526).
+                if mw_merged_nothing_owed \
+                    "$manifest_text_early" \
+                    "" \
+                    "$p" \
+                    "${PR_BY_REPO_RELATED[$pair_o]:-${PR_RELATED[$p]:-}}" \
+                    "${PR_BY_REPO_HINTS[$pair_o]:-${PR_HINTS[$p]:-}}"; then
+                    Q_ORPHAN+=("$r_o#$p 🧹 merged, nothing owed (watch-only / third-party; no soup / no owner)")
+                else
+                    Q_ORPHAN+=("$r_o#$p 🔧 merged, no owning session — confirm wave cleanup done / archive")
+                fi
+                ;;
             📝|"?") : ;;
             *) Q_ORPHAN+=("$r_o#$p $e open, NO HAPI session — assign an owner or spawn a peer") ;;
         esac

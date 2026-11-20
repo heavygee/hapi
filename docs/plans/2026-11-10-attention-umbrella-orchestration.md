@@ -250,6 +250,11 @@ No third-party pushback on #2355/#2356. Upstream `main` @ `6ea40f9e4`. Signals f
 Operator umbrella merge auth active (2026-11-19): merge attention children when three-dim CLEAN. #2515 closed absorbed into #2376. Orch resumed after parking wrongly post-#2376.
 
 
+
+### #2526 watch-only sticky-🔧 (2026-11-20T08:40Z)
+
+Third-party merge (Overbaker) Meta tracked for the settings.lock ENOENT flake. No soup/peer — chip was sticky 🔧 with drop-soup brief forever. Same defect class as #2376 prose scrape: assumed ownership. Fix: `mw_merged_nothing_owed` (uncited in manifest + Gate A clean) → 🧹 "nothing owed (watch-only / third-party)"; orphan queue same. Owned DROPPED cites still archive-pending.
+
 ### #2376 Meta 🔧 ping loop (2026-11-20T08:15Z)
 
 Peer [ea9e52cc](/sessions/ea9e52cc-cf3d-4f5d-95d8-9944bf08b0d6) flagged identical hourly "are you done yet" pings. Not a forgetful watcher: Gate A was **false-dirty**. `mw_manifest_incomplete_drop_active` scraped every `driver/…` token in the DROPPED #2376 comment, including parent prose "stacked on `driver/1996-consolidate-blocked-filter-wip`", and treated the still-live #1996 soup layer as an incomplete #2376 drop → sticky 🔧 forever.

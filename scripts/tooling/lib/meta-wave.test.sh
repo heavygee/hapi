@@ -340,6 +340,25 @@ if mw_broom_latch "🔧" "not_archived+branch"; then bad "branch must not recove
 if mw_broom_latch "🔧" "layer+worktree"; then bad "soup dirt must not recover"; else ok; fi
 if mw_broom_latch "" "complete"; then bad "complete reason must not latch here"; else ok; fi
 
+# --- watch-only / third-party merged (#2526 sticky-🔧, 2026-11-20) ---
+MANIFEST_NO_2526=$(cat <<'EOF'
+base: upstream/main
+layers:
+  # DROPPED 2026-11-19: MERGED upstream as tiann/hapi#2376
+  # - branch: driver/2002-session-filter-active-working-wip
+  - branch: driver/1996-consolidate-blocked-filter-wip
+EOF
+)
+if mw_manifest_pr_cited "$MANIFEST_NO_2526" 2526; then bad "#2526 must be uncited"; else ok; fi
+if mw_manifest_pr_cited "$MANIFEST_NO_2526" 2376; then ok; else bad "#2376 DROPPED cite must count"; fi
+if mw_manifest_pr_cited "$MANIFEST_NO_2526" 1996; then bad "bare branch name must not cite #1996"; else ok; fi
+if mw_merged_nothing_owed "$MANIFEST_NO_2526" "/home/heavygee/coding/hapi" 2526; then ok; else bad "uncited merged must be nothing-owed"; fi
+if mw_merged_nothing_owed "$MANIFEST_NO_2526" "/home/heavygee/coding/hapi" 2376; then
+    bad "DROPPED-cited #2376 must still owe archive (not watch-only)"
+else
+    ok
+fi
+
 rm -rf "$GIT_TMP"
 
 echo ""
