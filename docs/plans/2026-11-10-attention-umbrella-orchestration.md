@@ -244,16 +244,15 @@ No third-party pushback on #2355/#2356. Upstream `main` @ `6ea40f9e4`. Signals f
 | #1733 | **MERGED** 2026-11-19 (operator-directed Lane B / elapsed dogfooded). Gate A + exit reflection filed; peer idle for Meta archive. Promote filed: mirror-hygiene `~` expand. |
 | #1772 | **MERGED** 2026-11-19 (Lane B / elapsed dogfooded + operator umbrella auth). Squash `3ae9c77c4` (38 files). Gate A' done — retro `2026-11-19-1772-session-list-filters-exit.md` (promote none), emit+archive [assist](/sessions/3c5af7c8-540d-4d7c-b7a1-5df17abe5b37); assist wt removed. Soup layers for stack left for Meta. |
 | #2376 | **MERGED** 2026-11-19 (Lane B / elapsed dogfooded + umbrella auth). Squash `fa9fd8cc0`. Gate A' done — retro `2026-11-19-2002-active-working-lenses-exit.md`; promote applied (`rebase --onto` recipe → `driver-soup.md`); soup layer 3/3 dropped; [peer](/sessions/ea9e52cc-cf3d-4f5d-95d8-9944bf08b0d6) archived. Layers 1–2 (#1772/#1996) left for Meta remat re-thread. |
-| #1717 | **UPSTREAM [#2520](https://github.com/tiann/hapi/pull/2520)** tip `793be7644` — rounds 13–15 cleared (87 findings / 15 waves). Soft kill: next wave ≥2 Majors that are only prior-fix limits → Known follow-ups. Soup HARD HOLD. Dogfood ~39h; **no laneb**. [peer](/sessions/83d28e01-5852-4926-b163-99a95f46c931) |
-| #1996 | **UPSTREAM [#2530](https://github.com/tiann/hapi/pull/2530)** tip `8cd971f38` atop #2520 `793be7644`. Idle-hold. [peer](/sessions/eddfb230-ebc4-4196-b2b7-c33a2f5f71f8) |
+| #1717 | **UPSTREAM [#2520](https://github.com/tiann/hapi/pull/2520)** tip `8254b8c8a` — r16 withdrew `applyLaterDeliveryEvidence` (3 Majors = one bad decision). Soft kill: **one more wave grace**; then freeze if ≥2 Majors are limits of this round. Soup HARD HOLD. [peer](/sessions/83d28e01-5852-4926-b163-99a95f46c931) |
+| #1996 | **UPSTREAM [#2530](https://github.com/tiann/hapi/pull/2530)** — rebase onto `8254b8c8a` kicked. [peer](/sessions/eddfb230-ebc4-4196-b2b7-c33a2f5f71f8) |
 
 Operator umbrella merge auth active (2026-11-19): merge attention children when three-dim CLEAN. #2515 closed absorbed into #2376. Orch resumed after parking wrongly post-#2376.
 
-### #2520 status (2026-11-20T01:37Z)
+### #2520 status (2026-11-20T02:04Z)
 
-- Tip `793be7644`: rounds 13–15 cleared, 0 unresolved. Preceding tips each CI 9/9. **87 findings / 15 waves**; Majors ~2/wave since r10.
-- Peer flag (orch agrees): every Major in r13–15 was a limit of the prior round's fix — converging, not noise, no natural terminate. Soft kill criterion set: if next wave still ≥2 Majors that are only prior-fix limits and surface not shrinking → soft-freeze tip + Known follow-ups / separate issues. One clean bot pass (0 Major) also stops hardening this PR.
-- Shared `operatorReplyDeliveredAt` extracted (3rd sibling-path drift). Narrow dedupe pushback in-thread.
+- Tip `8254b8c8a`: round-16 fixed+RESOLVED (0 unresolved). `core` SUCCESS. Criterion letter met (3/3 Majors = prior-fix limits) but **no freeze**: one withdrawal of `applyLaterDeliveryEvidence` dissolved three symptoms; prior tip would have stamped future-scheduled prompts invoked (scheduler never sends them).
+- Soft kill updated: next wave after this tip — if ≥2 Majors are limits of *this* round → freeze, no further grace. 0 Major → automatic stop.
 - Soup HARD HOLD. #2530 rebase kicked. No laneb (~39h calendar).
 
 
