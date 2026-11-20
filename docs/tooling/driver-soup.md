@@ -70,7 +70,11 @@ A first-sidecar-wins lookup plus `retained.version !== offer.targetVersion` → 
 
 ## Daily driver (soup)
 
-**Manifest:** **Repo** `config/driver-manifest.yaml` is the recipe (tracked, commit on fork `main`). Rebuild reads it via `hapi-manifest-path.sh`. `~/.config/hapi/driver-manifest.yaml` is a **generated mirror** (`scripts/tooling/hapi-manifest-mirror-to-config.sh`). Legacy override: `HAPI_DRIVER_MANIFEST` env only. Meta may set `HAPI_META_MANIFEST` to the `~/.config` mirror for *composition* (active layers); DROPPED/cite provenance and watch-only overlay always read the repo recipe via `hapi_manifest_provenance_path` — a stale mirror must not reclassify owned merges as third-party.
+**Manifest:** **Repo** `config/driver-manifest.yaml` is the recipe (tracked, commit on fork `main`). Rebuild reads it via `hapi-manifest-path.sh`. `~/.config/hapi/driver-manifest.yaml` is a **generated mirror** (`scripts/tooling/hapi-manifest-mirror-to-config.sh`) — one-way, no independent content. Legacy override: `HAPI_DRIVER_MANIFEST` env only.
+
+**After every DROPPED (or layer) edit on the repo recipe:** re-run `hapi-manifest-mirror-to-config.sh` so composition stays current. Defer the mirror only when a remat hold / mid-absorb makes yanking `~/.config` unsafe; then catch up when the hold clears.
+
+**Cite-detection deliberately bypasses the mirror:** Meta may set `HAPI_META_MANIFEST` to `~/.config` for *composition* (active layers the driver cooks). DROPPED/cite provenance and the watch-only overlay (`mw_merged_nothing_owed` / `hapi_manifest_provenance_path`) always read the **repo** recipe — a stale mirror must not reclassify owned merges as third-party (2026-11-20). If the dance disagrees with a DROPPED block you just edited, check the mirror mtime before assuming the predicate is wrong.
 
 **Composed soup tree:** `~/coding/hapi/driver` on branch `driver/integration` — output of rebuild, not a substitute for the manifest when adding layers.
 
