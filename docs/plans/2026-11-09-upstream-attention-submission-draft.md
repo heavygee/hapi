@@ -105,8 +105,20 @@ order above is a real dependency chain, so a removal part way down just stops ev
   rather than relying on repo-relative `assets/` paths.
 - **Omitted deliberately:** any reference to `#2296`. Arguing against a live contributor's PR in
   our own submission would be poor form, and the case stands on its own without it. If the
-  maintainer raises it, answer then. (Do not @-mention anyone in the posted body — fires the
-  broken `codex-mention-response.yml`.)
+  maintainer raises it, answer then.
+- **@-mentions: hazard is dormant, not fixed — measured 2026-11-20, supersedes the blanket
+  prohibition this note used to carry.** The old rule was "never @-mention in a posted body, it
+  fires the broken `codex-mention-response.yml`." That was grounded — the workflow failed ~40 times
+  up to 2026-11-11, including on `feat/session-attached-jobs`. It has **not failed since**: the last
+  40 runs are all `skipped`. `@tiann` in #2147's body on 2026-11-20 triggered six runs and every one
+  skipped, harmlessly.
+  The root cause is still present — `ref: dev` is hardcoded at `.github/workflows/
+  codex-mention-response.yml:110` — but every step that would use it is now gated behind
+  `if: steps.check_skip.outputs.should_skip != 'true'`, so it no longer reaches the broken checkout
+  in practice. So: an @-mention is not currently a red-check risk, but the trap is one skip-condition
+  change away from live. **Check `gh run list --workflow=codex-mention-response.yml` before relying
+  on either answer** rather than inheriting this paragraph; it is dated, like the
+  unfiled-work sweep was.
 - **"Take the green notion"** is reflected as understanding (1), not as a request.
 - **Dependency reality:** 3 extends 2's enum and cannot precede it; 1 is already open as #1424.
   The order above is real, not cosmetic.
