@@ -269,6 +269,31 @@ the completeness gate runs before promote. Reach for full-recipe only for a deli
 recipe audit — not as a repair tool for a bad tip, because repairing a tip costs one
 seat what re-thinning costs 84 owners.
 
+### Read the exit code, and read it from the right place
+
+Three times on 2026-11-20 this seat drew a false conclusion from its own
+verification, which is worth more attention than any single bug:
+
+1. **A command sequence committed past its own failing check.** The check
+   printed its failure and the next line committed anyway. Put the check in a
+   separate call, or gate on it — do not print it and hope.
+2. **`$?` after a pipeline is the LAST command's status, not the interesting
+   one.** `cmd 2>&1 | tail -3; echo $?` reports `tail`'s success. That is how
+   `parse-driver-manifest.mjs` got written off as "exits 0 either way" when it
+   has always failed closed (no argument → 2, bad path → 2, valid → 0). Use
+   `${PIPESTATUS[0]}`, or do not pipe when the status is what you are after.
+3. **Empty grep output is not a pass.** `suite | grep -E 'FAIL|OK'` matching
+   nothing was read as nothing-to-report, when the suite had died at line 189
+   and never reached those cases.
+
+The common shape: the tool answered correctly and the reading was wrong. That
+is the same failure as the green gate on a hollow tree, aimed at ourselves —
+and it is more dangerous, because a misread check retires the suspicion that
+would have found the real problem. Corollary: when a tool's output looks like a
+verdict about your data but might be a complaint about your invocation, check
+which it is before believing either. A raw stack trace from a parser reads like
+"bad manifest" and often means "bad path".
+
 ### Kill criteria for "the absorb is done"
 
 1. Completeness gate red → **do not promote.** Not negotiable, and it runs always.
