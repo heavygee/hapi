@@ -244,16 +244,17 @@ No third-party pushback on #2355/#2356. Upstream `main` @ `6ea40f9e4`. Signals f
 | #1733 | **MERGED** 2026-11-19 (operator-directed Lane B / elapsed dogfooded). Gate A + exit reflection filed; peer idle for Meta archive. Promote filed: mirror-hygiene `~` expand. |
 | #1772 | **MERGED** 2026-11-19 (Lane B / elapsed dogfooded + operator umbrella auth). Squash `3ae9c77c4` (38 files). Gate A' done — retro `2026-11-19-1772-session-list-filters-exit.md` (promote none), emit+archive [assist](/sessions/3c5af7c8-540d-4d7c-b7a1-5df17abe5b37); assist wt removed. Soup layers for stack left for Meta. |
 | #2376 | **MERGED** 2026-11-19 (Lane B / elapsed dogfooded + umbrella auth). Squash `fa9fd8cc0`. Gate A' done — retro `2026-11-19-2002-active-working-lenses-exit.md`; promote applied (`rebase --onto` recipe → `driver-soup.md`); soup layer 3/3 dropped; [peer](/sessions/ea9e52cc-cf3d-4f5d-95d8-9944bf08b0d6) archived. Layers 1–2 (#1772/#1996) left for Meta remat re-thread. |
-| #1717 | **UPSTREAM [#2520](https://github.com/tiann/hapi/pull/2520)** tip `2418abee9` — round-9 4/4 (**replaced** seq invariant with `received_at`; deleted invoked_seq/notify seqs). Soup HARD HOLD. Dogfood ~41h; **no laneb**. [peer](/sessions/83d28e01-5852-4926-b163-99a95f46c931) |
-| #1996 | **UPSTREAM [#2530](https://github.com/tiann/hapi/pull/2530)** tip `319403726` atop #2520 `2418abee9`. Idle-hold. [peer](/sessions/eddfb230-ebc4-4196-b2b7-c33a2f5f71f8) |
+| #1717 | **UPSTREAM [#2520](https://github.com/tiann/hapi/pull/2520)** tip `b3307de4c` — round-10 4/4 (receivedAt wired through live emitters — r9 invariant finally reached production path). Soup HARD HOLD. Dogfood ~40h; **no laneb**. [peer](/sessions/83d28e01-5852-4926-b163-99a95f46c931) |
+| #1996 | **UPSTREAM [#2530](https://github.com/tiann/hapi/pull/2530)** — rebase onto `b3307de4c` kicked. [peer](/sessions/eddfb230-ebc4-4196-b2b7-c33a2f5f71f8) |
 
 Operator umbrella merge auth active (2026-11-19): merge attention children when three-dim CLEAN. #2515 closed absorbed into #2376. Orch resumed after parking wrongly post-#2376.
 
-### #2520 status (2026-11-19T23:57Z)
+### #2520 status (2026-11-20T00:16Z)
 
-- Tip `2418abee9`: round-9 4/4 fixed+RESOLVED. `core` SUCCESS on tip. Prior green tip included `a22a65a6f` / `51fe4a04d` lineage.
-- Headline: **deleted** seq-as-boundary invariant (`invoked_seq`, `last_notify_seq`, `last_notify_cleared_seq`) — seq not durable after cancel, not comparable across merge. Replaced with hub `received_at` vs delivery hub stamp; footer-vs-footer stays on `at`; delayed same-turn via `last_notify_cleared_author_at`.
-- Soup HARD HOLD. #2530 rebase kicked. No laneb (~41h calendar).
+- Tip `b3307de4c`: round-10 4/4 fixed+RESOLVED. `core` SUCCESS on tip. Prior tip `2418abee9` full CI green.
+- Headline: round-9 `received_at` boundary was correct but **never reached live ingestion** — four hand-built `message-received` emitters dropped the field (fallback to runner `createdAt`). Wired all four; follow-up: single construction site.
+- Also: import reconciliation from transcript order; search-mode lens/counter unmount; Ctrl/Cmd+Enter dialog guard via sync ref.
+- Soup HARD HOLD. #2530 rebase kicked. No laneb (~40h calendar).
 
 
 ### #2530 status (2026-11-19T21:25Z)
