@@ -249,6 +249,52 @@ prefer the fuller helper module over a partial stub. Then the completeness gate
 must pass **before** any typecheck celebration, then layers, then promote, then
 `hapi-restart-hub` (patient — live WORKING sessions).
 
+## The shared/ PR-ref cluster — union, and one trap
+
+`shared/src/externalRefs.ts` (7), `shared/src/schemas.ts` (4) and
+`web/src/components/SessionPrChip.tsx` (5) are one problem, not three. Upstream
+rewrote PR refs for GHES/custom hosts (`isValidGitHubHost`,
+`hostFromGithubPrUrl`, `getGitHubUrlForRepo`), added cached forge snapshots
+(`openState` / `checks` / `merge`) and a chip-display profile
+(`shared/src/prChipDisplay.ts` — one of the files my broken absorb left at zero
+bytes, now correctly restored at 5709 bytes). The fork has the Meta
+title-emoji contract (`githubPrStatusFromEmoji`, ADR D8) plus
+`status`/`statusCheckedAt`/`statusAction`.
+
+**Both are live, so it is a union, not a side-take.** `GithubPrStatus` is
+referenced in 9 files and `statusAction` in 8; upstream's `prChipDisplay` in 14
+and `DEFAULT_PR_CHIP_DISPLAY` in 11. Note `githubPrStatusFromEmoji` itself has
+only two references — its own definition and `SessionPrChip.test.ts` — so judge
+it by the enum's reach, not the function's.
+
+Resolved so far in `externalRefs.ts`: hunk 2 `both` (fork emoji contract +
+upstream host-aware `githubPrUrl`), 3/4 `theirs` (`isValidGitHubHost` supersedes
+the github.com-only check), 6 `theirs` (host-aware `isSameGithubPrIdentity`).
+**Hunks 1, 5 and 7 are left conflicted on purpose:** both sides define
+`buildGithubPrExternalRef` with different signatures, and they have to become
+one function taking the fork's `status`/`statusAction` *and* upstream's
+`openState`/`checks`/`merge`/`host`/`url`. That is a 130-line read, not a splice.
+
+**The trap in `schemas.ts` hunk 3:** upstream narrows
+`ExternalRefSchema` to `GithubPrExternalRefSchema` alone, dropping the
+`discriminatedUnion` that carries `github_issue`. The fork needs that union —
+it backs the `link_issue` MCP tool (`LinkIssueRequest` is in the fork-only
+apiTypes set). Taking upstream there silently removes issue links. Keep ours'
+union and add upstream's `MAX_EXTERNAL_REFS` / `ExternalRefsSchema`.
+
+`shared/src/messages.ts` (1 hunk) is also deliberately untouched: it is the
+AGENT_NOTIFY_SUMMARY matcher. The fork has a `collapseRepeats`-tolerant
+`findNotifyTokenStart`; upstream has `eligibleTokenStarts` shared between the
+strict matcher and near-miss detection. Competing implementations of the same
+concern, in the contract the operator cares most about — read both callers
+before choosing.
+
+Done in this cluster: `shared/src/index.ts` (barrel union, five modules),
+`shared/src/types.ts` (type-name union keeping `GithubPrStatus`),
+`shared/src/runnerCapabilities.ts` (additive both sides — fork
+`RunnerSelfUpgrade`/`CliArtifactGeneration`, upstream `UsageQuery`/
+`WorkspaceFileAccess`/`LocalSessionImport`).
+
 ## SessionList.tsx — analysis done, apply it rather than re-reading
 
 The single hardest file: **41 hunks, all MANUAL**, 117 soup-only symbols against
