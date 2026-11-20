@@ -186,7 +186,6 @@ done
     printf '%s origin/main\n' "$T"
     printf "}\n"
 } > "$TMP/dupkey.ts"
-make_unmerged dupkey.ts
 run "$TMP/dupkey.ts"
 expect_manual "$TMP/dupkey.ts" "key already present outside the hunk refused"
 
