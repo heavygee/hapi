@@ -535,6 +535,23 @@ eq "bot_stale omitted: same as 0" \
     "$(action_of "$(pec_decide_emoji 1 0 0 1 0 1 0 0 0 1 0 0 0 0 0)")" \
     "address latest bot review"
 
+# "Stacked on #N" / "Depends on #N" are the same claim as "blocked on #N".
+# tiann/hapi#2530 declares "**Stacked on #2520**" under a "## Depends on"
+# heading; none of the old patterns matched, so it drew an hourly sticky ping
+# for a dependency its peer could not act on — the bot's objection was exactly
+# "land #2520 first, then rebase".
+eq "blocked dep: Stacked on #N" \
+    "$(pec_blocked_upstream_dep_from_body '**Stacked on #2520** (flagship chrome)')" "#2520"
+eq "blocked dep: Depends on #N" \
+    "$(pec_blocked_upstream_dep_from_body 'Depends on #77 landing first.')" "#77"
+eq "blocked dep: blocked on #N still works" \
+    "$(pec_blocked_upstream_dep_from_body 'blocked on #123')" "#123"
+eq "blocked dep: no dependency stays empty" \
+    "$(pec_blocked_upstream_dep_from_body 'Normal body mentioning #999.')" ""
+eq "blocked dep: action names the dependency" \
+    "$(pec_blocked_upstream_action '**Stacked on #2520**')" \
+    "blocked upstream — wait on #2520 (status:blocked-upstream)"
+
 eq "status_from_emoji clean" "$(pec_status_from_emoji '✅')" "clean"
 eq "status_from_emoji needs_work" "$(pec_status_from_emoji '⚠️')" "needs_work"
 eq "status_from_emoji unknown" "$(pec_status_from_emoji '?')" "unknown"

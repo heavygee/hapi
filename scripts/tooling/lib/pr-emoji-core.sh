@@ -502,10 +502,16 @@ pec_labels_csv_has() {
 pec_blocked_upstream_dep_from_body() {
     local body="${1:-}" dep=""
     [[ -n "$body" ]] || { printf ''; return 0; }
-    if [[ "$body" =~ [Bb]locked[[:space:]]+(on|by)[[:space:]]+[^[:digit:]#]{0,80}#([0-9]+) ]]; then
-        dep="#${BASH_REMATCH[2]}"
-    elif [[ "$body" =~ [Bb]locked[[:space:]]+(on|by)[[:space:]]+([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+) ]]; then
-        dep="${BASH_REMATCH[2]}"
+    # "Stacked on #N" / "Depends on #N" are the same claim as "blocked on #N" —
+    # a stacked PR cannot go green on its own merge-base diff until its parent
+    # lands. tiann/hapi#2530 says "**Stacked on #2520**" under a "## Depends on"
+    # heading and was matched by none of these, so it drew an hourly sticky ping
+    # for a thing its peer could not act on: the bot's whole objection was
+    # "land #2520 first, then rebase".
+    if [[ "$body" =~ ([Bb]locked|[Ss]tacked|[Dd]epends)[[:space:]]+(on|by)[[:space:]]+[^[:digit:]#]{0,80}#([0-9]+) ]]; then
+        dep="#${BASH_REMATCH[3]}"
+    elif [[ "$body" =~ ([Bb]locked|[Ss]tacked|[Dd]epends)[[:space:]]+(on|by)[[:space:]]+([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+) ]]; then
+        dep="${BASH_REMATCH[3]}"
     fi
     printf '%s' "$dep"
 }
