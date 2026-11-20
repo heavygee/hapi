@@ -11,7 +11,21 @@ if (!path) {
     process.exit(2);
 }
 
-const text = readFileSync(path, 'utf8');
+// Distinguish "your path is wrong" from "the manifest is bad". A raw fs stack
+// trace reads like the manifest failed to parse, which is how a tooling seat
+// came to report PARSE FAILED against a manifest that was fine (2026-11-20).
+// Exit 2 matches the missing-argument case: both are caller errors, neither is
+// a verdict about the manifest.
+let text;
+try {
+    text = readFileSync(path, 'utf8');
+} catch (err) {
+    console.error(`parse-driver-manifest.mjs: cannot read manifest: ${path}`);
+    console.error(`  ${err.message.split('\n')[0]}`);
+    console.error('  This is a bad PATH, not a bad manifest.');
+    process.exit(2);
+}
+
 const result = { base: 'upstream/main', layers: [] };
 
 for (const raw of text.split('\n')) {
