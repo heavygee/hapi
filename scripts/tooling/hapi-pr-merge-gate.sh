@@ -135,6 +135,54 @@ fi
 # 3. review decision must not be a rejection
 [ "$REVIEW" = "CHANGES_REQUESTED" ] && fail "reviewDecision=CHANGES_REQUESTED" || pass "no CHANGES_REQUESTED"
 
+# 3b. THE BOT VERDICT ITSELF — reviewDecision does NOT carry it.
+#
+# This gate exists because "CI green never meant reviewed" (#1842): tiann's
+# "fix before merging" was a plain comment, so GitHub reported CLEAN and
+# reviewDecision="". The bot posts COMMENTED reviews, which leave reviewDecision
+# empty exactly the same way — so step 3 says "ok" while the tip-matched verdict
+# reads "⚠️ Needs changes" with Majors standing. Observed 2026-11-20 on #2147:
+# five standing Majors, every thread resolved, step 3 and step 4 both ok, and
+# the only BLOCKs were CI-in-progress and the absent lane B grant. Resolving
+# threads does not change a verdict the bot re-derives from the diff.
+#
+# Bound to the tip by the review's own commit_id — never scraped from the body.
+# A verdict for an older head is not a verdict for this one, so it fails closed;
+# a tip-fresh cold-review-clean label is the sanctioned human attestation and
+# satisfies this step (same contract as the chip classifier).
+BOT_STEP_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/pr-emoji-core.sh"
+if [ -r "$BOT_STEP_LIB" ]; then
+    # shellcheck source=lib/pr-emoji-core.sh
+    . "$BOT_STEP_LIB"
+    CRC_AT="$("$REAL_GH" api "repos/$REPO/issues/$PR/timeline" --paginate --slurp 2>/dev/null \
+        | jq -r 'add | [.[] | select(.event == "labeled" and .label.name == "cold-review-clean")]
+                 | last | .created_at // empty' 2>/dev/null || echo "")"
+    HEAD_AT="$("$REAL_GH" api "repos/$REPO/pulls/$PR/commits" --paginate --slurp 2>/dev/null \
+        | jq -r 'add | last | .commit.committer.date // empty' 2>/dev/null || echo "")"
+    if [ -n "$CRC_AT" ] && ! pec_attestation_is_stale "$CRC_AT" "$HEAD_AT"; then
+        pass "cold-review-clean attests this head (labelled $CRC_AT)"
+    else
+        BOT_JSON="$("$REAL_GH" api "repos/$REPO/pulls/$PR/reviews" --paginate --slurp 2>/dev/null || echo "")"
+        BOT_CID="$(printf '%s' "$BOT_JSON" | jq -r '(if (.[0]|type)=="array" then flatten else . end)
+            | [.[] | select(.user.login == "github-actions[bot]")] | last | .commit_id // empty' 2>/dev/null || echo "")"
+        BOT_BODY="$(printf '%s' "$BOT_JSON" | jq -r '(if (.[0]|type)=="array" then flatten else . end)
+            | [.[] | select(.user.login == "github-actions[bot]")] | last | .body // empty' 2>/dev/null || echo "")"
+        if [ -z "$BOT_CID" ]; then
+            fail "no bot review found for head ${HEAD:0:9} — absence is not a clean verdict (attest with cold-review-clean)"
+        elif [ "$BOT_CID" != "$HEAD" ]; then
+            fail "bot verdict is for ${BOT_CID:0:9}, not head ${HEAD:0:9} — stale verdict is not a clean verdict"
+        elif echo "$BOT_BODY" | grep -qiE '\[Major\]|\[Blocker\]'; then
+            fail "tip-matched bot verdict has Major/Blocker findings: $(printf '%s' "$BOT_BODY" | head -1)"
+        elif ! pec_bot_body_findings_clean "$BOT_BODY"; then
+            fail "tip-matched bot verdict is not clean: $(printf '%s' "$BOT_BODY" | head -1)"
+        else
+            pass "tip-matched bot verdict clean ($(printf '%s' "$BOT_BODY" | head -1))"
+        fi
+    fi
+else
+    fail "cannot read lib/pr-emoji-core.sh — bot-verdict step cannot run (gate fails closed)"
+fi
+
 # 4. UNRESOLVED REVIEW THREADS — the thing status APIs hide
 #
 # Paginated via the shared helper. A bare `first:100` silently returns a prefix
