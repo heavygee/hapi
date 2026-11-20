@@ -514,6 +514,27 @@ else
     eq "findings clean: All stages passed header" "no" "yes"
 fi
 
+# bot_stale (arg 16): a clean verdict belonging to an older head must not read
+# as "address latest bot review" — there is nothing to address, it needs a
+# review of THIS tip. tiann/hapi#945 wore ✅ "self-merge eligible" off a verdict
+# 984 commits behind the tip, with bot-skip so no fresh one would ever arrive.
+_stale_decided="$(pec_decide_emoji 1 0 0 1 0 1 0 0 0 1 0 0 0 0 0 1)"
+eq "bot_stale: emoji is not green" "$(emoji_of "$_stale_decided")" "⚠️"
+eq "bot_stale: action names the stale head" \
+    "$(action_of "$_stale_decided")" \
+    "bot verdict is for an older head — re-review this tip (or attest with cold-review-clean)"
+
+# Same inputs WITHOUT the stale bit must keep the old wording (regression guard).
+_fresh_decided="$(pec_decide_emoji 1 0 0 1 0 1 0 0 0 1 0 0 0 0 0 0)"
+eq "bot_stale unset: keeps address-latest wording" \
+    "$(action_of "$_fresh_decided")" "address latest bot review"
+
+# Omitting arg 16 entirely must behave exactly as passing 0 (back-compat: every
+# existing call site passes 15 args).
+eq "bot_stale omitted: same as 0" \
+    "$(action_of "$(pec_decide_emoji 1 0 0 1 0 1 0 0 0 1 0 0 0 0 0)")" \
+    "address latest bot review"
+
 eq "status_from_emoji clean" "$(pec_status_from_emoji '✅')" "clean"
 eq "status_from_emoji needs_work" "$(pec_status_from_emoji '⚠️')" "needs_work"
 eq "status_from_emoji unknown" "$(pec_status_from_emoji '?')" "unknown"

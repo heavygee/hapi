@@ -379,7 +379,8 @@ pec_decide_emoji() {
     local exists="$1" merged="$2" closed="$3" checks_ok="$4" checks_pending="$5" \
         checks_seen="$6" threads_n="$7" bot_clean="$8" bot_major="$9" \
         bot_has_body="${10}" merge_bad="${11}" data_unavailable="${12}" \
-        review_changes="${13:-0}" superseded_hint="${14:-0}" crc_attested="${15:-0}"
+        review_changes="${13:-0}" superseded_hint="${14:-0}" crc_attested="${15:-0}" \
+        bot_stale="${16:-0}"
 
     if [[ "$data_unavailable" == "1" ]]; then
         printf '%s\t%s' "?" "GitHub data unavailable this run — retry sweep (title unchanged)"
@@ -428,6 +429,12 @@ pec_decide_emoji() {
             parts+=("address bot [Major] findings")
         elif [[ "$checks_pending" == "1" && "$threads_n" == "0" && "$review_changes" != "1" ]]; then
             : # receiving — skip sticky body-grep bot nag until pr-review finishes
+        elif [[ "$bot_stale" == "1" ]]; then
+            # The verdict is clean but belongs to an older head. Nothing to
+            # "address" — it needs a review OF THIS TIP. Sending an operator to
+            # read a verdict for a different commit is how #945 came to wear
+            # "self-merge eligible" off a review 984 commits behind.
+            parts+=("bot verdict is for an older head — re-review this tip (or attest with cold-review-clean)")
         elif [[ "$bot_has_body" == "1" ]]; then
             parts+=("address latest bot review")
         elif [[ "$review_changes" != "1" && "$crc_attested" != "1" ]]; then

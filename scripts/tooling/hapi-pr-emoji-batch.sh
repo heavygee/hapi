@@ -74,17 +74,25 @@ gh_t() {
     timeout -k 3 "${TIMEOUT}s" gh "$@"
 }
 
-fetch_latest_bot_body() {
+# Prints the bot verdict as: "<commit_id-or-'-'>\n<body…>"
+# The commit_id is the review's OWN field — no body scraping. A verdict for a
+# different commit is not a verdict for this tip (see the staleness gate in
+# classify_one): tiann/hapi#945 chipped ✅ "self-merge eligible" off a review of
+# a commit 984 behind the tip, and carries bot-skip so no fresh one will come.
+# Fork issue-comment reviews carry no commit_id, so they emit "-" (unassessable)
+# and the staleness gate stays off for them.
+fetch_latest_bot_review() {
     local n="$1" label
     label="$(gh_t pr view "$n" --repo "$REPO" --json labels \
         --jq '[.labels[].name]|contains(["cold-review-clean"])' 2>/dev/null || echo false)"
-    [[ "$label" == "true" ]] && { echo "__CLEAN_LABEL__"; return 0; }
+    [[ "$label" == "true" ]] && { printf '%s\n%s\n' "__LABEL__" "__CLEAN_LABEL__"; return 0; }
     # IMPORTANT: never use `gh api --paginate --jq '…|last|…'`.
     # With --jq, gh filters EACH page and concatenates string outputs. On long
     # PRs (#1108 had 2+ review pages) that glues an older page's tip body onto
     # the real tip — body-grep then false-[Major] (⚠️) while tip is Findings:None.
     # --slurp cannot combine with --jq (gh 2.96); pipe pages through jq `add`.
     if [[ "$OWNER" == "heavygee" ]]; then
+        printf '%s\n' "-"
         gh_t api "repos/${REPO}/issues/${n}/comments" --paginate --slurp 2>/dev/null \
             | jq -r 'add
                 | map(select(.user.login|test("^chatgpt-codex-connector")))
@@ -98,8 +106,8 @@ fetch_latest_bot_body() {
                 | map(select(.user.login=="github-actions[bot]"))
                 | sort_by(.submitted_at)
                 | last
-                | .body // empty' \
-            2>/dev/null || echo ""
+                | ((.commit_id // "-") + "\n" + (.body // ""))' \
+            2>/dev/null || printf '%s\n' "-"
     fi
 }
 
@@ -240,11 +248,17 @@ _gh_check_signals() {
 # threads on long-lived PRs like #1108 with 66+ threads). Also return reviewDecision.
 # Chip count EXCLUDES outdated threads (#847: Findings:None + green CI + leftover
 # outdated unresolved bot Major must not force ⚠️).
-# Prints: "<unresolved_count>\t<review_decision_or_empty>"
+# Prints: "<unresolved_count>\t<review_decision_or_dash>\t<head_oid_or_dash>"
 # unresolved_count is -1 on transport/parse failure.
+# head_oid rides along so the caller can tell a tip-matched bot verdict from a
+# stale one without a second round trip (see the staleness gate in classify_one).
+# EMPTY FIELDS ARE EMITTED AS "-", never as nothing. Tab is an IFS *whitespace*
+# character, so bash `read` collapses runs of tabs and strips leading ones: with
+# a null reviewDecision, "0\t\t<oid>" splits into TWO fields and the oid lands
+# in review_decision. Caller normalizes "-" back to empty.
 _fetch_review_signals() {
     local n="$1"
-    local cursor="" page unresolved=0 decision="" has_next=true resp page_n
+    local cursor="" page unresolved=0 decision="" head_oid="" has_next=true resp page_n
     while [[ "$has_next" == "true" ]]; do
         if [[ -n "$cursor" ]]; then
             resp="$(gh_t api graphql -f query="
@@ -252,6 +266,7 @@ query(\$cursor: String) {
   repository(owner:\"${OWNER}\", name:\"${NAME}\") {
     pullRequest(number: ${n}) {
       reviewDecision
+      headRefOid
       reviewThreads(first: 100, after: \$cursor) {
         pageInfo { hasNextPage endCursor }
         nodes { isResolved isOutdated }
@@ -265,6 +280,7 @@ query {
   repository(owner:\"${OWNER}\", name:\"${NAME}\") {
     pullRequest(number: ${n}) {
       reviewDecision
+      headRefOid
       reviewThreads(first: 100) {
         pageInfo { hasNextPage endCursor }
         nodes { isResolved isOutdated }
@@ -274,14 +290,15 @@ query {
 }" 2>/dev/null || true)"
         fi
         if ! printf '%s' "$resp" | jq -e '.data.repository.pullRequest' >/dev/null 2>&1; then
-            printf '%s\t%s\n' "-1" ""
+            printf '%s\t%s\t%s\n' "-1" "-" "-"
             return
         fi
         decision="$(printf '%s' "$resp" | jq -r '.data.repository.pullRequest.reviewDecision // empty')"
+        head_oid="$(printf '%s' "$resp" | jq -r '.data.repository.pullRequest.headRefOid // empty')"
         page_n="$(printf '%s' "$resp" | jq -c '.data.repository.pullRequest.reviewThreads.nodes // []' \
             | pec_count_chip_unresolved_threads)"
         if [[ ! "$page_n" =~ ^[0-9]+$ ]]; then
-            printf '%s\t%s\n' "-1" ""
+            printf '%s\t%s\t%s\n' "-1" "-" "-"
             return
         fi
         unresolved=$(( unresolved + page_n ))
@@ -289,7 +306,7 @@ query {
         cursor="$(printf '%s' "$resp" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor // empty')"
         [[ "$has_next" == "true" && -n "$cursor" ]] || has_next=false
     done
-    printf '%s\t%s\n' "$unresolved" "$decision"
+    printf '%s\t%s\t%s\n' "$unresolved" "${decision:--}" "${head_oid:--}"
 }
 
 # Wrapper kept for export -f / classify_one; logic lives in pr-emoji-core.
@@ -302,6 +319,7 @@ classify_one() {
     local out="$TMPDIR/$n.json"
     local merge_state pr_state pr_json bot_body
     local checks_ok=1 checks_pending=0 checks_seen=0 pr_review_ok=0 threads_n bot_clean=0 bot_major=0 bot_has_body=0 merge_bad=0
+    local head_oid="" bot_review="" bot_commit="" bot_stale=0
     local review_changes=0 review_decision=""
     local exists=0 merged=0 closed=0 data_unavail=0
     local decided emoji action
@@ -415,13 +433,21 @@ classify_one() {
         checks_ok=1
     fi
 
-    IFS=$'\t' read -r threads_n review_decision < <(_fetch_review_signals "$n")
+    IFS=$'\t' read -r threads_n review_decision head_oid < <(_fetch_review_signals "$n")
+    [[ "$review_decision" == "-" ]] && review_decision=""
+    [[ "$head_oid" == "-" ]] && head_oid=""
     if [[ -z "$threads_n" || ! "$threads_n" =~ ^-?[0-9]+$ ]]; then
         threads_n=-1
     fi
     [[ "$review_decision" == "CHANGES_REQUESTED" ]] && review_changes=1
 
-    bot_body="$(fetch_latest_bot_body "$n")"
+    bot_review="$(fetch_latest_bot_review "$n")"
+    bot_commit="${bot_review%%$'\n'*}"
+    if [[ "$bot_review" == *$'\n'* ]]; then
+        bot_body="${bot_review#*$'\n'}"
+    else
+        bot_body=""
+    fi
     if [[ "$bot_body" == "__CLEAN_LABEL__" ]]; then
         bot_clean=1
         has_crc=1
@@ -441,6 +467,20 @@ classify_one() {
         bot_clean=1
     fi
 
+    # Staleness gate: a clean verdict for a DIFFERENT commit says nothing about
+    # this tip. The review's own commit_id is authoritative — a green pr-review
+    # CHECK only means the job completed, not that its verdict was clean, and a
+    # verdict on an older head is not evidence about the current one. Operators
+    # can still attest a tip explicitly with the cold-review-clean label, which
+    # short-circuits above as __CLEAN_LABEL__.
+    if [[ "$bot_clean" -eq 1 && "$bot_has_body" -eq 1 \
+          && -n "$head_oid" && -n "$bot_commit" \
+          && "$bot_commit" != "-" && "$bot_commit" != "__LABEL__" \
+          && "$bot_commit" != "$head_oid" ]]; then
+        bot_clean=0
+        bot_stale=1
+    fi
+
     # Resolved threads + in-flight CI/pr-review: body-grep Majors from the
     # previous review head are sticky noise — do not emit botMajor in the
     # classify JSON (decide also ignores them for emoji). Keep Majors when
@@ -450,7 +490,7 @@ classify_one() {
     fi
 
     decided="$(pec_decide_emoji 1 0 0 "$checks_ok" "$checks_pending" "$checks_seen" \
-        "$threads_n" "$bot_clean" "$bot_major" "$bot_has_body" "$merge_bad" 0 "$review_changes" 0 "$has_crc")"
+        "$threads_n" "$bot_clean" "$bot_major" "$bot_has_body" "$merge_bad" 0 "$review_changes" 0 "$has_crc" "$bot_stale")"
     emoji="${decided%%$'\t'*}"
     action="${decided#*$'\t'}"
     local merge_lane=""
@@ -469,7 +509,7 @@ classify_one() {
 export REPO OWNER NAME TIMEOUT TMPDIR WALL_LIMIT MERGE_POLICY_JSON
 # Path-kind helpers (pmp_path_is_*) removed with product_paths lane reject (5d23292bb);
 # do not export -f names that are no longer functions — that aborts the whole batch.
-export -f classify_one gh_t fetch_latest_bot_body _emit_pr_json _apply_merge_lane \
+export -f classify_one gh_t fetch_latest_bot_review _emit_pr_json _apply_merge_lane \
     _gate_a_related_refs _gate_a_branch_hints \
     pec_decide_emoji pec_gate_draft_blocked pec_labels_csv_has \
     pec_blocked_upstream_action pec_blocked_upstream_dep_from_body \
