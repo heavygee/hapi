@@ -249,6 +249,36 @@ prefer the fuller helper module over a partial stub. Then the completeness gate
 must pass **before** any typecheck celebration, then layers, then promote, then
 `hapi-restart-hub` (patient — live WORKING sessions).
 
+## Known PRE-EXISTING failure — do not chase it as absorb damage
+
+When the gate finally runs, this one fails and it is **not** mine:
+
+`hub/src/sync/steerDeliveryLifecycle.test.ts` → *keeps pending delivery during
+a live reconnect but resolves an expired owner to unknown*.
+
+Investigated 2026-11-20 after `fc47e8d8` hit it on `feat/boards`. It is
+**upstream's bug**: `messageService.ts` (which produces the field) and the test
+file are byte-identical across `feat/boards`, `origin/main` and `upstream/main`,
+and `syncEngine.ts` differs from upstream by one unrelated hunk (+28 lines, a
+`flavor === 'claude' && resumeToken` transcript check) touching nothing in the
+expiry path. It reproduces on fork `main`.
+
+**Flaky, not deterministic** — same SHA, no change, whole file: 1 fail, then 2,
+then 1. opencode fails consistently, claude wobbles. (The reporter's "3/3
+deterministic" was the claude case *in isolation*, and isolation changes the
+ordering this test is sensitive to.)
+
+Mechanism: `getQueuedState` spreads the field conditionally
+(`...(dispatchingLocalIds.length ? { dispatchingLocalIds } : {})`), so it is
+omitted when empty — which is why the strict `toEqual` in `expectUnknown`
+normally passes. The "unexpected `dispatchingLocalIds`" is therefore a
+behaviour report: after `expireInactive()` the pending message stays
+`dispatching` instead of resolving to `indeterminate`. The test is right.
+
+Routed to the umbrella (`c89dc806`) as an upstream PR candidate. Counterpart to
+the lesson that a green gate proves nothing: a red one that predates the work
+is not evidence against it either. Check provenance before resolving.
+
 ## The shared/ PR-ref cluster — union, and one trap
 
 `shared/src/externalRefs.ts` (7), `shared/src/schemas.ts` (4) and
