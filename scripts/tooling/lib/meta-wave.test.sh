@@ -165,6 +165,32 @@ eq "incomplete drop #2007 dirty" "$reason" "layer"
 got="$(mw_wave_member_clean "$MANIFEST_INCOMPLETE_DROP" "" 241)" && ok || bad "complete drop #241 exit"
 eq "complete drop #241 clean" "$got" "clean"
 
+# Parent "stacked on driver/…" prose must NOT keep a DROPPED child dirty while the
+# parent layer is still live (#2376 hourly 🔧 false positive, 2026-11-20).
+MANIFEST_STACKED_PARENT=$(cat <<'EOF'
+base: upstream/main
+layers:
+  # Layer 2/3 — tiann/hapi#1996 blocked filter.
+  - branch: driver/1996-consolidate-blocked-filter-wip
+
+  # Layer 3/3 — tiann/hapi#2002 (Active + Working), stacked on
+  # driver/1996-consolidate-blocked-filter-wip above.
+  #
+  # DROPPED 2026-11-19: MERGED upstream as tiann/hapi#2376 (squash fa9fd8cc0).
+  # - branch: driver/2002-session-filter-active-working-wip
+EOF
+)
+got="$(mw_wave_member_clean "$MANIFEST_STACKED_PARENT" "" 2376)" && ok || bad "DROPPED #2376 with live parent exit"
+eq "DROPPED #2376 clean despite live parent stack note" "$got" "clean"
+if mw_manifest_incomplete_drop_active "$MANIFEST_STACKED_PARENT" 2376; then
+    bad "incomplete_drop must ignore stacked-on parent branch prose"
+else
+    ok
+fi
+# Parent itself still dirty (its own live layer).
+reason="$(mw_wave_member_clean "$MANIFEST_STACKED_PARENT" "" 1996 || true)"
+eq "live parent #1996 still dirty" "$reason" "layer"
+
 # --- issue≠PR / ancestor-ref footgun (w-241-2007 premature WAVE CLEAR) ---
 MANIFEST_ISSUE_NOT_PR=$(cat <<'EOF'
 base: upstream/main

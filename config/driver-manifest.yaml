@@ -1133,11 +1133,13 @@ layers:
   # See docs/operator/2026-11-19-absorb-redo-checkpoint.md.
   - branch: driver/1996-consolidate-blocked-filter-wip
 
-  # Layer 3/3 — tiann/hapi#2002 (Active + Working), stacked on
-  # driver/1996-consolidate-blocked-filter-wip above. Active is already covered by
-  # techotaku's status==='active' radio; this adds Working as one more ephemeral
-  # MenuRow, AND-composed with the others — confirmed mechanical per the original
-  # combined commit's byte-level diff (fb502599d).
+  # Layer 3/3 — tiann/hapi#2002 (Active + Working), stacked on the #1996 layer
+  # above (do not name that parent branch token here — incomplete_drop used to
+  # scrape every driver/… mention and keep Gate A dirty while #1996 soup lived).
+  # Active is already covered by techotaku's status==='active' radio; this adds
+  # Working as one more ephemeral MenuRow, AND-composed with the others —
+  # confirmed mechanical per the original combined commit's byte-level diff
+  # (fb502599d).
   #
   # Thin-tip SHA: 2bf6ef8a8fa8 — re-cut 2026-11-09 onto the re-cut #1996 tip above,
   # same reason. 6 files against its own merge-base with the tip — clears the gate on
@@ -1148,7 +1150,8 @@ layers:
   # DROPPED 2026-11-19: MERGED upstream as tiann/hapi#2376 (squash fa9fd8cc0 —
   # feat(web) Active + Working lenses, rebased onto #1772 post-squash main via
   # `git rebase --onto`, plus the #2514 hub hook-timeout CI unblocker cherry-picked
-  # in before merge). Session fda1dbdf; exit reflection docs/plans/retros/2026-11-19-2002-active-working-lenses-exit.md.
+  # in before merge). Session fda1dbdf / ea9e52cc; exit reflection
+  # docs/plans/retros/2026-11-19-2002-active-working-lenses-exit.md.
   # - branch: driver/2002-session-filter-active-working-wip
 
   # FOOTGUN FOUND while swapping #1772 (2026-11-09, session 3c5af7c8): the `- pr: N`

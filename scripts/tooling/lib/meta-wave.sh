@@ -26,16 +26,24 @@
 # NO network. Callers inject manifest text + worktree existence checks.
 # Optional: HAPI_META_WORKTREES_ROOT — override …/worktrees dir for declared names.
 
-# Branch refs named inside a DROPPED/Was comment block (newline-separated).
-_mw_block_named_branches() {
+# Subject branch refs inside a DROPPED/Was comment block (newline-separated).
+# Only `Was:` and `- branch:` lines — NOT every feat|driver|soup/ token in prose.
+# Parent stack notes ("stacked on driver/1996-… above") must not keep a DROPPED
+# child's Gate A dirty while the parent layer is still live (#2376 hourly 🔧
+# loop, 2026-11-20).
+_mw_block_drop_subject_branches() {
     local block="$1"
     {
-        printf '%s' "$block" | grep -Eio '(feat|fix|chore|driver|soup)/[A-Za-z0-9._-]+' || true
         printf '%s' "$block" | grep -Eio 'Was:[[:space:]]*[^[:space:]@]+' \
             | sed -E 's/^[Ww]as:[[:space:]]*//' || true
         printf '%s' "$block" | grep -Eio '\-[[:space:]]*branch:[[:space:]]*[^[:space:]]+' \
             | sed -E 's/.*branch:[[:space:]]*//' || true
     } | sed '/^$/d' | sort -u
+}
+
+# Compat alias — callers historically scraped every driver/… token; that over-matched.
+_mw_block_named_branches() {
+    _mw_block_drop_subject_branches "$@"
 }
 
 # Exit 0 if a DROPPED comment for this PR still has a matching live `- branch:` line
@@ -53,7 +61,7 @@ mw_manifest_incomplete_drop_active() {
                     if mw_manifest_branch_layer_active "$text" "$branch"; then
                         return 0
                     fi
-                done < <(_mw_block_named_branches "$block")
+                done < <(_mw_block_drop_subject_branches "$block")
             fi
             block=""
             continue
@@ -71,7 +79,7 @@ mw_manifest_incomplete_drop_active() {
                     if mw_manifest_branch_layer_active "$text" "$branch"; then
                         return 0
                     fi
-                done < <(_mw_block_named_branches "$block")
+                done < <(_mw_block_drop_subject_branches "$block")
             fi
             block=""
             continue
@@ -83,7 +91,7 @@ mw_manifest_incomplete_drop_active() {
                     if mw_manifest_branch_layer_active "$text" "$branch"; then
                         return 0
                     fi
-                done < <(_mw_block_named_branches "$block")
+                done < <(_mw_block_drop_subject_branches "$block")
             fi
             block=""
         fi
@@ -94,7 +102,7 @@ mw_manifest_incomplete_drop_active() {
             if mw_manifest_branch_layer_active "$text" "$branch"; then
                 return 0
             fi
-        done < <(_mw_block_named_branches "$block")
+        done < <(_mw_block_drop_subject_branches "$block")
     fi
     return 1
 }
