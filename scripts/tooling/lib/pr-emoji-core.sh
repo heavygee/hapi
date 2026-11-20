@@ -281,6 +281,28 @@ pec_status_from_emoji() {
 # "No Blocker, Major, Minor, or Nit findings…" (#1400 false ⚠️), and
 # "No reportable issues found…" (align with hapi-pr-status CLEAN_REGEX; #1821 false ⚠️).
 # "No reportable code issues found" / "No additional actionable…" (#1163 Codex v2).
+# An attestation names the head it was given to. `cold-review-clean` means "a
+# human read THIS diff", so a push after the label lands invalidates it exactly
+# as a new commit invalidates a bot verdict. Nothing on GitHub strips the label
+# on push, so the chip has to notice.
+#
+# Observed on tiann/hapi#945: labelled 2026-11-20T04:12:22Z, then force-pushed
+# at 05:07:38Z and pushed again at 05:18:42Z. The chip read ✅ "full green -
+# self-merge eligible (dogfooded; window elapsed)" on a tip that neither the
+# bot nor a human had ever looked at — the same stale-attestation defect the
+# bot-verdict gate fixes, one level up, and let through by that gate's own
+# __LABEL__ exemption.
+#
+# Returns 0 (stale) when the head is newer than the attestation. Both args are
+# ISO-8601 UTC. Unknown/empty either side → NOT stale: absence of evidence that
+# it moved is not evidence that it did, and this must not invent a downgrade.
+pec_attestation_is_stale() {
+    local label_iso="${1:-}" head_iso="${2:-}"
+    [[ -n "$label_iso" && -n "$head_iso" ]] || return 1
+    # ISO-8601 UTC with a fixed shape sorts lexically, so no date(1) needed.
+    [[ "$head_iso" > "$label_iso" ]]
+}
+
 pec_bot_body_findings_clean() {
     local body="$1" findings stripped
     # An EXPLICIT verdict outranks findings-section shape. The 2026-11 review

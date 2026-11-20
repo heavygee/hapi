@@ -85,7 +85,25 @@ fetch_latest_bot_review() {
     local n="$1" label
     label="$(gh_t pr view "$n" --repo "$REPO" --json labels \
         --jq '[.labels[].name]|contains(["cold-review-clean"])' 2>/dev/null || echo false)"
-    [[ "$label" == "true" ]] && { printf '%s\n%s\n' "__LABEL__" "__CLEAN_LABEL__"; return 0; }
+    if [[ "$label" == "true" ]]; then
+        # An attestation names the head it was given to — see
+        # pec_attestation_is_stale. If the branch was pushed after the label
+        # landed, the label attests a tip that no longer exists, so fall through
+        # to the real bot verdict (and its own staleness gate) instead of
+        # short-circuiting to clean.
+        local crc_at head_at
+        crc_at="$(gh_t api "repos/${REPO}/issues/${n}/timeline" --paginate --slurp 2>/dev/null \
+            | jq -r 'add | [.[] | select(.event == "labeled" and .label.name == "cold-review-clean")]
+                     | last | .created_at // empty' 2>/dev/null || echo "")"
+        head_at="$(gh_t api "repos/${REPO}/pulls/${n}/commits" --paginate --slurp 2>/dev/null \
+            | jq -r 'add | last | .commit.committer.date // empty' 2>/dev/null || echo "")"
+        if pec_attestation_is_stale "$crc_at" "$head_at"; then
+            echo "hapi-pr-emoji-batch: #${n} cold-review-clean is STALE (labelled ${crc_at}, head ${head_at}) — not scoring it clean" >&2
+        else
+            printf '%s\n%s\n' "__LABEL__" "__CLEAN_LABEL__"
+            return 0
+        fi
+    fi
     # IMPORTANT: never use `gh api --paginate --jq '…|last|…'`.
     # With --jq, gh filters EACH page and concatenates string outputs. On long
     # PRs (#1108 had 2+ review pages) that glues an older page's tip body onto
@@ -509,7 +527,7 @@ classify_one() {
 export REPO OWNER NAME TIMEOUT TMPDIR WALL_LIMIT MERGE_POLICY_JSON
 # Path-kind helpers (pmp_path_is_*) removed with product_paths lane reject (5d23292bb);
 # do not export -f names that are no longer functions — that aborts the whole batch.
-export -f classify_one gh_t fetch_latest_bot_review _emit_pr_json _apply_merge_lane \
+export -f classify_one gh_t fetch_latest_bot_review pec_attestation_is_stale _emit_pr_json _apply_merge_lane \
     _gate_a_related_refs _gate_a_branch_hints \
     pec_decide_emoji pec_gate_draft_blocked pec_labels_csv_has \
     pec_blocked_upstream_action pec_blocked_upstream_dep_from_body \

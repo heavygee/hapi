@@ -514,6 +514,25 @@ else
     eq "findings clean: All stages passed header" "no" "yes"
 fi
 
+# pec_attestation_is_stale: cold-review-clean attests the head it was given to.
+# tiann/hapi#945 was labelled 04:12:22Z then pushed at 05:07:38Z and 05:18:42Z,
+# and chipped ✅ "self-merge eligible" on a tip nobody had reviewed.
+st() { pec_attestation_is_stale "$1" "$2" && echo stale || echo fresh; }
+eq "attestation stale: head newer than label" \
+    "$(st 2026-11-20T04:12:22Z 2026-11-20T05:18:42Z)" "stale"
+eq "attestation fresh: head older than label" \
+    "$(st 2026-11-20T05:18:42Z 2026-11-20T04:12:22Z)" "fresh"
+eq "attestation fresh: identical timestamps" \
+    "$(st 2026-11-20T04:12:22Z 2026-11-20T04:12:22Z)" "fresh"
+# Unknown either side must NOT invent a downgrade — absence of evidence that the
+# head moved is not evidence that it did.
+eq "attestation fresh: empty head" "$(st 2026-11-20T04:12:22Z '')" "fresh"
+eq "attestation fresh: empty label" "$(st '' 2026-11-20T05:18:42Z)" "fresh"
+eq "attestation fresh: both empty" "$(st '' '')" "fresh"
+# Crossing a day/month boundary must still compare correctly (lexical ISO).
+eq "attestation stale: across month boundary" \
+    "$(st 2026-11-30T23:59:59Z 2026-12-01T00:00:01Z)" "stale"
+
 # bot_stale (arg 16): a clean verdict belonging to an older head must not read
 # as "address latest bot review" — there is nothing to address, it needs a
 # review of THIS tip. tiann/hapi#945 wore ✅ "self-merge eligible" off a verdict
