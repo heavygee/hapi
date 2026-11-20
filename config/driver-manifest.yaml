@@ -1084,6 +1084,13 @@ layers:
   #     e2e/session-list-filter.spec.ts, filterSessionsByStatus in
   #     web/src/lib/sessionListOrder.ts
   # Feature now arrives from base. Do not re-enable this layer.
+  #
+  # BRANCHES RETAINED DELIBERATELY — do not "tidy" these in a worktree sweep.
+  # The worktrees were removed 2026-11-20 (tooling/meta), but the branches
+  # driver/1772-techotaku-base-wip, driver/1772-techotaku-reshape-wip and
+  # soup/1772-combined-list-filters are kept because the drop decisions above
+  # and below cite them by name as provenance. Deleting them makes those notes
+  # unverifiable, which is the whole point of writing them. They cost nothing.
 # - branch: driver/1772-techotaku-base-wip
 
   # Layer 2/3 — tiann/hapi#1996 (blocked-only filter), stacked on
@@ -1099,21 +1106,31 @@ layers:
   # with the tip — clears the fat-tip gate on its own merits, no override needed.
   # Verified standalone: typecheck clean, web vitest green.
   #
-  # STALE 2026-11-20 (tooling/meta cbd1073e) — OWNER RE-THIN OWED, not dropped.
-  # #1772 has since merged upstream (squash 3ae9c77c4), so the stack base this was
-  # cut onto is retired (layer 1/3 above). Measured against the base it is still
-  # stacked on: its own delta is 7 files, and upstream has moved 6 of those 7 since
-  # — SessionList.tsx by 20 commits, en.ts/zh-CN.ts by 29 each, ru.ts by 21,
+  # STALE 2026-11-20 (tooling/meta cbd1073e) — re-thin owed, but NOT unowned and
+  # NOT yet. #1772 has since merged upstream (squash 3ae9c77c4), so the stack base
+  # this was cut onto is retired (layer 1/3 above). Measured against the base it is
+  # still stacked on: its own delta is 7 files, and upstream has moved 6 of those 7
+  # since — SessionList.tsx by 20 commits, en.ts/zh-CN.ts by 29 each, ru.ts by 21,
   # SessionListViewMenu.tsx by 3, SessionList.machine-filter.test.tsx by 5. Only
   # SessionList.blocked.test.tsx is untouched, and that file is fork-only.
   #
-  # It is left ACTIVE deliberately: #1996 remains unfiled upstream, so the feature
-  # is still wanted, and a drop needs PR identity under §3c which does not exist
-  # here. But expect it to conflict on exactly the hot files the 2026-11-19 absorb
-  # is hand-resolving, and note the soup tip already carries blocked-lens UX from
-  # driver/blocked-list-ux (an ancestor of the WIP), so this layer may now be
-  # partly redundant rather than merely stale. Re-thin onto the post-absorb tip
-  # before trusting it. See docs/operator/2026-11-19-absorb-redo-checkpoint.md.
+  # CORRECTION 2026-11-20: an earlier revision of this note said #1996 was unfiled
+  # upstream and that a §3c drop therefore had no PR identity. Both were wrong.
+  # #1996 IS filed — upstream tiann/hapi#2530, OPEN, head branch
+  # `1996-fold-blocked-filter`, body citing #1996 (verified via gh, not inferred).
+  # The stale premise came from the 2026-11-09 unfiled-work sweep, true when
+  # written and since overtaken by two filings.
+  #
+  # Still ACTIVE, for the correct reason: the feature is wanted until #2530 lands,
+  # so dropping now would pull working UX out of the soup. The re-thin belongs to
+  # #2530's peer, whose live workspace is worktrees/1996-fold-blocked-filter — do
+  # not treat it as an unowned chore, and do not re-thin AHEAD of #2530. #2530's
+  # body states that sessionIsBlocked / BlockedJumpPill / blockedCount /
+  # showBlockedOnly all come from #2520 as-is, which is the same overlap with
+  # driver/blocked-list-ux (an ancestor of the WIP) that this layer would hit — so
+  # that reconciliation already exists inside the PR. Re-thinning independently
+  # would duplicate it and then conflict with it. Sequence behind #2530 landing.
+  # See docs/operator/2026-11-19-absorb-redo-checkpoint.md.
   - branch: driver/1996-consolidate-blocked-filter-wip
 
   # Layer 3/3 — tiann/hapi#2002 (Active + Working), stacked on
