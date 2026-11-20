@@ -288,5 +288,5 @@ Stale comment note: `hub/src/store/index.ts` still says SCHEMA_VERSION=23; actua
 
 ### Tooling false-green (2026-11-20T00:21Z) — Meta `27aaff11d`
 
-`prt_fetch_threads` / `prt_checks_settled` / `prt_external_review_count` used unpinned `gh` → default `lhs.ghe.com` → NOT_FOUND → **0 unresolved** (fail-soft). Same class as absorb: check that cannot run returns "all good". Orch GraphQL for umbrella used `GH_HOST=github.com` and was mostly OK; re-measure after fix found **#2520 = 4 unresolved** on tip `b3307de4c` (CI 9/9 green) — round 11 kicked.
+`prt_fetch_threads` / `prt_checks_settled` / `prt_external_review_count` used unpinned `gh` → default `lhs.ghe.com` → NOT_FOUND → **0 unresolved** (fail-soft). Lesson: unpinned fails loud; defect was 0-on-failure making silence look clean (same *class* as absorb, different mechanism). **Correction:** #2147's 0→5 was two real moments (pre-push clean vs post-push re-review), not an agent trusting a false green. Orch GraphQL used `GH_HOST=github.com`; re-measure found **#2520 = 4 unresolved** on tip `b3307de4c` (CI 9/9) — round 11 kicked.
 
