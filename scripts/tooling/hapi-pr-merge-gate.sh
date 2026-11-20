@@ -101,6 +101,25 @@ fi
 # accepted context must be success, and NEITHER surface having anything is a
 # refusal exactly as before.
 TRUSTED_STATUS_CONTEXTS="${HAPI_GATE_TRUSTED_STATUS_CONTEXTS:-oos-linux/test}"
+
+# OPTIONAL (non-required) check-runs that must not block a merge.
+#
+# Why this exists as a sanctioned mechanism: on #1424 the gate blocked on the
+# optional `mention-response` workflow (hardcoded `ref: dev`), and the operator
+# merged via `/usr/bin/gh` after the dogfood window had elapsed. The retro
+# recorded that as a "known false alarm class" and checked off the fix as a
+# promote item. Reaching for a raw gh to defeat a fail-closed gate is a bad
+# habit to need; an explicit, named, auditable exemption is not.
+#
+# It is NOT derivable from the API at our permission level: branch protection on
+# tiann/hapi returns 404 (no admin) and statusCheckRollup carries no isRequired
+# field, so the gate cannot tell required from optional by itself.
+#
+# DEFAULTS TO EMPTY — nothing is exempt until a human names it, so behaviour is
+# unchanged until someone takes that decision deliberately. Prefer fixing the
+# upstream workflow over adding a name here; the retro's own first choice was
+# `ref: dev` → `main`.
+OPTIONAL_CHECKS="${HAPI_GATE_OPTIONAL_CHECKS:-}"
 CR="$("$REAL_GH" api "repos/$REPO/commits/$HEAD/check-runs" --jq '.check_runs[] | "\(.name)\t\(.status)\t\(.conclusion)"' 2>/dev/null || true)"
 if [ -n "$CR" ]; then
     # A `cancelled` run is ignorable ONLY when another run of the SAME name on
@@ -111,7 +130,8 @@ if [ -n "$CR" ]; then
     # ready PR, and a gate that false-blocks is how people learn to route
     # around it (cf. the #1424 override). Narrow by construction: it cannot
     # turn a real failure green, and an unsuperseded cancellation still blocks.
-    BAD=$(awk -F'\t' '
+    BAD=$(awk -F'\t' -v optional_list="$OPTIONAL_CHECKS" '
+        BEGIN { n = split(optional_list, o, /[[:space:]]+/); for (i = 1; i <= n; i++) if (o[i] != "") optional[o[i]] = 1 }
         {
             line[NR] = $0; nm[NR] = $1; st[NR] = $2; cc[NR] = $3
             if ($2 == "completed" && $3 == "success") ok[$1] = 1
@@ -120,6 +140,7 @@ if [ -n "$CR" ]; then
             for (i = 1; i <= NR; i++) {
                 if (st[i] != "completed" || (cc[i] != "success" && cc[i] != "neutral" && cc[i] != "skipped")) {
                     if (cc[i] == "cancelled" && (nm[i] in ok)) continue
+                    if (nm[i] in optional) { print "OPTIONAL\t" line[i] > "/dev/stderr"; continue }
                     print line[i]
                 }
             }
