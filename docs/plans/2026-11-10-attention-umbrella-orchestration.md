@@ -290,3 +290,7 @@ Stale comment note: `hub/src/store/index.ts` still says SCHEMA_VERSION=23; actua
 
 `prt_fetch_threads` / `prt_checks_settled` / `prt_external_review_count` used unpinned `gh` → default `lhs.ghe.com` → NOT_FOUND → **0 unresolved** (fail-soft). Lesson: unpinned fails loud; defect was 0-on-failure making silence look clean (same *class* as absorb, different mechanism). **Correction:** #2147's 0→5 was two real moments (pre-push clean vs post-push re-review), not an agent trusting a false green. Orch GraphQL used `GH_HOST=github.com`; re-measure found **#2520 = 4 unresolved** on tip `b3307de4c` (CI 9/9) — round 11 kicked.
 
+### Routed upstream (2026-11-20T01:47Z)
+
+- [#2531](https://github.com/tiann/hapi/issues/2531) — `expireInactive` leaves dispatching delivery pending (flaky `steerDeliveryLifecycle`). Meta diagnosis via #2147 re-verify; byte-identical to upstream; not fork. Filed; no peer spawned mid-absorb.
+
