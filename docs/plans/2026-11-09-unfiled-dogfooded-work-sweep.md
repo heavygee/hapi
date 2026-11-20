@@ -2,6 +2,32 @@
 
 **Date:** 2026-11-09 — operator-requested, after three separate instances turned up in one day.
 
+> ## STATUS UPDATE 2026-11-20 — the table below is a SNAPSHOT, not current state
+>
+> Three of the five "genuinely unfiled" rows have since been filed. **Do not cite this document
+> as evidence that something is unfiled** without re-checking; it is dated, and it has already
+> been cited wrongly once.
+>
+> | Row | Status on 2026-11-20 |
+> |---|---|
+> | `driver/blocked-list-ux` → #1717 | In flight (flagship PR) — was already moving when written |
+> | `driver/2002-session-filter-active-working` → #2002 | **Filed and MERGED** as [#2376](https://github.com/tiann/hapi/pull/2376) (squash `fa9fd8cc0`, 2026-11-19). Layer retired; exit reflection at `docs/plans/retros/2026-11-19-2002-active-working-lenses-exit.md` |
+> | `driver/1996-consolidate-blocked-filter` → #1996 | **Filed** as [#2530](https://github.com/tiann/hapi/pull/2530) (open, head `1996-fold-blocked-filter`, actively worked) |
+> | `feat/fue-app-shell-onboarding` → #1272 | Still unfiled |
+> | `driver/2038-machine-tag-reregister` → #2038 | Still unfiled |
+>
+> **How it was cited wrongly:** the `driver/1996-consolidate-blocked-filter-wip` manifest entry was
+> marked STALE on 2026-11-20 and deliberately left ACTIVE on the stated grounds that *"#1996 remains
+> unfiled upstream, so the feature is still wanted, and a drop needs PR identity under §3c which
+> does not exist here."* #1996 **does** have PR identity — #2530 — so that premise was wrong, and
+> the "owner re-thin owed" is not an unowned chore: #2530's own peer is working the same change.
+> Re-thinning the soup layer independently would duplicate it.
+>
+> This is the same defect class the sweep itself was about, inverted: a dated finding read as a
+> current one. It is also the strongest argument yet for recommendation 5 below — a mechanical
+> age-and-PR check would have made both the original gap *and* this staleness visible without
+> anyone re-reading this file.
+
 ## Method
 
 1. Parsed all **91 active layers** in `config/driver-manifest.yaml` with their comment blocks.
