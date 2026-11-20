@@ -103,7 +103,27 @@ fi
 TRUSTED_STATUS_CONTEXTS="${HAPI_GATE_TRUSTED_STATUS_CONTEXTS:-oos-linux/test}"
 CR="$("$REAL_GH" api "repos/$REPO/commits/$HEAD/check-runs" --jq '.check_runs[] | "\(.name)\t\(.status)\t\(.conclusion)"' 2>/dev/null || true)"
 if [ -n "$CR" ]; then
-    BAD=$(awk -F'\t' '$2!="completed" || ($3!="success" && $3!="neutral" && $3!="skipped")' <<<"$CR" | head -5)
+    # A `cancelled` run is ignorable ONLY when another run of the SAME name on
+    # the SAME head concluded success — i.e. it was superseded by a re-run.
+    # Observed on #2544: pr-review cancelled at 08:22:20 after 16s, a second
+    # pr-review started 08:22:22 and succeeded at 08:24:42, every other check
+    # green. Blocking on the corpse of a superseded run blocks a genuinely
+    # ready PR, and a gate that false-blocks is how people learn to route
+    # around it (cf. the #1424 override). Narrow by construction: it cannot
+    # turn a real failure green, and an unsuperseded cancellation still blocks.
+    BAD=$(awk -F'\t' '
+        {
+            line[NR] = $0; nm[NR] = $1; st[NR] = $2; cc[NR] = $3
+            if ($2 == "completed" && $3 == "success") ok[$1] = 1
+        }
+        END {
+            for (i = 1; i <= NR; i++) {
+                if (st[i] != "completed" || (cc[i] != "success" && cc[i] != "neutral" && cc[i] != "skipped")) {
+                    if (cc[i] == "cancelled" && (nm[i] in ok)) continue
+                    print line[i]
+                }
+            }
+        }' <<<"$CR" | head -5)
     [ -z "$BAD" ] && pass "all checks green on head ${HEAD:0:9}" \
         || fail "checks not green on head ${HEAD:0:9}: $(tr '\n' ' ' <<<"$BAD")"
 else
