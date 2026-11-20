@@ -358,6 +358,12 @@ if mw_merged_nothing_owed "$MANIFEST_NO_2526" "/home/heavygee/coding/hapi" 2376;
 else
     ok
 fi
+ov="$(mw_overlay_merged_watch_only "$MANIFEST_NO_2526" "" 2526 "🔧" "MERGED — notify peer: drop soup")"
+eq "overlay watch-only emoji" "${ov%%$'\t'*}" "🧹"
+eq "overlay watch-only action" "${ov#*$'\t'}" "MERGED — nothing owed (watch-only / third-party; no soup layer ever)"
+ov="$(mw_overlay_merged_watch_only "$MANIFEST_NO_2526" "" 2376 "🔧" "MERGED — notify peer: drop soup")"
+eq "overlay owned keeps wrench" "${ov%%$'\t'*}" "🔧"
+eq "overlay owned keeps action" "${ov#*$'\t'}" "MERGED — notify peer: drop soup"
 
 rm -rf "$GIT_TMP"
 

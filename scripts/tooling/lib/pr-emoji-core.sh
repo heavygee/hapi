@@ -413,6 +413,10 @@ pec_decide_emoji() {
         return
     fi
     if [[ "$merged" == "1" ]]; then
+        # Owned-cleanup default. Consumers with driver-manifest context MUST run
+        # mw_overlay_merged_watch_only (hapi-pr-emoji-batch + hapi-meta-daily) so
+        # uncited third-party watches become 🧹 nothing-owed — otherwise batch
+        # --table and the hourly dance disagree (#2526, 2026-11-20).
         # Keep in sync with docs/tooling/feature-work-lifecycle.md § After upstream merge.
         printf '%s\t%s' "🔧" "MERGED — notify peer: (1) drop soup layer(s) (2) remove worktree+branch (3) exit reflection docs/plans/retros/TEMPLATE-exit-reflection.md or skip: (4) ack; do NOT self-archive mid-turn (orphans tool UI); meta rematerializes soup once wave cleanup done, then archives when idle"
         return

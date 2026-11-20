@@ -253,7 +253,7 @@ Operator umbrella merge auth active (2026-11-19): merge attention children when 
 
 ### #2526 watch-only sticky-🔧 (2026-11-20T08:40Z)
 
-Third-party merge (Overbaker) Meta tracked for the settings.lock ENOENT flake. No soup/peer — chip was sticky 🔧 with drop-soup brief forever. Same defect class as #2376 prose scrape: assumed ownership. Fix: `mw_merged_nothing_owed` (uncited in manifest + Gate A clean) → 🧹 "nothing owed (watch-only / third-party)"; orphan queue same. Owned DROPPED cites still archive-pending.
+Third-party merge (Overbaker) Meta tracked for the settings.lock ENOENT flake. No soup/peer — chip was sticky 🔧 with drop-soup brief forever. Same defect class as #2376 prose scrape: assumed ownership. Fix: `mw_merged_nothing_owed` → 🧹 nothing-owed; orphan + daily overlay. Batch `--table` now applies `mw_overlay_merged_watch_only` post-classify so it agrees with the dance (not just pec_decide_emoji).
 
 ### #2376 Meta 🔧 ping loop (2026-11-20T08:15Z)
 

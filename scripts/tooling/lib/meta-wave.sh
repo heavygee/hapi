@@ -503,6 +503,20 @@ mw_merged_nothing_owed() {
     return 0
 }
 
+# mw_overlay_merged_watch_only <manifest> <path> <pr> <emoji> <action> [related] [hints]
+# Align batch/table consumers with meta-daily: pec_decide_emoji's MERGED brief is
+# the owned-cleanup default; when nothing is owed, rewrite to 🧹 (sticky false via
+# emoji). Prints "<emoji>\t<action>".
+mw_overlay_merged_watch_only() {
+    local manifest="$1" path="$2" pr="$3" emoji="$4" action="$5"
+    local related="${6:-}" hints="${7:-}"
+    if [[ "$emoji" == "🔧" ]] && mw_merged_nothing_owed "$manifest" "$path" "$pr" "$related" "$hints"; then
+        printf '%s\t%s' "🧹" "MERGED — nothing owed (watch-only / third-party; no soup layer ever)"
+        return 0
+    fi
+    printf '%s\t%s' "$emoji" "$action"
+}
+
 # mw_broom_latch <prev_emoji> <complete_reason>
 # When Gate A is already clean, decide whether the chip should be 🧹 even though
 # mw_member_complete failed (typically not_archived after ping-peer resume).

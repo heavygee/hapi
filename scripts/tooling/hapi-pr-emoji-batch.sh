@@ -35,10 +35,21 @@ source "$CORE_LIB"
 source "$SCRIPT_DIR/lib/pr-merge-policy.sh"
 # shellcheck source=lib/dogfood-countdown.sh
 source "$SCRIPT_DIR/lib/dogfood-countdown.sh"
+# shellcheck source=lib/hapi-manifest-path.sh
+source "$SCRIPT_DIR/lib/hapi-manifest-path.sh"
+# shellcheck source=lib/meta-wave.sh
+source "$SCRIPT_DIR/lib/meta-wave.sh"
 MERGE_POLICY_JSON="$(pmp_load_policy)"
 # shellcheck source=lib/require-gh-version.sh
 source "$SCRIPT_DIR/lib/require-gh-version.sh"
 require_gh_version
+
+# Wave overlay for MERGED rows (watch-only → 🧹). Same predicate as hapi-meta-daily;
+# without it --table disagrees with the hourly dance (#2526, 2026-11-20).
+HAPI_PRIMARY="${HAPI_PRIMARY:-$HOME/coding/hapi}"
+MANIFEST_PATH="${HAPI_META_MANIFEST:-$(hapi_manifest_path "$HAPI_PRIMARY")}"
+MANIFEST_TEXT=""
+[[ -f "$MANIFEST_PATH" ]] && MANIFEST_TEXT="$(cat "$MANIFEST_PATH")"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -413,6 +424,8 @@ classify_one() {
         local related_refs branch_hints
         related_refs="$(_gate_a_related_refs "$n" "$pr_title")"
         branch_hints="$(_gate_a_branch_hints "$head_ref" "$pr_body")"
+        # Watch-only overlay applied post-parallel (see _apply_merged_watch_overlays)
+        # so classify_one does not need to export the whole meta-wave graph.
         _emit_pr_json "$out" "${decided%%$'\t'*}" "${decided#*$'\t'}" 1 1 0 0 0 0 1 0 1 1 0 "MERGED" "" "$head_ref" 0 \
             "$related_refs" "$branch_hints"
         return
@@ -481,8 +494,24 @@ classify_one() {
     elif [[ -n "$bot_body" ]] && _bot_body_findings_clean "$bot_body"; then
         bot_clean=1
     elif [[ "$pr_review_ok" -eq 1 && "$bot_has_body" -eq 0 ]]; then
-        # Check passed and no review body yet — treat as clean-enough for CI path.
-        bot_clean=1
+        # A green pr-review CHECK with no retrievable body is INDETERMINATE, not
+        # clean (heavygee/hapi#338, the originally filed shape). The check only
+        # says the review job completed; it carries no verdict. And this branch
+        # fires for two different reasons that are indistinguishable here — the
+        # bot genuinely hasn't reviewed yet, OR fetch_latest_bot_review returned
+        # empty on a timeout/503. Scoring the second as clean is absence-of-data
+        # read as a passing answer, which is the defect this whole file keeps
+        # getting caught by.
+        #
+        # hapi-pr-merge-gate.sh already fails closed here ("no bot review found
+        # — absence is not a clean verdict"), so scoring it clean also left the
+        # chip and the gate disagreeing about the same PR. They now agree.
+        #
+        # Blast radius checked before changing: every PR in the watched set has
+        # at least one bot review (2147:86, 2520:30, 2530:12, 945:17, 2544:5,
+        # 2526:1, 2529:2), so no live chip moves on this. The explicit operator
+        # attestation path (cold-review-clean, tip-fresh) is unaffected.
+        :
     fi
 
     # Staleness gate: a clean verdict for a DIFFERENT commit says nothing about
@@ -538,6 +567,31 @@ export -f classify_one gh_t fetch_latest_bot_review pec_attestation_is_stale _em
     _gh_check_signals _fetch_review_signals _bot_body_findings_clean \
     pec_count_chip_unresolved_threads
 
+# After parallel classify: rewrite watch-only MERGED rows to 🧹 so --table matches
+# hapi-meta-daily (pec_decide_emoji alone always emits the owned-cleanup brief).
+_apply_merged_watch_overlays() {
+    [[ -n "$MANIFEST_TEXT" ]] || return 0
+    local n f decided emoji action related hints sticky
+    for n in "${PRS[@]}"; do
+        f="$TMPDIR/$n.json"
+        [[ -f "$f" ]] || continue
+        jq -e '.merged == true and .emoji == "🔧"' "$f" >/dev/null 2>&1 || continue
+        emoji="$(jq -r '.emoji' "$f")"
+        action="$(jq -r '.action' "$f")"
+        related="$(jq -r '.relatedRefs // empty' "$f")"
+        hints="$(jq -r '.branchHints // empty' "$f")"
+        decided="$(mw_overlay_merged_watch_only \
+            "$MANIFEST_TEXT" "" "$n" "$emoji" "$action" "$related" "$hints")"
+        emoji="${decided%%$'\t'*}"
+        action="${decided#*$'\t'}"
+        [[ "$emoji" == "🧹" ]] || continue
+        sticky="$(pec_default_sticky_ping "$emoji" "false")"
+        jq -c --arg e "$emoji" --arg a "$action" --argjson s "$sticky" \
+            '.emoji=$e | .action=$a | .stickyPing=$s' "$f" >"$f.tmp" \
+            && mv "$f.tmp" "$f"
+    done
+}
+
 echo "hapi-pr-emoji-batch: ${#PRS[@]} PR(s), parallel=${PARALLEL}, timeout=${TIMEOUT}s, wall=$(( WALL_LIMIT - $(date +%s) ))s" >&2
 t0=$(date +%s)
 
@@ -566,6 +620,8 @@ while (( running > 0 )); do
 done
 
 echo "hapi-pr-emoji-batch: fetched in $(( $(date +%s) - t0 ))s" >&2
+
+_apply_merged_watch_overlays
 
 json="{"
 first=1
