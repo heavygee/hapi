@@ -448,6 +448,72 @@ else
     eq "findings dirty: Major" "no" "no"
 fi
 
+# Explicit "Needs changes" verdict with NO findings list and NO [Major] tags.
+# Real shape: tiann/hapi#2147 round 9 (review 5986856502, tip 832dbd852625).
+# The bot stopped at the approach, so it emitted no finding bullets and no
+# **Findings** section — the old findings-section reader saw a missing section
+# as an empty one and returned clean, chipping ✅ "full green" on a PR that
+# simultaneously wore GitHub's `codex-review:changes` label. The most severe
+# outcome (review aborted) produced the cleanest chip.
+_dirty_body_needs_changes_no_findings='**⚠️ Needs changes**
+
+Review mode: follow-up after new commits
+
+**Requirement — Pass**
+
+Boards gives operators a durable work queue.
+
+**Approach — Needs changes**
+
+Issue creation needs a stronger write contract.
+
+**Code — Not reviewed**
+
+Code review stopped at the issue-creation approach.
+
+**Testing**
+
+Not run (automation; PR code execution is prohibited).
+'
+if pec_bot_body_findings_clean "$_dirty_body_needs_changes_no_findings"; then
+    eq "findings dirty: Needs changes verdict, no findings list" "yes" "no"
+else
+    eq "findings dirty: Needs changes verdict, no findings list" "no" "no"
+fi
+
+# Section-level verdict only (no header), em dash as the bot emits it.
+_dirty_body_section_needs_changes='Review mode: initial
+
+**Approach — Needs changes**
+
+Policy resolution is unsound.
+'
+if pec_bot_body_findings_clean "$_dirty_body_section_needs_changes"; then
+    eq "findings dirty: section-level Needs changes" "yes" "no"
+else
+    eq "findings dirty: section-level Needs changes" "no" "no"
+fi
+
+# Regression guard: the verdict check must not catch a passing header. 27 real
+# "All stages passed" bodies on #2147 stayed clean after the fix.
+_clean_body_all_stages_passed='**✅ All stages passed** (1 Minor)
+
+Review mode: follow-up after new commits
+
+**Requirement — Pass**
+
+Fine.
+
+**Code — Reviewed**
+
+No reportable code issues found.
+'
+if pec_bot_body_findings_clean "$_clean_body_all_stages_passed"; then
+    eq "findings clean: All stages passed header" "yes" "yes"
+else
+    eq "findings clean: All stages passed header" "no" "yes"
+fi
+
 eq "status_from_emoji clean" "$(pec_status_from_emoji '✅')" "clean"
 eq "status_from_emoji needs_work" "$(pec_status_from_emoji '⚠️')" "needs_work"
 eq "status_from_emoji unknown" "$(pec_status_from_emoji '?')" "unknown"

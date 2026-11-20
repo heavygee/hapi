@@ -283,6 +283,18 @@ pec_status_from_emoji() {
 # "No reportable code issues found" / "No additional actionable…" (#1163 Codex v2).
 pec_bot_body_findings_clean() {
     local body="$1" findings stripped
+    # An EXPLICIT verdict outranks findings-section shape. The 2026-11 review
+    # format states its verdict in the header ("**⚠️ Needs changes**") and per
+    # section ("**Approach — Needs changes**"), carries NO `[Major]` tags, and
+    # may omit **Findings** entirely. The findings logic below reads a missing
+    # section as an empty one and returns clean — so a Needs-changes review
+    # scored ✅ "full green" on tiann/hapi#2147 round 9 while the PR also wore
+    # GitHub's own `codex-review:changes` label. Absence of a findings list is
+    # not absence of objections.
+    if printf '%s' "$body" | grep -qE \
+        '^\*\*[^*]*Needs changes|[—-][[:space:]]*Needs changes'; then
+        return 1
+    fi
     if printf '%s' "$body" | grep -qiE \
         'No findings|No high-confidence|No issues found|No reportable (code )?issues|No additional actionable|No actionable|Didn.t find any|No new issues found|No Blocker, Major, Minor, or Nit findings|No Blocker[[:space:]].*findings|None at the current head'; then
         return 0
