@@ -20,11 +20,17 @@ prt_fetch_threads() {
     local owner="${1:?owner}" name="${2:?name}" pr="${3:?pr}"
     local fields="${4:-isResolved isOutdated}"
     local gh="${PRT_GH_BIN:-gh}"
+    # Pin the host. gh's default host on an estate box can be the enterprise
+    # instance (lhs.ghe.com here), where tiann/hapi does not exist, so every
+    # call returned NOT_FOUND and the 0-on-failure callers read it as "no
+    # unresolved threads" (2026-11-20). GH_HOST works for both `gh api` and
+    # `gh pr view`; --hostname does not exist on the latter.
+    local gh_host="${PRT_GH_HOST:-github.com}"
     local cursor="" has_next="true" resp page acc="[]"
 
     while [[ "$has_next" == "true" ]]; do
         if [[ -n "$cursor" ]]; then
-            resp="$("$gh" api graphql -f query="
+            resp="$(GH_HOST="$gh_host" "$gh" api graphql -f query="
 query(\$cursor: String) {
   repository(owner: \"${owner}\", name: \"${name}\") {
     pullRequest(number: ${pr}) {
@@ -36,7 +42,7 @@ query(\$cursor: String) {
   }
 }" -f cursor="$cursor" 2>/dev/null)" || return 1
         else
-            resp="$("$gh" api graphql -f query="
+            resp="$(GH_HOST="$gh_host" "$gh" api graphql -f query="
 {
   repository(owner: \"${owner}\", name: \"${name}\") {
     pullRequest(number: ${pr}) {
@@ -96,9 +102,9 @@ prt_count_blocking() {
 prt_checks_settled() {
     local owner="${1:?owner}" name="${2:?name}" pr="${3:?pr}"
     local required="${4-pr-review}"
-    local gh="${PRT_GH_BIN:-gh}" resp total pending req_state head
+    local gh="${PRT_GH_BIN:-gh}" gh_host="${PRT_GH_HOST:-github.com}" resp total pending req_state head
 
-    resp="$("$gh" pr view "$pr" -R "${owner}/${name}" --json statusCheckRollup,headRefOid 2>/dev/null)" || return 2
+    resp="$(GH_HOST="$gh_host" "$gh" pr view "$pr" -R "${owner}/${name}" --json statusCheckRollup,headRefOid 2>/dev/null)" || return 2
     printf '%s' "$resp" | jq -e '.statusCheckRollup' >/dev/null 2>&1 || return 2
 
     head="$(printf '%s' "$resp" | jq -r '.headRefOid // "unknown" | .[0:9]')"
@@ -147,9 +153,9 @@ prt_checks_settled() {
 prt_external_review_count() {
     local owner="${1:?owner}" name="${2:?name}" pr="${3:?pr}"
     local selves="${4:-heavygee,gavinc,sterlingchad}"
-    local gh="${PRT_GH_BIN:-gh}" resp
+    local gh="${PRT_GH_BIN:-gh}" gh_host="${PRT_GH_HOST:-github.com}" resp
 
-    resp="$("$gh" api "repos/${owner}/${name}/pulls/${pr}/reviews" 2>/dev/null)" || return 2
+    resp="$(GH_HOST="$gh_host" "$gh" api "repos/${owner}/${name}/pulls/${pr}/reviews" 2>/dev/null)" || return 2
     printf '%s' "$resp" | jq -e 'type == "array"' >/dev/null 2>&1 || return 2
 
     printf '%s' "$resp" | jq --arg selves "$selves" '

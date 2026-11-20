@@ -72,4 +72,26 @@ if [[ "$fails" -ne 0 ]]; then
     echo "pr-review-threads.test.sh: $fails failure(s)"
     exit 1
 fi
+
+# Host pinning. gh's default host on an estate box is the enterprise instance,
+# where tiann/hapi does not exist, so an unpinned call returns NOT_FOUND and the
+# 0-on-failure callers read that as "no unresolved threads". That shipped
+# undetected until 2026-11-20 and made #2147 read clean while holding 5
+# unresolved threads — the second time that PR produced a false 0, after the
+# single-page bug this file was written for.
+cat > "$TMP/gh-host" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s' "${GH_HOST:-UNSET}" >> "$HOSTLOG"
+echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}}'
+FAKE
+chmod +x "$TMP/gh-host"
+HOSTLOG="$TMP/hostlog" ; export HOSTLOG
+: > "$HOSTLOG"
+PRT_GH_BIN="$TMP/gh-host" prt_fetch_threads tiann hapi 2147 'isResolved' >/dev/null 2>&1
+check "graphql fetch pins the gh host" "github.com" "$(cat "$HOSTLOG")"
+
+: > "$HOSTLOG"
+PRT_GH_BIN="$TMP/gh-host" PRT_GH_HOST=lhs.ghe.com prt_fetch_threads tiann hapi 2147 'isResolved' >/dev/null 2>&1
+check "PRT_GH_HOST overrides the default" "lhs.ghe.com" "$(cat "$HOSTLOG")"
+
 echo "pr-review-threads.test.sh: all cases OK"

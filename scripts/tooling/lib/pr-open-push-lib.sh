@@ -4,9 +4,51 @@
 # Paginated review-thread fetch (prt_fetch_threads). Guarded so repeated
 # sourcing from hook chains stays cheap and a missing lib is loud, not a
 # silently empty thread list.
+#
+# `dirname "${BASH_SOURCE[0]}"` alone was wrong and broke this for every agent
+# on the box (2026-11-20): BASH_SOURCE is the path as SOURCED, never
+# symlink-resolved, and install-hapi-local-bin.sh copied this file into
+# ~/.local/bin without its sibling. So `git push` on any open-PR branch printed
+# "pr-review-threads.sh: No such file or directory" and carried on.
+#
+# Carrying on is the dangerous part. pr_unresolved_thread_count has a
+# deliberate 0-on-failure contract so GitHub flakiness cannot block every
+# `gh pr comment` — but with prt_fetch_threads UNDEFINED that same path returns
+# "0 unresolved threads", which reads as a clean PR. A permanently missing
+# dependency must never be indistinguishable from nothing left to reply to.
 if ! declare -F prt_fetch_threads >/dev/null 2>&1; then
-    # shellcheck source=/dev/null
-    source "$(dirname "${BASH_SOURCE[0]}")/pr-review-threads.sh"
+    _prt_self="${BASH_SOURCE[0]}"
+    # readlink -f so a ~/.local/bin symlink resolves to the repo lib dir, where
+    # the sibling actually lives.
+    _prt_dir="$(dirname "$(readlink -f "$_prt_self" 2>/dev/null || printf '%s' "$_prt_self")")"
+    for _prt_cand in \
+        "$_prt_dir/pr-review-threads.sh" \
+        "${HAPI_PRIMARY:-$HOME/coding/hapi}/scripts/tooling/lib/pr-review-threads.sh"
+    do
+        if [[ -r "$_prt_cand" ]]; then
+            # shellcheck source=/dev/null
+            source "$_prt_cand"
+            break
+        fi
+    done
+    unset _prt_self _prt_dir _prt_cand
+fi
+
+# Still missing => local misconfiguration, not a flaky API.
+#
+# The warning has to be emitted HERE, at source time. Callers invoke
+# prt_fetch_threads as `$(prt_fetch_threads ... 2>/dev/null)` to keep flaky-API
+# noise out of hook output, so a message printed from inside the shim is
+# swallowed by the caller's own redirect — which is how the first version of
+# this fix still produced a silent "0 unresolved".
+if ! declare -F prt_fetch_threads >/dev/null 2>&1; then
+    printf '%s\n' \
+        "pr-open-push-lib: CANNOT CHECK PR review threads — pr-review-threads.sh not found." \
+        "  Unresolved-thread counts this session are UNAVAILABLE, not zero." \
+        "  Do not read a 0 as a clean PR. Fix: bash scripts/tooling/install-hapi-local-bin.sh" >&2
+    # Returns non-zero so the 0-on-failure callers still work rather than
+    # erroring mid-hook; the source-time warning above is the signal.
+    prt_fetch_threads() { return 1; }
 fi
 
 pr_extract_push_branch() {

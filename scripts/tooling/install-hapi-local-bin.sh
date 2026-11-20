@@ -31,7 +31,14 @@ if [[ -f "$HOME/coding/server-setup/scripts/hapi/hapi-sessions-health.sh" ]]; th
   ln -sf "$HOME/coding/server-setup/scripts/hapi/hapi-sessions-health.sh" "$BIN/hapi-sessions-health.sh"
 fi
 
-install -m 755 "$TOOLING/lib/pr-open-push-lib.sh" "$BIN/pr-open-push-lib.sh"
+# Symlinked, not copied. `install` put pr-open-push-lib.sh in $BIN without its
+# sibling pr-review-threads.sh, so it sourced a path that does not exist there
+# and every `git push` on an open-PR branch printed a not-found error while the
+# gate silently reported zero unresolved threads (2026-11-20). Symlinks also
+# stop these two drifting from the repo between installer runs, which is how
+# the other 100+ entries here already work.
+ln -sf "$TOOLING/lib/pr-open-push-lib.sh" "$BIN/pr-open-push-lib.sh"
+ln -sf "$TOOLING/lib/pr-review-threads.sh" "$BIN/pr-review-threads.sh"
 install -m 755 "$TOOLING/pr-post-push-check-core.sh" "$BIN/pr-post-push-check-core.sh"
 install -m 755 "$TOOLING/hooks/claude/pr-post-push-check.sh" "$BIN/pr-post-push-check"
 
