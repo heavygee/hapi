@@ -249,6 +249,36 @@ prefer the fuller helper module over a partial stub. Then the completeness gate
 must pass **before** any typecheck celebration, then layers, then promote, then
 `hapi-restart-hub` (patient — live WORKING sessions).
 
+## SessionList.tsx — analysis done, apply it rather than re-reading
+
+The single hardest file: **41 hunks, all MANUAL**, 117 soup-only symbols against
+79 main-only. Both sides carry real features — fork has the blocked-list UX
+(`BLOCKED_DIRECTION_GLYPH`, `BlockedJumpPill`), `ProjectGroupHeader`, pinned
+sections, dictation and content search; upstream has `CollapsiblePanelOpenContext`,
+`LEGACY_LIST_ORDER`, `LowRatePulseDot`, `MACHINE_LOCAL_AGENT_FLAVORS`, search
+match modes.
+
+**Do not try to offload this to layer owners.** Checked: nearly every manifest
+layer touching this file (`driver/blocked-list-ux`, `driver/search-peers`,
+`driver/in-session-content-search`, `driver/a2a-2251-strict-delta`,
+`driver/1931-spawn-machine-delta`, ...) is already an **ancestor of the WIP**, so
+tip-forward skips them on replay and their code only survives if this resolution
+preserves it.
+
+Decisions already reached for the first hunks (reading them again is the
+expensive part, not applying them):
+
+| # | Resolution |
+|---|---|
+| 2 | `both` — ours declares `shouldShowPinnedDivider`, theirs `sessionMatchesSearchMode`; different functions |
+| 3 | **custom** — union the props (`api?`, `searchMode?`, `onSearchModeChange?`, `showDateFilter?`, `searchMatchMode?`, `onSearchMatchModeChange?`, `chromeMinPx?`, `maxWidthPx?`) and keep **both** `useState` lines (`datePickerOpen` and `searchMatchModeOpen`). A plain `both` duplicates the `}) { const { t } = useTranslation()` opening |
+| 4 | **custom** — theirs' effect close (adds `setSearchMatchModeOpen(false)`) followed by ours' `formatTimeFilterChipLabel` |
+| 5 | **custom** — a rename (`renderDateFilter` → `renderDateButton`). Take theirs' declaration but keep ours' comment block: it records an operator decision (Layout A, 2026-10-15) and the Quest 48×48 minimum. Hunks 8/9/10 must then use the `renderDateButton` name consistently |
+| 6 | `ours` — genuine competing styling for the standalone variant, and the fork's is an explicit operator decision, so §3b soup-wins applies |
+
+Hunks 7–41 still need reading. Expect more renames like hunk 5, where the
+call sites in later hunks have to agree with whichever name survives.
+
 ## Superseded: where the full-recipe compose got to
 
 Live tip `360c9d58` UNCHANGED and serving throughout. Remat hold ACTIVE, owned
