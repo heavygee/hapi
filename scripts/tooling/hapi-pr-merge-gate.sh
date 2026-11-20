@@ -173,6 +173,44 @@ else
     fi
 fi
 
+# 2b. TRUSTED COMMIT STATUSES, when check-runs ALSO exist.
+#
+# The block above reads commit statuses only in its `else` — i.e. when there are
+# NO check-runs at all. So the moment a repo produces check-runs, a trusted
+# status is never looked at again. Reported by the flake-quarantine seat off
+# heavygee/hapi#275: "the gate only reads check-runs, never the local-CI-bridge's
+# status API." Correct, and my earlier fallback patch did not cover it — that
+# fixed "no check-runs", not "statuses ignored when check-runs are present".
+#
+# Latent until now and about to go live: fork PRs currently have ZERO check-runs
+# (heavygee#275: check-runs=0, status oos-linux/test=success), so the else branch
+# still reads them. Actions on the fork was dead for 32 days and the operator has
+# just re-enabled it, so check-runs will start appearing there — and on that day
+# the bridge's verdict would silently stop being read.
+#
+# Blocks only on a trusted context that is PRESENT and not success. Absence does
+# not block: the bridge legitimately never runs on upstream PRs (all three I
+# checked have zero statuses), so requiring one would refuse every upstream merge.
+if [ -n "$CR" ]; then
+    ST2="$("$REAL_GH" api "repos/$REPO/commits/$HEAD/status" --jq '.statuses[] | "\(.context)\t\(.state)"' 2>/dev/null || true)"
+    BADTRUST=""
+    if [ -n "$ST2" ]; then
+        while IFS=$'\t' read -r ctx state; do
+            [ -n "$ctx" ] || continue
+            for want in $TRUSTED_STATUS_CONTEXTS; do
+                [ "$ctx" = "$want" ] && [ "$state" != "success" ] \
+                    && BADTRUST="${BADTRUST}${ctx}=${state} "
+            done
+        done <<<"$ST2"
+    fi
+    if [ -n "$BADTRUST" ]; then
+        fail "trusted commit status not green alongside check-runs on head ${HEAD:0:9}: $BADTRUST"
+    else
+        pass "trusted commit statuses ok (or absent) alongside check-runs"
+    fi
+fi
+
+
 # 3. review decision must not be a rejection
 [ "$REVIEW" = "CHANGES_REQUESTED" ] && fail "reviewDecision=CHANGES_REQUESTED" || pass "no CHANGES_REQUESTED"
 
