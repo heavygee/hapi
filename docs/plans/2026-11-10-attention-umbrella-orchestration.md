@@ -261,6 +261,8 @@ Peer [ea9e52cc](/sessions/ea9e52cc-cf3d-4f5d-95d8-9944bf08b0d6) flagged identica
 
 Fix: incomplete_drop now only uses `Was:` / `- branch:` subject lines (`_mw_block_drop_subject_branches`); regression in `meta-wave.test.sh`; DROPPED comment rephrased. Dry-run: Gate A clean / archive pending. Meta archived `ea9e52cc`. **Pushed** `d2ff1692b` → `origin/main` (was local-only; dance≠compose-base trap). Leftover `driver/2002-*` refs kept (provenance; same as 1772 set).
 
+**CLOSED 2026-11-20T23:08Z (live):** first hourly carrying `e78e67d88`+`05734c33b` → `#2376 [ea9e52cc] COMPLETE — babysit ended (no ping)`, chip 🧹. Root: pipefail SIGPIPE on `printf|grep -q` + wave/peer drop-state reading stale `~/.config` composition; both now read recipe. Remirror still owed after absorb.
+
 ### #2520 status (2026-11-20T02:04Z)
 
 - Tip `8254b8c8a`: round-16 fixed+RESOLVED (0 unresolved). `core` SUCCESS. Criterion letter met (3/3 Majors = prior-fix limits) but **no freeze**: one withdrawal of `applyLaterDeliveryEvidence` dissolved three symptoms; prior tip would have stamped future-scheduled prompts invoked (scheduler never sends them).
