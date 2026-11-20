@@ -254,7 +254,7 @@ Operator umbrella merge auth active (2026-11-19): merge attention children when 
 
 Peer [ea9e52cc](/sessions/ea9e52cc-cf3d-4f5d-95d8-9944bf08b0d6) flagged identical hourly "are you done yet" pings. Not a forgetful watcher: Gate A was **false-dirty**. `mw_manifest_incomplete_drop_active` scraped every `driver/…` token in the DROPPED #2376 comment, including parent prose "stacked on `driver/1996-consolidate-blocked-filter-wip`", and treated the still-live #1996 soup layer as an incomplete #2376 drop → sticky 🔧 forever.
 
-Fix: incomplete_drop now only uses `Was:` / `- branch:` subject lines (`_mw_block_drop_subject_branches`); regression in `meta-wave.test.sh`; DROPPED comment rephrased. Dry-run now: Gate A clean / archive pending. Meta should archive the idle peer (no more drop-soup nags).
+Fix: incomplete_drop now only uses `Was:` / `- branch:` subject lines (`_mw_block_drop_subject_branches`); regression in `meta-wave.test.sh`; DROPPED comment rephrased. Dry-run: Gate A clean / archive pending. Meta archived `ea9e52cc`. **Pushed** `d2ff1692b` → `origin/main` (was local-only; dance≠compose-base trap). Leftover `driver/2002-*` refs kept (provenance; same as 1772 set).
 
 ### #2520 status (2026-11-20T02:04Z)
 
