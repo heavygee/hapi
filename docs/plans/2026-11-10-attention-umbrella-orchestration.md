@@ -244,7 +244,7 @@ No third-party pushback on #2355/#2356. Upstream `main` @ `6ea40f9e4`. Signals f
 | #1733 | **MERGED** 2026-11-19 (operator-directed Lane B / elapsed dogfooded). Gate A + exit reflection filed; peer idle for Meta archive. Promote filed: mirror-hygiene `~` expand. |
 | #1772 | **MERGED** 2026-11-19 (Lane B / elapsed dogfooded + operator umbrella auth). Squash `3ae9c77c4` (38 files). Gate A' done — retro `2026-11-19-1772-session-list-filters-exit.md` (promote none), emit+archive [assist](/sessions/3c5af7c8-540d-4d7c-b7a1-5df17abe5b37); assist wt removed. Soup layers for stack left for Meta. |
 | #2376 | **MERGED** 2026-11-19 (Lane B / elapsed dogfooded + umbrella auth). Squash `fa9fd8cc0`. Gate A' done — retro `2026-11-19-2002-active-working-lenses-exit.md`; promote applied (`rebase --onto` recipe → `driver-soup.md`); soup layer 3/3 dropped; [peer](/sessions/ea9e52cc-cf3d-4f5d-95d8-9944bf08b0d6) archived. Layers 1–2 (#1772/#1996) left for Meta remat re-thread. |
-| #1717 | **UPSTREAM [#2520](https://github.com/tiann/hapi/pull/2520)** tip `b3307de4c` — round-10 4/4 (receivedAt wired through live emitters — r9 invariant finally reached production path). Soup HARD HOLD. Dogfood ~40h; **no laneb**. [peer](/sessions/83d28e01-5852-4926-b163-99a95f46c931) |
+| #1717 | **UPSTREAM [#2520](https://github.com/tiann/hapi/pull/2520)** tip `b3307de4c` — CI 9/9; **round-11 IN PROGRESS** (4 unresolved: 1 Major + 3 Minor). Soup HARD HOLD. [peer](/sessions/83d28e01-5852-4926-b163-99a95f46c931) |
 | #1996 | **UPSTREAM [#2530](https://github.com/tiann/hapi/pull/2530)** tip `b538e0966` atop #2520 `b3307de4c` — search hatch reconciled. Idle-hold. [peer](/sessions/eddfb230-ebc4-4196-b2b7-c33a2f5f71f8) |
 
 Operator umbrella merge auth active (2026-11-19): merge attention children when three-dim CLEAN. #2515 closed absorbed into #2376. Orch resumed after parking wrongly post-#2376.
@@ -285,4 +285,8 @@ Stale comment note: `hub/src/store/index.ts` still says SCHEMA_VERSION=23; actua
 - SCHEMA_VERSION=23 comment was soup-only drift (never on fork main); redo drops it. Fork main = 36.
 - **User-visible on :3006 now:** `ProjectGroupRow.tsx` is zero-byte (from `b97537bd1` 2026-11-11 compile-fix) — project-group right-click/long-press menu (#881/#2357) dead. Restored by absorb redo; not spinning a separate peer.
 - Tip-forward vs full-recipe: Meta flagged to 028d0a86 for ruling.
+
+### Tooling false-green (2026-11-20T00:21Z) — Meta `27aaff11d`
+
+`prt_fetch_threads` / `prt_checks_settled` / `prt_external_review_count` used unpinned `gh` → default `lhs.ghe.com` → NOT_FOUND → **0 unresolved** (fail-soft). Same class as absorb: check that cannot run returns "all good". Orch GraphQL for umbrella used `GH_HOST=github.com` and was mostly OK; re-measure after fix found **#2520 = 4 unresolved** on tip `b3307de4c` (CI 9/9 green) — round 11 kicked.
 
