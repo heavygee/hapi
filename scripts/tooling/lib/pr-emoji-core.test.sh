@@ -637,5 +637,16 @@ eq "ping sticky 🔧 on window" "$(pec_should_ping "🔧" "🔧" "a" "a" 0 100 1
 eq "emit none on complete" "$(pec_emit_reason "🧹" "🔧" "a" "b" 0 100 10 1 || true)" "none"
 
 echo ""
+
+# merge_state_raw (arg 17): merge_bad fires for dirty/behind/unknown/empty, and
+# all four used to render as "merge state dirty" — false for three of them.
+# tiann/hapi#2147 (2026-11-21): GitHub returned UNKNOWN on a cold cache, the
+# chip said "rebase (merge state dirty)", and three sources said clean.
+ms() { action_of "$(pec_decide_emoji 1 0 0 1 0 1 0 1 0 0 1 0 0 0 0 0 "$1")"; }
+eq "merge_state dirty names dirty"    "$(ms dirty)"   "rebase (merge state dirty)"
+eq "merge_state behind names behind"  "$(ms behind)"  "rebase (behind base)"
+eq "merge_state unknown is not dirty" "$(ms unknown)" "merge state unknown — recheck before trusting"
+eq "merge_state empty is not dirty"   "$(ms '')"      "merge state unknown — recheck before trusting"
+
 echo "pr-emoji-core.test.sh: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]] || exit 1

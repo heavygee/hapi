@@ -402,7 +402,7 @@ pec_decide_emoji() {
         checks_seen="$6" threads_n="$7" bot_clean="$8" bot_major="$9" \
         bot_has_body="${10}" merge_bad="${11}" data_unavailable="${12}" \
         review_changes="${13:-0}" superseded_hint="${14:-0}" crc_attested="${15:-0}" \
-        bot_stale="${16:-0}"
+        bot_stale="${16:-0}" merge_state_raw="${17:-}"
 
     if [[ "$data_unavailable" == "1" ]]; then
         printf '%s\t%s' "?" "GitHub data unavailable this run — retry sweep (title unchanged)"
@@ -441,7 +441,19 @@ pec_decide_emoji() {
     if [[ "$checks_pending" == "1" && "$threads_n" == "0" && "$review_changes" != "1" ]]; then
         bot_major_actionable=0
     fi
-    [[ "$merge_bad" == "1" ]] && parts+=("rebase (merge state dirty)")
+    # Name the state actually observed. merge_bad fires for FOUR states —
+    # dirty, behind, unknown and empty — and this used to render all four as
+    # "merge state dirty", which is a false statement for three of them. An
+    # indeterminate state reported as a definite one sent a peer chasing a
+    # clean PR (tiann/hapi#2147, 2026-11-21). Caller passes the raw state.
+    if [[ "$merge_bad" == "1" ]]; then
+        case "$merge_state_raw" in
+            dirty)   parts+=("rebase (merge state dirty)") ;;
+            behind)  parts+=("rebase (behind base)") ;;
+            unknown|"") parts+=("merge state unknown — recheck before trusting") ;;
+            *)       parts+=("rebase (merge state ${merge_state_raw})") ;;
+        esac
+    fi
     [[ "$review_changes" == "1" ]] && parts+=("address CHANGES_REQUESTED review")
     if [[ "$checks_ok" == "0" && "$checks_pending" == "1" ]]; then
         parts+=("CI running")

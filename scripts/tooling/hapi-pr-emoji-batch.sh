@@ -417,8 +417,26 @@ classify_one() {
        || "$merge_state" == "unknown" || -z "$merge_state" ]]; then
         merge_bad=1
         local _verdict="$SCRIPT_DIR/hapi-pr-merge-verdict.sh"
-        if [[ -x "$_verdict" ]] \
-           && "$_verdict" --repo "$REPO" --quiet "$n" >/dev/null 2>&1; then
+        # The rescue MUST trial-merge against the PR's own base repo. The verdict
+        # tool defaults to BASE="origin/main" — the FORK's main, which diverges
+        # from upstream/main by ~1,674 commits. So for an upstream PR the rescue
+        # was conflicting against the wrong base every time, never clearing
+        # merge_bad, and the chip then asserted "merge state dirty" on a PR that
+        # merges clean (tiann/hapi#2147, 2026-11-21: GitHub cold → UNKNOWN,
+        # rescue failed on the wrong base, chip said dirty, three independent
+        # sources said clean). Same footgun as passing bare `main` by hand.
+        local _vbase="origin/main"
+        if [[ "$OWNER" != "heavygee" ]]; then
+            # Only use upstream/main if the ref actually exists here; otherwise
+            # skip the rescue rather than silently scoring against the wrong base.
+            if git -C "$HAPI_PRIMARY" rev-parse --verify --quiet upstream/main >/dev/null 2>&1; then
+                _vbase="upstream/main"
+            else
+                _vbase=""
+            fi
+        fi
+        if [[ -n "$_vbase" && -x "$_verdict" ]] \
+           && "$_verdict" --repo "$REPO" --base "$_vbase" --quiet "$n" >/dev/null 2>&1; then
             merge_bad=0
             merge_state="stale-${merge_state}"
         fi
@@ -542,7 +560,7 @@ classify_one() {
     fi
 
     decided="$(pec_decide_emoji 1 0 0 "$checks_ok" "$checks_pending" "$checks_seen" \
-        "$threads_n" "$bot_clean" "$bot_major" "$bot_has_body" "$merge_bad" 0 "$review_changes" 0 "$has_crc" "$bot_stale")"
+        "$threads_n" "$bot_clean" "$bot_major" "$bot_has_body" "$merge_bad" 0 "$review_changes" 0 "$has_crc" "$bot_stale" "$merge_state")"
     emoji="${decided%%$'\t'*}"
     action="${decided#*$'\t'}"
     local merge_lane=""
