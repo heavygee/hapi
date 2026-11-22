@@ -115,7 +115,46 @@ Then **abort the WIP and clear your own hold** (`hapi-remat-hold clear` with
 remat and build-web; leaving one set while a peer reshapes freezes the fleet for no
 reason. The previous tip stays live and serving throughout.
 
-## 3. Done is not yours to declare — ask the predecessor
+## 3. DONE HAS A COMMAND. Run it before you stop.
+
+```
+hapi-kitchen-status --quiet   # 0 = green, 75 = busy (fine), 1 / 76 = DIRTY
+```
+
+**You may not end a turn quietly while that returns 1 or 76.** Not "should
+not" — the seat's definition of done is this exit code, not your recollection
+of what you did. If it is dirty, either keep working or hand the hold over
+explicitly and say to whom.
+
+This is written in blood. On 2026-11-19→22 this seat held a remat escalation
+for **41+ hours** across several sessions, each one ending with a confident
+summary, while `hapi-kitchen-status` sat at 76 the entire time. The affordance
+already existed — its own header says it is there so "agents (especially
+tooling meta-bot) can answer *how clean is the kitchen?* without shelling five
+commands" — and the seat never ran it once. The failure was not the absorb
+taking long. It was answering "am I done?" from memory when a command would
+have said no.
+
+Three specific traps that produced those confident summaries:
+
+- **"I'm continuing" at the end of a turn is false.** Ending the turn IS
+  stopping; nothing runs between turns. Say what is *done*, never what you are
+  "now doing".
+- **A long-held hold is not automatically wrong, but it is never invisible.**
+  Check whether releasing would actually unblock anyone (if every remat
+  re-hits the same conflict, releasing just hands someone a broken compose) and
+  say which it is.
+- **Routed side-work is the main way this seat loses days.** Each item is real.
+  Decline or defer while a hold is yours, and route it back with a reason.
+
+Backstop so this cannot rely on diligence:
+`scripts/tooling/hapi-kitchen-watchdog.sh` polls the same verdict and pings the
+hold owner (falling back to `meta-sessions.yaml` → `tooling_meta`) whenever it
+is dirty. Busy (75) deliberately does not ping, because a watchdog that cries
+wolf gets ignored. Run it from a timer (pattern:
+`hapi-runner-watchdog.timer`) or an agent-side cron.
+
+## 3z. Done is not yours to declare — ask the predecessor
 
 **POLICY (operator, 2026-11-18).** *"From now on, when you THINK you are done,
 you will ask your predecessor if you actually ARE done. HE is senior, you are
