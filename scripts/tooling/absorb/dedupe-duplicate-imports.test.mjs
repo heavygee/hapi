@@ -138,5 +138,95 @@ const eq = (actual, expected, msg) => (actual === expected ? ok() : bad(`${msg}\
     eq(r.text, src, 'the x-module merge must NOT be applied when the file has a refusal')
 }
 
+// --- multi-line blocks (opt-in via { multiline: true }) ------------------
+
+// 15. off by default: a multi-line block duplicated by a single-line import is
+//     left alone unless the caller opts in.
+{
+    const src = ['import {', '    A,', '    B', "} from 'x'", "import { C } from 'x'"].join('\n')
+    eq(dedupeImports(src).merged, 0, 'multiline must stay opt-in')
+    eq(dedupeImports(src).text, src, 'and unchanged')
+}
+
+// 16. opted in: the block and the single line merge into one statement
+{
+    const src = ['import {', '    A,', '    B', "} from 'x'", "import { C } from 'x'"].join('\n')
+    const r = dedupeImports(src, { multiline: true })
+    eq(r.merged, 1, 'one duplicate removed')
+    eq(r.text, "import { A, B, C } from 'x'", 'collapsed and merged')
+}
+
+// 17. THE REFORMAT GUARD. A multi-line block with no duplicate must come back
+//     byte-identical — collapsing it anyway would reformat every multi-line
+//     import in the repo on first run.
+{
+    const src = ['import {', '    A,', '    B', "} from 'x'", "import { C } from 'y'", ''].join('\n')
+    const r = dedupeImports(src, { multiline: true })
+    eq(r.merged, 0, 'nothing to merge')
+    eq(r.text, src, 'untouched multi-line block is byte-identical')
+}
+
+// 18. an untouched block is restored in the RIGHT PLACE when an earlier block
+//     did merge. This is the stale-index bug: splicing in place moves later
+//     blocks, so a recorded index puts the restored block back wrong.
+{
+    const src = [
+        'import {', '    A', "} from 'x'",
+        "import { B } from 'x'",
+        'const between = 1',
+        'import {', '    KeepMe,', '    AlsoKeep', "} from 'z'",
+        'const after = 2',
+    ].join('\n')
+    const r = dedupeImports(src, { multiline: true })
+    eq(r.merged, 1, 'only the x-module pair merges')
+    eq(r.text, [
+        "import { A, B } from 'x'",
+        'const between = 1',
+        'import {', '    KeepMe,', '    AlsoKeep', "} from 'z'",
+        'const after = 2',
+    ].join('\n'), 'the z block is restored verbatim and in place')
+}
+
+// 19. a block containing a comment is skipped: the comment belongs to a
+//     binding and merging would strand it.
+{
+    const src = ['import {', '    // the fork needs this one', '    A', "} from 'x'", "import { B } from 'x'"].join('\n')
+    const r = dedupeImports(src, { multiline: true })
+    eq(r.merged, 0, 'a commented block is not rewritten')
+    eq(r.text, src, 'unchanged')
+}
+
+// 20. type-only multi-line stays separate from a value import of the module
+{
+    const src = ['import type {', '    A', "} from 'x'", "import { b } from 'x'"].join('\n')
+    const r = dedupeImports(src, { multiline: true })
+    eq(r.merged, 0, 'type-only and value still never collapse')
+    eq(r.text, src, 'unchanged')
+}
+
+// 21. two multi-line blocks from the SAME module merge with each other
+{
+    const src = ['import {', '    A', "} from 'x'", 'import {', '    B', "} from 'x'"].join('\n')
+    const r = dedupeImports(src, { multiline: true })
+    eq(r.merged, 1, 'two blocks collapse to one')
+    eq(r.text, "import { A, B } from 'x'", 'merged')
+}
+
+// 22. an unterminated `import {` is not treated as a block (it would otherwise
+//     swallow the rest of the file)
+{
+    const src = ['import {', 'const notAnImport = 1', "import { B } from 'x'"].join('\n')
+    const r = dedupeImports(src, { multiline: true })
+    eq(r.merged, 0, 'unterminated opener ignored')
+    eq(r.text, src, 'unchanged')
+}
+
+// 23. trailing comma in a multi-line block is tolerated
+{
+    const src = ['import {', '    A,', '    B,', "} from 'x'", "import { C } from 'x'"].join('\n')
+    const r = dedupeImports(src, { multiline: true })
+    eq(r.text, "import { A, B, C } from 'x'", 'trailing comma handled')
+}
+
 console.log(`dedupe-duplicate-imports: ${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)
