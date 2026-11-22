@@ -55,7 +55,7 @@ DRY_RUN=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run|-n) DRY_RUN=1; shift ;;
-        -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,46p' "$0"; exit 0 ;;
         *) echo "Unknown flag: $1" >&2; exit 64 ;;
     esac
 done
