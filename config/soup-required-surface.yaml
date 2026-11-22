@@ -101,6 +101,32 @@ required:
     path: cli/src/commands/registry.ts
   - symbol: pingPeerCommand
     path: cli/src/commands/registry.ts
+  # --- added 2026-11-22: observed at risk during the tip-forward absorb ---
+  # Each one would have vanished with a green typecheck and green tests.
+  - symbol: versionCommand
+    path: cli/src/commands/registry.ts
+    why: bare 'hapi version', read by the skew check; runCli handles -v/--version before resolveCommand but not the bare word, and resolveCommand only consults commandMap, so upstream's lazy-map rewrite unregistered it while typechecking perfectly
+  - symbol: notifyTask
+    path: hub/src/notifications/notificationHub.ts
+    why: hub-side task-notification dispatch; fork main has no task path while composer, both channels, eventParsing, transcriptEntry and two web consumers still handle the event, so severing it breaks nothing at build time
+  - symbol: surfaceBlockedNotify
+    path: cli/src/cursor/cursorAcpRemoteLauncher.ts
+    why: Blocked chrome (1717) keyed off lastNotify; owned by an ancestor layer that is skipped on replay, and in this absorb its call site survived in common context while the method did not
+  - symbol: findJsonObjectEnd
+    path: shared/src/messages.ts
+    why: the AGENT_NOTIFY_SUMMARY matcher scans for the closing brace rather than requiring endsWith; without it a glued suffix is unmatchable, the footer is never stripped, and raw JSON reaches the operator
+  - symbol: github_issue
+    path: shared/src/schemas.ts
+    why: the discriminatedUnion member backing the link_issue MCP tool; upstream narrows ExternalRefSchema to PRs alone, which compiles and silently drops issue links
+  - symbol: PasskeySettings
+    path: web/src/routes/settings/general.tsx
+    why: the passkeys settings section; a JSX section is invisible to symbol diffs, and this absorb left the import while losing the render
+  - symbol: gzipCompress
+    path: hub/src/web/routes/cli.ts
+    why: gzip middleware on the CLI router; middleware is not a symbol any importer references, so dropping it is invisible to typecheck and tests
+  - symbol: ProjectGroupRow
+    path: web/src/components/ProjectGroupRow.tsx
+    why: the sidebar project-group row; this file sat at ZERO BYTES on the serving tip from 2026-11-11 until this absorb restored it, with no importers left and nothing red
 
   # --- web affordances -------------------------------------------------------
   # These render fine when removed; only a human notices.

@@ -69,7 +69,14 @@ done
 # Default to the manifest INSIDE the composed tree: that is the one the remat
 # actually used, not whatever the mirror happens to have checked out.
 [[ -n "$MANIFEST" ]] || MANIFEST="$TREE/config/driver-manifest.yaml"
-[[ -f "$MANIFEST" ]] || die "manifest not found: $MANIFEST"
+# --required asserts the required SURFACE and is documented as independent of
+# any layer, so it must not need a manifest. It used to die here first, which
+# meant a required-surface run against a tree without a manifest failed for a
+# reason that had nothing to do with the surface — the kind of wrong-reason
+# non-zero that reads as a real verdict.
+if [[ "$REQUIRED" -ne 1 ]]; then
+    [[ -f "$MANIFEST" ]] || die "manifest not found: $MANIFEST"
+fi
 
 say() { [[ "$QUIET" == "1" ]] || echo "$*"; }
 
@@ -192,6 +199,42 @@ run_auto() {
 # symbol must be present on :3006 after a remat; a miss fails the rebuild.
 run_required() {
     local file="$1" total=0 gone=0 sym path
+    # Validate the file as YAML before trusting the line loop below.
+    #
+    # The loop is a tolerant line matcher: on 2026-11-22 a set of entries was
+    # inserted one level too deep, which made them a nested sequence inside the
+    # previous entry's mapping. yaml.safe_load threw; this loop happily counted
+    # all 30. A gate that passes on a file every other consumer rejects is worse
+    # than no gate, so parse it for real when a parser is available.
+    if command -v python3 >/dev/null 2>&1; then
+        local yaml_err
+        if ! yaml_err="$(python3 -c '
+import sys
+try:
+    import yaml
+except ImportError:
+    sys.exit(0)   # no parser here: fall through to the tolerant line loop
+try:
+    d = yaml.safe_load(open(sys.argv[1]))
+except yaml.YAMLError as exc:
+    mark = getattr(exc, "problem_mark", None)
+    where = " at line %d col %d" % (mark.line + 1, mark.column + 1) if mark else ""
+    sys.exit("%s%s" % (getattr(exc, "problem", None) or exc, where))
+r = d.get("required") if isinstance(d, dict) else d
+if not isinstance(r, list) or not r:
+    sys.exit("required-surface file parsed to no entries")
+for i, e in enumerate(r):
+    if not isinstance(e, dict):
+        sys.exit("entry %d is not a mapping (indentation?): %r" % (i, e))
+    if not e.get("symbol") or not e.get("path"):
+        sys.exit("entry %d missing symbol or path: %r" % (i, e))
+' "$file" 2>&1)"; then
+            err "required-surface file is malformed: ${yaml_err##*SystemExit: }"
+            err "  $file"
+            REQ_GONE=$((REQ_GONE + 1))
+            return 1
+        fi
+    fi
     while IFS= read -r line; do
         if [[ "$line" =~ ^[[:space:]]*-[[:space:]]*symbol:[[:space:]]*(.+)$ ]]; then
             [[ -n "${sym:-}" ]] && { _req_one "$sym" "${path:-}"; }
@@ -259,7 +302,7 @@ fi
 
 # Walk the manifest line by line, same shape as parse-driver-manifest.mjs, so a
 # sentinel always binds to the branch entry directly above it.
-declared=0; missing=0; checked=0; current=""; sentinels=(); spath=""
+declared=0; missing=0; checked=0; queued=0; current=""; sentinels=(); spath=""
 
 # One layer may declare MANY sentinels. The operator's standing rule (2026-11-11)
 # is that everything the manifest claims to keep on the soup gets one, so a
@@ -268,8 +311,34 @@ declared=0; missing=0; checked=0; current=""; sentinels=(); spath=""
 # (The previous loop overwrote: a second `sentinel:` line silently replaced the
 # first, so only the last was ever checked. That is the same silent-pass class
 # this tool exists to close, in the tool itself.)
+# Is this layer actually composed into the tree under test?
+#
+# The MISSING messages below assert "the layer is an ancestor but its behaviour
+# is gone" — a claim this tool never verified. A QUEUED layer (declared in the
+# manifest, not yet merged into the tip) has no behaviour to lose, so flagging
+# it is a false red, and false reds are precisely how a gate stops being read.
+# On 2026-11-22 `driver/agent-title-name-once` failed this way against a tip it
+# was never merged into. Unknown ancestry stays FAIL-CLOSED: only a branch we
+# can prove is NOT an ancestor is downgraded to "queued".
+layer_is_ancestor() {
+    local branch="$1" ref=""
+    [[ -n "$branch" ]] || return 0
+    for ref in "$branch" "refs/heads/$branch" "origin/$branch"; do
+        if git -C "$TREE" rev-parse --verify --quiet "$ref" >/dev/null 2>&1; then
+            git -C "$TREE" merge-base --is-ancestor "$ref" HEAD 2>/dev/null && return 0
+            return 1
+        fi
+    done
+    return 0   # branch not resolvable here — cannot disprove, so keep asserting
+}
+
 check_one() {
     local layer="$1" sym="$2" path="$3"
+    if ! layer_is_ancestor "$layer"; then
+        say "queued   $layer  ($sym not expected yet — branch is not an ancestor of HEAD)"
+        queued=$((queued+1))
+        return
+    fi
     checked=$((checked+1))
     if [[ -n "$path" ]]; then
         if [[ ! -e "$TREE/$path" ]]; then
@@ -329,7 +398,7 @@ flush_sentinels
 
 total_layers="$(grep -c '^[[:space:]]*-[[:space:]]*branch:' "$MANIFEST" || echo 0)"
 say ""
-say "sentinels: $checked checked, $missing missing, $((total_layers - declared)) of $total_layers layers undeclared"
+say "sentinels: $checked checked, $missing missing, $queued queued (not yet composed), $((total_layers - declared)) of $total_layers layers undeclared"
 
 if [[ "$missing" -gt 0 ]]; then
     err "$missing layer(s) lost their behaviour despite being composed in."

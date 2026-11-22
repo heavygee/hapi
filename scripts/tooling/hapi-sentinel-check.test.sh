@@ -162,5 +162,69 @@ man "layers:" "  - branch: driver/multi" "    sentinel: liveSymbol" "    sentine
 if out="$(run)"; then ok; else bad "all-present multi-sentinel should pass: $out"; fi
 printf '%s' "$out" | grep -q "2 checked" && ok || bad "multi-sentinel count wrong: $out"
 
+# --- required-surface file validation -------------------------------------
+# The line loop that reads this file is a tolerant matcher, so a structurally
+# broken file used to count its entries and report PASS. A gate that goes green
+# on a file every other YAML consumer rejects is worse than no gate.
+reqrun() { bash "$S" --required --required-file "$1" --tree "$TREE" 2>&1; }
+
+# 15. a well-formed file whose symbol is present -> pass
+printf 'required:\n  - symbol: liveSymbol\n    path: src/present.ts\n' > "$WORK/req-ok.yaml"
+if out="$(reqrun "$WORK/req-ok.yaml")"; then ok; else bad "valid required file should pass: $out"; fi
+printf '%s' "$out" | grep -q "1 entr" && ok || bad "required count wrong: $out"
+
+# 16. a well-formed file whose symbol is GONE -> red (the check can still fail)
+printf 'required:\n  - symbol: vanishedSymbol\n    path: src/present.ts\n' > "$WORK/req-gone.yaml"
+if out="$(reqrun "$WORK/req-gone.yaml")"; then bad "missing required symbol should fail: $out"; else ok; fi
+
+# 17. entries nested one level too deep (the real 2026-11-22 mistake) -> red,
+#     and the message must point at the line so it is fixable.
+printf 'required:\n  - symbol: liveSymbol\n    path: src/present.ts\n    - symbol: nested\n      path: src/present.ts\n' > "$WORK/req-indent.yaml"
+if out="$(reqrun "$WORK/req-indent.yaml")"; then bad "bad indentation should fail, not count entries: $out"; else ok; fi
+printf '%s' "$out" | grep -qi "malformed" && ok || bad "bad indentation not reported as malformed: $out"
+printf '%s' "$out" | grep -qE "line [0-9]+" && ok || bad "malformed message should name a line: $out"
+
+# 18. an entry with a symbol but no path -> red (a pathless entry silently
+#     degrades to a whole-tree grep, which passes on almost anything)
+printf 'required:\n  - symbol: liveSymbol\n' > "$WORK/req-nopath.yaml"
+if out="$(reqrun "$WORK/req-nopath.yaml")"; then bad "entry without path should fail: $out"; else ok; fi
+
+# 19. zero entries -> red. An emptied file is the cheapest way to disable the
+#     gate by accident, so it must never read as "nothing owed".
+printf 'required: []\n' > "$WORK/req-empty.yaml"
+if out="$(reqrun "$WORK/req-empty.yaml")"; then bad "empty required list should fail: $out"; else ok; fi
+printf '%s' "$out" | grep -qi "no entries" && ok || bad "empty list message unclear: $out"
+
+# --- queued vs composed ----------------------------------------------------
+# "the layer is an ancestor but its behaviour is gone" was asserted, never
+# checked. A layer still waiting to be merged has no behaviour to lose, so
+# failing on it is a false red — and a gate that cries wolf gets ignored,
+# which is the whole failure mode this tool was built against.
+tg() { git -C "$TREE" -c user.email=t@t -c user.name=t "$@"; }
+tg branch -f driver/queued-layer HEAD >/dev/null 2>&1 || true
+tg checkout -q driver/queued-layer 2>/dev/null
+printf 'export const queuedOnlySymbol = 1\n' > "$TREE/src/queued.ts"
+tg add -A >/dev/null 2>&1; tg commit -qm "queued layer work" >/dev/null 2>&1
+tg checkout -q - 2>/dev/null || tg checkout -q master 2>/dev/null || tg checkout -q main 2>/dev/null
+
+# 20. branch resolvable and NOT an ancestor -> reported queued, exit 0
+man "layers:" "  - branch: driver/queued-layer" "    sentinel: queuedOnlySymbol" ""
+if out="$(run)"; then ok; else bad "queued (non-ancestor) layer must not fail the gate: $out"; fi
+printf '%s' "$out" | grep -q "queued   driver/queued-layer" && ok || bad "non-ancestor layer not reported queued: $out"
+printf '%s' "$out" | grep -q "1 queued" && ok || bad "queued not counted in summary: $out"
+
+# 21. branch resolvable AND an ancestor, symbol gone -> still MISSING. The
+#     downgrade must not swallow the real ancestry-vs-presence loss.
+tg branch -f driver/merged-layer HEAD >/dev/null 2>&1 || true
+man "layers:" "  - branch: driver/merged-layer" "    sentinel: vanishedFromTree" ""
+if out="$(run)"; then bad "ancestor layer with a missing symbol must still fail: $out"; else ok; fi
+printf '%s' "$out" | grep -q "MISSING  driver/merged-layer" && ok || bad "ancestor loss not reported MISSING: $out"
+
+# 22. branch NOT resolvable in this tree -> fail closed, keep asserting. We
+#     cannot disprove ancestry, so silence would be the dangerous answer.
+man "layers:" "  - branch: driver/no-such-ref-anywhere" "    sentinel: vanishedFromTree" ""
+if out="$(run)"; then bad "unresolvable branch must fail closed, not be excused: $out"; else ok; fi
+printf '%s' "$out" | grep -q "MISSING  driver/no-such-ref-anywhere" && ok || bad "unresolvable branch wrongly downgraded: $out"
+
 echo "hapi-sentinel-check: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]]
