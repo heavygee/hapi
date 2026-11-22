@@ -10,6 +10,18 @@
 # hapi-kitchen-status is the single source of truth. This adds nothing to its
 # verdict — it only decides WHO to wake and says so.
 #
+# CADENCE (predecessor review, 2026-11-22): a flat ping every 20min against a
+# legitimately long hold is ~120 identical fires over 41 hours, which becomes
+# wallpaper — "if you leave flat :07/:27/:47 forever, the fix is already dying;
+# you just have not felt the numbness yet." So:
+#   * exit 76 during an OWNED hold is expected, not always an emergency
+#   * age escalation instead of flat poll: T+0, then ~2h / 8h / 24h
+#   * at >=24h the OPERATOR is pinged too — owner-only forever is how 41 hours
+#     passes without a human smelling it
+#   * state change (hold reason or remaining-conflict count moved) resets the
+#     ladder, because that is progress and deserves silence
+# State lives in ~/.local/state/hapi/kitchen-watchdog.state
+#
 # Exit codes (mirrors hapi-kitchen-status so a timer can alert on them):
 #   0   kitchen green, or busy (75) which is not a hygiene failure
 #   1   kitchen dirty and the owning seat was pinged
@@ -72,12 +84,16 @@ except Exception:
 fi
 if [[ -z "$owner" && -r "$MANIFEST" ]]; then
     owner="$(python3 -c "
-import re,sys
+import re
 text=open('$MANIFEST').read()
-m=re.search(r'^\s*tooling_meta:\s*$(.*?)(?=^\s*\w+:\s*$)', text, re.S|re.M)
-block=m.group(1) if m else ''
-s=re.search(r'session(?:_id)?:\s*([0-9a-fA-F-]{8,})', block)
-print(s.group(1) if s else '')
+m=re.search(r'^  tooling_meta:\s*$', text, re.M)
+block=text[m.end():] if m else ''
+n=re.search(r'^  \w+:\s*$', block, re.M)
+block=block[:n.start()] if n else block
+# key is 'id:', not 'session:' — the earlier regex matched nothing and the
+# fallback silently never fired (masked by the hold file resolving first).
+k=re.search(r'^\s*id:\s*([0-9a-fA-F-]{8,})', block, re.M)
+print(k.group(1) if k else '')
 " 2>/dev/null)"
     [[ -n "$owner" ]] && owner_src="meta-sessions.yaml tooling_meta"
 fi
@@ -86,7 +102,86 @@ reason="exit $rc"
 [[ "$rc" == "76" ]] && reason="remat escalation hold ACTIVE"
 [[ "$rc" == "1" ]] && reason="mirror unclean / primary not on main"
 
-msg="**Kitchen is DIRTY and you own it.** hapi-kitchen-status exits ${rc} (${reason}).
+# ---- age escalation ------------------------------------------------------
+# Fire at T+0, then only when the hold crosses 2h / 8h / 24h, unless the state
+# fingerprint changed (progress => stay quiet and reset the ladder).
+STATE_DIR="${HAPI_KITCHEN_WATCHDOG_STATE_DIR:-$HOME/.local/state/hapi}"
+STATE_FILE="$STATE_DIR/kitchen-watchdog.state"
+mkdir -p "$STATE_DIR" 2>/dev/null || true
+
+hold_set_at=""
+if [[ -r "$HOLD_FILE" ]]; then
+    hold_set_at="$(python3 -c "
+import json
+try: print(json.load(open('$HOLD_FILE')).get('set_at') or '')
+except Exception: print('')
+" 2>/dev/null)"
+fi
+age_h=0
+if [[ -n "$hold_set_at" ]]; then
+    age_h="$(python3 -c "
+import datetime
+try:
+    t=datetime.datetime.fromisoformat('$hold_set_at'.replace('Z','+00:00'))
+    now=datetime.datetime.now(datetime.timezone.utc)
+    print(int((now-t).total_seconds()//3600))
+except Exception: print(0)
+" 2>/dev/null)"
+fi
+
+# Fingerprint: anything that means real movement. Remaining-conflict count is
+# the honest progress signal; the hold reason catches a different failure.
+remaining="?"
+remat_wt="$(python3 -c "
+import json
+try: print(json.load(open('$HOLD_FILE')).get('remat_wt') or '')
+except Exception: print('')
+" 2>/dev/null)"
+if [[ -n "$remat_wt" && -d "$remat_wt" ]]; then
+    remaining="$(git -C "$remat_wt" diff --name-only --diff-filter=U 2>/dev/null | wc -l | tr -d ' ')"
+fi
+# Include the hold's OWN reason, not just the one derived from the exit code:
+# a different failure behind the same code deserves a fresh ping, which is what
+# "state change resets the ladder" has to mean.
+hold_reason=""
+if [[ -r "$HOLD_FILE" ]]; then
+    hold_reason="$(python3 -c "
+import json
+try: print((json.load(open('$HOLD_FILE')).get('reason') or '').strip())
+except Exception: print('')
+" 2>/dev/null)"
+fi
+fingerprint="rc=$rc|reason=$reason|hold=$hold_reason|remaining=$remaining"
+
+prev_fingerprint=""; prev_rung=""
+if [[ -r "$STATE_FILE" ]]; then
+    prev_fingerprint="$(sed -n '1p' "$STATE_FILE")"
+    prev_rung="$(sed -n '2p' "$STATE_FILE")"
+fi
+
+rung=0
+for threshold in 2 8 24; do
+    [[ "$age_h" -ge "$threshold" ]] && rung=$threshold
+done
+
+notify_operator=0
+should_ping=0
+if [[ "$fingerprint" != "$prev_fingerprint" ]]; then
+    # State moved (progress, or a new failure) — ping once, reset the ladder.
+    should_ping=1
+elif [[ "$rung" != "$prev_rung" ]]; then
+    should_ping=1
+    [[ "$rung" -ge 24 ]] && notify_operator=1
+fi
+
+printf '%s\n%s\n' "$fingerprint" "$rung" > "$STATE_FILE" 2>/dev/null || true
+
+if [[ "$should_ping" -eq 0 ]]; then
+    echo "kitchen-watchdog: DIRTY ($reason) age=${age_h}h remaining=$remaining — already escalated at rung ${prev_rung}h, staying quiet"
+    exit 1
+fi
+
+msg="**Kitchen is DIRTY and you own it.** hapi-kitchen-status exits ${rc} (${reason}). Hold age **${age_h}h**, unresolved conflicts **${remaining}**.
 
 \`\`\`
 ${status_line}
@@ -114,11 +209,41 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
     exit 1
 fi
 
+send_ping() {
+    local target="$1" body="$2"
+    printf '%s' "$body" | hapi-ping-peer "$target" --message-file - --delivery-mode auto >/dev/null 2>&1 \
+        || hapi-ping-peer "$target" "$body" >/dev/null 2>&1
+}
+
 if command -v hapi-ping-peer >/dev/null 2>&1; then
-    printf '%s' "$msg" | hapi-ping-peer "$owner" --message-file - --delivery-mode auto >/dev/null 2>&1 \
-        || hapi-ping-peer "$owner" "$msg" >/dev/null 2>&1 \
+    send_ping "$owner" "$msg" \
         || { echo "kitchen-watchdog: ping to $owner FAILED" >&2; exit 2; }
-    echo "kitchen-watchdog: DIRTY ($reason) — pinged $owner [$owner_src]"
+    echo "kitchen-watchdog: DIRTY ($reason) age=${age_h}h remaining=$remaining rung=${rung}h — pinged $owner [$owner_src]"
+
+    # Owner-only forever is how 41 hours passes without a human smelling it.
+    # At the 24h rung, escalate to the seat that reports to the operator.
+    if [[ "$notify_operator" -eq 1 ]]; then
+        escalate="$(python3 -c "
+import re
+text=open('$MANIFEST').read()
+m=re.search(r'^  pr_watcher:\s*$', text, re.M)
+block=text[m.end():] if m else ''
+n=re.search(r'^  \w+:\s*$', block, re.M)
+block=block[:n.start()] if n else block
+k=re.search(r'^\s*id:\s*([0-9a-fA-F-]{8,})', block, re.M)
+print(k.group(1) if k else '')
+" 2>/dev/null)"
+        if [[ -n "$escalate" && "$escalate" != "$owner" ]]; then
+            send_ping "$escalate" "**Escalation: remat hold has been open ${age_h}h.** Owner \`${owner}\` has been pinged at every rung and the kitchen is still dirty (${reason}), ${remaining} conflicts unresolved.
+
+\`\`\`
+${status_line}
+\`\`\`
+
+Raising it with you because owner-only pings are how a 41-hour hold passed unnoticed once already. Not asking you to take the absorb — just that a second seat (and the operator) can see the age." \
+                && echo "kitchen-watchdog: escalated to $escalate at ${age_h}h"
+        fi
+    fi
     exit 1
 fi
 

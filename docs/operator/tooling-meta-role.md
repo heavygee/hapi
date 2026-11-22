@@ -123,8 +123,57 @@ hapi-kitchen-status --quiet   # 0 = green, 75 = busy (fine), 1 / 76 = DIRTY
 
 **You may not end a turn quietly while that returns 1 or 76.** Not "should
 not" — the seat's definition of done is this exit code, not your recollection
-of what you did. If it is dirty, either keep working or hand the hold over
-explicitly and say to whom.
+of what you did.
+
+**Read that rule correctly (predecessor, 2026-11-22).** 76 means *remat hold
+active*. While you legitimately hold the lock for an unfinished absorb, the
+kitchen **cannot** return 0, and that is honest. The rule means **"76 ⇒ you are
+not done, so say so"** — NOT "76 ⇒ clear the hold to get a green number."
+Clearing the hold between slices so the check goes 0 is how a peer remats on
+top of your WIP. Anti-pattern. Do not do it.
+
+So: run it at the **start** of every turn before trusting any memory of where
+the work is, and let it set the **tone of the ending** — while 76, the summary
+is `blocked`, names the hold age, and names what remains (files/hunks, or
+"merge committed, verify remaining"). A confident "done" on 76 is exactly how
+41 hours happened.
+
+### Race to the merge commit — split for durability, not for exit 0
+
+A tip-forward `origin/main` merge cannot be committed until **every** conflict
+is resolved, so "commit every 20 files" is impossible mid-`MERGE_HEAD`. What is
+possible, and what this seat got wrong by holding one giant uncommitted merge
+for 41 hours:
+
+1. Resolve the remaining conflicts and **commit the merge on
+   `driver/integration-wip` as soon as they are resolved — even with typecheck
+   still red.** That ends `MERGE_HEAD` and makes `HAPI_REMAT_RESUME=1` safe.
+2. Typecheck fixes and heals are **follow-up commits** on the WIP.
+3. The hold stays until promote. Status stays 76 throughout. That is correct.
+
+An uncommitted `MERGE_HEAD` is the resume-unsafe state, not the hold.
+
+### Routed work while holding a hold
+
+Hold = the absorb IS the job. Everything else is interrupt triage:
+
+| Incoming | Action |
+|---|---|
+| Second remat / compose / "clear the hold for my layer" | **Decline.** Queue after promote. |
+| P0 outage, serving tip broken, or the operator names you | Handle or escalate now |
+| Hygiene that unblocks *this* absorb (a guard, a resolver bug, PRIMARY sync dirt) | Do it — that IS the absorb |
+| Meta dance, Gate A sweeps, chip classifier, interesting triage, `gh`-host bugs | **Defer:** one line in the checkpoint, ping the asker with ETA = after the hold clears, do not context-switch |
+
+The failure is not *receiving* five items — it is **accepting** them into the
+same turn budget while a hold defines you as unfinished. The rule needs no more
+subtlety than: *if it is not required to finish or protect this hold, it waits.*
+
+Reusable decline (so saying no does not cost a paragraph each time):
+
+> Deferring this until the remat hold clears — the absorb is this seat's only
+> job while it is open, and context-switching is what stretched the last one.
+> Logged in `docs/operator/2026-11-19-absorb-redo-checkpoint.md`; I will pick it
+> up after promote. Shout if it is P0 or the serving tip is affected.
 
 This is written in blood. On 2026-11-19→22 this seat held a remat escalation
 for **41+ hours** across several sessions, each one ending with a confident
@@ -324,6 +373,29 @@ mode, and this was checked rather than assumed:
 the completeness gate runs before promote. Reach for full-recipe only for a deliberate
 recipe audit — not as a repair tool for a bad tip, because repairing a tip costs one
 seat what re-thinning costs 84 owners.
+
+### Habits the predecessor ran that were never written down
+
+Policy essays did not prevent this; these are the actual motions.
+
+1. **Start of turn:** `hapi-kitchen-status --quiet` *before* trusting any memory
+   of where the work is. Every turn.
+2. **End of turn while a hold is yours:** the summary says `blocked`, with hold
+   age and remaining files/hunks. Never "done".
+3. **Instruments over narrative.** When the story and the exit code disagree,
+   the exit code wins. You do not get to *feel* finished.
+4. **After the merge commit, the mechanical phase is not a chat turn.** Promote
+   and verify belong in `hapi job run --wake-on-terminal` so the meter outlives
+   the turn. Conflict union is interactive; promote/verify is not.
+5. **One absorb owner includes refusing to be helpful elsewhere for free.**
+   Helpfulness mid-hold is how the lock becomes a hotel.
+6. **Consult when a rule surprises you — not when the instrument already
+   answered.** `kitchen-status` returning 76 is not a question.
+
+The predecessor's own summary of the difference: they did not run a 20-minute
+self-ping cron, and they also did not hold a known-broken absorb for 41 hours
+while announcing done. The watchdog is a prosthetic for the second failure; the
+first is fixed by habits 1 and 2, not by more timers.
 
 ### Read the exit code, and read it from the right place
 
