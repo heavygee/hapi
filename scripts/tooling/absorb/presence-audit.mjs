@@ -127,7 +127,112 @@ export const auditOne = ({ base, ours, theirs, resolved }) => {
     }
 }
 
+/**
+ * File-level audit: which files does either parent have that the resolution
+ * does not?
+ *
+ * This exists because the identifier audit above cannot see a file that is
+ * simply gone — and because my first attempt at this check LIED. It compared
+ * `side - base` plus `fork & theirs` and reported "0 files owed" on a tree that
+ * was missing 53 of them. A positive control (spike three known-missing files
+ * back out, see whether the probe names them) scored 0 of 3: every real loss
+ * was in the BASE and deleted by ONE side, which all three predicates miss by
+ * construction.
+ *
+ * So the predicate is the only one that cannot be fooled: present in EITHER
+ * parent, absent here. The results are then CLASSIFIED rather than acted on,
+ * because "in base, kept by one side, deleted by the other" is genuinely
+ * ambiguous — honouring a deliberate deletion is correct, and bulk-reviving
+ * code a side removed on purpose is its own bug.
+ *
+ * `orphanTests` is the one class that is never ambiguous and never visible any
+ * other way: a test file that is absent while its implementation is still
+ * present here. Nothing imports a test, so the compiler, the test run and the
+ * gate all stay silent while the subject ships with its coverage deleted.
+ */
+export const auditTrees = ({ base, fork, theirs, resolved }) => {
+    const inEither = new Set([...fork, ...theirs])
+    const absent = [...inEither].filter((p) => !resolved.has(p)).sort()
+
+    const classify = (p) => {
+        const b = base.has(p), f = fork.has(p), t = theirs.has(p)
+        if (!b && f && !t) return 'forkAdded'
+        if (!b && t && !f) return 'theirsAdded'
+        if (b && f && t) return 'keptByBoth'
+        if (b && f && !t) return 'theirsDeleted'
+        if (b && t && !f) return 'forkDeleted'
+        return 'other'
+    }
+
+    const classes = { forkAdded: [], theirsAdded: [], keptByBoth: [], theirsDeleted: [], forkDeleted: [], other: [] }
+    for (const p of absent) classes[classify(p)].push(p)
+
+    // A test whose subject is still here. Unambiguous, and invisible otherwise.
+    const orphanTests = absent
+        .filter((p) => /\.test\.(ts|tsx)$/.test(p))
+        .map((p) => {
+            const stem = p.replace(/\.test\.(ts|tsx)$/, '')
+            const impl = ['.ts', '.tsx'].map((e) => stem + e).find((c) => resolved.has(c))
+            return impl ? { test: p, impl, side: fork.has(p) ? 'fork' : 'theirs' } : null
+        })
+        .filter(Boolean)
+
+    // Definite losses: an addition by either side that simply is not here, and
+    // anything both sides agreed to keep.
+    const definite = [...classes.forkAdded, ...classes.theirsAdded, ...classes.keptByBoth].sort()
+    return { absent, classes, orphanTests, definite }
+}
+
 if (import.meta.main) {
+    // --trees: file-level audit across the two merge parents.
+    if (has('--trees')) {
+        const baseRef = arg('--base')
+        const forkRef = arg('--ours')
+        const theirsRef = arg('--theirs')
+        if (!baseRef || !forkRef || !theirsRef) {
+            console.error('usage: presence-audit.mjs --trees --base <ref> --ours <ref> --theirs <ref> [--git <wt>] [--strict]')
+            process.exit(2)
+        }
+        const lsTree = (ref) => new Set(
+            execFileSync('git', ['-C', gitTree, 'ls-tree', '-r', '--name-only', ref],
+                { encoding: 'utf8', maxBuffer: 1 << 28 }).split('\n').filter(Boolean))
+        // Untracked files count as present: during an absorb the restored files
+        // are not staged yet, and calling them missing would be a false alarm.
+        // `--untracked-files=all` is required — plain `git status` reports a NEW
+        // DIRECTORY as one entry, which hid every file inside it.
+        const statusLines = execFileSync('git', ['-C', gitTree, 'status', '--porcelain', '--untracked-files=all'],
+            { encoding: 'utf8', maxBuffer: 1 << 28 }).split('\n').filter(Boolean)
+        const untracked = statusLines.filter((l) => l.startsWith('??')).map((l) => l.slice(3))
+        const resolved = new Set([...lsTree('HEAD'), ...untracked])
+
+        const r = auditTrees({ base: lsTree(baseRef), fork: lsTree(forkRef), theirs: lsTree(theirsRef), resolved })
+        const label = {
+            forkAdded: 'added by ours, absent here      (LOSS)',
+            theirsAdded: 'added by theirs, absent here    (LOSS)',
+            keptByBoth: 'kept by BOTH, absent here       (LOSS)',
+            theirsDeleted: 'in base, ours kept / theirs deleted (review)',
+            forkDeleted: 'in base, theirs kept / ours deleted (review)',
+            other: 'unclassified                    (review)',
+        }
+        for (const [k, v] of Object.entries(r.classes)) {
+            if (!v.length) continue
+            console.log(`${label[k]}: ${v.length}`)
+            for (const p of v.slice(0, 20)) console.log(`      ${p}`)
+            if (v.length > 20) console.log(`      ... and ${v.length - 20} more`)
+        }
+        if (r.orphanTests.length) {
+            console.log('')
+            console.log(`ORPHANED TESTS — implementation still ships, test is gone: ${r.orphanTests.length}`)
+            console.log('  Nothing imports a test file, so neither the compiler nor the test run')
+            console.log('  can notice these. They are never ambiguous.')
+            for (const o of r.orphanTests) console.log(`      ${o.test}   (impl ${o.impl}, from ${o.side})`)
+        }
+        console.log('')
+        console.log(`tree audit: ${r.absent.length} path(s) absent · ${r.definite.length} definite loss(es) · ${r.orphanTests.length} orphaned test(s)`)
+        const fatal = r.definite.length + r.orphanTests.length
+        process.exit(fatal && strict ? 1 : 0)
+    }
+
     const baseRef = arg('--base')
     const oursRef = arg('--ours')
     const theirsRef = arg('--theirs')

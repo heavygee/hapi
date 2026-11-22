@@ -7,7 +7,7 @@
  * how a tool talks you into re-adding code the fork removed on purpose — it is
  * the exact bug the first version of this check had.
  */
-import { auditOne, identifiers } from './presence-audit.mjs'
+import { auditOne, auditTrees, identifiers } from './presence-audit.mjs'
 
 let pass = 0, fail = 0
 const ok = () => pass++
@@ -163,6 +163,92 @@ const eqArr = (a, e, m) => (JSON.stringify(a) === JSON.stringify(e) ? ok() : bad
 {
     const got = identifiers(['const pattern = "*/"', 'const afterPattern = 2'].join('\n'))
     eqArr([...got].includes('afterPattern'), true, 'parsing continues past a string containing */')
+}
+
+// --- auditTrees: file-level losses ---------------------------------------
+const S = (...xs) => new Set(xs)
+
+// 16. THE CASE THAT DEFEATED THE FIRST PROBE. A file in the BASE that one side
+//     deleted and the other kept, absent from the resolution. `side - base`
+//     and `fork & theirs` both miss it; this is how 53 real files hid.
+{
+    const r = auditTrees({
+        base: S('a.ts', 'kept.ts'),
+        fork: S('a.ts', 'kept.ts'),      // fork kept it
+        theirs: S('kept.ts'),            // theirs deleted it
+        resolved: S('kept.ts'),          // and it is not here
+    })
+    eqArr(r.absent, ['a.ts'], 'a base file kept by one side must be reported absent')
+    eqArr(r.classes.theirsDeleted, ['a.ts'], 'classified as theirs-deleted, not as a definite loss')
+    eqArr(r.definite, [], 'ambiguous class is NOT a definite loss')
+}
+
+// 17. the mirror case: base file the fork deleted and theirs kept
+{
+    const r = auditTrees({
+        base: S('b.ts'), fork: S(), theirs: S('b.ts'), resolved: S(),
+    })
+    eqArr(r.classes.forkDeleted, ['b.ts'], 'classified as fork-deleted')
+}
+
+// 18. an addition by either side that is absent IS a definite loss
+{
+    const r = auditTrees({
+        base: S(), fork: S('f.ts'), theirs: S('t.ts'), resolved: S(),
+    })
+    eqArr(r.classes.forkAdded, ['f.ts'], 'fork addition')
+    eqArr(r.classes.theirsAdded, ['t.ts'], 'theirs addition')
+    eqArr(r.definite, ['f.ts', 't.ts'], 'both are definite losses')
+}
+
+// 19. a file BOTH sides kept, absent here, is a definite loss
+{
+    const r = auditTrees({
+        base: S('c.ts'), fork: S('c.ts'), theirs: S('c.ts'), resolved: S(),
+    })
+    eqArr(r.classes.keptByBoth, ['c.ts'], 'kept by both')
+    eqArr(r.definite, ['c.ts'], 'nobody deleted it, so it is a loss')
+}
+
+// 20. nothing absent -> nothing reported
+{
+    const r = auditTrees({
+        base: S('a.ts'), fork: S('a.ts'), theirs: S('a.ts'), resolved: S('a.ts'),
+    })
+    eqArr(r.absent, [], 'clean tree reports nothing')
+    eqArr(r.orphanTests, [], 'and no orphan tests')
+}
+
+// 21. ORPHANED TEST: the test is gone, its implementation still ships. Never
+//     ambiguous, and invisible to the compiler, the test run and the gate.
+{
+    const r = auditTrees({
+        base: S('x.ts', 'x.test.ts'),
+        fork: S('x.ts', 'x.test.ts'),
+        theirs: S('x.ts'),
+        resolved: S('x.ts'),
+    })
+    eqArr(r.orphanTests.map(o => o.test), ['x.test.ts'], 'orphaned test is reported')
+    eqArr(r.orphanTests[0].impl, 'x.ts', 'and names the implementation that still ships')
+    eqArr(r.orphanTests[0].side, 'fork', 'and which side had it')
+}
+
+// 22. a test whose implementation is ALSO gone is not an "orphan" — the whole
+//     feature left, which the classes above already cover.
+{
+    const r = auditTrees({
+        base: S('y.ts', 'y.test.ts'), fork: S('y.ts', 'y.test.ts'), theirs: S(), resolved: S(),
+    })
+    eqArr(r.orphanTests, [], 'not an orphan when the subject is gone too')
+}
+
+// 23. .test.tsx is recognised, and matched against a .tsx implementation
+{
+    const r = auditTrees({
+        base: S('C.tsx', 'C.test.tsx'), fork: S('C.tsx', 'C.test.tsx'),
+        theirs: S('C.tsx'), resolved: S('C.tsx'),
+    })
+    eqArr(r.orphanTests.map(o => o.test), ['C.test.tsx'], 'tsx test orphan detected')
 }
 
 console.log(`presence-audit: ${pass} passed, ${fail} failed`)
