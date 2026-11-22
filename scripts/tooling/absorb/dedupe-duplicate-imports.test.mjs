@@ -153,7 +153,7 @@ const eq = (actual, expected, msg) => (actual === expected ? ok() : bad(`${msg}\
     const src = ['import {', '    A,', '    B', "} from 'x'", "import { C } from 'x'"].join('\n')
     const r = dedupeImports(src, { multiline: true })
     eq(r.merged, 1, 'one duplicate removed')
-    eq(r.text, "import { A, B, C } from 'x'", 'collapsed and merged')
+    eq(r.text, "import {\n    A,\n    B,\n    C\n} from 'x'", 'merged, and the multi-line shape is preserved')
 }
 
 // 17. THE REFORMAT GUARD. A multi-line block with no duplicate must come back
@@ -180,7 +180,7 @@ const eq = (actual, expected, msg) => (actual === expected ? ok() : bad(`${msg}\
     const r = dedupeImports(src, { multiline: true })
     eq(r.merged, 1, 'only the x-module pair merges')
     eq(r.text, [
-        "import { A, B } from 'x'",
+        'import {', '    A,', '    B', "} from 'x'",
         'const between = 1',
         'import {', '    KeepMe,', '    AlsoKeep', "} from 'z'",
         'const after = 2',
@@ -208,8 +208,8 @@ const eq = (actual, expected, msg) => (actual === expected ? ok() : bad(`${msg}\
 {
     const src = ['import {', '    A', "} from 'x'", 'import {', '    B', "} from 'x'"].join('\n')
     const r = dedupeImports(src, { multiline: true })
-    eq(r.merged, 1, 'two blocks collapse to one')
-    eq(r.text, "import { A, B } from 'x'", 'merged')
+    eq(r.merged, 1, 'two blocks merge into one')
+    eq(r.text, "import {\n    A,\n    B\n} from 'x'", 'merged, shape preserved')
 }
 
 // 22. an unterminated `import {` is not treated as a block (it would otherwise
@@ -225,7 +225,36 @@ const eq = (actual, expected, msg) => (actual === expected ? ok() : bad(`${msg}\
 {
     const src = ['import {', '    A,', '    B,', "} from 'x'", "import { C } from 'x'"].join('\n')
     const r = dedupeImports(src, { multiline: true })
-    eq(r.text, "import { A, B, C } from 'x'", 'trailing comma handled')
+    eq(r.text, "import {\n    A,\n    B,\n    C\n} from 'x'", 'trailing comma handled')
+}
+
+// 47. A merge INTO a multi-line block re-emits multi-line. Collapsing it to one
+//     line is semantically identical, which is why nothing caught it on
+//     overseerEntity.ts — a 39-line block became a single 1,400-char line.
+{
+    const src = [
+        'import {',
+        '    Alpha,',
+        '    Beta',
+        "} from 'x'",
+        "import { Gamma } from 'x'",
+        'const after = 1',
+    ].join('\n')
+    const r = dedupeImports(src, { multiline: true })
+    eq(r.merged, 1, 'the duplicate module is merged')
+    eq(r.text.split('\n').every((l) => l.length < 60), true, 'no mega-line is produced')
+    eq(r.text.includes('import {\n'), true, 'still a multi-line block')
+    for (const n of ['Alpha', 'Beta', 'Gamma']) {
+        eq(r.text.includes(n), true, `${n} survives the merge`)
+    }
+    eq(r.text.endsWith('const after = 1'), true, 'following code is intact')
+}
+
+// 48. A merge into a SINGLE-line block stays single-line.
+{
+    const r = dedupeImports("import { A } from 'x'\nimport { B } from 'x'\n", { multiline: true })
+    eq(r.text.includes('import {\n'), false, 'single-line input stays single-line')
+    eq(r.text.includes("import { A, B } from 'x'"), true, 'merged on one line')
 }
 
 console.log(`dedupe-duplicate-imports: ${pass} passed, ${fail} failed`)

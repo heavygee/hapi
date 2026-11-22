@@ -40,6 +40,7 @@ set -euo pipefail
 
 err() { echo "hapi-sentinel-check: $*" >&2; }
 die() { err "$*"; exit 2; }
+say() { [[ "$QUIET" == "1" ]] || echo "$*"; }
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TREE="${HAPI_DRIVER:-$HOME/coding/hapi/driver}"
@@ -48,6 +49,7 @@ QUIET=0
 AUTO=0
 REQUIRED=0
 REQFILE=""
+SINGLE_PARENT=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -57,6 +59,7 @@ while [[ $# -gt 0 ]]; do
         --auto) AUTO=1; shift ;;
         --required) REQUIRED=1; shift ;;
         --required-file) REQFILE="$2"; shift 2 ;;
+        --single-parent) SINGLE_PARENT="$2"; shift 2 ;;
         # --auto-sample is gone: --auto now reads every identifier, so there is
         # nothing to size. Accepted and ignored so an older caller still runs.
         --auto-sample) err "--auto-sample is obsolete (coverage is complete); ignoring"; shift 2 ;;
@@ -66,6 +69,61 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -d "$TREE" ]] || die "tree not found: $TREE"
+
+# --single-parent: a file that exists on only ONE side of a merge had nothing to
+# conflict with, so the resolution should be that parent's copy BYTE-FOR-BYTE.
+# Any drift is a resolution error rather than a judgement call, which makes this
+# the cheapest sentinel in the file: no declaration, no foresight, no sampling.
+#
+# It earned its place. On the 11-22 absorb it was the check that found
+# cli/src/modules/common/opencodeSessions.test.ts had silently lost one line of
+# its subprocess preamble (`import { join } from 'node:path'`) — 14 failures
+# from a file nobody had reason to suspect, because it only ever existed on one
+# side. It also found a 39-line import block collapsed to a single
+# 1,400-character line in hub/src/sync/overseerEntity.ts.
+#
+# Drift is reported, not judged: adapting a single-parent file to the merged
+# APIs around it is legitimate, and so is an intentional reformat. The check
+# says "justify this", the same contract as presence-audit.
+if [[ -n "$SINGLE_PARENT" ]]; then
+    git -C "$TREE" rev-parse --verify "${SINGLE_PARENT}^2" >/dev/null 2>&1 \
+        || die "--single-parent needs a MERGE commit (no second parent on $SINGLE_PARENT)"
+    sp_tmp="$(mktemp -d)"
+    trap 'rm -rf "$sp_tmp"' EXIT
+    git -C "$TREE" ls-tree -r --name-only "${SINGLE_PARENT}^1" | sort > "$sp_tmp/p1"
+    git -C "$TREE" ls-tree -r --name-only "${SINGLE_PARENT}^2" | sort > "$sp_tmp/p2"
+    git -C "$TREE" ls-files | sort > "$sp_tmp/mine"
+    sp_checked=0; sp_drift=0
+    for side in 1 2; do
+        other=$(( side == 1 ? 2 : 1 ))
+        comm -23 "$sp_tmp/p$side" "$sp_tmp/p$other" | comm -12 - "$sp_tmp/mine" > "$sp_tmp/only$side"
+        while IFS= read -r f; do
+            [[ -n "$f" ]] || continue
+            [[ -f "$TREE/$f" ]] || continue
+            sp_checked=$((sp_checked+1))
+            if ! git -C "$TREE" show "${SINGLE_PARENT}^${side}:$f" 2>/dev/null \
+                 | diff -q - "$TREE/$f" >/dev/null 2>&1; then
+                # `|| true` is load-bearing: diff exits 1 when the files differ,
+                # pipefail propagates that out of the command substitution, and
+                # set -e then killed the whole run at the FIRST drift it found —
+                # reporting nothing and exiting 1, which reads exactly like a
+                # clean-but-failing check.
+                n=$( { git -C "$TREE" show "${SINGLE_PARENT}^${side}:$f" 2>/dev/null | diff - "$TREE/$f" || true; } | wc -l)
+                echo "DRIFT    $f" >&2
+                echo "         present only on parent $side, but differs from it ($n diff line(s))" >&2
+                sp_drift=$((sp_drift+1))
+            fi
+        done < "$sp_tmp/only$side"
+    done
+    say ""
+    say "single-parent: $sp_checked file(s) checked, $sp_drift diverged"
+    if [[ "$sp_drift" -gt 0 ]]; then
+        err "$sp_drift single-parent file(s) differ from the only parent that had them."
+        err "Each is either a resolution error or a deliberate adaptation — say which."
+        exit 1
+    fi
+    exit 0
+fi
 # Default to the manifest INSIDE the composed tree: that is the one the remat
 # actually used, not whatever the mirror happens to have checked out.
 [[ -n "$MANIFEST" ]] || MANIFEST="$TREE/config/driver-manifest.yaml"
@@ -78,7 +136,6 @@ if [[ "$REQUIRED" -ne 1 ]]; then
     [[ -f "$MANIFEST" ]] || die "manifest not found: $MANIFEST"
 fi
 
-say() { [[ "$QUIET" == "1" ]] || echo "$*"; }
 
 
 # --auto: derive the check from each layer's own diff instead of a declaration.
