@@ -22,6 +22,16 @@
 #     ladder, because that is progress and deserves silence
 # State lives in ~/.local/state/hapi/kitchen-watchdog.state
 #
+# Reproducible check on the ladder (it was wrong once, in the direction of
+# nagging the owner about their own progress reports):
+#   S=$(mktemp -d)
+#   r() { HAPI_KITCHEN_WATCHDOG_STATE_DIR="$S" bash hapi-kitchen-watchdog.sh --dry-run | tail -1; }
+#   r   # 1st: no prior state  -> announces
+#   r   # 2nd: unchanged       -> "unchanged ... staying quiet"
+#   <change the hold reason>
+#   r   # 3rd: state moved     -> "state MOVED ... staying quiet"
+#   r   # 4th: unchanged       -> quiet again
+#
 # Exit codes (mirrors hapi-kitchen-status so a timer can alert on them):
 #   0   kitchen green, or busy (75) which is not a hygiene failure
 #   1   kitchen dirty and the owning seat was pinged
@@ -166,10 +176,23 @@ done
 
 notify_operator=0
 should_ping=0
-if [[ "$fingerprint" != "$prev_fingerprint" ]]; then
-    # State moved (progress, or a new failure) — ping once, reset the ladder.
+if [[ -z "$prev_fingerprint" ]]; then
+    # First time this dirty state is seen at all — say so once.
     should_ping=1
+elif [[ "$fingerprint" != "$prev_fingerprint" ]]; then
+    # State MOVED. The header says progress deserves silence, and the first
+    # implementation then pinged on every change anyway — which turned the
+    # owner's own progress reports into a nag loop: each time the hold reason
+    # was updated with fresh numbers the fingerprint changed and this fired,
+    # three times in one working session, every one of them telling the owner
+    # something they had just written themselves.
+    #
+    # So movement resets the ladder and stays QUIET. The ladder below is what
+    # breaks silence, and a hold that is genuinely progressing re-earns its
+    # quiet every time it moves.
+    should_ping=0
 elif [[ "$rung" != "$prev_rung" ]]; then
+    # Age crossed 2h / 8h / 24h with NOTHING having moved. That is the signal.
     should_ping=1
     [[ "$rung" -ge 24 ]] && notify_operator=1
 fi
@@ -177,7 +200,11 @@ fi
 printf '%s\n%s\n' "$fingerprint" "$rung" > "$STATE_FILE" 2>/dev/null || true
 
 if [[ "$should_ping" -eq 0 ]]; then
-    echo "kitchen-watchdog: DIRTY ($reason) age=${age_h}h remaining=$remaining — already escalated at rung ${prev_rung}h, staying quiet"
+    if [[ "$fingerprint" != "$prev_fingerprint" ]]; then
+        echo "kitchen-watchdog: DIRTY ($reason) age=${age_h}h remaining=$remaining — state MOVED since the last check, ladder reset, staying quiet"
+    else
+        echo "kitchen-watchdog: DIRTY ($reason) age=${age_h}h remaining=$remaining — unchanged, already escalated at rung ${prev_rung}h, staying quiet"
+    fi
     exit 1
 fi
 
