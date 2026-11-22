@@ -89,15 +89,33 @@ export const identifiers = (text) => {
             line = line.slice(close + 2)
             inBlock = false
         }
-        // Strip whole inline block comments, then a trailing opener, then line comments.
+        // Strip whole inline block comments first, so a `//` INSIDE one cannot
+        // be mistaken for a line comment.
         line = line.replace(/\/\*[\s\S]*?\*\//g, ' ')
+        // Then honour whichever of `/*` and `//` comes FIRST. Order matters and
+        // getting it wrong is not a small error: this used to test for `/*`
+        // before stripping line comments, so a line comment that merely
+        // MENTIONED one — `// regardless of which \`/sessions/*\` child matched`
+        // in web/src/router.tsx — set inBlock and swallowed the entire rest of
+        // the file. 338 lines of router.tsx were invisible, including
+        // createAppRouter and normalizeRouterBasepath, and the audit reported
+        // them as LOST. A false positive wastes a few minutes; this was also a
+        // false NEGATIVE for every real loss below the trigger line, in every
+        // file with that shape, and a check that silently stops reading is the
+        // exact failure this tool exists to prevent.
         const open = line.indexOf('/*')
-        if (open !== -1) {
+        // `://` is not a line comment — otherwise any URL in a string truncates
+        // the line and drops the identifiers after it.
+        let lineComment = -1
+        for (let i = line.indexOf('//'); i !== -1; i = line.indexOf('//', i + 1)) {
+            if (i === 0 || line[i - 1] !== ':') { lineComment = i; break }
+        }
+        if (open !== -1 && (lineComment === -1 || open < lineComment)) {
             inBlock = true
             line = line.slice(0, open)
+        } else if (lineComment !== -1) {
+            line = line.slice(0, lineComment)
         }
-        const lineComment = line.indexOf('//')
-        if (lineComment !== -1) line = line.slice(0, lineComment)
         const s = line.trim()
         if (!s) continue
         for (const m of line.matchAll(/\b[A-Za-z_$][A-Za-z0-9_$]{3,}\b/g)) {

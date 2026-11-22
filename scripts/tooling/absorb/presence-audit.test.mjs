@@ -251,5 +251,61 @@ const S = (...xs) => new Set(xs)
     eqArr(r.orphanTests.map(o => o.test), ['C.test.tsx'], 'tsx test orphan detected')
 }
 
+
+// 24. A LINE COMMENT MENTIONING `/*` MUST NOT OPEN A BLOCK. This was a real
+//     false negative: `// ... `/sessions/*` ...` in web/src/router.tsx set the
+//     block flag and swallowed the remaining 338 lines, so createAppRouter and
+//     normalizeRouterBasepath read as LOST and every genuine loss below that
+//     line was invisible.
+{
+    const got = identifiers([
+        'const before = 1',
+        '// survives regardless of which `/sessions/*` child is actually matched',
+        'const afterTheMention = 2',
+        'function stillVisible() {}',
+    ].join('\n'))
+    eqArr(got.has('afterTheMention'), true, 'code after the mention is still read')
+    eqArr(got.has('stillVisible'), true, 'and so is everything further down')
+    eqArr(got.has('before'), true, 'and the line before it')
+}
+
+// 25. A genuine block opener on a line still opens a block.
+{
+    const got = identifiers([
+        'const visible = 1 /* opener',
+        'swallowedWord',
+        '*/ const tailCode = 2',
+    ].join('\n'))
+    eqArr(got.has('visible'), true, 'code before the opener survives')
+    eqArr(got.has('swallowedWord'), false, 'the comment body is excluded')
+    eqArr(got.has('tailCode'), true, 'code after the close survives')
+}
+
+// 26. `//` inside a block comment does not end the block early (which would
+//     strip the `*/` and leak the block state onward).
+{
+    const got = identifiers([
+        '/* opener with a // inside it',
+        'commentBody',
+        '*/',
+        'const afterBlock = 1',
+    ].join('\n'))
+    eqArr(got.has('commentBody'), false, 'body still excluded')
+    eqArr(got.has('afterBlock'), true, 'block closed properly')
+}
+
+// 27. A URL in a string is not a line comment — `://` must not truncate.
+{
+    const got = identifiers("const url = 'https://example.com/x' + trailingIdent")
+    eqArr(got.has('trailingIdent'), true, 'identifiers after a URL survive')
+}
+
+// 28. A real line comment AFTER a URL on the same line still works.
+{
+    const got = identifiers("const endpointUrl = 'https://x' // droppedWord")
+    eqArr(got.has('droppedWord'), false, 'the real line comment is still stripped')
+    eqArr(got.has('endpointUrl'), true, 'and the code before it is kept')
+}
+
 console.log(`presence-audit: ${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)
