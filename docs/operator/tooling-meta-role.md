@@ -147,12 +147,29 @@ Three specific traps that produced those confident summaries:
 - **Routed side-work is the main way this seat loses days.** Each item is real.
   Decline or defer while a hold is yours, and route it back with a reason.
 
-Backstop so this cannot rely on diligence:
-`scripts/tooling/hapi-kitchen-watchdog.sh` polls the same verdict and pings the
-hold owner (falling back to `meta-sessions.yaml` → `tooling_meta`) whenever it
-is dirty. Busy (75) deliberately does not ping, because a watchdog that cries
-wolf gets ignored. Run it from a timer (pattern:
-`hapi-runner-watchdog.timer`) or an agent-side cron.
+Backstop, INSTALLED AND ARMED 2026-11-22 — this does not rely on the seat's
+diligence, which is the point:
+
+- `hapi-kitchen-watchdog.timer` → `.service`, every 20min at :07/:27/:47
+  (+45s scatter), `Persistent=true` so a hold that went stale while the box was
+  down still gets caught. Install/disable:
+  `sudo bash scripts/tooling/install-hapi-kitchen-watchdog-timer.sh [--disable]`.
+- It defers entirely to `hapi-kitchen-status` for the verdict and pings the
+  **remat-hold owner** (falling back to `meta-sessions.yaml` → `tooling_meta`).
+- Busy (75) deliberately does not ping. A watchdog that cries wolf during a
+  long rebuild trains the seat to ignore it, and then it protects nothing.
+- `SuccessExitStatus=0 1`: exit 1 is "dirty, owner pinged" — the watchdog
+  working. Exit 2 (dirty, no owner resolvable) is left as a **unit failure**,
+  because that is the case that needs a human.
+
+Verified end to end, not just installed: a real fire logged
+`DIRTY (remat escalation hold ACTIVE) — pinged cbd1073e [remat hold owner]`
+with `Result=success ExecMainStatus=1`.
+
+**An agent cannot do this for itself.** You do not run between turns — ending a
+turn IS stopping — so the poll must live outside the agent. A session-scoped
+cron is not a substitute: it dies with the session and only fires while that
+session's REPL is idle.
 
 ## 3z. Done is not yours to declare — ask the predecessor
 
