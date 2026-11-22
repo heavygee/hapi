@@ -50,7 +50,12 @@ const read = (ref) => {
     return readFileSync(ref, 'utf8')
 }
 
-const EXPORT_RE = /^export\s+(?:declare\s+)?(?:const|let|var|type|interface|function|class|enum)\s+([A-Za-z0-9_$]+)/
+// Module-private definitions count. Matching only `export` silently skipped
+// five helpers across both sides of hub/src/store/sessions.ts on 2026-11-22 —
+// the tool reported "ported 0" while leaving the carrier's own call sites
+// unresolved, a count that reads like success. Anything declared at column 0
+// is a top-level definition whether it is exported or not.
+const EXPORT_RE = /^(?:export\s+)?(?:declare\s+)?(?:async\s+)?(?:const|let|var|type|interface|function|class|enum)\s+([A-Za-z0-9_$]+)/
 
 /**
  * Split a module into top-level definition chunks. A chunk starts at the first
@@ -109,8 +114,12 @@ const banner = [
 
 writeFileSync(out, `${carrierText.replace(/\s*$/, '\n')}${banner.join('\n')}${port.map((c) => c.text.replace(/\s*$/, '')).join('\n\n')}\n`)
 
-console.log(`ported ${port.length} fork-only definition(s) onto carrier -> ${out}`)
+console.log(`ported ${port.length} donor-only definition(s) onto carrier -> ${out}`)
 if (port.length) console.log(`  ${port.map((c) => c.name).join(', ')}`)
+if (!port.length) {
+    console.log('  (nothing donor-only — if the carrier still has unresolved call sites,')
+    console.log('   the missing symbol is NOT top-level: check nested/class members by hand)')
+}
 if (collisions.length) {
     console.error(`\n${collisions.length} name(s) exist on BOTH sides with different definitions — carrier kept, review each:`)
     for (const c of collisions) console.error(`  ${c.name}`)
