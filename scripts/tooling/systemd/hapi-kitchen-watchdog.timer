@@ -1,0 +1,27 @@
+# Kitchen watchdog schedule — every 20 minutes, off the hour marks.
+#
+# Fork-local. Install: sudo bash scripts/tooling/install-hapi-kitchen-watchdog-timer.sh
+#
+# Cadence reasoning: a remat hold that is legitimately in progress should not be
+# nagged every minute, and a stale one should not survive a coffee break. Twenty
+# minutes is the compromise. :07/:27/:47 keeps it off the top-of-hour where
+# hapi-meta-daily and the other hapi timers already land.
+#
+# Busy (hapi-kitchen-status exit 75) deliberately does not ping, so a long
+# rebuild does not train the seat to ignore this.
+
+[Unit]
+Description=HAPI kitchen hygiene watchdog timer (every 20min)
+Documentation=file:///home/heavygee/coding/hapi/docs/operator/tooling-meta-role.md
+
+[Timer]
+OnCalendar=*-*-* *:07,27,47:00
+RandomizedDelaySec=45s
+AccuracySec=15s
+# Catch up after a reboot or suspend: a hold that went stale while the box was
+# down is exactly the case this exists for.
+Persistent=true
+Unit=hapi-kitchen-watchdog.service
+
+[Install]
+WantedBy=timers.target

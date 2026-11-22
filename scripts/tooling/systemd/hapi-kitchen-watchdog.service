@@ -1,0 +1,47 @@
+# Kitchen watchdog — drag the responsible seat back to a dirty kitchen.
+#
+# Fork-local (heavygee estate). NOT upstream. NOT Tier-1.
+# Install: sudo bash scripts/tooling/install-hapi-kitchen-watchdog-timer.sh
+#
+# Why: on 2026-11-19→22 the tooling/meta seat held a remat escalation for 41+
+# hours across several sessions, each ending with a confident summary, while
+# hapi-kitchen-status sat at exit 76 the whole time. An agent cannot poll itself
+# between turns — it does not run between turns — so the poll has to live out
+# here and ping the seat awake.
+
+[Unit]
+Description=HAPI kitchen hygiene watchdog (pings the remat-hold owner while dirty)
+Documentation=file:///home/heavygee/coding/hapi/docs/operator/tooling-meta-role.md
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/home/heavygee/.hapi/settings.json
+ConditionPathExists=/home/heavygee/coding/hapi/scripts/tooling/hapi-kitchen-watchdog.sh
+
+[Service]
+Type=oneshot
+User=heavygee
+Group=heavygee
+Nice=15
+Environment=HOME=/home/heavygee
+Environment=USER=heavygee
+Environment=PATH=/home/heavygee/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HAPI_HOST=http://127.0.0.1:3006
+Environment=HAPI_PRIMARY=/home/heavygee/coding/hapi
+Environment=HAPI_SETTINGS=/home/heavygee/.hapi/settings.json
+Environment=NO_COLOR=1
+Environment=CLICOLOR=0
+# Optional overrides (~/.hapi/kitchen-watchdog.env): HAPI_REMAT_HOLD_FILE,
+# HAPI_KITCHEN_WATCHDOG_TARGET to force a ping target.
+EnvironmentFile=-/home/heavygee/.hapi/kitchen-watchdog.env
+WorkingDirectory=/home/heavygee/coding/hapi
+ExecStartPre=/usr/bin/mkdir -p /home/heavygee/.local/state/hapi
+# Non-blocking lock: if a previous fire is somehow still running, skip rather
+# than queue. A watchdog that backs up behind itself stops being a watchdog.
+ExecStart=/usr/bin/flock -n /home/heavygee/.local/state/hapi/kitchen-watchdog.lock \
+    /home/heavygee/coding/hapi/scripts/tooling/hapi-kitchen-watchdog.sh
+# Exit 1 means "dirty, owner pinged" — that is the watchdog working, not failing.
+# Exit 2 means dirty with no owner resolved, which SHOULD show as a failed unit.
+SuccessExitStatus=0 1
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hapi-kitchen-watchdog
