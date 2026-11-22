@@ -249,6 +249,44 @@ prefer the fuller helper module over a partial stub. Then the completeness gate
 must pass **before** any typecheck celebration, then layers, then promote, then
 `hapi-restart-hub` (patient — live WORKING sessions).
 
+## Deliberate divergence: upstream's agent-state touch gate is NOT adopted
+
+`hub/src/store/sessions.ts` — upstream gates the `updated_at` bump in
+`updateSessionAgentState` on `hasNewAgentStateRequest(prior, next)`, so an
+agent-state write with no new request stops bumping session activity. That is
+plausibly a fix for the fork's own "session-list spinner dance" (hub thinking
+flips every 1–2s, noted in the manifest near the harness-wake merge).
+
+**I did not adopt it, deliberately.** Upstream calls it with the prior row, but
+the fork's `updateSessionAgentState` delegates to `updateVersionedField` and
+never reads prior — there is no `prior` in scope to pass. Wiring it means either
+reading the row first or threading it through the generic helper, i.e. a
+restructure, and guessing at one inside an absorb is how behaviour gets
+silently changed. I dropped the helper rather than leave it defined-and-unused.
+
+Everything else from upstream in that file IS in: `preserveForkSummary`,
+`preserveModelErrorHubFields` (hub ack/watermark survive stale CLI rewrites,
+keyed on `eventId`), `HUB_OWNED_METADATA_FIELDS`, the `conversationBranch`
+regression guard, and `preservePreallocation` — the last now gating the fork's
+stub-tag release so a hub-authored PR attach cannot release a tag that
+`adoptPreallocatedSession` still needs.
+
+**Follow-up owed:** decide the agent-state touch gate on its own merits, with
+the spinner-dance symptom as the test.
+
+## Tool gap: port-fork-symbols only sees EXPORTED definitions
+
+It bit twice in one file. `mergeContributionFields` and
+`preserveExternalRefsStatusCache` (fork) and `preserveForkSummary` /
+`preserveModelErrorHubFields` / `hasNewAgentStateRequest` (upstream) are all
+module-private `function` declarations, so the tool reported "ported 0" and
+silently left the carrier missing helpers its own call sites needed. Both
+directions had to be spliced by hand.
+
+Worth fixing in the tool: match `^function` as well as `^export …`, and report
+*which* names were skipped as unexportable rather than only counting what moved.
+Until then, after running it, check that every call site in the carrier resolves.
+
 ## Known PRE-EXISTING failure — do not chase it as absorb damage
 
 When the gate finally runs, this one fails and it is **not** mine:
