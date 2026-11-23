@@ -77,8 +77,24 @@ if [ "$MERGEABLE" = "MERGEABLE" ]; then
 else
     _mv="$(dirname "$(readlink -f "$0")")/hapi-pr-merge-verdict.sh"
     _hint=""
-    if [ -x "$_mv" ]; then
-        if _out="$("$_mv" --repo "$REPO" "$PR" 2>&1)"; then
+    # Trial-merge against the PR's OWN base. hapi-pr-merge-verdict.sh defaults
+    # to origin/main (the FORK's main, ~1,674 commits divergent), so for an
+    # upstream PR this compared against a base the PR was never written for.
+    # Observed 2026-11-23 on #945: GitHub said CONFLICTING and this rescue
+    # replied "trial merge is CLEAN, so this verdict is STALE: do not rebase" —
+    # advising against the exact merge required. Same bug fixed in
+    # hapi-pr-emoji-batch.sh; this copy was missed.
+    _vb="origin/main"
+    if [ "${REPO%%/*}" != "heavygee" ]; then
+        if git -C "${HAPI_PRIMARY:-$HOME/coding/hapi}" rev-parse --verify --quiet \
+            refs/remotes/upstream/main >/dev/null 2>&1; then
+            _vb="refs/remotes/upstream/main"
+        else
+            _vb=""
+        fi
+    fi
+    if [ -n "$_vb" ] && [ -x "$_mv" ]; then
+        if _out="$("$_mv" --repo "$REPO" --base "$_vb" "$PR" 2>&1)"; then
             _hint=" — local trial merge is CLEAN, so this verdict is STALE: wait and re-run, do not rebase"
         else
             [ "$?" = "2" ] || _hint=" — local trial merge CONFLICTS too: $(printf '%s' "$_out" | grep -A2 'conflicting path' | tail -n +2 | tr -s ' \n' ' ')"
