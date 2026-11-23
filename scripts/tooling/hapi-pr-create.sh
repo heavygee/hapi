@@ -111,7 +111,14 @@ done
 
 # ----- check 2: branch must have ancestry with upstream/main, not driver/integration -----
 git fetch upstream main --quiet 2>/dev/null || true
-if ! git merge-base --is-ancestor "$(git merge-base upstream/main "$BRANCH")" upstream/main 2>/dev/null; then
+# refs/remotes/ is load-bearing: a local branch named `upstream/main` shadows
+# the remote-tracking ref (git prefers refs/heads), and one sat two commits
+# stale in the shared repo on 2026-11-23. Against a stale base this gate can
+# reject a branch that IS correctly based on upstream — a loud, confusing
+# refusal of valid work.
+if ! git merge-base --is-ancestor \
+        "$(git merge-base refs/remotes/upstream/main "$BRANCH")" \
+        refs/remotes/upstream/main 2>/dev/null; then
   echo "hapi-pr-create: cannot find merge-base with upstream/main for '$BRANCH'" >&2
   echo "  was this branched from driver/integration? upstream PRs must be off upstream/main" >&2
   exit 2

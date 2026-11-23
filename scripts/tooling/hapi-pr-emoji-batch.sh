@@ -456,8 +456,14 @@ classify_one() {
         if [[ "$OWNER" != "heavygee" ]]; then
             # Only use upstream/main if the ref actually exists here; otherwise
             # skip the rescue rather than silently scoring against the wrong base.
-            if git -C "$HAPI_PRIMARY" rev-parse --verify --quiet upstream/main >/dev/null 2>&1; then
-                _vbase="upstream/main"
+            # Fully-qualified: a local branch named `upstream/main` shadows the
+            # remote-tracking ref (git prefers refs/heads), and one existed in
+            # the shared repo on 2026-11-23 two commits stale. Bare would also
+            # now be REFUSED by the verdict tool's ambiguity guard, silently
+            # skipping the rescue — so name the ref we actually mean.
+            if git -C "$HAPI_PRIMARY" rev-parse --verify --quiet \
+                    refs/remotes/upstream/main >/dev/null 2>&1; then
+                _vbase="refs/remotes/upstream/main"
             else
                 _vbase=""
             fi
