@@ -50,8 +50,25 @@ scan_text_blob() {
     local blob="$2"
     local pat sample
     for pat in "${LEAK_PATTERNS[@]}"; do
-        if printf '%s' "$blob" | grep -qiE "$pat"; then
-            sample="$(printf '%s' "$blob" | grep -oiE ".{0,40}${pat}.{0,40}" | head -1 | tr '\n' ' ')"
+        # Herestring, NOT `printf | grep -q`. grep -q exits on its first match
+        # and closes the pipe; `set -o pipefail` (line 13) then promotes the
+        # writer's SIGPIPE (141) to the pipeline's status, so the `if` read a
+        # match in any blob larger than the pipe buffer (~64KB) as NO MATCH —
+        # failing CLEAN, which is the dangerous direction for a gate that
+        # backstops a hard rule.
+        #
+        # Measured 2026-11-23: `--git-range refs/remotes/upstream/main HEAD`
+        # over a 1.98MB product diff missed a pattern present 16 times and
+        # exited 0, so hapi-pr-create's check 3 was passing unconditionally on
+        # every real-sized diff. Same class as the 103KB manifest case. Note
+        # the perverse part: the EARLIER the match, the sooner grep exits and
+        # the more certainly it is missed. A herestring has no writer to kill.
+        if grep -qiE "$pat" <<<"$blob"; then
+            # `|| true` is load-bearing here: `head -1` closes this pipe early
+            # too, so the sample pipeline can legitimately exit 141 under
+            # pipefail — and with `set -e` that would abort the script between
+            # detecting a leak and reporting it.
+            sample="$(grep -oiE ".{0,40}${pat}.{0,40}" <<<"$blob" | head -1 | tr '\n' ' ' || true)"
             report_leak "$context" "$pat" "$sample"
         fi
     done
