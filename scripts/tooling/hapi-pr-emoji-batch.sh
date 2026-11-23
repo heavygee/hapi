@@ -290,6 +290,33 @@ _gh_check_signals() {
 # character, so bash `read` collapses runs of tabs and strips leading ones: with
 # a null reviewDecision, "0\t\t<oid>" splits into TWO fields and the oid lands
 # in review_decision. Caller normalizes "-" back to empty.
+# Is the `test` gate already red on the PR's OWN base tip? Then a red head is
+# inherited and the branch cannot fix it — see pec_decide_emoji's note on #945.
+# Prints 1/0, and 0 on any uncertainty: claiming "inherited" without evidence
+# would excuse a genuinely broken PR, which is the costlier direction to be
+# wrong in. Only called when the head is actually failing, so the extra API
+# call is paid on red PRs rather than on every sweep.
+_base_checks_failing() {
+    local n="$1" base_oid json
+    base_oid="$(gh_t pr view "$n" --repo "$REPO" --json baseRefOid -q .baseRefOid 2>/dev/null || true)"
+    [[ "$base_oid" =~ ^[0-9a-f]{40}$ ]] || { echo 0; return; }
+    json="$(gh_t api "repos/${REPO}/commits/${base_oid}/check-runs" --paginate 2>/dev/null || true)"
+    # External jq -s: `--paginate -q` filters per page, and this gh rejects
+    # --slurp alongside --jq (both traps cost a retracted verdict this week).
+    if printf '%s' "$json" | jq -s -e '
+            [.[].check_runs[]?] | map(select(.name == "test"))
+            | length > 0
+              and all(.[]; .status == "completed"
+                        and .conclusion != "success"
+                        and .conclusion != "skipped"
+                        and .conclusion != "neutral")
+        ' >/dev/null 2>&1; then
+        echo 1
+    else
+        echo 0
+    fi
+}
+
 _fetch_review_signals() {
     local n="$1"
     local cursor="" page unresolved=0 decision="" head_oid="" has_next=true resp page_n
@@ -559,8 +586,15 @@ classify_one() {
         bot_major=0
     fi
 
+    # Only ask about the base when the head is genuinely red and settled —
+    # a pending head is "CI running", not anyone's failure to fix.
+    local checks_inherited=0
+    if [[ "$checks_ok" -eq 0 && "$checks_pending" -eq 0 && "$checks_seen" -eq 1 ]]; then
+        checks_inherited="$(_base_checks_failing "$n")"
+    fi
+
     decided="$(pec_decide_emoji 1 0 0 "$checks_ok" "$checks_pending" "$checks_seen" \
-        "$threads_n" "$bot_clean" "$bot_major" "$bot_has_body" "$merge_bad" 0 "$review_changes" 0 "$has_crc" "$bot_stale" "$merge_state")"
+        "$threads_n" "$bot_clean" "$bot_major" "$bot_has_body" "$merge_bad" 0 "$review_changes" 0 "$has_crc" "$bot_stale" "$merge_state" "$checks_inherited")"
     emoji="${decided%%$'\t'*}"
     action="${decided#*$'\t'}"
     local merge_lane=""
@@ -571,9 +605,22 @@ classify_one() {
         action="${lane_out#*$'\t'}"
     fi
 
+    # Inherited red as the ONLY complaint: keep ⚠️ visible for the operator but
+    # stop the peer nag, reusing the blockedUpstream contract (#128) rather than
+    # inventing a second suppression path. Exact match against the core lib's
+    # own string means a single part and nothing else actionable — if other
+    # parts were appended the action carries "; " and this will not fire.
+    # #945 (2026-11-23): its peer was nagged to fix upstream's regression and
+    # had to refuse; a nag nobody can action is noise that trains peers to
+    # discount the chip.
+    local blocked_up=0
+    if [[ "$emoji" == "⚠️" && "$action" == "$(pec_checks_inherited_action)" ]]; then
+        blocked_up=1
+    fi
+
     _emit_pr_json "$out" "$emoji" "$action" 1 0 0 0 0 "$threads_n" \
         "$checks_ok" "$checks_pending" "$checks_seen" "$bot_clean" "$bot_major" "$merge_state" \
-        "$merge_lane"
+        "$merge_lane" "" "$blocked_up"
 }
 
 export REPO OWNER NAME TIMEOUT TMPDIR WALL_LIMIT MERGE_POLICY_JSON
@@ -583,11 +630,11 @@ export -f classify_one gh_t fetch_latest_bot_review pec_attestation_is_stale _em
     _gate_a_related_refs _gate_a_branch_hints \
     pec_decide_emoji pec_gate_draft_blocked pec_labels_csv_has \
     pec_blocked_upstream_action pec_blocked_upstream_dep_from_body \
-    pec_default_sticky_ping \
+    pec_default_sticky_ping pec_checks_inherited_action \
     pmp_classify pmp_action_for_lane pmp_load_policy \
     dogfood_has_label dogfood_labeled_at dogfood_secs_remaining dogfood_humanize_secs dogfood_status_for_pr \
     pmp_default_policy_json \
-    _gh_check_signals _fetch_review_signals _bot_body_findings_clean \
+    _gh_check_signals _base_checks_failing _fetch_review_signals _bot_body_findings_clean \
     pec_count_chip_unresolved_threads
 
 # After parallel classify: rewrite watch-only MERGED rows to 🧹 so --table matches

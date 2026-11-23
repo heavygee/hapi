@@ -648,5 +648,29 @@ eq "merge_state behind names behind"  "$(ms behind)"  "rebase (behind base)"
 eq "merge_state unknown is not dirty" "$(ms unknown)" "merge state unknown — recheck before trusting"
 eq "merge_state empty is not dirty"   "$(ms '')"      "merge state unknown — recheck before trusting"
 
+# checks_inherited (arg 18): a head whose failing gate is ALSO red on the base
+# tip cannot be fixed from the branch. tiann/hapi#945 (2026-11-23): upstream
+# main had been red since the #2519 merge, the PR touched no e2e/auth code, and
+# the chip still said "fix failing CI" — so the peer was told to debug someone
+# else's regression, and acting on it would have voided a cold-review-clean
+# attestation to change nothing. It refused the chip and was right to.
+ci() { action_of "$(pec_decide_emoji 1 0 0 0 "$2" 1 0 1 0 0 0 0 0 0 0 0 "" "$1")"; }
+eq "inherited red does not blame the PR" "$(ci 1 0)" \
+    "CI red on the base too — not this PR's to fix; recheck when base is green"
+eq "own red still says fix failing CI"   "$(ci 0 0)" "fix failing CI"
+# Anti-drift: hapi-pr-emoji-batch recognises this exact string to suppress the
+# peer nag (blockedUpstream contract, #128). If the emitter and the recogniser
+# ever diverge the nag comes back silently, so pin them equal here.
+eq "recogniser matches what decide emits" "$(ci 1 0)" "$(pec_checks_inherited_action)"
+# Pending outranks both: an unfinished run is nobody's failure yet, so neither
+# "fix" nor "inherited" may appear — and an inherited flag must not suppress it.
+eq "pending beats inherited"             "$(ci 1 1)" "CI running"
+eq "pending beats own red"               "$(ci 0 1)" "CI running"
+# Default must stay blame-the-PR: callers that never pass arg 18 (and the
+# uncertainty path in _base_checks_failing, which returns 0 on any doubt) must
+# not silently excuse a genuinely broken PR.
+eq "arg 18 omitted keeps old behaviour" \
+    "$(action_of "$(pec_decide_emoji 1 0 0 0 0 1 0 1 0 0 0 0)")" "fix failing CI"
+
 echo "pr-emoji-core.test.sh: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]] || exit 1

@@ -397,12 +397,20 @@ pec_leading_emoji() {
 # SUPERSEDED_HINT: 1 when caller detected empty-vs-main / absorber merge (close as superseded).
 # ---------------------------------------------------------------------------
 
+# The single inherited-CI action string, exposed so a caller can RECOGNISE it
+# without keeping a second copy of the text — two copies drift the moment
+# either is reworded, and the recogniser failing silently would restore the
+# peer nag this exists to stop.
+pec_checks_inherited_action() {
+    printf '%s' "CI red on the base too — not this PR's to fix; recheck when base is green"
+}
+
 pec_decide_emoji() {
     local exists="$1" merged="$2" closed="$3" checks_ok="$4" checks_pending="$5" \
         checks_seen="$6" threads_n="$7" bot_clean="$8" bot_major="$9" \
         bot_has_body="${10}" merge_bad="${11}" data_unavailable="${12}" \
         review_changes="${13:-0}" superseded_hint="${14:-0}" crc_attested="${15:-0}" \
-        bot_stale="${16:-0}" merge_state_raw="${17:-}"
+        bot_stale="${16:-0}" merge_state_raw="${17:-}" checks_inherited="${18:-0}"
 
     if [[ "$data_unavailable" == "1" ]]; then
         printf '%s\t%s' "?" "GitHub data unavailable this run — retry sweep (title unchanged)"
@@ -457,6 +465,16 @@ pec_decide_emoji() {
     [[ "$review_changes" == "1" ]] && parts+=("address CHANGES_REQUESTED review")
     if [[ "$checks_ok" == "0" && "$checks_pending" == "1" ]]; then
         parts+=("CI running")
+    elif [[ "$checks_ok" == "0" && "$checks_inherited" == "1" ]]; then
+        # The same check is red on the base tip, so the branch cannot be the
+        # cause and there is nothing here to fix. Saying "fix failing CI" at a
+        # session in this state sends it to debug someone else's regression —
+        # and on tiann/hapi#945 (2026-11-23) it did exactly that: upstream main
+        # had been red since the #2519 merge, the PR touched no e2e or auth
+        # code, and acting on the chip would have voided a cold-review-clean
+        # attestation to change nothing. The peer refused the chip and was
+        # right to; a signal that has to be overridden to be correct is broken.
+        parts+=("$(pec_checks_inherited_action)")
     elif [[ "$checks_ok" == "0" && ! ( "$crc_attested" == "1" && "$checks_seen" == "0" ) ]]; then
         parts+=("fix failing CI")
     fi
