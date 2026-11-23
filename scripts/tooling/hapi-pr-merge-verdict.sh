@@ -88,9 +88,34 @@ git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null \
     || git fetch -q origin "refs/pull/${PR}/head" 2>/dev/null || true
 git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null || die "head $HEAD_SHA not fetchable"
 
-# "Current" is the whole point: a verdict against a stale base is the bug.
-[[ "$NO_FETCH" -eq 1 ]] || git fetch -q origin 2>/dev/null \
-    || err "warning: could not refresh origin; base may be stale"
+# A base that matches BOTH refs/heads/<x> and refs/remotes/<x> is pathological:
+# git silently prefers the local branch, so one stray `git branch upstream/main`
+# turns every verdict into one against whatever that branch last pointed at.
+# Observed 2026-11-23: a shadow refs/heads/upstream/main, created that morning
+# and already 2 commits behind, won bare `upstream/main` here. Loud beats silent,
+# so refuse rather than guess which one the caller meant.
+if [[ "$BASE" != refs/* ]]; then
+    _bh="$(git rev-parse --verify --quiet "refs/heads/${BASE}" || true)"
+    _br="$(git rev-parse --verify --quiet "refs/remotes/${BASE}" || true)"
+    if [[ -n "$_bh" && -n "$_br" && "$_bh" != "$_br" ]]; then
+        err "base '$BASE' is ambiguous — a local branch shadows the remote ref:"
+        err "  refs/heads/${BASE}   = ${_bh:0:9}   <- git silently picks this"
+        err "  refs/remotes/${BASE} = ${_br:0:9}"
+        die "disambiguate explicitly: --base refs/remotes/${BASE}"
+    fi
+fi
+
+# "Current" is the whole point: a verdict against a stale base is the bug — and
+# refreshing `origin` while verdicting against an upstream base is that same bug
+# one level up, so refresh the remote the base actually belongs to.
+_base_remote="origin"
+case "$BASE" in
+    refs/remotes/*) _bare="${BASE#refs/remotes/}"; _base_remote="${_bare%%/*}" ;;
+    */*) _cand="${BASE%%/*}"
+         git config --get "remote.${_cand}.url" >/dev/null 2>&1 && _base_remote="$_cand" ;;
+esac
+[[ "$NO_FETCH" -eq 1 ]] || git fetch -q "$_base_remote" 2>/dev/null \
+    || err "warning: could not refresh ${_base_remote}; base may be stale"
 BASE_SHA="$(git rev-parse --verify --quiet "$BASE")" || die "base not resolvable: $BASE"
 
 OUT="$(mktemp)"; trap 'rm -f "$OUT"' EXIT

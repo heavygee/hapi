@@ -80,5 +80,29 @@ else
     rc=$?; [[ "$rc" == "2" ]] && ok || bad "missing base should exit 2 (not 1), got $rc"
 fi
 
+# 8. a local branch shadowing a remote-tracking ref must be refused, not guessed.
+#    Live on 2026-11-23: a stray refs/heads/upstream/main, created that morning
+#    and already 2 commits behind, silently won bare `upstream/main` — so the
+#    verdict was computed against a base nobody had asked for.
+g branch shadow/main "$BASE_SHA"
+g update-ref refs/remotes/shadow/main "$(g rev-parse mainline)"
+if out="$(cd "$R" && bash "$S" --base shadow/main --no-fetch --head "$CLEAN_SHA" 999 2>&1)"; then
+    bad "ambiguous base must not succeed"
+else
+    rc=$?; [[ "$rc" == "2" ]] && ok || bad "ambiguous base should exit 2 (not 1), got $rc"
+fi
+printf '%s' "$out" | grep -q "ambiguous" && ok || bad "ambiguity not explained: $out"
+printf '%s' "$out" | grep -q "refs/remotes/shadow/main" && ok \
+    || bad "no disambiguation offered: $out"
+
+# 9. negative control — a same-sha duplicate is harmless, so it must NOT be
+#    refused, or the guard blocks every repo keeping a local mirror branch.
+g update-ref refs/remotes/shadow/main "$BASE_SHA"
+if (cd "$R" && bash "$S" --base shadow/main --no-fetch --head "$CLEAN_SHA" 999 >/dev/null 2>&1); then
+    ok
+else
+    bad "same-sha shadow must not be refused"
+fi
+
 echo "hapi-pr-merge-verdict: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]]
