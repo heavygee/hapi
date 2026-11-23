@@ -28,7 +28,13 @@ source "$SCRIPT_DIR/lib/hapi-feature-peer-reminders.sh"
 
 PRIMARY="${HAPI_PRIMARY:-$HOME/coding/hapi}"
 BUN="${BUN:-$HOME/.bun/bin/bun}"
-BASE="${HAPI_WORKTREE_BASE:-upstream/main}"
+# refs/remotes/ is load-bearing — a local branch named `upstream/main` shadows
+# the remote-tracking ref (git prefers refs/heads) and one sat two commits stale
+# in the shared repo on 2026-11-23. Every new feature worktree is cut from this
+# base, so a stale resolution silently backdates the branch an upstream PR is
+# later built on, and the PR-create gate then rejects work that IS correctly
+# based on upstream.
+BASE="${HAPI_WORKTREE_BASE:-refs/remotes/upstream/main}"
 WORKTREE_ROOT="${HAPI_WORKTREE_ROOT:-$PRIMARY/worktrees}"
 NAME=""
 BRANCH=""

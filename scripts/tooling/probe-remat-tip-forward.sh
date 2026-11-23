@@ -24,7 +24,9 @@ rm -rf "$OUT"
 mkdir -p "$OUT"
 
 TIP=$(git -C "$DRIVER" rev-parse HEAD)
-UP=$(git -C "$REPO" rev-parse upstream/main)
+# refs/remotes/: bare `upstream/main` can be shadowed by a local branch of the
+# same name (git prefers refs/heads), which silently backdates the probe's base.
+UP=$(git -C "$REPO" rev-parse refs/remotes/upstream/main)
 
 mapfile -t LAYERS < <(python3 - <<PY
 import re, pathlib

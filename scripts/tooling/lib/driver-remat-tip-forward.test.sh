@@ -46,11 +46,29 @@ if [[ "$got" != "main" ]]; then
     exit 1
 fi
 
+# The legacy bare base resolves to the FULLY-QUALIFIED remote ref. The caller
+# feeds this straight to `git merge`, and bare `upstream/main` prefers
+# refs/heads — so a local branch of that name would have the remat merge a
+# backdated upstream into the soup WIP.
 got="$(driver_remat_tip_forward_merge_ref upstream/main "$tmpdir")"
-if [[ "$got" != "upstream/main" ]]; then
-    echo "FAIL: expected upstream/main for legacy base, got '$got'" >&2
+if [[ "$got" != "refs/remotes/upstream/main" ]]; then
+    echo "FAIL: expected refs/remotes/upstream/main for legacy base, got '$got'" >&2
     exit 1
 fi
+
+# RED→GREEN for the shadow itself: with a local branch named upstream/main at a
+# DIFFERENT sha, the returned ref must still be the remote one.
+git -C "$tmpdir" update-ref refs/heads/upstream/main "$fork_sha"
+got="$(driver_remat_tip_forward_merge_ref upstream/main "$tmpdir")"
+if [[ "$got" != "refs/remotes/upstream/main" ]]; then
+    echo "FAIL: shadow branch hijacked the base, got '$got'" >&2
+    exit 1
+fi
+if [[ "$(git -C "$tmpdir" rev-parse "$got")" != "$up_sha" ]]; then
+    echo "FAIL: returned ref resolves to the shadow sha, not upstream's" >&2
+    exit 1
+fi
+git -C "$tmpdir" update-ref -d refs/heads/upstream/main
 
 # Missing explicit base must HARD FAIL — never substitute upstream/main (#213 Codex).
 if got="$(driver_remat_tip_forward_merge_ref 'refs/heads/does-not-exist' "$tmpdir")"; then

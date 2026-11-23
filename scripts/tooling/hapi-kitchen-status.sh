@@ -97,10 +97,15 @@ if [[ -d "$PRIMARY/.git" ]] || git -C "$PRIMARY" rev-parse --git-dir >/dev/null 
 fi
 
 fork_behind=0 fork_ahead=0
-if git -C "$PRIMARY" rev-parse upstream/main >/dev/null 2>&1; then
+# refs/remotes/ is load-bearing — a local branch named `upstream/main` shadows
+# the remote-tracking ref (git prefers refs/heads) and one sat two commits stale
+# in the shared repo on 2026-11-23. This endpoint is polled for the kitchen
+# chip, so a stale base reports fork sync debt that is quietly too small: the
+# honest-reporting intent of the comment below was being defeated by the ref.
+if git -C "$PRIMARY" rev-parse refs/remotes/upstream/main >/dev/null 2>&1; then
     # Count against the main ref (not HEAD) so a wrong-branch primary still
     # reports fork sync debt honestly.
-    read -r fork_behind fork_ahead < <(git -C "$PRIMARY" rev-list --left-right --count upstream/main...main 2>/dev/null || echo "0 0")
+    read -r fork_behind fork_ahead < <(git -C "$PRIMARY" rev-list --left-right --count refs/remotes/upstream/main...main 2>/dev/null || echo "0 0")
     : "${fork_behind:=0}" "${fork_ahead:=0}"
 fi
 

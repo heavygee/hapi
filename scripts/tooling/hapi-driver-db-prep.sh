@@ -82,7 +82,14 @@ extract_schema_version() {
 target_schema="$(extract_schema_version "$TARGET/hub/src/store/index.ts" || true)"
 [[ -n "$target_schema" ]] || { echo "ERROR: could not parse SCHEMA_VERSION in $TARGET" >&2; exit 1; }
 
-base_schema="$(git -C "$PRIMARY" show upstream/main:hub/src/store/index.ts 2>/dev/null \
+# refs/remotes/ is load-bearing: a local branch named `upstream/main` shadows
+# the remote-tracking ref (git prefers refs/heads) and one sat two commits stale
+# in the shared repo on 2026-11-23. This is the worst of the soup consumers,
+# because the stale value is not a count anyone would sanity-check — it is the
+# base SCHEMA_VERSION, and the whole migrate-or-not decision below is reasoned
+# from it. The `?` fallback also means a wrong ref degrades to a plausible
+# number rather than an error.
+base_schema="$(git -C "$PRIMARY" show refs/remotes/upstream/main:hub/src/store/index.ts 2>/dev/null \
     | grep -E "^const SCHEMA_VERSION:\s*number\s*=\s*[0-9]+" | head -1 | grep -oE "[0-9]+$" || true)"
 base_schema="${base_schema:-?}"
 

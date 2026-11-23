@@ -14,7 +14,13 @@ set -euo pipefail
 
 PRIMARY="${HAPI_PRIMARY:-$HOME/coding/hapi}"
 DRIVER="${HAPI_DRIVER:-$PRIMARY/driver}"
-UPSTREAM_REF="${HAPI_UPSTREAM_REF:-upstream/main}"
+# refs/remotes/ is load-bearing — a local branch named `upstream/main` shadows
+# the remote-tracking ref (git prefers refs/heads) and one sat two commits stale
+# in the shared repo on 2026-11-23. This script exists to MEASURE upstream
+# drift, so a stale base understates exactly the number it is consulted for.
+# origin/main is left bare: nothing shadowed it, and qualifying it here without
+# a found defect would be a change nobody can check.
+UPSTREAM_REF="${HAPI_UPSTREAM_REF:-refs/remotes/upstream/main}"
 ORIGIN_MAIN="${HAPI_ORIGIN_MAIN:-origin/main}"
 TIP=""
 JSON=0

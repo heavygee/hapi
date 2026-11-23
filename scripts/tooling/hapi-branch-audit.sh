@@ -129,8 +129,13 @@ while read -r branch; do
     [[ "$branch" == "$ib" ]] && is_infra=1 && break
   done
 
-  ahead=$(git rev-list --count upstream/main..refs/heads/"$branch" 2>/dev/null || echo "?")
-  behind=$(git rev-list --count refs/heads/"$branch"..upstream/main 2>/dev/null || echo "?")
+  # refs/remotes/: this audit already fully-qualifies the branch side, and the
+  # base side must be too — a local branch named `upstream/main` shadows the
+  # remote-tracking ref, so every ahead/behind pair in the report (and the
+  # "rebase on upstream/main (N behind)" advice derived from it) silently
+  # measures against a backdated base. One sat two commits stale 2026-11-23.
+  ahead=$(git rev-list --count refs/remotes/upstream/main..refs/heads/"$branch" 2>/dev/null || echo "?")
+  behind=$(git rev-list --count refs/heads/"$branch"..refs/remotes/upstream/main 2>/dev/null || echo "?")
   ab="$ahead/$behind"
 
   wt_path=$(worktree_for_branch "$branch" | head -1)

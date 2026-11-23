@@ -11,7 +11,14 @@
 set -euo pipefail
 
 PRIMARY="${HAPI_PRIMARY:-$HOME/coding/hapi}"
-UPSTREAM_REF="${HAPI_UPSTREAM_REF:-upstream/main}"
+# refs/remotes/ is load-bearing. A local branch named `upstream/main` shadows
+# the remote-tracking ref, because git resolves refs/heads first — one sat two
+# commits stale in the shared repo on 2026-11-23, announced only by a
+# `warning: refname 'upstream/main' is ambiguous` that --quiet hides. This
+# script SYNCS FORK MAIN from that ref, so a stale resolution does not merely
+# misreport: it fast-forwards main to a backdated upstream and every later
+# "already on base" layer retirement reasons from it.
+UPSTREAM_REF="${HAPI_UPSTREAM_REF:-refs/remotes/upstream/main}"
 MAIN_BRANCH="${HAPI_MAIN_BRANCH:-main}"
 
 CHECK_ONLY=0

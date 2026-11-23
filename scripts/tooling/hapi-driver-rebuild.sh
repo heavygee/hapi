@@ -116,7 +116,12 @@ mkdir -p "$(dirname "$MANIFEST")"
 
 echo "Fetching upstream..."
 git -C "$PRIMARY" fetch upstream
-upstream_tip="$(git -C "$PRIMARY" rev-parse upstream/main 2>/dev/null || true)"
+# refs/remotes/ throughout this script: a local branch named `upstream/main`
+# shadows the remote-tracking ref (git prefers refs/heads), and one sat two
+# commits stale in the shared repo on 2026-11-23 with only an ambiguity warning
+# on stderr. Here that would understate the behind-check; at the `worktree add`
+# below it would seed the whole driver tree from a backdated commit.
+upstream_tip="$(git -C "$PRIMARY" rev-parse refs/remotes/upstream/main 2>/dev/null || true)"
 
 # Fetch origin before resolving manifest base (Codex #213): stale origin/main
 # otherwise composes soup that silently omits unpushed/unfetched fork tip work
@@ -131,7 +136,7 @@ if [[ -x "$SYNC_SCRIPT" ]]; then
         exit 1
     fi
 elif git -C "$PRIMARY" show-ref --verify --quiet refs/heads/main; then
-    behind_main="$(git -C "$PRIMARY" rev-list --count main..upstream/main 2>/dev/null || echo 0)"
+    behind_main="$(git -C "$PRIMARY" rev-list --count main..refs/remotes/upstream/main 2>/dev/null || echo 0)"
     if [[ "${behind_main:-0}" -gt 0 ]]; then
         echo "ERROR: $PRIMARY main is ${behind_main} commit(s) behind upstream/main" >&2
         echo "       Run: hapi-sync-fork-main" >&2
@@ -160,7 +165,7 @@ fi
 
 if [[ ! -d "$DRIVER" ]]; then
     echo "Creating driver worktree at $DRIVER (branch $DRIVER_BRANCH)..."
-    git -C "$PRIMARY" worktree add -b "$DRIVER_BRANCH" "$DRIVER" upstream/main
+    git -C "$PRIMARY" worktree add -b "$DRIVER_BRANCH" "$DRIVER" refs/remotes/upstream/main
 fi
 
 if [[ ! -e "$DRIVER/hub/.env" ]]; then

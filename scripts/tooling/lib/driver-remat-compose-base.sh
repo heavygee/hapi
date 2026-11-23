@@ -31,14 +31,22 @@ driver_remat_validate_compose_base() {
         fi
     fi
 
-    if git -C "$repo" rev-parse --verify "${base_ref}^{commit}" >/dev/null 2>&1; then
-        echo "Base: $base_ref @ $(git -C "$repo" log -1 --oneline "$base_ref")"
-        return 0
+    # The manifest spells its base `upstream/main`, which git resolves against
+    # refs/heads FIRST — so a local branch of that name shadows the
+    # remote-tracking ref. One sat two commits stale in the shared repo on
+    # 2026-11-23, announced only by an ambiguity warning on stderr. Resolve
+    # through the fully-qualified remote ref while still reporting the
+    # manifest's own spelling, so the Base: line stays comparable to the
+    # manifest and the compose cannot be backdated. The fallback below never
+    # fired in that situation: the shadow made the generic resolve SUCCEED.
+    local resolve_ref="$base_ref"
+    if [[ "$base_ref" == "upstream/main" ]] \
+        && git -C "$repo" rev-parse --verify 'refs/remotes/upstream/main^{commit}' >/dev/null 2>&1; then
+        resolve_ref='refs/remotes/upstream/main'
     fi
 
-    if [[ "$base_ref" == "upstream/main" ]] \
-        && git -C "$repo" rev-parse --verify 'upstream/main^{commit}' >/dev/null 2>&1; then
-        echo "Base: upstream/main @ $(git -C "$repo" log -1 --oneline upstream/main)"
+    if git -C "$repo" rev-parse --verify "${resolve_ref}^{commit}" >/dev/null 2>&1; then
+        echo "Base: $base_ref @ $(git -C "$repo" log -1 --oneline "$resolve_ref")"
         return 0
     fi
 
