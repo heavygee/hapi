@@ -50,6 +50,9 @@ AUTO=0
 REQUIRED=0
 REQFILE=""
 SINGLE_PARENT=""
+AUTO_PARENTS=""
+ADJUDICATIONS=""
+ALLOW_DIRTY=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -60,6 +63,9 @@ while [[ $# -gt 0 ]]; do
         --required) REQUIRED=1; shift ;;
         --required-file) REQFILE="$2"; shift 2 ;;
         --single-parent) SINGLE_PARENT="$2"; shift 2 ;;
+        --parents) AUTO_PARENTS="$2"; shift 2 ;;
+        --adjudications) ADJUDICATIONS="$2"; shift 2 ;;
+        --allow-dirty) ALLOW_DIRTY=1; shift ;;
         # --auto-sample is gone: --auto now reads every identifier, so there is
         # nothing to size. Accepted and ignored so an older caller still runs.
         --auto-sample) err "--auto-sample is obsolete (coverage is complete); ignoring"; shift 2 ;;
@@ -184,8 +190,27 @@ fi
 # never as "this is broken" — see the triage in
 # docs/plans/2026-11-09-sentinel-auto-first-sweep-triage.md.
 # Identifiers added by a ref relative to a base, code lines only.
+#
+# $3 selects the scope: 'all' (default) or 'src'. The split matters for the
+# verdict. On the 11-23 sweep, 12 of 79 layers reported absent content and
+# almost every named identifier turned out to have been TEST-ONLY on the layer
+# — mock names, fixture strings, local consts in a `.test.ts`. A layer whose
+# tests were merged or rewritten is not a layer whose feature was dropped, but
+# the sweep called both "LOST" and so could not be used as a gate: too noisy to
+# act on, which is the same way the alphabetical-prefix sampling failed.
+# Source-scope absence is the feature signal; test-scope absence is reported
+# but does not fail the run.
 _sentinel_pool() {
-    git -C "$TREE" diff "$1" "$2" -- '*.ts' '*.tsx' '*.mjs' '*.js' 2>/dev/null \
+    local scope="${3:-all}"
+    local -a paths=('*.ts' '*.tsx' '*.mjs' '*.js')
+    if [[ "$scope" == "src" ]]; then
+        paths+=(':(exclude)*.test.ts' ':(exclude)*.test.tsx'
+                ':(exclude)*.spec.ts' ':(exclude)*.spec.tsx'
+                ':(exclude)*/test/*' ':(exclude)*/__tests__/*'
+                ':(exclude)e2e/*' ':(exclude)*/e2e/*'
+                ':(exclude)*-fixture.ts' ':(exclude)*-fixture.tsx')
+    fi
+    git -C "$TREE" diff "$1" "$2" -- "${paths[@]}" 2>/dev/null \
         | grep "^+" | grep -v "^+++" \
         | grep -vE "^\+[[:space:]]*(//|/\*|\*|#)" \
         | grep -oE "\b[A-Za-z_][A-Za-z0-9_]{5,}\b" \
@@ -195,6 +220,33 @@ _sentinel_pool() {
 
 run_auto() {
     local tip="$1" layers=0 flagged=0
+    # Identifiers that exist in either merge parent's tip. Anything absent from
+    # both was already gone before the merge (see the filter below).
+    # Adjudicated supersessions. An identifier legitimately disappears when the
+    # other side RENAMED or RELOCATED the thing that carries it — upstream moved
+    # selectForkTranscriptPrefix into forkBoundary.ts in #2421 and deleted the
+    # old module; the fork renamed restart_unsupported to restart_unavailable
+    # because its guard covers a second case. Neither is lost content, but both
+    # look identical to loss from a set difference. They are listed explicitly,
+    # with a reason, and still PRINTED on every run — an adjudication that goes
+    # quiet is just a suppression, and the first absorb was promoted green
+    # precisely because its losses had gone quiet.
+    local adjudicated="" adjused=""
+    if [[ -n "$ADJUDICATIONS" ]]; then
+        [[ -f "$ADJUDICATIONS" ]] || die "no such adjudications file: $ADJUDICATIONS (tool failure, not a finding)"
+        adjudicated="$ADJUDICATIONS"
+        adjused="$(mktemp)"
+    fi
+    local parentsyms=""
+    if [[ -n "$AUTO_PARENTS" ]]; then
+        parentsyms="$(mktemp)"
+        local pref
+        for pref in ${AUTO_PARENTS//,/ }; do
+            git -C "$TREE" grep -h -oE "\b[A-Za-z_][A-Za-z0-9_]{5,}\b" "$pref" \
+                -- '*.ts' '*.tsx' '*.mjs' '*.js' 2>/dev/null
+        done | sort -u > "$parentsyms"
+        [[ -s "$parentsyms" ]] || die "no identifiers extracted from --parents $AUTO_PARENTS (tool failure, not a finding)"
+    fi
     # One pass over the composed tree yields every identifier in it (~1.6s for
     # 43k names on a 90-layer soup). Every layer is then a set difference, which
     # is free — so there is no sample and no cap, and the earlier
@@ -221,10 +273,50 @@ run_auto() {
         [[ "$pool_n" -gt 0 ]] || { say "ok       $br  (no code identifiers added — nothing to lose)"; continue; }
         local names; names="$(comm -23 <(printf '%s\n' "$pool" | grep .) "$tipsyms" | tr '\n' ' ')"
         local absent; absent="$(printf '%s\n' "$names" | tr ' ' '\n' | grep -c . || true)"
-        if [[ "$absent" -gt 0 ]]; then
+        # Split the verdict by scope. Only a SOURCE-file identifier going
+        # missing is a feature signal; a test-only one usually means the
+        # layer's tests were merged or rewritten, which is expected during an
+        # absorb and must not fail the gate.
+        local srcpool; srcpool="$(_sentinel_pool "$base" "$ref" src)"
+        local srcnames; srcnames="$(comm -12 \
+            <(printf '%s\n' "$names" | tr ' ' '\n' | grep . | sort -u) \
+            <(printf '%s\n' "$srcpool" | grep . | sort -u) | tr '\n' ' ')"
+        # An identifier that is absent from BOTH merge parents' tips was already
+        # gone before this merge — superseded or renamed by a later layer in the
+        # fork's own history — so it cannot be a loss THIS merge caused. Without
+        # this, the 11-23 sweep reported 10 layers lost and nearly every named
+        # identifier (PerSessionSettingsButton, voiceFue, adoptedSession,
+        # synthesizeTurnFallback, sessionStartCommand, clearStateDir) turned out
+        # to be missing from the live fork tip as well. Flagging those makes the
+        # sweep unusable as a gate: it cries wolf on the fork's own refactors.
+        if [[ -n "$parentsyms" ]]; then
+            srcnames="$(comm -12 \
+                <(printf '%s\n' "$srcnames" | tr ' ' '\n' | grep . | sort -u) \
+                "$parentsyms" | tr '\n' ' ')"
+        fi
+        if [[ -n "$adjudicated" ]]; then
+            local keep="" nm
+            for nm in $srcnames; do
+                local row
+                row="$(awk -F'\t' -v l="$br" -v n="$nm" \
+                    '$1==l && $2==n { print; exit }' "$adjudicated")"
+                if [[ -n "$row" ]]; then
+                    say "adjudged $br  $nm — $(printf '%s' "$row" | cut -f3-)"
+                    printf '%s\t%s\n' "$br" "$nm" >> "$adjused"
+                else
+                    keep="$keep $nm"
+                fi
+            done
+            srcnames="$keep"
+        fi
+        local srcabsent; srcabsent="$(printf '%s\n' "$srcnames" | tr ' ' '\n' | grep -c . || true)"
+        if [[ "$srcabsent" -gt 0 ]]; then
             echo "LOST     $br" >&2
-            echo "         $absent of $pool_n identifier(s) the layer added are absent from the composed tree:" >&2
-            echo "         $names" >&2
+            echo "         $srcabsent of $pool_n identifier(s) the layer added in SOURCE are absent from the composed tree:" >&2
+            echo "         $srcnames" >&2
+            if [[ "$absent" -gt "$srcabsent" ]]; then
+                echo "         (plus $((absent - srcabsent)) test-only identifier(s) absent — not counted)" >&2
+            fi
             # A layer whose diff-vs-parent is huge is not thin: its first parent
             # is not its real base, so the finding is real but the ATTRIBUTION
             # is coarse — the missing code may belong to a neighbour in the
@@ -234,13 +326,33 @@ run_auto() {
                 echo "         note: fat diff vs first parent (${BASH_REMATCH[1]} insertions) — attribution to this branch is approximate" >&2
             fi
             flagged=$((flagged+1))
+        elif [[ "$absent" -gt 0 ]]; then
+            say "ok       $br  (all source identifiers intact; $absent test-only identifier(s) absent)"
         else
             say "ok       $br  (all $pool_n layer identifiers intact)"
         fi
     done < "$MANIFEST"
     say ""
+    # A stale adjudication is worse than no adjudication: it is a standing
+    # permission for an identifier to vanish, and it keeps that permission after
+    # the reason for it is gone. If an entry matched nothing this run, the
+    # identifier is back (or the layer was renamed) and the entry must go.
+    local stale=0
+    if [[ -n "$adjudicated" ]]; then
+        local line layer ident
+        while IFS=$'\t' read -r layer ident _; do
+            [[ -z "$layer" || "$layer" == \#* ]] && continue
+            if ! grep -qxF "$(printf '%s\t%s' "$layer" "$ident")" "$adjused" 2>/dev/null; then
+                say "STALE    $layer  $ident — adjudication no longer applies; delete this entry"
+                stale=$((stale + 1))
+            fi
+        done < "$adjudicated"
+        rm -f "$adjused"
+        [[ "$stale" -eq 0 ]] || say ""
+    fi
     say "auto: $layers layer(s) checked in full against their own diffs, $flagged with missing content"
-    [[ "$flagged" -eq 0 ]]
+    [[ "$stale" -eq 0 ]] || say "auto: $stale stale adjudication(s) — the list is granting permission it no longer needs"
+    [[ "$flagged" -eq 0 && "$stale" -eq 0 ]]
 }
 
 
@@ -349,6 +461,17 @@ fi
 if [[ "$AUTO" -eq 1 ]]; then
     command -v git >/dev/null 2>&1 || die "git not on PATH (tool failure, not a finding)"
     TIP="$(git -C "$TREE" rev-parse HEAD 2>/dev/null)" || die "cannot resolve HEAD in $TREE (tool failure, not a finding)"
+    # Every comparison below is against the COMMIT at HEAD, because a layer pool
+    # is a commit-to-commit diff. A promote ships the WORKING TREE. If those two
+    # differ, this gate is answering a question nobody asked — and it answers it
+    # green, which is the single failure mode the gate exists to prevent. (Found
+    # 11-23: a control that renamed an identifier in the worktree and expected
+    # LOST got a pass, because HEAD still had the old name.)
+    dirty="$(git -C "$TREE" status --porcelain --untracked-files=no 2>/dev/null | grep -c . || true)"
+    if [[ "$dirty" -gt 0 && "$ALLOW_DIRTY" -ne 1 ]]; then
+        die "$dirty tracked file(s) modified — this gate reads HEAD ($(git -C "$TREE" rev-parse --short HEAD)), so a dirty tree would be scored on bytes you are not promoting. Commit first, or pass --allow-dirty for an interim read."
+    fi
+    [[ "$dirty" -eq 0 ]] || say "WARN     --allow-dirty: scoring HEAD, NOT the $dirty modified file(s) in the working tree"
     if run_auto "$TIP"; then
         exit 0
     fi
