@@ -33,7 +33,7 @@ INCLUDE_TESTS=0
 PATHS=("$@"); [[ ${#PATHS[@]} -gt 0 ]] || PATHS=(cli/src hub/src web/src shared/src relay/src)
 
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
-total=0; files=0
+total=0; files=0; reformatted=0
 
 while read -r f; do
     [[ -n "$f" ]] || continue
@@ -58,14 +58,42 @@ while read -r f; do
     else
         cp "$tmp/want" "$tmp/gone"
     fi
-    n=$(grep -c . "$tmp/gone" || true)
+    # Separate REFORMATTED from ABSENT. A line whose every identifier is still
+    # present in the file is almost always the same declaration written
+    # differently — upstream splits an options object across lines where this
+    # tree keeps it on one, so `allowTitleUpdate?: boolean` reads as "missing"
+    # while allowTitleUpdate is right there. hub/src/store/sessionStore.ts
+    # scored 5/5 absent that way with nothing actually lost. Counting those as
+    # losses makes the gate noisy, and a noisy gate is one nobody reads — the
+    # same failure the sentinel sweep had before its parent filter.
+    : > "$tmp/absent"; : > "$tmp/reformat"
+    if [[ -f "$f" ]]; then
+        while IFS= read -r line; do
+            [[ -n "$line" ]] || continue
+            missing_id=0
+            while IFS= read -r id; do
+                [[ -n "$id" ]] || continue
+                grep -qF -- "$id" "$f" || { missing_id=1; break; }
+            done < <(printf '%s\n' "$line" | grep -oE '\b[A-Za-z_][A-Za-z0-9_]{2,}\b' | sort -u)
+            if [[ "$missing_id" -eq 1 ]]; then printf '%s\n' "$line" >> "$tmp/absent"
+            else printf '%s\n' "$line" >> "$tmp/reformat"; fi
+        done < "$tmp/gone"
+    else
+        cp "$tmp/gone" "$tmp/absent"
+    fi
+    n=$(grep -c . "$tmp/absent" || true)
+    r=$(grep -c . "$tmp/reformat" || true)
+    reformatted=$((reformatted + r))
     [[ "$n" -gt 0 ]] || continue
     files=$((files + 1)); total=$((total + n))
-    printf '%4d/%-4d  %s%s\n' "$n" "$tot" "$f" "$([[ -f "$f" ]] || echo '   [FILE ABSENT]')"
-    sed 's/^/          /' "$tmp/gone" | head -3
+    printf '%4d/%-4d  %s%s%s\n' "$n" "$tot" "$f" \
+        "$([[ -f "$f" ]] || echo '   [FILE ABSENT]')" \
+        "$([[ "$r" -gt 0 ]] && echo "   (+$r reformatted, not counted)" || true)"
+    sed 's/^/          /' "$tmp/absent" | head -3
     [[ "$n" -gt 3 ]] && echo "          … $((n - 3)) more"
 done < <(git diff --name-only "$BASE" "$UP" -- "${PATHS[@]}" | grep -E '\.tsx?$')
 
 echo
 echo "upstream-addition-audit: $total upstream-added line(s) absent across $files file(s)"
+[[ "$reformatted" -eq 0 ]] || echo "upstream-addition-audit: $reformatted further line(s) are the same declarations reformatted — every identifier still present"
 [[ "$total" -eq 0 ]]
