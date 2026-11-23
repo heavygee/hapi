@@ -132,7 +132,13 @@ fi
 
 # ----- check 3: outgoing diff leak scan -----
 if [[ "${HAPI_PR_CREATE_NO_LEAK_SCAN:-0}" != "1" ]]; then
-  if ! "$LEAK_SCRIPT" --git-range upstream/main HEAD 2>&1; then
+  # Qualified ref: this scan is the backstop for a hard rule (no docs/operator/,
+  # docs/plans/ or CLAUDE.md in an upstream diff), so it must not be computed
+  # against a shadow `refs/heads/upstream/main`. A merely-behind shadow only
+  # widens the range (noisy, fail-safe), but a DIVERGENT one is permissive:
+  # `git diff A HEAD` omits a path A happens to carry identically, so a leak
+  # could pass. Low likelihood, wrong direction to gamble on.
+  if ! "$LEAK_SCRIPT" --git-range refs/remotes/upstream/main HEAD 2>&1; then
     echo "hapi-pr-create: outgoing diff has operator-leak hits (see above)" >&2
     echo "  fix the diff or set HAPI_PR_CREATE_NO_LEAK_SCAN=1 if you understand the risk" >&2
     exit 2
@@ -147,7 +153,9 @@ fi
 # so fresh clones see it). They just must not ride along to upstream PRs.
 FORK_ONLY_PR_PATHS_RE='^(CLAUDE\.md|\.claude/settings\.local\.json)$'
 if [[ "${HAPI_PR_CREATE_NO_FORK_PATH_SCAN:-0}" != "1" ]]; then
-  bad_fork_paths="$(git diff --name-only upstream/main HEAD 2>/dev/null | grep -E "$FORK_ONLY_PR_PATHS_RE" || true)"
+  # Qualified for the same reason as the leak scan above: a divergent shadow
+  # carrying an identical CLAUDE.md would hide it from this diff entirely.
+  bad_fork_paths="$(git diff --name-only refs/remotes/upstream/main HEAD 2>/dev/null | grep -E "$FORK_ONLY_PR_PATHS_RE" || true)"
   if [[ -n "$bad_fork_paths" ]]; then
     echo "hapi-pr-create: outgoing diff includes fork-only paths that must not reach upstream:" >&2
     printf '%s\n' "$bad_fork_paths" | sed 's/^/    /' >&2

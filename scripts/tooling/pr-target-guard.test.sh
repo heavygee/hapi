@@ -31,7 +31,7 @@ expect_allow() {
 
 # Simulate #971: tooling branch with scripts/tooling in diff vs upstream/main
 PR_TARGET_GUARD_ROOT="$ROOT"
-if git -C "$ROOT" merge-base --is-ancestor upstream/main HEAD 2>/dev/null; then
+if git -C "$ROOT" merge-base --is-ancestor refs/remotes/upstream/main HEAD 2>/dev/null; then
     expect_block 'fork tooling diff on default repo' tiann/hapi
 fi
 

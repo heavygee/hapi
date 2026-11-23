@@ -79,7 +79,7 @@ pr_target_upstream_block_reason() {
 
     local branch paths
     branch="$(git -C "$PR_TARGET_GUARD_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
-    paths="$(pr_target_fork_only_paths_in_diff "upstream/main...HEAD" | sort -u)"
+    paths="$(pr_target_fork_only_paths_in_diff "refs/remotes/upstream/main...HEAD" | sort -u)"
 
     if [[ -n "$paths" ]]; then
         {

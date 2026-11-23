@@ -42,13 +42,19 @@ DAILY_REF_RE='^refs/heads/(driver/|garden/)'
 # can't resolve at all.
 resolve_push_base() {
     local local_sha="$1" push_remote="$2"
+    # Fully-qualified remote-tracking refs: a local branch named `origin/main`
+    # or `upstream/main` shadows them (git prefers refs/heads), and one existed
+    # in the shared repo on 2026-11-23. This hook blocks docs/operator/ and
+    # docs/plans/ from reaching a remote at all, so a base resolved against a
+    # divergent shadow could let a path through. The existing fallback chain
+    # already covers a genuinely absent ref.
     if [[ "$push_remote" == "origin" ]]; then
-        git merge-base "$local_sha" origin/main 2>/dev/null \
-            || git merge-base "$local_sha" upstream/main 2>/dev/null \
+        git merge-base "$local_sha" refs/remotes/origin/main 2>/dev/null \
+            || git merge-base "$local_sha" refs/remotes/upstream/main 2>/dev/null \
             || true
     else
-        git merge-base "$local_sha" upstream/main 2>/dev/null \
-            || git merge-base "$local_sha" origin/main 2>/dev/null \
+        git merge-base "$local_sha" refs/remotes/upstream/main 2>/dev/null \
+            || git merge-base "$local_sha" refs/remotes/origin/main 2>/dev/null \
             || true
     fi
 }
