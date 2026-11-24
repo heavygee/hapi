@@ -32,6 +32,25 @@
 
 required:
 
+  # --- Surface that only a HEAL puts back -----------------------------------
+  # These are not carried by any layer's own merge: they live in a conflict-free
+  # region, so rerere never replays them and only soup-heals/*.patch restores
+  # them. That made them invisible in the worst way — on 2026-11-24 a tree-wide
+  # conflict-marker grep in the remat's heal loop was matching a PLANNING DOC
+  # that quotes `<<<<<<< HEAD`, so EVERY heal was applied and instantly
+  # reverted, for an unknown number of remats, while the remat printed a WARN
+  # and promoted green.
+  #
+  # Registering them HERE is the durable guard, because this gate does not care
+  # WHY the content is missing. The heal-loop bug is fixed, but the next cause
+  # will be different and this check will still fire.
+  - symbol: "<GardenXrEntryChip"
+    path: web/src/router.tsx
+    why: Garden/XR entry point; restored only by heal 111, absent from promoted tips for weeks with green gates
+  - symbol: "'<render-issue>'"
+    path: cli/src/claude/utils/transcriptEntry.ts
+    why: marks mermaid render hints as system injection; without it heal 109's absence makes them render as human text
+
   # --- MCP tools advertised by the Claude HTTP server ------------------------
   # Fork-only tools. Upstream's builder has no notion of these, so every
   # upstream absorb of startHappyServer.ts is an opportunity to drop one — it

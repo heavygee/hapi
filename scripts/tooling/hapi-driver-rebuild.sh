@@ -405,6 +405,7 @@ if [[ -d "$HEAL_DIR" ]]; then
     shopt -u nullglob
     if [[ ${#heal_patches[@]} -gt 0 ]]; then
         echo "Post-merge heal: applying ${#heal_patches[@]} patch(es) from soup-heals/ ..."
+        heal_applied=0; heal_noop=0; heal_unappliable=0; heal_anomalous=0
         for patch in "${heal_patches[@]}"; do
             if git -C "$REMAT" apply --check -3 "$patch" 2>/dev/null; then
                 # `apply -3` can still leave conflicts even when `--check` passed
@@ -413,6 +414,7 @@ if [[ -d "$HEAL_DIR" ]]; then
                 if ! git -C "$REMAT" apply -3 "$patch"; then
                     if [[ "$REMAT_MODE" == "tip-forward" ]]; then
                         echo "  WARN: skip $(basename "$patch") (apply -3 failed; tip-forward does not heal_fail)"
+                        heal_anomalous=$((heal_anomalous + 1))
                         git -C "$REMAT" checkout -- . >/dev/null 2>&1 || true
                         git -C "$REMAT" clean -fdq >/dev/null 2>&1 || true
                         continue
@@ -432,6 +434,7 @@ if [[ -d "$HEAL_DIR" ]]; then
                 if [[ -n "$heal_files" ]] && git -C "$REMAT" grep -lE '^<<<<<<< |^>>>>>>> ' -- $heal_files >/dev/null 2>&1; then
                     if [[ "$REMAT_MODE" == "tip-forward" ]]; then
                         echo "  WARN: skip $(basename "$patch") (left conflict markers; tip-forward)"
+                        heal_anomalous=$((heal_anomalous + 1))
                         git -C "$REMAT" checkout -- . >/dev/null 2>&1 || true
                         git -C "$REMAT" clean -fdq >/dev/null 2>&1 || true
                         continue
@@ -441,14 +444,31 @@ if [[ -d "$HEAL_DIR" ]]; then
                 git -C "$REMAT" add -A
                 if git -C "$REMAT" diff --cached --quiet; then
                     echo "  skip $(basename "$patch") (no-op on WIP)"
+                    heal_noop=$((heal_noop + 1))
                 else
                     git -C "$REMAT" commit --no-edit --no-verify -q -m "fix(soup): apply heal $(basename "$patch")"
                     echo "  applied $(basename "$patch")"
+                    heal_applied=$((heal_applied + 1))
                 fi
             else
                 echo "  skip $(basename "$patch") (already applied or does not apply cleanly)"
+                heal_unappliable=$((heal_unappliable + 1))
             fi
         done
+        echo "Heal summary: applied=$heal_applied no-op=$heal_noop unappliable=$heal_unappliable anomalous=$heal_anomalous"
+        # ANOMALOUS = `git apply --check -3` PASSED and the heal was skipped anyway.
+        # Never normal: a stale heal fails --check and counts as `unappliable`. A
+        # non-zero count is the signature of the 2026-11-24 defect, where a tree-wide
+        # conflict-marker grep matched a PLANNING DOC and silently reverted EVERY
+        # heal while the remat promoted green. Loud on purpose: the original failure
+        # was a WARN indistinguishable from a healthy run full of stale heals.
+        if [[ "$heal_anomalous" -gt 0 ]]; then
+        echo "" >&2
+        echo "WARNING: $heal_anomalous heal(s) passed apply --check and were then SKIPPED." >&2
+        echo "         That is a heal-loop defect, not a stale heal." >&2
+        echo "         Required-surface gate reports the COST; this line names the CAUSE." >&2
+        echo "" >&2
+        fi
         echo "Remat WIP HEAD: $(git -C "$REMAT" log -1 --oneline)"
     fi
 fi
