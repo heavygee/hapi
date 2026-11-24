@@ -31,6 +31,7 @@ jobs:
                   composer-attachment-controls.spec.ts
                   image-preview-back.spec.ts
                   opencode-fork-buttons.spec.ts
+                  auth-network-recovery.spec.ts
 
     unit-cli:
         runs-on: ${{ github.repository_owner == 'heavygee' && fromJSON('["self-hosted","Linux","X64","hapi"]') || 'ubuntu-latest' }}
@@ -61,6 +62,14 @@ jobs:
                       bun run test:cli
                   fi
 
+    wrapper-parity:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: oven-sh/setup-bun@v2
+            - run: bun install --frozen-lockfile
+            - run: bun run test:parity
+
     unit-web:
         runs-on: ${{ github.repository_owner == 'heavygee' && fromJSON('["self-hosted","Linux","X64","hapi"]') || 'ubuntu-latest' }}
         steps:
@@ -90,7 +99,7 @@ jobs:
     # report — turning a runner outage into a silently missing required
     # check instead of a loud failure.
     test:
-        needs: [browser, unit-cli, unit-web, core]
+        needs: [browser, unit-cli, unit-web, core, wrapper-parity]
         if: ${{ always() }}
         runs-on: ubuntu-latest
         steps:
