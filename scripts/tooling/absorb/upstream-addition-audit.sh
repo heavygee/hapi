@@ -33,7 +33,7 @@ INCLUDE_TESTS=0
 PATHS=("$@"); [[ ${#PATHS[@]} -gt 0 ]] || PATHS=(cli/src hub/src web/src shared/src relay/src)
 
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
-total=0; files=0; reformatted=0
+total=0; files=0; reformatted=0; moved=0
 
 while read -r f; do
     [[ -n "$f" ]] || continue
@@ -66,7 +66,7 @@ while read -r f; do
     # scored 5/5 absent that way with nothing actually lost. Counting those as
     # losses makes the gate noisy, and a noisy gate is one nobody reads — the
     # same failure the sentinel sweep had before its parent filter.
-    : > "$tmp/absent"; : > "$tmp/reformat"
+    : > "$tmp/absent"; : > "$tmp/reformat"; : > "$tmp/moved"
     if [[ -f "$f" ]]; then
         while IFS= read -r line; do
             [[ -n "$line" ]] || continue
@@ -75,7 +75,17 @@ while read -r f; do
                 [[ -n "$id" ]] || continue
                 grep -qF -- "$id" "$f" || { missing_id=1; break; }
             done < <(printf '%s\n' "$line" | grep -oE '\b[A-Za-z_][A-Za-z0-9_]{2,}\b' | sort -u)
-            if [[ "$missing_id" -eq 1 ]]; then printf '%s\n' "$line" >> "$tmp/absent"
+            if [[ "$missing_id" -eq 1 ]]; then
+                # Third class: MOVED. The fork refactors upstream code into new
+                # modules (help.ts's text now lives in cliHelp.ts), and a
+                # per-file comparison reads a move as a loss. Search the owning
+                # package for the exact line before calling it absent.
+                pkg="${f%%/*}"
+                if [[ -d "$pkg" ]] && grep -rqF -- "$line" "$pkg" --include='*.ts' --include='*.tsx' 2>/dev/null; then
+                    printf '%s\n' "$line" >> "$tmp/moved"
+                else
+                    printf '%s\n' "$line" >> "$tmp/absent"
+                fi
             else printf '%s\n' "$line" >> "$tmp/reformat"; fi
         done < "$tmp/gone"
     else
@@ -83,12 +93,14 @@ while read -r f; do
     fi
     n=$(grep -c . "$tmp/absent" || true)
     r=$(grep -c . "$tmp/reformat" || true)
+    mv=$(grep -c . "$tmp/moved" || true)
+    moved=$((moved + mv))
     reformatted=$((reformatted + r))
     [[ "$n" -gt 0 ]] || continue
     files=$((files + 1)); total=$((total + n))
     printf '%4d/%-4d  %s%s%s\n' "$n" "$tot" "$f" \
         "$([[ -f "$f" ]] || echo '   [FILE ABSENT]')" \
-        "$([[ "$r" -gt 0 ]] && echo "   (+$r reformatted, not counted)" || true)"
+        "$([[ "$r" -gt 0 ]] && echo "   (+$r reformatted)" || true)$([[ "$mv" -gt 0 ]] && echo "   (+$mv moved)" || true)"
     sed 's/^/          /' "$tmp/absent" | head -3
     [[ "$n" -gt 3 ]] && echo "          … $((n - 3)) more"
 done < <(git diff --name-only "$BASE" "$UP" -- "${PATHS[@]}" | grep -E '\.tsx?$')
@@ -96,4 +108,5 @@ done < <(git diff --name-only "$BASE" "$UP" -- "${PATHS[@]}" | grep -E '\.tsx?$'
 echo
 echo "upstream-addition-audit: $total upstream-added line(s) absent across $files file(s)"
 [[ "$reformatted" -eq 0 ]] || echo "upstream-addition-audit: $reformatted further line(s) are the same declarations reformatted — every identifier still present"
+[[ "$moved" -eq 0 ]] || echo "upstream-addition-audit: $moved further line(s) moved to another file in the same package (fork refactor), still present verbatim"
 [[ "$total" -eq 0 ]]
