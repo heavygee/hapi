@@ -1,0 +1,121 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: HeavyGee <gc@lockhouse.systems>
+Date: Mon, 24 Nov 2026 17:30:00 +0000
+Subject: [PATCH] fix(soup): restore three RPC handlers the tip-forward merge dropped
+
+The compose's test gate failed with
+
+  apiMachine.test.ts > rejects archive for Codex sessions outside workspace roots
+  expected { error: 'Method not found' } to deeply equal
+           { success: false, error: 'Codex session is outside workspace roots' }
+
+"Method not found" means the RPC method is not registered. Three were missing
+from cli/src/api/apiMachine.ts, along with their imports:
+
+  ArchiveCodexSession   present in BOTH parents (old tip 45abeaa2b AND
+                        origin/main) — an unambiguous merge loss, not a choice
+  ForkArchivedCodex     upstream addition
+  ListOpencodeSessions  upstream addition
+
+MY OWN FAULT, recorded so the next seat does not repeat it. Resolving the
+tip-forward conflict in this file, I dropped a ~50-line `registerHandler` block
+after verifying that ONE symbol inside it (PrepareCursorImport) was already
+registered elsewhere. The block carried three further registrations I never
+checked. Verifying one symbol in a block does not license deleting the block.
+
+AND THE FIRST RESTORE WAS STILL WRONG, which is the more useful half: I spliced
+the handlers after the LAST registerHandler in the file, which sits inside
+`setRPCHandlers()`. origin/main registers them in the CONSTRUCTOR. The test
+constructs a client and never calls setRPCHandlers, so the handlers existed,
+typechecked, and stayed unreachable — the same "Method not found" as before.
+Present is not wired. Same shape as the imported-but-unrendered components and
+the declared-but-uncalled producers this absorb keeps turning up.
+
+WHY A HEAL, even though apiMachine.ts IS a conflicted file: rerere has the bad
+resolution recorded and will replay it on every future compose. A heal applies
+AFTER the merge, so it corrects the replayed state regardless. Fixing rerere's
+cache instead would need the conflict to resurface first.
+
+Retire when the merge stops dropping them (check the three registration counts
+against origin/main before deleting).
+
+VERIFIED: typecheck:cli exit 0; apiMachine.test.ts 33/33 passed, where the
+failing case was the only failure in 6669 cli tests.
+---
+diff --git a/cli/src/api/apiMachine.ts b/cli/src/api/apiMachine.ts
+index 0b540fa49..ef71a8f70 100644
+--- a/cli/src/api/apiMachine.ts
++++ b/cli/src/api/apiMachine.ts
+@@ -29,7 +29,10 @@ import {
+     type MachineDirectoryEntry,
+     type MachineListDirectoryResponse,
+     type PathExistsResponse,
++    ListOpencodeSessionsRpcRequestSchema,
++    type ListOpencodeSessionsRpcResponse,
+ } from '@hapi/protocol/apiTypes'
++import { ForkArchivedCodexRequestSchema } from '@hapi/protocol/apiTypes'
+ import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
+ import { RUNNER_CAPABILITIES } from '@hapi/protocol'
+ import type { RunnerState, Machine, MachineMetadata } from './types'
+@@ -659,6 +662,59 @@ export class ApiMachineClient {
+                 return prepared
+             }
+         )
++
++        // Restored 2026-11-24: the tip-forward merge of origin/main dropped
++        // these three registrations AND their imports. ArchiveCodexSession was
++        // in BOTH parents, so its loss is a merge defect, not a choice;
++        // ForkArchivedCodex and ListOpencodeSessions are upstream additions.
++        // They belong in the CONSTRUCTOR, where origin/main has them — my first
++        // restore put them in setRPCHandlers(), which apiMachine.test.ts never
++        // calls, so the handler existed and stayed unreachable ('Method not
++        // found'). Present is not the same as wired.
++        this.rpcHandlerManager.registerHandler<unknown, ArchiveCodexSessionRpcResponse>(
++            RPC_METHODS.ArchiveCodexSession,
++            async (params) => {
++                const parsed = ArchiveCodexSessionRpcRequestSchema.safeParse(params)
++                if (!parsed.success) return { success: false, error: 'Invalid Codex archive request' }
++                const sessionId = parsed.data.sessionId.trim()
++                return await archiveLocalCodexSession(sessionId, {
++                    canArchive: (session) => this.isLocalSessionWithinWorkspaceRoots(session)
++                })
++            }
++        )
++        this.rpcHandlerManager.registerHandler(RPC_METHODS.ForkArchivedCodex, async (raw: unknown) => {
++            const request = ForkArchivedCodexRequestSchema.parse(raw)
++            const { forkArchivedCodex } = await import('@/codex/shared/archivedFork')
++            return forkArchivedCodex(request, () => this.pathPolicy.allowsSpawn(request.directory))
++        })
++        this.rpcHandlerManager.registerHandler<unknown, ListOpencodeSessionsRpcResponse>(
++            RPC_METHODS.ListOpencodeSessions,
++            async (params) => {
++                const parsed = ListOpencodeSessionsRpcRequestSchema.safeParse(params)
++                if (!parsed.success) return { success: false, error: 'Invalid Opencode sessions request' }
++                const rawCwd = typeof parsed.data.cwd === 'string' ? parsed.data.cwd.trim() : ''
++                if (rawCwd) {
++                    const resolvedCwd = await this.pathPolicy.resolveForCheck(rawCwd)
++                    if (!this.pathPolicy.isWithinSpawnRoots(resolvedCwd)) {
++                        return { success: false, error: 'Path is outside workspace roots' }
++                    }
++                }
++                const requestedIds = parsed.data.sessionIds ? new Set(parsed.data.sessionIds) : null
++                let allSessions
++                try {
++                    allSessions = requestedIds
++                        ? await listLocalOpencodeSessionsWithMessagesByIds(requestedIds)
++                        : await listLocalOpencodeSessionSummaries()
++                } catch (error) {
++                    return { success: false, error: error instanceof Error ? error.message : 'Failed to read local OpenCode sessions' }
++                }
++                const sessions = []
++                for (const session of allSessions) {
++                    if (await this.isLocalSessionWithinWorkspaceRoots(session)) sessions.push(session)
++                }
++                return { success: true, sessions }
++            }
++        )
+     }
+ 
+     private async isLocalSessionWithinWorkspaceRoots(session: { cwd?: string | null }): Promise<boolean> {
+-- 
+2.47.3
