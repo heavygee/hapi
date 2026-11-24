@@ -88,7 +88,12 @@ fi
 echo "Fetching upstream..."
 git -C "$PRIMARY" fetch upstream
 
-if ! git -C "$PRIMARY" show-ref --verify --quiet "refs/remotes/$UPSTREAM_REF"; then
+# UPSTREAM_REF is already a full ref path (refs/remotes/upstream/main by
+# default), so prefixing it again asked for
+# refs/remotes/refs/remotes/upstream/main and ALWAYS reported missing. The
+# error printed the un-doubled variable, so it read like a genuinely absent
+# remote-tracking ref rather than a malformed lookup.
+if ! git -C "$PRIMARY" show-ref --verify --quiet "$UPSTREAM_REF"; then
     echo "ERROR: missing $UPSTREAM_REF" >&2
     exit 1
 fi
