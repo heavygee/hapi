@@ -1397,7 +1397,10 @@ if (isReconnect) {
         }, 'droppable')
     }
 
-    emitMessagesConsumed(localIds: string[], options?: { clearQueuedThinkingGrace?: boolean; steered?: boolean }): void {
+    emitMessagesConsumed(
+        localIds: string[],
+        options?: { clearQueuedThinkingGrace?: boolean; steered?: boolean; maintenance?: boolean }
+    ): void {
         if (localIds.length === 0) return
         // `clearQueuedThinkingGrace` is an opt-in signal for the hub to drop
         // the 15s queued-thinking grace immediately. Only synchronous handlers
@@ -1405,11 +1408,15 @@ if (isReconnect) {
         // inside `onUserMessage`) should set it — normal queue drains still
         // need the grace so the spinner doesn't flicker between drain and
         // backend.prompt start.
+        // `maintenance` is a separate axis from the grace: it says this
+        // acknowledgement consumed a COMMAND rather than delivering a prompt,
+        // so the hub must not read it as an answer to a blocked report (#1717).
         const payload: {
             sid: string
             localIds: string[]
             clearQueuedThinkingGrace?: boolean
             steered?: boolean
+            maintenance?: boolean
         } = {
             sid: this.sessionId,
             localIds
@@ -1419,6 +1426,9 @@ if (isReconnect) {
         }
         if (options?.steered) {
             payload.steered = true
+        }
+        if (options?.maintenance) {
+            payload.maintenance = true
         }
         this.emitOrQueue(() => this.socket.emit('messages-consumed', payload))
     }
