@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: HeavyGee <gc@lockhouse.systems>
+Date: Mon, 24 Nov 2026 14:35:00 +0000
+Subject: [PATCH] fix(soup): drop the duplicate prepareCursorImportForMachine
+
+The tip-forward merge of origin/main lands `prepareCursorImportForMachine`
+TWICE in hub/src/sync/syncEngine.ts — once from upstream's #945 squash (now on
+fork main) and once from the old tip's copy of the same work. The two are
+functionally identical: same parameters, same single-line delegation to
+`this.rpcGateway.prepareCursorImportForMachine`, differing only in whether the
+signature is wrapped. TypeScript rejects it:
+
+  src/sync/syncEngine.ts(7983,11): error TS2393: Duplicate function implementation.
+  src/sync/syncEngine.ts(8003,11): error TS2393: Duplicate function implementation.
+
+THIS LIVES IN A HEAL RATHER THAN THE MERGE RESOLUTION, and the reason is the
+whole point. syncEngine.ts does NOT conflict during the tip-forward merge — both
+sides add the method in a different place, so git auto-merges both copies as
+context with no marker at all. rerere only replays regions that actually
+conflicted, so a fix made here by hand is silently dropped by the next
+recompose. Proven the hard way on 2026-11-24: the identical fix was committed to
+driver/integration-wip, the remat reset the branch, and the error came straight
+back — while the same-day fixes to apiMachine.ts and rpcGateway.ts DID survive,
+because those files were genuinely conflicted and rerere had resolutions to
+replay.
+
+Retire this heal once the old tip no longer carries the #945 layer's copy (the
+layer itself was retired 2026-11-24, so the next full recompose from main should
+make this unnecessary — verify by checking the method count before deleting).
+---
+diff --git a/hub/src/sync/syncEngine.ts b/hub/src/sync/syncEngine.ts
+index aff737358..4bbda08ce 100644
+--- a/hub/src/sync/syncEngine.ts
++++ b/hub/src/sync/syncEngine.ts
+@@ -8000,14 +8000,6 @@ recordSessionActivity(sessionId: string, updatedAt: number): void {
+         return await this.rpcGateway.listLocalSessionsForMachine(machineId, params)
+     }
+ 
+-    async prepareCursorImportForMachine(
+-        machineId: string,
+-        uuid: string,
+-        workspacePath?: string | null
+-    ) {
+-        return await this.rpcGateway.prepareCursorImportForMachine(machineId, uuid, workspacePath)
+-    }
+-
+     async listCursorModelsForSession(sessionId: string): Promise<RpcListCursorModelsResponse> {
+         return await this.rpcGateway.listCursorModelsForSession(sessionId)
+     }
+-- 
+2.47.3
