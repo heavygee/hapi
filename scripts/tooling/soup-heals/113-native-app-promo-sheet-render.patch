@@ -1,0 +1,127 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: HeavyGee <gc@lockhouse.systems>
+Date: Mon, 24 Nov 2026 17:20:00 +0000
+Subject: [PATCH] fix(soup): render NativeAppPromoSheet, and drop its dead sibling import
+
+`verify-sessionlist-bindings` (a HARD gate in the remat's verify stage) fails
+the compose with:
+
+  web/src/router.tsx: imports NativeAppPromoSheet but never renders
+  <NativeAppPromoSheet /> — entry point unreachable
+
+PROVENANCE: upstream parent f288d8511 and origin/main both render
+`<NativeAppPromoSheet enabled={isSessionsIndex} />` at router.tsx:392. The fork
+parent had no render site, so the merge took the fork side of that region and
+kept only the import. An upstream addition dropped — the one direction this
+absorb is never allowed to resolve that way.
+
+WHY IT MATTERS MORE THAN A MISSING MODAL: `markPromoFirstSeen()` is called from
+exactly one place, this sheet, and `shouldShowPromoModal` requires
+`state.firstSeenAt !== undefined`. The component that ARMS the state machine is
+the one gated on it, so unmounted it disarms itself permanently — the modal
+could never appear even if something else mounted it.
+
+WHY A HEAL. The render site sits in a conflict-free region of router.tsx, so git
+treats it as context, rerere never replays it, and a hand fix is discarded by
+the next recompose. Proven twice on 2026-11-24: this exact fix was committed to
+driver/integration-wip, the compose recomposed, and the commit went dangling
+(held only by tag rescue/2026-11-24-promo-sheet) while the gate demanding it —
+landed on MAIN, where it persists — kept failing. The gate survived and its fix
+did not, which is the whole argument for heals.
+
+Also drops `NativeAppPromoButton` from SessionHeader.tsx: an unused import,
+verified NOT a third instance of the same bug before deleting — that button IS
+rendered, from router.tsx.
+---
+commit 270f84bc7eedb18ca0375d79cd62944219347418
+Author: HeavyGee <133152184+heavygee@users.noreply.github.com>
+Date:   Tue Nov 24 09:23:00 2026 +0000
+
+    fix(web): render the native-app promo sheet, dropped as an upstream addition
+    
+    Generalising yesterday's Garden/XR chip fix into a tree-wide sweep for
+    imported-but-unrendered components found a SECOND instance of the same class.
+    That is the point of the sweep: one occurrence is a bug, two is a defect class,
+    and the class is what the gate now covers.
+    
+    `NativeAppPromoSheet` (web/src/components/NativeAppPromo.tsx:226, props
+    `{ enabled: boolean }`) was imported at web/src/router.tsx:2 and rendered
+    nowhere.
+    
+    PROVENANCE — an upstream addition dropped, which is the one direction this
+    absorb is not allowed to resolve that way. Upstream parent f288d8511 and
+    current origin/main BOTH render `<NativeAppPromoSheet enabled={isSessionsIndex} />`
+    at router.tsx:392. Fork parent 360c9d58d has no render site at all. So the
+    merge took the fork side of that region and kept only the import. Restored at
+    our line 1375, inside the same SessionsPage function where `isSessionsIndex`
+    is already defined (line 330), so the prop means what upstream means by it.
+    
+    THE CONSEQUENCE IS WORSE THAN A MISSING MODAL, and is why this is not simply a
+    cosmetic restore. `markPromoFirstSeen()` is called from exactly one place —
+    this sheet, line 235 — and `shouldShowPromoModal` requires
+    `state.firstSeenAt !== undefined`. The component that ARMS the state machine
+    is the one gated on it. Unmounted, it disarms itself permanently: the modal
+    could never have appeared on the promoted tip even if something else had
+    mounted it. A reader checking only "is the promo feature wired?" would find a
+    complete-looking state machine and no way to reach it.
+    
+    WHY NOTHING CAUGHT IT. The same structural blindness as the chip: typecheck is
+    content with an unused import, there is no router test harness, and zero tests
+    anywhere reference the component (grep NativeAppPromoSheet across
+    web/src/**/*.test.tsx: no hits). Git treated the region as CONTEXT, not
+    conflict, so no amount of careful conflict resolution would have surfaced it.
+    
+    THE GATE, extended rather than re-invented.
+    verify-sessionlist-bindings.mjs already runs from the build and already failed
+    closed on an unrendered entry point; `ENTRY_POINT_COMPONENTS` now carries both
+    components. Its remediation hint was hardcoded to the chip's home
+    (`toolbarExtras`), which would have sent the next reader to the wrong file for
+    this component — it is now per-component and names upstream's own line.
+    Positive control, both directions: deleting the render makes it exit 1 with
+    "imports NativeAppPromoSheet but never renders <NativeAppPromoSheet /> —
+    entry point unreachable / Render it in the SessionsPage shell, as upstream
+    does at router.tsx:392", and restoring it returns OK (31 files).
+    
+    ALSO, one genuinely dead import removed: SessionHeader.tsx imported
+    `NativeAppPromoButton` and never used it. Verified it is not a third instance
+    of the same bug before deleting — the button IS rendered, at router.tsx:1284.
+    Deleting a live binding to quiet a gate would have been the opposite of this fix.
+    
+    web 5556 passed / 1 expected fail / 0 failed (498 files, exit 0; floor 5557
+    unchanged). typecheck:web exit 0. verify-sessionlist-bindings OK.
+    
+    via [HAPI](https://hapi.run)
+    
+    Co-Authored-By: HAPI <noreply@hapi.run>
+
+diff --git a/web/src/components/SessionHeader.tsx b/web/src/components/SessionHeader.tsx
+index 7a90d78c1..2e4c445d3 100644
+--- a/web/src/components/SessionHeader.tsx
++++ b/web/src/components/SessionHeader.tsx
+@@ -1,6 +1,5 @@
+ import { isLiveLifecycleState } from '@hapi/protocol/sessionLifecycle'
+ import { useEffect, useId, useMemo, useRef, useState } from 'react'
+-import { NativeAppPromoButton } from '@/components/NativeAppPromo'
+ import { useIsMutating, useQueryClient } from '@tanstack/react-query'
+ import type { Session } from '@/types/api'
+ import type { ApiClient } from '@/api/client'
+diff --git a/web/src/router.tsx b/web/src/router.tsx
+index 4587915ef..6c284f5b9 100644
+--- a/web/src/router.tsx
++++ b/web/src/router.tsx
+@@ -1366,6 +1366,13 @@ function SessionsPage() {
+                 </div>
+             </div>
+             </div>
++            {/* Upstream addition (f288d8511 / origin/main render it at router.tsx:392);
++                the fork parent had no render site, so the merge took our side for
++                this region and kept only the import. Without it the component that
++                calls markPromoFirstSeen() never mounts — and shouldShowPromoModal
++                requires firstSeenAt — so the modal could never appear even once
++                mounted. The sheet self-gates on isPhone / Telegram / dismissal. */}
++            <NativeAppPromoSheet enabled={isSessionsIndex} />
+             {/* Multi-agent session import: Codex + Cursor + Claude tabs. */}
+             <AgentSessionImportDialog
+                 isOpen={isSyncConfirmOpen}
+-- 
+2.47.3
