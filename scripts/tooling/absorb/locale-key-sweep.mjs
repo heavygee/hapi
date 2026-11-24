@@ -32,8 +32,14 @@ const walkDir = (dir) => {
 }
 walkDir(WEB_SRC)
 
-const STATIC = /\bt\(\s*(['"])([A-Za-z0-9_.-]+)\1/g
+// A literal followed by `+` is a CONCATENATED key, not a complete one:
+// `t('sessions.search.scope.' + mode + '.description')` would otherwise be
+// reported as the undefined key `sessions.search.scope.` — a false positive,
+// and a gate that cries wolf is a gate people stop reading. The trailing
+// `(?!\s*\+)` is what makes the match mean "this is the whole key".
+const STATIC = /\bt\(\s*(['"])([A-Za-z0-9_.-]+)\1(?!\s*\+)/g
 const DYNAMIC = /\bt\(\s*(?!['"])[^)]/g
+const CONCAT = /\bt\(\s*(['"])[A-Za-z0-9_.-]+\1\s*\+/g
 
 const missing = new Map()   // key -> [sites]
 let staticCount = 0
