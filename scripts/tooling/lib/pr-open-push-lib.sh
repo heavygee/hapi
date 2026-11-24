@@ -70,15 +70,66 @@ pr_extract_push_branch() {
     printf '%s' "$branch"
 }
 
+# Resolve "owner/repo" from a remote. Fails for non-GitHub remotes, of which
+# this checkout has several (driver-soup, driver-src and fork are local paths).
+pr_open_push_remote_slug() {
+    local url slug
+    url=$(git remote get-url "$1" 2>/dev/null) || return 1
+    url="${url%.git}"
+    case "$url" in
+        *github.com[:/]*) ;;
+        *) return 1 ;;
+    esac
+    slug="${url#*github.com}"
+    slug="${slug#:}"
+    slug="${slug#/}"
+    [ -n "$slug" ] || return 1
+    printf '%s' "$slug"
+}
+
 pr_open_push_lookup() {
     local branch="$1"
-    local pr base
-    pr=$(gh pr list --head "$branch" --state open --json number --jq '.[0].number' 2>/dev/null || true)
-    if [ -z "$pr" ] || [ "$pr" = "null" ]; then
-        return 1
-    fi
-    base=$(gh pr view "$pr" --json baseRefName --jq -r '.baseRefName' 2>/dev/null || echo "main")
-    printf '%s %s\n' "$pr" "$base"
+    local pr base slug owner repo
+
+    slug=$(pr_open_push_remote_slug origin) || return 1
+    owner="${slug%%/*}"
+
+    # The head is qualified by OWNER, and the search is scoped to explicit repos.
+    #
+    # `gh pr list --head "$branch"` was unqualified in two ways at once. It never
+    # said WHICH repo to search — with no gh default set, gh resolves one from the
+    # remote set, and this checkout carries `upstream` plus half a dozen
+    # contributor forks — and it never said WHOSE head branch to match. So on
+    # 2026-11-24 a `git push origin main` on the fork matched tiann/hapi#553, an
+    # unrelated contributor's PR whose head branch is also named `main`, and told
+    # the agent it must cold-review that stranger's WeCom feature before pushing
+    # two file renames. A gate that points at someone else's diff is worse than
+    # no gate: it trains agents to scroll past the one that matters.
+    #
+    # Both repos are searched because a fork-main PR lives in UPSTREAM with head
+    # "<fork-owner>:main", not in the fork — so scoping to origin alone would
+    # miss the real case this gate exists for. Owner-qualifying the head is what
+    # excludes other forks' identically-named branches.
+    #
+    # ORIGIN IS SEARCHED FIRST, and that ordering is deliberate: one branch
+    # routinely carries TWO open PRs, the fork's "[cold-review]" PR and the
+    # upstream one (e.g. 1996-fold-blocked-filter is fork #337 and upstream
+    # #2530). A push to `origin` is the fork event, and the fork's cold-review PR
+    # is where that review lives, so it is the more useful of the two to name.
+    # The caller contract is one PR, so the other is not reported — if you are
+    # chasing upstream CI for a branch, look it up there directly rather than
+    # assuming this gate named it.
+    for repo in "$slug" $(pr_open_push_remote_slug upstream 2>/dev/null || true); do
+        [ -n "$repo" ] || continue
+        pr=$(gh api "repos/$repo/pulls?state=open&head=$owner:$branch" \
+            --jq '.[0].number // empty' 2>/dev/null || true)
+        if [ -n "$pr" ] && [ "$pr" != "null" ]; then
+            base=$(gh api "repos/$repo/pulls/$pr" --jq '.base.ref // "main"' 2>/dev/null || echo "main")
+            printf '%s %s\n' "$pr" "$base"
+            return 0
+        fi
+    done
+    return 1
 }
 
 pr_open_push_cold_review_message() {
