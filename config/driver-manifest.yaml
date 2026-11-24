@@ -1327,13 +1327,10 @@ layers:
   # Hub → remat + hapi-restart-hub (startHub poller). No --activate from agents.
   - branch: driver/hub-upstream-seal-url
 
-  # tiann/hapi#2011 — terminal To agent / Selection to agent: append xterm
-  # buffer or selection to composer draft, navigate back to chat.
-  # Upstream tip: feat/terminal-to-agent @ c853efbe9
-  # Soup thin tip on live driver HEAD: driver/2011-terminal-to-agent @ e89bcf2bd
-  # Worktree: ~/coding/hapi/worktrees/terminal-to-agent (+ soup thin 2011-terminal-to-agent-soup)
-  # Web-only → remat --build-web; hard-reload (no hub restart required).
-  - branch: driver/2011-terminal-to-agent
+  # DROPPED 2026-11-24: driver/2011-terminal-to-agent — MERGED upstream as
+  # tiann/hapi#2012 (squash ad9fa5d711). Base tip-forward absorbs it from
+  # upstream/main; keeping the layer would double-apply / conflict.
+  # - branch: driver/2011-terminal-to-agent
 
   # DROPPED 2026-10-15: driver/elevenlabs-max-duration — MERGED upstream as
   # tiann/hapi#2017 (squash 7b00df458). Base tip-forward absorbs it from
