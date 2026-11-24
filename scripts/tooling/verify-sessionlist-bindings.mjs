@@ -19,6 +19,19 @@ const webSrc = join(driver, 'web/src')
 
 const HOT_CALLS = ['getTodoProgress', 'getAttentionLabel', 'getSessionTimeLabel']
 
+// Fork entry points that router.tsx must RENDER, not merely import.
+const ENTRY_POINT_COMPONENTS = [
+    // name → where it belongs, so the failure tells you the right place.
+    { name: 'GardenXrEntryChip', home: 'SessionList toolbarExtras (heal 111-garden-xr-chip-toolbar)' },
+    // Upstream's promo modal. Found imported-but-unrendered on the composed tip
+    // by the same sweep that caught GardenXrEntryChip: the fork parent had no
+    // render site, so the merge kept our side of that region and the import
+    // alone survived. It is self-gating AND it is the only caller of
+    // markPromoFirstSeen(), which shouldShowPromoModal depends on — so leaving
+    // it unmounted disarms its own state machine.
+    { name: 'NativeAppPromoSheet', home: 'the SessionsPage shell, as upstream does at router.tsx:392: <NativeAppPromoSheet enabled={isSessionsIndex} />' },
+]
+
 function walk(dir, out = []) {
     let entries
     try {
@@ -108,7 +121,29 @@ if (failures.length > 0) {
             )
             process.exit(1)
         }
+
+        // Fail-closed: a fork entry point that router.tsx IMPORTS but never
+        // RENDERS is unreachable, and nothing else notices — typecheck is happy
+        // with an unused import and no test asserts the toolbar's contents.
+        //
+        // Found 2026-11-24 on the composed tip: GardenXrEntryChip was imported
+        // at router.tsx:109 and rendered nowhere, so the Garden/XR entry simply
+        // did not exist in the UI. The cause is structural, not careless —
+        // upstream moved this header into <SessionList renderHeader>, so the
+        // merge takes the base for that region and the chip loses its home. It
+        // belongs in toolbarExtras (heal 111), which sits OUTSIDE the conflict
+        // region, so rerere never replays it and a hand edit is silently
+        // dropped by the next compose. Hence a gate rather than a comment.
+        for (const { name, home } of ENTRY_POINT_COMPONENTS) {
+            const imported = new RegExp(`\\bimport\\s*\\{[^}]*\\b${name}\\b[^}]*\\}`).test(routerSrc)
+            if (!imported) continue
+            if (new RegExp(`<${name}[\\s/>]`).test(routerSrc)) continue
+            console.error('verify-sessionlist-bindings: FAIL')
+            console.error(`  - web/src/router.tsx: imports ${name} but never renders <${name} /> — entry point unreachable`)
+            console.error(`  Render it in ${home}.`)
+            process.exit(1)
+        }
     }
 }
 
-console.log(`verify-sessionlist-bindings: OK (${targets.length} file(s), hot calls bound)`)
+console.log(`verify-sessionlist-bindings: OK (${targets.length} file(s), hot calls bound, entry points rendered)`)

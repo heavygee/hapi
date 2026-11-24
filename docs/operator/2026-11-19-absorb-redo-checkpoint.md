@@ -461,3 +461,38 @@ expect to push commits that are not yours.
    do this naturally; verify it, since the serving tip lost the feature).
 8. Stale comment: `hub/src/store/index.ts:165` claims "Soup tip keeps
    SCHEMA_VERSION=23"; actual is **35**. Fix while in there.
+
+## SWEEP 2 — missing locale keys (the heal-94 class): CLEAN
+
+Heal 94 (`94-pr-modelerror-linkpr-locale-keys`) exists because an absorb can
+land a `t('some.key')` call whose catalogue entry was dropped with the other
+side of the merge. Typecheck cannot see it — `t()` takes a string — and the
+user gets a raw key on screen. So the class was swept tree-wide rather than
+judged one heal at a time.
+
+Result on WIP 270f84bc7: **0 undefined keys** across 2057 static `t()` call
+sites against 1925 defined keys in `en`. Tool:
+`scripts/tooling/absorb/locale-key-sweep.mjs` (unwired — see below).
+
+THE CONTROL MATTERS MORE THAN THE ZERO. A sweep that reports "0 problems"
+is indistinguishable from a sweep that is silently broken, and the first
+control written here was the weak kind: it only asserted the catalogue did not
+contain a bogus key, which tests the `Set`, not the scanner. The real control
+injected `t('sweep2.injected.not.a.real.key')` into a live source file
+(SessionHeader.tsx) and confirmed the probe reported it at the correct
+`file:line`, then reverted via `git checkout --` (never `git stash` in this
+repo — the stash ref is shared across worktrees) and confirmed the count
+returned to 0. Only the second control licenses the zero.
+
+KNOWN LIMIT, stated so the zero is not over-read: 114 `t()` call sites take a
+non-literal key (variable or template) and are NOT checkable by this method.
+They are counted and reported separately rather than quietly skipped, because
+a sweep that folds unknowns into its clean bucket is worse than no sweep.
+
+NOT WIRED INTO THE BUILD, deliberately. Wiring it into
+`verify-sessionlist-bindings`-style build gating would change the build, and
+the web build is currently refused by its own memory floor (MemAvailable
+3551 MiB against the 4096 floor, swap 100%), so that change could not be
+verified end to end right now. Shipping an unverified gate is how a gate that
+cannot fail gets normalised. Wiring is a utensil follow-up after promote,
+alongside defaulting the sentinel adjudication flags.
