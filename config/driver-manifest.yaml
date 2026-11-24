@@ -240,7 +240,21 @@ layers:
   # Brief: docs/plans/peer-briefings/2026-07-24-peer-942-945-import-picker-rebase.md
   # Worktree: agent-import-picker. Drop when upstream #945 merges.
   # Heals 52/53/54 parked while this cluster is souped.
-  - branch: feat/agent-session-import-picker
+    #
+    # DROPPED 2026-11-24: MERGED upstream as tiann/hapi#945 (squash 6b4fc8249).
+    # Base tip-forward absorbs it from upstream/main; keeping the layer would
+    # double-apply / conflict — which this entry's own "drop when #945 merges"
+    # note anticipated. Verified by CONTENT, not by the merge notice: 9 of 14
+    # distinctive identifiers the layer adds (NO_ONLINE_MACHINE_ERROR,
+    # CURSOR_IMPORT_NAMESPACE_ERROR, IMPORT_LIMIT, acpRoot, acpMetaPath,
+    # DEFAULT_{INIT,LIST,LOAD}_TIMEOUT_MS, NO_CURSOR_SESSION_SELECTED_ERROR) are
+    # ABSENT at merge-base a2a79b4a6 and PRESENT in upstream/main; the other 5
+    # pre-existed and merely gained usages. Absence-at-base is the half that
+    # proves it — presence upstream alone would prove nothing, which is the
+    # discriminator this absorb has been bitten by before.
+    # Heals 52/53/54 stay parked (already .parked): they were parked because
+    # this cluster was souped, and the content now arrives from upstream.
+    # - branch: feat/agent-session-import-picker
 
   # Session list/header context menu: Copy reference for cross-session citation.
   # tiann/hapi#950. Web-only; topmost for cheap rollback via atomic web swap.
