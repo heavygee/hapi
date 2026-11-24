@@ -1,41 +1,49 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: HeavyGee <gc@lockhouse.systems>
-Date: Thu, 19 Nov 2026 22:45:00 +0000
+Date: Mon, 24 Nov 2026 09:10:00 +0000
 Subject: [PATCH] fix(soup): reinstate the Garden/XR entry chip in the sessions toolbar
 
-feat/garden-route placed <GardenXrEntryChip /> inline in the sessions
-header in web/src/router.tsx, beside the session count. Upstream has since
-moved that whole header into <SessionList renderHeader toolbarExtras={[...]}>,
-so the layer merge takes the base for that region — otherwise the composed
-tip would render a second header the base no longer renders.
+RE-CUT 2026-11-24 against composed tip 45abeaa2b. The original (dated
+2026-11-19) stopped applying when the toolbarExtras region moved, and a
+failed `apply -3` leaves partial debris in the remat worktree, so a stale
+heal is worse than none.
 
-That leaves the chip with nowhere to live, so it is reinstated here as a
-toolbarExtras entry (id 'garden-xr', keep 4) alongside browse and settings.
+The reason this must stay a heal, unchanged from the original: upstream moved
+the sessions header into <SessionList renderHeader>, so the layer merge takes
+the base for that region and the chip loses its home. toolbarExtras sits
+OUTSIDE the conflict region — git treats it as context, rerere replays only
+conflicted regions, so a hand edit there is silently dropped by the next
+compose, and full-recipe mode recomposes from the base every run.
 
-A heal rather than part of the merge resolution: toolbarExtras is outside
-the conflict region, git treated it as context, and rerere replays
-conflicted regions only — so a hand edit there is silently dropped by the
-next compose, and in full-recipe mode every run recomposes from the base.
-
+Found unrendered on the promoted tip: GardenXrEntryChip was imported at
+router.tsx:109 and rendered NOWHERE, so the Garden/XR entry point did not
+exist in the UI. Typecheck is happy with an unused import and no test asserts
+the toolbar's contents, so nothing reported it. A fail-closed check now does:
+verify-sessionlist-bindings.mjs rejects an entry-point component that
+router.tsx imports but never renders.
 diff --git a/web/src/router.tsx b/web/src/router.tsx
+index 6c9a4981a..4587915ef 100644
 --- a/web/src/router.tsx
 +++ b/web/src/router.tsx
-@@ -345,6 +345,16 @@
-                                 )
-                             }] : []),
-                             {
-+                                // Garden/XR entry (fork). It used to sit inline
-+                                // beside the session count; upstream moved that
-+                                // header into <SessionList renderHeader>, so the
-+                                // chip belongs in the toolbar rather than in a
-+                                // header this file no longer renders.
+@@ -1149,6 +1149,19 @@ function SessionsPage() {
+                         // browse 8, overseer 9, import 10 (#2039).
+                         renderHeader={false}
+                         toolbarExtras={[
++                            {
++                                // Garden/XR entry (fork). It used to sit inline beside
++                                // the session count in this file; upstream moved that
++                                // header into <SessionList renderHeader>, so the chip
++                                // belongs in the toolbar rather than in a header this
++                                // file no longer renders. Without this entry the
++                                // component is imported here and rendered NOWHERE —
++                                // the entry point is simply unreachable, which is the
++                                // state the composed tip was in.
 +                                id: 'garden-xr',
 +                                keep: 4,
 +                                node: <GardenXrEntryChip />
 +                            },
-+                            {
+                             {
                                  id: 'settings',
                                  keep: 6,
-                                 node: (
 -- 
 2.47.3
