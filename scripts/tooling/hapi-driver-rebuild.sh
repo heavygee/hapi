@@ -419,7 +419,17 @@ if [[ -d "$HEAL_DIR" ]]; then
                     fi
                     heal_fail "heal apply failed (3-way conflict): $(basename "$patch")"
                 fi
-                if git -C "$REMAT" grep -lE '^<<<<<<< |^>>>>>>> ' >/dev/null 2>&1; then
+                # Scope the marker check to the files THIS PATCH touched. A
+                # tree-wide `git grep` is a false-positive magnet and silently
+                # disabled EVERY heal: docs/plans/2026-11-10-soup-upstream-absorb-91-files.md
+                # quotes `<<<<<<< HEAD` / `>>>>>>> origin/main` at lines 40/44 as
+                # worked examples, that file is on main, so the grep matched on
+                # every iteration and each heal took the warn-skip branch. Heals
+                # 109/111/112 were applied and then reverted on every remat, which
+                # is why the Garden/XR chip stayed missing from promoted tips while
+                # its heal looked healthy (2026-11-24).
+                heal_files=$(grep -E '^\+\+\+ b/' "$patch" | sed 's|^+++ b/||')
+                if [[ -n "$heal_files" ]] && git -C "$REMAT" grep -lE '^<<<<<<< |^>>>>>>> ' -- $heal_files >/dev/null 2>&1; then
                     if [[ "$REMAT_MODE" == "tip-forward" ]]; then
                         echo "  WARN: skip $(basename "$patch") (left conflict markers; tip-forward)"
                         git -C "$REMAT" checkout -- . >/dev/null 2>&1 || true
