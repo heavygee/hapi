@@ -496,3 +496,54 @@ the web build is currently refused by its own memory floor (MemAvailable
 verified end to end right now. Shipping an unverified gate is how a gate that
 cannot fail gets normalised. Wiring is a utensil follow-up after promote,
 alongside defaulting the sentinel adjudication flags.
+
+---
+
+# Archive-peer layer decision (copied from the tip-only ledger, 2026-11-24)
+
+Copied here because `docs/operator/absorb-decision-ledger.md` exists ONLY on
+`driver/integration-wip`, not on main, so every remat recompose can erase it.
+That is the same fragility that orphaned four commits earlier today. This file
+IS on main, so the decision survives.
+
+## feat/archive-peer-2020 tip-forward (2026-11-24) — one behavioural choice the operator may want to reverse
+
+The remat hit a 16-file conflict merging layer `feat/archive-peer-2020`. Fifteen
+files were reconcilable without choosing a behaviour. ONE was not, and it is
+recorded here because it changes what the hub does, not merely how it reads.
+
+**Soft stand-down: eligibility-gated (fork) vs opt-in-gated (layer).**
+
+| | Fork tip (KEPT) | Layer feat/archive-peer-2020 |
+|---|---|---|
+| Gate | Session ELIGIBILITY only — still connected, not thinking (`canSoftStandDownUnconfirmedStop`) | Eligibility **plus** an explicit `softStandDown: true` from the caller |
+| Ordinary archive (web UI / bare REST) of an eligible Peer Done reporting `still_alive` | **Archives**, flagging `softStandDownPending` | **Refuses** with `archive-cleanup-unconfirmed` |
+| Tests pinning it | FOUR (`archives a still-connected non-thinking Peer Done…`, `archives still-connected keepalive-idle Peer Done…`, `archives Peer Done when KillSession succeeded but StopSession stays unknown…`, `archives a Peer Done non-stub runner session on unknown without hostPid`) | ONE (`keeps verified cleanup for ordinary archive … (no softStandDown opt-in)`) |
+
+**The fork won, on two grounds.** Four tests against one, and it is the
+behaviour already running on the live tip — adopting the layer's gate broke all
+four. I tried the layer's gate first and it failed exactly those four, which is
+how the conflict was identified as behavioural rather than textual.
+
+**Why the operator might still want the layer's version.** The layer's gate is
+the SAFER one: it refuses to archive from the web UI whenever Runner cleanup is
+unproven, reserving the soft stand-down path for the CLI/MCP `archive_peer`
+caller that explicitly opts in. The fork's version will archive a session whose
+process may still be alive, on the strength of "connected and not thinking".
+That is a real difference in how much the hub trusts a ghost keepalive. Reversal
+recipe: restore the `if (!opts?.softStandDown) throw new ArchiveCleanupError('unconfirmed')`
+gate in `syncEngine.ts`, re-add the layer's test (its full text is quoted in a
+comment at the end of `hub/src/sync/syncEngineArchiveSession.test.ts`), and
+update the four fork tests to pass `{ softStandDown: true }`.
+
+**One genuine fork defect was fixed while here, not a choice.** The fork's side
+allowed the archive but never set `peerDoneSoftStandDown`, so
+`confirmSoftStandDownExit` — whose only caller lives in the layer's half of
+another conflicted hunk — never ran, and `softStandDownPending` was never
+lifted. With the DELETE route also gated on that flag, a soft-stand-down archive
+would have left the session undeletable indefinitely. Three files had to be read
+together to see it.
+
+Three of the layer's four unique tests WERE grafted in (drained pid+marker
+pinning, WORKING refusal, non-runner refusal) — they pin the machinery both
+designs share.
