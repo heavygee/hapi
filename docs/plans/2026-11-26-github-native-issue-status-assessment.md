@@ -55,7 +55,7 @@ Recommendation: **#2147 should not merge with `setStatus` unguarded.** See "Reco
 
 ### 5. [LOW, strategic — not a correctness issue] #2147's pitch is partly native now
 
-- PR #2147 (`feat/boards` → `tiann/hapi:main`, OPEN) frames Boards as "see work without leaving the repo." As of 3 days ago, GitHub ships a native version of exactly that for the common case. The PR's own linked discussion (#2148, "two-way status sync, multi-repo rollups, board-level automations") shows the author was already reaching for the sync problem GitHub just solved natively — better to name that overlap explicitly in the PR body than have a reviewer (plausibly @tiann, who will have seen the same changelog) name it first.
+- PR #2147 (`feat/boards` → `tiann/hapi:main`, OPEN) frames Boards as "see work without leaving the repo." As of 3 days ago, GitHub ships a native version of exactly that for the common case. The PR's own linked discussion (#2148, "two-way status sync, multi-repo rollups, board-level automations") shows the author was already reaching for the sync problem GitHub just solved natively — better to name that overlap explicitly in the PR body than have a reviewer (plausibly @tiann, who will have seen the same changelog) name it first. This is a better position to argue from than it first looks: #2147 predates the 2026-11-23 announcement entirely, and #2148 was proposing two-way status sync *before* GitHub shipped a version of it. The honest framing isn't "our feature collided with a GitHub change" — it's "our feature anticipated a GitHub change, and the collision is in one specific behavior" (hazard #1's auto-close edge, not the sync concept itself, which the author already wanted).
 
 ## Opportunities
 
