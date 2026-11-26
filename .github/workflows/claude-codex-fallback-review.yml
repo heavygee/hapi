@@ -47,6 +47,29 @@ on:
         types: [created]
     pull_request_review:
         types: [submitted]
+    # THIRD PATH, added 2026-11-26: Codex INFRASTRUCTURE failure, as distinct
+    # from quota exhaustion. The two comment/review triggers above only fire
+    # when Codex POSTS something — which it does on quota ("usage limits for
+    # code reviews"). On an infrastructure outage it posts NOTHING: the action
+    # exhausts its stream retries, prints "We're currently experiencing high
+    # demand", calls markReviewError and exits non-zero. No comment, no review,
+    # no trigger — so this complete and correct fallback sat idle through a
+    # 19-hour estate-wide outage (20 of 20 runs failing across six unrelated
+    # branches) waiting for a message that never arrives.
+    #
+    # SECURITY: `workflow_run` is a PRIVILEGED trigger of the same class as
+    # `pull_request_target` — base-repo context, secrets available, while
+    # reviewing untrusted fork PRs. It was added deliberately and EVERY
+    # constraint in the file-header security note binds it identically: the
+    # untrusted head is never checked out at the workspace root, the pinned
+    # claude-fallback-pr-diff.sh takes no argv, the review helper reads only
+    # stdin and refuses --body-file paths, and the relative-path hook concern
+    # applies unchanged. `workflows:` scopes this to the Codex workflow by
+    # name, which is also the loop guard — this workflow must never trigger
+    # on itself.
+    workflow_run:
+        workflows: ["Codex PR Review"]
+        types: [completed]
 
 jobs:
     maybe-review:
@@ -61,14 +84,21 @@ jobs:
         # actually going to run, so an ineligible event can no longer
         # interrupt a real one.
         concurrency:
-            group: claude-fallback-review-${{ github.event.issue.number || github.event.pull_request.number }}
+            # `workflow_run` carries NEITHER issue.number NOR pull_request.number,
+            # so without the head_sha fallback every workflow_run fire would land
+            # in the same group `claude-fallback-review-` and cancel the previous
+            # one — during an estate-wide outage that is every failing PR
+            # cancelling every other, leaving at most one review. head_sha is the
+            # right key here because the gate dedups per tip anyway.
+            group: claude-fallback-review-${{ github.event.issue.number || github.event.pull_request.number || github.event.workflow_run.head_sha }}
             cancel-in-progress: true
         if: |
             github.repository_owner == 'heavygee' &&
             vars.CLAUDE_REVIEW_ENABLED == 'true' &&
             (
               (github.event_name == 'issue_comment' && github.event.issue.pull_request && github.event.comment.user.type == 'Bot' && (github.event.comment.user.login == 'chatgpt-codex-connector[bot]' || github.event.comment.user.login == 'chatgpt-codex-connector')) ||
-              (github.event_name == 'pull_request_review' && github.event.review.user.type == 'Bot' && (github.event.review.user.login == 'chatgpt-codex-connector[bot]' || github.event.review.user.login == 'chatgpt-codex-connector'))
+              (github.event_name == 'pull_request_review' && github.event.review.user.type == 'Bot' && (github.event.review.user.login == 'chatgpt-codex-connector[bot]' || github.event.review.user.login == 'chatgpt-codex-connector')) ||
+              (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.name == 'Codex PR Review' && github.event.workflow_run.event == 'pull_request_target')
             )
         runs-on: [self-hosted, Linux, X64, hapi]
         timeout-minutes: 45
@@ -88,6 +118,9 @@ jobs:
                   REVIEW_BODY: ${{ github.event.review.body }}
                   PR_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
                   REPO: ${{ github.repository }}
+                  # workflow_run path only: that event carries no PR context at
+                  # all, so the PR has to be resolved from the run's head SHA.
+                  RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
               run: |
                   # Deliberately NOT `set -e`: a transient gh-api hiccup here must
                   # degrade to "skip this run" (run=false), not a job failure —
@@ -110,9 +143,37 @@ jobs:
                   BODY="$COMMENT_BODY"
                   if [[ "$EVENT_NAME" == "pull_request_review" ]]; then BODY="$REVIEW_BODY"; fi
 
-                  # Same phrase hapi-pr-status.sh matches (scripts/tooling/hapi-pr-status.sh)
-                  # — one detection pattern, not two that can drift apart.
-                  if ! printf '%s' "$BODY" | grep -qiE 'usage limits for code reviews|Codex usage limits'; then
+                  # TWO WAYS to satisfy "Codex cannot review this tip", sharing all
+                  # the coverage/dedup logic below rather than duplicating it:
+                  #
+                  #   a) QUOTA — Codex posted a usage-limit message. Same phrase
+                  #      hapi-pr-status.sh matches, so there is one detection
+                  #      pattern, not two that can drift apart.
+                  #   b) INFRASTRUCTURE FAILURE — the "Codex PR Review" workflow
+                  #      run itself concluded `failure` and posted nothing at all.
+                  #      The job `if:` already established event/name/conclusion
+                  #      and that the run came from pull_request_target, so there
+                  #      is no body to match here and demanding one is exactly why
+                  #      this fallback could not fire during the outage.
+                  if [[ "$EVENT_NAME" == "workflow_run" ]]; then
+                      if [[ -z "${RUN_HEAD_SHA:-}" ]]; then
+                          echo "run=false" >>"$GITHUB_OUTPUT"
+                          echo "workflow_run carried no head_sha — skipping rather than guessing a PR."
+                          exit 0
+                      fi
+                      # workflow_run has no PR context: resolve it from the tip the
+                      # failed run was actually testing. If the SHA maps to no open
+                      # PR (branch push, already-merged, force-pushed away), skip —
+                      # never guess.
+                      PR_NUMBER="$(gh api "repos/$REPO/commits/$RUN_HEAD_SHA/pulls" \
+                          --jq '[.[] | select(.state == "open")] | .[0].number // empty' 2>/dev/null)"
+                      if [[ -z "$PR_NUMBER" ]]; then
+                          echo "run=false" >>"$GITHUB_OUTPUT"
+                          echo "No open PR for failed-run tip ${RUN_HEAD_SHA:0:12} — skipping."
+                          exit 0
+                      fi
+                      echo "Codex PR Review run FAILED with no posted message for PR #$PR_NUMBER (tip ${RUN_HEAD_SHA:0:12}) — infrastructure path."
+                  elif ! printf '%s' "$BODY" | grep -qiE 'usage limits for code reviews|Codex usage limits'; then
                       echo "run=false" >>"$GITHUB_OUTPUT"
                       echo "Not a Codex usage-limit message — skipping."
                       exit 0
@@ -147,6 +208,43 @@ jobs:
                   # review, 2026-10-15, second + fourth waves) — distinct from the
                   # earlier resolve-PR fail-soft above, which correctly degrades to
                   # SKIP, not to "assume clear to proceed".
+                  # SCOPING, workflow_run path only — decided deliberately rather
+                  # than defaulting. During a 19-hour estate-wide outage, firing on
+                  # EVERY Codex failure means a Claude review for every failing PR
+                  # on the estate, including ones whose own tests are red. A PR with
+                  # a genuinely failing test does not need a code review yet; it
+                  # needs the test fixed. So: fire only when no SUBSTANTIVE check
+                  # has failed — the same discriminator as the PR-chip advisory-vs-
+                  # real distinction, so the two pieces share one condition.
+                  #
+                  # `pr-review` itself is excluded (it is the thing that failed), and
+                  # in_progress/queued checks are NOT treated as failures: requiring
+                  # every check to have already succeeded would mean a PR with one
+                  # perpetually-running job never gets a fallback at all, and
+                  # workflow_run fires once — there is no retry to wait for. Only an
+                  # actual failure/cancelled/timed_out verdict suppresses.
+                  #
+                  # Deliberately NOT applied to the quota path: there, Codex posting
+                  # a usage-limit message is itself the signal, and adding a new
+                  # precondition would silently change behaviour that works today.
+                  if [[ "$EVENT_NAME" == "workflow_run" ]]; then
+                      SUBSTANTIVE_FAILS="$(gh api "repos/$REPO/commits/$HEAD_SHA/check-runs?per_page=100" \
+                          --jq '[.check_runs[]
+                                 | select(.name != "pr-review")
+                                 | select(.conclusion == "failure" or .conclusion == "cancelled" or .conclusion == "timed_out")]
+                                | length' 2>/dev/null)"
+                      if [[ -z "$SUBSTANTIVE_FAILS" ]]; then
+                          echo "run=false" >>"$GITHUB_OUTPUT"
+                          echo "Could not read check-runs for $HEAD_SHA (transient API error?) — skipping rather than reviewing blind."
+                          exit 0
+                      fi
+                      if [[ "$SUBSTANTIVE_FAILS" -gt 0 ]]; then
+                          echo "run=false" >>"$GITHUB_OUTPUT"
+                          echo "PR #$PR_NUMBER has $SUBSTANTIVE_FAILS failing substantive check(s) at ${HEAD_SHA:0:12} — fix those first; a review is not the blocker."
+                          exit 0
+                      fi
+                  fi
+
                   REVIEWS_TMP="$(mktemp)"
                   COMMENTS_TMP="$(mktemp)"
                   trap 'rm -f "$REVIEWS_TMP" "$COMMENTS_TMP"' EXIT
@@ -206,12 +304,18 @@ jobs:
                       echo "head_sha=$HEAD_SHA"
                       echo "base_sha=$BASE_SHA"
                   } >>"$GITHUB_OUTPUT"
-                  echo "Codex usage-limit detected on PR #$PR_NUMBER at tip ${HEAD_SHA:0:12} — running Claude fallback review."
+                  if [[ "$EVENT_NAME" == "workflow_run" ]]; then
+                      echo "Codex PR Review FAILED (no message posted) on PR #$PR_NUMBER at tip ${HEAD_SHA:0:12}, substantive checks clean — running Claude fallback review."
+                  else
+                      echo "Codex usage-limit detected on PR #$PR_NUMBER at tip ${HEAD_SHA:0:12} — running Claude fallback review."
+                  fi
 
             # TRUSTED base at the workspace root — this is what .claude/settings.json's
             # hook relative-paths resolve against. Default ref (no `ref:` override):
-            # for issue_comment/pull_request_review this is the default branch, never
-            # the PR. See the file-header security note.
+            # for issue_comment/pull_request_review AND for workflow_run this is the
+            # default branch, never the PR. That is what makes workflow_run safe to
+            # add here despite being a privileged trigger — it inherits the same
+            # trusted-root/untrusted-./pr-head split. See the file-header note.
             - name: Checkout base (trusted) at workspace root
               id: checkout_base
               if: steps.gate.outputs.run == 'true'
