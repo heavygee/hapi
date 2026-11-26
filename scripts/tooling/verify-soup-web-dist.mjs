@@ -42,6 +42,9 @@ const STANDARD_TOP_DIRS = new Set([
     'vendor-stubs',
     'test',
     'utils',
+    // Separate Bun build → website/dist/auth (web/scripts/build-passkey-site.ts),
+    // not vite → web/dist. Requiring a passkey-site marker in hub dist false-fails remat.
+    'passkey-site',
 ])
 
 /** Core routes present before operator soup layers. */
@@ -66,18 +69,23 @@ function parseEnLocale(enPath) {
     const map = new Map()
     // Allow common JS string escapes (\n, \\, \', \uXXXX). Values like
     // message.fork.confirmDescription use \n and were false-missing under [^'\\].
+    // Keys may be single- or double-quoted (soup absorb mixed "branch.*" into en.ts).
     const sqValue = String.raw`'(?:\\.|\\u[0-9a-fA-F]{4}|[^'\\])*'`
     const dqValue = String.raw`"(?:\\.|\\u[0-9a-fA-F]{4}|[^"\\])*"`
-    const re = new RegExp(String.raw`'([^']+)':\s*(${sqValue}|${dqValue})`, 'g')
+    const re = new RegExp(
+        String.raw`(?:'([^']+)'|"([^"]+)"):\s*(${sqValue}|${dqValue})`,
+        'g',
+    )
     for (const m of text.matchAll(re)) {
-        const raw = m[2]
+        const key = m[1] ?? m[2]
+        const raw = m[3]
         const unquoted = raw.slice(1, -1)
         const value = unquoted
             .replace(/\\n/g, '\n')
             .replace(/\\'/g, "'")
             .replace(/\\"/g, '"')
             .replace(/\\u2014/g, '\u2014')
-        map.set(m[1], value)
+        map.set(key, value)
     }
     return map
 }
@@ -285,7 +293,7 @@ function keySatisfied(distBlob, key, value) {
     return false
 }
 
-export { collectSoupMarkersFromSource, featureTopLevelDirs, STANDARD_TOP_DIRS }
+export { collectSoupMarkersFromSource, featureTopLevelDirs, parseEnLocale, STANDARD_TOP_DIRS }
 
 function runVerify() {
     // Fail closed before dist checks: SessionList unbound helpers (2026-07-29 double outage).
