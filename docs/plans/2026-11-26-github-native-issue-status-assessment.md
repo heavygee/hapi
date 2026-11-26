@@ -1,6 +1,8 @@
 # GitHub native issue statuses & repository boards — threat/opportunity assessment for HAPI Boards (#2147)
 
 Author: overseer stand-in assessment session. Date: 2026-11-26.
+
+**Status: hazard #1 (must-fix) shipped and reviewed.** `fc47e8d8`/`1009-14eb` implemented the guard on `feat/boards` (`1ddcc20f9`): `setStatus` now reads `repository.planningStatuses` and checks `category.state` — not a hardcoded status-name list, so it survives a repo renaming its own statuses — for a case-insensitive CLOSED match before writing, 409s naming the native status, and the web UI resubmits with `confirmCloses: true` on confirmation; fails open on any lookup trouble. Reviewed the diff directly against the live mechanism confirmed below and it matches. Hazard #2 left documented-not-guarded per the CRITICAL/HIGH split below (non-destructive); #3/#4 deferred as follow-ups, consistent with "should-fix" not "must-fix."
 Scope: investigation and judgement only, no code changes made. All "CONFIRMED" claims below were verified live against `heavygee/hapi-demo-board` (the sanctioned, content-free test repo/board) and `heavygee/hapi` / `tiann/hapi` using `gh`/GraphQL on 2026-11-26, not inferred from the GitHub changelog prose alone. Mutations made during testing were reverted; the demo board's open/closed state matches its pre-test state (residual native-status values were left populated — harmless, no real content).
 
 ## Bottom line
