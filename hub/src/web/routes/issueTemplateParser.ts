@@ -288,13 +288,17 @@ export function parseIssueFormYaml(id: string, raw: string): IssueTemplate {
     // `title` is optional, but GitHub's top-level syntax table still types
     // it as String — same "key must be a string" validation error class
     // already confirmed for `description`/`name`, just not yet checked for
-    // this key (bot review, tiann/hapi#2147, follow-up). `asString` alone
-    // would silently drop a Boolean-coerced value as "not provided" rather
-    // than rejecting the template, which is the same silent-acceptance gap
-    // every other check in this family exists to close — present-and-wrong
-    // must reject, not degrade to absent.
-    if (obj.title !== undefined && typeof obj.title !== 'string') {
-        return { id, name, kind: 'unsupported', reason: 'Template\'s "title" must be a string', githubValid: false }
+    // this key (bot review, tiann/hapi#2147, follow-up). Present-and-wrong
+    // must reject, not degrade to absent: a Boolean-coerced value, AND —
+    // caught one round later, same gap, this key specifically missed it —
+    // a whitespace-only string. Both pass a bare type-only check; only the
+    // combined (wrong-type OR blank-when-present) check matches GitHub's
+    // own rule, which this file's other required-string checks already
+    // apply via `asNonBlankString`. `title` can't reuse that helper
+    // directly (it's optional, `asNonBlankString` has no "absent is fine"
+    // case), so it's checked inline instead.
+    if (obj.title !== undefined && (typeof obj.title !== 'string' || obj.title.trim().length === 0)) {
+        return { id, name, kind: 'unsupported', reason: 'Template\'s "title" must be a non-blank string', githubValid: false }
     }
     // `labels`/`assignees` accept an Array OR a comma-delimited string — a
     // whitespace-only STRING form is GitHub's own cited example of "Empty

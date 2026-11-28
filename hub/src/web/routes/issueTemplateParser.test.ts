@@ -554,6 +554,17 @@ body:
         expect(template.kind === 'unsupported' && template.githubValid).toBe(false)
     })
 
+    // Regression (bot review, tiann/hapi#2147, follow-up, same round as the
+    // Boolean-title check above): a type-only check passes a whitespace-
+    // only string, which GitHub's own docs reject the same way as an empty
+    // one — the title check missed the blank case the label/description/
+    // assignees/labels checks already handle.
+    it('is unsupported when title is only whitespace', () => {
+        const template = parseIssueFormYaml('x.yml', 'name: Bug\ndescription: Bug\ntitle: "   "\nbody:\n  - type: input\n    attributes:\n      label: Contact')
+        expect(template.kind).toBe('unsupported')
+        expect(template.kind === 'unsupported' && template.githubValid).toBe(false)
+    })
+
     it('allows an ordinary string title, and omitting it entirely', () => {
         const withTitle = parseIssueFormYaml('x.yml', 'name: Bug\ndescription: Bug\ntitle: "[Bug]: "\nbody:\n  - type: input\n    attributes:\n      label: Contact')
         expect(withTitle.kind).toBe('form')
