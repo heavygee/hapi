@@ -1247,23 +1247,43 @@ layers:
   # Was: driver/1724-auto-continue-delta @ b5dd9ff77
   # - branch: driver/1724-auto-continue-delta
 
+  # SWAPPED 2026-11-28 (operator: "we need it in the soup, we need to dog
+  # food it"): heavygee/hapi#238's Boards view (driver/235-todo-board-view)
+  # and its four externalRefs follow-on layers below it are retired in
+  # favor of tiann/hapi#2147 (branch feat/boards) directly. #2147 is the
+  # same feature's later, far more hardened continuation, not a sibling —
+  # confirmed by diffing the two branches' tips: issueTemplateParser.ts
+  # alone is 246 lines on #238 vs 802 on feat/boards, the extra ~550 being
+  # the GitHub-form-validation hardening (forbidden words, Boolean
+  # coercion, duplicate-id collisions, name-length minimum, blank-issue-
+  # policy correctness) #238 never received. feat/boards also already
+  # carries its own version of every externalRefs fix the four #238
+  # follow-on layers below were porting piecemeal (confirmed directly: the
+  # driver/238-externalrefs-replace-semantics comment below already notes
+  # "Same pattern already shipped on feat/boards" for itself) — keeping
+  # both would mean running the less-correct version in the soup while a
+  # strictly more-correct one sits unused. Single layer replaces all five:
+  - branch: feat/boards
+
+  # Retired 2026-11-28, superseded by feat/boards above — kept commented
+  # for history/rollback reference only, not active layers.
   # heavygee/hapi#235 / PR #238 — Boards view (cards/chips/relative-time,
   # Projects v2 /views/<n> filter capture). Renamed To-Do → Boards.
   # Re-tip 2026-10-31: driver/235-todo-board-view @ 736cf8ae8 thin onto soup
   # 2ae0c0c10 (test-only: PROJECT_QUERY unfiltered path lock-in).
-  - branch: driver/235-todo-board-view
+  # - branch: driver/235-todo-board-view
 
   # heavygee/hapi#238 — GithubPrExternalRefSchema: status enum -> passthrough,
   # any-host URL match. Thin on soup f516d1a58 @ 03fc0d272.
   # Shared+web → remat --build-web + hapi-restart-hub.
-  - branch: driver/238-github-pr-schema-reconcile
+  # - branch: driver/238-github-pr-schema-reconcile
 
   # heavygee/hapi#238 follow-on — toValidExternalRefs + MetadataSchema preprocess
   # so one malformed externalRefs element cannot null session.metadata wholesale.
   # Thin tip on soup 37b51cf77: driver/238-externalrefs-metadata-preprocess @ 7cc01ffbb
   # Shared+hub → remat --build-web + hapi-restart-hub (patient).
   # Deliberately excludes Boards canonicalization / todoBoard port-normalization.
-  - branch: driver/238-externalrefs-metadata-preprocess
+  # - branch: driver/238-externalrefs-metadata-preprocess
 
   # heavygee/hapi#238 follow-on — cap the externalRefs union at
   # MAX_EXTERNAL_REFS (32) in both mergeContributionFields (sparse-write
@@ -1278,7 +1298,7 @@ layers:
   # cap alone did NOT stop #238's primary-PR-chip demotion from flapping —
   # confirmed on live hub it was never a race at all, see
   # driver/238-externalrefs-replace-semantics below.
-  - branch: driver/238-externalrefs-union-cap
+  # - branch: driver/238-externalrefs-union-cap
 
   # heavygee/hapi#238 follow-on — PUT /external-refs (setSessionExternalRefs)
   # and remove-primary/upsert (mutateSessionExternalRefs) never actually
@@ -1300,7 +1320,7 @@ layers:
   # driver/238-externalrefs-replace-semantics @ 7c01ec6d5. Deliberately
   # excludes ExternalRefsSchema's schema .max(32) — separate optional
   # follow-on. Hub-only → remat + hapi-restart-hub (patient), no --build-web.
-  - branch: driver/238-externalrefs-replace-semantics
+  # - branch: driver/238-externalrefs-replace-semantics
 
   # heavygee/hapi#247 — deliberate fleet push + restore upgrade-runner; kill
   # keepalive/startup unattended auto-upgrade. Hub default stays alert; per-machine
@@ -1552,6 +1572,12 @@ layers:
   # Was: - branch: driver/2081-search-scope-toggle
   # Was: - branch: driver/2081-forward-reading
 
+  # Retired 2026-11-28, superseded by feat/boards above (same swap) —
+  # confirmed feat/boards already calls api.renameSession(sessionId,
+  # briefing.title) natively in web/src/router.tsx, so this patch (written
+  # against #238's board-spawn flow, which no longer exists once
+  # feat/boards replaces it) would either no-op or conflict. Kept
+  # commented for history/rollback reference only.
   # hapi#247 (operator feedback) — a session spawned from a Boards card kept
   # the generic "you've been spawned from a Boards card..." briefing text as
   # its name instead of the card's own title. Renames the session via
@@ -1559,7 +1585,7 @@ layers:
   # the existing briefing-message delivery and issue auto-link.
   # Thin tip on soup a717c9642: driver/247-board-spawn-rename @ 31ce99324.
   # Web-only -> remat --build-web; hard-reload (no hub restart).
-  - branch: driver/247-board-spawn-rename
+  # - branch: driver/247-board-spawn-rename
 
   # #304 — require GitHub NOTES.md on Layer A materialize (Ian empty applied banner).
   # Thin tip on soup HEAD 960e1be58: driver/fix-304-fleet-notes-required @ c00dbd9f4
