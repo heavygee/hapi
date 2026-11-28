@@ -638,6 +638,7 @@ export class SessionCache {
         serviceTier?: string | null
         collaborationMode?: CodexCollaborationMode
         copilotAgentMode?: CopilotAgentMode
+        machineId?: string
         hostPid?: number
         processStartMarker?: string
     }): void {
@@ -677,14 +678,16 @@ export class SessionCache {
             this.pendingThinkingUntilBySessionId.delete(session.id)
         }
         // Durable owner latch survives heartbeat expiry (#2658). Bound to the
-        // reporting worker — never the current row's marker alone.
+        // reporting worker — never the current row's marker/machine alone.
         if (session.thinking) {
             this.setUnresolvedTurn(session.id, true, {
+                machineId: payload.machineId,
                 hostPid: payload.hostPid,
                 processStartMarker: payload.processStartMarker,
             })
         } else if (!preserveQueuedThinking) {
             this.setUnresolvedTurn(session.id, false, {
+                machineId: payload.machineId,
                 hostPid: payload.hostPid,
                 processStartMarker: payload.processStartMarker,
             })
@@ -877,14 +880,10 @@ export class SessionCache {
 
         session.backgroundTasks = tasks
         session.backgroundTaskCount = tasks.length
-        // Background snapshots arrive on the current session socket — attribute
-        // to the current runner owner only when machine/pid/marker are known.
-        this.upsertReportedGenerationLiveWork(sessionId, { backgroundTasks: tasks }, {
-            hostPid: typeof session.metadata?.hostPid === 'number' ? session.metadata.hostPid : undefined,
-            processStartMarker: typeof session.metadata?.hostStartMarker === 'string'
-                ? session.metadata.hostStartMarker
-                : undefined,
-        })
+        // Background snapshots carry only the task list today — no reporting
+        // owner. Keep them in-memory (already in session.backgroundTasks) and
+        // do NOT durable-latch under the current row; a late snapshot from A
+        // after B registers must not write or clear under B (#2658 remasure).
         this.recordAgentProgress(sessionId)
         this.publisher.emit({
             type: 'session-updated',
@@ -901,7 +900,7 @@ export class SessionCache {
     setUnresolvedTurn(
         sessionId: string,
         unresolved: boolean,
-        reported?: { hostPid?: number; processStartMarker?: string },
+        reported?: { machineId?: string; hostPid?: number; processStartMarker?: string },
     ): void {
         this.upsertReportedGenerationLiveWork(sessionId, { unresolvedTurn: unresolved }, reported)
     }
@@ -947,14 +946,16 @@ export class SessionCache {
     private upsertReportedGenerationLiveWork(
         sessionId: string,
         patch: { unresolvedTurn?: boolean; backgroundTasks?: BackgroundTask[] },
-        reported?: { hostPid?: number; processStartMarker?: string },
+        reported?: { machineId?: string; hostPid?: number; processStartMarker?: string },
     ): void {
         const session = this.sessions.get(sessionId)
         if (!session?.metadata) return
         if (!isRunnerOwnedSession(session)) return
 
-        const machineId = typeof session.metadata.machineId === 'string'
-            ? session.metadata.machineId
+        // Owner identity comes only from the report — never from the current
+        // row (replacement can change machineId / hostPid / marker).
+        const machineId = typeof reported?.machineId === 'string' && reported.machineId.length > 0
+            ? reported.machineId
             : ''
         const hostPid = typeof reported?.hostPid === 'number' && reported.hostPid > 0
             ? reported.hostPid

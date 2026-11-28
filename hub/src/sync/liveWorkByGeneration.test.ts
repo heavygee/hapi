@@ -64,6 +64,26 @@ describe('liveWorkByGeneration helpers', () => {
         expect(liveWorkByGenerationHasWork(map)).toBe(true)
     })
 
+    it('does not pair a prior legacy marker with the current row pid after replacement', () => {
+        const map = projectLegacyLiveWork({
+            path: '/tmp/p',
+            host: 'h',
+            machineId: 'm-B',
+            hostPid: 200,
+            hostStartMarker: 'worker-B',
+            unresolvedTurn: { since: NOW - 1000, hostStartMarker: 'worker-A' },
+        } as Session['metadata'])
+        expect(Object.keys(map)).toEqual(['worker-A'])
+        expect(map['worker-A']?.hostPid).toBeUndefined()
+        expect(map['worker-A']?.machineId).toBe('')
+        expect(generationEntryProbeClearable(
+            session({ metadata: { path: '/tmp/p', host: 'h', startedBy: 'runner', machineId: 'm-B' } }),
+            'worker-A',
+            map['worker-A']!,
+        )).toBe(false)
+        expect(liveWorkByGenerationHasWork(map)).toBe(true)
+    })
+
     it('prefers the keyed map when present (no legacy merge)', () => {
         const key = liveWorkOwnerKey({ machineId: 'm1', hostPid: 7, hostStartMarker: 'worker-B' })
         const map = projectLegacyLiveWork({

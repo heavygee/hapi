@@ -91,9 +91,12 @@
       },
       "last": {
         "effort": null,
+        "hostPid": "<pid>",
+        "machineId": "parity-machine",
         "mode": "remote",
         "model": null,
         "permissionMode": "default",
+        "processStartMarker": "<marker>",
         "sid": "<uuid:1>",
         "thinking": false
       }
@@ -101,17 +104,23 @@
     "2": {
       "first": {
         "effort": null,
+        "hostPid": "<pid>",
+        "machineId": "parity-machine",
         "mode": "remote",
         "model": null,
         "permissionMode": "default",
+        "processStartMarker": "<marker>",
         "sid": "<uuid:1>",
         "thinking": false
       },
       "last": {
         "effort": null,
+        "hostPid": "<pid>",
+        "machineId": "parity-machine",
         "mode": "remote",
         "model": null,
         "permissionMode": "default",
+        "processStartMarker": "<marker>",
         "sid": "<uuid:1>",
         "thinking": false
       }

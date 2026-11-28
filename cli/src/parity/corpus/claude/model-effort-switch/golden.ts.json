@@ -50,9 +50,12 @@
       },
       "last": {
         "effort": "low",
+        "hostPid": "<pid>",
+        "machineId": "parity-machine",
         "mode": "remote",
         "model": "sonnet",
         "permissionMode": "default",
+        "processStartMarker": "<marker>",
         "sid": "<uuid:1>",
         "thinking": false
       }

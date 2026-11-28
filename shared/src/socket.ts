@@ -271,6 +271,7 @@ export interface ClientToServerEvents {
         copilotAgentMode?: CopilotAgentMode
         // Reporting worker identity for durable live-work (#2658). Absent on
         // terminal / older CLIs — hub skips durable latch without these.
+        machineId?: string
         hostPid?: number
         processStartMarker?: string
     }) => void

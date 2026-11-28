@@ -109,11 +109,22 @@ export function projectLegacyLiveWork(
         : []
     if (!hasTurn && tasks.length === 0) return out
 
-    const machineId = typeof metadata.machineId === 'string' ? metadata.machineId : ''
-    const hostPid = typeof metadata.hostPid === 'number' && metadata.hostPid > 0
+    // Only attach current-row machine/pid when they still identify the latch's
+    // generation. Otherwise keep the latch blocking without a probe-clearable
+    // owner (do not pair A's marker with B's pid after replacement).
+    const currentMarker = typeof metadata.hostStartMarker === 'string' && metadata.hostStartMarker.length > 0
+        ? metadata.hostStartMarker
+        : undefined
+    const markerMatchesCurrent = marker !== UNKNOWN_GENERATION_KEY && marker === currentMarker
+    const machineId = markerMatchesCurrent && typeof metadata.machineId === 'string'
+        ? metadata.machineId
+        : ''
+    const hostPid = markerMatchesCurrent
+        && typeof metadata.hostPid === 'number'
+        && metadata.hostPid > 0
         ? metadata.hostPid
         : undefined
-    const ownerKey = (machineId.length > 0 && typeof hostPid === 'number' && marker !== UNKNOWN_GENERATION_KEY)
+    const ownerKey = (machineId.length > 0 && typeof hostPid === 'number')
         ? liveWorkOwnerKey({ machineId, hostPid, hostStartMarker: marker })
         : marker
 

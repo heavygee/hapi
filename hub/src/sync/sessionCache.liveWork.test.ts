@@ -38,6 +38,7 @@ describe('SessionCache liveWorkByGeneration attribution (#2658)', () => {
             sid: session.id,
             time: Date.now(),
             thinking: true,
+            machineId: 'm1',
             hostPid: 100,
             processStartMarker: 'worker-A',
         })
@@ -49,10 +50,45 @@ describe('SessionCache liveWorkByGeneration attribution (#2658)', () => {
             sid: session.id,
             time: Date.now(),
             thinking: false,
+            machineId: 'm1',
             hostPid: 200,
             processStartMarker: 'worker-B',
         })
         expect(cache.getSession(session.id)?.metadata?.liveWorkByGeneration?.[keyA]?.unresolvedTurn).toBe(true)
+        store.close()
+    })
+
+    it('attributes a cross-machine late report to the reporting machine, not the current row', () => {
+        const store = new Store(':memory:')
+        const cache = new SessionCache(store, createPublisher([]))
+        const session = cache.getOrCreateSession(
+            'live-work-cross-machine',
+            {
+                path: '/tmp/p',
+                host: 'localhost',
+                flavor: 'claude',
+                startedBy: 'runner',
+                startedFromRunner: true,
+                machineId: 'machine-B',
+                hostPid: 200,
+                hostStartMarker: 'worker-B',
+            },
+            null,
+            'default',
+        )
+
+        cache.handleSessionAlive({
+            sid: session.id,
+            time: Date.now(),
+            thinking: true,
+            machineId: 'machine-A',
+            hostPid: 100,
+            processStartMarker: 'worker-A',
+        })
+        const keyA = liveWorkOwnerKey({ machineId: 'machine-A', hostPid: 100, hostStartMarker: 'worker-A' })
+        const entry = cache.getSession(session.id)?.metadata?.liveWorkByGeneration?.[keyA]
+        expect(entry?.unresolvedTurn).toBe(true)
+        expect(entry?.machineId).toBe('machine-A')
         store.close()
     })
 

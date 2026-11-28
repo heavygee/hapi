@@ -1382,10 +1382,14 @@ if (isReconnect) {
         const hostPid = typeof meta?.hostPid === 'number' && meta.hostPid > 0
             ? meta.hostPid
             : (typeof process.pid === 'number' && process.pid > 0 ? process.pid : undefined)
+        const machineId = typeof meta?.machineId === 'string' && meta.machineId.length > 0
+            ? meta.machineId
+            : undefined
         this.latestKeepAlive = {
             thinking,
             mode,
             ...(runtime ?? {}),
+            ...(machineId ? { machineId } : {}),
             ...(typeof hostPid === 'number' ? { hostPid } : {}),
             ...(processStartMarker ? { processStartMarker } : {}),
         }

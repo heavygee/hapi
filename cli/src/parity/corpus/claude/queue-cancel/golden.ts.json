@@ -50,9 +50,12 @@
       },
       "last": {
         "effort": null,
+        "hostPid": "<pid>",
+        "machineId": "parity-machine",
         "mode": "remote",
         "model": null,
         "permissionMode": "default",
+        "processStartMarker": "<marker>",
         "sid": "<uuid:1>",
         "thinking": true
       }
