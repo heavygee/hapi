@@ -3880,7 +3880,6 @@ export class SyncEngine {
             if (owners.has(ownerKey)) continue
             owners.set(ownerKey, { machineId, hostPid, hostStartMarker })
         }
-        const sessionSocketGone = !this.rpcGateway.hasSessionRpcTarget(sessionId)
         for (const [ownerKey, owner] of owners) {
             const ownerMachine = this.getMachineByNamespace(owner.machineId, session.namespace)
                 ?? this.getMachine(owner.machineId)
@@ -3911,15 +3910,9 @@ export class SyncEngine {
                     // handler-not-registered still leaves unknown (keep the ask).
                     status = 'unknown'
                 }
-            } else if (
-                !session.active
-                && sessionSocketGone
-                && (Date.now() - session.activeAt) > 300_000
-            ) {
-                // Standalone terminal: long-inactive + socket gone. Short
-                // disconnects must not drop a live ask (#2658).
-                status = 'already_gone'
             }
+            // No probe / inactive / socket-gone alone is not exit proof — leave
+            // status unknown so pending asks survive prolonged disconnects (#2658).
             if (status === 'already_gone' || status === 'stopped') {
                 // Only this owner's requests — never wipe another generation.
                 this.sessionCache.clearPendingAgentRequestsForOwner(sessionId, owner)
@@ -3927,11 +3920,9 @@ export class SyncEngine {
                 this.sessionCache.clearTransientBackgroundForOwner(sessionId, ownerKey)
             }
         }
-        // Unstamped terminal asks: only when the whole session is inactive and
-        // the CLI socket is gone (no other attributed owner to probe).
-        if (!session.active && sessionSocketGone && owners.size === 0) {
-            this.sessionCache.clearTerminalPendingRequests(sessionId)
-        }
+        // Unstamped terminal asks: transport loss is not exit proof. Leave them
+        // so a reconnecting terminal can still answer; Archive stays blocked
+        // until the ask settles or an attributed owner probe clears it (#2658).
     }
 
     private async archiveSessionUnlocked(sessionId: string): Promise<void> {

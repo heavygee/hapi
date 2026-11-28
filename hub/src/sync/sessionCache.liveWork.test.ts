@@ -458,4 +458,130 @@ describe('SessionCache liveWorkByGeneration attribution (#2658)', () => {
         expect(afterA?.unmarked).toBeDefined()
         store.close()
     })
+
+    it('records transcript cutoff on metadata patch before the first keepalive', () => {
+        const store = new Store(':memory:')
+        const cache = new SessionCache(store, createPublisher([]))
+        const session = cache.getOrCreateSession(
+            'live-work-patch-cutoff',
+            {
+                path: '/tmp/p',
+                host: 'localhost',
+                flavor: 'claude',
+                startedBy: 'runner',
+                startedFromRunner: true,
+                machineId: 'm1',
+                hostPid: 100,
+                hostStartMarker: 'worker-A',
+            },
+            null,
+            'default',
+        )
+        cache.noteRowGenerationOwner(
+            session.id,
+            liveWorkOwnerKey({ machineId: 'm1', hostPid: 100, hostStartMarker: 'worker-A' }),
+        )
+        store.messages.addMessage(session.id, { role: 'assistant', content: 'from-A' })
+        const seqAtSwitch = store.messages.getMaxSeq(session.id)
+        const before = cache.getSession(session.id)!
+        const nextMeta = {
+            ...before.metadata!,
+            hostPid: 200,
+            hostStartMarker: 'worker-B',
+        }
+        expect(store.sessions.updateSessionMetadata(
+            session.id,
+            nextMeta,
+            before.metadataVersion,
+            'default',
+        ).result).toBe('success')
+        const stored = store.sessions.getSession(session.id)!
+        expect(cache.applySessionPatch(session.id, {
+            metadata: { version: stored.metadataVersion, value: stored.metadata },
+        })).toBe(true)
+        expect(cache.getTranscriptGenerationBoundarySeq(session.id)).toBe(seqAtSwitch)
+        store.close()
+    })
+
+    it('keeps markerless thinking when an attributed worker reports', () => {
+        const store = new Store(':memory:')
+        const cache = new SessionCache(store, createPublisher([]))
+        const session = cache.getOrCreateSession(
+            'live-work-markerless-thinking',
+            {
+                path: '/tmp/p',
+                host: 'localhost',
+                flavor: 'claude',
+                startedBy: 'user',
+                machineId: 'm1',
+                hostPid: 100,
+                hostStartMarker: 'worker-A',
+            },
+            null,
+            'default',
+        )
+        cache.handleSessionAlive({
+            sid: session.id,
+            time: Date.now(),
+            thinking: true,
+            // Markerless replacement — no host identity.
+        })
+        expect(cache.getSession(session.id)?.thinking).toBe(true)
+        cache.handleSessionAlive({
+            sid: session.id,
+            time: Date.now() + 1,
+            thinking: true,
+            machineId: 'm1',
+            hostPid: 100,
+            processStartMarker: 'worker-A',
+            runnerOwned: true,
+        })
+        expect(cache.getSession(session.id)?.thinking).toBe(true)
+        store.close()
+    })
+
+    it('expires stale terminal thinking without waiting for the replacement to idle', () => {
+        const store = new Store(':memory:')
+        const cache = new SessionCache(store, createPublisher([]))
+        const session = cache.getOrCreateSession(
+            'live-work-stale-thinking',
+            {
+                path: '/tmp/p',
+                host: 'localhost',
+                flavor: 'claude',
+                startedBy: 'user',
+                machineId: 'm1',
+                hostPid: 200,
+                hostStartMarker: 'worker-B',
+            },
+            null,
+            'default',
+        )
+        const realNow = Date.now
+        let fakeNow = 1_700_000_000_000
+        Date.now = () => fakeNow
+        try {
+            cache.handleSessionAlive({
+                sid: session.id,
+                time: fakeNow,
+                thinking: true,
+                machineId: 'm1',
+                hostPid: 100,
+                processStartMarker: 'worker-A',
+                runnerOwned: false,
+            })
+            expect(cache.getSession(session.id)?.thinking).toBe(true)
+            // B keeps the row online without clearing A (bootstrap-style idle omit).
+            fakeNow += 301_000
+            cache.handleSessionAlive({
+                sid: session.id,
+                time: fakeNow,
+                thinking: false,
+            })
+            expect(cache.getSession(session.id)?.thinking).toBe(false)
+        } finally {
+            Date.now = realNow
+        }
+        store.close()
+    })
 })

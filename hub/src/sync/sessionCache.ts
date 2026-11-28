@@ -206,22 +206,54 @@ export function transferSourceLiveWorkOntoDest(
     initialSourceMap: LiveWorkByGeneration = {},
 ): LiveWorkByGeneration {
     const out: LiveWorkByGeneration = { ...destMap }
+    const mergeOwner = (
+        source: LiveWorkGenerationEntry,
+        dest: LiveWorkGenerationEntry | undefined,
+    ): LiveWorkGenerationEntry => {
+        // Source is authoritative for unresolvedTurn (settlement during I/O).
+        // Background tasks union so destination-only work survives.
+        const tasksById = new Map<string, NonNullable<LiveWorkGenerationEntry['backgroundTasks']>[number]>()
+        for (const task of dest?.backgroundTasks ?? []) tasksById.set(task.id, task)
+        for (const task of source.backgroundTasks ?? []) tasksById.set(task.id, task)
+        const tasks = [...tasksById.values()]
+        return {
+            machineId: source.machineId || dest?.machineId || '',
+            ...(typeof (source.hostPid ?? dest?.hostPid) === 'number'
+                ? { hostPid: (source.hostPid ?? dest?.hostPid) as number }
+                : {}),
+            ...(source.hostStartMarker || dest?.hostStartMarker
+                ? { hostStartMarker: source.hostStartMarker ?? dest?.hostStartMarker }
+                : {}),
+            since: Math.min(source.since, dest?.since ?? source.since),
+            ...(source.unresolvedTurn ? { unresolvedTurn: true as const } : {}),
+            ...(tasks.length > 0 ? { backgroundTasks: tasks } : {}),
+        }
+    }
     for (const key of sourceOwnerKeys) {
-        if (sourceMap[key] && out[key]) {
-            out[key] = unionLiveWorkEntries(sourceMap[key], out[key])
-        } else if (sourceMap[key]) {
-            out[key] = sourceMap[key]
+        if (sourceMap[key]) {
+            const merged = mergeOwner(sourceMap[key], out[key])
+            if (generationEntryHasWork(merged)) out[key] = merged
+            else delete out[key]
         } else if (out[key]) {
+            // Source settled this owner away during scratchlist I/O. Drop a
+            // pure initial copy, or strip the source's unresolvedTurn from a
+            // combined entry so dest-only background work survives (#2658).
             const initial = initialSourceMap[key]
             if (initial && JSON.stringify(out[key]) === JSON.stringify(initial)) {
                 delete out[key]
+            } else if (initial?.unresolvedTurn && out[key]?.unresolvedTurn) {
+                const stripped: LiveWorkGenerationEntry = { ...out[key] }
+                delete stripped.unresolvedTurn
+                if (generationEntryHasWork(stripped)) out[key] = stripped
+                else delete out[key]
             }
-            // else: destination evolved independently — keep it
         }
     }
     for (const [key, entry] of Object.entries(sourceMap)) {
         if (!sourceOwnerKeys.has(key)) {
-            out[key] = out[key] ? unionLiveWorkEntries(out[key], entry) : entry
+            const merged = mergeOwner(entry, out[key])
+            if (generationEntryHasWork(merged)) out[key] = merged
+            else delete out[key]
         }
     }
     return out
@@ -299,6 +331,8 @@ export class SessionCache {
     private readonly thinkingByOwnerBySessionId: Map<string, boolean> = new Map()
     /** Thinking reported without a full owner identity (markerless terminal). */
     private readonly unattributedThinkingBySessionId: Set<string> = new Set()
+    /** Last time each owner reported thinking=true (stale terminal retirement). */
+    private readonly thinkingReportedAtByOwner: Map<string, number> = new Map()
     private readonly runtimeConfigUpdatedAtBySessionId: Map<string, Partial<Record<RuntimeConfigKey, number>>> = new Map()
     /**
      * Last time the hub saw real agent progress per session (tiann/hapi#1820).
@@ -728,6 +762,11 @@ export class SessionCache {
         if (patch.metadata !== undefined) {
             session.metadata = patch.metadata.value
             session.metadataVersion = patch.metadata.version
+            // Metadata identity can flip on resume before the first keepalive —
+            // bound transcript work now so a later heartbeat cutoff cannot
+            // swallow tool calls that already landed (#2658).
+            const rowOwner = this.currentRowOwnerKey(session)
+            if (rowOwner) this.noteRowGenerationOwner(sessionId, rowOwner)
         }
         if (patch.agentState !== undefined) {
             session.agentState = patch.agentState.value
@@ -795,22 +834,40 @@ export class SessionCache {
             })
             : undefined
         const currentKey = this.currentRowOwnerKey(session)
-        if (reportedOwnerKey) {
-            this.noteRowGenerationOwner(session.id, reportedOwnerKey)
-            this.thinkingByOwnerBySessionId.set(session.id + '\0' + reportedOwnerKey, requestedThinking)
-            if (requestedThinking) {
-                this.thinkingOwnerBySessionId.set(session.id, reportedOwnerKey)
-                this.unattributedThinkingBySessionId.delete(session.id)
-            } else if (this.thinkingOwnerBySessionId.get(session.id) === reportedOwnerKey) {
+        const ownerMapKey = (owner: string) => session.id + '\0' + owner
+        // Retire owner thinking bits that have not been refreshed (crashed
+        // terminal A while B keeps the row online — including when bootstrap
+        // omits hostStartMarker so currentKey is unset) (#2658).
+        const THINKING_STALE_MS = 300_000
+        for (const [key, at] of [...this.thinkingReportedAtByOwner.entries()]) {
+            if (!key.startsWith(session.id + '\0')) continue
+            if (hubNow - at <= THINKING_STALE_MS) continue
+            this.thinkingReportedAtByOwner.delete(key)
+            this.thinkingByOwnerBySessionId.delete(key)
+            const owner = key.slice((session.id + '\0').length)
+            if (this.thinkingOwnerBySessionId.get(session.id) === owner) {
                 this.thinkingOwnerBySessionId.delete(session.id)
             }
-            // Current-row idle retires other owners' stale thinking (crashed
-            // terminal A while B keeps the row online) (#2658).
+        }
+        if (reportedOwnerKey) {
+            this.noteRowGenerationOwner(session.id, reportedOwnerKey)
+            this.thinkingByOwnerBySessionId.set(ownerMapKey(reportedOwnerKey), requestedThinking)
+            if (requestedThinking) {
+                this.thinkingOwnerBySessionId.set(session.id, reportedOwnerKey)
+                this.thinkingReportedAtByOwner.set(ownerMapKey(reportedOwnerKey), hubNow)
+                // Do not clear markerless thinking — a late attributed report
+                // must not erase an unattributed replacement's bit (#2658).
+            } else if (this.thinkingOwnerBySessionId.get(session.id) === reportedOwnerKey) {
+                this.thinkingOwnerBySessionId.delete(session.id)
+                this.thinkingReportedAtByOwner.delete(ownerMapKey(reportedOwnerKey))
+            }
+            // Idle from the current row identity also retires other owners.
             if (!requestedThinking && currentKey && reportedOwnerKey === currentKey) {
                 for (const key of [...this.thinkingByOwnerBySessionId.keys()]) {
                     if (!key.startsWith(session.id + '\0')) continue
-                    if (key === session.id + '\0' + reportedOwnerKey) continue
+                    if (key === ownerMapKey(reportedOwnerKey)) continue
                     this.thinkingByOwnerBySessionId.delete(key)
+                    this.thinkingReportedAtByOwner.delete(key)
                 }
             }
         } else if (requestedThinking) {
