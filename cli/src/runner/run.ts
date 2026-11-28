@@ -16,7 +16,7 @@ import { isBunCompiled } from '@/projectPath';
 import { describeChildFatalContext } from './childFatalDiagnostics';
 import { writeRunnerState, RunnerLocallyPersistedState, readRunnerState, acquireRunnerLock, releaseRunnerLock } from '@/persistence';
 import { getCliArgs } from '@/utils/cliArgs';
-import { getProcessStartMarker, getSystemBootId, getProcessThreadGroupId, normalizeBootId, isProcessAlive, isWindows, killProcess, killProcessByChildProcess, killProcessTreeByPid } from '@/utils/process';
+import { getProcessStartMarker, getSystemBootId, getProcessThreadGroupId, normalizeBootId, isProcessAlive, isWindows, killProcess, killProcessByChildProcess, killProcessTreeByPid, processGroupMayBeAlive } from '@/utils/process';
 import { findStopSessionOrphanTargets, listWindowsProcessesWithCommandLine, reapRunnerSpawnedOrphans } from '@/runner/orphanReap';
 import { decideUntrackedRunnerWebhook } from '@/runner/lateRunnerWebhook';
 import { cleanupFailedStartupAfterExit, sessionStartupTimeout, waitForRecoverableStartup } from './sessionStartup';
@@ -1787,15 +1787,12 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           const hub = configuration.apiUrl
           const auth = runtimeAuthHash()
           for (const runtime of runtimes) {
-            // Match by hub+auth+wrapper identity. Do NOT require hubSessionId —
+            // Match by hub+auth+wrapper PID+marker. Do NOT require hubSessionId —
             // after a row merge the runtime may still be indexed under the
             // source id while Archive probes the survivor (#2658).
             if (runtime.hub !== hub || runtime.authHash !== auth) continue
-            if (expected) {
-              if (runtime.marker !== expected) continue
-            } else if (runtime.pid !== pid) {
-              continue
-            }
+            if (runtime.pid !== pid) continue
+            if (expected && runtime.marker !== expected) continue
             if (runtimeMayBeAlive(runtime)) return 'still_alive'
           }
           return null
@@ -1820,6 +1817,10 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         // owned app-server for that wrapper generation remains live.
         const owned = await codexOwnedStillAlive()
         if (owned) return owned
+        // Descendants may keep the wrapper's process group after reparent (#2658).
+        const group = processGroupMayBeAlive(pid)
+        if (group === true) return 'still_alive'
+        if (group === 'unknown') return 'unknown'
         rememberVerifiedExit(sessionId);
         return 'already_gone';
       }

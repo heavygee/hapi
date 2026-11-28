@@ -251,6 +251,8 @@ export class SessionCache {
     private readonly thinkingOwnerBySessionId: Map<string, string> = new Map()
     /** Owner key that last set row-wide backgroundTasks via an attributed snapshot. */
     private readonly backgroundOwnerBySessionId: Map<string, string> = new Map()
+    /** Current-generation owner credited for transcript-derived tool work. */
+    private readonly derivedWorkOwnerBySessionId: Map<string, string> = new Map()
     private readonly runtimeConfigUpdatedAtBySessionId: Map<string, Partial<Record<RuntimeConfigKey, number>>> = new Map()
     /**
      * Last time the hub saw real agent progress per session (tiann/hapi#1820).
@@ -744,9 +746,13 @@ export class SessionCache {
                 hostStartMarker: payload.processStartMarker,
             })
             : undefined
-        if (session.thinking && reportedOwnerKey) {
+        if (!session.thinking) {
+            this.thinkingOwnerBySessionId.delete(session.id)
+        } else if (reportedOwnerKey) {
             this.thinkingOwnerBySessionId.set(session.id, reportedOwnerKey)
-        } else if (!session.thinking) {
+        } else if (requestedThinking) {
+            // Unattributed worker thinking — do not leave a prior owner credited
+            // (queued hub thinking keeps preserveQueuedThinking without this path).
             this.thinkingOwnerBySessionId.delete(session.id)
         }
         if (!requestedThinking && preserveQueuedThinking && hasUnconsumedPrompt) {
@@ -960,6 +966,25 @@ export class SessionCache {
     ): void {
         const session = this.sessions.get(sessionId)
         if (!session) return
+        // Ownership before any early-return — unattributed / identical snapshots
+        // must not leave a prior owner credited for the row-wide task list (#2658).
+        const bgOwnerKey = (
+            typeof reported?.machineId === 'string' && reported.machineId.length > 0
+            && typeof reported?.hostPid === 'number' && reported.hostPid > 0
+            && typeof reported?.processStartMarker === 'string' && reported.processStartMarker.length > 0
+        )
+            ? liveWorkOwnerKey({
+                machineId: reported.machineId,
+                hostPid: reported.hostPid,
+                hostStartMarker: reported.processStartMarker,
+            })
+            : undefined
+        if (bgOwnerKey) {
+            this.backgroundOwnerBySessionId.set(sessionId, bgOwnerKey)
+        } else {
+            this.backgroundOwnerBySessionId.delete(sessionId)
+        }
+
         const current = session.backgroundTasks ?? []
         if (tasks.length === current.length && tasks.every((task, index) =>
             task.id === current[index]?.id && task.description === current[index]?.description
@@ -972,22 +997,6 @@ export class SessionCache {
 
         session.backgroundTasks = tasks
         session.backgroundTaskCount = tasks.length
-        const bgOwnerKey = (
-            typeof reported?.machineId === 'string' && reported.machineId.length > 0
-            && typeof reported?.hostPid === 'number' && reported.hostPid > 0
-            && typeof reported?.processStartMarker === 'string' && reported.processStartMarker.length > 0
-        )
-            ? liveWorkOwnerKey({
-                machineId: reported.machineId,
-                hostPid: reported.hostPid,
-                hostStartMarker: reported.processStartMarker,
-            })
-            : undefined
-        if (tasks.length > 0 && bgOwnerKey) {
-            this.backgroundOwnerBySessionId.set(sessionId, bgOwnerKey)
-        } else if (tasks.length === 0) {
-            this.backgroundOwnerBySessionId.delete(sessionId)
-        }
         // Durable latch only when the CLI stamped a reporting owner (#2658).
         // Without it, stay in-memory so a late unmarked snapshot cannot
         // write/clear under the current row after replacement.
@@ -1253,6 +1262,29 @@ export class SessionCache {
     noteDerivedWork(sessionId: string, open: boolean): void {
         const session = this.sessions.get(sessionId)
         if (!session) return
+        if (open) {
+            const machineId = typeof session.metadata?.machineId === 'string'
+                && session.metadata.machineId.length > 0
+                ? session.metadata.machineId
+                : undefined
+            const hostPid = typeof session.metadata?.hostPid === 'number' && session.metadata.hostPid > 0
+                ? session.metadata.hostPid
+                : undefined
+            const marker = typeof session.metadata?.hostStartMarker === 'string'
+                && session.metadata.hostStartMarker.length > 0
+                ? session.metadata.hostStartMarker
+                : undefined
+            if (machineId && hostPid && marker) {
+                this.derivedWorkOwnerBySessionId.set(
+                    sessionId,
+                    liveWorkOwnerKey({ machineId, hostPid, hostStartMarker: marker }),
+                )
+            } else {
+                this.derivedWorkOwnerBySessionId.delete(sessionId)
+            }
+        } else {
+            this.derivedWorkOwnerBySessionId.delete(sessionId)
+        }
         if ((session.derivedToolWork ?? false) === open) return
         session.derivedToolWork = open
         this.publisher.emit({
@@ -1260,6 +1292,61 @@ export class SessionCache {
             sessionId,
             data: { derivedToolWork: open } satisfies SessionPatch
         })
+    }
+
+    clearDerivedWorkForOwner(sessionId: string, ownerKey: string): void {
+        const session = this.sessions.get(sessionId)
+        if (!session) return
+        if (this.derivedWorkOwnerBySessionId.get(sessionId) !== ownerKey) return
+        this.derivedWorkOwnerBySessionId.delete(sessionId)
+        if (session.derivedToolWork !== true) return
+        session.derivedToolWork = false
+        this.publisher.emit({
+            type: 'session-updated',
+            sessionId,
+            data: { derivedToolWork: false } satisfies SessionPatch
+        })
+    }
+
+    /**
+     * Terminal sessions: retire pending asks after the CLI socket is gone so
+     * they cannot permanently 409 Archive. Runner-owned asks stay on the
+     * probe path (#2658).
+     */
+    clearTerminalPendingRequests(sessionId: string): void {
+        const session = this.sessions.get(sessionId)
+        if (!session?.agentState) return
+        if (isRunnerOwnedSession(session)) return
+        const requests = session.agentState.requests
+        if (!requests || Object.keys(requests).length === 0) return
+        const nextRequests: NonNullable<typeof requests> = {}
+        let removed = false
+        for (const [id, request] of Object.entries(requests)) {
+            if (request.runnerOwned === true) {
+                nextRequests[id] = request
+                continue
+            }
+            removed = true
+        }
+        if (!removed) return
+        const next = { ...session.agentState, requests: nextRequests }
+        const result = this.store.sessions.updateSessionAgentState(
+            sessionId,
+            next,
+            session.agentStateVersion,
+            session.namespace,
+        )
+        if (result.result === 'success') {
+            session.agentState = result.value as typeof session.agentState
+            session.agentStateVersion = result.version
+            this.publisher.emit({
+                type: 'session-updated',
+                sessionId,
+                data: {
+                    agentState: { version: result.version, value: session.agentState },
+                },
+            })
+        }
     }
 
     refreshLastUserMessageAt(sessionId: string): void {

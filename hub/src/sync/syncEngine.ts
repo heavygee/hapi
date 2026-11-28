@@ -3942,6 +3942,7 @@ export class SyncEngine {
                     this.sessionCache.clearPendingAgentRequestsForOwner(sessionId, owner)
                     this.sessionCache.clearTransientThinkingForOwner(sessionId, ownerKey)
                     this.sessionCache.clearTransientBackgroundForOwner(sessionId, ownerKey)
+                    this.sessionCache.clearDerivedWorkForOwner(sessionId, ownerKey)
                 }
             }
             const afterProbe = this.sessionCache.getSession(sessionId) ?? liveBeforeStop
@@ -3965,6 +3966,9 @@ export class SyncEngine {
         } catch (error) {
             if (error instanceof RpcTargetMissingError) {
                 cliUnreachable = true
+                // Terminal (non-runner) rows: once the CLI socket is gone, stale
+                // permission asks cannot be answered and must not 409 forever.
+                this.sessionCache.clearTerminalPendingRequests(sessionId)
             } else {
                 throw error
             }

@@ -10,6 +10,33 @@ export const isWindows = (): boolean => process.platform === 'win32';
 /** Bound hung WMI/tasklist/ps so a wedged spawn cannot darken the runner (#1911 Overseer B3). */
 const SPAWN_SYNC_TIMEOUT_MS = 10_000;
 
+/**
+ * Read-only: does this process group still have a live member?
+ * Used by ProbeSessionExit after the wrapper PID disappears — children may
+ * have been reparented to init but keep the wrapper's PGID (#2658).
+ * Returns `'unknown'` when the scan cannot be trusted (fail closed).
+ */
+export function processGroupMayBeAlive(pgid: number): boolean | 'unknown' {
+  if (!Number.isFinite(pgid) || pgid <= 0) return 'unknown'
+  if (isWindows()) {
+    // Windows process groups are not the Unix PGID model; tree liveness is
+    // handled by the Windows stop path. Probe treats this as no PGID evidence.
+    return false
+  }
+  const result = spawn.sync('pgrep', ['-g', String(pgid)], {
+    encoding: 'utf8',
+    timeout: SPAWN_SYNC_TIMEOUT_MS,
+  })
+  if (result.error) return 'unknown'
+  if (result.status === 1) return false
+  if (result.status !== 0) return 'unknown'
+  const pids = (result.stdout ?? '').trim().split('\n').map(Number).filter((p) => Number.isFinite(p) && p > 0)
+  for (const pid of pids) {
+    if (isProcessAlive(pid)) return true
+  }
+  return false
+}
+
 export function isProcessAlive(pid: number): boolean {
   if (!Number.isFinite(pid) || pid <= 0) {
     return false;
