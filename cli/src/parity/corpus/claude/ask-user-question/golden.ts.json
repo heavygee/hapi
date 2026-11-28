@@ -869,6 +869,7 @@
                     ]
                   },
                   "createdAt": "<ts>",
+                  "hostStartMarker": "<marker>",
                   "tool": "AskUserQuestion"
                 }
               },
@@ -906,6 +907,7 @@
                     ]
                   },
                   "createdAt": "<ts>",
+                  "hostStartMarker": "<marker>",
                   "tool": "AskUserQuestion"
                 }
               },
@@ -1257,6 +1259,7 @@
                   },
                   "completedAt": "<ts>",
                   "createdAt": "<ts>",
+                  "hostStartMarker": "<marker>",
                   "status": "approved",
                   "tool": "AskUserQuestion"
                 }
@@ -1302,6 +1305,7 @@
                   },
                   "completedAt": "<ts>",
                   "createdAt": "<ts>",
+                  "hostStartMarker": "<marker>",
                   "status": "approved",
                   "tool": "AskUserQuestion"
                 }

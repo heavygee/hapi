@@ -837,6 +837,7 @@
                     "plan": "Test the harness"
                   },
                   "createdAt": "<ts>",
+                  "hostStartMarker": "<marker>",
                   "tool": "ExitPlanMode"
                 }
               },
@@ -858,6 +859,7 @@
                     "plan": "Test the harness"
                   },
                   "createdAt": "<ts>",
+                  "hostStartMarker": "<marker>",
                   "tool": "ExitPlanMode"
                 }
               },
@@ -1288,6 +1290,7 @@
                   },
                   "completedAt": "<ts>",
                   "createdAt": "<ts>",
+                  "hostStartMarker": "<marker>",
                   "status": "approved",
                   "tool": "ExitPlanMode"
                 }
@@ -1312,6 +1315,7 @@
                   },
                   "completedAt": "<ts>",
                   "createdAt": "<ts>",
+                  "hostStartMarker": "<marker>",
                   "status": "approved",
                   "tool": "ExitPlanMode"
                 }

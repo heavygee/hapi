@@ -837,6 +837,7 @@
                     "command": "echo parity"
                   },
                   "createdAt": "<ts>",
+                  "hostStartMarker": "<marker>",
                   "tool": "Bash"
                 }
               },
@@ -858,6 +859,7 @@
                     "command": "echo parity"
                   },
                   "createdAt": "<ts>",
+                  "hostStartMarker": "<marker>",
                   "tool": "Bash"
                 }
               },
@@ -1183,6 +1185,7 @@
                   },
                   "completedAt": "<ts>",
                   "createdAt": "<ts>",
+                  "hostStartMarker": "<marker>",
                   "status": "approved",
                   "tool": "Bash"
                 }
@@ -1207,6 +1210,7 @@
                   },
                   "completedAt": "<ts>",
                   "createdAt": "<ts>",
+                  "hostStartMarker": "<marker>",
                   "status": "approved",
                   "tool": "Bash"
                 }
