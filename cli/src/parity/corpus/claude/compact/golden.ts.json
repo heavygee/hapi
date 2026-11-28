@@ -555,6 +555,12 @@
                 "type": "output"
               },
               "meta": {
+                "reportingOwner": {
+                  "hostPid": "<pid>",
+                  "machineId": "parity-machine",
+                  "processStartMarker": "<marker>",
+                  "runnerOwned": true
+                },
                 "sentFrom": "cli"
               },
               "role": "agent"
@@ -1074,6 +1080,12 @@
       "isSidechain": false,
       "localId": null,
       "meta": {
+        "reportingOwner": {
+          "hostPid": "<pid>",
+          "machineId": "parity-machine",
+          "processStartMarker": "<marker>",
+          "runnerOwned": true
+        },
         "sentFrom": "cli"
       },
       "parentToolUseId": null,

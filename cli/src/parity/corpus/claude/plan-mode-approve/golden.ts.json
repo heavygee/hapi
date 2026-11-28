@@ -542,6 +542,12 @@
                 "type": "output"
               },
               "meta": {
+                "reportingOwner": {
+                  "hostPid": "<pid>",
+                  "machineId": "parity-machine",
+                  "processStartMarker": "<marker>",
+                  "runnerOwned": true
+                },
                 "sentFrom": "cli"
               },
               "role": "agent"
@@ -918,6 +924,12 @@
                 "type": "output"
               },
               "meta": {
+                "reportingOwner": {
+                  "hostPid": "<pid>",
+                  "machineId": "parity-machine",
+                  "processStartMarker": "<marker>",
+                  "runnerOwned": true
+                },
                 "sentFrom": "cli"
               },
               "role": "agent"
@@ -960,6 +972,12 @@
                 "type": "output"
               },
               "meta": {
+                "reportingOwner": {
+                  "hostPid": "<pid>",
+                  "machineId": "parity-machine",
+                  "processStartMarker": "<marker>",
+                  "runnerOwned": true
+                },
                 "sentFrom": "cli"
               },
               "role": "agent"
@@ -998,6 +1016,12 @@
                 "type": "output"
               },
               "meta": {
+                "reportingOwner": {
+                  "hostPid": "<pid>",
+                  "machineId": "parity-machine",
+                  "processStartMarker": "<marker>",
+                  "runnerOwned": true
+                },
                 "sentFrom": "cli"
               },
               "role": "agent"
@@ -2004,6 +2028,12 @@
       "isSidechain": false,
       "localId": null,
       "meta": {
+        "reportingOwner": {
+          "hostPid": "<pid>",
+          "machineId": "parity-machine",
+          "processStartMarker": "<marker>",
+          "runnerOwned": true
+        },
         "sentFrom": "cli"
       },
       "model": "sonnet",
@@ -2031,6 +2061,12 @@
       "isSidechain": false,
       "localId": null,
       "meta": {
+        "reportingOwner": {
+          "hostPid": "<pid>",
+          "machineId": "parity-machine",
+          "processStartMarker": "<marker>",
+          "runnerOwned": true
+        },
         "sentFrom": "cli"
       },
       "parentToolUseId": null,
@@ -2051,6 +2087,12 @@
       "isSidechain": false,
       "localId": null,
       "meta": {
+        "reportingOwner": {
+          "hostPid": "<pid>",
+          "machineId": "parity-machine",
+          "processStartMarker": "<marker>",
+          "runnerOwned": true
+        },
         "sentFrom": "cli"
       },
       "model": "sonnet",
@@ -2071,6 +2113,12 @@
       "isSidechain": false,
       "localId": null,
       "meta": {
+        "reportingOwner": {
+          "hostPid": "<pid>",
+          "machineId": "parity-machine",
+          "processStartMarker": "<marker>",
+          "runnerOwned": true
+        },
         "sentFrom": "cli"
       },
       "parentToolUseId": null,
