@@ -763,6 +763,23 @@ body:
         expect(template.reason).toContain('my id!')
     })
 
+    // Regression (bot review, tiann/hapi#2147, follow-up): an unquoted
+    // `id: true` parses as a Boolean. The previous form checked the
+    // character set only on `asString`'s result, which silently returns
+    // undefined for a non-string — treating a Boolean id as "no explicit
+    // id declared" (auto-generates one) instead of rejecting the template,
+    // the one remaining field in this loop checked on truthiness rather
+    // than presence.
+    it('is genuinely invalid when an explicit id parses as a YAML boolean', () => {
+        const template = parseIssueFormYaml(
+            'x.yml',
+            'name: Bug\ndescription: Bug\nbody:\n  - type: input\n    id: true\n    attributes:\n      label: Contact'
+        )
+        expect(template.kind).toBe('unsupported')
+        if (template.kind !== 'unsupported') return
+        expect(template.githubValid).toBe(false)
+    })
+
     // Regression (bot review, tiann/hapi#2147, follow-up): a dropdown's
     // own choices were never checked for duplicates — only an empty
     // options list was rejected. GitHub requires a dropdown's choices to

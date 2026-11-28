@@ -385,7 +385,19 @@ export function parseIssueFormYaml(id: string, raw: string): IssueTemplate {
     const usedIds = new Set<string>()
     for (const element of bodyRaw) {
         if (element && typeof element === 'object') {
-            const explicitId = asString((element as Record<string, unknown>).id)
+            const rawId = (element as Record<string, unknown>).id
+            // Checked on presence, not on `asString`'s truthy result (bot
+            // review, tiann/hapi#2147, follow-up) — the previous form let a
+            // Boolean-coerced `id: true` silently fall through this whole
+            // loop as "no explicit id" (asString returns undefined), skipping
+            // the character-set check below entirely and letting the field
+            // auto-generate one instead, same silent-acceptance gap as every
+            // other check in this family: present-and-wrong must reject, not
+            // degrade to absent.
+            if (rawId !== undefined && typeof rawId !== 'string') {
+                return { id, name, kind: 'unsupported', reason: 'Template body has a field id that is not a string', githubValid: false }
+            }
+            const explicitId = asString(rawId)
             if (explicitId) {
                 if (!VALID_EXPLICIT_ID.test(explicitId)) {
                     return { id, name, kind: 'unsupported', reason: `Template body has an invalid field id "${explicitId}" (ids may only use letters, numbers, "-", and "_")`, githubValid: false }
