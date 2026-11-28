@@ -1948,11 +1948,10 @@ export class SyncEngine {
                 session.id,
                 this.store.messages.getLiveToolWork(session.id, boundarySeq),
             )
-            // Transcript-open latches clear on settlement (no open tools left),
-            // not on idle thinking (#2658).
-            if (!this.store.messages.getLiveToolWork(session.id)) {
-                this.sessionCache.clearTranscriptOpenWorkWhenSettled(session.id)
-            }
+            // Do NOT clear transcriptOpenWork from an unbounded transcript scan:
+            // a later human prompt / turn-end from replacement B would look like
+            // settlement for A's latched call. Clear only on verified owner exit
+            // (clearGenerationLiveWork) (#2658).
         }
     }
 
@@ -3895,6 +3894,7 @@ export class SyncEngine {
             const probeSupported = Boolean(ownerMachine)
                 && (!ownerCaps || ownerCaps.includes(MACHINE_CAPABILITIES.ProbeSessionExit))
             let status: 'stopped' | 'already_gone' | 'still_alive' | 'unknown' = 'unknown'
+            const sessionSocketGone = !this.rpcGateway.hasSessionRpcTarget(sessionId)
             if (probeSupported) {
                 const timeoutMs = Math.ceil(deadline - performance.now())
                 if (timeoutMs <= 0) throw new ArchiveCleanupError('timeout')
@@ -3916,13 +3916,34 @@ export class SyncEngine {
                     // handler-not-registered still leaves unknown (keep the ask).
                     status = 'unknown'
                 }
+                // Registered machine without a live runner handler: probe stays
+                // unknown. Inactive machine + inactive session + no session
+                // socket is standalone recovery — not ordinary reconnect (#2658).
+                if (
+                    status === 'unknown'
+                    && ownerMachine
+                    && !ownerMachine.active
+                    && !session.active
+                    && sessionSocketGone
+                ) {
+                    status = 'already_gone'
+                }
             } else if (
                 !ownerMachine
                 && !session.active
-                && !this.rpcGateway.hasSessionRpcTarget(sessionId)
+                && sessionSocketGone
             ) {
                 // Owner's machine is gone from the hub — not mere session-socket
                 // loss. Standalone terminals without a runner can recover here (#2658).
+                status = 'already_gone'
+            } else if (
+                ownerMachine
+                && !ownerMachine.active
+                && !session.active
+                && sessionSocketGone
+            ) {
+                // Machine still cached but inactive (heartbeat expired) and no
+                // session socket — same recovery for terminal-only installs.
                 status = 'already_gone'
             }
             // Socket-gone alone while the machine remains registered is not exit

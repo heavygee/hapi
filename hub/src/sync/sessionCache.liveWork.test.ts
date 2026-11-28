@@ -479,7 +479,7 @@ describe('SessionCache liveWorkByGeneration attribution (#2658)', () => {
             'default',
         )
         const keyA = liveWorkOwnerKey({ machineId: 'm1', hostPid: 100, hostStartMarker: 'worker-A' })
-        cache.noteRowGenerationOwner(session.id, keyA)
+        cache.noteRowGenerationOwner(session.id, keyA, true)
         store.messages.addMessage(session.id, {
             role: 'agent',
             content: {

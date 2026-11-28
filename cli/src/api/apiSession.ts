@@ -1328,8 +1328,13 @@ if (isReconnect) {
         return changed ? { ...state, requests: next } : state
     }
 
-    /** Refresh machineId only when metadata still describes this OS process. */
+    /**
+     * Fill machineId once from metadata when construct deferred it. Never
+     * overwrite a bootstrap identity — a replacement row can share PID and a
+     * same-second start marker across machines (#2658).
+     */
     private adoptLocalMachineIdFromMetadata(): void {
+        if (this.localWorkerIdentity.machineId) return
         const meta = this.metadata
         if (!meta) return
         if (meta.hostPid !== this.localWorkerIdentity.hostPid) return

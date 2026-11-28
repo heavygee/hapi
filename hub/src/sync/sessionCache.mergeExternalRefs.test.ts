@@ -133,7 +133,7 @@ describe('mergeSessionMetadataForSessionMerge externalRefs', () => {
         expect(united[key]?.since).toBe(10)
     })
 
-    it('drops a stale first-merge source copy when the fresh source is idle', () => {
+    it('keeps dest entries when source owner key is absent from the fresh snapshot', () => {
         const keyA = liveWorkOwnerKey({ machineId: 'm1', hostPid: 1, hostStartMarker: 'A' })
         const keyB = liveWorkOwnerKey({ machineId: 'm1', hostPid: 2, hostStartMarker: 'B' })
         const initialA = {
@@ -153,13 +153,15 @@ describe('mergeSessionMetadataForSessionMerge externalRefs', () => {
                 backgroundTasks: [{ id: 'bg-b', type: 'local_bash', description: 'b' }],
             },
         }
+        // Absent source key is no longer treated as "drop identical residue" —
+        // dest may have reported the same shape independently (#2658).
         const transferred = transferSourceLiveWorkOntoDest(
             dest,
             {},
             new Set([keyA]),
             { [keyA]: initialA },
         )
-        expect(transferred[keyA]).toBeUndefined()
+        expect(transferred[keyA]?.unresolvedTurn).toBe(true)
         expect(transferred[keyB]?.backgroundTasks).toHaveLength(1)
     })
 
@@ -223,7 +225,7 @@ describe('mergeSessionMetadataForSessionMerge externalRefs', () => {
         expect(transferred[key]?.backgroundTasks).toHaveLength(1)
     })
 
-    it('applies source settlement when the fresh source still has the owner key', () => {
+    it('unions dest turn when source settles but retains background for shared owner', () => {
         const key = liveWorkOwnerKey({ machineId: 'm1', hostPid: 1, hostStartMarker: 'shared' })
         const transferred = transferSourceLiveWorkOntoDest(
             {
@@ -233,7 +235,7 @@ describe('mergeSessionMetadataForSessionMerge externalRefs', () => {
                     hostStartMarker: 'shared',
                     since: 10,
                     unresolvedTurn: true,
-                    backgroundTasks: [{ id: 'bg', type: 'local_bash', description: 'dest' }],
+                    backgroundTasks: [{ id: 'bg-dest', type: 'local_bash', description: 'dest' }],
                 },
             },
             {
@@ -242,12 +244,13 @@ describe('mergeSessionMetadataForSessionMerge externalRefs', () => {
                     hostPid: 1,
                     hostStartMarker: 'shared',
                     since: 10,
-                    // Settled — no unresolvedTurn.
+                    // Source settled its turn but still has a bg task.
+                    backgroundTasks: [{ id: 'bg-src', type: 'local_bash', description: 'src' }],
                 },
             },
             new Set([key]),
         )
-        expect(transferred[key]?.unresolvedTurn).toBeUndefined()
-        expect(transferred[key]?.backgroundTasks).toHaveLength(1)
+        expect(transferred[key]?.unresolvedTurn).toBe(true)
+        expect(transferred[key]?.backgroundTasks?.map((t) => t.id).sort()).toEqual(['bg-dest', 'bg-src'])
     })
 })

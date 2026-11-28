@@ -214,7 +214,10 @@ export function transferSourceLiveWorkOntoDest(
                 ? { hostStartMarker: source.hostStartMarker ?? dest?.hostStartMarker }
                 : {}),
             since: Math.min(source.since, dest?.since ?? source.since),
-            ...(source.unresolvedTurn ? { unresolvedTurn: true as const } : {}),
+            // Union turns — source settlement must not erase a dest-reported turn.
+            ...(source.unresolvedTurn || dest?.unresolvedTurn
+                ? { unresolvedTurn: true as const }
+                : {}),
             ...(source.transcriptOpenWork || dest?.transcriptOpenWork
                 ? { transcriptOpenWork: true as const }
                 : {}),
@@ -226,17 +229,9 @@ export function transferSourceLiveWorkOntoDest(
             const merged = mergeOwner(sourceMap[key], out[key])
             if (generationEntryHasWork(merged)) out[key] = merged
             else delete out[key]
-        } else if (out[key]) {
-            // Source settled this owner away during scratchlist I/O. Drop a
-            // pure initial copy, or strip the source's unresolvedTurn from a
-            // combined entry so dest-only background work survives (#2658).
-            const initial = initialSourceMap[key]
-            if (initial && JSON.stringify(out[key]) === JSON.stringify(initial)) {
-                delete out[key]
-            }
-            // Else keep dest as-is: it may hold dest-reported work for the same
-            // owner that arrived while the source settled (#2658).
         }
+        // Source key gone: keep dest. Early merge no longer copies live-work, so
+        // "equals initial" is not proof of a stale source residue (#2658).
     }
     for (const [key, entry] of Object.entries(sourceMap)) {
         if (!sourceOwnerKeys.has(key)) {
@@ -314,6 +309,8 @@ export class SessionCache {
     private readonly derivedWorkOwnerBySessionId: Map<string, string> = new Map()
     /** Last attributed row generation (machine:pid:marker) for transcript bounds. */
     private readonly rowGenerationOwnerBySessionId: Map<string, string> = new Map()
+    /** Runner provenance for each noted row generation (latch uses prior, not current). */
+    private readonly rowGenerationRunnerOwnedByOwnerKey: Map<string, boolean> = new Map()
     /**
      * Max message seq observed when the row's *current* generation changed.
      * Transcript tool-work at or below this seq belongs to a prior owner (#2658).
@@ -847,6 +844,11 @@ export class SessionCache {
         // path, not only when another reporter emits a bg snapshot (#2658).
         const BACKGROUND_STALE_MS = 300_000
         const byOwnerBg = this.backgroundTasksByOwnerBySessionId.get(session.id)
+        if (reportedOwnerKey && byOwnerBg?.get(reportedOwnerKey)?.length) {
+            // Every attributed heartbeat refreshes liveness for this reporter's
+            // tasks — membership need not change (AGY) (#2658).
+            this.backgroundReportedAtByOwner.set(ownerMapKey(reportedOwnerKey), hubNow)
+        }
         if (byOwnerBg) {
             let bgChanged = false
             for (const [owner, tasks] of [...byOwnerBg.entries()]) {
@@ -862,7 +864,12 @@ export class SessionCache {
             if (bgChanged) this.recomputeRowWideBackgroundTasks(session.id)
         }
         if (reportedOwnerKey) {
-            this.noteRowGenerationOwner(session.id, reportedOwnerKey)
+            this.noteRowGenerationOwner(
+                session.id,
+                reportedOwnerKey,
+                payload.runnerOwned === true
+                    || (payload.runnerOwned !== false && isRunnerOwnedSession(session)),
+            )
             this.thinkingByOwnerBySessionId.set(ownerMapKey(reportedOwnerKey), requestedThinking)
             if (requestedThinking) {
                 this.thinkingOwnerBySessionId.set(session.id, reportedOwnerKey)
@@ -1510,7 +1517,11 @@ export class SessionCache {
      * scans by message seq so prior-owner tool calls cannot credit the
      * replacement. Late reports from a prior owner must not move the cutoff (#2658).
      */
-    noteRowGenerationOwner(sessionId: string, ownerKey: string): void {
+    noteRowGenerationOwner(
+        sessionId: string,
+        ownerKey: string,
+        runnerOwned?: boolean,
+    ): void {
         if (ownerKey.length === 0) return
         const session = this.sessions.get(sessionId)
         const currentKey = this.currentRowOwnerKey(session)
@@ -1520,13 +1531,15 @@ export class SessionCache {
         if (currentKey && ownerKey !== currentKey) return
         if (previous && previous !== ownerKey) {
             // Cutoff would hide prior-gen tool calls from derivedToolWork.
-            // Latch them onto the previous owner before advancing (#2658).
+            // Latch them onto the previous owner with THAT owner's provenance
+            // — not the replacement row's runner/terminal status (#2658).
             if (this.store.messages.getLiveToolWork(sessionId)) {
                 const parts = previous.split(':')
                 if (parts.length >= 3) {
                     const hostPid = Number(parts[1])
                     const hostStartMarker = parts.slice(2).join(':')
                     if (parts[0] && Number.isFinite(hostPid) && hostPid > 0 && hostStartMarker) {
+                        const priorRunnerOwned = this.rowGenerationRunnerOwnedByOwnerKey.get(previous)
                         this.upsertReportedGenerationLiveWork(
                             sessionId,
                             { transcriptOpenWork: true },
@@ -1534,7 +1547,7 @@ export class SessionCache {
                                 machineId: parts[0],
                                 hostPid,
                                 processStartMarker: hostStartMarker,
-                                runnerOwned: isRunnerOwnedSession(session),
+                                runnerOwned: priorRunnerOwned === true,
                             },
                         )
                     }
@@ -1546,6 +1559,11 @@ export class SessionCache {
             )
         }
         this.rowGenerationOwnerBySessionId.set(sessionId, ownerKey)
+        if (runnerOwned !== undefined) {
+            this.rowGenerationRunnerOwnedByOwnerKey.set(ownerKey, runnerOwned)
+        } else if (!this.rowGenerationRunnerOwnedByOwnerKey.has(ownerKey)) {
+            this.rowGenerationRunnerOwnedByOwnerKey.set(ownerKey, isRunnerOwnedSession(session))
+        }
     }
 
     private currentRowOwnerKey(session: Session | undefined): string | undefined {
