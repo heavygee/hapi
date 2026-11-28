@@ -880,15 +880,9 @@ export class SessionCache {
                 this.thinkingOwnerBySessionId.delete(session.id)
                 this.thinkingReportedAtByOwner.delete(ownerMapKey(reportedOwnerKey))
             }
-            // Idle from the current row identity also retires other owners.
-            if (!requestedThinking && currentKey && reportedOwnerKey === currentKey) {
-                for (const key of [...this.thinkingByOwnerBySessionId.keys()]) {
-                    if (!key.startsWith(session.id + '\0')) continue
-                    if (key === ownerMapKey(reportedOwnerKey)) continue
-                    this.thinkingByOwnerBySessionId.delete(key)
-                    this.thinkingReportedAtByOwner.delete(key)
-                }
-            }
+            // Idle updates only this reporter's bit. Other owners (including a
+            // prior terminal with no durable latch) keep theirs until their own
+            // idle, stale expiry, or verified exit (#2658).
         } else if (requestedThinking) {
             this.thinkingOwnerBySessionId.delete(session.id)
             this.unattributedThinkingBySessionId.add(session.id)
@@ -1533,7 +1527,10 @@ export class SessionCache {
             // Cutoff would hide prior-gen tool calls from derivedToolWork.
             // Latch them onto the previous owner with THAT owner's provenance
             // — not the replacement row's runner/terminal status (#2658).
-            if (this.store.messages.getLiveToolWork(sessionId)) {
+            // Respect the departing generation's existing boundary so an older
+            // unsettled call is not re-latched onto the middle owner (#2658).
+            const priorBoundary = this.transcriptGenerationBoundarySeqBySessionId.get(sessionId)
+            if (this.store.messages.getLiveToolWork(sessionId, priorBoundary)) {
                 const parts = previous.split(':')
                 if (parts.length >= 3) {
                     const hostPid = Number(parts[1])
@@ -1604,27 +1601,50 @@ export class SessionCache {
     noteDerivedWork(sessionId: string, open: boolean): void {
         const session = this.sessions.get(sessionId)
         if (!session) return
+        const machineId = typeof session.metadata?.machineId === 'string'
+            && session.metadata.machineId.length > 0
+            ? session.metadata.machineId
+            : undefined
+        const hostPid = typeof session.metadata?.hostPid === 'number' && session.metadata.hostPid > 0
+            ? session.metadata.hostPid
+            : undefined
+        const marker = typeof session.metadata?.hostStartMarker === 'string'
+            && session.metadata.hostStartMarker.length > 0
+            ? session.metadata.hostStartMarker
+            : undefined
         if (open) {
-            const machineId = typeof session.metadata?.machineId === 'string'
-                && session.metadata.machineId.length > 0
-                ? session.metadata.machineId
-                : undefined
-            const hostPid = typeof session.metadata?.hostPid === 'number' && session.metadata.hostPid > 0
-                ? session.metadata.hostPid
-                : undefined
-            const marker = typeof session.metadata?.hostStartMarker === 'string'
-                && session.metadata.hostStartMarker.length > 0
-                ? session.metadata.hostStartMarker
-                : undefined
             if (machineId && hostPid && marker) {
                 const ownerKey = liveWorkOwnerKey({ machineId, hostPid, hostStartMarker: marker })
                 this.noteRowGenerationOwner(sessionId, ownerKey)
                 this.derivedWorkOwnerBySessionId.set(sessionId, ownerKey)
+                // Durable before heartbeat expiry can wipe the transient flag (#2658).
+                this.upsertReportedGenerationLiveWork(
+                    sessionId,
+                    { transcriptOpenWork: true },
+                    {
+                        machineId,
+                        hostPid,
+                        processStartMarker: marker,
+                        runnerOwned: isRunnerOwnedSession(session),
+                    },
+                )
             } else {
                 this.derivedWorkOwnerBySessionId.delete(sessionId)
             }
         } else {
             this.derivedWorkOwnerBySessionId.delete(sessionId)
+            if (machineId && hostPid && marker) {
+                this.upsertReportedGenerationLiveWork(
+                    sessionId,
+                    { transcriptOpenWork: false },
+                    {
+                        machineId,
+                        hostPid,
+                        processStartMarker: marker,
+                        runnerOwned: isRunnerOwnedSession(session),
+                    },
+                )
+            }
         }
         if ((session.derivedToolWork ?? false) === open) return
         session.derivedToolWork = open

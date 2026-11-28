@@ -3916,36 +3916,17 @@ export class SyncEngine {
                     // handler-not-registered still leaves unknown (keep the ask).
                     status = 'unknown'
                 }
-                // Registered machine without a live runner handler: probe stays
-                // unknown. Inactive machine + inactive session + no session
-                // socket is standalone recovery — not ordinary reconnect (#2658).
-                if (
-                    status === 'unknown'
-                    && ownerMachine
-                    && !ownerMachine.active
-                    && !session.active
-                    && sessionSocketGone
-                ) {
-                    status = 'already_gone'
-                }
             } else if (
                 !ownerMachine
                 && !session.active
                 && sessionSocketGone
             ) {
-                // Owner's machine is gone from the hub — not mere session-socket
-                // loss. Standalone terminals without a runner can recover here (#2658).
-                status = 'already_gone'
-            } else if (
-                ownerMachine
-                && !ownerMachine.active
-                && !session.active
-                && sessionSocketGone
-            ) {
-                // Machine still cached but inactive (heartbeat expired) and no
-                // session socket — same recovery for terminal-only installs.
+                // Machine row truly gone from the hub (not cached-inactive).
+                // Network outages that only expire heartbeats must not clear (#2658).
                 status = 'already_gone'
             }
+            // Machine inactivity alone is not exit proof — a live terminal can
+            // lose both session and machine heartbeats during an outage.
             // Socket-gone alone while the machine remains registered is not exit
             // proof — leave unknown so reconnecting terminals can still answer.
             if (status === 'already_gone' || status === 'stopped') {
