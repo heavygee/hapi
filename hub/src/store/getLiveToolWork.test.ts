@@ -267,4 +267,48 @@ describe('getLiveToolWork', () => {
         expect(store.messages.getLiveToolWork(session.id, undefined, keyB)).toBe(false)
         store.close()
     })
+
+    it('does not let a foreign Claude result settle the current owner\'s open call', () => {
+        const store = makeStore()
+        const session = makeSession(store, 'live-work-foreign-result')
+        const ownerB = {
+            machineId: 'm1',
+            hostPid: 200,
+            processStartMarker: 'worker-B',
+        }
+        const keyB = 'm1:200:worker-B'
+        // B's open call, then a late stamped turn-end from A above it.
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'assistant',
+                    message: {
+                        role: 'assistant',
+                        content: [{ type: 'tool_use', id: 'tu-b', name: 'Bash', input: {} }],
+                    },
+                },
+            },
+            meta: { sentFrom: 'cli', reportingOwner: ownerB },
+        })
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: { type: 'result', subtype: 'success', is_error: false },
+            },
+            meta: {
+                sentFrom: 'cli',
+                reportingOwner: {
+                    machineId: 'm1',
+                    hostPid: 100,
+                    processStartMarker: 'worker-A',
+                },
+            },
+        })
+        expect(store.messages.scanLiveToolWork(session.id, undefined, keyB)).toBe('open')
+        expect(store.messages.getLiveToolWork(session.id, undefined, keyB)).toBe(true)
+        store.close()
+    })
 })

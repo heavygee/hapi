@@ -1970,15 +1970,15 @@ export class SyncEngine {
                 : undefined
             // Owner-scoped: late prior-worker calls stamped with another owner
             // must not credit the replacement (#2658).
-            const openForCurrent = this.store.messages.getLiveToolWork(
+            const scan = this.store.messages.scanLiveToolWork(
                 session.id,
                 boundarySeq,
                 currentOwner,
             )
-            this.sessionCache.noteDerivedWork(session.id, openForCurrent)
-            // Owner settled their own calls — clear that owner's durable bit.
-            // Prior owners keep theirs until exit probe (clearGenerationLiveWork).
-            if (!openForCurrent && currentOwner) {
+            this.sessionCache.noteDerivedWork(session.id, scan === 'open')
+            // Clear durable only on positive settlement — never when the
+            // bounded window is inconclusive (call may have aged out) (#2658).
+            if (scan === 'settled' && currentOwner) {
                 this.sessionCache.clearTranscriptOpenWorkForOwner(session.id, currentOwner)
             }
         }

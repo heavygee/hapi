@@ -1094,6 +1094,8 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
               // Await tree-kill (wrapper + agent grandchildren). Do not fire-
               // and-forget: under load an unawaited kill can fail silently and
               // leave an immortal detached child.
+              // Capture marker before cleanup deletes resume-process state.
+              const timeoutMarker = persistedResumeProcesses.get(pid)?.processStartMarker;
               let treeDead = false;
               if (happyProcess) {
                 try {
@@ -1114,15 +1116,14 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
                 if (trackedSession.requestedHappySessionId) {
                   rememberVerifiedExit(trackedSession.requestedHappySessionId);
                 }
-                // Webhook-timeout tree kill: generation-key on Windows when
-                // the start marker is known; never bare PID-N (#2658).
-                {
-                  const timeoutMarker = persistedResumeProcesses.get(pid)?.processStartMarker;
-                  if (isWindows() && timeoutMarker) {
+                // Windows: only write a generation tombstone after verified
+                // tree death — wrapper-gone alone is not tree proof (#2658).
+                if (isWindows()) {
+                  if (treeDead && timeoutMarker) {
                     rememberVerifiedExit(windowsGenerationExitKey(pid, timeoutMarker));
-                  } else if (!isWindows()) {
-                    rememberVerifiedExit(`PID-${pid}`);
                   }
+                } else {
+                  rememberVerifiedExit(`PID-${pid}`);
                 }
                 pidToRequestedSessionId.delete(pid);
                 pidToConfirmedSessionId.delete(pid);
@@ -1563,6 +1564,10 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           }
 
           let treeTerminationVerified = false;
+          // Capture marker before awaits — onChildExited may delete
+          // persistedResumeProcesses during tree wait (#2658).
+          const stopGenerationMarker = persistedResumeProcesses.get(pid)?.processStartMarker
+            ?? opts?.processStartMarker;
           if (session.startedBy === 'runner') {
             // Adopted post-restart sessions have no ChildProcess handle — still
             // tree-kill so agent grandchildren cannot outlive the wrapper.
@@ -1590,15 +1595,14 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
               }
             }
             try {
-              if (!await prepareSessionStop(sessionId, pid, persistedResumeProcesses.get(pid)?.processStartMarker)) return 'still_alive';
+              if (!await prepareSessionStop(sessionId, pid, stopGenerationMarker)) return 'still_alive';
               // Preparation can outlive the target generation (same recheck as
               // the raw-PID path): never signal a dead or recycled PID.
               if (!isProcessAlive(pid)) {
                 if (isWindows()) return await finishWithOrphanSweep('unknown')
                 return await finishWithOrphanSweep('already_gone');
               }
-              const trackedMarker = persistedResumeProcesses.get(pid)?.processStartMarker;
-              if (trackedMarker && getProcessStartMarker(pid) !== trackedMarker) return 'unknown';
+              if (stopGenerationMarker && getProcessStartMarker(pid) !== stopGenerationMarker) return 'unknown';
               const reportStop: Parameters<typeof killProcessTreeByPid>[2] = report => {
                 logger.debug('[RUNNER RUN] Windows tree stop confirmation', { sessionId, pid, ...report });
               };
@@ -1648,14 +1652,10 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           }
           if (session.happySessionId) rememberVerifiedExit(session.happySessionId);
           if (session.requestedHappySessionId) rememberVerifiedExit(session.requestedHappySessionId);
-          {
-            const genMarker = persistedResumeProcesses.get(pid)?.processStartMarker
-              ?? opts?.processStartMarker;
-            if (isWindows() && genMarker) {
-              rememberVerifiedExit(windowsGenerationExitKey(pid, genMarker));
-            } else if (!isWindows()) {
-              rememberVerifiedExit(`PID-${pid}`);
-            }
+          if (isWindows() && stopGenerationMarker) {
+            rememberVerifiedExit(windowsGenerationExitKey(pid, stopGenerationMarker));
+          } else if (!isWindows()) {
+            rememberVerifiedExit(`PID-${pid}`);
           }
           pidToTrackedSession.delete(pid);
           pidToRequestedSessionId.delete(pid);

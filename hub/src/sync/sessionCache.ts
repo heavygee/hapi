@@ -1350,7 +1350,7 @@ export class SessionCache {
         if (!session) return
         this.backgroundReportedAtByOwner.delete(sessionId + '\0' + ownerKey)
         const byOwner = this.backgroundTasksByOwnerBySessionId.get(sessionId)
-        if (byOwner?.has(ownerKey)) {
+        if (byOwner) {
             byOwner.delete(ownerKey)
             if (byOwner.size === 0) this.backgroundTasksByOwnerBySessionId.delete(sessionId)
             if (this.backgroundOwnerBySessionId.get(sessionId) === ownerKey) {
@@ -1358,10 +1358,23 @@ export class SessionCache {
                 if (remaining) this.backgroundOwnerBySessionId.set(sessionId, remaining)
                 else this.backgroundOwnerBySessionId.delete(sessionId)
             }
-            this.recomputeRowWideBackgroundTasks(sessionId)
+            // Always recompute from remaining snapshots — an empty snapshot
+            // from A can leave A as last reporter while B still has tasks;
+            // exit-probe clear must not wipe B (#2658).
+            if (byOwner.size > 0) {
+                this.recomputeRowWideBackgroundTasks(sessionId)
+                return
+            }
+        }
+        if (this.backgroundOwnerBySessionId.get(sessionId) !== ownerKey) {
+            // Other owners may still hold the last-reporter slot after A's
+            // empty snapshot; only clear row-wide when this owner was the
+            // sole unattributed holder.
+            if (this.backgroundTasksByOwnerBySessionId.get(sessionId)?.size) {
+                this.recomputeRowWideBackgroundTasks(sessionId)
+            }
             return
         }
-        if (this.backgroundOwnerBySessionId.get(sessionId) !== ownerKey) return
         this.backgroundOwnerBySessionId.delete(sessionId)
         if ((session.backgroundTaskCount ?? 0) === 0 && !(session.backgroundTasks?.length)) return
         session.backgroundTasks = []
@@ -1526,6 +1539,35 @@ export class SessionCache {
         // Only the row's current identity may advance the boundary / become
         // the tracked generation. Prior-owner heartbeats are ignored here.
         if (currentKey && ownerKey !== currentKey) return
+        // Terminal bootstrap may omit hostStartMarker — without a registered
+        // currentKey, a late prior-worker report must not advance the cutoff
+        // past the terminal's open tool call (#2658).
+        if (!currentKey) {
+            const metaMachine = typeof session?.metadata?.machineId === 'string'
+                ? session.metadata.machineId
+                : undefined
+            const metaPid = typeof session?.metadata?.hostPid === 'number'
+                ? session.metadata.hostPid
+                : undefined
+            const parts = ownerKey.split(':')
+            const reportMachine = parts[0]
+            const reportPid = Number(parts[1])
+            if (!metaMachine || !metaPid
+                || reportMachine !== metaMachine
+                || !Number.isFinite(reportPid)
+                || reportPid !== metaPid) {
+                return
+            }
+            // Same machine+pid but no registered marker on the row: track the
+            // reporter for bookkeeping only — never move the transcript cutoff.
+            this.rowGenerationOwnerBySessionId.set(sessionId, ownerKey)
+            if (runnerOwned !== undefined) {
+                this.rowGenerationRunnerOwnedByOwnerKey.set(ownerKey, runnerOwned)
+            } else if (!this.rowGenerationRunnerOwnedByOwnerKey.has(ownerKey)) {
+                this.rowGenerationRunnerOwnedByOwnerKey.set(ownerKey, isRunnerOwnedSession(session))
+            }
+            return
+        }
         if (previous && previous !== ownerKey) {
             // Cutoff would hide prior-gen tool calls from derivedToolWork.
             // Latch them onto the previous owner with THAT owner's provenance
@@ -1533,7 +1575,9 @@ export class SessionCache {
             // Respect the departing generation's existing boundary so an older
             // unsettled call is not re-latched onto the middle owner (#2658).
             const priorBoundary = this.transcriptGenerationBoundarySeqBySessionId.get(sessionId)
-            if (this.store.messages.getLiveToolWork(sessionId, priorBoundary)) {
+            // Scope to the departing owner so a late third-party stamped call
+            // is not latched onto the middle generation (#2658).
+            if (this.store.messages.getLiveToolWork(sessionId, priorBoundary, previous)) {
                 const parts = previous.split(':')
                 if (parts.length >= 3) {
                     const hostPid = Number(parts[1])

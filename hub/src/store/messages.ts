@@ -604,6 +604,85 @@ function openWorkCreditsOwner(decoded: unknown, forOwnerKey: string | undefined)
     return stamped === forOwnerKey
 }
 
+/**
+ * Owner-scoped transcript tool-work scan (#2658).
+ * - `open`: unsettled call credits this owner
+ * - `settled`: positive settlement evidence (result / human turn / boundary)
+ * - `inconclusive`: lookback exhausted without open or settlement — do not
+ *   clear durable transcriptOpenWork (call may have aged out of the window)
+ */
+export type LiveToolWorkScan = 'open' | 'settled' | 'inconclusive'
+
+export function scanLiveToolWork(
+    db: Database,
+    sessionId: string,
+    afterSeq?: number,
+    forOwnerKey?: string,
+): LiveToolWorkScan {
+    const rows = prepareCached(db, `
+        SELECT id, content, seq FROM messages
+        WHERE session_id = ?
+        ORDER BY seq DESC
+        LIMIT ?
+    `).all(sessionId, TOOL_CALL_UPSERT_LOOKBACK) as Array<Pick<DbMessageRow, 'id' | 'content' | 'seq'>>
+
+    const settledAcpCallIds = new Set<string>()
+    const settledClaudeToolUseIds = new Set<string>()
+    const boundarySeq = typeof afterSeq === 'number' && Number.isFinite(afterSeq)
+        ? afterSeq
+        : undefined
+    for (const row of rows) {
+        // Prior-generation transcript is outside this worker's boundary.
+        if (boundarySeq !== undefined && row.seq <= boundarySeq) return 'settled'
+
+        const decoded = decodeMessageContent(row.content)
+        // A human turn (web prompt, native user row) starts a new round and
+        // closes every tool call older than it — stop, nothing is open.
+        if (isUserMessageRow(decoded)) return 'settled'
+
+        const claudeData = claudeOutputData(decoded)
+        if (claudeData !== null) {
+            if (isHiddenClaudeOutput(claudeData)) continue
+            if (claudeData.type === 'user') {
+                // Foreign stamped tool_result carriers must not settle or end
+                // this owner's scan (#2658).
+                if (forOwnerKey && !openWorkCreditsOwner(decoded, forOwnerKey)) continue
+                if (!collectClaudeToolResultIds(claudeData, settledClaudeToolUseIds)) return 'settled'
+                continue
+            }
+            if (claudeData.type === 'result') {
+                // Turn-end: only settle when this row credits the scoped owner
+                // (or is unstamped). A late foreign result must not hide the
+                // current owner's open call below it (#2658).
+                if (openWorkCreditsOwner(decoded, forOwnerKey)) return 'settled'
+                continue
+            }
+            if (claudeData.type === 'assistant'
+                && claudeAssistantHasOpenToolUse(claudeData, settledClaudeToolUseIds)) {
+                if (openWorkCreditsOwner(decoded, forOwnerKey)) return 'open'
+                continue
+            }
+            continue
+        }
+
+        const resultCallId = toolCallResultCallId(decoded)
+        if (resultCallId !== null) {
+            if (openWorkCreditsOwner(decoded, forOwnerKey)) {
+                settledAcpCallIds.add(resultCallId)
+            }
+            continue
+        }
+        const callId = getToolCallId(decoded)
+        if (callId !== null && !settledAcpCallIds.has(callId) && !isTerminalToolCallRow(decoded)) {
+            if (openWorkCreditsOwner(decoded, forOwnerKey)) return 'open'
+            continue
+        }
+    }
+    // Full history fit in the window → settled/empty. Truncated window with
+    // no evidence → inconclusive (do not invent settlement).
+    return rows.length < TOOL_CALL_UPSERT_LOOKBACK ? 'settled' : 'inconclusive'
+}
+
 /** Whether the session tail still holds tool work that started but never
  *  settled — the transcript-derived "the agent is demonstrably working"
  *  signal for the hub's work-scoped liveness sweep.
@@ -637,60 +716,7 @@ export function getLiveToolWork(
      */
     forOwnerKey?: string,
 ): boolean {
-    const rows = prepareCached(db, `
-        SELECT id, content, seq FROM messages
-        WHERE session_id = ?
-        ORDER BY seq DESC
-        LIMIT ?
-    `).all(sessionId, TOOL_CALL_UPSERT_LOOKBACK) as Array<Pick<DbMessageRow, 'id' | 'content' | 'seq'>>
-
-    const settledAcpCallIds = new Set<string>()
-    const settledClaudeToolUseIds = new Set<string>()
-    const boundarySeq = typeof afterSeq === 'number' && Number.isFinite(afterSeq)
-        ? afterSeq
-        : undefined
-    for (const row of rows) {
-        // Prior-generation transcript is outside this worker's boundary.
-        if (boundarySeq !== undefined && row.seq <= boundarySeq) return false
-
-        const decoded = decodeMessageContent(row.content)
-        // A human turn (web prompt, native user row) starts a new round and
-        // closes every tool call older than it — stop, nothing is open.
-        if (isUserMessageRow(decoded)) return false
-
-        const claudeData = claudeOutputData(decoded)
-        if (claudeData !== null) {
-            if (isHiddenClaudeOutput(claudeData)) continue
-            if (claudeData.type === 'user') {
-                if (!collectClaudeToolResultIds(claudeData, settledClaudeToolUseIds)) return false
-                continue
-            }
-            if (claudeData.type === 'result') {
-                // Turn-end marker: everything newer was walked already, so the
-                // calls of this finished turn are settled. Idle sessions end
-                // here, which keeps the sweep's every-tick scan to one row.
-                return false
-            }
-            if (claudeData.type === 'assistant'
-                && claudeAssistantHasOpenToolUse(claudeData, settledClaudeToolUseIds)) {
-                if (openWorkCreditsOwner(decoded, forOwnerKey)) return true
-                continue
-            }
-            continue
-        }
-
-        const resultCallId = toolCallResultCallId(decoded)
-        if (resultCallId !== null) {
-            settledAcpCallIds.add(resultCallId)
-            continue
-        }
-        const callId = getToolCallId(decoded)
-        if (callId !== null && !settledAcpCallIds.has(callId) && !isTerminalToolCallRow(decoded)) {
-            if (openWorkCreditsOwner(decoded, forOwnerKey)) return true
-            continue
-        }
-    }
-    return false
+    return scanLiveToolWork(db, sessionId, afterSeq, forOwnerKey) === 'open'
 }
 
 /** Merge an incoming tool-call snapshot into a known live row. Shared by the
