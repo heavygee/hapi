@@ -1764,6 +1764,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     /**
      * Read-only exit probe for generation-keyed live-work clear (#2658).
      * Never tree-kills. PID- path honours processStartMarker (mismatch → unknown).
+     * Codex: a dead wrapper with a live owned app-server is still_alive.
      */
     const probeSessionExit = async (
       sessionId: string,
@@ -1772,16 +1773,27 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       if (sessionId.startsWith('PID-')) {
         const pid = parseInt(sessionId.slice(4), 10);
         if (!Number.isFinite(pid) || pid <= 0) return 'unknown';
-        if (!isProcessAlive(pid)) {
-          rememberVerifiedExit(sessionId);
-          return 'already_gone';
-        }
         const expected = opts?.processStartMarker;
-        if (expected) {
-          const current = getProcessStartMarker(pid);
-          if (!current || current !== expected) return 'unknown';
+        if (isProcessAlive(pid)) {
+          if (expected) {
+            const current = getProcessStartMarker(pid);
+            if (!current || current !== expected) return 'unknown';
+          }
+          return 'still_alive';
         }
-        return 'still_alive';
+        // Wrapper PID is gone — still refuse already_gone while a Codex
+        // owned app-server for that wrapper generation remains live.
+        try {
+          for (const runtime of await readRuntimes()) {
+            if (runtime.pid !== pid) continue;
+            if (expected && runtime.marker && runtime.marker !== expected) continue;
+            if (runtimeMayBeAlive(runtime)) return 'still_alive';
+          }
+        } catch {
+          return 'unknown';
+        }
+        rememberVerifiedExit(sessionId);
+        return 'already_gone';
       }
 
       for (const [pid, session] of pidToTrackedSession) {
