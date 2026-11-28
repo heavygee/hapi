@@ -47,11 +47,13 @@ When an agent starts process-shaped work that will keep running after the agent 
 Agent contract (idle agents cannot heartbeat — bare set + nohup freezes the bar):
 
 0. **Default is not to attach.** Only for a process that must outlive this agent *and* that the operator would reopen the chat to ask about. Never for tests, builds, installs, typechecks, or anything that finishes in this turn.
-1. **For that process-shaped work:** Shell `hapi job run <session-id> <key> --label … --progress unknown|fraction|until … -- <cmd>` (auto-heartbeat + exit status; `--progress` required). Use `"$HAPI_SESSION_ID"` only when it matches the operator chat row (`/sessions/<id>` in the web URL). Pass `--wake-on-terminal` only when the operator asked to be woken.
-2. MCP `session_job` **refuses `action=set`**. Use it only for `update` / `clear` / `list` on a job the supervisor already created.
-3. Manual CLI `set` only with a self-heartbeating wrapper (`update` ≥~10m); never MCP set + nohup.
-4. Prefer honest `--remaining`+`--total` or `--done`/`--total` for a determinate fill; omit counts if unknown — list shows a subtle indeterminate striped bar (no %). Never invent a percent.
-5. Elapsed wall clock is always shown from `startedAt` (not an ETA).
+1. **For that process-shaped work:** Shell `hapi job run <session-id> <key> --label … --progress unknown|fraction|until … -- <cmd>` (auto-heartbeat + exit status; `--progress` required). Prefer `--detach --detach-log <path>` in agent tool shells so parent exit 0 means the hub meter registered (do not trust `nohup job run &` shell exit). Use `"$HAPI_SESSION_ID"` only when it matches the operator chat row (`/sessions/<id>` in the web URL). Pass `--wake-on-terminal` only when the operator asked to be woken.
+2. **Already running?** `hapi job attach <session-id> <key> --pid <pid> --label … --progress …` heartbeats until the PID exits.
+3. MCP `session_job` **refuses `action=set`**. Use it only for `update` / `clear` / `list` on a job the supervisor already created.
+4. Manual CLI `set` only with a self-heartbeating wrapper (`update` ≥~10m); never MCP set + nohup. `job set` warns that idle agents cannot heartbeat (amber ~15m).
+5. Prefer honest `--remaining`+`--total` or `--done`/`--total` for a determinate fill; omit counts if unknown — list shows a subtle indeterminate striped bar (no %). Never invent a percent.
+6. Elapsed wall clock is always shown from `startedAt` (not an ETA).
+7. If you see `unexpected flag: --progress`, upgrade the CLI (progress modes need a post-#1424 binary).
 
 Full guide: [docs/guide/session-jobs.md](docs/guide/session-jobs.md). CLI: `hapi job --help`.
 
