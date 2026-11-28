@@ -10,8 +10,9 @@ import { extractTodoWriteTodosFromMessageContent, TodosSchema } from './todos'
 import { InvalidExternalRefsError } from './externalRefErrors'
 import {
     generationEntryHasWork,
+    isRunnerOwnedSession,
+    liveWorkOwnerKey,
     projectLegacyLiveWork,
-    UNKNOWN_GENERATION_KEY,
 } from './liveWorkByGeneration'
 import { resolveSessionIdleTimeoutMs, shouldClearKeepaliveIdle, shouldMarkKeepaliveIdle } from './sessionIdle'
 
@@ -637,6 +638,8 @@ export class SessionCache {
         serviceTier?: string | null
         collaborationMode?: CodexCollaborationMode
         copilotAgentMode?: CopilotAgentMode
+        hostPid?: number
+        processStartMarker?: string
     }): void {
         const t = clampAliveTime(payload.time)
         if (!t) return
@@ -673,11 +676,18 @@ export class SessionCache {
         if (requestedThinking || pendingThinkingUntil <= hubNow) {
             this.pendingThinkingUntilBySessionId.delete(session.id)
         }
-        // Durable generation latch survives heartbeat expiry (#2658).
+        // Durable owner latch survives heartbeat expiry (#2658). Bound to the
+        // reporting worker — never the current row's marker alone.
         if (session.thinking) {
-            this.setUnresolvedTurn(session.id, true)
+            this.setUnresolvedTurn(session.id, true, {
+                hostPid: payload.hostPid,
+                processStartMarker: payload.processStartMarker,
+            })
         } else if (!preserveQueuedThinking) {
-            this.setUnresolvedTurn(session.id, false)
+            this.setUnresolvedTurn(session.id, false, {
+                hostPid: payload.hostPid,
+                processStartMarker: payload.processStartMarker,
+            })
         }
         // The agent says it's idle: whatever it does next is a new turn.
         if (!requestedThinking) this.forgetInterruptedTurn(session.id)
@@ -867,7 +877,14 @@ export class SessionCache {
 
         session.backgroundTasks = tasks
         session.backgroundTaskCount = tasks.length
-        this.upsertCurrentGenerationLiveWork(sessionId, { backgroundTasks: tasks })
+        // Background snapshots arrive on the current session socket — attribute
+        // to the current runner owner only when machine/pid/marker are known.
+        this.upsertReportedGenerationLiveWork(sessionId, { backgroundTasks: tasks }, {
+            hostPid: typeof session.metadata?.hostPid === 'number' ? session.metadata.hostPid : undefined,
+            processStartMarker: typeof session.metadata?.hostStartMarker === 'string'
+                ? session.metadata.hostStartMarker
+                : undefined,
+        })
         this.recordAgentProgress(sessionId)
         this.publisher.emit({
             type: 'session-updated',
@@ -877,24 +894,29 @@ export class SessionCache {
     }
 
     /**
-     * Persist / clear the current worker's unresolved-turn bit in
-     * `liveWorkByGeneration` (#2658). Only mutates the reporting generation.
+     * Persist / clear the reporting worker's unresolved-turn bit in
+     * `liveWorkByGeneration` (#2658). Only mutates that owner — never the
+     * current row's marker alone. No-op for terminal / missing identity.
      */
-    setUnresolvedTurn(sessionId: string, unresolved: boolean): void {
-        this.upsertCurrentGenerationLiveWork(sessionId, { unresolvedTurn: unresolved })
+    setUnresolvedTurn(
+        sessionId: string,
+        unresolved: boolean,
+        reported?: { hostPid?: number; processStartMarker?: string },
+    ): void {
+        this.upsertReportedGenerationLiveWork(sessionId, { unresolvedTurn: unresolved }, reported)
     }
 
     /**
-     * Drop one generation's durable live-work entry after verified exit (#2658).
+     * Drop one owner's durable live-work entry after verified exit (#2658).
      */
-    clearGenerationLiveWork(sessionId: string, hostStartMarker: string): void {
+    clearGenerationLiveWork(sessionId: string, ownerKey: string): void {
         const session = this.sessions.get(sessionId)
-        if (!session?.metadata || hostStartMarker.length === 0) return
+        if (!session?.metadata || ownerKey.length === 0) return
         const map = {
             ...projectLegacyLiveWork(session.metadata),
         }
-        if (!(hostStartMarker in map)) return
-        delete map[hostStartMarker]
+        if (!(ownerKey in map)) return
+        delete map[ownerKey]
         // Hub-owned fields: `undefined` carries prior forward; `null` clears.
         const metadata = {
             ...session.metadata,
@@ -916,24 +938,38 @@ export class SessionCache {
         }
     }
 
-    private upsertCurrentGenerationLiveWork(
+    /**
+     * Upsert durable live-work for the reporting worker only (#2658).
+     * Runner-owned + machineId + hostPid + processStartMarker required —
+     * otherwise leave transient thinking/backgroundTasks alone (terminal /
+     * older CLIs stay on heartbeat expiry).
+     */
+    private upsertReportedGenerationLiveWork(
         sessionId: string,
         patch: { unresolvedTurn?: boolean; backgroundTasks?: BackgroundTask[] },
+        reported?: { hostPid?: number; processStartMarker?: string },
     ): void {
         const session = this.sessions.get(sessionId)
         if (!session?.metadata) return
-        const marker = typeof session.metadata.hostStartMarker === 'string'
-            && session.metadata.hostStartMarker.length > 0
-            ? session.metadata.hostStartMarker
-            : UNKNOWN_GENERATION_KEY
-        const map = projectLegacyLiveWork(session.metadata)
-        const existing = map[marker]
+        if (!isRunnerOwnedSession(session)) return
+
         const machineId = typeof session.metadata.machineId === 'string'
             ? session.metadata.machineId
-            : (existing?.machineId ?? '')
-        const hostPid = typeof session.metadata.hostPid === 'number' && session.metadata.hostPid > 0
-            ? session.metadata.hostPid
-            : existing?.hostPid
+            : ''
+        const hostPid = typeof reported?.hostPid === 'number' && reported.hostPid > 0
+            ? reported.hostPid
+            : undefined
+        const marker = typeof reported?.processStartMarker === 'string'
+            && reported.processStartMarker.length > 0
+            ? reported.processStartMarker
+            : undefined
+        // Without a full owner identity, refuse durable write/clear so a late
+        // unmarked heartbeat cannot steal or erase another generation.
+        if (machineId.length === 0 || typeof hostPid !== 'number' || !marker) return
+
+        const ownerKey = liveWorkOwnerKey({ machineId, hostPid, hostStartMarker: marker })
+        const map = projectLegacyLiveWork(session.metadata)
+        const existing = map[ownerKey]
         const nextTasks = patch.backgroundTasks !== undefined
             ? patch.backgroundTasks
             : existing?.backgroundTasks
@@ -942,15 +978,16 @@ export class SessionCache {
             : existing?.unresolvedTurn === true
         const entry = {
             machineId,
-            ...(typeof hostPid === 'number' ? { hostPid } : {}),
+            hostPid,
+            hostStartMarker: marker,
             since: existing?.since ?? Date.now(),
             ...(nextUnresolved ? { unresolvedTurn: true as const } : {}),
             ...(nextTasks && nextTasks.length > 0 ? { backgroundTasks: nextTasks } : {}),
         }
         if (!generationEntryHasWork(entry)) {
-            delete map[marker]
+            delete map[ownerKey]
         } else {
-            map[marker] = entry
+            map[ownerKey] = entry
         }
         // Hub-owned fields: `undefined` carries prior forward; `null` clears.
         const metadata = {

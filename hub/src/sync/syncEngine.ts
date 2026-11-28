@@ -93,6 +93,7 @@ import { ArchiveCleanupError } from './archiveCleanupError'
 import {
     generationEntryProbeClearable,
     isRunnerOwnedSession,
+    resolveEntryProbeMarker,
     resolveLiveWorkByGeneration,
 } from './liveWorkByGeneration'
 import { blocksHardArchive, hasDurableLiveWork } from './sessionIdle'
@@ -3867,16 +3868,17 @@ export class SyncEngine {
                     || caps.includes(MACHINE_CAPABILITIES.ProbeSessionExit)
                 if (probeSupported) {
                     const map = resolveLiveWorkByGeneration(liveBeforeStop)
-                    for (const [marker, entry] of Object.entries(map)) {
-                        if (!generationEntryProbeClearable(liveBeforeStop, marker, entry)) continue
+                    for (const [ownerKey, entry] of Object.entries(map)) {
+                        if (!generationEntryProbeClearable(liveBeforeStop, ownerKey, entry)) continue
                         const timeoutMs = Math.ceil(deadline - performance.now())
                         if (timeoutMs <= 0) throw new ArchiveCleanupError('timeout')
+                        const probeMarker = resolveEntryProbeMarker(ownerKey, entry)
                         let status: 'stopped' | 'already_gone' | 'still_alive' | 'unknown' = 'unknown'
                         try {
                             status = await this.rpcGateway.probeRunnerSessionExit(
                                 entry.machineId,
                                 `PID-${entry.hostPid}`,
-                                { timeoutMs, processStartMarker: marker },
+                                { timeoutMs, processStartMarker: probeMarker },
                             )
                         } catch (error) {
                             if (error instanceof RunnerStopRpcError && error.timedOut) {
@@ -3885,7 +3887,7 @@ export class SyncEngine {
                             status = 'unknown'
                         }
                         if (status === 'already_gone' || status === 'stopped') {
-                            this.sessionCache.clearGenerationLiveWork(sessionId, marker)
+                            this.sessionCache.clearGenerationLiveWork(sessionId, ownerKey)
                         }
                     }
                 }

@@ -269,6 +269,10 @@ export interface ClientToServerEvents {
         serviceTier?: string | null
         collaborationMode?: CodexCollaborationMode
         copilotAgentMode?: CopilotAgentMode
+        // Reporting worker identity for durable live-work (#2658). Absent on
+        // terminal / older CLIs — hub skips durable latch without these.
+        hostPid?: number
+        processStartMarker?: string
     }) => void
   /** CLI agent finished session/load (or equivalent) and can accept prompts. */
     'session-ready': (data: { sid: string; time: number }) => void

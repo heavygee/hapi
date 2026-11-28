@@ -1,14 +1,21 @@
 /**
  * Generation-keyed durable live-work (#2658).
  *
- * One record per worker generation (`hostStartMarker`). Any entry with work
- * blocks destroy-state callers. Clear of a prior generation on runner-owned
- * sessions requires PID+marker ProbeSessionExit `already_gone` first.
+ * One record per worker owner. Map keys are
+ * `liveWorkOwnerKey(machineId, hostPid, hostStartMarker)` — hostStartMarker is
+ * the generation identity used everywhere else; machineId + hostPid complete the
+ * owner so same-second start markers cannot merge distinct PIDs.
+ *
+ * Any entry with work blocks destroy-state callers. Clear of a prior owner on
+ * runner-owned sessions requires PID+marker ProbeSessionExit `already_gone`.
+ *
+ * Durable writes are runner-owned only. Terminal / imported rows keep transient
+ * thinking / backgroundTask lifecycle — they never enter the keyed probe path.
  *
  * Acceptance: the archive / live-work coverage tables (prior-gen still_alive
  * refuse; PID+marker already_gone clear; runner-owned hostPid scope; legacy
- * read-path project) are criteria, not decoration — #2021 must not regress
- * them when it rebases onto this keyed model.
+ * read-path project; report-bound write attribution) are criteria, not
+ * decoration — #2021 must not regress them when it rebases onto this model.
  */
 
 import type { BackgroundTask, Session } from '@hapi/protocol/types'
@@ -16,6 +23,8 @@ import type { BackgroundTask, Session } from '@hapi/protocol/types'
 export type LiveWorkGenerationEntry = {
     machineId: string
     hostPid?: number
+    /** Process start marker for ProbeSessionExit (may differ from map key). */
+    hostStartMarker?: string
     since: number
     unresolvedTurn?: boolean
     backgroundTasks?: BackgroundTask[]
@@ -33,6 +42,15 @@ export function isRunnerOwnedSession(session: Session | { metadata?: Session['me
         || meta?.startedFromRunner === true
 }
 
+/** Owner map key: generation marker plus the PID/machine the probe already uses. */
+export function liveWorkOwnerKey(opts: {
+    machineId: string
+    hostPid: number
+    hostStartMarker: string
+}): string {
+    return `${opts.machineId}:${opts.hostPid}:${opts.hostStartMarker}`
+}
+
 export function generationEntryHasWork(entry: LiveWorkGenerationEntry | null | undefined): boolean {
     if (!entry) return false
     if (entry.unresolvedTurn === true) return true
@@ -45,6 +63,14 @@ export function liveWorkByGenerationHasWork(map: LiveWorkByGeneration | null | u
         if (generationEntryHasWork(entry)) return true
     }
     return false
+}
+
+export function resolveEntryProbeMarker(ownerKey: string, entry: LiveWorkGenerationEntry): string {
+    if (typeof entry.hostStartMarker === 'string' && entry.hostStartMarker.length > 0) {
+        return entry.hostStartMarker
+    }
+    // Legacy marker-only keys from early seeds / read-path projection.
+    return ownerKey
 }
 
 /**
@@ -84,11 +110,17 @@ export function projectLegacyLiveWork(
     if (!hasTurn && tasks.length === 0) return out
 
     const machineId = typeof metadata.machineId === 'string' ? metadata.machineId : ''
-    out[marker] = {
+    const hostPid = typeof metadata.hostPid === 'number' && metadata.hostPid > 0
+        ? metadata.hostPid
+        : undefined
+    const ownerKey = (machineId.length > 0 && typeof hostPid === 'number' && marker !== UNKNOWN_GENERATION_KEY)
+        ? liveWorkOwnerKey({ machineId, hostPid, hostStartMarker: marker })
+        : marker
+
+    out[ownerKey] = {
         machineId,
-        ...(typeof metadata.hostPid === 'number' && metadata.hostPid > 0
-            ? { hostPid: metadata.hostPid }
-            : {}),
+        ...(typeof hostPid === 'number' ? { hostPid } : {}),
+        ...(marker !== UNKNOWN_GENERATION_KEY ? { hostStartMarker: marker } : {}),
         since: (legacyTurn && typeof legacyTurn === 'object' && typeof legacyTurn.since === 'number')
             ? legacyTurn.since
             : Date.now(),
@@ -105,10 +137,11 @@ export function resolveLiveWorkByGeneration(session: Session): LiveWorkByGenerat
 /** Entry can be cleared via existing PID+marker ProbeSessionExit (runner-owned only). */
 export function generationEntryProbeClearable(
     session: Session,
-    marker: string,
+    ownerKey: string,
     entry: LiveWorkGenerationEntry,
 ): boolean {
     if (!isRunnerOwnedSession(session)) return false
+    const marker = resolveEntryProbeMarker(ownerKey, entry)
     if (marker === UNKNOWN_GENERATION_KEY || marker.length === 0) return false
     if (typeof entry.machineId !== 'string' || entry.machineId.length === 0) return false
     if (typeof entry.hostPid !== 'number' || entry.hostPid <= 0) return false

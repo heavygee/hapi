@@ -1371,7 +1371,24 @@ if (isReconnect) {
             copilotAgentMode?: import('@hapi/protocol').CopilotAgentMode
         }
     ): void {
-        this.latestKeepAlive = { thinking, mode, ...(runtime ?? {}) }
+        // Bind durable live-work writes to this process generation (#2658).
+        // Prefer bootstrap metadata; fall back to this PID so a runner child
+        // that never got hostStartMarker still cannot be attributed as "current
+        // row" after replacement.
+        const meta = this.metadata
+        const processStartMarker = typeof meta?.hostStartMarker === 'string' && meta.hostStartMarker.length > 0
+            ? meta.hostStartMarker
+            : undefined
+        const hostPid = typeof meta?.hostPid === 'number' && meta.hostPid > 0
+            ? meta.hostPid
+            : (typeof process.pid === 'number' && process.pid > 0 ? process.pid : undefined)
+        this.latestKeepAlive = {
+            thinking,
+            mode,
+            ...(runtime ?? {}),
+            ...(typeof hostPid === 'number' ? { hostPid } : {}),
+            ...(processStartMarker ? { processStartMarker } : {}),
+        }
         if (this.state !== 'active' || !this.socket.connected) {
             return
         }

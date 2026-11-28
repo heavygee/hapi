@@ -5,6 +5,7 @@ import {
     generationEntryProbeClearable,
     isRunnerOwnedSession,
     liveWorkByGenerationHasWork,
+    liveWorkOwnerKey,
     projectLegacyLiveWork,
     UNKNOWN_GENERATION_KEY,
 } from './liveWorkByGeneration'
@@ -31,7 +32,7 @@ function session(overrides: Partial<Session> = {}): Session {
 }
 
 describe('liveWorkByGeneration helpers', () => {
-    it('projects legacy single-slot latches into the keyed map', () => {
+    it('projects legacy single-slot latches into an owner key when pid is known', () => {
         const map = projectLegacyLiveWork({
             path: '/tmp/p',
             host: 'h',
@@ -44,11 +45,13 @@ describe('liveWorkByGeneration helpers', () => {
                 hostStartMarker: 'worker-A',
             },
         } as Session['metadata'])
-        expect(Object.keys(map)).toEqual(['worker-A'])
-        expect(map['worker-A']?.unresolvedTurn).toBe(true)
-        expect(map['worker-A']?.backgroundTasks).toHaveLength(1)
-        expect(map['worker-A']?.hostPid).toBe(42)
-        expect(map['worker-A']?.machineId).toBe('m1')
+        const key = liveWorkOwnerKey({ machineId: 'm1', hostPid: 42, hostStartMarker: 'worker-A' })
+        expect(Object.keys(map)).toEqual([key])
+        expect(map[key]?.unresolvedTurn).toBe(true)
+        expect(map[key]?.backgroundTasks).toHaveLength(1)
+        expect(map[key]?.hostPid).toBe(42)
+        expect(map[key]?.machineId).toBe('m1')
+        expect(map[key]?.hostStartMarker).toBe('worker-A')
     })
 
     it('uses the reserved unknown key when legacy latches have no marker', () => {
@@ -62,19 +65,22 @@ describe('liveWorkByGeneration helpers', () => {
     })
 
     it('prefers the keyed map when present (no legacy merge)', () => {
+        const key = liveWorkOwnerKey({ machineId: 'm1', hostPid: 7, hostStartMarker: 'worker-B' })
         const map = projectLegacyLiveWork({
             path: '/tmp/p',
             host: 'h',
             liveWorkByGeneration: {
-                'worker-B': {
+                [key]: {
                     machineId: 'm1',
+                    hostPid: 7,
+                    hostStartMarker: 'worker-B',
                     since: NOW,
                     unresolvedTurn: true,
                 },
             },
             unresolvedTurn: { since: NOW, hostStartMarker: 'worker-A' },
         } as Session['metadata'])
-        expect(Object.keys(map)).toEqual(['worker-B'])
+        expect(Object.keys(map)).toEqual([key])
     })
 
     it('only marks runner-owned rows as probe-clearable when hostPid is present', () => {
@@ -99,12 +105,14 @@ describe('liveWorkByGeneration helpers', () => {
         const entry = {
             machineId: 'm1',
             hostPid: 99,
+            hostStartMarker: 'worker-A',
             since: NOW,
             unresolvedTurn: true,
         }
-        expect(generationEntryProbeClearable(runner, 'worker-A', entry)).toBe(true)
-        expect(generationEntryProbeClearable(terminal, 'worker-A', entry)).toBe(false)
-        expect(generationEntryProbeClearable(runner, 'worker-A', {
+        const key = liveWorkOwnerKey({ machineId: 'm1', hostPid: 99, hostStartMarker: 'worker-A' })
+        expect(generationEntryProbeClearable(runner, key, entry)).toBe(true)
+        expect(generationEntryProbeClearable(terminal, key, entry)).toBe(false)
+        expect(generationEntryProbeClearable(runner, key, {
             machineId: 'm1',
             since: NOW,
             unresolvedTurn: true,

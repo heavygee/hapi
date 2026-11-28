@@ -2095,7 +2095,15 @@ describe('ApiSessionClient runtime heartbeat', () => {
 
         socket.triggerConnect()
         expect(socket.emitted.filter((entry) => entry.event === 'session-alive').map((entry) => entry.args[0])).toEqual([
-            { sid: client.sessionId, time: expect.any(Number), thinking: true, mode: 'remote', permissionMode: 'bypassPermissions' }
+            {
+                sid: client.sessionId,
+                time: expect.any(Number),
+                thinking: true,
+                mode: 'remote',
+                permissionMode: 'bypassPermissions',
+                // Reporting worker identity for durable live-work (#2658).
+                hostPid: expect.any(Number),
+            }
         ])
         client.close()
     })

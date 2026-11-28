@@ -317,13 +317,15 @@ export const MetadataSchema = z.object({
         since: z.number(),
         reason: z.string().optional(),
     }).nullable().optional(),
-    // Generation-keyed durable live work (#2658). Key = hostStartMarker (or
-    // reserved unknown). Any entry with work blocks destroy-state callers;
-    // clear of a prior generation on runner-owned rows requires PID+marker
-    // ProbeSessionExit already_gone. Hub-owned.
+    // Generation-keyed durable live work (#2658). Key =
+    // machineId:hostPid:hostStartMarker (or reserved unknown). Any entry with
+    // work blocks destroy-state callers; clear of a prior owner on
+    // runner-owned rows requires PID+marker ProbeSessionExit already_gone.
+    // Hub-owned. Writers bind to the reporting worker, not the current row.
     liveWorkByGeneration: z.record(z.string(), z.object({
         machineId: z.string(),
         hostPid: z.number().int().positive().optional(),
+        hostStartMarker: z.string().optional(),
         since: z.number(),
         unresolvedTurn: z.boolean().optional(),
         backgroundTasks: z.array(z.object({

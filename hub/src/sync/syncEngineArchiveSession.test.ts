@@ -632,6 +632,7 @@ describe('SyncEngine.archiveSession runner reaping (#1910)', () => {
     it('refuses Archive while a prior generation still has durable live work (#2658)', async () => {
         const sessionId = insertActiveSession('sess-gen-live', 'machine-x', 7001)
         const before = cache().getSession(sessionId)!
+        const priorKey = 'machine-x:7001:worker-A'
         expect(store.sessions.updateSessionMetadata(
             sessionId,
             {
@@ -639,9 +640,10 @@ describe('SyncEngine.archiveSession runner reaping (#1910)', () => {
                 hostStartMarker: 'worker-B',
                 hostPid: 7002,
                 liveWorkByGeneration: {
-                    'worker-A': {
+                    [priorKey]: {
                         machineId: 'machine-x',
                         hostPid: 7001,
+                        hostStartMarker: 'worker-A',
                         since: Date.now() - 1000,
                         unresolvedTurn: true,
                     },
@@ -684,6 +686,7 @@ describe('SyncEngine.archiveSession runner reaping (#1910)', () => {
     it('clears a prior generation after PID+marker already_gone then archives (#2658)', async () => {
         const sessionId = insertActiveSession('sess-gen-clear', 'machine-x', 7001)
         const before = cache().getSession(sessionId)!
+        const priorKey = 'machine-x:7001:worker-A'
         expect(store.sessions.updateSessionMetadata(
             sessionId,
             {
@@ -691,9 +694,10 @@ describe('SyncEngine.archiveSession runner reaping (#1910)', () => {
                 hostStartMarker: 'worker-B',
                 hostPid: 7002,
                 liveWorkByGeneration: {
-                    'worker-A': {
+                    [priorKey]: {
                         machineId: 'machine-x',
                         hostPid: 7001,
+                        hostStartMarker: 'worker-A',
                         since: Date.now() - 1000,
                         unresolvedTurn: true,
                     },
@@ -716,6 +720,6 @@ describe('SyncEngine.archiveSession runner reaping (#1910)', () => {
 
         await engine.archiveSession(sessionId)
         expect(cache().getSession(sessionId)?.metadata?.lifecycleState).toBe('archived')
-        expect(cache().getSession(sessionId)?.metadata?.liveWorkByGeneration?.['worker-A']).toBeUndefined()
+        expect(cache().getSession(sessionId)?.metadata?.liveWorkByGeneration?.[priorKey]).toBeUndefined()
     })
 })
