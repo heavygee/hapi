@@ -64,6 +64,26 @@ describe('liveWorkByGeneration helpers', () => {
         expect(liveWorkByGenerationHasWork(map)).toBe(true)
     })
 
+    it('projects legacy turn and background as separate owners when markers differ', () => {
+        const map = projectLegacyLiveWork({
+            path: '/tmp/p',
+            host: 'h',
+            machineId: 'm1',
+            hostPid: 42,
+            hostStartMarker: 'worker-A',
+            unresolvedTurn: { since: NOW - 1000, hostStartMarker: 'worker-A' },
+            backgroundWork: {
+                tasks: [{ id: 'bg-1', type: 'local_bash', description: 'sleep' }],
+                hostStartMarker: 'worker-B',
+            },
+        } as Session['metadata'])
+        const turnKey = liveWorkOwnerKey({ machineId: 'm1', hostPid: 42, hostStartMarker: 'worker-A' })
+        expect(map[turnKey]?.unresolvedTurn).toBe(true)
+        expect(map[turnKey]?.backgroundTasks).toBeUndefined()
+        expect(map['worker-B']?.backgroundTasks).toHaveLength(1)
+        expect(map['worker-B']?.hostPid).toBeUndefined()
+    })
+
     it('does not pair a prior legacy marker with the current row pid after replacement', () => {
         const map = projectLegacyLiveWork({
             path: '/tmp/p',

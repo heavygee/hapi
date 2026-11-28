@@ -3865,35 +3865,42 @@ export class SyncEngine {
         const liveBeforeStop = this.sessionCache.getSession(sessionId)
         if (liveBeforeStop) {
             if (isRunnerOwnedSession(liveBeforeStop) && hasDurableLiveWork(liveBeforeStop)) {
-                const caps = liveBeforeStop.metadata?.machineId
-                    ? this.getMachine(liveBeforeStop.metadata.machineId)?.metadata?.capabilities
-                    : undefined
-                const probeSupported = !caps
-                    || caps.includes(MACHINE_CAPABILITIES.ProbeSessionExit)
-                if (probeSupported) {
-                    const map = resolveLiveWorkByGeneration(liveBeforeStop)
-                    for (const [ownerKey, entry] of Object.entries(map)) {
-                        if (!generationEntryProbeClearable(liveBeforeStop, ownerKey, entry)) continue
-                        const timeoutMs = Math.ceil(deadline - performance.now())
-                        if (timeoutMs <= 0) throw new ArchiveCleanupError('timeout')
-                        const probeMarker = resolveEntryProbeMarker(ownerKey, entry)
-                        let status: 'stopped' | 'already_gone' | 'still_alive' | 'unknown' = 'unknown'
-                        try {
-                            status = await this.rpcGateway.probeRunnerSessionExit(
-                                entry.machineId,
-                                `PID-${entry.hostPid}`,
-                                { timeoutMs, processStartMarker: probeMarker },
-                            )
-                        } catch (error) {
-                            if (error instanceof RunnerStopRpcError && error.timedOut) {
-                                throw new ArchiveCleanupError('timeout', error)
-                            }
-                            status = 'unknown'
+                const map = resolveLiveWorkByGeneration(liveBeforeStop)
+                for (const [ownerKey, entry] of Object.entries(map)) {
+                    if (!generationEntryProbeClearable(liveBeforeStop, ownerKey, entry)) continue
+                    // Probe capability on the recorded owner's machine, not the
+                    // current row's machine (cross-machine replacement).
+                    const ownerCaps = entry.machineId
+                        ? this.getMachine(entry.machineId)?.metadata?.capabilities
+                        : undefined
+                    const probeSupported = !ownerCaps
+                        || ownerCaps.includes(MACHINE_CAPABILITIES.ProbeSessionExit)
+                    if (!probeSupported) continue
+                    const timeoutMs = Math.ceil(deadline - performance.now())
+                    if (timeoutMs <= 0) throw new ArchiveCleanupError('timeout')
+                    const probeMarker = resolveEntryProbeMarker(ownerKey, entry)
+                    let status: 'stopped' | 'already_gone' | 'still_alive' | 'unknown' = 'unknown'
+                    try {
+                        status = await this.rpcGateway.probeRunnerSessionExit(
+                            entry.machineId,
+                            `PID-${entry.hostPid}`,
+                            { timeoutMs, processStartMarker: probeMarker },
+                        )
+                    } catch (error) {
+                        if (error instanceof RunnerStopRpcError && error.timedOut) {
+                            throw new ArchiveCleanupError('timeout', error)
                         }
-                        if (status === 'already_gone' || status === 'stopped') {
-                            this.sessionCache.clearGenerationLiveWork(sessionId, ownerKey)
-                        }
+                        status = 'unknown'
                     }
+                    if (status === 'already_gone' || status === 'stopped') {
+                        this.sessionCache.clearGenerationLiveWork(sessionId, ownerKey)
+                    }
+                }
+                // Verified owner exit: drop stale permission requests so they
+                // cannot strand Archive after durable work is cleared (#2658).
+                const afterClear = this.sessionCache.getSession(sessionId) ?? liveBeforeStop
+                if (!hasDurableLiveWork(afterClear)) {
+                    this.sessionCache.clearPendingAgentRequests(sessionId)
                 }
             }
             const afterProbe = this.sessionCache.getSession(sessionId) ?? liveBeforeStop

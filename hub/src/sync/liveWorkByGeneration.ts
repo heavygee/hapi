@@ -73,45 +73,11 @@ export function resolveEntryProbeMarker(ownerKey: string, entry: LiveWorkGenerat
     return ownerKey
 }
 
-/**
- * Project legacy single-slot `unresolvedTurn` / `backgroundWork` into the keyed
- * map when the keyed field is absent (read-path only; no backfill job).
- */
-export function projectLegacyLiveWork(
-    metadata: Session['metadata'] | null | undefined,
-): LiveWorkByGeneration {
-    if (!metadata) return {}
-    const keyed = metadata.liveWorkByGeneration
-    if (keyed && typeof keyed === 'object' && !Array.isArray(keyed)) {
-        return { ...keyed }
-    }
-
-    const out: LiveWorkByGeneration = {}
-    const legacyTurn = metadata.unresolvedTurn
-    const legacyBg = metadata.backgroundWork
-    const turnMarker = legacyTurn && typeof legacyTurn === 'object'
-        ? legacyTurn.hostStartMarker
-        : undefined
-    const bgMarker = legacyBg && typeof legacyBg === 'object'
-        ? legacyBg.hostStartMarker
-        : undefined
-    const marker = (typeof turnMarker === 'string' && turnMarker.length > 0)
-        ? turnMarker
-        : (typeof bgMarker === 'string' && bgMarker.length > 0)
-            ? bgMarker
-            : (typeof metadata.hostStartMarker === 'string' && metadata.hostStartMarker.length > 0)
-                ? metadata.hostStartMarker
-                : UNKNOWN_GENERATION_KEY
-
-    const hasTurn = Boolean(legacyTurn && typeof legacyTurn === 'object')
-    const tasks = legacyBg && typeof legacyBg === 'object' && Array.isArray(legacyBg.tasks)
-        ? legacyBg.tasks
-        : []
-    if (!hasTurn && tasks.length === 0) return out
-
-    // Only attach current-row machine/pid when they still identify the latch's
-    // generation. Otherwise keep the latch blocking without a probe-clearable
-    // owner (do not pair A's marker with B's pid after replacement).
+function projectOneLegacyLatch(
+    metadata: NonNullable<Session['metadata']>,
+    marker: string,
+    opts: { unresolvedTurn?: boolean; backgroundTasks?: BackgroundTask[]; since: number },
+): { key: string; entry: LiveWorkGenerationEntry } {
     const currentMarker = typeof metadata.hostStartMarker === 'string' && metadata.hostStartMarker.length > 0
         ? metadata.hostStartMarker
         : undefined
@@ -127,17 +93,89 @@ export function projectLegacyLiveWork(
     const ownerKey = (machineId.length > 0 && typeof hostPid === 'number')
         ? liveWorkOwnerKey({ machineId, hostPid, hostStartMarker: marker })
         : marker
-
-    out[ownerKey] = {
-        machineId,
-        ...(typeof hostPid === 'number' ? { hostPid } : {}),
-        ...(marker !== UNKNOWN_GENERATION_KEY ? { hostStartMarker: marker } : {}),
-        since: (legacyTurn && typeof legacyTurn === 'object' && typeof legacyTurn.since === 'number')
-            ? legacyTurn.since
-            : Date.now(),
-        ...(hasTurn ? { unresolvedTurn: true } : {}),
-        ...(tasks.length > 0 ? { backgroundTasks: tasks as BackgroundTask[] } : {}),
+    return {
+        key: ownerKey,
+        entry: {
+            machineId,
+            ...(typeof hostPid === 'number' ? { hostPid } : {}),
+            ...(marker !== UNKNOWN_GENERATION_KEY ? { hostStartMarker: marker } : {}),
+            since: opts.since,
+            ...(opts.unresolvedTurn ? { unresolvedTurn: true as const } : {}),
+            ...(opts.backgroundTasks && opts.backgroundTasks.length > 0
+                ? { backgroundTasks: opts.backgroundTasks }
+                : {}),
+        },
     }
+}
+
+/**
+ * Project legacy single-slot `unresolvedTurn` / `backgroundWork` into the keyed
+ * map when the keyed field is absent (read-path only; no backfill job).
+ * Turn and background keep separate owners when their markers differ.
+ */
+export function projectLegacyLiveWork(
+    metadata: Session['metadata'] | null | undefined,
+): LiveWorkByGeneration {
+    if (!metadata) return {}
+    const keyed = metadata.liveWorkByGeneration
+    if (keyed && typeof keyed === 'object' && !Array.isArray(keyed)) {
+        return { ...keyed }
+    }
+
+    const out: LiveWorkByGeneration = {}
+    const legacyTurn = metadata.unresolvedTurn
+    const legacyBg = metadata.backgroundWork
+    const turnMarkerRaw = legacyTurn && typeof legacyTurn === 'object'
+        ? legacyTurn.hostStartMarker
+        : undefined
+    const bgMarkerRaw = legacyBg && typeof legacyBg === 'object'
+        ? legacyBg.hostStartMarker
+        : undefined
+    const fallbackMarker = (typeof metadata.hostStartMarker === 'string' && metadata.hostStartMarker.length > 0)
+        ? metadata.hostStartMarker
+        : UNKNOWN_GENERATION_KEY
+
+    const hasTurn = Boolean(legacyTurn && typeof legacyTurn === 'object')
+    const tasks = legacyBg && typeof legacyBg === 'object' && Array.isArray(legacyBg.tasks)
+        ? legacyBg.tasks as BackgroundTask[]
+        : []
+    if (!hasTurn && tasks.length === 0) return out
+
+    const turnMarker = (typeof turnMarkerRaw === 'string' && turnMarkerRaw.length > 0)
+        ? turnMarkerRaw
+        : fallbackMarker
+    const bgMarker = (typeof bgMarkerRaw === 'string' && bgMarkerRaw.length > 0)
+        ? bgMarkerRaw
+        : fallbackMarker
+
+    if (hasTurn) {
+        const projected = projectOneLegacyLatch(metadata, turnMarker, {
+            unresolvedTurn: true,
+            since: (typeof legacyTurn === 'object' && typeof legacyTurn.since === 'number')
+                ? legacyTurn.since
+                : Date.now(),
+            // Same marker: fold bg into the turn entry; different → separate below.
+            ...(turnMarker === bgMarker && tasks.length > 0 ? { backgroundTasks: tasks } : {}),
+        })
+        out[projected.key] = projected.entry
+    }
+
+    if (tasks.length > 0 && (!hasTurn || bgMarker !== turnMarker)) {
+        const projected = projectOneLegacyLatch(metadata, bgMarker, {
+            backgroundTasks: tasks,
+            since: Date.now(),
+        })
+        const existing = out[projected.key]
+        if (existing) {
+            out[projected.key] = {
+                ...existing,
+                backgroundTasks: tasks,
+            }
+        } else {
+            out[projected.key] = projected.entry
+        }
+    }
+
     return out
 }
 

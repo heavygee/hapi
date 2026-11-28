@@ -1783,14 +1783,22 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         }
         // Wrapper PID is gone — still refuse already_gone while a Codex
         // owned app-server for that wrapper generation remains live.
+        // Strict registry read: unreadable → unknown (keep latch), never
+        // treat an empty/failed scan as verified exit.
+        let runtimes: Awaited<ReturnType<typeof readRuntimes>>
         try {
-          for (const runtime of await readRuntimes()) {
-            if (runtime.pid !== pid) continue;
-            if (expected && runtime.marker && runtime.marker !== expected) continue;
-            if (runtimeMayBeAlive(runtime)) return 'still_alive';
-          }
+          runtimes = await readRuntimes({ strict: true })
         } catch {
-          return 'unknown';
+          return 'unknown'
+        }
+        const hub = configuration.apiUrl
+        const auth = runtimeAuthHash()
+        for (const runtime of runtimes) {
+          // Scope to this runner's hub+token namespace (not every local runtime).
+          if (runtime.hub !== hub || runtime.authHash !== auth) continue
+          if (runtime.pid !== pid) continue
+          if (expected && runtime.marker && runtime.marker !== expected) continue
+          if (runtimeMayBeAlive(runtime)) return 'still_alive'
         }
         rememberVerifiedExit(sessionId);
         return 'already_gone';

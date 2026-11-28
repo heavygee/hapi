@@ -917,6 +917,35 @@ export class SessionCache {
     }
 
     /**
+     * Drop pending permission/input requests after verified owner exit (#2658).
+     * Stale requests must not strand Archive once durable live-work is gone.
+     */
+    clearPendingAgentRequests(sessionId: string): void {
+        const session = this.sessions.get(sessionId)
+        if (!session?.agentState) return
+        const requests = session.agentState.requests
+        if (!requests || Object.keys(requests).length === 0) return
+        const next = { ...session.agentState, requests: {} }
+        const result = this.store.sessions.updateSessionAgentState(
+            sessionId,
+            next,
+            session.agentStateVersion,
+            session.namespace,
+        )
+        if (result.result === 'success') {
+            session.agentState = result.value as typeof session.agentState
+            session.agentStateVersion = result.version
+            this.publisher.emit({
+                type: 'session-updated',
+                sessionId,
+                data: {
+                    agentState: { version: result.version, value: session.agentState },
+                },
+            })
+        }
+    }
+
+    /**
      * Drop one owner's durable live-work entry after verified exit (#2658).
      */
     clearGenerationLiveWork(sessionId: string, ownerKey: string): void {
@@ -996,7 +1025,16 @@ export class SessionCache {
             ...(nextUnresolved ? { unresolvedTurn: true as const } : {}),
             ...(nextTasks && nextTasks.length > 0 ? { backgroundTasks: nextTasks } : {}),
         }
-        if (!generationEntryHasWork(entry)) {
+        const nextHasWork = generationEntryHasWork(entry)
+        const existingHasWork = generationEntryHasWork(existing)
+        // Skip metadata write when the owner latch is unchanged (heartbeat churn).
+        if (nextHasWork && existingHasWork
+            && existing?.unresolvedTurn === entry.unresolvedTurn
+            && JSON.stringify(existing?.backgroundTasks ?? []) === JSON.stringify(entry.backgroundTasks ?? [])) {
+            return
+        }
+        if (!nextHasWork && !existingHasWork && !(ownerKey in map)) return
+        if (!nextHasWork) {
             delete map[ownerKey]
         } else {
             map[ownerKey] = entry
