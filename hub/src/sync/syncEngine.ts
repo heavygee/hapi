@@ -3885,9 +3885,10 @@ export class SyncEngine {
             const ownerMachine = this.getMachineByNamespace(owner.machineId, session.namespace)
                 ?? this.getMachine(owner.machineId)
             const ownerCaps = ownerMachine?.metadata?.capabilities
-            const probeSupported = Boolean(ownerMachine) && (
-                !ownerCaps || ownerCaps.includes(MACHINE_CAPABILITIES.ProbeSessionExit)
-            )
+            // Absent capabilities means no Runner probe — not "supports all".
+            const probeSupported = Boolean(ownerMachine)
+                && Array.isArray(ownerCaps)
+                && ownerCaps.includes(MACHINE_CAPABILITIES.ProbeSessionExit)
             let status: 'stopped' | 'already_gone' | 'still_alive' | 'unknown' = 'unknown'
             if (probeSupported) {
                 const timeoutMs = Math.ceil(deadline - performance.now())
@@ -3907,11 +3908,16 @@ export class SyncEngine {
                     if (error instanceof RunnerStopRpcError && error.timedOut) {
                         throw new ArchiveCleanupError('timeout', error)
                     }
+                    // handler-not-registered still leaves unknown (keep the ask).
                     status = 'unknown'
                 }
-            } else if (!session.active && sessionSocketGone) {
-                // Standalone terminal (no Runner probe): inactive + socket gone
-                // is the owner-bound exit witness for this generation (#2658).
+            } else if (
+                !session.active
+                && sessionSocketGone
+                && (Date.now() - session.activeAt) > 300_000
+            ) {
+                // Standalone terminal: long-inactive + socket gone. Short
+                // disconnects must not drop a live ask (#2658).
                 status = 'already_gone'
             }
             if (status === 'already_gone' || status === 'stopped') {
@@ -3998,6 +4004,8 @@ export class SyncEngine {
                 const ownerMachine = this.getMachineByNamespace(owner.machineId, liveBeforeStop.namespace)
                     ?? this.getMachine(owner.machineId)
                 const ownerCaps = ownerMachine?.metadata?.capabilities
+                // Legacy machines with no capability list still probe; an
+                // explicit list without ProbeSessionExit skips (older Runner).
                 const probeSupported = !ownerCaps
                     || ownerCaps.includes(MACHINE_CAPABILITIES.ProbeSessionExit)
                 if (!probeSupported) continue

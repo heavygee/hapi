@@ -135,14 +135,15 @@ describe('mergeSessionMetadataForSessionMerge externalRefs', () => {
     it('drops a stale first-merge source copy when the fresh source is idle', () => {
         const keyA = liveWorkOwnerKey({ machineId: 'm1', hostPid: 1, hostStartMarker: 'A' })
         const keyB = liveWorkOwnerKey({ machineId: 'm1', hostPid: 2, hostStartMarker: 'B' })
+        const initialA = {
+            machineId: 'm1',
+            hostPid: 1,
+            hostStartMarker: 'A',
+            since: 10,
+            unresolvedTurn: true as const,
+        }
         const dest = {
-            [keyA]: {
-                machineId: 'm1',
-                hostPid: 1,
-                hostStartMarker: 'A',
-                since: 10,
-                unresolvedTurn: true,
-            },
+            [keyA]: { ...initialA },
             [keyB]: {
                 machineId: 'm1',
                 hostPid: 2,
@@ -151,8 +152,40 @@ describe('mergeSessionMetadataForSessionMerge externalRefs', () => {
                 backgroundTasks: [{ id: 'bg-b', type: 'local_bash', description: 'b' }],
             },
         }
-        const transferred = transferSourceLiveWorkOntoDest(dest, {}, new Set([keyA]))
+        const transferred = transferSourceLiveWorkOntoDest(
+            dest,
+            {},
+            new Set([keyA]),
+            { [keyA]: initialA },
+        )
         expect(transferred[keyA]).toBeUndefined()
         expect(transferred[keyB]?.backgroundTasks).toHaveLength(1)
+    })
+
+    it('unions overlapping owners on final transfer instead of replacing dest', () => {
+        const key = liveWorkOwnerKey({ machineId: 'm1', hostPid: 1, hostStartMarker: 'shared' })
+        const transferred = transferSourceLiveWorkOntoDest(
+            {
+                [key]: {
+                    machineId: 'm1',
+                    hostPid: 1,
+                    hostStartMarker: 'shared',
+                    since: 20,
+                    backgroundTasks: [{ id: 'bg', type: 'local_bash', description: 'dest' }],
+                },
+            },
+            {
+                [key]: {
+                    machineId: 'm1',
+                    hostPid: 1,
+                    hostStartMarker: 'shared',
+                    since: 10,
+                    unresolvedTurn: true,
+                },
+            },
+            new Set([key]),
+        )
+        expect(transferred[key]?.unresolvedTurn).toBe(true)
+        expect(transferred[key]?.backgroundTasks).toHaveLength(1)
     })
 })

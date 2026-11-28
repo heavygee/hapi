@@ -95,15 +95,17 @@ export function windowsProcessTreeMayBeAlive(
     const root = table.get(rootPid)
     if (root) {
         if (!expectedMarker || !root.marker || root.marker === expectedMarker) return true
-        // Root PID was reused by a different generation — its current children
-        // are not evidence about the recorded owner.
-    } else {
-        for (const [childPid, entry] of table) {
-            if (childPid === rootPid) continue
-            if (entry.parentPid === rootPid) return true
-        }
+        // Root PID was reused — current ParentProcessId children are the
+        // replacement's, not evidence about the recorded owner.
+        return 'unknown'
     }
-    return false
+    for (const [childPid, entry] of table) {
+        if (childPid === rootPid) continue
+        if (entry.parentPid === rootPid) return true
+    }
+    // Root gone and no direct children remain linked. Grandchildren may have
+    // been reparented after an intermediate exit — refuse to claim empty (#2658).
+    return 'unknown'
 }
 
 export type WindowsStopReport = { confirmed: boolean; phase: string; elapsedMs: number; snapshots: number }

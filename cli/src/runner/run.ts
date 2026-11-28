@@ -1807,10 +1807,10 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             if (current !== expected) {
               const owned = await codexOwnedStillAlive()
               if (owned) return owned
-              if (hasVerifiedExit(sessionId)) return 'already_gone'
               if (isWindows()) {
                 // Reused PID: current ParentProcessId children belong to the
-                // replacement. Without a tombstone, refuse already_gone (#2658).
+                // replacement. PID-only child-exit tombstones are not tree
+                // proof — refuse already_gone (#2658).
                 return 'unknown'
               }
               // Unix: old descendants may still hold the prior PGID (== old pid).
@@ -1830,14 +1830,18 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         // Do NOT trust a PID-only child-exit tombstone before descendant
         // checks — onChildExited records one as soon as the wrapper exits (#2658).
         if (isWindows()) {
-          // Generation-scoped tree: live root/children with this parent, or
-          // empty containment → already_gone. Table failure → unknown.
+          // Generation-scoped tree. Root-gone with no direct children is
+          // unknown (reparented grandchildren). Confirmed StopSession
+          // tombstones remain the clean already_gone path (#2658).
           const table = await readWindowsProcessTable(10_000)
           const tree = windowsProcessTreeMayBeAlive(table, pid, expected)
           if (tree === true) return 'still_alive'
-          if (tree === 'unknown') return 'unknown'
-          rememberVerifiedExit(sessionId);
-          return 'already_gone'
+          if (tree === false) {
+            rememberVerifiedExit(sessionId);
+            return 'already_gone'
+          }
+          if (hasVerifiedExit(sessionId)) return 'already_gone'
+          return 'unknown'
         }
         // Descendants may keep the wrapper's process group after reparent (#2658).
         const group = processGroupMayBeAlive(pid)
@@ -1891,7 +1895,9 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       if (requestedSessionId) rememberVerifiedExit(requestedSessionId);
       const confirmedSessionId = session?.happySessionId ?? pidToConfirmedSessionId.get(pid);
       if (confirmedSessionId) rememberVerifiedExit(confirmedSessionId);
-      rememberVerifiedExit(`PID-${pid}`);
+      // Do not tombstone PID-* here — wrapper exit alone is not full-tree
+      // proof. ProbeSessionExit / StopSession record tombstones after
+      // descendant checks (#2658).
       logger.debug(`[RUNNER RUN] Removing exited process PID ${pid} from tracking`);
       const existingSessionId = existingSessionIdByChildPid.get(pid);
       if (existingSessionId) {

@@ -196,26 +196,32 @@ export function unionLiveWorkByGeneration(
 
 /**
  * Final pre-delete live-work transfer (#2658): destination-only owners stay;
- * every source owner is replaced by the fresh source map (including deletes
- * when the source went idle during merge I/O). Avoids retaining a stale
- * first-merge copy after the source cleared.
+ * overlapping owners union fresh source with destination; source-cleared keys
+ * drop only when the destination entry still matches the initial source copy.
  */
 export function transferSourceLiveWorkOntoDest(
     destMap: LiveWorkByGeneration,
     sourceMap: LiveWorkByGeneration,
     sourceOwnerKeys: ReadonlySet<string>,
+    initialSourceMap: LiveWorkByGeneration = {},
 ): LiveWorkByGeneration {
     const out: LiveWorkByGeneration = { ...destMap }
     for (const key of sourceOwnerKeys) {
-        if (sourceMap[key]) {
+        if (sourceMap[key] && out[key]) {
+            out[key] = unionLiveWorkEntries(sourceMap[key], out[key])
+        } else if (sourceMap[key]) {
             out[key] = sourceMap[key]
-        } else {
-            delete out[key]
+        } else if (out[key]) {
+            const initial = initialSourceMap[key]
+            if (initial && JSON.stringify(out[key]) === JSON.stringify(initial)) {
+                delete out[key]
+            }
+            // else: destination evolved independently — keep it
         }
     }
     for (const [key, entry] of Object.entries(sourceMap)) {
         if (!sourceOwnerKeys.has(key)) {
-            out[key] = entry
+            out[key] = out[key] ? unionLiveWorkEntries(out[key], entry) : entry
         }
     }
     return out
@@ -291,6 +297,8 @@ export class SessionCache {
     private readonly transcriptGenerationBoundarySeqBySessionId: Map<string, number> = new Map()
     /** Per-owner transient thinking bits (row-wide thinking is derived). */
     private readonly thinkingByOwnerBySessionId: Map<string, boolean> = new Map()
+    /** Thinking reported without a full owner identity (markerless terminal). */
+    private readonly unattributedThinkingBySessionId: Set<string> = new Set()
     private readonly runtimeConfigUpdatedAtBySessionId: Map<string, Partial<Record<RuntimeConfigKey, number>>> = new Map()
     /**
      * Last time the hub saw real agent progress per session (tiann/hapi#1820).
@@ -580,6 +588,10 @@ export class SessionCache {
         }
 
         this.sessions.set(sessionId, session)
+        // Advance transcript boundary when metadata identity changes (resume
+        // registration) before the replacement publishes tool calls (#2658).
+        const rowOwner = this.currentRowOwnerKey(session)
+        if (rowOwner) this.noteRowGenerationOwner(sessionId, rowOwner)
         this.publisher.emit({ type: existing ? 'session-updated' : 'session-added', sessionId, data: session })
         return session
     }
@@ -782,22 +794,39 @@ export class SessionCache {
                 hostStartMarker: payload.processStartMarker,
             })
             : undefined
+        const currentKey = this.currentRowOwnerKey(session)
         if (reportedOwnerKey) {
             this.noteRowGenerationOwner(session.id, reportedOwnerKey)
             this.thinkingByOwnerBySessionId.set(session.id + '\0' + reportedOwnerKey, requestedThinking)
             if (requestedThinking) {
                 this.thinkingOwnerBySessionId.set(session.id, reportedOwnerKey)
+                this.unattributedThinkingBySessionId.delete(session.id)
             } else if (this.thinkingOwnerBySessionId.get(session.id) === reportedOwnerKey) {
                 this.thinkingOwnerBySessionId.delete(session.id)
             }
+            // Current-row idle retires other owners' stale thinking (crashed
+            // terminal A while B keeps the row online) (#2658).
+            if (!requestedThinking && currentKey && reportedOwnerKey === currentKey) {
+                for (const key of [...this.thinkingByOwnerBySessionId.keys()]) {
+                    if (!key.startsWith(session.id + '\0')) continue
+                    if (key === session.id + '\0' + reportedOwnerKey) continue
+                    this.thinkingByOwnerBySessionId.delete(key)
+                }
+            }
         } else if (requestedThinking) {
             this.thinkingOwnerBySessionId.delete(session.id)
+            this.unattributedThinkingBySessionId.add(session.id)
+        } else {
+            this.unattributedThinkingBySessionId.delete(session.id)
         }
-        // Row-wide thinking: any owner still thinking, or hub queued-prompt grace.
+        // Row-wide thinking: any owner still thinking, unattributed, or hub grace.
         // A prior owner's idle must not clear a replacement's thinking bit.
         const anyOwnerThinking = [...this.thinkingByOwnerBySessionId.entries()]
             .some(([key, thinking]) => key.startsWith(session.id + '\0') && thinking)
-        session.thinking = requestedThinking || anyOwnerThinking || preserveQueuedThinking
+        session.thinking = requestedThinking
+            || anyOwnerThinking
+            || this.unattributedThinkingBySessionId.has(session.id)
+            || preserveQueuedThinking
         session.thinkingAt = t
         if (!requestedThinking && preserveQueuedThinking && hasUnconsumedPrompt) {
             session.activeTurnStartedAt = hubNow
@@ -807,7 +836,6 @@ export class SessionCache {
         // Never let a prior-generation thinking heartbeat cancel hub grace.
         // Grace clears on consumption (clearQueuedThinkingGrace), expiry, or
         // when the *current* row owner reports thinking (delivery started).
-        const currentKey = this.currentRowOwnerKey(session)
         if (pendingThinkingUntil <= hubNow) {
             this.pendingThinkingUntilBySessionId.delete(session.id)
         } else if (requestedThinking && reportedOwnerKey && currentKey && reportedOwnerKey === currentKey) {
@@ -1187,8 +1215,12 @@ export class SessionCache {
         if (this.thinkingOwnerBySessionId.get(sessionId) === ownerKey) {
             this.thinkingOwnerBySessionId.delete(sessionId)
         }
-        // Queued-prompt grace is hub work — keep thinking while grace is live.
+        // Queued-prompt grace / unattributed thinking / other owners survive.
         if (this.hasQueuedPromptWork(sessionId)) {
+            session.thinking = true
+            return
+        }
+        if (this.unattributedThinkingBySessionId.has(sessionId)) {
             session.thinking = true
             return
         }
@@ -1779,6 +1811,7 @@ export class SessionCache {
         this.backgroundTasksByOwnerBySessionId.delete(session.id)
         this.backgroundOwnerBySessionId.delete(session.id)
         this.thinkingOwnerBySessionId.delete(session.id)
+        this.unattributedThinkingBySessionId.delete(session.id)
         for (const key of [...this.thinkingByOwnerBySessionId.keys()]) {
             if (key.startsWith(session.id + '\0')) this.thinkingByOwnerBySessionId.delete(key)
         }
@@ -1834,6 +1867,7 @@ export class SessionCache {
             this.backgroundTasksByOwnerBySessionId.delete(session.id)
             this.backgroundOwnerBySessionId.delete(session.id)
             this.thinkingOwnerBySessionId.delete(session.id)
+            this.unattributedThinkingBySessionId.delete(session.id)
             for (const key of [...this.thinkingByOwnerBySessionId.keys()]) {
                 if (key.startsWith(session.id + '\0')) this.thinkingByOwnerBySessionId.delete(key)
             }
@@ -3049,7 +3083,12 @@ export class SessionCache {
                     ...Object.keys(initialSourceMap),
                     ...Object.keys(sourceMap),
                 ])
-                const transferred = transferSourceLiveWorkOntoDest(destMap, sourceMap, sourceKeys)
+                const transferred = transferSourceLiveWorkOntoDest(
+                    destMap,
+                    sourceMap,
+                    sourceKeys,
+                    initialSourceMap,
+                )
                 const prevJson = JSON.stringify(
                     (freshNew.metadata as { liveWorkByGeneration?: unknown } | null)?.liveWorkByGeneration ?? null,
                 )
