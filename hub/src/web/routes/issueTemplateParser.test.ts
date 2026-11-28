@@ -680,6 +680,20 @@ body:
         expect(template.kind === 'unsupported' && template.githubValid).toBe(false)
     })
 
+    // Regression (bot review, tiann/hapi#2147, follow-up): GitHub's own
+    // "Validations for upload" section documents `accept` as String —
+    // the outer validations-map check confirms `validations:` itself is
+    // a Map, but never looked at what's inside it for upload, so a
+    // non-string `accept` (a Boolean) still produced githubValid: true.
+    it('is genuinely invalid (githubValid: false) when an upload field has a non-string validations.accept', () => {
+        const template = parseIssueFormYaml(
+            'x.yml',
+            'name: Bug\ndescription: Bug\nbody:\n  - type: upload\n    id: screenshots\n    attributes:\n      label: Screenshots\n    validations:\n      accept: true'
+        )
+        expect(template.kind).toBe('unsupported')
+        expect(template.kind === 'unsupported' && template.githubValid).toBe(false)
+    })
+
     // Regression (bot review, tiann/hapi#2147, follow-up): the upload
     // field used to return githubValid: true immediately, before the
     // parser ever reached a later field in the same body — so a

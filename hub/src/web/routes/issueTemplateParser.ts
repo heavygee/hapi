@@ -63,16 +63,23 @@ const GITHUB_BOOLEAN_WORDS = new Set(['y', 'yes', 'n', 'no', 'true', 'false', 'o
 // string (`description: Yes`, the review's own example) but GitHub's
 // backend coerces. One shared check closes all three for every
 // attribute that needs it, rather than one more key per round.
+//
+// `containerKey` defaults to `attributes` for every existing caller;
+// `validations.accept` (upload-specific, bot review, tiann/hapi#2147,
+// follow-up) is also GitHub-documented String and needs the identical
+// three checks, just against the sibling `validations:` map instead of
+// `attributes:`.
 function invalidAttributeStringReason(
     cstDoc: ReturnType<typeof parseDocument>,
     elementIndex: number,
     attrKey: string,
-    value: unknown
+    value: unknown,
+    containerKey: 'attributes' | 'validations' = 'attributes'
 ): string | undefined {
     if (value === undefined) return undefined
     if (typeof value !== 'string') return `"${attrKey}" must be a string`
     if (value.trim().length === 0) return `"${attrKey}" must be a non-blank string`
-    const node = cstDoc.getIn(['body', elementIndex, 'attributes', attrKey], true) as { type?: string } | undefined
+    const node = cstDoc.getIn(['body', elementIndex, containerKey, attrKey], true) as { type?: string } | undefined
     if (node?.type === 'PLAIN' && GITHUB_BOOLEAN_WORDS.has(value.toLowerCase())) {
         return `"${attrKey}" is an unquoted word GitHub's own parser would read as a Boolean — wrap it in quotes`
     }
@@ -574,6 +581,24 @@ export function parseIssueFormYaml(id: string, raw: string): IssueTemplate {
             const uploadDescriptionReason = invalidAttributeStringReason(cstDoc, elementIndex, 'description', attrs.description)
             if (uploadDescriptionReason) {
                 return { id, name, kind: 'unsupported', reason: `A "upload" field has an invalid ${uploadDescriptionReason}`, githubValid: false }
+            }
+            // GitHub's own "Validations for upload" section documents
+            // `accept` as String (bot review, tiann/hapi#2147,
+            // follow-up) — the validations-map check above only confirms
+            // the outer `validations:` value is a Map; it never looks at
+            // what's inside, and `upload` never reaches the field-level
+            // `asRecord(elObj.validations)` further down either (it
+            // `continue`s before that point), so a malformed `accept`
+            // still returned githubValid: true.
+            const uploadAcceptReason = invalidAttributeStringReason(
+                cstDoc,
+                elementIndex,
+                'accept',
+                asRecord(elObj.validations).accept,
+                'validations'
+            )
+            if (uploadAcceptReason) {
+                return { id, name, kind: 'unsupported', reason: `A "upload" field has an invalid ${uploadAcceptReason}`, githubValid: false }
             }
             if (!asString(elObj.id)) {
                 if (idlessLabels.has(uploadLabel)) {
