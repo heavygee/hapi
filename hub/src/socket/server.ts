@@ -44,7 +44,11 @@ export type SocketServerDeps = {
     onSessionEnd?: (payload: { sid: string; time: number }) => void
     onMachineAlive?: (payload: { machineId: string; time: number; health?: unknown }) => void
     onSessionChildExited?: (payload: { machineId: string; sid: string; pid: number; processStartMarker?: string; time: number; namespace: string }) => void
-    onBackgroundTasks?: (sessionId: string, tasks: BackgroundTask[]) => void
+    onBackgroundTasks?: (
+        sessionId: string,
+        tasks: BackgroundTask[],
+        reported?: { machineId?: string; hostPid?: number; processStartMarker?: string },
+    ) => void
     onSessionActivity?: (sessionId: string, updatedAt: number) => void
     onAgentProgress?: (sessionId: string, at: number) => void
     onSweepImmediateQueued?: (sessionId: string, now: number) => void

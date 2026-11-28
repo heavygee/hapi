@@ -2103,7 +2103,7 @@ describe('ApiSessionClient runtime heartbeat', () => {
                 permissionMode: 'bypassPermissions',
                 // Reporting worker identity for durable live-work (#2658).
                 hostPid: expect.any(Number),
-                // machineId / processStartMarker only when metadata has them.
+                processStartMarker: expect.any(String),
             }
         ])
         client.close()

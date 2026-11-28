@@ -68,7 +68,12 @@ const messageSchema = z.object({
     // Client-provided origin timestamp (epoch ms) — e.g. a Claude transcript
     // entry's own `timestamp`. Only honored for agent messages (no localId);
     // see addMessage in messages.ts.
-    createdAt: z.number().optional()
+    createdAt: z.number().optional(),
+    reportingOwner: z.object({
+        machineId: z.string().optional(),
+        hostPid: z.number().int().positive().optional(),
+        processStartMarker: z.string().optional(),
+    }).optional(),
 })
 
 const updateMetadataSchema = z.object({
@@ -128,7 +133,11 @@ export type SessionHandlersDeps = {
     onSessionReady?: (payload: SessionReadyPayload) => void
     onSessionEnd?: (payload: SessionEndPayload) => void
     onWebappEvent?: (event: SyncEvent) => void
-    onBackgroundTasks?: (sessionId: string, tasks: BackgroundTask[]) => void
+    onBackgroundTasks?: (
+        sessionId: string,
+        tasks: BackgroundTask[],
+        reported?: { machineId?: string; hostPid?: number; processStartMarker?: string },
+    ) => void
     onSessionActivity?: (sessionId: string, updatedAt: number) => void
     /** tiann/hapi#1820: any message is agent progress, either direction. */
     onAgentProgress?: (sessionId: string, at: number) => void
@@ -172,7 +181,7 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
             return
         }
 
-        const { sid, localId, createdAt } = parsed.data
+        const { sid, localId, createdAt, reportingOwner } = parsed.data
         const raw = parsed.data.message
 
         const content = typeof raw === 'string'
@@ -200,7 +209,7 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
         // without storing a hidden row.
         const backgroundTasks = extractBackgroundTasks(content)
         if (backgroundTasks !== null) {
-            onBackgroundTasks?.(sid, backgroundTasks)
+            onBackgroundTasks?.(sid, backgroundTasks, reportingOwner)
             return
         }
 

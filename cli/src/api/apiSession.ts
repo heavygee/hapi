@@ -41,6 +41,7 @@ import { TerminalManager } from '@/terminal/TerminalManager'
 import { applyVersionedAck } from './versionedUpdate'
 import { buildHubRequestHeaders, buildSocketIoExtraHeaderOptions } from './hubExtraHeaders'
 import { extractRawUserTextContent, isExternalUserMessage } from '@/claude/utils/transcriptEntry'
+import { getProcessStartMarker } from '@/utils/process'
 
 // Transcript entry classification moved to @/claude/utils/transcriptEntry;
 // re-exported here so existing importers of the old name keep working.
@@ -224,6 +225,16 @@ export class ApiSessionClient extends EventEmitter {
     private hasConnectedOnce = false
     // Replayed on (re)connect: a volatile heartbeat sent while disconnected is dropped (#2053).
     private latestKeepAlive: Omit<Parameters<ClientToServerEvents['session-alive']>[0], 'sid' | 'time'> | null = null
+    /**
+     * Stable this-process owner for durable live-work (#2658). Taken from the
+     * OS process at construct time — never from refreshed session metadata,
+     * which a replacement can overwrite on this socket.
+     */
+    private localWorkerIdentity: {
+        machineId?: string
+        hostPid: number
+        processStartMarker?: string
+    }
     readonly rpcHandlerManager: RpcHandlerManager
     private readonly terminalManager: TerminalManager
     private agentTerminalResize: ((cols: number, rows: number) => void) | null = null
@@ -268,6 +279,17 @@ export class ApiSessionClient extends EventEmitter {
         this.materializer = options.materialize
         this.onMaterialized = options.onMaterialized
         this.state = this.materializer ? 'pending' : 'active'
+        const hostPid = process.pid
+        this.localWorkerIdentity = {
+            hostPid,
+            processStartMarker: getProcessStartMarker(hostPid)
+                ?? (typeof session.metadata?.hostStartMarker === 'string' && session.metadata.hostStartMarker.length > 0
+                    ? session.metadata.hostStartMarker
+                    : undefined),
+            ...(typeof session.metadata?.machineId === 'string' && session.metadata.machineId.length > 0
+                ? { machineId: session.metadata.machineId }
+                : {}),
+        }
 
         this.rpcHandlerManager = new RpcHandlerManager({
             scopePrefix: this.sessionId,
@@ -1219,14 +1241,43 @@ if (isReconnect) {
                 sentFrom: 'cli'
             }
         }
+        const bgBody = body !== null && typeof body === 'object' ? body as { type?: unknown; subtype?: unknown } : null
+        const bgSnapshot = bgBody?.type === 'system' && bgBody.subtype === 'background_tasks_changed'
         this.emitOrQueue(() => {
             this.socket.emit('message', {
                 sid: this.sessionId,
                 message: content,
-                localId
+                localId,
+                ...(bgSnapshot ? { reportingOwner: this.reportingOwnerPayload() } : {}),
             })
             if (localId) this.socket.emit('messages-consumed', { sid: this.sessionId, localIds: [localId] })
         })
+    }
+
+    private reportingOwnerPayload(): {
+        machineId?: string
+        hostPid: number
+        processStartMarker?: string
+    } {
+        this.adoptLocalMachineIdFromMetadata()
+        return { ...this.localWorkerIdentity }
+    }
+
+    /** Refresh machineId only when metadata still describes this OS process. */
+    private adoptLocalMachineIdFromMetadata(): void {
+        const meta = this.metadata
+        if (!meta) return
+        if (meta.hostPid !== this.localWorkerIdentity.hostPid) return
+        if (this.localWorkerIdentity.processStartMarker
+            && meta.hostStartMarker !== this.localWorkerIdentity.processStartMarker) {
+            return
+        }
+        if (typeof meta.machineId === 'string' && meta.machineId.length > 0) {
+            this.localWorkerIdentity = {
+                ...this.localWorkerIdentity,
+                machineId: meta.machineId,
+            }
+        }
     }
 
     sendSessionEvent(event: {
@@ -1371,27 +1422,16 @@ if (isReconnect) {
             copilotAgentMode?: import('@hapi/protocol').CopilotAgentMode
         }
     ): void {
-        // Bind durable live-work writes to this process generation (#2658).
-        // Prefer bootstrap metadata; fall back to this PID so a runner child
-        // that never got hostStartMarker still cannot be attributed as "current
-        // row" after replacement.
-        const meta = this.metadata
-        const processStartMarker = typeof meta?.hostStartMarker === 'string' && meta.hostStartMarker.length > 0
-            ? meta.hostStartMarker
-            : undefined
-        const hostPid = typeof meta?.hostPid === 'number' && meta.hostPid > 0
-            ? meta.hostPid
-            : (typeof process.pid === 'number' && process.pid > 0 ? process.pid : undefined)
-        const machineId = typeof meta?.machineId === 'string' && meta.machineId.length > 0
-            ? meta.machineId
-            : undefined
+        // Bind durable live-work writes to this OS process (#2658), not
+        // refreshed session metadata (replacement can overwrite that).
+        const owner = this.reportingOwnerPayload()
         this.latestKeepAlive = {
             thinking,
             mode,
             ...(runtime ?? {}),
-            ...(machineId ? { machineId } : {}),
-            ...(typeof hostPid === 'number' ? { hostPid } : {}),
-            ...(processStartMarker ? { processStartMarker } : {}),
+            ...(owner.machineId ? { machineId: owner.machineId } : {}),
+            hostPid: owner.hostPid,
+            ...(owner.processStartMarker ? { processStartMarker: owner.processStartMarker } : {}),
         }
         if (this.state !== 'active' || !this.socket.connected) {
             return

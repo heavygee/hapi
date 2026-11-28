@@ -121,6 +121,43 @@ describe('SessionCache liveWorkByGeneration attribution (#2658)', () => {
         store.close()
     })
 
+    it('durable-latches attributed background snapshots under the reporting owner', () => {
+        const store = new Store(':memory:')
+        const cache = new SessionCache(store, createPublisher([]))
+        const session = cache.getOrCreateSession(
+            'live-work-bg',
+            {
+                path: '/tmp/p',
+                host: 'localhost',
+                flavor: 'claude',
+                startedBy: 'runner',
+                startedFromRunner: true,
+                machineId: 'm1',
+                hostPid: 200,
+                hostStartMarker: 'worker-B',
+            },
+            null,
+            'default',
+        )
+
+        cache.setBackgroundTasks(
+            session.id,
+            [{ id: 'bg-1', type: 'local_bash', description: 'sleep' }],
+            { machineId: 'm1', hostPid: 100, processStartMarker: 'worker-A' },
+        )
+        const keyA = liveWorkOwnerKey({ machineId: 'm1', hostPid: 100, hostStartMarker: 'worker-A' })
+        expect(cache.getSession(session.id)?.metadata?.liveWorkByGeneration?.[keyA]?.backgroundTasks).toHaveLength(1)
+
+        // Empty snapshot from B must not erase A's durable bg latch.
+        cache.setBackgroundTasks(
+            session.id,
+            [],
+            { machineId: 'm1', hostPid: 200, processStartMarker: 'worker-B' },
+        )
+        expect(cache.getSession(session.id)?.metadata?.liveWorkByGeneration?.[keyA]?.backgroundTasks).toHaveLength(1)
+        store.close()
+    })
+
     it('skips durable write/clear when the heartbeat omits owner identity', () => {
         const store = new Store(':memory:')
         const cache = new SessionCache(store, createPublisher([]))

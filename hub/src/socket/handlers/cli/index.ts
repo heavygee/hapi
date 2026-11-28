@@ -49,7 +49,11 @@ export type CliHandlersDeps = {
     onMachineAlive?: (payload: MachineAlivePayload) => void
     onSessionChildExited?: (payload: SessionChildExitedPayload & { namespace: string }) => void
     onWebappEvent?: (event: SyncEvent) => void
-    onBackgroundTasks?: (sessionId: string, tasks: BackgroundTask[]) => void
+    onBackgroundTasks?: (
+        sessionId: string,
+        tasks: BackgroundTask[],
+        reported?: { machineId?: string; hostPid?: number; processStartMarker?: string },
+    ) => void
     onSessionActivity?: (sessionId: string, updatedAt: number) => void
     onAgentProgress?: (sessionId: string, at: number) => void
     onSweepImmediateQueued?: (sessionId: string, now: number) => void

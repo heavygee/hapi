@@ -1154,8 +1154,12 @@ export class SyncEngine {
         return true
     }
 
-    handleBackgroundTasks(sessionId: string, tasks: BackgroundTask[]): void {
-        this.sessionCache.setBackgroundTasks(sessionId, tasks)
+    handleBackgroundTasks(
+        sessionId: string,
+        tasks: BackgroundTask[],
+        reported?: { machineId?: string; hostPid?: number; processStartMarker?: string },
+    ): void {
+        this.sessionCache.setBackgroundTasks(sessionId, tasks, reported)
     }
 
     updateReadState(sessionId: string, namespace: string, request: SessionReadStateRequest) {

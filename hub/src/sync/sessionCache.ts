@@ -870,20 +870,31 @@ export class SessionCache {
         }
     }
 
-    setBackgroundTasks(sessionId: string, tasks: BackgroundTask[]): void {
+    setBackgroundTasks(
+        sessionId: string,
+        tasks: BackgroundTask[],
+        reported?: { machineId?: string; hostPid?: number; processStartMarker?: string },
+    ): void {
         const session = this.sessions.get(sessionId)
         if (!session) return
         const current = session.backgroundTasks ?? []
         if (tasks.length === current.length && tasks.every((task, index) =>
             task.id === current[index]?.id && task.description === current[index]?.description
-        )) return
+        )) {
+            if (reported) {
+                this.upsertReportedGenerationLiveWork(sessionId, { backgroundTasks: tasks }, reported)
+            }
+            return
+        }
 
         session.backgroundTasks = tasks
         session.backgroundTaskCount = tasks.length
-        // Background snapshots carry only the task list today — no reporting
-        // owner. Keep them in-memory (already in session.backgroundTasks) and
-        // do NOT durable-latch under the current row; a late snapshot from A
-        // after B registers must not write or clear under B (#2658 remasure).
+        // Durable latch only when the CLI stamped a reporting owner (#2658).
+        // Without it, stay in-memory so a late unmarked snapshot cannot
+        // write/clear under the current row after replacement.
+        if (reported) {
+            this.upsertReportedGenerationLiveWork(sessionId, { backgroundTasks: tasks }, reported)
+        }
         this.recordAgentProgress(sessionId)
         this.publisher.emit({
             type: 'session-updated',
