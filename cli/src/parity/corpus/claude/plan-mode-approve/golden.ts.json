@@ -841,6 +841,7 @@
                   "hostPid": "<pid>",
                   "hostStartMarker": "<marker>",
                   "machineId": "parity-machine",
+                  "runnerOwned": true,
                   "tool": "ExitPlanMode"
                 }
               },
@@ -865,6 +866,7 @@
                   "hostPid": "<pid>",
                   "hostStartMarker": "<marker>",
                   "machineId": "parity-machine",
+                  "runnerOwned": true,
                   "tool": "ExitPlanMode"
                 }
               },
@@ -1298,6 +1300,7 @@
                   "hostPid": "<pid>",
                   "hostStartMarker": "<marker>",
                   "machineId": "parity-machine",
+                  "runnerOwned": true,
                   "status": "approved",
                   "tool": "ExitPlanMode"
                 }
@@ -1325,6 +1328,7 @@
                   "hostPid": "<pid>",
                   "hostStartMarker": "<marker>",
                   "machineId": "parity-machine",
+                  "runnerOwned": true,
                   "status": "approved",
                   "tool": "ExitPlanMode"
                 }

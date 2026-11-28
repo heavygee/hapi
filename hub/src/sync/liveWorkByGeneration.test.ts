@@ -32,7 +32,7 @@ function session(overrides: Partial<Session> = {}): Session {
 }
 
 describe('liveWorkByGeneration helpers', () => {
-    it('projects legacy single-slot latches into an owner key when pid is known', () => {
+    it('projects legacy latches by marker only — never attaches current-row pid', () => {
         const map = projectLegacyLiveWork({
             path: '/tmp/p',
             host: 'h',
@@ -45,13 +45,17 @@ describe('liveWorkByGeneration helpers', () => {
                 hostStartMarker: 'worker-A',
             },
         } as Session['metadata'])
-        const key = liveWorkOwnerKey({ machineId: 'm1', hostPid: 42, hostStartMarker: 'worker-A' })
-        expect(Object.keys(map)).toEqual([key])
-        expect(map[key]?.unresolvedTurn).toBe(true)
-        expect(map[key]?.backgroundTasks).toHaveLength(1)
-        expect(map[key]?.hostPid).toBe(42)
-        expect(map[key]?.machineId).toBe('m1')
-        expect(map[key]?.hostStartMarker).toBe('worker-A')
+        expect(Object.keys(map)).toEqual(['worker-A'])
+        expect(map['worker-A']?.unresolvedTurn).toBe(true)
+        expect(map['worker-A']?.backgroundTasks).toHaveLength(1)
+        expect(map['worker-A']?.hostPid).toBeUndefined()
+        expect(map['worker-A']?.machineId).toBe('')
+        expect(map['worker-A']?.hostStartMarker).toBe('worker-A')
+        expect(generationEntryProbeClearable(
+            session({ metadata: { path: '/tmp/p', host: 'h', startedBy: 'runner', machineId: 'm1' } }),
+            'worker-A',
+            map['worker-A']!,
+        )).toBe(false)
     })
 
     it('uses the reserved unknown key when legacy latches have no marker', () => {
@@ -96,9 +100,8 @@ describe('liveWorkByGeneration helpers', () => {
                 hostStartMarker: 'worker-B',
             },
         } as Session['metadata'])
-        const turnKey = liveWorkOwnerKey({ machineId: 'm1', hostPid: 42, hostStartMarker: 'worker-A' })
-        expect(map[turnKey]?.unresolvedTurn).toBe(true)
-        expect(map[turnKey]?.backgroundTasks).toBeUndefined()
+        expect(map['worker-A']?.unresolvedTurn).toBe(true)
+        expect(map['worker-A']?.backgroundTasks).toBeUndefined()
         expect(map['worker-B']?.backgroundTasks).toHaveLength(1)
         expect(map['worker-B']?.hostPid).toBeUndefined()
     })

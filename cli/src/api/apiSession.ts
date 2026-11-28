@@ -1280,25 +1280,35 @@ if (isReconnect) {
         machineId?: string
         hostPid: number
         processStartMarker?: string
+        runnerOwned: boolean
     } {
         this.adoptLocalMachineIdFromMetadata()
-        return { ...this.localWorkerIdentity }
+        return {
+            ...this.localWorkerIdentity,
+            runnerOwned: this.localWorkerRunnerOwned,
+        }
     }
 
     /**
      * Stamp pending permission/input requests with this process's start marker
      * so Archive can clear only the verified-exited owner's asks (#2658).
      */
-    private stampRequestOwners(state: AgentState): AgentState {
+    /**
+     * Stamp only requests this process newly added. Never claim an unmarked
+     * request inherited from a prior worker on an unrelated state update (#2658).
+     */
+    private stampRequestOwners(before: AgentState, state: AgentState): AgentState {
         const marker = this.localWorkerIdentity.processStartMarker
         const machineId = this.localWorkerIdentity.machineId
         const hostPid = this.localWorkerIdentity.hostPid
         const requests = state.requests
         if (!marker || !machineId || !hostPid || !requests) return state
+        const prior = before.requests ?? {}
         let changed = false
         const next: NonNullable<AgentState['requests']> = { ...requests }
         for (const [id, request] of Object.entries(requests)) {
             if (!request) continue
+            if (prior[id]) continue // inherited — leave ownership alone
             const hasFullOwner = typeof request.hostStartMarker === 'string'
                 && request.hostStartMarker.length > 0
                 && typeof request.machineId === 'string'
@@ -1311,6 +1321,7 @@ if (isReconnect) {
                 machineId,
                 hostPid,
                 hostStartMarker: marker,
+                runnerOwned: this.localWorkerRunnerOwned,
             }
             changed = true
         }
@@ -1690,7 +1701,7 @@ if (isReconnect) {
         if (this.state !== 'active') {
             if (this.state === 'closed') return
             const current = this.agentState ?? ({} as AgentState)
-            this.agentState = this.stampRequestOwners(handler(current))
+            this.agentState = this.stampRequestOwners(current, handler(current))
             if (this.state === 'materializing') {
                 this.agentStateChangedDuringAttempt = true
             }
@@ -1699,7 +1710,7 @@ if (isReconnect) {
         this.agentStateLock.inLock(async () => {
             await backoff(async () => {
                 const current = this.agentState ?? ({} as AgentState)
-                const updated = this.stampRequestOwners(handler(current))
+                const updated = this.stampRequestOwners(current, handler(current))
 
                 const answer = await this.socket.emitWithAck('update-state', {
                     sid: this.sessionId,

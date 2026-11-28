@@ -266,6 +266,7 @@ export interface ClientToServerEvents {
             machineId?: string
             hostPid?: number
             processStartMarker?: string
+            runnerOwned?: boolean
         }
     }) => void
     'session-alive': (data: {

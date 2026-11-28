@@ -803,6 +803,7 @@ describe('SyncEngine.archiveSession runner reaping (#1910)', () => {
                         machineId: 'machine-x',
                         hostPid: 7001,
                         hostStartMarker: 'worker-A',
+                        runnerOwned: true,
                     },
                     'from-B': {
                         tool: 'Edit',
@@ -810,6 +811,7 @@ describe('SyncEngine.archiveSession runner reaping (#1910)', () => {
                         machineId: 'machine-x',
                         hostPid: 7002,
                         hostStartMarker: 'worker-B',
+                        runnerOwned: true,
                     },
                 },
             },
@@ -863,6 +865,7 @@ describe('SyncEngine.archiveSession runner reaping (#1910)', () => {
                         machineId: 'machine-x',
                         hostPid: 7001,
                         hostStartMarker: 'worker-A',
+                        runnerOwned: true,
                     },
                 },
             },

@@ -74,30 +74,19 @@ export function resolveEntryProbeMarker(ownerKey: string, entry: LiveWorkGenerat
 }
 
 function projectOneLegacyLatch(
-    metadata: NonNullable<Session['metadata']>,
+    _metadata: NonNullable<Session['metadata']>,
     marker: string,
     opts: { unresolvedTurn?: boolean; backgroundTasks?: BackgroundTask[]; since: number },
 ): { key: string; entry: LiveWorkGenerationEntry } {
-    const currentMarker = typeof metadata.hostStartMarker === 'string' && metadata.hostStartMarker.length > 0
-        ? metadata.hostStartMarker
-        : undefined
-    const markerMatchesCurrent = marker !== UNKNOWN_GENERATION_KEY && marker === currentMarker
-    const machineId = markerMatchesCurrent && typeof metadata.machineId === 'string'
-        ? metadata.machineId
-        : ''
-    const hostPid = markerMatchesCurrent
-        && typeof metadata.hostPid === 'number'
-        && metadata.hostPid > 0
-        ? metadata.hostPid
-        : undefined
-    const ownerKey = (machineId.length > 0 && typeof hostPid === 'number')
-        ? liveWorkOwnerKey({ machineId, hostPid, hostStartMarker: marker })
-        : marker
+    // Never attach the current row's machine/pid from marker equality alone —
+    // Unix markers are second-precision, so a same-second replacement can match
+    // and then clear the prior latch on its first idle heartbeat (#2658).
+    // Legacy stays blocking and not probe-clearable until report-bound writes
+    // materialize a real owner key.
     return {
-        key: ownerKey,
+        key: marker,
         entry: {
-            machineId,
-            ...(typeof hostPid === 'number' ? { hostPid } : {}),
+            machineId: '',
             ...(marker !== UNKNOWN_GENERATION_KEY ? { hostStartMarker: marker } : {}),
             since: opts.since,
             ...(opts.unresolvedTurn ? { unresolvedTurn: true as const } : {}),

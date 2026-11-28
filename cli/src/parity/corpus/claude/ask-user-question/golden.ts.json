@@ -873,6 +873,7 @@
                   "hostPid": "<pid>",
                   "hostStartMarker": "<marker>",
                   "machineId": "parity-machine",
+                  "runnerOwned": true,
                   "tool": "AskUserQuestion"
                 }
               },
@@ -913,6 +914,7 @@
                   "hostPid": "<pid>",
                   "hostStartMarker": "<marker>",
                   "machineId": "parity-machine",
+                  "runnerOwned": true,
                   "tool": "AskUserQuestion"
                 }
               },
@@ -1267,6 +1269,7 @@
                   "hostPid": "<pid>",
                   "hostStartMarker": "<marker>",
                   "machineId": "parity-machine",
+                  "runnerOwned": true,
                   "status": "approved",
                   "tool": "AskUserQuestion"
                 }
@@ -1315,6 +1318,7 @@
                   "hostPid": "<pid>",
                   "hostStartMarker": "<marker>",
                   "machineId": "parity-machine",
+                  "runnerOwned": true,
                   "status": "approved",
                   "tool": "AskUserQuestion"
                 }

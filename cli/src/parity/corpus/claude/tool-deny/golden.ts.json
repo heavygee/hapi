@@ -841,6 +841,7 @@
                   "hostPid": "<pid>",
                   "hostStartMarker": "<marker>",
                   "machineId": "parity-machine",
+                  "runnerOwned": true,
                   "tool": "Bash"
                 }
               },
@@ -865,6 +866,7 @@
                   "hostPid": "<pid>",
                   "hostStartMarker": "<marker>",
                   "machineId": "parity-machine",
+                  "runnerOwned": true,
                   "tool": "Bash"
                 }
               },
@@ -979,6 +981,7 @@
                   "hostPid": "<pid>",
                   "hostStartMarker": "<marker>",
                   "machineId": "parity-machine",
+                  "runnerOwned": true,
                   "status": "denied",
                   "tool": "Bash"
                 }
@@ -1006,6 +1009,7 @@
                   "hostPid": "<pid>",
                   "hostStartMarker": "<marker>",
                   "machineId": "parity-machine",
+                  "runnerOwned": true,
                   "status": "denied",
                   "tool": "Bash"
                 }

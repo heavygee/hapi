@@ -494,9 +494,11 @@ export const AgentStateRequestSchema = z.object({
     createdAt: z.number().nullish(),
     // Full reporting owner (#2658). Marker alone is second-precision on Unix
     // and can collide across PIDs — Archive clears only when all three match.
+    // runnerOwned distinguishes terminal asks (transient) from runner probe path.
     machineId: z.string().optional(),
     hostPid: z.number().int().positive().optional(),
     hostStartMarker: z.string().optional(),
+    runnerOwned: z.boolean().optional(),
 })
 
 export type AgentStateRequest = z.infer<typeof AgentStateRequestSchema>

@@ -2104,6 +2104,7 @@ describe('ApiSessionClient runtime heartbeat', () => {
                 // Reporting worker identity for durable live-work (#2658).
                 hostPid: expect.any(Number),
                 processStartMarker: expect.any(String),
+                runnerOwned: false,
             }
         ])
         client.close()

@@ -249,6 +249,8 @@ export class SessionCache {
     private readonly pendingThinkingUntilBySessionId: Map<string, number> = new Map()
     /** Owner key that last set `session.thinking` via an attributed keepalive. */
     private readonly thinkingOwnerBySessionId: Map<string, string> = new Map()
+    /** Owner key that last set row-wide backgroundTasks via an attributed snapshot. */
+    private readonly backgroundOwnerBySessionId: Map<string, string> = new Map()
     private readonly runtimeConfigUpdatedAtBySessionId: Map<string, Partial<Record<RuntimeConfigKey, number>>> = new Map()
     /**
      * Last time the hub saw real agent progress per session (tiann/hapi#1820).
@@ -949,7 +951,12 @@ export class SessionCache {
     setBackgroundTasks(
         sessionId: string,
         tasks: BackgroundTask[],
-        reported?: { machineId?: string; hostPid?: number; processStartMarker?: string },
+        reported?: {
+            machineId?: string
+            hostPid?: number
+            processStartMarker?: string
+            runnerOwned?: boolean
+        },
     ): void {
         const session = this.sessions.get(sessionId)
         if (!session) return
@@ -965,6 +972,22 @@ export class SessionCache {
 
         session.backgroundTasks = tasks
         session.backgroundTaskCount = tasks.length
+        const bgOwnerKey = (
+            typeof reported?.machineId === 'string' && reported.machineId.length > 0
+            && typeof reported?.hostPid === 'number' && reported.hostPid > 0
+            && typeof reported?.processStartMarker === 'string' && reported.processStartMarker.length > 0
+        )
+            ? liveWorkOwnerKey({
+                machineId: reported.machineId,
+                hostPid: reported.hostPid,
+                hostStartMarker: reported.processStartMarker,
+            })
+            : undefined
+        if (tasks.length > 0 && bgOwnerKey) {
+            this.backgroundOwnerBySessionId.set(sessionId, bgOwnerKey)
+        } else if (tasks.length === 0) {
+            this.backgroundOwnerBySessionId.delete(sessionId)
+        }
         // Durable latch only when the CLI stamped a reporting owner (#2658).
         // Without it, stay in-memory so a late unmarked snapshot cannot
         // write/clear under the current row after replacement.
@@ -1071,6 +1094,21 @@ export class SessionCache {
             type: 'session-updated',
             sessionId,
             data: { thinking: false, thinkingAt: session.thinkingAt, activeTurnStartedAt: null },
+        })
+    }
+
+    clearTransientBackgroundForOwner(sessionId: string, ownerKey: string): void {
+        const session = this.sessions.get(sessionId)
+        if (!session) return
+        if (this.backgroundOwnerBySessionId.get(sessionId) !== ownerKey) return
+        this.backgroundOwnerBySessionId.delete(sessionId)
+        if ((session.backgroundTaskCount ?? 0) === 0 && !(session.backgroundTasks?.length)) return
+        session.backgroundTasks = []
+        session.backgroundTaskCount = 0
+        this.publisher.emit({
+            type: 'session-updated',
+            sessionId,
+            data: { backgroundTaskCount: 0, backgroundTasks: [] },
         })
     }
 

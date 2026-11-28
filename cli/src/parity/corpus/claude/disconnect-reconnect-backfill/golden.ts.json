@@ -97,6 +97,7 @@
         "model": null,
         "permissionMode": "default",
         "processStartMarker": "<marker>",
+        "runnerOwned": true,
         "sid": "<uuid:1>",
         "thinking": false
       }
@@ -110,6 +111,7 @@
         "model": null,
         "permissionMode": "default",
         "processStartMarker": "<marker>",
+        "runnerOwned": true,
         "sid": "<uuid:1>",
         "thinking": false
       },
@@ -121,6 +123,7 @@
         "model": null,
         "permissionMode": "default",
         "processStartMarker": "<marker>",
+        "runnerOwned": true,
         "sid": "<uuid:1>",
         "thinking": false
       }

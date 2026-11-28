@@ -73,6 +73,7 @@ const messageSchema = z.object({
         machineId: z.string().optional(),
         hostPid: z.number().int().positive().optional(),
         processStartMarker: z.string().optional(),
+        runnerOwned: z.boolean().optional(),
     }).optional(),
 })
 
@@ -425,59 +426,16 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
             return
         }
 
-        const { sid, expectedVersion } = parsed.data
+        const { sid, agentState, expectedVersion } = parsed.data
         const sessionAccess = resolveSessionAccess(sid)
         if (!sessionAccess.ok) {
             cb({ result: 'error', reason: sessionAccess.reason })
             return
         }
 
-        // Stamp unmarked permission requests with the current row's generation
-        // so Archive can reconcile by verified owner without wiping a
-        // replacement's in-flight ask (#2658). Never overwrite an existing stamp.
-        let agentState = parsed.data.agentState
-        if (agentState && typeof agentState === 'object' && !Array.isArray(agentState)) {
-            const state = agentState as AgentState
-            const requests = state.requests
-            const meta = sessionAccess.value.metadata
-            const metaObj = meta && typeof meta === 'object' && !Array.isArray(meta)
-                ? meta as Record<string, unknown>
-                : null
-            const marker = typeof metaObj?.hostStartMarker === 'string'
-                && metaObj.hostStartMarker.length > 0
-                ? metaObj.hostStartMarker
-                : undefined
-            const machineId = typeof metaObj?.machineId === 'string' && metaObj.machineId.length > 0
-                ? metaObj.machineId
-                : undefined
-            const hostPid = typeof metaObj?.hostPid === 'number' && metaObj.hostPid > 0
-                ? metaObj.hostPid
-                : undefined
-            if (marker && machineId && hostPid && requests && typeof requests === 'object') {
-                let stamped = false
-                const nextRequests: NonNullable<AgentState['requests']> = { ...requests }
-                for (const [id, request] of Object.entries(requests)) {
-                    if (!request) continue
-                    const hasFull = typeof request.hostStartMarker === 'string'
-                        && request.hostStartMarker.length > 0
-                        && typeof request.machineId === 'string'
-                        && request.machineId.length > 0
-                        && typeof request.hostPid === 'number'
-                        && request.hostPid > 0
-                    if (hasFull) continue
-                    nextRequests[id] = {
-                        ...request,
-                        machineId,
-                        hostPid,
-                        hostStartMarker: marker,
-                    }
-                    stamped = true
-                }
-                if (stamped) {
-                    agentState = { ...state, requests: nextRequests }
-                }
-            }
-        }
+        // Do NOT hub-stamp unmarked requests with the current row's identity —
+        // a late unmarked ask from A would be credited to B and cleared when B
+        // exits (#2658). Ownership is CLI-stamped at the reporting process only.
 
         const result = store.sessions.updateSessionAgentState(
             sid,

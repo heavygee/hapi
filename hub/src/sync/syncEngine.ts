@@ -3887,6 +3887,8 @@ export class SyncEngine {
             const requests = liveBeforeStop.agentState?.requests
             if (requests) {
                 for (const request of Object.values(requests)) {
+                    // Terminal asks stay off the runner probe path (#2658).
+                    if (request.runnerOwned !== true) continue
                     if (
                         typeof request.machineId !== 'string' || request.machineId.length === 0
                         || typeof request.hostPid !== 'number' || request.hostPid <= 0
@@ -3939,6 +3941,7 @@ export class SyncEngine {
                     this.sessionCache.clearGenerationLiveWork(sessionId, ownerKey)
                     this.sessionCache.clearPendingAgentRequestsForOwner(sessionId, owner)
                     this.sessionCache.clearTransientThinkingForOwner(sessionId, ownerKey)
+                    this.sessionCache.clearTransientBackgroundForOwner(sessionId, ownerKey)
                 }
             }
             const afterProbe = this.sessionCache.getSession(sessionId) ?? liveBeforeStop
