@@ -467,7 +467,9 @@ export async function bootstrapExistingSession(options: {
     }
     const metadata = buildUpdatedMetadata(sessionInfo.metadata)
 
-    const session = api.sessionSyncClient(sessionInfo)
+    // Construct with this process's metadata so durable live-work identity
+    // (#2658) is not inherited from the prior worker's session row.
+    const session = api.sessionSyncClient({ ...sessionInfo, metadata })
     session.updateMetadata(buildUpdatedMetadata)
     if (options.requireMetadataFlush?.(sessionInfo.metadata) && !await session.flushMetadata()) {
         throw new Error('Unable to persist existing-session metadata')

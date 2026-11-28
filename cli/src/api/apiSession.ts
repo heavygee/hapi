@@ -279,14 +279,25 @@ export class ApiSessionClient extends EventEmitter {
         this.materializer = options.materialize
         this.onMaterialized = options.onMaterialized
         this.state = this.materializer ? 'pending' : 'active'
+        // Prefer this process's probe + the metadata this client was
+        // constructed with (sessionFactory now passes local bootstrap
+        // metadata). Never inherit a prior worker's pid/marker from a
+        // stale row after replacement.
         const hostPid = process.pid
+        const probedMarker = getProcessStartMarker(hostPid)
+        const metaMarker = typeof session.metadata?.hostStartMarker === 'string'
+            && session.metadata.hostStartMarker.length > 0
+            ? session.metadata.hostStartMarker
+            : undefined
+        const metaPid = typeof session.metadata?.hostPid === 'number' && session.metadata.hostPid > 0
+            ? session.metadata.hostPid
+            : undefined
         this.localWorkerIdentity = {
             hostPid,
-            processStartMarker: getProcessStartMarker(hostPid)
-                ?? (typeof session.metadata?.hostStartMarker === 'string' && session.metadata.hostStartMarker.length > 0
-                    ? session.metadata.hostStartMarker
-                    : undefined),
+            processStartMarker: probedMarker
+                ?? (metaPid === hostPid ? metaMarker : undefined),
             ...(typeof session.metadata?.machineId === 'string' && session.metadata.machineId.length > 0
+                && (metaPid === undefined || metaPid === hostPid)
                 ? { machineId: session.metadata.machineId }
                 : {}),
         }
@@ -1175,11 +1186,15 @@ if (isReconnect) {
             }
         }
 
+        const bgSnapshot = body.type === 'system'
+            && 'subtype' in body
+            && body.subtype === 'background_tasks_changed'
         this.emitOrQueue(() => {
             this.socket.emit('message', {
                 sid: this.sessionId,
                 message: content,
-                ...(createdAt !== undefined ? { createdAt } : {})
+                ...(createdAt !== undefined ? { createdAt } : {}),
+                ...(bgSnapshot ? { reportingOwner: this.reportingOwnerPayload() } : {}),
             })
         })
 
