@@ -1033,6 +1033,35 @@ body:
         expect(template.kind).toBe('form')
     })
 
+    // Regression (bot review, tiann/hapi#2147, follow-up): GitHub's own
+    // per-type attribute table types `default` as Integer, the one
+    // non-string attribute in this file's silent-acceptance family. The
+    // bare `typeof === 'number'` ternary already in place silently
+    // dropped a Boolean-coerced `default: false` as "no default
+    // declared" instead of rejecting the template.
+    it('is genuinely invalid when a dropdown default parses as a YAML boolean', () => {
+        const template = parseIssueFormYaml(
+            'x.yml',
+            'name: Bug\ndescription: Bug\nbody:\n  - type: dropdown\n    id: pie\n    attributes:\n      label: Pie?\n      options:\n        - Steak\n        - Fish\n      default: false'
+        )
+        expect(template.kind).toBe('unsupported')
+        if (template.kind !== 'unsupported') return
+        expect(template.githubValid).toBe(false)
+    })
+
+    it('allows an ordinary integer dropdown default, and omitting it entirely', () => {
+        const withDefault = parseIssueFormYaml(
+            'x.yml',
+            'name: Bug\ndescription: Bug\nbody:\n  - type: dropdown\n    id: pie\n    attributes:\n      label: Pie?\n      options:\n        - Steak\n        - Fish\n      default: 1'
+        )
+        expect(withDefault.kind).toBe('form')
+        const withoutDefault = parseIssueFormYaml(
+            'x.yml',
+            'name: Bug\ndescription: Bug\nbody:\n  - type: dropdown\n    id: pie\n    attributes:\n      label: Pie?\n      options:\n        - Steak\n        - Fish'
+        )
+        expect(withoutDefault.kind).toBe('form')
+    })
+
     // Regression (Meta review, tiann/hapi#2147, follow-up): checkboxes'
     // own option labels were never checked for duplicates either — the
     // direct structural sibling of the dropdown-options check above.
