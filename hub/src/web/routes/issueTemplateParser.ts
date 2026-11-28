@@ -557,6 +557,24 @@ export function parseIssueFormYaml(id: string, raw: string): IssueTemplate {
             if (!uploadLabel) {
                 return { id, name, kind: 'unsupported', reason: 'A "upload" field is missing a label', githubValid: false }
             }
+            // `upload`'s own checks above only ever covered "missing" —
+            // GitHub's "Attributes for upload" table types both `label`
+            // and `description` as String the same as every other type
+            // (bot review, tiann/hapi#2147, follow-up, which flagged
+            // `description` specifically; `label`'s matching
+            // unquoted-Boolean-word gap is the same bypass pattern, fixed
+            // alongside it rather than waiting for a separate round).
+            // `upload` never reaches the shared label/description checks
+            // below — it returns/continues before them — so this is the
+            // one place these must run for this type.
+            const uploadLabelNode = cstDoc.getIn(['body', elementIndex, 'attributes', 'label'], true) as { type?: string } | undefined
+            if (uploadLabelNode?.type === 'PLAIN' && GITHUB_BOOLEAN_WORDS.has(uploadLabel.toLowerCase())) {
+                return { id, name, kind: 'unsupported', reason: `Field label "${uploadLabel}" is an unquoted word GitHub's own parser would read as a Boolean — wrap it in quotes`, githubValid: false }
+            }
+            const uploadDescriptionReason = invalidAttributeStringReason(cstDoc, elementIndex, 'description', attrs.description)
+            if (uploadDescriptionReason) {
+                return { id, name, kind: 'unsupported', reason: `A "upload" field has an invalid ${uploadDescriptionReason}`, githubValid: false }
+            }
             if (!asString(elObj.id)) {
                 if (idlessLabels.has(uploadLabel)) {
                     return { id, name, kind: 'unsupported', reason: `Template body has a duplicate label "${uploadLabel}" with no distinguishing id`, githubValid: false }

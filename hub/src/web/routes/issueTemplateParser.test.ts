@@ -654,6 +654,32 @@ body:
         expect(template.kind === 'unsupported' && template.githubValid).toBe(false)
     })
 
+    // Regression (bot review, tiann/hapi#2147, follow-up): GitHub's
+    // "Attributes for upload" table types `description` as String — the
+    // upload branch checked `label`'s presence but never `description`
+    // at all, so an unquoted Boolean (`description: true`) still
+    // returned githubValid: true.
+    it('is genuinely invalid (githubValid: false) when an upload field has a non-string description', () => {
+        const template = parseIssueFormYaml(
+            'x.yml',
+            'name: Bug\ndescription: Bug\nbody:\n  - type: upload\n    id: screenshots\n    attributes:\n      label: Screenshots\n      description: true'
+        )
+        expect(template.kind).toBe('unsupported')
+        expect(template.kind === 'unsupported' && template.githubValid).toBe(false)
+    })
+
+    // Same bug, label variant: the upload branch's own label check only
+    // caught "missing," not the unquoted-GitHub-Boolean-word case every
+    // other type's label already gets checked for.
+    it('is genuinely invalid (githubValid: false) when an upload field has an unquoted Boolean-word label', () => {
+        const template = parseIssueFormYaml(
+            'x.yml',
+            'name: Bug\ndescription: Bug\nbody:\n  - type: upload\n    id: screenshots\n    attributes:\n      label: Yes'
+        )
+        expect(template.kind).toBe('unsupported')
+        expect(template.kind === 'unsupported' && template.githubValid).toBe(false)
+    })
+
     // Regression (bot review, tiann/hapi#2147, follow-up): the upload
     // field used to return githubValid: true immediately, before the
     // parser ever reached a later field in the same body — so a
