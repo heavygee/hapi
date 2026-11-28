@@ -15,6 +15,9 @@ describe('hapi job --help', () => {
             await jobCommand.run({ args: ['job', '--help'], subcommand: 'job', commandArgs: ['--help'] })
             const help = log.mock.calls.flat().join(' ').replace(/\s+/g, ' ')
             expect(help).toContain(SESSION_JOB_GATE)
+            expect(help).toMatch(/--detach/)
+            expect(help).toMatch(/job attach/)
+            expect(help).toMatch(/unexpected flag: --progress/)
         } finally {
             log.mockRestore()
         }
@@ -64,6 +67,56 @@ describe('parseJobArgs', () => {
         expect(parsed.progress).toBe('unknown')
         expect(parsed.heartbeatSec).toBe(60)
         expect(parsed.command).toEqual(['bash', '-c', 'echo hi'])
+    })
+
+    it('parses run --detach and attach --pid', () => {
+        const detached = parseJobArgs([
+            'run',
+            'sid',
+            'drain',
+            '--label=rsync',
+            '--progress=unknown',
+            '--detach',
+            '--detach-log=/tmp/job.log',
+            '--',
+            'true'
+        ])
+        expect(detached.detach).toBe(true)
+        expect(detached.detachLog).toBe('/tmp/job.log')
+
+        const attached = parseJobArgs([
+            'attach',
+            'sid',
+            'xfer',
+            '--pid=4242',
+            '--label=rsync',
+            '--progress=unknown',
+            '--started-at=1700000000000'
+        ])
+        expect(attached.action).toBe('attach')
+        expect(attached.pid).toBe(4242)
+        expect(attached.startedAt).toBe(1700000000000)
+        expect(attached.progress).toBe('unknown')
+    })
+
+    it('rejects attach without --pid and detach-log without --detach', () => {
+        expect(() => parseJobArgs([
+            'attach',
+            'sid',
+            'xfer',
+            '--label=x',
+            '--progress=unknown'
+        ])).toThrow(/requires --pid/)
+        expect(() => parseJobArgs([
+            'run',
+            'sid',
+            'drain',
+            '--label=x',
+            '--progress=unknown',
+            '--detach-log=/tmp/x',
+            '--',
+            'true'
+        ])).toThrow(/requires --detach/)
     })
 
     it('parses wake-on-terminal flags', () => {

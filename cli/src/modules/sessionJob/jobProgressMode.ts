@@ -66,7 +66,7 @@ export function parseUntilTimestamp(raw: string, nowMs: number = Date.now()): nu
 }
 
 export function assertCreateProgressMode(
-    action: 'run' | 'set',
+    action: 'run' | 'set' | 'attach',
     fields: ProgressFields
 ): asserts fields is ProgressFields & { progress: JobProgressMode } {
     if (fields.progress === undefined) {

@@ -1,10 +1,15 @@
 import chalk from 'chalk'
+import { spawn as spawnProcess } from 'node:child_process'
+import { openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { initializeToken } from '@/ui/tokenInit'
 import type { AttachedJobPatch, AttachedJobUpsert } from '@hapi/protocol'
 import {
     SessionJobError,
     SESSION_JOB_GATE,
     SESSION_JOB_REMAINING_ZERO_HINT,
+    SESSION_JOB_SET_STALE_WARNING,
     clearSessionJob,
     exitCodeForSessionJobError,
     formatSessionJobNotFoundHint,
@@ -13,6 +18,7 @@ import {
     updateSessionJob
 } from '@/modules/sessionJob/sessionJob'
 import { formatJobLine } from '@/modules/sessionJob/formatJobLine'
+import { attachSessionJob } from '@/modules/sessionJob/attachSessionJob'
 import { runSessionJob } from '@/modules/sessionJob/runSessionJob'
 import {
     assertCreateProgressMode,
@@ -28,7 +34,7 @@ export { formatJobLine, terminalText } from '@/modules/sessionJob/formatJobLine'
 
 export type ParsedJobArgs = {
     help: boolean
-    action?: 'set' | 'update' | 'clear' | 'list' | 'run'
+    action?: 'set' | 'update' | 'clear' | 'list' | 'run' | 'attach'
     sessionIdPrefix?: string
     jobKey?: string
     label?: string
@@ -49,6 +55,16 @@ export type ParsedJobArgs = {
     wakeOnTerminal?: boolean
     wakePrompt?: string
     command?: string[]
+    /** Positive PID for `job attach`. */
+    pid?: number
+    /**
+     * `job run --detach`: parent exits 0 only after hub registration succeeds;
+     * supervisor continues in a detached child. Prefer this over `nohup job run &`
+     * (shell exit 0 only means the fork happened).
+     */
+    detach?: boolean
+    /** Optional log path for detached supervisor stdout/stderr. */
+    detachLog?: string
 }
 
 function showHelp(): void {
@@ -72,12 +88,23 @@ ${chalk.bold('Agent contract:')}
   Do not wrap hapi-restart-hub / stack-switch in job run (hub down → zombie running meter).
 
 ${chalk.bold('Usage:')}
-  hapi job run <session> <job-key> --label <text> --progress unknown|fraction|until […] -- <cmd>…
+  hapi job run <session> <job-key> --label <text> --progress unknown|fraction|until […] [--detach [--detach-log <path>]] -- <cmd>…
+  hapi job attach <session> <job-key> --pid <pid> --label <text> --progress unknown|fraction|until […]
   hapi job set <session> <job-key> --label <text> --progress unknown|fraction|until […]
   hapi job update <session> <job-key> [--expected-run-id UUID] [--remaining N] [--done N] [--total N] [--status running|completed|failed] [--wake-on-terminal] [--wake-prompt <text>] [--detail ...]
                        [--clear-remaining|--clear-done|--clear-total|--clear-unit|--clear-detail]
   hapi job clear <session> <job-key> [--expected-run-id UUID]
   hapi job list <session>
+
+${chalk.bold('Detached supervisor (agent shells):')}
+  ${chalk.bold('job run')} IS the long-lived supervisor — do not wrap it in ${chalk.bold('nohup … &')}
+  and trust the shell exit code (that only means the fork succeeded). Prefer:
+    hapi job run … --detach --detach-log /tmp/job.log -- <cmd>…
+  Parent exits 0 only after the hub meter is registered; supervisor keeps heartbeating.
+  If you must background by hand: ${chalk.bold('setsid')} hapi job run … >log 2>&1 < /dev/null & disown
+  then verify with ${chalk.bold('hapi job list')} (empty list = never registered).
+  If you see ${chalk.bold('unexpected flag: --progress')}, your CLI predates progress modes —
+  upgrade past tiann/hapi#1424 (do not keep using a stale /opt binary against new docs).
 
 ${chalk.bold('Wake on terminal (tiann/hapi#1489, default off):')}
   --wake-on-terminal   When the job hits completed/failed, hub resumes the owning
@@ -312,6 +339,32 @@ export function parseJobArgs(args: string[]): ParsedJobArgs {
             result.untilMs = parseUntilTimestamp(arg.slice('--until='.length))
             continue
         }
+        if (arg === '--detach') {
+            result.detach = true
+            continue
+        }
+        if (arg === '--detach-log') {
+            result.detachLog = flagArgs[++i]
+            if (!result.detachLog) {
+                throw new SessionJobError('bad_args', '--detach-log requires a path')
+            }
+            continue
+        }
+        if (arg.startsWith('--detach-log=')) {
+            result.detachLog = arg.slice('--detach-log='.length)
+            if (!result.detachLog) {
+                throw new SessionJobError('bad_args', '--detach-log requires a path')
+            }
+            continue
+        }
+        if (arg === '--pid') {
+            result.pid = parseOptionalNumber('--pid', flagArgs[++i])
+            continue
+        }
+        if (arg.startsWith('--pid=')) {
+            result.pid = parseOptionalNumber('--pid', arg.slice('--pid='.length))
+            continue
+        }
         if (arg.startsWith('-')) {
             throw new SessionJobError('bad_args', `unexpected flag: ${arg}`)
         }
@@ -322,8 +375,12 @@ export function parseJobArgs(args: string[]): ParsedJobArgs {
                 && arg !== 'clear'
                 && arg !== 'list'
                 && arg !== 'run'
+                && arg !== 'attach'
             ) {
-                throw new SessionJobError('bad_args', `unknown action '${arg}' (set|update|clear|list|run)`)
+                throw new SessionJobError(
+                    'bad_args',
+                    `unknown action '${arg}' (set|update|clear|list|run|attach)`
+                )
             }
             result.action = arg
             continue
@@ -340,8 +397,8 @@ export function parseJobArgs(args: string[]): ParsedJobArgs {
     }
 
     if (result.startedAt !== undefined && result.action !== undefined) {
-        if (result.action === 'set') {
-            // ok — correct historical clock / window start
+        if (result.action === 'set' || result.action === 'attach') {
+            // ok — late attach / correct historical clock
         } else if (result.action === 'run' && result.progress === 'until') {
             // ok — mid-window countdown: heartbeats keep total = until - startedAt
         } else if (result.action === 'run') {
@@ -353,7 +410,7 @@ export function parseJobArgs(args: string[]): ParsedJobArgs {
         } else {
             throw new SessionJobError(
                 'bad_args',
-                '--started-at is only valid with job set, or job run --progress until'
+                '--started-at is only valid with job set|attach, or job run --progress until'
             )
         }
     }
@@ -362,8 +419,22 @@ export function parseJobArgs(args: string[]): ParsedJobArgs {
         result.heartbeatSec !== undefined
         && result.action !== undefined
         && result.action !== 'run'
+        && result.action !== 'attach'
     ) {
-        throw new SessionJobError('bad_args', '--heartbeat-sec is only valid with job run')
+        throw new SessionJobError('bad_args', '--heartbeat-sec is only valid with job run or attach')
+    }
+
+    if (result.detach && result.action !== undefined && result.action !== 'run') {
+        throw new SessionJobError('bad_args', '--detach is only valid with job run')
+    }
+    if (result.detachLog !== undefined && !result.detach) {
+        throw new SessionJobError('bad_args', '--detach-log requires --detach')
+    }
+    if (result.pid !== undefined && result.action !== undefined && result.action !== 'attach') {
+        throw new SessionJobError('bad_args', '--pid is only valid with job attach')
+    }
+    if (result.action === 'attach' && result.pid === undefined) {
+        throw new SessionJobError('bad_args', 'attach requires --pid <pid>')
     }
 
     const clearUsed =
@@ -403,8 +474,11 @@ export function parseJobArgs(args: string[]): ParsedJobArgs {
     if (result.action === 'clear' && mutationFieldsUsed) {
         throw new SessionJobError('bad_args', 'job clear only accepts --expected-run-id')
     }
-    if (result.action === 'run' && result.status !== undefined) {
-        throw new SessionJobError('bad_args', '--status is not valid with job run')
+    if (
+        (result.action === 'run' || result.action === 'attach')
+        && result.status !== undefined
+    ) {
+        throw new SessionJobError('bad_args', '--status is not valid with job run or attach')
     }
 
     if (
@@ -414,17 +488,24 @@ export function parseJobArgs(args: string[]): ParsedJobArgs {
     ) {
         throw new SessionJobError('bad_args', '-- <cmd> is only valid with job run')
     }
+    if (result.action === 'attach' && result.command !== undefined) {
+        throw new SessionJobError('bad_args', 'attach watches --pid; do not pass -- <cmd>')
+    }
 
     if (
         (result.progress !== undefined || result.untilMs !== undefined)
         && result.action !== undefined
         && result.action !== 'run'
         && result.action !== 'set'
+        && result.action !== 'attach'
     ) {
-        throw new SessionJobError('bad_args', '--progress/--until are only valid with job run or set')
+        throw new SessionJobError(
+            'bad_args',
+            '--progress/--until are only valid with job run, set, or attach'
+        )
     }
 
-    if (result.action === 'run' || result.action === 'set') {
+    if (result.action === 'run' || result.action === 'set' || result.action === 'attach') {
         // Auto-infer until mode when running `sleep N [M...]` without explicit --progress or --until
         if (
             result.action === 'run'
@@ -478,6 +559,94 @@ function formatCliJobLine(job: {
     startedAt: number
 }): string {
     return formatJobLine(job, { includeTiming: true })
+}
+
+/** Parent of `job run --detach`: spawn supervisor, exit 0 only after hub register. */
+export async function launchDetachedJobRun(options: {
+    jobKey: string
+    detachLog?: string
+    /** Injected for tests. */
+    spawnImpl?: typeof spawnProcess
+    sleepImpl?: (ms: number) => Promise<void>
+    nowImpl?: () => number
+}): Promise<void> {
+    const readyFile = join(
+        tmpdir(),
+        `hapi-job-ready-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`
+    )
+    const childArgv = process.argv.slice(1).filter((arg, index, all) => {
+        if (arg === '--detach') return false
+        if (arg === '--detach-log') return false
+        if (index > 0 && all[index - 1] === '--detach-log') return false
+        if (arg.startsWith('--detach-log=')) return false
+        return true
+    })
+
+    let logFd: number | 'ignore' = 'ignore'
+    if (options.detachLog) {
+        logFd = openSync(options.detachLog, 'a')
+    }
+
+    const spawnFn = options.spawnImpl ?? spawnProcess
+    const child = spawnFn(process.execPath, childArgv, {
+        detached: true,
+        stdio: ['ignore', logFd, logFd],
+        env: {
+            ...process.env,
+            HAPI_JOB_RUN_SUPERVISOR: '1',
+            HAPI_JOB_READY_FILE: readyFile
+        }
+    })
+    child.unref()
+
+    const sleep = options.sleepImpl
+        ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
+    const now = options.nowImpl ?? Date.now
+    const deadline = now() + 60_000
+    while (now() < deadline) {
+        try {
+            const text = readFileSync(readyFile, 'utf8')
+            if (text.includes('registered')) {
+                try {
+                    unlinkSync(readyFile)
+                } catch {
+                    // best-effort cleanup
+                }
+                console.log(
+                    `detached supervisor pid=${child.pid ?? '?'} job=${options.jobKey}`
+                    + (options.detachLog ? ` log=${options.detachLog}` : '')
+                    + ' — hub meter registered; parent exiting 0'
+                )
+                return
+            }
+        } catch {
+            // not ready yet
+        }
+        if (child.exitCode !== null && child.exitCode !== undefined) {
+            try {
+                unlinkSync(readyFile)
+            } catch {
+                // ignore
+            }
+            throw new SessionJobError(
+                'bad_args',
+                `detached supervisor exited ${child.exitCode} before registering job ${options.jobKey}`
+                + (options.detachLog ? ` — see ${options.detachLog}` : '')
+            )
+        }
+        await sleep(100)
+    }
+
+    try {
+        unlinkSync(readyFile)
+    } catch {
+        // ignore
+    }
+    throw new SessionJobError(
+        'bad_args',
+        `timed out waiting for detached supervisor to register job ${options.jobKey}`
+        + (options.detachLog ? ` — see ${options.detachLog}` : '')
+    )
 }
 
 export async function handleJobCommand(args: string[]): Promise<void> {
@@ -553,7 +722,43 @@ export async function handleJobCommand(args: string[]): Promise<void> {
             jobKey: parsed.jobKey,
             body
         })
+        console.error(chalk.yellow('hapi job warning:'), SESSION_JOB_SET_STALE_WARNING)
         console.log(`set ${formatCliJobLine(result.job)}`)
+        return
+    }
+
+    if (parsed.action === 'attach') {
+        if (!parsed.label) {
+            throw new SessionJobError('bad_args', 'attach requires --label')
+        }
+        if (parsed.pid === undefined) {
+            throw new SessionJobError('bad_args', 'attach requires --pid <pid>')
+        }
+        if (parsed.startedAt !== undefined && !Number.isFinite(parsed.startedAt)) {
+            throw new SessionJobError('bad_args', '--started-at must be epoch milliseconds')
+        }
+        const exitCode = await attachSessionJob({
+            sessionIdPrefix: parsed.sessionIdPrefix,
+            jobKey: parsed.jobKey,
+            label: parsed.label,
+            pid: parsed.pid,
+            ...(parsed.heartbeatSec !== undefined
+                ? { heartbeatMs: Math.max(5, parsed.heartbeatSec) * 1000 }
+                : {}),
+            ...(typeof parsed.done === 'number' ? { done: parsed.done } : {}),
+            ...(typeof parsed.total === 'number' ? { total: parsed.total } : {}),
+            ...(typeof parsed.remaining === 'number' ? { remaining: parsed.remaining } : {}),
+            ...(typeof parsed.unit === 'string' ? { unit: parsed.unit } : {}),
+            ...(typeof parsed.detail === 'string' ? { detail: parsed.detail } : {}),
+            ...(parsed.untilMs !== undefined ? { untilMs: parsed.untilMs } : {}),
+            ...(parsed.startedAt !== undefined ? { startedAtMs: parsed.startedAt } : {}),
+            ...(parsed.wakeOnTerminal !== undefined ? { wakeOnTerminal: parsed.wakeOnTerminal } : {}),
+            ...(parsed.wakePrompt !== undefined ? { wakePrompt: parsed.wakePrompt } : {})
+        })
+        if (exitCode !== 0) {
+            process.exitCode = exitCode
+        }
+        console.log(`attach finished exit=${exitCode} job=${parsed.jobKey}`)
         return
     }
 
@@ -567,6 +772,17 @@ export async function handleJobCommand(args: string[]): Promise<void> {
         if (parsed.startedAt !== undefined && !Number.isFinite(parsed.startedAt)) {
             throw new SessionJobError('bad_args', '--started-at must be epoch milliseconds')
         }
+
+        // Parent side of --detach: re-exec without --detach, wait until hub set.
+        if (parsed.detach && process.env.HAPI_JOB_RUN_SUPERVISOR !== '1') {
+            await launchDetachedJobRun({
+                detachLog: parsed.detachLog,
+                jobKey: parsed.jobKey
+            })
+            return
+        }
+
+        const readyFile = process.env.HAPI_JOB_READY_FILE
         const exitCode = await runSessionJob({
             sessionIdPrefix: parsed.sessionIdPrefix,
             jobKey: parsed.jobKey,
@@ -584,7 +800,17 @@ export async function handleJobCommand(args: string[]): Promise<void> {
             ...(parsed.durationMs !== undefined ? { durationMs: parsed.durationMs } : {}),
             ...(parsed.startedAt !== undefined ? { startedAtMs: parsed.startedAt } : {}),
             ...(parsed.wakeOnTerminal !== undefined ? { wakeOnTerminal: parsed.wakeOnTerminal } : {}),
-            ...(parsed.wakePrompt !== undefined ? { wakePrompt: parsed.wakePrompt } : {})
+            ...(parsed.wakePrompt !== undefined ? { wakePrompt: parsed.wakePrompt } : {}),
+            ...(readyFile
+                ? {
+                    onRegistered: (info) => {
+                        writeFileSync(
+                            readyFile,
+                            `registered key=${info.jobKey} runId=${info.runId} session=${info.sessionId}\n`
+                        )
+                    }
+                }
+                : {})
         })
         if (exitCode !== 0) {
             process.exitCode = exitCode

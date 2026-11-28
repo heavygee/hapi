@@ -63,6 +63,40 @@ Treat this like `ping_peer` / `inspect_peer`: it is first-class HAPI tooling, no
 
 Prefer `"$HAPI_SESSION_ID"` only when it matches the operator chat URL uuid. Remote Cursor runner: pass `/sessions/<id>` explicitly (see "Which session id").
 
+#### Detached supervisor (agent tool shells)
+
+`job run` **is** the long-lived supervisor. Do **not** wrap it in `nohup hapi job run … &` and trust the **shell** exit code — that only means the fork succeeded. A stale CLI that rejects `--progress` still yields shell exit 0 under `&`, with no row in `hapi job list`.
+
+Prefer:
+
+```bash
+hapi job run "$HAPI_SESSION_ID" beets \
+  --label 'beets import' --progress unknown --detach --detach-log /tmp/beets-job.log \
+  -- ./beets-import.sh
+# Parent exits 0 only after the hub meter is registered.
+# Then: hapi job list "$HAPI_SESSION_ID"   # must show the key
+```
+
+If you must background by hand: `setsid hapi job run … >log 2>&1 </dev/null & disown`, then **verify** with `hapi job list`. Empty list means never registered. Look for `[hapi job run] starting` / `registered` lines in the log — silence means the process never entered `run`.
+
+If you see `unexpected flag: --progress`, your binary predates progress modes (tiann/hapi#1424) — upgrade the CLI; do not keep feeding new docs to a stale `/opt` binary.
+
+#### Late attach (`job attach --pid`)
+
+When the long process is **already running** (you started it before reaching for `job`):
+
+```bash
+hapi job attach "$HAPI_SESSION_ID" xfer \
+  --pid "$PID" --label 'qmrestore' --progress unknown \
+  --started-at "$PROCESS_START_EPOCH_MS"
+```
+
+The supervisor heartbeats until the PID exits, then marks `completed` (exit code unknown — attach is not the parent). Prefer `job run` when you can wrap the command from the start.
+
+#### `job set` warning
+
+`hapi job set` prints a stderr warning: idle agents cannot heartbeat; the UI goes amber after ~15m. Prefer `job run` / `job attach`. If you must `set`, keep `job update`ing from a live process for the whole run.
+
 #### Progress mode
 
 `--progress` is required on `run` / `set`, except when `run` directly wraps a numeric `sleep` command without progress flags. In that case the CLI infers a countdown from the duration. Other commands still require an explicit mode:

@@ -41,6 +41,8 @@ export type RunSessionJobOptions = SessionJobClientOptions & {
     startedAtMs?: number
     wakeOnTerminal?: boolean
     wakePrompt?: string
+    /** Called after hub set succeeds (detach parent waits on this). */
+    onRegistered?: (info: { jobKey: string; runId: string; sessionId: string }) => void
     /** Injected for tests. */
     spawnImpl?: typeof spawn
     setIntervalImpl?: typeof setInterval
@@ -220,6 +222,12 @@ export async function runSessionJob(options: RunSessionJobOptions): Promise<numb
         ...(options.wakePrompt !== undefined ? { wakePrompt: options.wakePrompt } : {})
     }
 
+    // Loud breadcrumb before any hub I/O so an empty redirected log means the
+    // supervisor never entered run (vs silent nohup& shell-exit-0 footgun).
+    console.error(
+        `[hapi job run] starting key=${options.jobKey} cmd=${JSON.stringify(options.command)}`
+    )
+
     // Cache sessionId for the run. JWT is refreshed in-place before hub's 4h
     // expiry and on 401 (see sessionJob.withAuthedRequest) — do not skip refresh.
     const resolved: SessionJobResolvedClient = await resolveSessionJobClient(options)
@@ -235,6 +243,16 @@ export async function runSessionJob(options: RunSessionJobOptions): Promise<numb
         ...clientOpts,
         jobKey: options.jobKey,
         body
+    })
+
+    console.error(
+        `[hapi job run] registered key=${options.jobKey} runId=${runId} `
+        + `session=${resolved.sessionId}`
+    )
+    options.onRegistered?.({
+        jobKey: options.jobKey,
+        runId,
+        sessionId: resolved.sessionId
     })
 
     const spawnFn = options.spawnImpl ?? spawn

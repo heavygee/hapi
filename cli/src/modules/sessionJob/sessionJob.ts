@@ -77,6 +77,13 @@ export function isSessionJobNotFoundError(error: unknown): boolean {
 export const SESSION_JOB_REMAINING_ZERO_HINT =
     'remaining is 0 but status is still running — pass --status completed when work is finished, or hapi job clear to drop the meter.'
 
+/** Shown on every `hapi job set` — idle agents cannot heartbeat. */
+export const SESSION_JOB_SET_STALE_WARNING =
+    'job set does not heartbeat. An idle agent cannot refresh the meter — the UI goes amber '
+    + 'after ~15m without updates. Prefer `hapi job run` (or `hapi job attach --pid`) so the '
+    + 'supervisor heartbeats until exit. If you must use set, keep `hapi job update`ing from a '
+    + 'live process for the whole run.'
+
 const AUTH_RECOVERY_HINT =
     'On a remote runner, set HAPI_API_URL to the runner hub, and set CLI_API_TOKEN ' +
     'or run `hapi auth login`. Prefer `hapi job` over raw JWT+curl.'
