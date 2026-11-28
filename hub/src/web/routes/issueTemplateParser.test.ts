@@ -561,6 +561,32 @@ body:
         expect(withoutTitle.kind).toBe('form')
     })
 
+    // Regression (bot review, tiann/hapi#2147, follow-up): `assignees`/
+    // `labels` accept an Array or a comma-delimited string — a whitespace-
+    // only STRING is GitHub's own cited example of the "key must be a
+    // string" error (its docs use `assignees: "      "` verbatim).
+    // `asStringListField` alone would silently trim/filter that to an
+    // empty array ("no assignees declared") instead of rejecting the
+    // template.
+    it('is unsupported when assignees is a whitespace-only string', () => {
+        const template = parseIssueFormYaml('x.yml', 'name: Bug\ndescription: Bug\nassignees: "      "\nbody:\n  - type: input\n    attributes:\n      label: Contact')
+        expect(template.kind).toBe('unsupported')
+        expect(template.kind === 'unsupported' && template.githubValid).toBe(false)
+    })
+
+    it('is unsupported when labels is a whitespace-only string', () => {
+        const template = parseIssueFormYaml('x.yml', 'name: Bug\ndescription: Bug\nlabels: "   "\nbody:\n  - type: input\n    attributes:\n      label: Contact')
+        expect(template.kind).toBe('unsupported')
+        expect(template.kind === 'unsupported' && template.githubValid).toBe(false)
+    })
+
+    it('allows a comma-delimited assignees string and an empty assignees array', () => {
+        const withString = parseIssueFormYaml('x.yml', 'name: Bug\ndescription: Bug\nassignees: "octocat, hubot"\nbody:\n  - type: input\n    attributes:\n      label: Contact')
+        expect(withString.kind).toBe('form')
+        const withEmptyArray = parseIssueFormYaml('x.yml', 'name: Bug\ndescription: Bug\nassignees: []\nbody:\n  - type: input\n    attributes:\n      label: Contact')
+        expect(withEmptyArray.kind).toBe('form')
+    })
+
     // Review finding (tiann/hapi#2147): GitHub's own docs document "Body
     // must contain at least one non-markdown field" as a validation error —
     // markdown elements are static text, never submitted, so a body made

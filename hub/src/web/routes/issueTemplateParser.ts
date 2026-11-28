@@ -296,6 +296,22 @@ export function parseIssueFormYaml(id: string, raw: string): IssueTemplate {
     if (obj.title !== undefined && typeof obj.title !== 'string') {
         return { id, name, kind: 'unsupported', reason: 'Template\'s "title" must be a string', githubValid: false }
     }
+    // `labels`/`assignees` accept an Array OR a comma-delimited string — a
+    // whitespace-only STRING form is GitHub's own cited example of "Empty
+    // strings, or strings consisting of only whitespaces, are also not
+    // permissible when the field expects a string" (confirmed directly
+    // against GitHub's docs, which use `assignees: "      "` verbatim as
+    // the example; bot review, tiann/hapi#2147, follow-up). `asStringListField`
+    // alone would silently split/trim/filter that down to an empty array —
+    // "no assignees declared" — rather than rejecting the template, same
+    // silent-acceptance gap as every other check in this family. An empty
+    // ARRAY (`assignees: []`) is unaffected; GitHub's example is specific
+    // to the blank-string form.
+    for (const [key, value] of [['labels', obj.labels], ['assignees', obj.assignees]] as const) {
+        if (typeof value === 'string' && value.trim().length === 0) {
+            return { id, name, kind: 'unsupported', reason: `Template's "${key}" is a whitespace-only string`, githubValid: false }
+        }
+    }
     const bodyRaw = obj.body
     if (!Array.isArray(bodyRaw) || bodyRaw.length === 0) {
         return { id, name, kind: 'unsupported', reason: 'Template has no body elements', githubValid: false }
