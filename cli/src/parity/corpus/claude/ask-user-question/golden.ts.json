@@ -56,6 +56,7 @@
         "model": null,
         "permissionMode": "default",
         "processStartMarker": "<marker>",
+        "runnerOwned": true,
         "sid": "<uuid:1>",
         "thinking": false
       }
@@ -869,7 +870,9 @@
                     ]
                   },
                   "createdAt": "<ts>",
+                  "hostPid": "<pid>",
                   "hostStartMarker": "<marker>",
+                  "machineId": "parity-machine",
                   "tool": "AskUserQuestion"
                 }
               },
@@ -907,7 +910,9 @@
                     ]
                   },
                   "createdAt": "<ts>",
+                  "hostPid": "<pid>",
                   "hostStartMarker": "<marker>",
+                  "machineId": "parity-machine",
                   "tool": "AskUserQuestion"
                 }
               },
@@ -1259,7 +1264,9 @@
                   },
                   "completedAt": "<ts>",
                   "createdAt": "<ts>",
+                  "hostPid": "<pid>",
                   "hostStartMarker": "<marker>",
+                  "machineId": "parity-machine",
                   "status": "approved",
                   "tool": "AskUserQuestion"
                 }
@@ -1305,7 +1312,9 @@
                   },
                   "completedAt": "<ts>",
                   "createdAt": "<ts>",
+                  "hostPid": "<pid>",
                   "hostStartMarker": "<marker>",
+                  "machineId": "parity-machine",
                   "status": "approved",
                   "tool": "AskUserQuestion"
                 }

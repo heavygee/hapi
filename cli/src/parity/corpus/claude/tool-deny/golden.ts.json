@@ -56,6 +56,7 @@
         "model": null,
         "permissionMode": "default",
         "processStartMarker": "<marker>",
+        "runnerOwned": true,
         "sid": "<uuid:1>",
         "thinking": false
       }
@@ -837,7 +838,9 @@
                     "command": "echo parity"
                   },
                   "createdAt": "<ts>",
+                  "hostPid": "<pid>",
                   "hostStartMarker": "<marker>",
+                  "machineId": "parity-machine",
                   "tool": "Bash"
                 }
               },
@@ -859,7 +862,9 @@
                     "command": "echo parity"
                   },
                   "createdAt": "<ts>",
+                  "hostPid": "<pid>",
                   "hostStartMarker": "<marker>",
+                  "machineId": "parity-machine",
                   "tool": "Bash"
                 }
               },
@@ -971,7 +976,9 @@
                   },
                   "completedAt": "<ts>",
                   "createdAt": "<ts>",
+                  "hostPid": "<pid>",
                   "hostStartMarker": "<marker>",
+                  "machineId": "parity-machine",
                   "status": "denied",
                   "tool": "Bash"
                 }
@@ -996,7 +1003,9 @@
                   },
                   "completedAt": "<ts>",
                   "createdAt": "<ts>",
+                  "hostPid": "<pid>",
                   "hostStartMarker": "<marker>",
+                  "machineId": "parity-machine",
                   "status": "denied",
                   "tool": "Bash"
                 }

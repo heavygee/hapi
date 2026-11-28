@@ -235,6 +235,8 @@ export class ApiSessionClient extends EventEmitter {
         hostPid: number
         processStartMarker?: string
     }
+    /** Frozen at construct from bootstrap metadata — not refreshed after terminal resume. */
+    private readonly localWorkerRunnerOwned: boolean
     readonly rpcHandlerManager: RpcHandlerManager
     private readonly terminalManager: TerminalManager
     private agentTerminalResize: ((cols: number, rows: number) => void) | null = null
@@ -301,6 +303,11 @@ export class ApiSessionClient extends EventEmitter {
                 ? { machineId: session.metadata.machineId }
                 : {}),
         }
+        this.localWorkerRunnerOwned = Boolean(
+            session.metadata?.codexResumePending
+            || session.metadata?.startedBy === 'runner'
+            || session.metadata?.startedFromRunner === true,
+        )
 
         this.rpcHandlerManager = new RpcHandlerManager({
             scopePrefix: this.sessionId,
@@ -1284,15 +1291,27 @@ if (isReconnect) {
      */
     private stampRequestOwners(state: AgentState): AgentState {
         const marker = this.localWorkerIdentity.processStartMarker
+        const machineId = this.localWorkerIdentity.machineId
+        const hostPid = this.localWorkerIdentity.hostPid
         const requests = state.requests
-        if (!marker || !requests) return state
+        if (!marker || !machineId || !hostPid || !requests) return state
         let changed = false
         const next: NonNullable<AgentState['requests']> = { ...requests }
         for (const [id, request] of Object.entries(requests)) {
-            if (!request || (typeof request.hostStartMarker === 'string' && request.hostStartMarker.length > 0)) {
-                continue
+            if (!request) continue
+            const hasFullOwner = typeof request.hostStartMarker === 'string'
+                && request.hostStartMarker.length > 0
+                && typeof request.machineId === 'string'
+                && request.machineId.length > 0
+                && typeof request.hostPid === 'number'
+                && request.hostPid > 0
+            if (hasFullOwner) continue
+            next[id] = {
+                ...request,
+                machineId,
+                hostPid,
+                hostStartMarker: marker,
             }
-            next[id] = { ...request, hostStartMarker: marker }
             changed = true
         }
         return changed ? { ...state, requests: next } : state
@@ -1467,6 +1486,7 @@ if (isReconnect) {
             ...(owner.machineId ? { machineId: owner.machineId } : {}),
             hostPid: owner.hostPid,
             ...(owner.processStartMarker ? { processStartMarker: owner.processStartMarker } : {}),
+            runnerOwned: this.localWorkerRunnerOwned,
         }
         if (this.state !== 'active' || !this.socket.connected) {
             return

@@ -1774,11 +1774,10 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         const pid = parseInt(sessionId.slice(4), 10);
         if (!Number.isFinite(pid) || pid <= 0) return 'unknown';
         const expected = opts?.processStartMarker;
-        const hubSessionId = opts?.hubSessionId;
 
         const codexOwnedStillAlive = async (): Promise<'still_alive' | 'unknown' | null> => {
           // Strict registry: unreadable → unknown (keep latch). Scope to this
-          // hub+token and, when provided, the HAPI session binding.
+          // hub+token; match wrapper by marker/pid (not survivor hubSessionId).
           let runtimes: Awaited<ReturnType<typeof readRuntimes>>
           try {
             runtimes = await readRuntimes({ strict: true })
@@ -1788,8 +1787,10 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           const hub = configuration.apiUrl
           const auth = runtimeAuthHash()
           for (const runtime of runtimes) {
+            // Match by hub+auth+wrapper identity. Do NOT require hubSessionId —
+            // after a row merge the runtime may still be indexed under the
+            // source id while Archive probes the survivor (#2658).
             if (runtime.hub !== hub || runtime.authHash !== auth) continue
-            if (hubSessionId && !runtime.sessions[hubSessionId]) continue
             if (expected) {
               if (runtime.marker !== expected) continue
             } else if (runtime.pid !== pid) {

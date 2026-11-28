@@ -492,9 +492,10 @@ export const AgentStateRequestSchema = z.object({
     toolCallId: z.string().optional(),
     arguments: z.unknown(),
     createdAt: z.number().nullish(),
-    // Reporting worker generation (#2658). Archive clears only requests that
-    // match a verified-exited owner — unmarked stay unless the current row's
-    // marker itself was verified gone.
+    // Full reporting owner (#2658). Marker alone is second-precision on Unix
+    // and can collide across PIDs — Archive clears only when all three match.
+    machineId: z.string().optional(),
+    hostPid: z.number().int().positive().optional(),
     hostStartMarker: z.string().optional(),
 })
 

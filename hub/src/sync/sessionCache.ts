@@ -247,6 +247,8 @@ export class SessionCache {
     private readonly deduplicateInProgress: Set<string> = new Set()
     private readonly deduplicatePending: Map<string, Set<string>> = new Map()
     private readonly pendingThinkingUntilBySessionId: Map<string, number> = new Map()
+    /** Owner key that last set `session.thinking` via an attributed keepalive. */
+    private readonly thinkingOwnerBySessionId: Map<string, string> = new Map()
     private readonly runtimeConfigUpdatedAtBySessionId: Map<string, Partial<Record<RuntimeConfigKey, number>>> = new Map()
     /**
      * Last time the hub saw real agent progress per session (tiann/hapi#1820).
@@ -698,6 +700,7 @@ export class SessionCache {
         machineId?: string
         hostPid?: number
         processStartMarker?: string
+        runnerOwned?: boolean
     }): void {
         const t = clampAliveTime(payload.time)
         if (!t) return
@@ -726,6 +729,24 @@ export class SessionCache {
         session.activeAt = Math.max(session.activeAt, hubNow)
         session.thinking = requestedThinking || preserveQueuedThinking
         session.thinkingAt = t
+        // Track which owner last set the row-wide thinking flag so a verified
+        // prior-gen exit can clear a stale latch without wiping B (#2658).
+        const reportedOwnerKey = (
+            typeof payload.machineId === 'string' && payload.machineId.length > 0
+            && typeof payload.hostPid === 'number' && payload.hostPid > 0
+            && typeof payload.processStartMarker === 'string' && payload.processStartMarker.length > 0
+        )
+            ? liveWorkOwnerKey({
+                machineId: payload.machineId,
+                hostPid: payload.hostPid,
+                hostStartMarker: payload.processStartMarker,
+            })
+            : undefined
+        if (session.thinking && reportedOwnerKey) {
+            this.thinkingOwnerBySessionId.set(session.id, reportedOwnerKey)
+        } else if (!session.thinking) {
+            this.thinkingOwnerBySessionId.delete(session.id)
+        }
         if (!requestedThinking && preserveQueuedThinking && hasUnconsumedPrompt) {
             session.activeTurnStartedAt = hubNow
         } else if (wasThinking && !session.thinking) {
@@ -736,18 +757,16 @@ export class SessionCache {
         }
         // Durable owner latch survives heartbeat expiry (#2658). Bound to the
         // reporting worker — never the current row's marker/machine alone.
+        const reported = {
+            machineId: payload.machineId,
+            hostPid: payload.hostPid,
+            processStartMarker: payload.processStartMarker,
+            runnerOwned: payload.runnerOwned,
+        }
         if (session.thinking) {
-            this.setUnresolvedTurn(session.id, true, {
-                machineId: payload.machineId,
-                hostPid: payload.hostPid,
-                processStartMarker: payload.processStartMarker,
-            })
+            this.setUnresolvedTurn(session.id, true, reported)
         } else if (!preserveQueuedThinking) {
-            this.setUnresolvedTurn(session.id, false, {
-                machineId: payload.machineId,
-                hostPid: payload.hostPid,
-                processStartMarker: payload.processStartMarker,
-            })
+            this.setUnresolvedTurn(session.id, false, reported)
         }
         // The agent says it's idle: whatever it does next is a new turn.
         if (!requestedThinking) this.forgetInterruptedTurn(session.id)
@@ -968,36 +987,44 @@ export class SessionCache {
     setUnresolvedTurn(
         sessionId: string,
         unresolved: boolean,
-        reported?: { machineId?: string; hostPid?: number; processStartMarker?: string },
+        reported?: {
+            machineId?: string
+            hostPid?: number
+            processStartMarker?: string
+            runnerOwned?: boolean
+        },
     ): void {
         this.upsertReportedGenerationLiveWork(sessionId, { unresolvedTurn: unresolved }, reported)
     }
 
     /**
      * Drop pending permission/input requests owned by a verified-exited worker
-     * (#2658). Never wipe another generation's requests. Unmarked requests
-     * clear only when the verified marker is still the current row's marker
-     * (legacy CLI that did not stamp ownership).
+     * (#2658). Requires full owner identity (machineId+hostPid+marker) — marker
+     * alone can collide across PIDs on Unix. Partial/legacy stamps are preserved
+     * (fail closed — never wipe an unverified owner).
      */
-    clearPendingAgentRequestsForOwner(sessionId: string, verifiedHostStartMarker: string): void {
+    clearPendingAgentRequestsForOwner(
+        sessionId: string,
+        verified: { machineId: string; hostPid: number; hostStartMarker: string },
+    ): void {
         const session = this.sessions.get(sessionId)
         if (!session?.agentState) return
-        if (typeof verifiedHostStartMarker !== 'string' || verifiedHostStartMarker.length === 0) return
+        if (
+            typeof verified.machineId !== 'string' || verified.machineId.length === 0
+            || typeof verified.hostPid !== 'number' || verified.hostPid <= 0
+            || typeof verified.hostStartMarker !== 'string' || verified.hostStartMarker.length === 0
+        ) {
+            return
+        }
         const requests = session.agentState.requests
         if (!requests || Object.keys(requests).length === 0) return
-        const currentMarker = typeof session.metadata?.hostStartMarker === 'string'
-            && session.metadata.hostStartMarker.length > 0
-            ? session.metadata.hostStartMarker
-            : undefined
         const nextRequests: NonNullable<typeof requests> = {}
         let removed = false
         for (const [id, request] of Object.entries(requests)) {
-            const owner = typeof request.hostStartMarker === 'string' && request.hostStartMarker.length > 0
-                ? request.hostStartMarker
-                : undefined
-            const drop = owner === verifiedHostStartMarker
-                || (!owner && currentMarker === verifiedHostStartMarker)
-            if (drop) {
+            const matches = request.machineId === verified.machineId
+                && request.hostPid === verified.hostPid
+                && request.hostStartMarker === verified.hostStartMarker
+            if (matches) {
                 removed = true
                 continue
             }
@@ -1022,6 +1049,29 @@ export class SessionCache {
                 },
             })
         }
+    }
+
+    /**
+     * After a verified owner exit, drop row-wide thinking only when that owner
+     * was the last attributed reporter (#2658). Preserves B's thinking.
+     */
+    clearTransientThinkingForOwner(sessionId: string, ownerKey: string): void {
+        const session = this.sessions.get(sessionId)
+        if (!session) return
+        if (this.thinkingOwnerBySessionId.get(sessionId) !== ownerKey) return
+        if (!session.thinking) {
+            this.thinkingOwnerBySessionId.delete(sessionId)
+            return
+        }
+        session.thinking = false
+        session.thinkingAt = Date.now()
+        session.activeTurnStartedAt = null
+        this.thinkingOwnerBySessionId.delete(sessionId)
+        this.publisher.emit({
+            type: 'session-updated',
+            sessionId,
+            data: { thinking: false, thinkingAt: session.thinkingAt, activeTurnStartedAt: null },
+        })
     }
 
     /**
@@ -1058,18 +1108,22 @@ export class SessionCache {
 
     /**
      * Upsert durable live-work for the reporting worker only (#2658).
-     * Runner-owned + machineId + hostPid + processStartMarker required —
-     * otherwise leave transient thinking/backgroundTasks alone (terminal /
-     * older CLIs stay on heartbeat expiry).
+     * Runner provenance comes from the report (frozen CLI construct) — not the
+     * current row's startedBy after a terminal resume. Full owner identity
+     * required; otherwise leave transient thinking/backgroundTasks alone.
      */
     private upsertReportedGenerationLiveWork(
         sessionId: string,
         patch: { unresolvedTurn?: boolean; backgroundTasks?: BackgroundTask[] },
-        reported?: { machineId?: string; hostPid?: number; processStartMarker?: string },
+        reported?: {
+            machineId?: string
+            hostPid?: number
+            processStartMarker?: string
+            runnerOwned?: boolean
+        },
     ): void {
         const session = this.sessions.get(sessionId)
         if (!session?.metadata) return
-        if (!isRunnerOwnedSession(session)) return
 
         // Owner identity comes only from the report — never from the current
         // row (replacement can change machineId / hostPid / marker).
@@ -1090,6 +1144,14 @@ export class SessionCache {
         const ownerKey = liveWorkOwnerKey({ machineId, hostPid, hostStartMarker: marker })
         const map = projectLegacyLiveWork(session.metadata)
         const existing = map[ownerKey]
+        // Reporter provenance from the process, not the current row's startedBy.
+        // Explicit terminal reporters never write durable; runner reporters and
+        // legacy CLIs on a still-runner row (or updating an existing entry) may.
+        if (reported?.runnerOwned === false) return
+        const reporterIsRunner = reported?.runnerOwned === true
+            || isRunnerOwnedSession(session)
+            || existing !== undefined
+        if (!reporterIsRunner) return
         const nextTasks = patch.backgroundTasks !== undefined
             ? patch.backgroundTasks
             : existing?.backgroundTasks
@@ -2531,8 +2593,14 @@ export class SessionCache {
         // initial read and this write (version-mismatch retry).
         for (let attempt = 0; attempt < 2; attempt += 1) {
             const latest = this.store.sessions.getSessionByNamespace(newSessionId, namespace)
+            // Re-read the source each attempt so work reported during async
+            // scratchlist I/O is not dropped when we later delete the row.
+            const latestOld = this.store.sessions.getSessionByNamespace(oldSessionId, namespace)
             if (!latest) break
-            const mergedMetadata = this.mergeSessionMetadata(oldStored.metadata, latest.metadata)
+            const mergedMetadata = this.mergeSessionMetadata(
+                latestOld?.metadata ?? oldStored.metadata,
+                latest.metadata,
+            )
             if (mergedMetadata === null || mergedMetadata === latest.metadata) break
             const result = this.store.sessions.updateSessionMetadata(
                 newSessionId,
@@ -2659,6 +2727,35 @@ export class SessionCache {
         }
 
         if (options.deleteOldSession) {
+            // Final live-work transfer from fresh snapshots immediately before
+            // delete — work reported during earlier async I/O must survive (#2658).
+            const freshOld = this.store.sessions.getSessionByNamespace(oldSessionId, namespace)
+            const freshNew = this.store.sessions.getSessionByNamespace(newSessionId, namespace)
+            if (freshOld && freshNew) {
+                const united = unionLiveWorkByGeneration(
+                    projectLegacyLiveWork(freshOld.metadata as Session['metadata']),
+                    projectLegacyLiveWork(freshNew.metadata as Session['metadata']),
+                )
+                if (Object.keys(united).length > 0) {
+                    const transferMeta = {
+                        ...(freshNew.metadata && typeof freshNew.metadata === 'object'
+                            ? freshNew.metadata as Record<string, unknown>
+                            : {}),
+                        liveWorkByGeneration: united,
+                    }
+                    const transfer = this.store.sessions.updateSessionMetadata(
+                        newSessionId,
+                        transferMeta,
+                        freshNew.metadataVersion,
+                        namespace,
+                        { touchUpdatedAt: false },
+                    )
+                    if (transfer.result !== 'success') {
+                        throw new Error('Failed to transfer live-work during merge')
+                    }
+                }
+            }
+
             // Deleting the row cascades to its turns; they're the new row's history now.
             this.store.turns.transferSession(oldSessionId, newSessionId)
             // Write the redirect before the row disappears so a concurrent

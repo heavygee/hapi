@@ -447,14 +447,30 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
                 && metaObj.hostStartMarker.length > 0
                 ? metaObj.hostStartMarker
                 : undefined
-            if (marker && requests && typeof requests === 'object') {
+            const machineId = typeof metaObj?.machineId === 'string' && metaObj.machineId.length > 0
+                ? metaObj.machineId
+                : undefined
+            const hostPid = typeof metaObj?.hostPid === 'number' && metaObj.hostPid > 0
+                ? metaObj.hostPid
+                : undefined
+            if (marker && machineId && hostPid && requests && typeof requests === 'object') {
                 let stamped = false
                 const nextRequests: NonNullable<AgentState['requests']> = { ...requests }
                 for (const [id, request] of Object.entries(requests)) {
-                    if (!request || (typeof request.hostStartMarker === 'string' && request.hostStartMarker.length > 0)) {
-                        continue
+                    if (!request) continue
+                    const hasFull = typeof request.hostStartMarker === 'string'
+                        && request.hostStartMarker.length > 0
+                        && typeof request.machineId === 'string'
+                        && request.machineId.length > 0
+                        && typeof request.hostPid === 'number'
+                        && request.hostPid > 0
+                    if (hasFull) continue
+                    nextRequests[id] = {
+                        ...request,
+                        machineId,
+                        hostPid,
+                        hostStartMarker: marker,
                     }
-                    nextRequests[id] = { ...request, hostStartMarker: marker }
                     stamped = true
                 }
                 if (stamped) {

@@ -92,6 +92,7 @@ import { SessionCache } from './sessionCache'
 import { ArchiveCleanupError } from './archiveCleanupError'
 import {
     generationEntryProbeClearable,
+    liveWorkOwnerKey,
     resolveEntryProbeMarker,
     resolveLiveWorkByGeneration,
 } from './liveWorkByGeneration'
@@ -3863,48 +3864,81 @@ export class SyncEngine {
         // Live-work precondition before any stop RPC (#2658 / #2020).
         // Probe clearable entries by recorded owner identity (not the current
         // row's startedBy — terminal resume must not hide a prior runner gen).
-        // Missing hostPid / namespace / probe support fails closed (stays blocking).
+        // Fully attributed pending requests are also probe owners even without
+        // a turn/background latch (worker exited mid-permission ask).
         const liveBeforeStop = this.sessionCache.getSession(sessionId)
         if (liveBeforeStop) {
-            if (hasDurableLiveWork(liveBeforeStop)) {
-                const map = resolveLiveWorkByGeneration(liveBeforeStop)
-                for (const [ownerKey, entry] of Object.entries(map)) {
-                    if (!generationEntryProbeClearable(liveBeforeStop, ownerKey, entry)) continue
-                    // Probe capability on the recorded owner's machine, not the
-                    // current row's machine (cross-machine replacement).
-                    const ownerMachine = this.getMachineByNamespace(entry.machineId, liveBeforeStop.namespace)
-                        ?? this.getMachine(entry.machineId)
-                    const ownerCaps = ownerMachine?.metadata?.capabilities
-                    const probeSupported = !ownerCaps
-                        || ownerCaps.includes(MACHINE_CAPABILITIES.ProbeSessionExit)
-                    if (!probeSupported) continue
-                    const timeoutMs = Math.ceil(deadline - performance.now())
-                    if (timeoutMs <= 0) throw new ArchiveCleanupError('timeout')
-                    const probeMarker = resolveEntryProbeMarker(ownerKey, entry)
-                    let status: 'stopped' | 'already_gone' | 'still_alive' | 'unknown' = 'unknown'
-                    try {
-                        status = await this.rpcGateway.probeRunnerSessionExit(
-                            entry.machineId,
-                            `PID-${entry.hostPid}`,
-                            {
-                                namespace: liveBeforeStop.namespace,
-                                hubSessionId: sessionId,
-                                timeoutMs,
-                                processStartMarker: probeMarker,
-                            },
-                        )
-                    } catch (error) {
-                        if (error instanceof RunnerStopRpcError && error.timedOut) {
-                            throw new ArchiveCleanupError('timeout', error)
-                        }
-                        status = 'unknown'
+            const map = resolveLiveWorkByGeneration(liveBeforeStop)
+            const ownersToProbe = new Map<string, {
+                machineId: string
+                hostPid: number
+                hostStartMarker: string
+            }>()
+            for (const [ownerKey, entry] of Object.entries(map)) {
+                if (!generationEntryProbeClearable(liveBeforeStop, ownerKey, entry)) continue
+                const probeMarker = resolveEntryProbeMarker(ownerKey, entry)
+                if (typeof entry.hostPid !== 'number' || entry.hostPid <= 0) continue
+                ownersToProbe.set(ownerKey, {
+                    machineId: entry.machineId,
+                    hostPid: entry.hostPid,
+                    hostStartMarker: probeMarker,
+                })
+            }
+            const requests = liveBeforeStop.agentState?.requests
+            if (requests) {
+                for (const request of Object.values(requests)) {
+                    if (
+                        typeof request.machineId !== 'string' || request.machineId.length === 0
+                        || typeof request.hostPid !== 'number' || request.hostPid <= 0
+                        || typeof request.hostStartMarker !== 'string' || request.hostStartMarker.length === 0
+                    ) {
+                        continue
                     }
-                    if (status === 'already_gone' || status === 'stopped') {
-                        this.sessionCache.clearGenerationLiveWork(sessionId, ownerKey)
-                        // Reconcile only this owner's requests — never wipe a
-                        // replacement's in-flight permission ask (#2658).
-                        this.sessionCache.clearPendingAgentRequestsForOwner(sessionId, probeMarker)
+                    const ownerKey = liveWorkOwnerKey({
+                        machineId: request.machineId,
+                        hostPid: request.hostPid,
+                        hostStartMarker: request.hostStartMarker,
+                    })
+                    if (ownersToProbe.has(ownerKey)) continue
+                    ownersToProbe.set(ownerKey, {
+                        machineId: request.machineId,
+                        hostPid: request.hostPid,
+                        hostStartMarker: request.hostStartMarker,
+                    })
+                }
+            }
+
+            for (const [ownerKey, owner] of ownersToProbe) {
+                const ownerMachine = this.getMachineByNamespace(owner.machineId, liveBeforeStop.namespace)
+                    ?? this.getMachine(owner.machineId)
+                const ownerCaps = ownerMachine?.metadata?.capabilities
+                const probeSupported = !ownerCaps
+                    || ownerCaps.includes(MACHINE_CAPABILITIES.ProbeSessionExit)
+                if (!probeSupported) continue
+                const timeoutMs = Math.ceil(deadline - performance.now())
+                if (timeoutMs <= 0) throw new ArchiveCleanupError('timeout')
+                let status: 'stopped' | 'already_gone' | 'still_alive' | 'unknown' = 'unknown'
+                try {
+                    status = await this.rpcGateway.probeRunnerSessionExit(
+                        owner.machineId,
+                        `PID-${owner.hostPid}`,
+                        {
+                            namespace: liveBeforeStop.namespace,
+                            hubSessionId: sessionId,
+                            timeoutMs,
+                            processStartMarker: owner.hostStartMarker,
+                        },
+                    )
+                } catch (error) {
+                    if (error instanceof RunnerStopRpcError && error.timedOut) {
+                        throw new ArchiveCleanupError('timeout', error)
                     }
+                    status = 'unknown'
+                }
+                if (status === 'already_gone' || status === 'stopped') {
+                    this.sessionCache.clearGenerationLiveWork(sessionId, ownerKey)
+                    this.sessionCache.clearPendingAgentRequestsForOwner(sessionId, owner)
+                    this.sessionCache.clearTransientThinkingForOwner(sessionId, ownerKey)
                 }
             }
             const afterProbe = this.sessionCache.getSession(sessionId) ?? liveBeforeStop

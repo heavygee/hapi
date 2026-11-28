@@ -285,6 +285,9 @@ export interface ClientToServerEvents {
         machineId?: string
         hostPid?: number
         processStartMarker?: string
+        // Provenance of *this* OS process (frozen at CLI construct), not the
+        // current row's startedBy after a terminal resume.
+        runnerOwned?: boolean
     }) => void
   /** CLI agent finished session/load (or equivalent) and can accept prompts. */
     'session-ready': (data: { sid: string; time: number }) => void
