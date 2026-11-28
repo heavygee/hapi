@@ -839,6 +839,45 @@ body:
         expect(withNone.kind).toBe('form')
     })
 
+    // Regression (bot review, tiann/hapi#2147, follow-up): the previous
+    // round's fix only covered input/textarea's richer attribute set.
+    // dropdown/checkboxes also type `description` as String on GitHub's
+    // own per-type attribute tables, confirmed directly — a gap the
+    // review's own cited URL fragment (#attributes-for-dropdown) pointed
+    // straight at.
+    it('is genuinely invalid when a dropdown description parses as a YAML boolean', () => {
+        const template = parseIssueFormYaml(
+            'x.yml',
+            'name: Bug\ndescription: Bug\nbody:\n  - type: dropdown\n    attributes:\n      label: Pie?\n      description: false\n      options:\n        - Steak\n        - Fish'
+        )
+        expect(template.kind).toBe('unsupported')
+        if (template.kind !== 'unsupported') return
+        expect(template.githubValid).toBe(false)
+    })
+
+    it('is genuinely invalid when a checkboxes description parses as a YAML boolean', () => {
+        const template = parseIssueFormYaml(
+            'x.yml',
+            'name: Bug\ndescription: Bug\nbody:\n  - type: checkboxes\n    attributes:\n      label: Confirm\n      description: true\n      options:\n        - label: I agree'
+        )
+        expect(template.kind).toBe('unsupported')
+        if (template.kind !== 'unsupported') return
+        expect(template.githubValid).toBe(false)
+    })
+
+    it('allows an ordinary string dropdown/checkboxes description, and omitting it entirely', () => {
+        const dropdownWithDescription = parseIssueFormYaml(
+            'x.yml',
+            'name: Bug\ndescription: Bug\nbody:\n  - type: dropdown\n    attributes:\n      label: Pie?\n      description: Pick one\n      options:\n        - Steak\n        - Fish'
+        )
+        expect(dropdownWithDescription.kind).toBe('form')
+        const checkboxesWithoutDescription = parseIssueFormYaml(
+            'x.yml',
+            'name: Bug\ndescription: Bug\nbody:\n  - type: checkboxes\n    attributes:\n      label: Confirm\n      options:\n        - label: I agree'
+        )
+        expect(checkboxesWithoutDescription.kind).toBe('form')
+    })
+
     // Regression (bot review, tiann/hapi#2147, follow-up): a dropdown's
     // own choices were never checked for duplicates — only an empty
     // options list was rejected. GitHub requires a dropdown's choices to

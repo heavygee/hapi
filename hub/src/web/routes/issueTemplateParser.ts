@@ -573,15 +573,23 @@ export function parseIssueFormYaml(id: string, raw: string): IssueTemplate {
         if ((type === 'input' || type === 'textarea') && containsForbiddenLabelWord(label)) {
             return { id, name, kind: 'unsupported', reason: `Field "${label}" uses a word GitHub forbids in an input/textarea label ("password")`, githubValid: false }
         }
-        if (type === 'input' || type === 'textarea') {
-            const attrKeys = type === 'textarea'
-                ? ['description', 'placeholder', 'value', 'render'] as const
-                : ['description', 'placeholder', 'value'] as const
-            for (const attrKey of attrKeys) {
-                const reason = invalidAttributeStringReason(cstDoc, elementIndex, attrKey, attrs[attrKey])
-                if (reason) {
-                    return { id, name, kind: 'unsupported', reason: `Field "${label}" has an invalid ${reason}`, githubValid: false }
-                }
+        // Every type's own attribute table includes `description` as
+        // String (dropdown/checkboxes confirmed, bot review,
+        // tiann/hapi#2147, follow-up — the previous round's fix only
+        // covered input/textarea's richer attribute set, missing the two
+        // types whose only other String attribute is `description`).
+        // `placeholder`/`value`/`render` don't exist on dropdown/checkboxes
+        // at all, hence the narrower list for those two.
+        const attrKeysByType: Record<string, readonly string[]> = {
+            input: ['description', 'placeholder', 'value'],
+            textarea: ['description', 'placeholder', 'value', 'render'],
+            dropdown: ['description'],
+            checkboxes: ['description']
+        }
+        for (const attrKey of attrKeysByType[type] ?? []) {
+            const reason = invalidAttributeStringReason(cstDoc, elementIndex, attrKey, attrs[attrKey])
+            if (reason) {
+                return { id, name, kind: 'unsupported', reason: `Field "${label}" has an invalid ${reason}`, githubValid: false }
             }
         }
         const explicitFieldId = asString(elObj.id)
