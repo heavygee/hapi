@@ -1093,6 +1093,19 @@ body:
         expect(template.githubValid).toBe(false)
     })
 
+    it('is genuinely invalid when validations is an array or null instead of a map', () => {
+        const withArray = parseIssueFormYaml(
+            'x.yml',
+            'name: Bug\ndescription: Bug\nbody:\n  - type: input\n    attributes:\n      label: Contact\n    validations:\n      - required'
+        )
+        expect(withArray.kind).toBe('unsupported')
+        const withNull = parseIssueFormYaml(
+            'x.yml',
+            'name: Bug\ndescription: Bug\nbody:\n  - type: input\n    attributes:\n      label: Contact\n    validations: null'
+        )
+        expect(withNull.kind).toBe('unsupported')
+    })
+
     it('allows an ordinary validations map, and omitting it entirely', () => {
         const withValidations = parseIssueFormYaml(
             'x.yml',
