@@ -47,6 +47,10 @@ const commandMap = new Map<string, () => Promise<CommandDefinition>>([
     ['inspect-peer', async () => (await import('./inspectPeer')).inspectPeerCommand],
     ['link-issue', async () => (await import('./linkIssue')).linkIssueCommand],
     ['spawn-peer', async () => (await import('./spawnPeer')).spawnPeerCommand],
+    // Fork-only (ported from heavygee/hapi#238 when the soup manifest swapped
+    // it for feat/boards, 2026-11-28) — shell fallback for the MCP
+    // search_content tool, same CLI_API_TOKEN -> JWT exchange as ping-peer.
+    ['search-content', async () => (await import('./searchContent')).searchContentCommand],
     ['set-mode', async () => (await import('./setMode')).setModeCommand],
     ['job', async () => (await import('./job')).jobCommand],
     ['usage', async () => (await import('./usage')).usageCommand]

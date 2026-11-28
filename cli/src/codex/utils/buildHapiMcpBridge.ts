@@ -151,6 +151,14 @@ export async function buildHapiMcpBridge(
             approval_mode: 'approve'
         };
     }
+    // Transcript fleet search — read-only hub REST, same trust as list_peers.
+    // Fork-only tool (ported from heavygee/hapi#238, soup manifest swap
+    // 2026-11-28); unconditional, not gated by peer-tools-disable.
+    if (enabledTools.has('search_content')) {
+        tools.search_content = {
+            approval_mode: 'approve'
+        };
+    }
     // Own-session progress meter (tiann/hapi#1404) — hub REST, not peer inject.
     if (enabledTools.has('session_job')) {
         tools.session_job = {
