@@ -780,6 +780,65 @@ body:
         expect(template.githubValid).toBe(false)
     })
 
+    // Regression (bot review, tiann/hapi#2147, follow-up): GitHub's own
+    // per-type attribute tables ("Syntax for GitHub's form schema") type
+    // `description`/`placeholder`/`value`/`render` as String, same as
+    // `label` — each subject to the identical wrong-type, blank-when-
+    // present, and unquoted-GitHub-boolean-word gaps already fixed for
+    // `label`/`title`/`id`, just not yet checked for these four keys.
+    it('is genuinely invalid when a field description is an unquoted GitHub-boolean word', () => {
+        const template = parseIssueFormYaml(
+            'x.yml',
+            'name: Bug\ndescription: Bug\nbody:\n  - type: input\n    attributes:\n      label: Contact\n      description: Yes'
+        )
+        expect(template.kind).toBe('unsupported')
+        if (template.kind !== 'unsupported') return
+        expect(template.githubValid).toBe(false)
+    })
+
+    it('is genuinely invalid when a field placeholder parses as a YAML boolean', () => {
+        const template = parseIssueFormYaml(
+            'x.yml',
+            'name: Bug\ndescription: Bug\nbody:\n  - type: input\n    attributes:\n      label: Contact\n      placeholder: true'
+        )
+        expect(template.kind).toBe('unsupported')
+        if (template.kind !== 'unsupported') return
+        expect(template.githubValid).toBe(false)
+    })
+
+    it('is genuinely invalid when a field value is only whitespace', () => {
+        const template = parseIssueFormYaml(
+            'x.yml',
+            'name: Bug\ndescription: Bug\nbody:\n  - type: textarea\n    attributes:\n      label: Contact\n      value: "   "'
+        )
+        expect(template.kind).toBe('unsupported')
+        if (template.kind !== 'unsupported') return
+        expect(template.githubValid).toBe(false)
+    })
+
+    it('is genuinely invalid when a textarea render parses as a YAML boolean', () => {
+        const template = parseIssueFormYaml(
+            'x.yml',
+            'name: Bug\ndescription: Bug\nbody:\n  - type: textarea\n    attributes:\n      label: Contact\n      render: false'
+        )
+        expect(template.kind).toBe('unsupported')
+        if (template.kind !== 'unsupported') return
+        expect(template.githubValid).toBe(false)
+    })
+
+    it('allows ordinary string description/placeholder/value/render, and omitting them entirely', () => {
+        const withAll = parseIssueFormYaml(
+            'x.yml',
+            'name: Bug\ndescription: Bug\nbody:\n  - type: textarea\n    attributes:\n      label: Contact\n      description: Tell us more\n      placeholder: e.g. a stack trace\n      value: "default text"\n      render: bash'
+        )
+        expect(withAll.kind).toBe('form')
+        const withNone = parseIssueFormYaml(
+            'x.yml',
+            'name: Bug\ndescription: Bug\nbody:\n  - type: input\n    attributes:\n      label: Contact'
+        )
+        expect(withNone.kind).toBe('form')
+    })
+
     // Regression (bot review, tiann/hapi#2147, follow-up): a dropdown's
     // own choices were never checked for duplicates — only an empty
     // options list was rejected. GitHub requires a dropdown's choices to

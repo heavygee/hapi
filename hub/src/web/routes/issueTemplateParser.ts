@@ -51,6 +51,34 @@ function containsForbiddenLabelWord(label: string): boolean {
 // to every scalar GitHub requires to be a string).
 const GITHUB_BOOLEAN_WORDS = new Set(['y', 'yes', 'n', 'no', 'true', 'false', 'on', 'off'])
 
+// `label`/`description`/`placeholder`/`value`/`render` are all documented
+// as String on GitHub's own per-type attribute tables (confirmed directly
+// against "Syntax for GitHub's form schema" — a different, more specific
+// page than "Syntax for issue forms"; bot review, tiann/hapi#2147,
+// follow-up cited it first). Each is subject to the identical three gaps
+// already fixed one key at a time elsewhere in this file: wrong type
+// (`placeholder: true`), blank-when-present ("Empty strings... are also
+// not permissible when the field expects a string"), and an unquoted
+// GitHub-boolean word this codebase's own yaml library leaves as a
+// string (`description: Yes`, the review's own example) but GitHub's
+// backend coerces. One shared check closes all three for every
+// attribute that needs it, rather than one more key per round.
+function invalidAttributeStringReason(
+    cstDoc: ReturnType<typeof parseDocument>,
+    elementIndex: number,
+    attrKey: string,
+    value: unknown
+): string | undefined {
+    if (value === undefined) return undefined
+    if (typeof value !== 'string') return `"${attrKey}" must be a string`
+    if (value.trim().length === 0) return `"${attrKey}" must be a non-blank string`
+    const node = cstDoc.getIn(['body', elementIndex, 'attributes', attrKey], true) as { type?: string } | undefined
+    if (node?.type === 'PLAIN' && GITHUB_BOOLEAN_WORDS.has(value.toLowerCase())) {
+        return `"${attrKey}" is an unquoted word GitHub's own parser would read as a Boolean — wrap it in quotes`
+    }
+    return undefined
+}
+
 // GitHub's own attribute tables, one per field type (confirmed directly
 // against GitHub's documented form-schema syntax) — the full permitted
 // set, used to reject an unrecognized attribute key (see the main parse
@@ -544,6 +572,17 @@ export function parseIssueFormYaml(id: string, raw: string): IssueTemplate {
         }
         if ((type === 'input' || type === 'textarea') && containsForbiddenLabelWord(label)) {
             return { id, name, kind: 'unsupported', reason: `Field "${label}" uses a word GitHub forbids in an input/textarea label ("password")`, githubValid: false }
+        }
+        if (type === 'input' || type === 'textarea') {
+            const attrKeys = type === 'textarea'
+                ? ['description', 'placeholder', 'value', 'render'] as const
+                : ['description', 'placeholder', 'value'] as const
+            for (const attrKey of attrKeys) {
+                const reason = invalidAttributeStringReason(cstDoc, elementIndex, attrKey, attrs[attrKey])
+                if (reason) {
+                    return { id, name, kind: 'unsupported', reason: `Field "${label}" has an invalid ${reason}`, githubValid: false }
+                }
+            }
         }
         const explicitFieldId = asString(elObj.id)
         if (!explicitFieldId) {
