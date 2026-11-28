@@ -22,7 +22,11 @@ type ToolCallFields = {
     progress?: unknown
 }
 
-function toolCallContent(callId: string, fields: ToolCallFields = {}): unknown {
+function toolCallContent(
+    callId: string,
+    fields: ToolCallFields = {},
+    reportingOwner?: { machineId: string; hostPid: number; processStartMarker: string },
+): unknown {
     return {
         role: 'agent',
         content: {
@@ -39,7 +43,8 @@ function toolCallContent(callId: string, fields: ToolCallFields = {}): unknown {
                 ...(fields.nativeArgs !== undefined ? { nativeArgs: fields.nativeArgs } : {}),
                 ...(fields.progress !== undefined ? { progress: fields.progress } : {})
             }
-        }
+        },
+        ...(reportingOwner ? { meta: { sentFrom: 'cli', reportingOwner } } : {}),
     }
 }
 
@@ -238,6 +243,28 @@ describe('getLiveToolWork', () => {
             { isSidechain: true }
         ))
         expect(store.messages.getLiveToolWork(session.id)).toBe(false)
+        store.close()
+    })
+
+    it('does not credit a late prior-worker tool call to the replacement owner', () => {
+        const store = makeStore()
+        const session = makeSession(store, 'live-work-owner-scope')
+        const ownerA = {
+            machineId: 'm1',
+            hostPid: 100,
+            processStartMarker: 'worker-A',
+        }
+        const keyA = `m1:100:worker-A`
+        const keyB = `m1:200:worker-B`
+        store.messages.upsertToolCallMessage(
+            session.id,
+            toolCallContent('call-a', { status: 'in_progress' }, ownerA),
+            'call-a',
+        )
+        expect(store.messages.getLiveToolWork(session.id)).toBe(true)
+        expect(store.messages.getLiveToolWork(session.id, undefined, keyA)).toBe(true)
+        // Replacement B must not see A's stamped call as its own work.
+        expect(store.messages.getLiveToolWork(session.id, undefined, keyB)).toBe(false)
         store.close()
     })
 })

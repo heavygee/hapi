@@ -78,6 +78,27 @@ export function windowsGenerationMayBeAlive(table: WindowsProcessTable | null, p
 }
 
 /**
+ * Generation-scoped Windows exit tombstone key for ProbeSessionExit (#2658).
+ * Must include the start marker — bare `PID-N` is not generation evidence.
+ */
+export function windowsGenerationExitKey(pid: number, marker: string): string {
+    return `PID-${pid}:${marker}`
+}
+
+/**
+ * Whether Windows ProbeSessionExit may return `already_gone` from a tombstone.
+ * Session-keyed tombstones must not clear a generation (#2658 / #2660).
+ */
+export function windowsProbeMayClearFromTombstone(opts: {
+    pid: number
+    expectedMarker?: string
+    hasTombstone: (key: string) => boolean
+}): boolean {
+    if (!opts.expectedMarker || opts.expectedMarker.length === 0) return false
+    return opts.hasTombstone(windowsGenerationExitKey(opts.pid, opts.expectedMarker))
+}
+
+/**
  * Read-only: does this Windows generation still have a live root or a child
  * still parented to it? Used by ProbeSessionExit after the wrapper PID is gone
  * or reused (#2658). Returns `'unknown'` when the table cannot be trusted.

@@ -1167,6 +1167,18 @@ export class SyncEngine {
         this.sessionCache.setBackgroundTasks(sessionId, tasks, reported)
     }
 
+    /**
+     * Tool traffic stamped with the reporting worker: latch or clear that
+     * owner's transcriptOpenWork without attributing to the current row (#2658).
+     */
+    handleReportedTranscriptToolWork(
+        sessionId: string,
+        open: boolean,
+        reported: { machineId?: string; hostPid?: number; processStartMarker?: string; runnerOwned?: boolean },
+    ): void {
+        this.sessionCache.noteReportedTranscriptToolWork(sessionId, open, reported)
+    }
+
     updateReadState(sessionId: string, namespace: string, request: SessionReadStateRequest) {
         const result = this.store.sessions.updateReadState(sessionId, namespace, request)
         if (result?.status === 'ok') this.sessionCache.syncReadState(sessionId)
@@ -1944,14 +1956,31 @@ export class SyncEngine {
             // Bound by the current worker generation so an unsettled call from a
             // verified-exited prior owner cannot credit the idle replacement.
             const boundarySeq = this.sessionCache.getTranscriptGenerationBoundarySeq(session.id)
-            this.sessionCache.noteDerivedWork(
+            const currentOwner = typeof session.metadata?.machineId === 'string'
+                && typeof session.metadata?.hostPid === 'number'
+                && typeof session.metadata?.hostStartMarker === 'string'
+                && session.metadata.machineId.length > 0
+                && session.metadata.hostPid > 0
+                && session.metadata.hostStartMarker.length > 0
+                ? liveWorkOwnerKey({
+                    machineId: session.metadata.machineId,
+                    hostPid: session.metadata.hostPid,
+                    hostStartMarker: session.metadata.hostStartMarker,
+                })
+                : undefined
+            // Owner-scoped: late prior-worker calls stamped with another owner
+            // must not credit the replacement (#2658).
+            const openForCurrent = this.store.messages.getLiveToolWork(
                 session.id,
-                this.store.messages.getLiveToolWork(session.id, boundarySeq),
+                boundarySeq,
+                currentOwner,
             )
-            // Do NOT clear transcriptOpenWork from an unbounded transcript scan:
-            // a later human prompt / turn-end from replacement B would look like
-            // settlement for A's latched call. Clear only on verified owner exit
-            // (clearGenerationLiveWork) (#2658).
+            this.sessionCache.noteDerivedWork(session.id, openForCurrent)
+            // Owner settled their own calls — clear that owner's durable bit.
+            // Prior owners keep theirs until exit probe (clearGenerationLiveWork).
+            if (!openForCurrent && currentOwner) {
+                this.sessionCache.clearTranscriptOpenWorkForOwner(session.id, currentOwner)
+            }
         }
     }
 

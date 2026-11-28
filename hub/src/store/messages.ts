@@ -570,6 +570,40 @@ function isTerminalToolCallRow(value: unknown): boolean {
     return toolCallStatusRank(data.status) === TOOL_CALL_STATUS_RANK.completed
 }
 
+/**
+ * Owner key stamped on agent message meta by the reporting CLI (#2658).
+ * Format matches liveWorkOwnerKey — kept local so the store layer does not
+ * import hub sync modules.
+ */
+function reportingOwnerKeyFromMessage(decoded: unknown): string | null {
+    const record = unwrapRoleWrappedRecordEnvelope(decoded)
+    if (!record || !isRecord(record.meta)) return null
+    const owner = record.meta.reportingOwner
+    if (!isRecord(owner)) return null
+    const machineId = typeof owner.machineId === 'string' && owner.machineId.length > 0
+        ? owner.machineId
+        : null
+    const hostPid = typeof owner.hostPid === 'number' && Number.isFinite(owner.hostPid) && owner.hostPid > 0
+        ? owner.hostPid
+        : null
+    const marker = typeof owner.processStartMarker === 'string' && owner.processStartMarker.length > 0
+        ? owner.processStartMarker
+        : typeof owner.hostStartMarker === 'string' && owner.hostStartMarker.length > 0
+            ? owner.hostStartMarker
+            : null
+    if (!machineId || !hostPid || !marker) return null
+    return `${machineId}:${hostPid}:${marker}`
+}
+
+/** Whether open tool work in this row should credit `forOwnerKey`. */
+function openWorkCreditsOwner(decoded: unknown, forOwnerKey: string | undefined): boolean {
+    if (!forOwnerKey) return true
+    const stamped = reportingOwnerKeyFromMessage(decoded)
+    // Unstamped legacy rows credit the scoped owner (current-row heartbeat path).
+    if (!stamped) return true
+    return stamped === forOwnerKey
+}
+
 /** Whether the session tail still holds tool work that started but never
  *  settled — the transcript-derived "the agent is demonstrably working"
  *  signal for the hub's work-scoped liveness sweep.
@@ -596,6 +630,12 @@ export function getLiveToolWork(
      * created_at) so CLI-origin timestamps cannot hide a replacement's call.
      */
     afterSeq?: number,
+    /**
+     * When set, only count open tool work stamped for this owner (or unstamped
+     * legacy rows). Late prior-worker calls after a cutoff must not credit the
+     * replacement (#2658).
+     */
+    forOwnerKey?: string,
 ): boolean {
     const rows = prepareCached(db, `
         SELECT id, content, seq FROM messages
@@ -633,7 +673,8 @@ export function getLiveToolWork(
             }
             if (claudeData.type === 'assistant'
                 && claudeAssistantHasOpenToolUse(claudeData, settledClaudeToolUseIds)) {
-                return true
+                if (openWorkCreditsOwner(decoded, forOwnerKey)) return true
+                continue
             }
             continue
         }
@@ -645,7 +686,8 @@ export function getLiveToolWork(
         }
         const callId = getToolCallId(decoded)
         if (callId !== null && !settledAcpCallIds.has(callId) && !isTerminalToolCallRow(decoded)) {
-            return true
+            if (openWorkCreditsOwner(decoded, forOwnerKey)) return true
+            continue
         }
     }
     return false

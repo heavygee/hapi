@@ -54,6 +54,11 @@ export type CliHandlersDeps = {
         tasks: BackgroundTask[],
         reported?: { machineId?: string; hostPid?: number; processStartMarker?: string },
     ) => void
+    onReportedTranscriptToolWork?: (
+        sessionId: string,
+        open: boolean,
+        reported: { machineId?: string; hostPid?: number; processStartMarker?: string; runnerOwned?: boolean },
+    ) => void
     onSessionActivity?: (sessionId: string, updatedAt: number) => void
     onAgentProgress?: (sessionId: string, at: number) => void
     onSweepImmediateQueued?: (sessionId: string, now: number) => void
@@ -89,7 +94,7 @@ const SESSION_ACCESS_CACHE_TTL_MS = 1_000
 const SESSION_ACCESS_CACHE_MAX_SESSIONS = 64
 
 export function registerCliHandlers(socket: CliSocketWithData, deps: CliHandlersDeps): void {
-    const { io, store, rpcRegistry, terminalRegistry, onSessionAlive, onSessionReady, onSessionEnd, onMachineAlive, onSessionChildExited, onWebappEvent, onBackgroundTasks, onSessionActivity, onAgentProgress, onSweepImmediateQueued, onMessagesConsumed } = deps
+    const { io, store, rpcRegistry, terminalRegistry, onSessionAlive, onSessionReady, onSessionEnd, onMachineAlive, onSessionChildExited, onWebappEvent, onBackgroundTasks, onReportedTranscriptToolWork, onSessionActivity, onAgentProgress, onSweepImmediateQueued, onMessagesConsumed } = deps
     const terminalNamespace = io.of('/terminal')
     const namespace = typeof socket.data.namespace === 'string' ? socket.data.namespace : null
 
@@ -184,6 +189,7 @@ export function registerCliHandlers(socket: CliSocketWithData, deps: CliHandlers
         onSessionEnd,
         onWebappEvent,
         onBackgroundTasks,
+        onReportedTranscriptToolWork,
         onSessionActivity,
         onAgentProgress,
         onSweepImmediateQueued,

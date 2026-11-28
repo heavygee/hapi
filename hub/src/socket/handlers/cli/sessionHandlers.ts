@@ -107,6 +107,7 @@ const HUB_OWNED_METADATA_KEYS = [
     'liveWorkByGeneration',
     'unresolvedTurn',
     'backgroundWork',
+    'transcriptGenerationBoundary',
 ] as const
 
 function preserveHubOwnedMetadata(incoming: unknown, current: unknown): unknown {
@@ -139,6 +140,15 @@ export type SessionHandlersDeps = {
         tasks: BackgroundTask[],
         reported?: { machineId?: string; hostPid?: number; processStartMarker?: string },
     ) => void
+    /**
+     * Tool-call / tool-call-result from a stamped reporting worker. Latch or
+     * settle that owner's transcriptOpenWork without crediting the row (#2658).
+     */
+    onReportedTranscriptToolWork?: (
+        sessionId: string,
+        open: boolean,
+        reported: { machineId?: string; hostPid?: number; processStartMarker?: string; runnerOwned?: boolean },
+    ) => void
     onSessionActivity?: (sessionId: string, updatedAt: number) => void
     /** tiann/hapi#1820: any message is agent progress, either direction. */
     onAgentProgress?: (sessionId: string, at: number) => void
@@ -150,7 +160,7 @@ export type SessionHandlersDeps = {
 }
 
 export function registerSessionHandlers(socket: CliSocketWithData, deps: SessionHandlersDeps): void {
-    const { store, resolveSessionAccess, emitAccessError, onSessionAlive, onSessionReady, onSessionEnd, onWebappEvent, onBackgroundTasks, onSessionActivity, onAgentProgress, onSweepImmediateQueued, onMessagesConsumed } = deps
+    const { store, resolveSessionAccess, emitAccessError, onSessionAlive, onSessionReady, onSessionEnd, onWebappEvent, onBackgroundTasks, onReportedTranscriptToolWork, onSessionActivity, onAgentProgress, onSweepImmediateQueued, onMessagesConsumed } = deps
 
     socket.on('native-queue-message', data => {
         const parsed = z.object({ sid: z.string(), localId: z.string().min(1), text: z.string().nullable() }).safeParse(data)
@@ -241,6 +251,46 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
         // The durable row already exists; replay must not be mistaken for
         // fresh agent progress or trigger another round of UI updates.
         if (wasStored) return
+
+        // Latch / settle transcriptOpenWork for the stamped reporting worker
+        // so a late prior-generation tool call cannot credit the row (#2658).
+        if (onReportedTranscriptToolWork) {
+            const metaOwner = (() => {
+                if (!content || typeof content !== 'object' || !('meta' in content)) return null
+                const meta = (content as { meta?: { reportingOwner?: unknown } }).meta
+                const owner = meta?.reportingOwner
+                if (!owner || typeof owner !== 'object') return null
+                return owner as {
+                    machineId?: string
+                    hostPid?: number
+                    processStartMarker?: string
+                    runnerOwned?: boolean
+                }
+            })()
+            const owner = reportingOwner ?? metaOwner
+            if (owner) {
+                const machineId = typeof owner.machineId === 'string' && owner.machineId.length > 0
+                    ? owner.machineId
+                    : undefined
+                const hostPid = typeof owner.hostPid === 'number' && owner.hostPid > 0
+                    ? owner.hostPid
+                    : undefined
+                const marker = typeof owner.processStartMarker === 'string'
+                    && owner.processStartMarker.length > 0
+                    ? owner.processStartMarker
+                    : undefined
+                if (machineId && hostPid && marker) {
+                    const ownerKey = `${machineId}:${hostPid}:${marker}`
+                    const open = store.messages.getLiveToolWork(sid, undefined, ownerKey)
+                    onReportedTranscriptToolWork(sid, open, {
+                        machineId,
+                        hostPid,
+                        processStartMarker: marker,
+                        runnerOwned: owner.runnerOwned,
+                    })
+                }
+            }
+        }
 
         // A reasoning stream arrives as a series of growing snapshots under one
         // stable id, so a stream should cost one row rather than one per

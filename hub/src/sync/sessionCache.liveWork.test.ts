@@ -645,4 +645,132 @@ describe('SessionCache liveWorkByGeneration attribution (#2658)', () => {
         }
         store.close()
     })
+
+    it('clears durable transcriptOpenWork for the settled owner only', () => {
+        const store = new Store(':memory:')
+        const cache = new SessionCache(store, createPublisher([]))
+        const session = cache.getOrCreateSession(
+            'live-work-settle-clear',
+            {
+                path: '/tmp/p',
+                host: 'localhost',
+                flavor: 'claude',
+                startedBy: 'runner',
+                startedFromRunner: true,
+                machineId: 'm1',
+                hostPid: 200,
+                hostStartMarker: 'worker-B',
+            },
+            null,
+            'default',
+        )
+        const keyA = liveWorkOwnerKey({ machineId: 'm1', hostPid: 100, hostStartMarker: 'worker-A' })
+        const keyB = liveWorkOwnerKey({ machineId: 'm1', hostPid: 200, hostStartMarker: 'worker-B' })
+        cache.noteReportedTranscriptToolWork(session.id, true, {
+            machineId: 'm1',
+            hostPid: 100,
+            processStartMarker: 'worker-A',
+            runnerOwned: true,
+        })
+        cache.noteReportedTranscriptToolWork(session.id, true, {
+            machineId: 'm1',
+            hostPid: 200,
+            processStartMarker: 'worker-B',
+            runnerOwned: true,
+        })
+        expect(cache.getSession(session.id)?.metadata?.liveWorkByGeneration?.[keyA]?.transcriptOpenWork).toBe(true)
+        expect(cache.getSession(session.id)?.metadata?.liveWorkByGeneration?.[keyB]?.transcriptOpenWork).toBe(true)
+        // B settles — A must keep its latched bit.
+        cache.clearTranscriptOpenWorkForOwner(session.id, keyB)
+        expect(cache.getSession(session.id)?.metadata?.liveWorkByGeneration?.[keyA]?.transcriptOpenWork).toBe(true)
+        expect(cache.getSession(session.id)?.metadata?.liveWorkByGeneration?.[keyB]?.transcriptOpenWork).toBeUndefined()
+        store.close()
+    })
+
+    it('restores transcript cutoff across a hub-restart cache reload', () => {
+        const store = new Store(':memory:')
+        const cache = new SessionCache(store, createPublisher([]))
+        const session = cache.getOrCreateSession(
+            'live-work-restart-cutoff',
+            {
+                path: '/tmp/p',
+                host: 'localhost',
+                flavor: 'claude',
+                startedBy: 'runner',
+                startedFromRunner: true,
+                machineId: 'm1',
+                hostPid: 100,
+                hostStartMarker: 'worker-A',
+            },
+            null,
+            'default',
+        )
+        const keyA = liveWorkOwnerKey({ machineId: 'm1', hostPid: 100, hostStartMarker: 'worker-A' })
+        cache.noteRowGenerationOwner(session.id, keyA, true)
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: AGENT_MESSAGE_PAYLOAD_TYPE,
+                data: { type: 'tool-call', callId: 'tool_a', name: 'Bash' },
+            },
+        })
+        const before = cache.getSession(session.id)!
+        before.metadata = {
+            ...before.metadata!,
+            hostPid: 200,
+            hostStartMarker: 'worker-B',
+        }
+        cache.noteRowGenerationOwner(
+            session.id,
+            liveWorkOwnerKey({ machineId: 'm1', hostPid: 200, hostStartMarker: 'worker-B' }),
+        )
+        const cutoff = cache.getTranscriptGenerationBoundarySeq(session.id)
+        expect(typeof cutoff).toBe('number')
+        if (typeof cutoff !== 'number') throw new Error('expected cutoff')
+        expect(
+            cache.getSession(session.id)?.metadata?.transcriptGenerationBoundary,
+        ).toEqual({
+            ownerKey: liveWorkOwnerKey({ machineId: 'm1', hostPid: 200, hostStartMarker: 'worker-B' }),
+            afterSeq: cutoff,
+        })
+
+        // Simulate hub restart: new cache over the same store.
+        const reloaded = new SessionCache(store, createPublisher([]))
+        reloaded.reloadAll()
+        expect(reloaded.getTranscriptGenerationBoundarySeq(session.id)).toBe(cutoff)
+        // A's open call stays below the restored cutoff — must not credit B.
+        expect(store.messages.getLiveToolWork(session.id, cutoff)).toBe(false)
+        store.close()
+    })
+
+    it('latches a late prior-worker tool report onto that owner, not the row', () => {
+        const store = new Store(':memory:')
+        const cache = new SessionCache(store, createPublisher([]))
+        const session = cache.getOrCreateSession(
+            'live-work-late-tool',
+            {
+                path: '/tmp/p',
+                host: 'localhost',
+                flavor: 'claude',
+                startedBy: 'runner',
+                startedFromRunner: true,
+                machineId: 'm1',
+                hostPid: 200,
+                hostStartMarker: 'worker-B',
+            },
+            null,
+            'default',
+        )
+        const keyA = liveWorkOwnerKey({ machineId: 'm1', hostPid: 100, hostStartMarker: 'worker-A' })
+        const keyB = liveWorkOwnerKey({ machineId: 'm1', hostPid: 200, hostStartMarker: 'worker-B' })
+        cache.noteReportedTranscriptToolWork(session.id, true, {
+            machineId: 'm1',
+            hostPid: 100,
+            processStartMarker: 'worker-A',
+            runnerOwned: true,
+        })
+        expect(cache.getSession(session.id)?.metadata?.liveWorkByGeneration?.[keyA]?.transcriptOpenWork).toBe(true)
+        expect(cache.getSession(session.id)?.metadata?.liveWorkByGeneration?.[keyB]?.transcriptOpenWork).toBeUndefined()
+        store.close()
+    })
 })

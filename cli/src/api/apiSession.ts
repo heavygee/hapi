@@ -1175,6 +1175,8 @@ if (isReconnect) {
                 }
             }
         } else {
+            const owner = this.reportingOwnerPayload()
+            const stampOwner = Boolean(owner.machineId && owner.processStartMarker && owner.hostPid > 0)
             content = {
                 role: 'agent',
                 content: {
@@ -1182,7 +1184,10 @@ if (isReconnect) {
                     data: body
                 },
                 meta: {
-                    sentFrom: 'cli'
+                    sentFrom: 'cli',
+                    // Stamp so late prior-worker Claude tool_use after a cutoff
+                    // cannot credit the replacement row (#2658).
+                    ...(stampOwner ? { reportingOwner: owner } : {}),
                 }
             }
             if (body.timestamp) {
@@ -1253,6 +1258,13 @@ if (isReconnect) {
     }
 
     sendAgentMessage(body: unknown, localId?: string): void {
+        const owner = this.reportingOwnerPayload()
+        const stampOwner = Boolean(owner.machineId && owner.processStartMarker && owner.hostPid > 0)
+        const bgBody = body !== null && typeof body === 'object' ? body as { type?: unknown; subtype?: unknown } : null
+        const bgSnapshot = bgBody?.type === 'system' && bgBody.subtype === 'background_tasks_changed'
+        const toolTraffic = bgBody?.type === 'tool-call' || bgBody?.type === 'tool-call-result'
+        // Persist reporting generation on tool traffic so a late prior-worker
+        // call after replacement cannot credit the idle row (#2658).
         const content = {
             role: 'agent',
             content: {
@@ -1260,17 +1272,17 @@ if (isReconnect) {
                 data: body
             },
             meta: {
-                sentFrom: 'cli'
+                sentFrom: 'cli',
+                ...(stampOwner && toolTraffic ? { reportingOwner: owner } : {}),
             }
         }
-        const bgBody = body !== null && typeof body === 'object' ? body as { type?: unknown; subtype?: unknown } : null
-        const bgSnapshot = bgBody?.type === 'system' && bgBody.subtype === 'background_tasks_changed'
         this.emitOrQueue(() => {
             this.socket.emit('message', {
                 sid: this.sessionId,
                 message: content,
                 localId,
-                ...(bgSnapshot ? { reportingOwner: this.reportingOwnerPayload() } : {}),
+                // Wire owner still required for background snapshots (not stored).
+                ...((bgSnapshot || toolTraffic) && stampOwner ? { reportingOwner: owner } : {}),
             })
             if (localId) this.socket.emit('messages-consumed', { sid: this.sessionId, localIds: [localId] })
         })

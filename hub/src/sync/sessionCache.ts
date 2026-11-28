@@ -1686,23 +1686,63 @@ export class SessionCache {
     }
 
     /**
-     * Drop transcriptOpenWork bits once the transcript has no open tool calls
-     * (settlement). Idle thinking must not call this (#2658).
+     * Latch or clear transcriptOpenWork for the worker that reported the tool
+     * traffic — not the current row identity (#2658).
      */
-    clearTranscriptOpenWorkWhenSettled(sessionId: string): void {
+    noteReportedTranscriptToolWork(
+        sessionId: string,
+        open: boolean,
+        reported: {
+            machineId?: string
+            hostPid?: number
+            processStartMarker?: string
+            runnerOwned?: boolean
+        },
+    ): void {
+        const machineId = typeof reported.machineId === 'string' && reported.machineId.length > 0
+            ? reported.machineId
+            : undefined
+        const hostPid = typeof reported.hostPid === 'number' && reported.hostPid > 0
+            ? reported.hostPid
+            : undefined
+        const marker = typeof reported.processStartMarker === 'string'
+            && reported.processStartMarker.length > 0
+            ? reported.processStartMarker
+            : undefined
+        if (!machineId || !hostPid || !marker) return
+        const ownerKey = liveWorkOwnerKey({ machineId, hostPid, hostStartMarker: marker })
+        if (open) {
+            this.upsertReportedGenerationLiveWork(
+                sessionId,
+                { transcriptOpenWork: true },
+                {
+                    machineId,
+                    hostPid,
+                    processStartMarker: marker,
+                    runnerOwned: reported.runnerOwned === true,
+                },
+            )
+            return
+        }
+        this.clearTranscriptOpenWorkForOwner(sessionId, ownerKey)
+    }
+
+    /**
+     * Drop one owner's transcriptOpenWork once an owner-scoped scan confirms
+     * settlement. Idle thinking must not call this (#2658). Never clears a
+     * different owner's latched bit.
+     */
+    clearTranscriptOpenWorkForOwner(sessionId: string, ownerKey: string): void {
+        if (ownerKey.length === 0) return
         const session = this.sessions.get(sessionId)
         if (!session?.metadata) return
-        const map = projectLegacyLiveWork(session.metadata)
-        let changed = false
-        for (const [key, entry] of Object.entries(map)) {
-            if (!entry.transcriptOpenWork) continue
-            const rest: LiveWorkGenerationEntry = { ...entry }
-            delete rest.transcriptOpenWork
-            if (generationEntryHasWork(rest)) map[key] = rest
-            else delete map[key]
-            changed = true
-        }
-        if (!changed) return
+        const map = { ...projectLegacyLiveWork(session.metadata) }
+        const entry = map[ownerKey]
+        if (!entry?.transcriptOpenWork) return
+        const rest: LiveWorkGenerationEntry = { ...entry }
+        delete rest.transcriptOpenWork
+        if (generationEntryHasWork(rest)) map[ownerKey] = rest
+        else delete map[ownerKey]
         const metadata = {
             ...session.metadata,
             liveWorkByGeneration: Object.keys(map).length > 0 ? map : null,

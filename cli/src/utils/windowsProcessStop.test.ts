@@ -6,7 +6,12 @@ vi.mock('node:child_process', () => ({ execFile: execFileMock }))
 vi.mock('cross-spawn', () => ({ default: { sync: syncMock } }))
 vi.mock('./time', () => ({ monotonicTimeMs: () => authority.now }))
 import { killProcessTreeByPid } from './process'
-import { readWindowsProcessTable, windowsGenerationMayBeAlive } from './windowsProcessStop'
+import {
+    readWindowsProcessTable,
+    windowsGenerationExitKey,
+    windowsGenerationMayBeAlive,
+    windowsProbeMayClearFromTombstone,
+} from './windowsProcessStop'
 import { windowsSystemTool } from './windowsSystemTools'
 
 const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!
@@ -307,5 +312,50 @@ describe('Windows asynchronous tree stop', () => {
         await expect(operation).resolves.toBe(false)
         expect(kills.every(k => k.force)).toBe(true)
         expect(syncMock).not.toHaveBeenCalled()
+    })
+})
+
+describe('Windows ProbeSessionExit generation tombstones (#2658)', () => {
+    it('keys exit evidence by PID and start marker', () => {
+        expect(windowsGenerationExitKey(3704400, 'worker-A')).toBe('PID-3704400:worker-A')
+    })
+
+    it('rejects session-keyed or wrapper-only tombstones without a marker match', () => {
+        const tombstones = new Set<string>([
+            'session-abc',
+            'PID-100',
+            'PID-100:other-gen',
+        ])
+        const hasTombstone = (key: string) => tombstones.has(key)
+        // Session id alone must not clear a generation.
+        expect(windowsProbeMayClearFromTombstone({
+            pid: 100,
+            expectedMarker: 'worker-A',
+            hasTombstone: (key) => key === 'session-abc',
+        })).toBe(false)
+        // Bare PID-N (wrapper-only StopSession) must not clear.
+        expect(windowsProbeMayClearFromTombstone({
+            pid: 100,
+            expectedMarker: 'worker-A',
+            hasTombstone,
+        })).toBe(false)
+        // Wrong marker must not clear.
+        expect(windowsProbeMayClearFromTombstone({
+            pid: 100,
+            expectedMarker: 'worker-A',
+            hasTombstone: (key) => key === 'PID-100:other-gen',
+        })).toBe(false)
+        // Matching PID+marker clears.
+        tombstones.add('PID-100:worker-A')
+        expect(windowsProbeMayClearFromTombstone({
+            pid: 100,
+            expectedMarker: 'worker-A',
+            hasTombstone,
+        })).toBe(true)
+        // Missing expected marker → unknown (never invent clear).
+        expect(windowsProbeMayClearFromTombstone({
+            pid: 100,
+            hasTombstone,
+        })).toBe(false)
     })
 })

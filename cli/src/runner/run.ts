@@ -46,7 +46,12 @@ import { buildMachineMetadata } from '@/agent/sessionFactory';
 import { resolveWorkspaceRoots } from '@/utils/workspaceRoot';
 import { hashRunnerCliApiToken, hashRunnerExtraHeaders } from './runnerIdentity';
 import { readRuntimes, runtimeMayBeAlive, runtimeAuthHash } from '@/codex/shared/registry';
-import { readWindowsProcessTable, windowsProcessTreeMayBeAlive } from '@/utils/windowsProcessStop';
+import {
+  readWindowsProcessTable,
+  windowsGenerationExitKey,
+  windowsProbeMayClearFromTombstone,
+  windowsProcessTreeMayBeAlive,
+} from '@/utils/windowsProcessStop';
 import { coalesceStopRequests } from './stopSessionRequests';
 import { scheduleCursorModelsPrewarm } from '@/modules/common/cursorModelsPrewarm';
 import { isLinkedGitWorktree } from '@/utils/isLinkedGitWorktree';
@@ -1109,7 +1114,16 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
                 if (trackedSession.requestedHappySessionId) {
                   rememberVerifiedExit(trackedSession.requestedHappySessionId);
                 }
-                rememberVerifiedExit(`PID-${pid}`);
+                // Webhook-timeout tree kill: generation-key on Windows when
+                // the start marker is known; never bare PID-N (#2658).
+                {
+                  const timeoutMarker = persistedResumeProcesses.get(pid)?.processStartMarker;
+                  if (isWindows() && timeoutMarker) {
+                    rememberVerifiedExit(windowsGenerationExitKey(pid, timeoutMarker));
+                  } else if (!isWindows()) {
+                    rememberVerifiedExit(`PID-${pid}`);
+                  }
+                }
                 pidToRequestedSessionId.delete(pid);
                 pidToConfirmedSessionId.delete(pid);
                 webhookTimeoutOrphanPids.delete(pid);
@@ -1429,11 +1443,17 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             hasActiveSharedRoots: pidHasActiveSharedRoots(liveForPid, pid),
           });
           if (decision === 'already_gone') {
-            // Windows: PID-only already_gone is not tree proof — descendants
-            // may outlive the wrapper. Only lifecycle/StopSession tree
-            // confirmations may tombstone (#2658).
+            // Windows: wrapper-gone is not tree proof — descendants may
+            // outlive the wrapper. Only a generation-keyed tombstone
+            // (PID+marker after a verified tree kill) may clear (#2658).
             if (isWindows()) {
-              if (hasVerifiedExit(sessionId)) return 'already_gone'
+              if (windowsProbeMayClearFromTombstone({
+                pid,
+                expectedMarker: opts?.processStartMarker,
+                hasTombstone: hasVerifiedExit,
+              })) {
+                return 'already_gone'
+              }
               return 'unknown'
             }
             rememberVerifiedExit(sessionId);
@@ -1460,7 +1480,9 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           // Preparation can outlive the target generation. Recheck after that
           // await before signalling a raw PID that the OS may have reused.
           if (!isProcessAlive(pid)) {
-            if (isWindows() && !hasVerifiedExit(sessionId)) {
+            if (isWindows()) {
+              // Wrapper gone mid-prepare without a generation tombstone —
+              // not tree proof for ProbeSessionExit (#2658 / #2660).
               return await finishWithOrphanSweep('unknown')
             }
             rememberVerifiedExit(sessionId)
@@ -1470,7 +1492,11 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           if (!(await killProcessTreeByPid(pid, false, undefined, signalDeadlines.get(pid)))) return 'still_alive';
           terminated.add(pid);
           rememberVerifiedExit(sessionId);
-          rememberVerifiedExit(`PID-${pid}`);
+          if (isWindows() && opts?.processStartMarker) {
+            rememberVerifiedExit(windowsGenerationExitKey(pid, opts.processStartMarker));
+          } else {
+            rememberVerifiedExit(`PID-${pid}`);
+          }
           return await finishWithOrphanSweep('stopped');
         }
         return 'unknown';
@@ -1567,7 +1593,10 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
               if (!await prepareSessionStop(sessionId, pid, persistedResumeProcesses.get(pid)?.processStartMarker)) return 'still_alive';
               // Preparation can outlive the target generation (same recheck as
               // the raw-PID path): never signal a dead or recycled PID.
-              if (!isProcessAlive(pid)) return await finishWithOrphanSweep('already_gone');
+              if (!isProcessAlive(pid)) {
+                if (isWindows()) return await finishWithOrphanSweep('unknown')
+                return await finishWithOrphanSweep('already_gone');
+              }
               const trackedMarker = persistedResumeProcesses.get(pid)?.processStartMarker;
               if (trackedMarker && getProcessStartMarker(pid) !== trackedMarker) return 'unknown';
               const reportStop: Parameters<typeof killProcessTreeByPid>[2] = report => {
@@ -1619,7 +1648,15 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           }
           if (session.happySessionId) rememberVerifiedExit(session.happySessionId);
           if (session.requestedHappySessionId) rememberVerifiedExit(session.requestedHappySessionId);
-          rememberVerifiedExit(`PID-${pid}`);
+          {
+            const genMarker = persistedResumeProcesses.get(pid)?.processStartMarker
+              ?? opts?.processStartMarker;
+            if (isWindows() && genMarker) {
+              rememberVerifiedExit(windowsGenerationExitKey(pid, genMarker));
+            } else if (!isWindows()) {
+              rememberVerifiedExit(`PID-${pid}`);
+            }
+          }
           pidToTrackedSession.delete(pid);
           pidToRequestedSessionId.delete(pid);
           pidToConfirmedSessionId.delete(pid);
@@ -1673,22 +1710,33 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           if (!await prepareSessionStop(sessionId, pid, persisted.processStartMarker)) return 'still_alive';
           // Preparation can outlive the target generation (same recheck as
           // the raw-PID path): never signal a dead or recycled PID.
-          if (!isProcessAlive(pid)) return await finishWithOrphanSweep('already_gone');
+          if (!isProcessAlive(pid)) {
+            if (isWindows()) return await finishWithOrphanSweep('unknown')
+            return await finishWithOrphanSweep('already_gone');
+          }
           if (persisted.processStartMarker && getProcessStartMarker(pid) !== persisted.processStartMarker) return 'unknown';
           if (!(await killProcessTreeByPid(pid, false, undefined, signalDeadlines.get(pid)))) return 'still_alive';
           terminated.add(pid);
           if (requestedSessionId) rememberVerifiedExit(requestedSessionId);
           if (confirmedSessionId) rememberVerifiedExit(confirmedSessionId);
-          rememberVerifiedExit(`PID-${pid}`);
+          if (isWindows() && persisted.processStartMarker) {
+            rememberVerifiedExit(windowsGenerationExitKey(pid, persisted.processStartMarker));
+          } else if (!isWindows()) {
+            rememberVerifiedExit(`PID-${pid}`);
+          }
           pidToRequestedSessionId.delete(pid);
           pidToConfirmedSessionId.delete(pid);
           if (persistedResumeProcesses.delete(pid)) persistResumeProcesses();
           releaseRecoveredSpawnDedupe(pid, existingSessionIdByChildPid, spawnSession);
           return await finishWithOrphanSweep('stopped');
         }
+        // Wrapper already gone without a tree kill — session tombstones for
+        // StopSession bookkeeping only. On Windows do not write a generation
+        // PID tombstone; ProbeSessionExit must not treat wrapper-only as
+        // already_gone (#2658 / #2660).
         if (requestedSessionId) rememberVerifiedExit(requestedSessionId);
         if (confirmedSessionId) rememberVerifiedExit(confirmedSessionId);
-        rememberVerifiedExit(`PID-${pid}`);
+        if (!isWindows()) rememberVerifiedExit(`PID-${pid}`);
         pidToRequestedSessionId.delete(pid);
         pidToConfirmedSessionId.delete(pid);
         if (persistedResumeProcesses.delete(pid)) persistResumeProcesses();
@@ -1905,8 +1953,15 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             const tree = windowsProcessTreeMayBeAlive(table, pid, expected)
             if (tree === true) return 'still_alive'
           }
-          // Lifecycle / StopSession tree confirmation only.
-          if (hasVerifiedExit(sessionId)) return 'already_gone'
+          // Generation-keyed tombstone only — a session-keyed StopSession
+          // record must not clear a different generation (#2658 / #2660).
+          if (windowsProbeMayClearFromTombstone({
+            pid,
+            expectedMarker: expected,
+            hasTombstone: hasVerifiedExit,
+          })) {
+            return 'already_gone'
+          }
           return 'unknown'
         }
         // Descendants may keep the wrapper's process group after reparent (#2658).

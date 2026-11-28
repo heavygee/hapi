@@ -49,6 +49,11 @@ export type SocketServerDeps = {
         tasks: BackgroundTask[],
         reported?: { machineId?: string; hostPid?: number; processStartMarker?: string },
     ) => void
+    onReportedTranscriptToolWork?: (
+        sessionId: string,
+        open: boolean,
+        reported: { machineId?: string; hostPid?: number; processStartMarker?: string; runnerOwned?: boolean },
+    ) => void
     onSessionActivity?: (sessionId: string, updatedAt: number) => void
     onAgentProgress?: (sessionId: string, at: number) => void
     onSweepImmediateQueued?: (sessionId: string, now: number) => void
@@ -139,6 +144,7 @@ export function createSocketServer(deps: SocketServerDeps): {
         onSessionChildExited: deps.onSessionChildExited,
         onWebappEvent: deps.onWebappEvent,
         onBackgroundTasks: deps.onBackgroundTasks,
+        onReportedTranscriptToolWork: deps.onReportedTranscriptToolWork,
         onSessionActivity: deps.onSessionActivity,
         onAgentProgress: deps.onAgentProgress,
         onSweepImmediateQueued: deps.onSweepImmediateQueued,
