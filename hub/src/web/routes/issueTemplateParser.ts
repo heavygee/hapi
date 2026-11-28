@@ -502,6 +502,17 @@ export function parseIssueFormYaml(id: string, raw: string): IssueTemplate {
             // carries no label/options to validate) — one GitHub's own
             // chooser would reject, but Boards' own `.github`-inheritance
             // logic would still have counted it as valid local coverage.
+            // Reuses the same wrong-type/blank/unquoted-boolean-word check
+            // every other String attribute in this file now gets (bot
+            // review, tiann/hapi#2147, follow-up) — the bespoke `!value`
+            // check above only ever caught "missing" and "literal
+            // Boolean," not a whitespace-only value or an unquoted
+            // GitHub-boolean word (`value: Yes`), the two gaps closed
+            // everywhere else this round.
+            const invalidReason = invalidAttributeStringReason(cstDoc, elementIndex, 'value', attrs.value)
+            if (invalidReason) {
+                return { id, name, kind: 'unsupported', reason: `A "markdown" field has an invalid ${invalidReason}`, githubValid: false }
+            }
             const value = asString(attrs.value)
             if (!value) {
                 return { id, name, kind: 'unsupported', reason: 'A "markdown" field is missing a value', githubValid: false }

@@ -865,6 +865,31 @@ body:
         expect(template.githubValid).toBe(false)
     })
 
+    // Regression (bot review, tiann/hapi#2147, follow-up): markdown's own
+    // `value` attribute used a bespoke `!value` check that only caught
+    // "missing" and a literal Boolean — not a whitespace-only value or an
+    // unquoted GitHub-boolean word, the two gaps every other String
+    // attribute in this file got fixed for.
+    it('is genuinely invalid when a markdown value is only whitespace', () => {
+        const template = parseIssueFormYaml(
+            'x.yml',
+            'name: Bug\ndescription: Bug\nbody:\n  - type: markdown\n    attributes:\n      value: "   "\n  - type: input\n    attributes:\n      label: Contact'
+        )
+        expect(template.kind).toBe('unsupported')
+        if (template.kind !== 'unsupported') return
+        expect(template.githubValid).toBe(false)
+    })
+
+    it('is genuinely invalid when a markdown value is an unquoted GitHub-boolean word', () => {
+        const template = parseIssueFormYaml(
+            'x.yml',
+            'name: Bug\ndescription: Bug\nbody:\n  - type: markdown\n    attributes:\n      value: Yes\n  - type: input\n    attributes:\n      label: Contact'
+        )
+        expect(template.kind).toBe('unsupported')
+        if (template.kind !== 'unsupported') return
+        expect(template.githubValid).toBe(false)
+    })
+
     it('allows an ordinary string dropdown/checkboxes description, and omitting it entirely', () => {
         const dropdownWithDescription = parseIssueFormYaml(
             'x.yml',
