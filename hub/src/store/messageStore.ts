@@ -101,8 +101,8 @@ export class MessageStore {
 
     /** Whether the session tail still holds unsettled tool work (see
      *  getLiveToolWork in messages.ts for the liveness contract). */
-    getLiveToolWork(sessionId: string, notBeforeCreatedAt?: number): boolean {
-        return getLiveToolWork(this.db, sessionId, notBeforeCreatedAt)
+    getLiveToolWork(sessionId: string, afterSeq?: number): boolean {
+        return getLiveToolWork(this.db, sessionId, afterSeq)
     }
 
     syncNativeQueuedMessage(sessionId: string, localId: string, text: string): StoredMessage {

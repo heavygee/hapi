@@ -1827,10 +1827,11 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         // owned app-server for that wrapper generation remains live.
         const owned = await codexOwnedStillAlive()
         if (owned) return owned
-        if (hasVerifiedExit(sessionId)) return 'already_gone'
+        // Do NOT trust a PID-only child-exit tombstone before descendant
+        // checks — onChildExited records one as soon as the wrapper exits (#2658).
         if (isWindows()) {
           // Generation-scoped tree: live root/children with this parent, or
-          // empty containment → already_gone. Table failure → unknown (#2658).
+          // empty containment → already_gone. Table failure → unknown.
           const table = await readWindowsProcessTable(10_000)
           const tree = windowsProcessTreeMayBeAlive(table, pid, expected)
           if (tree === true) return 'still_alive'

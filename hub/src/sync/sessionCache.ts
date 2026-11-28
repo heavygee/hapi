@@ -285,10 +285,12 @@ export class SessionCache {
     /** Last attributed row generation (machine:pid:marker) for transcript bounds. */
     private readonly rowGenerationOwnerBySessionId: Map<string, string> = new Map()
     /**
-     * Wall clock when the row's *current* generation changed. Transcript
-     * tool-work before this instant belongs to a prior owner (#2658).
+     * Max message seq observed when the row's *current* generation changed.
+     * Transcript tool-work at or below this seq belongs to a prior owner (#2658).
      */
-    private readonly transcriptGenerationBoundaryAtBySessionId: Map<string, number> = new Map()
+    private readonly transcriptGenerationBoundarySeqBySessionId: Map<string, number> = new Map()
+    /** Per-owner transient thinking bits (row-wide thinking is derived). */
+    private readonly thinkingByOwnerBySessionId: Map<string, boolean> = new Map()
     private readonly runtimeConfigUpdatedAtBySessionId: Map<string, Partial<Record<RuntimeConfigKey, number>>> = new Map()
     /**
      * Last time the hub saw real agent progress per session (tiann/hapi#1820).
@@ -767,10 +769,8 @@ export class SessionCache {
 
         session.active = true
         session.activeAt = Math.max(session.activeAt, hubNow)
-        session.thinking = requestedThinking || preserveQueuedThinking
-        session.thinkingAt = t
-        // Track which owner last set the row-wide thinking flag so a verified
-        // prior-gen exit can clear a stale latch without wiping B (#2658).
+        // Track which owner last set thinking so a verified prior-gen exit can
+        // clear a stale latch without wiping B (#2658).
         const reportedOwnerKey = (
             typeof payload.machineId === 'string' && payload.machineId.length > 0
             && typeof payload.hostPid === 'number' && payload.hostPid > 0
@@ -782,27 +782,35 @@ export class SessionCache {
                 hostStartMarker: payload.processStartMarker,
             })
             : undefined
-        if (!session.thinking) {
-            this.thinkingOwnerBySessionId.delete(session.id)
-        } else if (preserveQueuedThinking && !requestedThinking) {
-            // Queued-prompt grace is hub work, not the idle reporter's — clearing
-            // a verified-exited owner must not drop the queue guard (#2658).
-            this.thinkingOwnerBySessionId.delete(session.id)
-        } else if (requestedThinking && reportedOwnerKey) {
-            this.thinkingOwnerBySessionId.set(session.id, reportedOwnerKey)
-        } else if (requestedThinking) {
-            // Unattributed worker thinking — do not leave a prior owner credited.
-            this.thinkingOwnerBySessionId.delete(session.id)
-        }
         if (reportedOwnerKey) {
             this.noteRowGenerationOwner(session.id, reportedOwnerKey)
+            this.thinkingByOwnerBySessionId.set(session.id + '\0' + reportedOwnerKey, requestedThinking)
+            if (requestedThinking) {
+                this.thinkingOwnerBySessionId.set(session.id, reportedOwnerKey)
+            } else if (this.thinkingOwnerBySessionId.get(session.id) === reportedOwnerKey) {
+                this.thinkingOwnerBySessionId.delete(session.id)
+            }
+        } else if (requestedThinking) {
+            this.thinkingOwnerBySessionId.delete(session.id)
         }
+        // Row-wide thinking: any owner still thinking, or hub queued-prompt grace.
+        // A prior owner's idle must not clear a replacement's thinking bit.
+        const anyOwnerThinking = [...this.thinkingByOwnerBySessionId.entries()]
+            .some(([key, thinking]) => key.startsWith(session.id + '\0') && thinking)
+        session.thinking = requestedThinking || anyOwnerThinking || preserveQueuedThinking
+        session.thinkingAt = t
         if (!requestedThinking && preserveQueuedThinking && hasUnconsumedPrompt) {
             session.activeTurnStartedAt = hubNow
         } else if (wasThinking && !session.thinking) {
             session.activeTurnStartedAt = null
         }
-        if (requestedThinking || pendingThinkingUntil <= hubNow) {
+        // Never let a prior-generation thinking heartbeat cancel hub grace.
+        // Grace clears on consumption (clearQueuedThinkingGrace), expiry, or
+        // when the *current* row owner reports thinking (delivery started).
+        const currentKey = this.currentRowOwnerKey(session)
+        if (pendingThinkingUntil <= hubNow) {
+            this.pendingThinkingUntilBySessionId.delete(session.id)
+        } else if (requestedThinking && reportedOwnerKey && currentKey && reportedOwnerKey === currentKey) {
             this.pendingThinkingUntilBySessionId.delete(session.id)
         }
         // Durable owner latch survives heartbeat expiry (#2658). Bound to the
@@ -1175,21 +1183,25 @@ export class SessionCache {
     clearTransientThinkingForOwner(sessionId: string, ownerKey: string): void {
         const session = this.sessions.get(sessionId)
         if (!session) return
-        if (this.thinkingOwnerBySessionId.get(sessionId) !== ownerKey) return
-        // Queued-prompt grace is hub work — drop worker credit but keep the
-        // thinking flag so Archive cannot bypass the queue guard (#2658).
+        this.thinkingByOwnerBySessionId.delete(sessionId + '\0' + ownerKey)
+        if (this.thinkingOwnerBySessionId.get(sessionId) === ownerKey) {
+            this.thinkingOwnerBySessionId.delete(sessionId)
+        }
+        // Queued-prompt grace is hub work — keep thinking while grace is live.
         if (this.hasQueuedPromptWork(sessionId)) {
-            this.thinkingOwnerBySessionId.delete(sessionId)
+            session.thinking = true
             return
         }
-        if (!session.thinking) {
-            this.thinkingOwnerBySessionId.delete(sessionId)
+        const anyOwnerThinking = [...this.thinkingByOwnerBySessionId.entries()]
+            .some(([key, thinking]) => key.startsWith(sessionId + '\0') && thinking)
+        if (anyOwnerThinking) {
+            session.thinking = true
             return
         }
+        if (!session.thinking) return
         session.thinking = false
         session.thinkingAt = Date.now()
         session.activeTurnStartedAt = null
-        this.thinkingOwnerBySessionId.delete(sessionId)
         this.publisher.emit({
             type: 'session-updated',
             sessionId,
@@ -1361,8 +1373,8 @@ export class SessionCache {
 
     /**
      * When the *current row* worker generation changes, bound later transcript
-     * scans so prior-owner tool calls cannot credit the replacement. Late
-     * reports from a prior owner must not move the cutoff (#2658).
+     * scans by message seq so prior-owner tool calls cannot credit the
+     * replacement. Late reports from a prior owner must not move the cutoff (#2658).
      */
     noteRowGenerationOwner(sessionId: string, ownerKey: string): void {
         if (ownerKey.length === 0) return
@@ -1373,7 +1385,10 @@ export class SessionCache {
         // the tracked generation. Prior-owner heartbeats are ignored here.
         if (currentKey && ownerKey !== currentKey) return
         if (previous && previous !== ownerKey) {
-            this.transcriptGenerationBoundaryAtBySessionId.set(sessionId, Date.now())
+            this.transcriptGenerationBoundarySeqBySessionId.set(
+                sessionId,
+                this.store.messages.getMaxSeq(sessionId),
+            )
         }
         this.rowGenerationOwnerBySessionId.set(sessionId, ownerKey)
     }
@@ -1394,9 +1409,9 @@ export class SessionCache {
         return liveWorkOwnerKey({ machineId, hostPid, hostStartMarker: marker })
     }
 
-    /** Messages at/after this instant may credit the current generation. */
-    getTranscriptGenerationBoundaryAt(sessionId: string): number | undefined {
-        return this.transcriptGenerationBoundaryAtBySessionId.get(sessionId)
+    /** Messages strictly after this seq may credit the current generation. */
+    getTranscriptGenerationBoundarySeq(sessionId: string): number | undefined {
+        return this.transcriptGenerationBoundarySeqBySessionId.get(sessionId)
     }
 
     /**
@@ -1761,6 +1776,13 @@ export class SessionCache {
         session.backgroundTaskCount = 0
         session.backgroundTasks = []
         session.derivedToolWork = false
+        this.backgroundTasksByOwnerBySessionId.delete(session.id)
+        this.backgroundOwnerBySessionId.delete(session.id)
+        this.thinkingOwnerBySessionId.delete(session.id)
+        for (const key of [...this.thinkingByOwnerBySessionId.keys()]) {
+            if (key.startsWith(session.id + '\0')) this.thinkingByOwnerBySessionId.delete(key)
+        }
+        this.derivedWorkOwnerBySessionId.delete(session.id)
         this.pendingThinkingUntilBySessionId.delete(session.id)
 
         this.publisher.emit({
@@ -1808,6 +1830,14 @@ export class SessionCache {
             session.backgroundTaskCount = 0
             session.backgroundTasks = []
             session.derivedToolWork = false
+            // Drop transient per-owner maps; durable evidence stays in metadata.
+            this.backgroundTasksByOwnerBySessionId.delete(session.id)
+            this.backgroundOwnerBySessionId.delete(session.id)
+            this.thinkingOwnerBySessionId.delete(session.id)
+            for (const key of [...this.thinkingByOwnerBySessionId.keys()]) {
+                if (key.startsWith(session.id + '\0')) this.thinkingByOwnerBySessionId.delete(key)
+            }
+            this.derivedWorkOwnerBySessionId.delete(session.id)
             // The last keepalive is the last time the agent was known to be working.
             this.recordTurn(session, wasThinking, session.activeAt, 'agent', 'expired')
             this.pendingThinkingUntilBySessionId.delete(session.id)

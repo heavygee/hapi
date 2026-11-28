@@ -591,26 +591,27 @@ export function getLiveToolWork(
     db: Database,
     sessionId: string,
     /**
-     * When set, messages strictly older than this created_at belong to a prior
-     * worker generation and must not credit the current row (#2658).
+     * When set, messages at or below this seq belong to a prior worker
+     * generation and must not credit the current row (#2658). Seq (not
+     * created_at) so CLI-origin timestamps cannot hide a replacement's call.
      */
-    notBeforeCreatedAt?: number,
+    afterSeq?: number,
 ): boolean {
     const rows = prepareCached(db, `
-        SELECT id, content, created_at FROM messages
+        SELECT id, content, seq FROM messages
         WHERE session_id = ?
         ORDER BY seq DESC
         LIMIT ?
-    `).all(sessionId, TOOL_CALL_UPSERT_LOOKBACK) as Array<Pick<DbMessageRow, 'id' | 'content' | 'created_at'>>
+    `).all(sessionId, TOOL_CALL_UPSERT_LOOKBACK) as Array<Pick<DbMessageRow, 'id' | 'content' | 'seq'>>
 
     const settledAcpCallIds = new Set<string>()
     const settledClaudeToolUseIds = new Set<string>()
-    const boundary = typeof notBeforeCreatedAt === 'number' && Number.isFinite(notBeforeCreatedAt)
-        ? notBeforeCreatedAt
+    const boundarySeq = typeof afterSeq === 'number' && Number.isFinite(afterSeq)
+        ? afterSeq
         : undefined
     for (const row of rows) {
         // Prior-generation transcript is outside this worker's boundary.
-        if (boundary !== undefined && row.created_at < boundary) return false
+        if (boundarySeq !== undefined && row.seq <= boundarySeq) return false
 
         const decoded = decodeMessageContent(row.content)
         // A human turn (web prompt, native user row) starts a new round and

@@ -1943,10 +1943,10 @@ export class SyncEngine {
             if ((primaryJobs.get(session.id) ?? null) !== null) continue
             // Bound by the current worker generation so an unsettled call from a
             // verified-exited prior owner cannot credit the idle replacement.
-            const boundary = this.sessionCache.getTranscriptGenerationBoundaryAt(session.id)
+            const boundarySeq = this.sessionCache.getTranscriptGenerationBoundarySeq(session.id)
             this.sessionCache.noteDerivedWork(
                 session.id,
-                this.store.messages.getLiveToolWork(session.id, boundary),
+                this.store.messages.getLiveToolWork(session.id, boundarySeq),
             )
         }
     }
@@ -3880,47 +3880,51 @@ export class SyncEngine {
             if (owners.has(ownerKey)) continue
             owners.set(ownerKey, { machineId, hostPid, hostStartMarker })
         }
+        const sessionSocketGone = !this.rpcGateway.hasSessionRpcTarget(sessionId)
         for (const [ownerKey, owner] of owners) {
             const ownerMachine = this.getMachineByNamespace(owner.machineId, session.namespace)
                 ?? this.getMachine(owner.machineId)
             const ownerCaps = ownerMachine?.metadata?.capabilities
-            const probeSupported = !ownerCaps
-                || ownerCaps.includes(MACHINE_CAPABILITIES.ProbeSessionExit)
-            if (!probeSupported) continue
-            const timeoutMs = Math.ceil(deadline - performance.now())
-            if (timeoutMs <= 0) throw new ArchiveCleanupError('timeout')
+            const probeSupported = Boolean(ownerMachine) && (
+                !ownerCaps || ownerCaps.includes(MACHINE_CAPABILITIES.ProbeSessionExit)
+            )
             let status: 'stopped' | 'already_gone' | 'still_alive' | 'unknown' = 'unknown'
-            try {
-                status = await this.rpcGateway.probeRunnerSessionExit(
-                    owner.machineId,
-                    `PID-${owner.hostPid}`,
-                    {
-                        namespace: session.namespace,
-                        hubSessionId: sessionId,
-                        timeoutMs,
-                        processStartMarker: owner.hostStartMarker,
-                    },
-                )
-            } catch (error) {
-                if (error instanceof RunnerStopRpcError && error.timedOut) {
-                    throw new ArchiveCleanupError('timeout', error)
+            if (probeSupported) {
+                const timeoutMs = Math.ceil(deadline - performance.now())
+                if (timeoutMs <= 0) throw new ArchiveCleanupError('timeout')
+                try {
+                    status = await this.rpcGateway.probeRunnerSessionExit(
+                        owner.machineId,
+                        `PID-${owner.hostPid}`,
+                        {
+                            namespace: session.namespace,
+                            hubSessionId: sessionId,
+                            timeoutMs,
+                            processStartMarker: owner.hostStartMarker,
+                        },
+                    )
+                } catch (error) {
+                    if (error instanceof RunnerStopRpcError && error.timedOut) {
+                        throw new ArchiveCleanupError('timeout', error)
+                    }
+                    status = 'unknown'
                 }
-                status = 'unknown'
+            } else if (!session.active && sessionSocketGone) {
+                // Standalone terminal (no Runner probe): inactive + socket gone
+                // is the owner-bound exit witness for this generation (#2658).
+                status = 'already_gone'
             }
             if (status === 'already_gone' || status === 'stopped') {
+                // Only this owner's requests — never wipe another generation.
                 this.sessionCache.clearPendingAgentRequestsForOwner(sessionId, owner)
-                // Session-row generation exited: also retire unstamped terminal asks.
-                const meta = session.metadata
-                if (
-                    meta?.machineId === owner.machineId
-                    && meta?.hostPid === owner.hostPid
-                    && meta?.hostStartMarker === owner.hostStartMarker
-                ) {
-                    this.sessionCache.clearTerminalPendingRequests(sessionId)
-                }
                 this.sessionCache.clearTransientThinkingForOwner(sessionId, ownerKey)
                 this.sessionCache.clearTransientBackgroundForOwner(sessionId, ownerKey)
             }
+        }
+        // Unstamped terminal asks: only when the whole session is inactive and
+        // the CLI socket is gone (no other attributed owner to probe).
+        if (!session.active && sessionSocketGone && owners.size === 0) {
+            this.sessionCache.clearTerminalPendingRequests(sessionId)
         }
     }
 

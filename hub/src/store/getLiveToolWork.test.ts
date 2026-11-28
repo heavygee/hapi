@@ -92,19 +92,17 @@ function claudeUserContent(blocks: unknown[], extra: Record<string, unknown> = {
 }
 
 describe('getLiveToolWork', () => {
-    it('ignores open tool calls older than a generation boundary', () => {
+    it('ignores open tool calls at or below a generation seq boundary', () => {
         const store = makeStore()
         const session = makeSession(store, 'live-work-gen-boundary')
-        const before = Date.now() - 5_000
         store.messages.upsertToolCallMessage(
             session.id,
             toolCallContent('call-old', { status: 'in_progress' }),
             'call-old',
-            undefined,
-            before,
         )
+        const boundarySeq = store.messages.getMaxSeq(session.id)
         expect(store.messages.getLiveToolWork(session.id)).toBe(true)
-        expect(store.messages.getLiveToolWork(session.id, before + 1)).toBe(false)
+        expect(store.messages.getLiveToolWork(session.id, boundarySeq)).toBe(false)
         store.close()
     })
 

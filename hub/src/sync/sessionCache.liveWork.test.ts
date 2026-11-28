@@ -208,7 +208,7 @@ describe('SessionCache liveWorkByGeneration attribution (#2658)', () => {
         store.close()
     })
 
-    it('keeps the queued-prompt guard when clearing worker thinking without an idle heartbeat', () => {
+    it('keeps the queued-prompt guard across prior-gen thinking and exit', () => {
         const store = new Store(':memory:')
         const cache = new SessionCache(store, createPublisher([]))
         const session = cache.getOrCreateSession(
@@ -220,8 +220,8 @@ describe('SessionCache liveWorkByGeneration attribution (#2658)', () => {
                 startedBy: 'runner',
                 startedFromRunner: true,
                 machineId: 'm1',
-                hostPid: 100,
-                hostStartMarker: 'worker-A',
+                hostPid: 200,
+                hostStartMarker: 'worker-B',
             },
             null,
             'default',
@@ -231,16 +231,69 @@ describe('SessionCache liveWorkByGeneration attribution (#2658)', () => {
         cache.handleSessionAlive({
             sid: session.id,
             time: Date.now(),
+            thinking: false,
+            machineId: 'm1',
+            hostPid: 200,
+            processStartMarker: 'worker-B',
+        })
+        cache.markMessageQueued(session.id)
+        expect(cache.hasQueuedPromptWork(session.id)).toBe(true)
+
+        // Late thinking from prior A must not cancel hub grace.
+        cache.handleSessionAlive({
+            sid: session.id,
+            time: Date.now() + 1,
             thinking: true,
             machineId: 'm1',
             hostPid: 100,
             processStartMarker: 'worker-A',
         })
-        // Prompt accepted while A is thinking — no intervening idle heartbeat.
-        cache.markMessageQueued(session.id)
         expect(cache.hasQueuedPromptWork(session.id)).toBe(true)
 
         cache.clearTransientThinkingForOwner(session.id, keyA)
+        expect(cache.getSession(session.id)?.thinking).toBe(true)
+        expect(cache.hasQueuedPromptWork(session.id)).toBe(true)
+        store.close()
+    })
+
+    it('preserves terminal thinking across a late prior-runner idle heartbeat', () => {
+        const store = new Store(':memory:')
+        const cache = new SessionCache(store, createPublisher([]))
+        const session = cache.getOrCreateSession(
+            'live-work-term-think',
+            {
+                path: '/tmp/p',
+                host: 'localhost',
+                flavor: 'claude',
+                startedBy: 'terminal',
+                machineId: 'm1',
+                hostPid: 200,
+                hostStartMarker: 'worker-B',
+            },
+            null,
+            'default',
+        )
+
+        cache.handleSessionAlive({
+            sid: session.id,
+            time: Date.now(),
+            thinking: true,
+            machineId: 'm1',
+            hostPid: 200,
+            processStartMarker: 'worker-B',
+            runnerOwned: false,
+        })
+        expect(cache.getSession(session.id)?.thinking).toBe(true)
+
+        cache.handleSessionAlive({
+            sid: session.id,
+            time: Date.now() + 1,
+            thinking: false,
+            machineId: 'm1',
+            hostPid: 100,
+            processStartMarker: 'worker-A',
+            runnerOwned: true,
+        })
         expect(cache.getSession(session.id)?.thinking).toBe(true)
         store.close()
     })
@@ -268,7 +321,10 @@ describe('SessionCache liveWorkByGeneration attribution (#2658)', () => {
             session.id,
             liveWorkOwnerKey({ machineId: 'm1', hostPid: 100, hostStartMarker: 'worker-A' }),
         )
-        expect(cache.getTranscriptGenerationBoundaryAt(session.id)).toBeUndefined()
+        expect(cache.getTranscriptGenerationBoundarySeq(session.id)).toBeUndefined()
+
+        store.messages.addMessage(session.id, { role: 'assistant', content: 'from-A' })
+        const seqAtSwitch = store.messages.getMaxSeq(session.id)
 
         // Advance row metadata to B (replacement), then note B.
         const before = cache.getSession(session.id)!
@@ -284,20 +340,19 @@ describe('SessionCache liveWorkByGeneration attribution (#2658)', () => {
         ).result).toBe('success')
         cache.refreshSession(session.id)
 
-        const at = Date.now()
         cache.noteRowGenerationOwner(
             session.id,
             liveWorkOwnerKey({ machineId: 'm1', hostPid: 200, hostStartMarker: 'worker-B' }),
         )
-        const boundary = cache.getTranscriptGenerationBoundaryAt(session.id)
-        expect(boundary).toBeGreaterThanOrEqual(at)
+        const boundary = cache.getTranscriptGenerationBoundarySeq(session.id)
+        expect(boundary).toBe(seqAtSwitch)
 
         // Late A report must not move the cutoff.
         cache.noteRowGenerationOwner(
             session.id,
             liveWorkOwnerKey({ machineId: 'm1', hostPid: 100, hostStartMarker: 'worker-A' }),
         )
-        expect(cache.getTranscriptGenerationBoundaryAt(session.id)).toBe(boundary)
+        expect(cache.getTranscriptGenerationBoundarySeq(session.id)).toBe(boundary)
         store.close()
     })
 
