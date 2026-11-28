@@ -21,6 +21,7 @@ import {
 } from "@/modules/common/generatedImages";
 import type { InlineMediaSource } from "@/modules/common/inlineMediaSource";
 import { DISPLAY_IMAGE_TOOL_DESCRIPTION, DISPLAY_MEDIA_TOOL_DESCRIPTION, DISPLAY_VIDEO_TOOL_DESCRIPTION } from "@/modules/common/displayToolDescriptions";
+import { CHANGE_TITLE_TOOL_DESCRIPTION } from "@/modules/common/titleInstruction";
 import { resolveSkill } from "@/modules/common/skills";
 import { SESSION_NAME_MAX_LENGTH, toSessionSummaryMetadata } from '@hapi/protocol'
 import { isPeerToolsDisabled } from "@/modules/common/peerTools";
@@ -54,6 +55,13 @@ import {
     sessionJobInputSchema,
     type SessionJobToolArgs,
 } from "@/modules/sessionJob/sessionJobMcp";
+import {
+    SESSION_WAITING_TOOL_DESCRIPTION,
+    SESSION_WAITING_TOOL_NAME,
+    handleSessionWaitingTool,
+    sessionWaitingInputSchema,
+    type SessionWaitingToolArgs,
+} from "@/modules/sessionWaiting/sessionWaitingMcp";
 import { SpawnPeerError, spawnPeer } from "@/modules/spawnPeer/spawnPeer";
 
 export type HapiMcpToolName =
@@ -68,6 +76,7 @@ export type HapiMcpToolName =
     | 'spawn_peer'
     | 'search_content'
     | 'session_job'
+    | 'session_waiting'
     | 'skill_lookup';
 
 const SEARCH_CONTENT_DESCRIPTION =
@@ -371,7 +380,7 @@ function createHapiMcpServer(
     }
     if (enableChangeTitle) {
         registerTool('change_title', {
-            description: 'Change the title of the current HAPI chat session. Call once when the user\'s primary objective is clear; use a concise task title.',
+            description: CHANGE_TITLE_TOOL_DESCRIPTION,
             title: 'Change Chat Title',
             inputSchema: changeTitleInputSchema,
             // Fires proactively with no user-stated trigger ("call once when the
@@ -602,6 +611,19 @@ function createHapiMcpServer(
     }, async (args: SessionJobToolArgs) => {
         logger.debug('[hapiMCP] session_job:', args.action, args.jobKey);
         const result = await handleSessionJobTool(args, client.sessionId);
+        return {
+            content: [{ type: 'text' as const, text: result.text }],
+            isError: result.isError,
+        };
+    });
+
+    registerTool(SESSION_WAITING_TOOL_NAME, {
+        description: SESSION_WAITING_TOOL_DESCRIPTION,
+        title: 'Session Waiting (External Block)',
+        inputSchema: sessionWaitingInputSchema,
+    }, async (args: SessionWaitingToolArgs) => {
+        logger.debug('[hapiMCP] session_waiting:', args.action, args.reason);
+        const result = await handleSessionWaitingTool(args, client);
         return {
             content: [{ type: 'text' as const, text: result.text }],
             isError: result.isError,
@@ -940,6 +962,7 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
         }
     }
     if (includeTool(SESSION_JOB_TOOL_NAME)) toolNames.push(SESSION_JOB_TOOL_NAME);
+    if (includeTool(SESSION_WAITING_TOOL_NAME)) toolNames.push(SESSION_WAITING_TOOL_NAME);
     if (options.skillLookup && includeTool('skill_lookup')) toolNames.push('skill_lookup');
     if (toolNames.length === 0) {
         throw new Error('startHappyServer requires at least one enabled tool');

@@ -136,6 +136,7 @@ describe('startHappyServer skill_lookup', () => {
             'ping_peer',
             'search_content',
             'session_job',
+            'session_waiting',
             'spawn_peer',
         ])
     })
@@ -262,8 +263,11 @@ describe('startHappyServer skill_lookup', () => {
             const mcp = await connect(false)
             const tools = await mcp.listTools()
             const tool = tools.tools.find((entry) => entry.name === 'ping_peer')
-            expect(tool?.inputSchema.properties?.deliveryMode).toMatchObject({ enum: ['auto', 'queue', 'steer'] })
-            expect(tool?.description).toContain('auto (default)')
+            expect(tool?.inputSchema.properties?.deliveryMode).toMatchObject({
+                enum: ['auto', 'queue', 'steer'],
+                description: expect.stringContaining('auto (default)')
+            })
+            expect(tool?.description).not.toContain('auto (default)')
             const result = await mcp.callTool({
                 name: 'ping_peer',
                 arguments: { sessionIdPrefix: 'peer-id', message: 'hello', ...(deliveryMode ? { deliveryMode } : {}) }
@@ -492,6 +496,7 @@ describe('startHappyServer skill_lookup', () => {
             'inspect_peer',
             'spawn_peer',
             'session_job',
+            'session_waiting',
         ])
         expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
             'display_image',
@@ -502,6 +507,7 @@ describe('startHappyServer skill_lookup', () => {
             'ping_peer',
             'search_content',
             'session_job',
+            'session_waiting',
             'spawn_peer',
         ])
     })
@@ -1098,6 +1104,7 @@ describe('toClaudeAllowedHapiMcpTools', () => {
             'inspect_peer',
             'spawn_peer',
             'session_job',
+            'session_waiting',
             'skill_lookup'
         ])).toEqual([
             'mcp__hapi__change_title',
@@ -1105,6 +1112,7 @@ describe('toClaudeAllowedHapiMcpTools', () => {
             'mcp__hapi__list_peers',
             'mcp__hapi__search_content',
             'mcp__hapi__session_job',
+            'mcp__hapi__session_waiting',
             'mcp__hapi__skill_lookup'
         ])
         expect(toClaudeAllowedHapiMcpTools(['display_video'])).not.toContain('mcp__hapi__display_video')
@@ -1221,6 +1229,7 @@ describe('startHappyServer peer tools kill switch', () => {
             'display_media',
             'search_content',
             'session_job',
+            'session_waiting',
         ])
         const tools = await client!.listTools()
         const names = tools.tools.map((tool) => tool.name)
@@ -1234,6 +1243,7 @@ describe('startHappyServer peer tools kill switch', () => {
             'display_video',
             'display_media',
             'session_job',
+            'session_waiting',
         ]))
     })
 })
