@@ -141,7 +141,6 @@ describe('startHappyServer skill_lookup', () => {
             'link_issue',
             'list_peers',
             'ping_peer',
-            'search_content',
             'session_job',
             'session_waiting',
             'spawn_peer',
@@ -502,7 +501,6 @@ describe('startHappyServer skill_lookup', () => {
             'ping_peer',
             'inspect_peer',
             'spawn_peer',
-            'search_content',
             'session_job',
             'session_waiting',
         ])
@@ -514,7 +512,6 @@ describe('startHappyServer skill_lookup', () => {
             'link_issue',
             'list_peers',
             'ping_peer',
-            'search_content',
             'session_job',
             'session_waiting',
             'spawn_peer',
@@ -1724,7 +1721,6 @@ describe('startHappyServer peer tools kill switch', () => {
             'display_image',
             'display_video',
             'display_media',
-            'search_content',
             'session_job',
             'session_waiting',
         ])
@@ -1739,7 +1735,6 @@ describe('startHappyServer peer tools kill switch', () => {
             'display_image',
             'display_video',
             'display_media',
-            'search_content',
             'session_job',
             'session_waiting',
         ]))

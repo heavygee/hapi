@@ -1,7 +1,7 @@
 /**
  * HAPI MCP STDIO Bridge
  *
- * Minimal STDIO MCP server exposing HAPI tools such as `change_title`, `display_image`, `display_video`, `display_media`, `list_peers`, `search_content`, `ping_peer`, `inspect_peer`, and `spawn_peer`.
+ * Minimal STDIO MCP server exposing HAPI tools such as `change_title`, `display_image`, `display_video`, `display_media`, `list_peers`, `ping_peer`, `inspect_peer`, and `spawn_peer`.
  * On invocation it forwards the tool call to an existing HAPI HTTP MCP server
  * using the StreamableHTTPClientTransport.
  *
@@ -56,8 +56,6 @@ const DEFAULT_TOOL_NAMES = [
   'ping_peer',
   'inspect_peer',
   'spawn_peer',
-  // Fork-only (ported from heavygee/hapi#238, soup manifest swap 2026-11-28).
-  'search_content',
   SESSION_JOB_TOOL_NAME,
   SESSION_WAITING_TOOL_NAME,
 ];
@@ -539,47 +537,6 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
             return {
               content: [
                 { type: 'text' as const, text: `Failed to list peers: ${error instanceof Error ? error.message : String(error)}` },
-              ],
-              isError: true,
-            };
-          }
-        }
-      );
-    }
-
-    // Fork-only tool (ported from heavygee/hapi#238, soup manifest swap
-    // 2026-11-28) — forwards to the HTTP MCP server's own search_content,
-    // same pattern as every other tool in this bridge.
-    const searchContentInputSchema: z.ZodTypeAny = z.object({
-      query: z.string().trim().min(2).max(200).describe(
-        'Distinctive noun/phrase from transcript text. Avoid short/common substrings (trigram FTS noise).'
-      ),
-      sessionId: z.string().min(1).optional().describe(
-        'Optional hub session id to scope search to one conversation.'
-      ),
-      limit: z.number().int().min(1).max(100).optional().describe(
-        'Max matches to return (default 50, hub max 100).'
-      ),
-    });
-
-    if (toolNames.has('search_content')) {
-      server.registerTool<any, any>(
-        'search_content',
-        {
-          description:
-            'Search transcript text across HAPI sessions on the same hub/namespace. Uses session CLI credentials — never hand-mint a JWT. Auth/backend failures are errors, never empty lists. Prefer distinctive nouns (trigram FTS).',
-          title: 'Search Session Transcripts',
-          inputSchema: searchContentInputSchema,
-        },
-        async (args: Record<string, unknown>) => {
-          try {
-            const client = await ensureHttpClient();
-            const response = await client.callTool({ name: 'search_content', arguments: args });
-            return response as any;
-          } catch (error) {
-            return {
-              content: [
-                { type: 'text' as const, text: `Failed to search content: ${error instanceof Error ? error.message : String(error)}` },
               ],
               isError: true,
             };

@@ -154,7 +154,6 @@ describe('runHappyMcpStdioBridge tool forwarding', () => {
             'inspect_peer',
             'list_peers',
             'ping_peer',
-            'search_content',
             'session_job',
             'session_waiting',
             'spawn_peer',
@@ -331,8 +330,7 @@ describe('runHappyMcpStdioBridge tool forwarding', () => {
             'ping_peer',
             'spawn_peer',
             'inspect_peer',
-            'list_peers',
-            'search_content'
+            'list_peers'
         ])
 
         harness.tools.clear()
@@ -350,7 +348,6 @@ describe('runHappyMcpStdioBridge tool forwarding', () => {
                 'display_media',
                 'session_job',
                 'session_waiting',
-                'search_content',
             ])
         } finally {
             delete process.env.HAPI_DISABLE_PEER_TOOLS

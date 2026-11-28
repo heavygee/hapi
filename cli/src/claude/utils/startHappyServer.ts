@@ -59,11 +59,6 @@ import {
     type SessionWaitingToolArgs,
 } from "@/modules/sessionWaiting/sessionWaitingMcp";
 import { SpawnPeerError, spawnPeer } from "@/modules/spawnPeer/spawnPeer";
-import {
-    SearchContentError,
-    formatSearchContentMatches,
-    searchSessionContent,
-} from "@/modules/searchContent/searchContent";
 
 export type HapiMcpToolName =
     | 'change_title'
@@ -76,26 +71,9 @@ export type HapiMcpToolName =
     | 'ping_peer'
     | 'inspect_peer'
     | 'spawn_peer'
-    | 'search_content'
     | 'session_job'
     | 'session_waiting'
     | 'skill_lookup';
-
-// Fork-only tool: upstream's builder has no equivalent (ported from
-// heavygee/hapi#238's branch when it was superseded by feat/boards, soup
-// manifest swap 2026-11-28 — "we need it in the soup, we need to dog food
-// it"). Backend (searchSessionContent in hub/src/sync/syncEngine.ts +
-// GET/POST /sessions/content-search) already exists on both upstream and
-// this branch; only the MCP-tool-exposure layer across this file,
-// happyMcpStdioBridge.ts, and buildHapiMcpBridge.ts was fork-only and
-// would otherwise have silently vanished in the swap.
-const SEARCH_CONTENT_DESCRIPTION =
-    'Search transcript text across HAPI sessions on the same hub/namespace (what sessions actually said). ' +
-    'Uses this session\'s CLI credentials — never hand-mint a JWT (expired JWT previously returned an empty list, ' +
-    'indistinguishable from no matches). Optional sessionId scopes to one session. ' +
-    'Returns session id, name, timestamp, and snippet so you can inspect_peer / ping_peer next. ' +
-    'Query tip: short/common substrings match badly via trigram FTS (e.g. "Ian" hits Austral**ian**; ' +
-    '"home" hits every /home/ path) — prefer distinctive nouns. Auth/backend failures surface as errors, never [].';
 
 type StartHappyServerOptions = {
     /**
@@ -178,8 +156,7 @@ const CLAUDE_MANUAL_APPROVAL_HAPI_TOOLS = new Set([
  * Keeps `display_media` / `display_video` (arbitrary local-path readers), `ping_peer`,
  * `inspect_peer`, `spawn_peer`, `link_pr`, and `link_issue` (both mutate session
  * metadata) off the auto-allow list so they still prompt. `list_peers` stays
- * allowed (discovery shortlist only). `search_content` stays allowed too
- * (transcript search; read-only hub REST, same trust level as `list_peers`).
+ * allowed (discovery shortlist only).
  */
 export function toClaudeAllowedHapiMcpTools(toolNames: string[]): string[] {
     return toolNames
@@ -346,18 +323,6 @@ function createHapiMcpServer(
             'Max sessions to return (default 30, max 100). Newest updatedAt first.'
         ),
         includeInactive: z.boolean().optional().describe(LIST_PEERS_INCLUDE_INACTIVE_PARAM_DESCRIPTION),
-    });
-
-    const searchContentInputSchema: z.ZodTypeAny = z.object({
-        query: z.string().trim().min(2).max(200).describe(
-            'Distinctive noun/phrase from transcript text. Avoid short/common substrings (trigram FTS noise).'
-        ),
-        sessionId: z.string().min(1).optional().describe(
-            'Optional hub session id to scope search to one conversation.'
-        ),
-        limit: z.number().int().min(1).max(100).optional().describe(
-            'Max matches to return (default 50, hub max 100).'
-        ),
     });
 
     async function displayInlineMedia(
@@ -880,49 +845,6 @@ function createHapiMcpServer(
         });
     }
 
-    registerTool('search_content', {
-        description: SEARCH_CONTENT_DESCRIPTION,
-        title: 'Search Session Transcripts',
-        inputSchema: searchContentInputSchema,
-    }, async (args: { query: string; sessionId?: string; limit?: number }) => {
-        logger.debug('[hapiMCP] search_content:', args.query);
-        try {
-            const limit = args.limit ?? 50;
-            const result = await searchSessionContent({
-                query: args.query,
-                sessionId: args.sessionId,
-                limit,
-            });
-            return {
-                content: [
-                    {
-                        type: 'text' as const,
-                        text: formatSearchContentMatches(result, {
-                            query: args.query,
-                            maxRows: limit,
-                        }),
-                    },
-                ],
-                isError: false,
-            };
-        } catch (error) {
-            const message = error instanceof SearchContentError
-                ? error.message
-                : error instanceof Error
-                    ? error.message
-                    : String(error);
-            logger.debug('[hapiMCP] search_content failed:', message);
-            return {
-                content: [
-                    {
-                        type: 'text' as const,
-                        text: `Failed to search content: ${message}`,
-                    },
-                ],
-                isError: true,
-            };
-        }
-    });
 
     if (skillLookup) {
         registerTool('skill_lookup', {
@@ -1015,7 +937,6 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
             if (includeTool(name)) toolNames.push(name);
         }
     }
-    if (includeTool('search_content')) toolNames.push('search_content');
     if (includeTool(SESSION_JOB_TOOL_NAME)) toolNames.push(SESSION_JOB_TOOL_NAME);
     if (includeTool(SESSION_WAITING_TOOL_NAME)) toolNames.push(SESSION_WAITING_TOOL_NAME);
     if (options.skillLookup && includeTool('skill_lookup')) toolNames.push('skill_lookup');
