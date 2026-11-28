@@ -1077,6 +1077,35 @@ body:
         expect(withoutDefault.kind).toBe('form')
     })
 
+    // Regression (bot review, tiann/hapi#2147, follow-up): GitHub's own
+    // element-keys table types `validations` as Map. `asRecord` alone
+    // silently coerces a non-object value to `{}` — treating a scalar
+    // `validations` as "no validations declared" instead of rejecting
+    // the template, the one key in this gap's family that's a sibling
+    // (nested object) type rather than String/Integer/Boolean.
+    it('is genuinely invalid when validations is a scalar instead of a map', () => {
+        const template = parseIssueFormYaml(
+            'x.yml',
+            'name: Bug\ndescription: Bug\nbody:\n  - type: input\n    attributes:\n      label: Contact\n    validations: "yes"'
+        )
+        expect(template.kind).toBe('unsupported')
+        if (template.kind !== 'unsupported') return
+        expect(template.githubValid).toBe(false)
+    })
+
+    it('allows an ordinary validations map, and omitting it entirely', () => {
+        const withValidations = parseIssueFormYaml(
+            'x.yml',
+            'name: Bug\ndescription: Bug\nbody:\n  - type: input\n    attributes:\n      label: Contact\n    validations:\n      required: true'
+        )
+        expect(withValidations.kind).toBe('form')
+        const withoutValidations = parseIssueFormYaml(
+            'x.yml',
+            'name: Bug\ndescription: Bug\nbody:\n  - type: input\n    attributes:\n      label: Contact'
+        )
+        expect(withoutValidations.kind).toBe('form')
+    })
+
     // Regression (Meta review, tiann/hapi#2147, follow-up): checkboxes'
     // own option labels were never checked for duplicates either — the
     // direct structural sibling of the dropdown-options check above.

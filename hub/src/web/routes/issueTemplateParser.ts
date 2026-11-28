@@ -616,6 +616,20 @@ export function parseIssueFormYaml(id: string, raw: string): IssueTemplate {
         }
         const fieldId = explicitFieldId ?? generatedFieldId as string
         const description = asString(attrs.description)
+        // GitHub's own element-keys table types `validations` as Map
+        // (bot review, tiann/hapi#2147, follow-up) — `asRecord` alone
+        // silently coerces a non-object value to `{}`, same "accept it as
+        // absent" shape as every other silent-acceptance gap fixed this
+        // round, just for a Map-typed key instead of String/Integer.
+        // Unlike `attributes` (also Map-typed, same function) a malformed
+        // `validations` doesn't cascade into any other rejection — a
+        // field's `attributes` being wrong eventually surfaces as "missing
+        // label"/"missing value" downstream, but `validations` is wholly
+        // optional and its only effect (required/min_length) silently
+        // degrades to "not required" with no further check noticing.
+        if (elObj.validations !== undefined && (typeof elObj.validations !== 'object' || elObj.validations === null || Array.isArray(elObj.validations))) {
+            return { id, name, kind: 'unsupported', reason: `Field "${label}" has a "validations" value that is not a map`, githubValid: false }
+        }
         const validations = asRecord(elObj.validations)
         const required = validations.required === true
 
