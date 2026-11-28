@@ -1049,6 +1049,21 @@ body:
         expect(template.githubValid).toBe(false)
     })
 
+    // Regression (bot review, tiann/hapi#2147, follow-up, same key one
+    // level more specific): `typeof === 'number'` alone still accepted a
+    // fractional value — a number, but not a valid index into the
+    // options array, and not what GitHub's own Integer-typed schema
+    // declares.
+    it('is genuinely invalid when a dropdown default is a fractional number', () => {
+        const template = parseIssueFormYaml(
+            'x.yml',
+            'name: Bug\ndescription: Bug\nbody:\n  - type: dropdown\n    id: pie\n    attributes:\n      label: Pie?\n      options:\n        - Steak\n        - Fish\n      default: 0.5'
+        )
+        expect(template.kind).toBe('unsupported')
+        if (template.kind !== 'unsupported') return
+        expect(template.githubValid).toBe(false)
+    })
+
     it('allows an ordinary integer dropdown default, and omitting it entirely', () => {
         const withDefault = parseIssueFormYaml(
             'x.yml',

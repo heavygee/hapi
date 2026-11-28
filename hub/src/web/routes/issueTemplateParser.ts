@@ -703,14 +703,15 @@ export function parseIssueFormYaml(id: string, raw: string): IssueTemplate {
                 return { id, name, kind: 'unsupported', reason: `Dropdown field "${label}" uses "None", a reserved option GitHub auto-populates`, githubValid: false }
             }
             // GitHub's own per-type attribute table types `default` as
-            // Integer, not String — the one attribute in this file's
-            // Boolean-silent-acceptance family that isn't a string type
-            // (bot review, tiann/hapi#2147, follow-up). The bare
-            // `typeof === 'number'` ternary already in place silently
-            // dropped a Boolean-coerced `default: false` as "no default
-            // declared" instead of rejecting the template, same shape as
-            // every other check in this family.
-            if (attrs.default !== undefined && typeof attrs.default !== 'number') {
+            // Integer specifically, not just String or Number — the one
+            // attribute in this file's Boolean-silent-acceptance family
+            // that isn't a string type (bot review, tiann/hapi#2147,
+            // follow-up). A bare `typeof === 'number'` check alone still
+            // accepted a fractional value (`default: 0.5`) — a number,
+            // but not a valid index into the options array, and not what
+            // GitHub's own schema declares — same silent-acceptance shape
+            // one level more specific than the type check alone catches.
+            if (attrs.default !== undefined && (typeof attrs.default !== 'number' || !Number.isInteger(attrs.default))) {
                 return { id, name, kind: 'unsupported', reason: `Dropdown field "${label}" has a "default" that is not an integer`, githubValid: false }
             }
             const defaultIndex = typeof attrs.default === 'number' ? attrs.default : undefined
