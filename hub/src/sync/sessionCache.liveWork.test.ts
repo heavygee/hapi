@@ -158,6 +158,119 @@ describe('SessionCache liveWorkByGeneration attribution (#2658)', () => {
         store.close()
     })
 
+    it('preserves a replacement\'s row-wide tasks when a prior owner sends an empty snapshot', () => {
+        const store = new Store(':memory:')
+        const cache = new SessionCache(store, createPublisher([]))
+        const session = cache.getOrCreateSession(
+            'live-work-bg-replace',
+            {
+                path: '/tmp/p',
+                host: 'localhost',
+                flavor: 'claude',
+                startedBy: 'terminal',
+                machineId: 'm1',
+                hostPid: 200,
+                hostStartMarker: 'worker-B',
+            },
+            null,
+            'default',
+        )
+
+        cache.setBackgroundTasks(
+            session.id,
+            [{ id: 'bg-b', type: 'local_bash', description: 'terminal-task' }],
+            { machineId: 'm1', hostPid: 200, processStartMarker: 'worker-B', runnerOwned: false },
+        )
+        expect(cache.getSession(session.id)?.backgroundTaskCount).toBe(1)
+
+        cache.setBackgroundTasks(
+            session.id,
+            [],
+            { machineId: 'm1', hostPid: 100, processStartMarker: 'worker-A', runnerOwned: true },
+        )
+        expect(cache.getSession(session.id)?.backgroundTaskCount).toBe(1)
+        expect(cache.getSession(session.id)?.backgroundTasks?.[0]?.id).toBe('bg-b')
+        store.close()
+    })
+
+    it('does not attribute queued-prompt thinking to an idle reporter', () => {
+        const store = new Store(':memory:')
+        const cache = new SessionCache(store, createPublisher([]))
+        const session = cache.getOrCreateSession(
+            'live-work-queued-think',
+            {
+                path: '/tmp/p',
+                host: 'localhost',
+                flavor: 'claude',
+                startedBy: 'runner',
+                startedFromRunner: true,
+                machineId: 'm1',
+                hostPid: 100,
+                hostStartMarker: 'worker-A',
+            },
+            null,
+            'default',
+        )
+        const keyA = liveWorkOwnerKey({ machineId: 'm1', hostPid: 100, hostStartMarker: 'worker-A' })
+
+        cache.handleSessionAlive({
+            sid: session.id,
+            time: Date.now(),
+            thinking: true,
+            machineId: 'm1',
+            hostPid: 100,
+            processStartMarker: 'worker-A',
+        })
+        cache.markMessageQueued(session.id)
+
+        cache.handleSessionAlive({
+            sid: session.id,
+            time: Date.now() + 1,
+            thinking: false,
+            machineId: 'm1',
+            hostPid: 100,
+            processStartMarker: 'worker-A',
+        })
+        expect(cache.getSession(session.id)?.thinking).toBe(true)
+
+        cache.clearTransientThinkingForOwner(session.id, keyA)
+        expect(cache.getSession(session.id)?.thinking).toBe(true)
+        store.close()
+    })
+
+    it('bounds transcript-derived work after a generation change', () => {
+        const store = new Store(':memory:')
+        const cache = new SessionCache(store, createPublisher([]))
+        const session = cache.getOrCreateSession(
+            'live-work-derived-bound',
+            {
+                path: '/tmp/p',
+                host: 'localhost',
+                flavor: 'claude',
+                startedBy: 'runner',
+                startedFromRunner: true,
+                machineId: 'm1',
+                hostPid: 100,
+                hostStartMarker: 'worker-A',
+            },
+            null,
+            'default',
+        )
+
+        cache.noteRowGenerationOwner(
+            session.id,
+            liveWorkOwnerKey({ machineId: 'm1', hostPid: 100, hostStartMarker: 'worker-A' }),
+        )
+        const before = Date.now()
+        cache.noteRowGenerationOwner(
+            session.id,
+            liveWorkOwnerKey({ machineId: 'm1', hostPid: 200, hostStartMarker: 'worker-B' }),
+        )
+        const boundary = cache.getTranscriptGenerationBoundaryAt(session.id)
+        expect(boundary).toBeGreaterThanOrEqual(before)
+        store.close()
+    })
+
     it('skips durable write/clear when the heartbeat omits owner identity', () => {
         const store = new Store(':memory:')
         const cache = new SessionCache(store, createPublisher([]))

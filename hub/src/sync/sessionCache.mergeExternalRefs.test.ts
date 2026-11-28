@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'bun:test'
-import { mergeSessionMetadataForSessionMerge, unionLiveWorkByGeneration } from './sessionCache'
+import {
+    mergeSessionMetadataForSessionMerge,
+    transferSourceLiveWorkOntoDest,
+    unionLiveWorkByGeneration,
+} from './sessionCache'
 import { liveWorkOwnerKey } from './liveWorkByGeneration'
 
 const prRef = {
@@ -126,5 +130,29 @@ describe('mergeSessionMetadataForSessionMerge externalRefs', () => {
         expect(united[key]?.unresolvedTurn).toBe(true)
         expect(united[key]?.backgroundTasks).toHaveLength(1)
         expect(united[key]?.since).toBe(10)
+    })
+
+    it('drops a stale first-merge source copy when the fresh source is idle', () => {
+        const keyA = liveWorkOwnerKey({ machineId: 'm1', hostPid: 1, hostStartMarker: 'A' })
+        const keyB = liveWorkOwnerKey({ machineId: 'm1', hostPid: 2, hostStartMarker: 'B' })
+        const dest = {
+            [keyA]: {
+                machineId: 'm1',
+                hostPid: 1,
+                hostStartMarker: 'A',
+                since: 10,
+                unresolvedTurn: true,
+            },
+            [keyB]: {
+                machineId: 'm1',
+                hostPid: 2,
+                hostStartMarker: 'B',
+                since: 20,
+                backgroundTasks: [{ id: 'bg-b', type: 'local_bash', description: 'b' }],
+            },
+        }
+        const transferred = transferSourceLiveWorkOntoDest(dest, {}, new Set([keyA]))
+        expect(transferred[keyA]).toBeUndefined()
+        expect(transferred[keyB]?.backgroundTasks).toHaveLength(1)
     })
 })

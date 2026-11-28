@@ -92,6 +92,7 @@ import { SessionCache } from './sessionCache'
 import { ArchiveCleanupError } from './archiveCleanupError'
 import {
     generationEntryProbeClearable,
+    isRunnerOwnedSession,
     liveWorkOwnerKey,
     resolveEntryProbeMarker,
     resolveLiveWorkByGeneration,
@@ -1940,7 +1941,13 @@ export class SyncEngine {
         const primaryJobs = this.getPrimaryAttachedJobsBySessionIds(candidates.map((session) => session.id))
         for (const session of candidates) {
             if ((primaryJobs.get(session.id) ?? null) !== null) continue
-            this.sessionCache.noteDerivedWork(session.id, this.store.messages.getLiveToolWork(session.id))
+            // Bound by the current worker generation so an unsettled call from a
+            // verified-exited prior owner cannot credit the idle replacement.
+            const boundary = this.sessionCache.getTranscriptGenerationBoundaryAt(session.id)
+            this.sessionCache.noteDerivedWork(
+                session.id,
+                this.store.messages.getLiveToolWork(session.id, boundary),
+            )
         }
     }
 
@@ -3945,7 +3952,14 @@ export class SyncEngine {
                     this.sessionCache.clearDerivedWorkForOwner(sessionId, ownerKey)
                 }
             }
-            const afterProbe = this.sessionCache.getSession(sessionId) ?? liveBeforeStop
+            let afterProbe = this.sessionCache.getSession(sessionId) ?? liveBeforeStop
+            // Terminal asks are outside the runner probe path. Retire them once
+            // the CLI socket is gone so Archive is not stuck on 409 before
+            // KillSession's missing-target catch (#2658).
+            if (!isRunnerOwnedSession(afterProbe) && !this.rpcGateway.hasSessionRpcTarget(sessionId)) {
+                this.sessionCache.clearTerminalPendingRequests(sessionId)
+                afterProbe = this.sessionCache.getSession(sessionId) ?? afterProbe
+            }
             if (blocksHardArchive(afterProbe)) {
                 throw new ArchiveCleanupError('working')
             }

@@ -223,6 +223,30 @@ describe('RpcGateway no-target diagnostics (tiann/hapi#916)', () => {
         await expect(new RpcGateway(io, registry).killSession('session-1')).rejects.toThrow('publication drain failed')
     })
 
+    it('hasSessionRpcTarget is false when the KillSession handler is missing', () => {
+        const io = {
+            of() {
+                return { sockets: { get() { return undefined } } }
+            }
+        } as unknown as Server
+        const rpcRegistry = {
+            getSocketIdForMethod() { return undefined }
+        } as unknown as RpcRegistry
+        expect(new RpcGateway(io, rpcRegistry).hasSessionRpcTarget('session-1')).toBe(false)
+    })
+
+    it('hasSessionRpcTarget is true when the KillSession socket is live', () => {
+        const io = {
+            of() {
+                return { sockets: { get() { return { id: 'socket-1' } } } }
+            }
+        } as unknown as Server
+        const rpcRegistry = {
+            getSocketIdForMethod() { return 'socket-1' }
+        } as unknown as RpcRegistry
+        expect(new RpcGateway(io, rpcRegistry).hasSessionRpcTarget('session-1')).toBe(true)
+    })
+
     it('throws RpcTargetMissingError(handler-not-registered) when no socket is registered for the method', async () => {
         const io = {
             of() {

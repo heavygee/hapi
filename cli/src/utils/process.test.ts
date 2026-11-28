@@ -501,6 +501,12 @@ describe('killProcess on Windows (orphanReap / stopSession)', () => {
         expect(taskkills[0]![1]).toEqual(['/F', '/T', '/PID', '9901'])
     })
 
+    it('processGroupMayBeAlive fails closed on Windows after wrapper death', async () => {
+        setPlatform('win32')
+        const { processGroupMayBeAlive } = await import('./process')
+        expect(processGroupMayBeAlive(4242)).toBe('unknown')
+    })
+
     it('windowsProcessTreeCimCommand is newline-separated (WinPS-parseable)', async () => {
         // #1911 bot Major: `.join(' ')` yields `$seen=@{} $bfs=@()` — parse error.
         // Assert generated command text, not mocked stdout (mocks never parse PS).

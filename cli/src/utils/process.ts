@@ -19,9 +19,10 @@ const SPAWN_SYNC_TIMEOUT_MS = 10_000;
 export function processGroupMayBeAlive(pgid: number): boolean | 'unknown' {
   if (!Number.isFinite(pgid) || pgid <= 0) return 'unknown'
   if (isWindows()) {
-    // Windows process groups are not the Unix PGID model; tree liveness is
-    // handled by the Windows stop path. Probe treats this as no PGID evidence.
-    return false
+    // Windows has no Unix PGID. After the wrapper PID dies, ParentProcessId
+    // links are reparented, so a tree scan of the dead root cannot prove
+    // descendants are gone. Fail closed — never already_gone on ambiguity (#2658).
+    return 'unknown'
   }
   const result = spawn.sync('pgrep', ['-g', String(pgid)], {
     encoding: 'utf8',

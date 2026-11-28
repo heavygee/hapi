@@ -194,6 +194,33 @@ export function unionLiveWorkByGeneration(
     return out
 }
 
+/**
+ * Final pre-delete live-work transfer (#2658): destination-only owners stay;
+ * every source owner is replaced by the fresh source map (including deletes
+ * when the source went idle during merge I/O). Avoids retaining a stale
+ * first-merge copy after the source cleared.
+ */
+export function transferSourceLiveWorkOntoDest(
+    destMap: LiveWorkByGeneration,
+    sourceMap: LiveWorkByGeneration,
+    sourceOwnerKeys: ReadonlySet<string>,
+): LiveWorkByGeneration {
+    const out: LiveWorkByGeneration = { ...destMap }
+    for (const key of sourceOwnerKeys) {
+        if (sourceMap[key]) {
+            out[key] = sourceMap[key]
+        } else {
+            delete out[key]
+        }
+    }
+    for (const [key, entry] of Object.entries(sourceMap)) {
+        if (!sourceOwnerKeys.has(key)) {
+            out[key] = entry
+        }
+    }
+    return out
+}
+
 function unionLiveWorkEntries(
     a: LiveWorkGenerationEntry,
     b: LiveWorkGenerationEntry,
@@ -253,6 +280,13 @@ export class SessionCache {
     private readonly backgroundOwnerBySessionId: Map<string, string> = new Map()
     /** Current-generation owner credited for transcript-derived tool work. */
     private readonly derivedWorkOwnerBySessionId: Map<string, string> = new Map()
+    /** Last attributed row generation (machine:pid:marker) for transcript bounds. */
+    private readonly rowGenerationOwnerBySessionId: Map<string, string> = new Map()
+    /**
+     * Wall clock when the row's attributed generation changed. Transcript
+     * tool-work before this instant belongs to a prior owner (#2658).
+     */
+    private readonly transcriptGenerationBoundaryAtBySessionId: Map<string, number> = new Map()
     private readonly runtimeConfigUpdatedAtBySessionId: Map<string, Partial<Record<RuntimeConfigKey, number>>> = new Map()
     /**
      * Last time the hub saw real agent progress per session (tiann/hapi#1820).
@@ -748,12 +782,18 @@ export class SessionCache {
             : undefined
         if (!session.thinking) {
             this.thinkingOwnerBySessionId.delete(session.id)
-        } else if (reportedOwnerKey) {
+        } else if (preserveQueuedThinking && !requestedThinking) {
+            // Queued-prompt grace is hub work, not the idle reporter's — clearing
+            // a verified-exited owner must not drop the queue guard (#2658).
+            this.thinkingOwnerBySessionId.delete(session.id)
+        } else if (requestedThinking && reportedOwnerKey) {
             this.thinkingOwnerBySessionId.set(session.id, reportedOwnerKey)
         } else if (requestedThinking) {
-            // Unattributed worker thinking — do not leave a prior owner credited
-            // (queued hub thinking keeps preserveQueuedThinking without this path).
+            // Unattributed worker thinking — do not leave a prior owner credited.
             this.thinkingOwnerBySessionId.delete(session.id)
+        }
+        if (reportedOwnerKey) {
+            this.noteRowGenerationOwner(session.id, reportedOwnerKey)
         }
         if (!requestedThinking && preserveQueuedThinking && hasUnconsumedPrompt) {
             session.activeTurnStartedAt = hubNow
@@ -771,7 +811,9 @@ export class SessionCache {
             processStartMarker: payload.processStartMarker,
             runnerOwned: payload.runnerOwned,
         }
-        if (session.thinking) {
+        // Only worker-reported thinking owns a turn latch. Queued-prompt grace
+        // must not attribute unresolvedTurn to an idle heartbeat's owner.
+        if (requestedThinking) {
             this.setUnresolvedTurn(session.id, true, reported)
         } else if (!preserveQueuedThinking) {
             this.setUnresolvedTurn(session.id, false, reported)
@@ -966,8 +1008,6 @@ export class SessionCache {
     ): void {
         const session = this.sessions.get(sessionId)
         if (!session) return
-        // Ownership before any early-return — unattributed / identical snapshots
-        // must not leave a prior owner credited for the row-wide task list (#2658).
         const bgOwnerKey = (
             typeof reported?.machineId === 'string' && reported.machineId.length > 0
             && typeof reported?.hostPid === 'number' && reported.hostPid > 0
@@ -980,8 +1020,28 @@ export class SessionCache {
             })
             : undefined
         if (bgOwnerKey) {
-            this.backgroundOwnerBySessionId.set(sessionId, bgOwnerKey)
-        } else {
+            this.noteRowGenerationOwner(sessionId, bgOwnerKey)
+        }
+
+        // Durable latch is always owner-scoped (#2658).
+        if (reported) {
+            this.upsertReportedGenerationLiveWork(sessionId, { backgroundTasks: tasks }, reported)
+        }
+
+        const priorRowOwner = this.backgroundOwnerBySessionId.get(sessionId)
+        // Empty snapshot from a prior owner must not wipe a replacement's
+        // row-wide tasks (terminal B has no durable entry to rebuild from).
+        if (tasks.length === 0 && priorRowOwner && bgOwnerKey && priorRowOwner !== bgOwnerKey) {
+            return
+        }
+
+        if (tasks.length > 0) {
+            if (bgOwnerKey) {
+                this.backgroundOwnerBySessionId.set(sessionId, bgOwnerKey)
+            } else {
+                this.backgroundOwnerBySessionId.delete(sessionId)
+            }
+        } else if (!priorRowOwner || priorRowOwner === bgOwnerKey || !bgOwnerKey) {
             this.backgroundOwnerBySessionId.delete(sessionId)
         }
 
@@ -989,20 +1049,11 @@ export class SessionCache {
         if (tasks.length === current.length && tasks.every((task, index) =>
             task.id === current[index]?.id && task.description === current[index]?.description
         )) {
-            if (reported) {
-                this.upsertReportedGenerationLiveWork(sessionId, { backgroundTasks: tasks }, reported)
-            }
             return
         }
 
         session.backgroundTasks = tasks
         session.backgroundTaskCount = tasks.length
-        // Durable latch only when the CLI stamped a reporting owner (#2658).
-        // Without it, stay in-memory so a late unmarked snapshot cannot
-        // write/clear under the current row after replacement.
-        if (reported) {
-            this.upsertReportedGenerationLiveWork(sessionId, { backgroundTasks: tasks }, reported)
-        }
         this.recordAgentProgress(sessionId)
         this.publisher.emit({
             type: 'session-updated',
@@ -1248,6 +1299,24 @@ export class SessionCache {
     }
 
     /**
+     * When the attributed worker generation changes, bound later transcript
+     * scans so prior-owner tool calls cannot credit the replacement (#2658).
+     */
+    noteRowGenerationOwner(sessionId: string, ownerKey: string): void {
+        if (ownerKey.length === 0) return
+        const previous = this.rowGenerationOwnerBySessionId.get(sessionId)
+        if (previous && previous !== ownerKey) {
+            this.transcriptGenerationBoundaryAtBySessionId.set(sessionId, Date.now())
+        }
+        this.rowGenerationOwnerBySessionId.set(sessionId, ownerKey)
+    }
+
+    /** Messages at/after this instant may credit the current generation. */
+    getTranscriptGenerationBoundaryAt(sessionId: string): number | undefined {
+        return this.transcriptGenerationBoundaryAtBySessionId.get(sessionId)
+    }
+
+    /**
      * Record the transcript-derived "open tool work" flag (work-scoped
      * liveness). Mirrors setBackgroundTasks: a transient in-memory Session
      * flag plus a session-updated broadcast, and a no-op when nothing
@@ -1257,7 +1326,9 @@ export class SessionCache {
      * whose `thinking` is false and no background task is declared, yet
      * whose tail holds a tool call that never settled — the autonomous
      * round case. Cleared on session end / expiry alongside the other
-     * transient work state.
+     * transient work state. Attribution follows the current row generation;
+     * the sweep must pass a generation boundary so prior-owner calls do not
+     * credit a replacement (#2658).
      */
     noteDerivedWork(sessionId: string, open: boolean): void {
         const session = this.sessions.get(sessionId)
@@ -1275,10 +1346,9 @@ export class SessionCache {
                 ? session.metadata.hostStartMarker
                 : undefined
             if (machineId && hostPid && marker) {
-                this.derivedWorkOwnerBySessionId.set(
-                    sessionId,
-                    liveWorkOwnerKey({ machineId, hostPid, hostStartMarker: marker }),
-                )
+                const ownerKey = liveWorkOwnerKey({ machineId, hostPid, hostStartMarker: marker })
+                this.noteRowGenerationOwner(sessionId, ownerKey)
+                this.derivedWorkOwnerBySessionId.set(sessionId, ownerKey)
             } else {
                 this.derivedWorkOwnerBySessionId.delete(sessionId)
             }
@@ -2853,20 +2923,31 @@ export class SessionCache {
 
         if (options.deleteOldSession) {
             // Final live-work transfer from fresh snapshots immediately before
-            // delete — work reported during earlier async I/O must survive (#2658).
+            // delete. Source owners are replaced by the fresh source map so an
+            // idle report during scratchlist I/O cannot leave a stale first-merge
+            // copy blocking Archive; destination-only owners are preserved (#2658).
             const freshOld = this.store.sessions.getSessionByNamespace(oldSessionId, namespace)
             const freshNew = this.store.sessions.getSessionByNamespace(newSessionId, namespace)
             if (freshOld && freshNew) {
-                const united = unionLiveWorkByGeneration(
-                    projectLegacyLiveWork(freshOld.metadata as Session['metadata']),
-                    projectLegacyLiveWork(freshNew.metadata as Session['metadata']),
+                const initialSourceMap = projectLegacyLiveWork(oldStored.metadata as Session['metadata'])
+                const sourceMap = projectLegacyLiveWork(freshOld.metadata as Session['metadata'])
+                const destMap = projectLegacyLiveWork(freshNew.metadata as Session['metadata'])
+                const sourceKeys = new Set([
+                    ...Object.keys(initialSourceMap),
+                    ...Object.keys(sourceMap),
+                ])
+                const transferred = transferSourceLiveWorkOntoDest(destMap, sourceMap, sourceKeys)
+                const prevJson = JSON.stringify(
+                    (freshNew.metadata as { liveWorkByGeneration?: unknown } | null)?.liveWorkByGeneration ?? null,
                 )
-                if (Object.keys(united).length > 0) {
+                const nextValue = Object.keys(transferred).length > 0 ? transferred : null
+                const nextJson = JSON.stringify(nextValue)
+                if (prevJson !== nextJson) {
                     const transferMeta = {
                         ...(freshNew.metadata && typeof freshNew.metadata === 'object'
                             ? freshNew.metadata as Record<string, unknown>
                             : {}),
-                        liveWorkByGeneration: united,
+                        liveWorkByGeneration: nextValue,
                     }
                     const transfer = this.store.sessions.updateSessionMetadata(
                         newSessionId,

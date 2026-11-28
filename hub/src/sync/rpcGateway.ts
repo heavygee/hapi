@@ -233,6 +233,17 @@ export class RpcGateway {
         return await this.sessionRpc(sessionId, RPC_METHODS.SetSessionConfig, config)
     }
 
+    /**
+     * Read-only: is a session-scoped RPC handler currently registered on a
+     * live CLI socket? Used to retire stale terminal asks before Archive's
+     * working guard without entering the runner probe path (#2658).
+     */
+    hasSessionRpcTarget(sessionId: string, method: string = RPC_METHODS.KillSession): boolean {
+        const socketId = this.rpcRegistry.getSocketIdForMethod(`${sessionId}:${method}`)
+        if (!socketId) return false
+        return Boolean(this.io.of('/cli').sockets.get(socketId))
+    }
+
     async killSession(sessionId: string, options: {
         prepareOnly?: boolean; expectedMachineId?: string; expectedPid?: number; expectedProcessStartMarker?: string; preparationLease?: SessionStopPreparationLease
     } = {}): Promise<{ pid?: number; machineId?: string; processStartMarker?: string; preparationLease?: SessionStopPreparationLease }> {
