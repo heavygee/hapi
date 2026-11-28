@@ -613,6 +613,9 @@ export class SessionCache {
         }
 
         this.sessions.set(sessionId, session)
+        // Restore persisted cutoff before noting the current owner so a hub
+        // restart cannot re-attribute a prior owner's open tool call (#2658).
+        this.restoreTranscriptGenerationBoundary(sessionId)
         // Advance transcript boundary when metadata identity changes (resume
         // registration) before the replacement publishes tool calls (#2658).
         const rowOwner = this.currentRowOwnerKey(session)
@@ -1550,10 +1553,9 @@ export class SessionCache {
                     }
                 }
             }
-            this.transcriptGenerationBoundarySeqBySessionId.set(
-                sessionId,
-                this.store.messages.getMaxSeq(sessionId),
-            )
+            const afterSeq = this.store.messages.getMaxSeq(sessionId)
+            this.transcriptGenerationBoundarySeqBySessionId.set(sessionId, afterSeq)
+            this.persistTranscriptGenerationBoundary(sessionId, ownerKey, afterSeq)
         }
         this.rowGenerationOwnerBySessionId.set(sessionId, ownerKey)
         if (runnerOwned !== undefined) {
@@ -1561,6 +1563,43 @@ export class SessionCache {
         } else if (!this.rowGenerationRunnerOwnedByOwnerKey.has(ownerKey)) {
             this.rowGenerationRunnerOwnedByOwnerKey.set(ownerKey, isRunnerOwnedSession(session))
         }
+    }
+
+    private persistTranscriptGenerationBoundary(
+        sessionId: string,
+        ownerKey: string,
+        afterSeq: number,
+    ): void {
+        const session = this.sessions.get(sessionId)
+        if (!session?.metadata) return
+        const metadata = {
+            ...session.metadata,
+            transcriptGenerationBoundary: { ownerKey, afterSeq },
+        }
+        const metaResult = this.store.sessions.updateSessionMetadata(
+            sessionId,
+            metadata,
+            session.metadataVersion,
+            session.namespace,
+            { touchUpdatedAt: false },
+        )
+        if (metaResult.result === 'success') {
+            session.metadata = metaResult.value as typeof session.metadata
+            session.metadataVersion = metaResult.version
+        }
+    }
+
+    /** Restore in-memory transcript cutoff after hub restart / cache load. */
+    private restoreTranscriptGenerationBoundary(sessionId: string): void {
+        const session = this.sessions.get(sessionId)
+        const boundary = session?.metadata?.transcriptGenerationBoundary as
+            | { ownerKey?: string; afterSeq?: number }
+            | null
+            | undefined
+        if (!boundary || typeof boundary.ownerKey !== 'string' || boundary.ownerKey.length === 0) return
+        if (typeof boundary.afterSeq !== 'number' || !Number.isFinite(boundary.afterSeq)) return
+        this.transcriptGenerationBoundarySeqBySessionId.set(sessionId, boundary.afterSeq)
+        this.rowGenerationOwnerBySessionId.set(sessionId, boundary.ownerKey)
     }
 
     private currentRowOwnerKey(session: Session | undefined): string | undefined {
@@ -1633,18 +1672,9 @@ export class SessionCache {
             }
         } else {
             this.derivedWorkOwnerBySessionId.delete(sessionId)
-            if (machineId && hostPid && marker) {
-                this.upsertReportedGenerationLiveWork(
-                    sessionId,
-                    { transcriptOpenWork: false },
-                    {
-                        machineId,
-                        hostPid,
-                        processStartMarker: marker,
-                        runnerOwned: isRunnerOwnedSession(session),
-                    },
-                )
-            }
+            // Transient display flag only. Durable transcriptOpenWork clears on
+            // verified owner exit or an owner-scoped settlement scan — not when
+            // thinking/background flips the sweep off mid-call (#2658).
         }
         if ((session.derivedToolWork ?? false) === open) return
         session.derivedToolWork = open

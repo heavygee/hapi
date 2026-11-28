@@ -337,6 +337,12 @@ export const MetadataSchema = z.object({
             description: z.string(),
         })).optional(),
     })).optional(),
+    // Persisted transcript cutoff for the current row generation so a hub
+    // restart cannot re-attribute a prior owner's open tool call (#2658).
+    transcriptGenerationBoundary: z.object({
+        ownerKey: z.string(),
+        afterSeq: z.number(),
+    }).nullish(),
     // Deprecated single-slot latches — read-path projects into
     // liveWorkByGeneration when the keyed map is absent (#2658 migration).
     // Writers should not create these going forward.
