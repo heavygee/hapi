@@ -64,6 +64,25 @@ describe('liveWorkByGeneration helpers', () => {
         expect(liveWorkByGenerationHasWork(map)).toBe(true)
     })
 
+    it('keeps markerless legacy work unattributed even when the row has a marker', () => {
+        const map = projectLegacyLiveWork({
+            path: '/tmp/p',
+            host: 'h',
+            machineId: 'm-B',
+            hostPid: 200,
+            hostStartMarker: 'worker-B',
+            unresolvedTurn: { since: NOW },
+        } as Session['metadata'])
+        expect(Object.keys(map)).toEqual([UNKNOWN_GENERATION_KEY])
+        expect(map[UNKNOWN_GENERATION_KEY]?.hostPid).toBeUndefined()
+        expect(map[UNKNOWN_GENERATION_KEY]?.machineId).toBe('')
+        expect(generationEntryProbeClearable(
+            session({ metadata: { path: '/tmp/p', host: 'h', startedBy: 'runner', machineId: 'm-B' } }),
+            UNKNOWN_GENERATION_KEY,
+            map[UNKNOWN_GENERATION_KEY]!,
+        )).toBe(false)
+    })
+
     it('projects legacy turn and background as separate owners when markers differ', () => {
         const map = projectLegacyLiveWork({
             path: '/tmp/p',
@@ -151,7 +170,8 @@ describe('liveWorkByGeneration helpers', () => {
         }
         const key = liveWorkOwnerKey({ machineId: 'm1', hostPid: 99, hostStartMarker: 'worker-A' })
         expect(generationEntryProbeClearable(runner, key, entry)).toBe(true)
-        expect(generationEntryProbeClearable(terminal, key, entry)).toBe(false)
+        // Entry ownership — a terminal resume must still probe prior runner work.
+        expect(generationEntryProbeClearable(terminal, key, entry)).toBe(true)
         expect(generationEntryProbeClearable(runner, key, {
             machineId: 'm1',
             since: NOW,

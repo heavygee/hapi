@@ -1768,38 +1768,57 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
      */
     const probeSessionExit = async (
       sessionId: string,
-      opts?: { processStartMarker?: string },
+      opts?: { processStartMarker?: string; hubSessionId?: string },
     ): Promise<'stopped' | 'already_gone' | 'still_alive' | 'unknown'> => {
       if (sessionId.startsWith('PID-')) {
         const pid = parseInt(sessionId.slice(4), 10);
         if (!Number.isFinite(pid) || pid <= 0) return 'unknown';
         const expected = opts?.processStartMarker;
+        const hubSessionId = opts?.hubSessionId;
+
+        const codexOwnedStillAlive = async (): Promise<'still_alive' | 'unknown' | null> => {
+          // Strict registry: unreadable → unknown (keep latch). Scope to this
+          // hub+token and, when provided, the HAPI session binding.
+          let runtimes: Awaited<ReturnType<typeof readRuntimes>>
+          try {
+            runtimes = await readRuntimes({ strict: true })
+          } catch {
+            return 'unknown'
+          }
+          const hub = configuration.apiUrl
+          const auth = runtimeAuthHash()
+          for (const runtime of runtimes) {
+            if (runtime.hub !== hub || runtime.authHash !== auth) continue
+            if (hubSessionId && !runtime.sessions[hubSessionId]) continue
+            if (expected) {
+              if (runtime.marker !== expected) continue
+            } else if (runtime.pid !== pid) {
+              continue
+            }
+            if (runtimeMayBeAlive(runtime)) return 'still_alive'
+          }
+          return null
+        }
+
         if (isProcessAlive(pid)) {
           if (expected) {
             const current = getProcessStartMarker(pid);
-            if (!current || current !== expected) return 'unknown';
+            // Unreadable marker → unknown (keep latch). Readable mismatch means
+            // the PID was reused; confirm via registry then already_gone.
+            if (!current) return 'unknown';
+            if (current !== expected) {
+              const owned = await codexOwnedStillAlive()
+              if (owned) return owned
+              rememberVerifiedExit(sessionId);
+              return 'already_gone';
+            }
           }
           return 'still_alive';
         }
         // Wrapper PID is gone — still refuse already_gone while a Codex
         // owned app-server for that wrapper generation remains live.
-        // Strict registry read: unreadable → unknown (keep latch), never
-        // treat an empty/failed scan as verified exit.
-        let runtimes: Awaited<ReturnType<typeof readRuntimes>>
-        try {
-          runtimes = await readRuntimes({ strict: true })
-        } catch {
-          return 'unknown'
-        }
-        const hub = configuration.apiUrl
-        const auth = runtimeAuthHash()
-        for (const runtime of runtimes) {
-          // Scope to this runner's hub+token namespace (not every local runtime).
-          if (runtime.hub !== hub || runtime.authHash !== auth) continue
-          if (runtime.pid !== pid) continue
-          if (expected && runtime.marker && runtime.marker !== expected) continue
-          if (runtimeMayBeAlive(runtime)) return 'still_alive'
-        }
+        const owned = await codexOwnedStillAlive()
+        if (owned) return owned
         rememberVerifiedExit(sessionId);
         return 'already_gone';
       }

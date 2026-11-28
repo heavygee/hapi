@@ -131,8 +131,13 @@ export function projectLegacyLiveWork(
     const bgMarkerRaw = legacyBg && typeof legacyBg === 'object'
         ? legacyBg.hostStartMarker
         : undefined
-    const fallbackMarker = (typeof metadata.hostStartMarker === 'string' && metadata.hostStartMarker.length > 0)
-        ? metadata.hostStartMarker
+    // Markerless latches stay under UNKNOWN — never inherit the current row's
+    // marker/pid (that would let B's verified exit clear A's work).
+    const turnMarker = (typeof turnMarkerRaw === 'string' && turnMarkerRaw.length > 0)
+        ? turnMarkerRaw
+        : UNKNOWN_GENERATION_KEY
+    const bgMarker = (typeof bgMarkerRaw === 'string' && bgMarkerRaw.length > 0)
+        ? bgMarkerRaw
         : UNKNOWN_GENERATION_KEY
 
     const hasTurn = Boolean(legacyTurn && typeof legacyTurn === 'object')
@@ -140,13 +145,6 @@ export function projectLegacyLiveWork(
         ? legacyBg.tasks as BackgroundTask[]
         : []
     if (!hasTurn && tasks.length === 0) return out
-
-    const turnMarker = (typeof turnMarkerRaw === 'string' && turnMarkerRaw.length > 0)
-        ? turnMarkerRaw
-        : fallbackMarker
-    const bgMarker = (typeof bgMarkerRaw === 'string' && bgMarkerRaw.length > 0)
-        ? bgMarkerRaw
-        : fallbackMarker
 
     if (hasTurn) {
         const projected = projectOneLegacyLatch(metadata, turnMarker, {
@@ -183,13 +181,17 @@ export function resolveLiveWorkByGeneration(session: Session): LiveWorkByGenerat
     return projectLegacyLiveWork(session.metadata)
 }
 
-/** Entry can be cleared via existing PID+marker ProbeSessionExit (runner-owned only). */
+/**
+ * Entry can be cleared via PID+marker ProbeSessionExit.
+ * Ownership is on the *entry* (runner durable writes stamp machineId+hostPid),
+ * not the current row's `startedBy` — a terminal resume must not hide a prior
+ * runner generation from the probe path (#2658).
+ */
 export function generationEntryProbeClearable(
-    session: Session,
+    _session: Session,
     ownerKey: string,
     entry: LiveWorkGenerationEntry,
 ): boolean {
-    if (!isRunnerOwnedSession(session)) return false
     const marker = resolveEntryProbeMarker(ownerKey, entry)
     if (marker === UNKNOWN_GENERATION_KEY || marker.length === 0) return false
     if (typeof entry.machineId !== 'string' || entry.machineId.length === 0) return false

@@ -13,6 +13,8 @@ import {
     isRunnerOwnedSession,
     liveWorkOwnerKey,
     projectLegacyLiveWork,
+    type LiveWorkByGeneration,
+    type LiveWorkGenerationEntry,
 } from './liveWorkByGeneration'
 import { resolveSessionIdleTimeoutMs, shouldClearKeepaliveIdle, shouldMarkKeepaliveIdle } from './sessionIdle'
 
@@ -156,7 +158,62 @@ export function mergeSessionMetadataForSessionMerge(
         changed = true
     }
 
+    // Carry durable live-work across resume/dedup merges (#2658). Project each
+    // side against its own row so legacy attribution survives, then union by
+    // owner — never drop the source map when the replacement omitted it.
+    const oldLive = projectLegacyLiveWork(oldObj as Session['metadata'])
+    const newLive = projectLegacyLiveWork(newObj as Session['metadata'])
+    if (Object.keys(oldLive).length > 0 || Object.keys(newLive).length > 0) {
+        const united = unionLiveWorkByGeneration(oldLive, newLive)
+        const prev = merged.liveWorkByGeneration
+        const prevJson = JSON.stringify(prev ?? null)
+        const nextJson = JSON.stringify(Object.keys(united).length > 0 ? united : null)
+        if (prevJson !== nextJson) {
+            merged.liveWorkByGeneration = Object.keys(united).length > 0 ? united : null
+            changed = true
+        }
+    }
+
     return changed ? merged : newMetadata
+}
+
+/** Union two generation maps by owner; work bits OR across both sides. */
+export function unionLiveWorkByGeneration(
+    left: LiveWorkByGeneration,
+    right: LiveWorkByGeneration,
+): LiveWorkByGeneration {
+    const out: LiveWorkByGeneration = { ...left }
+    for (const [key, rightEntry] of Object.entries(right)) {
+        const leftEntry = out[key]
+        if (!leftEntry) {
+            out[key] = rightEntry
+            continue
+        }
+        out[key] = unionLiveWorkEntries(leftEntry, rightEntry)
+    }
+    return out
+}
+
+function unionLiveWorkEntries(
+    a: LiveWorkGenerationEntry,
+    b: LiveWorkGenerationEntry,
+): LiveWorkGenerationEntry {
+    const tasksById = new Map<string, NonNullable<LiveWorkGenerationEntry['backgroundTasks']>[number]>()
+    for (const task of a.backgroundTasks ?? []) tasksById.set(task.id, task)
+    for (const task of b.backgroundTasks ?? []) tasksById.set(task.id, task)
+    const tasks = [...tasksById.values()]
+    return {
+        machineId: a.machineId || b.machineId,
+        ...(typeof (a.hostPid ?? b.hostPid) === 'number'
+            ? { hostPid: (a.hostPid ?? b.hostPid) as number }
+            : {}),
+        ...(a.hostStartMarker || b.hostStartMarker
+            ? { hostStartMarker: a.hostStartMarker ?? b.hostStartMarker }
+            : {}),
+        since: Math.min(a.since, b.since),
+        ...(a.unresolvedTurn || b.unresolvedTurn ? { unresolvedTurn: true as const } : {}),
+        ...(tasks.length > 0 ? { backgroundTasks: tasks } : {}),
+    }
 }
 
 /**
@@ -917,15 +974,37 @@ export class SessionCache {
     }
 
     /**
-     * Drop pending permission/input requests after verified owner exit (#2658).
-     * Stale requests must not strand Archive once durable live-work is gone.
+     * Drop pending permission/input requests owned by a verified-exited worker
+     * (#2658). Never wipe another generation's requests. Unmarked requests
+     * clear only when the verified marker is still the current row's marker
+     * (legacy CLI that did not stamp ownership).
      */
-    clearPendingAgentRequests(sessionId: string): void {
+    clearPendingAgentRequestsForOwner(sessionId: string, verifiedHostStartMarker: string): void {
         const session = this.sessions.get(sessionId)
         if (!session?.agentState) return
+        if (typeof verifiedHostStartMarker !== 'string' || verifiedHostStartMarker.length === 0) return
         const requests = session.agentState.requests
         if (!requests || Object.keys(requests).length === 0) return
-        const next = { ...session.agentState, requests: {} }
+        const currentMarker = typeof session.metadata?.hostStartMarker === 'string'
+            && session.metadata.hostStartMarker.length > 0
+            ? session.metadata.hostStartMarker
+            : undefined
+        const nextRequests: NonNullable<typeof requests> = {}
+        let removed = false
+        for (const [id, request] of Object.entries(requests)) {
+            const owner = typeof request.hostStartMarker === 'string' && request.hostStartMarker.length > 0
+                ? request.hostStartMarker
+                : undefined
+            const drop = owner === verifiedHostStartMarker
+                || (!owner && currentMarker === verifiedHostStartMarker)
+            if (drop) {
+                removed = true
+                continue
+            }
+            nextRequests[id] = request
+        }
+        if (!removed) return
+        const next = { ...session.agentState, requests: nextRequests }
         const result = this.store.sessions.updateSessionAgentState(
             sessionId,
             next,

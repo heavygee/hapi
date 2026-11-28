@@ -313,6 +313,83 @@ describe('RpcGateway permission RPC error surfacing (tiann/hapi#1735)', () => {
     })
 })
 
+describe('RpcGateway ProbeSessionExit namespace scope (#2658)', () => {
+    function createProbeGateway(opts: {
+        socketNamespace: string
+        machineNamespace: string
+        status?: string
+    }) {
+        const calls: Array<{ method: string; params: string }> = []
+        const socket = {
+            data: { namespace: opts.socketNamespace },
+            timeout() {
+                return {
+                    async emitWithAck(_event: string, payload: { method: string; params: string }) {
+                        calls.push(payload)
+                        return JSON.stringify({ status: opts.status ?? 'already_gone' })
+                    },
+                }
+            },
+        }
+        const io = {
+            of() {
+                return { sockets: { get() { return socket } } }
+            },
+        } as unknown as Server
+        const rpcRegistry = {
+            getSocketIdForMethod() { return 'socket-1' },
+        } as unknown as RpcRegistry
+        const gateway = new RpcGateway(
+            io,
+            rpcRegistry,
+            () => opts.machineNamespace,
+        )
+        return { gateway, calls }
+    }
+
+    it('dispatches when machine and socket match the session namespace', async () => {
+        const { gateway, calls } = createProbeGateway({
+            socketNamespace: 'ns-a',
+            machineNamespace: 'ns-a',
+        })
+        await expect(gateway.probeRunnerSessionExit('machine-1', 'PID-9', {
+            namespace: 'ns-a',
+            processStartMarker: 'worker-A',
+            hubSessionId: 'sess-1',
+        })).resolves.toBe('already_gone')
+        expect(calls).toHaveLength(1)
+        expect(JSON.parse(calls[0].params)).toMatchObject({
+            sessionId: 'PID-9',
+            processStartMarker: 'worker-A',
+            hubSessionId: 'sess-1',
+        })
+    })
+
+    it('returns unknown without dispatch when the machine is outside the session namespace', async () => {
+        const { gateway, calls } = createProbeGateway({
+            socketNamespace: 'ns-a',
+            machineNamespace: 'ns-other',
+        })
+        await expect(gateway.probeRunnerSessionExit('machine-1', 'PID-9', {
+            namespace: 'ns-a',
+            processStartMarker: 'worker-A',
+        })).resolves.toBe('unknown')
+        expect(calls).toHaveLength(0)
+    })
+
+    it('returns unknown without treating a cross-namespace socket as exit proof', async () => {
+        const { gateway, calls } = createProbeGateway({
+            socketNamespace: 'ns-other',
+            machineNamespace: 'ns-a',
+        })
+        await expect(gateway.probeRunnerSessionExit('machine-1', 'PID-9', {
+            namespace: 'ns-a',
+            processStartMarker: 'worker-A',
+        })).resolves.toBe('unknown')
+        expect(calls).toHaveLength(0)
+    })
+})
+
 describe('RpcGateway preview boundary error surfacing', () => {
     it('surfaces a resolved CLI error envelope as a rejected preview', async () => {
         // RpcHandlerManager serializes a thrown handler error as a RESOLVED

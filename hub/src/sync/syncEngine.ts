@@ -92,7 +92,6 @@ import { SessionCache } from './sessionCache'
 import { ArchiveCleanupError } from './archiveCleanupError'
 import {
     generationEntryProbeClearable,
-    isRunnerOwnedSession,
     resolveEntryProbeMarker,
     resolveLiveWorkByGeneration,
 } from './liveWorkByGeneration'
@@ -384,7 +383,11 @@ export class SyncEngine {
             this.sessionCache,
             this.titleSuggestionService
         )
-        this.rpcGateway = new RpcGateway(io, rpcRegistry)
+        this.rpcGateway = new RpcGateway(
+            io,
+            rpcRegistry,
+            (machineId) => this.machineCache.getMachine(machineId)?.namespace,
+        )
         this.sessionCache.closeTurnsLeftOpen()
         this.reloadAll()
         this.inactivityTimer = setInterval(() => this.expireInactive(), 5_000)
@@ -3858,21 +3861,20 @@ export class SyncEngine {
         }
 
         // Live-work precondition before any stop RPC (#2658 / #2020).
-        // Runner-owned prior generations: probe PID+marker and clear only
-        // already_gone entries, then recheck. Missing hostPid on a runner
-        // entry fails closed (stays blocking). Non-runner rows never enter
-        // the keyed probe — they were never on the verified-cleanup path.
+        // Probe clearable entries by recorded owner identity (not the current
+        // row's startedBy — terminal resume must not hide a prior runner gen).
+        // Missing hostPid / namespace / probe support fails closed (stays blocking).
         const liveBeforeStop = this.sessionCache.getSession(sessionId)
         if (liveBeforeStop) {
-            if (isRunnerOwnedSession(liveBeforeStop) && hasDurableLiveWork(liveBeforeStop)) {
+            if (hasDurableLiveWork(liveBeforeStop)) {
                 const map = resolveLiveWorkByGeneration(liveBeforeStop)
                 for (const [ownerKey, entry] of Object.entries(map)) {
                     if (!generationEntryProbeClearable(liveBeforeStop, ownerKey, entry)) continue
                     // Probe capability on the recorded owner's machine, not the
                     // current row's machine (cross-machine replacement).
-                    const ownerCaps = entry.machineId
-                        ? this.getMachine(entry.machineId)?.metadata?.capabilities
-                        : undefined
+                    const ownerMachine = this.getMachineByNamespace(entry.machineId, liveBeforeStop.namespace)
+                        ?? this.getMachine(entry.machineId)
+                    const ownerCaps = ownerMachine?.metadata?.capabilities
                     const probeSupported = !ownerCaps
                         || ownerCaps.includes(MACHINE_CAPABILITIES.ProbeSessionExit)
                     if (!probeSupported) continue
@@ -3884,7 +3886,12 @@ export class SyncEngine {
                         status = await this.rpcGateway.probeRunnerSessionExit(
                             entry.machineId,
                             `PID-${entry.hostPid}`,
-                            { timeoutMs, processStartMarker: probeMarker },
+                            {
+                                namespace: liveBeforeStop.namespace,
+                                hubSessionId: sessionId,
+                                timeoutMs,
+                                processStartMarker: probeMarker,
+                            },
                         )
                     } catch (error) {
                         if (error instanceof RunnerStopRpcError && error.timedOut) {
@@ -3894,13 +3901,10 @@ export class SyncEngine {
                     }
                     if (status === 'already_gone' || status === 'stopped') {
                         this.sessionCache.clearGenerationLiveWork(sessionId, ownerKey)
+                        // Reconcile only this owner's requests — never wipe a
+                        // replacement's in-flight permission ask (#2658).
+                        this.sessionCache.clearPendingAgentRequestsForOwner(sessionId, probeMarker)
                     }
-                }
-                // Verified owner exit: drop stale permission requests so they
-                // cannot strand Archive after durable work is cleared (#2658).
-                const afterClear = this.sessionCache.getSession(sessionId) ?? liveBeforeStop
-                if (!hasDurableLiveWork(afterClear)) {
-                    this.sessionCache.clearPendingAgentRequests(sessionId)
                 }
             }
             const afterProbe = this.sessionCache.getSession(sessionId) ?? liveBeforeStop

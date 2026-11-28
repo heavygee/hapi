@@ -670,9 +670,10 @@ describe('SyncEngine.archiveSession runner reaping (#1910)', () => {
         gateway.rpcGateway.probeRunnerSessionExit = async (
             _machineId: string,
             id: string,
-            opts?: { processStartMarker?: string },
+            opts?: { namespace?: string; processStartMarker?: string },
         ) => {
             probed.push({ id, marker: opts?.processStartMarker })
+            expect(opts?.namespace).toBe(NAMESPACE)
             return 'still_alive'
         }
 
@@ -720,6 +721,109 @@ describe('SyncEngine.archiveSession runner reaping (#1910)', () => {
 
         await engine.archiveSession(sessionId)
         expect(cache().getSession(sessionId)?.metadata?.lifecycleState).toBe('archived')
+        expect(cache().getSession(sessionId)?.metadata?.liveWorkByGeneration?.[priorKey]).toBeUndefined()
+    })
+
+    it('still probes prior runner work after a terminal resume on the same row (#2658)', async () => {
+        const sessionId = insertActiveSession('sess-term-resume', 'machine-x', 7001, { startedBy: 'terminal' })
+        const before = cache().getSession(sessionId)!
+        const priorKey = 'machine-x:7001:worker-A'
+        expect(store.sessions.updateSessionMetadata(
+            sessionId,
+            {
+                ...before.metadata!,
+                startedBy: 'terminal',
+                hostStartMarker: 'worker-B',
+                hostPid: 7002,
+                liveWorkByGeneration: {
+                    [priorKey]: {
+                        machineId: 'machine-x',
+                        hostPid: 7001,
+                        hostStartMarker: 'worker-A',
+                        since: Date.now() - 1000,
+                        unresolvedTurn: true,
+                    },
+                },
+            },
+            before.metadataVersion,
+            NAMESPACE,
+        ).result).toBe('success')
+        cache().refreshSession(sessionId)
+
+        setKillSessionMissingTarget()
+        let probed = false
+        const gateway = engine as unknown as {
+            rpcGateway: {
+                stopRunnerSession: unknown
+                probeRunnerSessionExit: unknown
+            }
+        }
+        gateway.rpcGateway.stopRunnerSession = async () => 'already_gone'
+        gateway.rpcGateway.probeRunnerSessionExit = async () => {
+            probed = true
+            return 'still_alive'
+        }
+
+        const error = await engine.archiveSession(sessionId).catch(error => error)
+        expect(error).toBeInstanceOf(ArchiveCleanupError)
+        expect((error as ArchiveCleanupError).code).toBe('archive-session-working')
+        expect(probed).toBe(true)
+    })
+
+    it('clears only requests owned by the verified-exited worker (#2658)', async () => {
+        const sessionId = insertActiveSession('sess-req-owner', 'machine-x', 7001)
+        const before = cache().getSession(sessionId)!
+        const priorKey = 'machine-x:7001:worker-A'
+        expect(store.sessions.updateSessionMetadata(
+            sessionId,
+            {
+                ...before.metadata!,
+                hostStartMarker: 'worker-B',
+                hostPid: 7002,
+                liveWorkByGeneration: {
+                    [priorKey]: {
+                        machineId: 'machine-x',
+                        hostPid: 7001,
+                        hostStartMarker: 'worker-A',
+                        since: Date.now() - 1000,
+                        unresolvedTurn: true,
+                    },
+                },
+            },
+            before.metadataVersion,
+            NAMESPACE,
+        ).result).toBe('success')
+        expect(store.sessions.updateSessionAgentState(
+            sessionId,
+            {
+                requests: {
+                    'from-A': { tool: 'Bash', arguments: {}, hostStartMarker: 'worker-A' },
+                    'from-B': { tool: 'Edit', arguments: {}, hostStartMarker: 'worker-B' },
+                },
+            },
+            before.agentStateVersion,
+            NAMESPACE,
+        ).result).toBe('success')
+        cache().refreshSession(sessionId)
+
+        setKillSessionMissingTarget()
+        const gateway = engine as unknown as {
+            rpcGateway: {
+                stopRunnerSession: unknown
+                probeRunnerSessionExit: unknown
+            }
+        }
+        // Prior gen clears; B's durable work is absent but B's request must remain
+        // and block archive.
+        gateway.rpcGateway.stopRunnerSession = async () => 'already_gone'
+        gateway.rpcGateway.probeRunnerSessionExit = async () => 'already_gone'
+
+        const error = await engine.archiveSession(sessionId).catch(error => error)
+        expect(error).toBeInstanceOf(ArchiveCleanupError)
+        expect((error as ArchiveCleanupError).code).toBe('archive-session-working')
+        const requests = cache().getSession(sessionId)?.agentState?.requests
+        expect(requests?.['from-A']).toBeUndefined()
+        expect(requests?.['from-B']).toEqual({ tool: 'Edit', arguments: {}, hostStartMarker: 'worker-B' })
         expect(cache().getSession(sessionId)?.metadata?.liveWorkByGeneration?.[priorKey]).toBeUndefined()
     })
 })

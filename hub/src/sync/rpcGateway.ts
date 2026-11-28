@@ -168,7 +168,13 @@ export type RpcUsageQueryResult = UsageQueryResult
 export class RpcGateway {
     constructor(
         private readonly io: Server,
-        private readonly rpcRegistry: RpcRegistry
+        private readonly rpcRegistry: RpcRegistry,
+        /**
+         * Resolve a machine row's authenticated hub namespace. Probe dispatch
+         * requires the recorded machine to live in the session's namespace
+         * (#2658) — without this, a forged machineId can clear another ns.
+         */
+        private readonly resolveMachineNamespace?: (machineId: string) => string | undefined,
     ) {
     }
 
@@ -282,22 +288,58 @@ export class RpcGateway {
     /**
      * Read-only exit probe. Older Runners lack the handler → RpcTargetMissingError
      * (hub must keep 409; never fall back to StopSession) (#2658).
+     *
+     * Namespace scope lives here at dispatch: the recorded machine must resolve
+     * inside `opts.namespace`, and the authenticated CLI socket must match.
+     * Fail closed with `unknown` (keep the latch) — never clear on a miss.
      */
     async probeRunnerSessionExit(
         machineId: string,
-        sessionId: string,
-        opts?: { processStartMarker?: string; timeoutMs?: number }
+        probeTargetId: string,
+        opts: {
+            namespace: string
+            hubSessionId?: string
+            processStartMarker?: string
+            timeoutMs?: number
+        },
     ): Promise<'stopped' | 'already_gone' | 'still_alive' | 'unknown'> {
-        const timeoutMs = opts?.timeoutMs ?? DEFAULT_RPC_TIMEOUT_MS
+        if (typeof opts.namespace !== 'string' || opts.namespace.length === 0) {
+            return 'unknown'
+        }
+        const machineNs = this.resolveMachineNamespace?.(machineId)
+        if (machineNs !== opts.namespace) {
+            return 'unknown'
+        }
+
+        const timeoutMs = opts.timeoutMs ?? DEFAULT_RPC_TIMEOUT_MS
+        const method = `${machineId}:${RPC_METHODS.ProbeSessionExit}`
+        const socketId = this.rpcRegistry.getSocketIdForMethod(method)
+        if (!socketId) {
+            throw new RpcTargetMissingError(method, 'handler-not-registered')
+        }
+        const socket = this.io.of('/cli').sockets.get(socketId)
+        if (!socket) {
+            throw new RpcTargetMissingError(method, 'socket-disconnected')
+        }
+        if (socket.data.namespace !== opts.namespace) {
+            return 'unknown'
+        }
+
         const started = performance.now()
         let result: unknown
         try {
-            result = await this.machineRpc(machineId, RPC_METHODS.ProbeSessionExit, {
-                sessionId,
-                ...(opts?.processStartMarker ? { processStartMarker: opts.processStartMarker } : {}),
-            }, timeoutMs)
+            const response = await socket.timeout(timeoutMs).emitWithAck('rpc-request', {
+                method,
+                params: JSON.stringify({
+                    sessionId: probeTargetId,
+                    ...(opts.hubSessionId ? { hubSessionId: opts.hubSessionId } : {}),
+                    ...(opts.processStartMarker ? { processStartMarker: opts.processStartMarker } : {}),
+                }),
+            }) as unknown
+            result = typeof response === 'string'
+                ? (() => { try { return JSON.parse(response) as unknown } catch { return response } })()
+                : response
         } catch (error) {
-            if (error instanceof RpcTargetMissingError) throw error
             throw new RunnerStopRpcError(performance.now() - started >= timeoutMs, error)
         }
         const status = result && typeof result === 'object' ? (result as { status?: unknown }).status : undefined

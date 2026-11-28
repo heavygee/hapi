@@ -1278,6 +1278,26 @@ if (isReconnect) {
         return { ...this.localWorkerIdentity }
     }
 
+    /**
+     * Stamp pending permission/input requests with this process's start marker
+     * so Archive can clear only the verified-exited owner's asks (#2658).
+     */
+    private stampRequestOwners(state: AgentState): AgentState {
+        const marker = this.localWorkerIdentity.processStartMarker
+        const requests = state.requests
+        if (!marker || !requests) return state
+        let changed = false
+        const next: NonNullable<AgentState['requests']> = { ...requests }
+        for (const [id, request] of Object.entries(requests)) {
+            if (!request || (typeof request.hostStartMarker === 'string' && request.hostStartMarker.length > 0)) {
+                continue
+            }
+            next[id] = { ...request, hostStartMarker: marker }
+            changed = true
+        }
+        return changed ? { ...state, requests: next } : state
+    }
+
     /** Refresh machineId only when metadata still describes this OS process. */
     private adoptLocalMachineIdFromMetadata(): void {
         const meta = this.metadata
@@ -1650,7 +1670,7 @@ if (isReconnect) {
         if (this.state !== 'active') {
             if (this.state === 'closed') return
             const current = this.agentState ?? ({} as AgentState)
-            this.agentState = handler(current)
+            this.agentState = this.stampRequestOwners(handler(current))
             if (this.state === 'materializing') {
                 this.agentStateChangedDuringAttempt = true
             }
@@ -1659,7 +1679,7 @@ if (isReconnect) {
         this.agentStateLock.inLock(async () => {
             await backoff(async () => {
                 const current = this.agentState ?? ({} as AgentState)
-                const updated = handler(current)
+                const updated = this.stampRequestOwners(handler(current))
 
                 const answer = await this.socket.emitWithAck('update-state', {
                     sid: this.sessionId,

@@ -425,11 +425,42 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
             return
         }
 
-        const { sid, agentState, expectedVersion } = parsed.data
+        const { sid, expectedVersion } = parsed.data
         const sessionAccess = resolveSessionAccess(sid)
         if (!sessionAccess.ok) {
             cb({ result: 'error', reason: sessionAccess.reason })
             return
+        }
+
+        // Stamp unmarked permission requests with the current row's generation
+        // so Archive can reconcile by verified owner without wiping a
+        // replacement's in-flight ask (#2658). Never overwrite an existing stamp.
+        let agentState = parsed.data.agentState
+        if (agentState && typeof agentState === 'object' && !Array.isArray(agentState)) {
+            const state = agentState as AgentState
+            const requests = state.requests
+            const meta = sessionAccess.value.metadata
+            const metaObj = meta && typeof meta === 'object' && !Array.isArray(meta)
+                ? meta as Record<string, unknown>
+                : null
+            const marker = typeof metaObj?.hostStartMarker === 'string'
+                && metaObj.hostStartMarker.length > 0
+                ? metaObj.hostStartMarker
+                : undefined
+            if (marker && requests && typeof requests === 'object') {
+                let stamped = false
+                const nextRequests: NonNullable<AgentState['requests']> = { ...requests }
+                for (const [id, request] of Object.entries(requests)) {
+                    if (!request || (typeof request.hostStartMarker === 'string' && request.hostStartMarker.length > 0)) {
+                        continue
+                    }
+                    nextRequests[id] = { ...request, hostStartMarker: marker }
+                    stamped = true
+                }
+                if (stamped) {
+                    agentState = { ...state, requests: nextRequests }
+                }
+            }
         }
 
         const result = store.sessions.updateSessionAgentState(

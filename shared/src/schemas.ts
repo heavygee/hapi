@@ -491,7 +491,11 @@ export const AgentStateRequestSchema = z.object({
     // Correlation only; replies use the request map key, never this tool id.
     toolCallId: z.string().optional(),
     arguments: z.unknown(),
-    createdAt: z.number().nullish()
+    createdAt: z.number().nullish(),
+    // Reporting worker generation (#2658). Archive clears only requests that
+    // match a verified-exited owner — unmarked stay unless the current row's
+    // marker itself was verified gone.
+    hostStartMarker: z.string().optional(),
 })
 
 export type AgentStateRequest = z.infer<typeof AgentStateRequestSchema>

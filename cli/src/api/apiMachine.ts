@@ -717,13 +717,18 @@ export class ApiMachineClient {
         })
 
         this.rpcHandlerManager.registerHandler(RPC_METHODS.ProbeSessionExit, async (params: any) => {
-            const { sessionId, processStartMarker } = params || {}
+            const { sessionId, processStartMarker, hubSessionId } = params || {}
             if (!sessionId) {
                 throw new Error('Session ID is required')
             }
             const status = await probeSessionExit(
                 sessionId,
-                typeof processStartMarker === 'string' ? { processStartMarker } : undefined
+                {
+                    ...(typeof processStartMarker === 'string' ? { processStartMarker } : {}),
+                    ...(typeof hubSessionId === 'string' && hubSessionId.length > 0
+                        ? { hubSessionId }
+                        : {}),
+                },
             )
             return { status }
         })

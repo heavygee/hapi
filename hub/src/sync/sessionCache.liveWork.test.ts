@@ -202,4 +202,43 @@ describe('SessionCache liveWorkByGeneration attribution (#2658)', () => {
         expect(cache.getSession(session.id)?.metadata?.liveWorkByGeneration?.[priorKey]?.unresolvedTurn).toBe(true)
         store.close()
     })
+
+    it('clears only permission requests for the verified owner marker', () => {
+        const store = new Store(':memory:')
+        const cache = new SessionCache(store, createPublisher([]))
+        const session = cache.getOrCreateSession(
+            'live-work-requests',
+            {
+                path: '/tmp/p',
+                host: 'localhost',
+                flavor: 'claude',
+                startedBy: 'runner',
+                startedFromRunner: true,
+                machineId: 'm1',
+                hostPid: 200,
+                hostStartMarker: 'worker-B',
+            },
+            {
+                requests: {
+                    a: { tool: 'Bash', arguments: {}, hostStartMarker: 'worker-A' },
+                    b: { tool: 'Edit', arguments: {}, hostStartMarker: 'worker-B' },
+                    unmarked: { tool: 'Read', arguments: {} },
+                },
+            },
+            'default',
+        )
+
+        cache.clearPendingAgentRequestsForOwner(session.id, 'worker-A')
+        const afterA = cache.getSession(session.id)?.agentState?.requests
+        expect(afterA?.a).toBeUndefined()
+        expect(afterA?.b).toBeDefined()
+        // Unmarked kept: current marker is B, verified was A.
+        expect(afterA?.unmarked).toBeDefined()
+
+        cache.clearPendingAgentRequestsForOwner(session.id, 'worker-B')
+        const afterB = cache.getSession(session.id)?.agentState?.requests
+        expect(afterB?.b).toBeUndefined()
+        expect(afterB?.unmarked).toBeUndefined()
+        store.close()
+    })
 })

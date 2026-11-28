@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test'
-import { mergeSessionMetadataForSessionMerge } from './sessionCache'
+import { mergeSessionMetadataForSessionMerge, unionLiveWorkByGeneration } from './sessionCache'
+import { liveWorkOwnerKey } from './liveWorkByGeneration'
 
 const prRef = {
     kind: 'github_pr' as const,
@@ -70,5 +71,60 @@ describe('mergeSessionMetadataForSessionMerge externalRefs', () => {
         const merged = mergeSessionMetadataForSessionMerge(oldMetadata, newMetadata) as Record<string, unknown>
 
         expect(merged.externalRefs).toEqual([])
+    })
+
+    it('carries liveWorkByGeneration across resume/dedup merges (#2658)', () => {
+        const priorKey = liveWorkOwnerKey({ machineId: 'm-A', hostPid: 11, hostStartMarker: 'worker-A' })
+        const oldMetadata = {
+            path: '/old',
+            host: 'old-host',
+            liveWorkByGeneration: {
+                [priorKey]: {
+                    machineId: 'm-A',
+                    hostPid: 11,
+                    hostStartMarker: 'worker-A',
+                    since: 1_000,
+                    unresolvedTurn: true,
+                },
+            },
+        }
+        const newMetadata = {
+            path: '/new',
+            host: 'new-host',
+            hostStartMarker: 'worker-B',
+            hostPid: 22,
+            machineId: 'm-B',
+        }
+
+        const merged = mergeSessionMetadataForSessionMerge(oldMetadata, newMetadata) as Record<string, unknown>
+        const map = merged.liveWorkByGeneration as Record<string, { unresolvedTurn?: boolean }>
+        expect(map[priorKey]?.unresolvedTurn).toBe(true)
+    })
+
+    it('unions overlapping generation entries without dropping work bits', () => {
+        const key = liveWorkOwnerKey({ machineId: 'm1', hostPid: 7, hostStartMarker: 'w' })
+        const united = unionLiveWorkByGeneration(
+            {
+                [key]: {
+                    machineId: 'm1',
+                    hostPid: 7,
+                    hostStartMarker: 'w',
+                    since: 10,
+                    unresolvedTurn: true,
+                },
+            },
+            {
+                [key]: {
+                    machineId: 'm1',
+                    hostPid: 7,
+                    hostStartMarker: 'w',
+                    since: 20,
+                    backgroundTasks: [{ id: 'bg-1', type: 'local_bash', description: 'sleep' }],
+                },
+            },
+        )
+        expect(united[key]?.unresolvedTurn).toBe(true)
+        expect(united[key]?.backgroundTasks).toHaveLength(1)
+        expect(united[key]?.since).toBe(10)
     })
 })
