@@ -285,6 +285,17 @@ export function parseIssueFormYaml(id: string, raw: string): IssueTemplate {
     if (!asNonBlankString(obj.description)) {
         return { id, name, kind: 'unsupported', reason: 'Template is missing the required "description" field', githubValid: false }
     }
+    // `title` is optional, but GitHub's top-level syntax table still types
+    // it as String — same "key must be a string" validation error class
+    // already confirmed for `description`/`name`, just not yet checked for
+    // this key (bot review, tiann/hapi#2147, follow-up). `asString` alone
+    // would silently drop a Boolean-coerced value as "not provided" rather
+    // than rejecting the template, which is the same silent-acceptance gap
+    // every other check in this family exists to close — present-and-wrong
+    // must reject, not degrade to absent.
+    if (obj.title !== undefined && typeof obj.title !== 'string') {
+        return { id, name, kind: 'unsupported', reason: 'Template\'s "title" must be a string', githubValid: false }
+    }
     const bodyRaw = obj.body
     if (!Array.isArray(bodyRaw) || bodyRaw.length === 0) {
         return { id, name, kind: 'unsupported', reason: 'Template has no body elements', githubValid: false }

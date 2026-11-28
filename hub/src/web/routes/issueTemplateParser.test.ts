@@ -540,6 +540,27 @@ body:
         expect(template.kind === 'unsupported' && template.githubValid).toBe(false)
     })
 
+    // Regression (bot review, tiann/hapi#2147, follow-up): `title` is
+    // optional, but GitHub's top-level syntax table still types it as
+    // String — an unquoted `title: true` parses as a Boolean (this
+    // codebase's own yaml library coerces literal true/false, same as it
+    // does everywhere else in this file), and `asString` alone would
+    // silently treat that as "not provided" rather than rejecting the
+    // template, same silent-acceptance gap as every other key in this
+    // family.
+    it('is unsupported when title parses as a YAML boolean', () => {
+        const template = parseIssueFormYaml('x.yml', 'name: Bug\ndescription: Bug\ntitle: true\nbody:\n  - type: input\n    attributes:\n      label: Contact')
+        expect(template.kind).toBe('unsupported')
+        expect(template.kind === 'unsupported' && template.githubValid).toBe(false)
+    })
+
+    it('allows an ordinary string title, and omitting it entirely', () => {
+        const withTitle = parseIssueFormYaml('x.yml', 'name: Bug\ndescription: Bug\ntitle: "[Bug]: "\nbody:\n  - type: input\n    attributes:\n      label: Contact')
+        expect(withTitle.kind).toBe('form')
+        const withoutTitle = parseIssueFormYaml('x.yml', 'name: Bug\ndescription: Bug\nbody:\n  - type: input\n    attributes:\n      label: Contact')
+        expect(withoutTitle.kind).toBe('form')
+    })
+
     // Review finding (tiann/hapi#2147): GitHub's own docs document "Body
     // must contain at least one non-markdown field" as a validation error —
     // markdown elements are static text, never submitted, so a body made
