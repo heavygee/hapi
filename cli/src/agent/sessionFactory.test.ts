@@ -156,7 +156,18 @@ describe('bootstrapExistingSession', () => {
         expect(result.sessionInfo.id).toBe('hapi-session-1')
         expect(process.env[HAPI_SESSION_ID_ENV]).toBe('hapi-session-1')
         expect(result.workingDirectory).toBe('/tmp/project')
-        expect(sessionSyncClientMock).toHaveBeenCalledWith(session)
+        expect(sessionSyncClientMock).toHaveBeenCalledWith(expect.objectContaining({
+            id: session.id,
+            // Local bootstrap metadata — not the prior row alone (#2658).
+            metadata: expect.objectContaining({
+                path: '/tmp/project',
+                flavor: 'codex',
+                startedBy: 'terminal',
+                startedFromRunner: false,
+                machineId: 'machine-1',
+                hostPid: process.pid,
+            }),
+        }))
         expect(sessionClient.updateMetadata).toHaveBeenCalledOnce()
         expect(sessionClient.flushMetadata).not.toHaveBeenCalled()
         expect(notifyRunnerSessionStartedMock).toHaveBeenCalledWith(
