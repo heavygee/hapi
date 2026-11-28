@@ -77,7 +77,7 @@ describe('mergeSessionMetadataForSessionMerge externalRefs', () => {
         expect(merged.externalRefs).toEqual([])
     })
 
-    it('carries liveWorkByGeneration across resume/dedup merges (#2658)', () => {
+    it('keeps liveWorkByGeneration out of early metadata merges (#2658)', () => {
         const priorKey = liveWorkOwnerKey({ machineId: 'm-A', hostPid: 11, hostStartMarker: 'worker-A' })
         const oldMetadata = {
             path: '/old',
@@ -100,9 +100,10 @@ describe('mergeSessionMetadataForSessionMerge externalRefs', () => {
             machineId: 'm-B',
         }
 
+        // Deleting merges transfer fresh snapshots immediately before source
+        // deletion — early/history-only metadata merges must not copy the map.
         const merged = mergeSessionMetadataForSessionMerge(oldMetadata, newMetadata) as Record<string, unknown>
-        const map = merged.liveWorkByGeneration as Record<string, { unresolvedTurn?: boolean }>
-        expect(map[priorKey]?.unresolvedTurn).toBe(true)
+        expect(merged.liveWorkByGeneration).toBeUndefined()
     })
 
     it('unions overlapping generation entries without dropping work bits', () => {

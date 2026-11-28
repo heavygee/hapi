@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test'
+import { AGENT_MESSAGE_PAYLOAD_TYPE } from '@hapi/protocol'
 import type { SyncEvent } from '@hapi/protocol/types'
 import { Store } from '../store'
 import type { EventPublisher } from './eventPublisher'
@@ -456,6 +457,53 @@ describe('SessionCache liveWorkByGeneration attribution (#2658)', () => {
         expect(afterA?.b).toBeDefined()
         expect(afterA?.collide).toBeDefined()
         expect(afterA?.unmarked).toBeDefined()
+        store.close()
+    })
+
+    it('latches prior transcript tool work onto the previous owner before cutoff', () => {
+        const store = new Store(':memory:')
+        const cache = new SessionCache(store, createPublisher([]))
+        const session = cache.getOrCreateSession(
+            'live-work-transcript-latch',
+            {
+                path: '/tmp/p',
+                host: 'localhost',
+                flavor: 'claude',
+                startedBy: 'runner',
+                startedFromRunner: true,
+                machineId: 'm1',
+                hostPid: 100,
+                hostStartMarker: 'worker-A',
+            },
+            null,
+            'default',
+        )
+        const keyA = liveWorkOwnerKey({ machineId: 'm1', hostPid: 100, hostStartMarker: 'worker-A' })
+        cache.noteRowGenerationOwner(session.id, keyA)
+        store.messages.addMessage(session.id, {
+            role: 'agent',
+            content: {
+                type: AGENT_MESSAGE_PAYLOAD_TYPE,
+                data: { type: 'tool-call', callId: 'tool_a', name: 'Bash' },
+            },
+        })
+        expect(store.messages.getLiveToolWork(session.id)).toBe(true)
+
+        // Flip row identity to B in the cache, then note B so the cutoff
+        // path latches A's open transcript work before advancing.
+        const before = cache.getSession(session.id)!
+        before.metadata = {
+            ...before.metadata!,
+            hostPid: 200,
+            hostStartMarker: 'worker-B',
+        }
+        cache.noteRowGenerationOwner(
+            session.id,
+            liveWorkOwnerKey({ machineId: 'm1', hostPid: 200, hostStartMarker: 'worker-B' }),
+        )
+        expect(
+            cache.getSession(session.id)?.metadata?.liveWorkByGeneration?.[keyA]?.unresolvedTurn,
+        ).toBe(true)
         store.close()
     })
 

@@ -3884,10 +3884,11 @@ export class SyncEngine {
             const ownerMachine = this.getMachineByNamespace(owner.machineId, session.namespace)
                 ?? this.getMachine(owner.machineId)
             const ownerCaps = ownerMachine?.metadata?.capabilities
-            // Absent capabilities means no Runner probe — not "supports all".
+            // Match the runner-owned probe loop: absent capability list still
+            // probes (legacy machines). Explicit lists without ProbeSessionExit
+            // skip. Transport loss alone never clears (#2658).
             const probeSupported = Boolean(ownerMachine)
-                && Array.isArray(ownerCaps)
-                && ownerCaps.includes(MACHINE_CAPABILITIES.ProbeSessionExit)
+                && (!ownerCaps || ownerCaps.includes(MACHINE_CAPABILITIES.ProbeSessionExit))
             let status: 'stopped' | 'already_gone' | 'still_alive' | 'unknown' = 'unknown'
             if (probeSupported) {
                 const timeoutMs = Math.ceil(deadline - performance.now())

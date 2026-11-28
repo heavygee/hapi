@@ -1429,6 +1429,13 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             hasActiveSharedRoots: pidHasActiveSharedRoots(liveForPid, pid),
           });
           if (decision === 'already_gone') {
+            // Windows: PID-only already_gone is not tree proof — descendants
+            // may outlive the wrapper. Only lifecycle/StopSession tree
+            // confirmations may tombstone (#2658).
+            if (isWindows()) {
+              if (hasVerifiedExit(sessionId)) return 'already_gone'
+              return 'unknown'
+            }
             rememberVerifiedExit(sessionId);
             return 'already_gone';
           }
@@ -1452,11 +1459,18 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             && !await prepareSessionStop(logicalId, pid, opts?.processStartMarker)) return 'still_alive';
           // Preparation can outlive the target generation. Recheck after that
           // await before signalling a raw PID that the OS may have reused.
-          if (!isProcessAlive(pid)) return await finishWithOrphanSweep('already_gone');
+          if (!isProcessAlive(pid)) {
+            if (isWindows() && !hasVerifiedExit(sessionId)) {
+              return await finishWithOrphanSweep('unknown')
+            }
+            rememberVerifiedExit(sessionId)
+            return await finishWithOrphanSweep('already_gone');
+          }
           if (getProcessStartMarker(pid) !== opts?.processStartMarker) return 'unknown';
           if (!(await killProcessTreeByPid(pid, false, undefined, signalDeadlines.get(pid)))) return 'still_alive';
           terminated.add(pid);
           rememberVerifiedExit(sessionId);
+          rememberVerifiedExit(`PID-${pid}`);
           return await finishWithOrphanSweep('stopped');
         }
         return 'unknown';
@@ -1783,7 +1797,8 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           if (!isWindows()) return
           const table = await readWindowsProcessTable(10_000)
           if (!table) return
-          const members: Array<{ pid: number; marker: string | null }> = []
+          const prior = windowsTreeWitnessByGeneration.get(witnessKey) ?? []
+          const byPid = new Map(prior.map((member) => [member.pid, member]))
           const queue = [pid]
           const seen = new Set<number>()
           while (queue.length) {
@@ -1791,12 +1806,19 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             if (seen.has(next)) continue
             seen.add(next)
             const entry = table.get(next)
-            members.push({ pid: next, marker: entry?.marker ?? null })
+            // Union — never drop previously observed members while alive so a
+            // child spawned after an earlier snapshot stays in the set (#2658).
+            byPid.set(next, {
+              pid: next,
+              marker: entry?.marker ?? byPid.get(next)?.marker ?? null,
+            })
             for (const [childPid, child] of table) {
               if (childPid !== next && child.parentPid === next) queue.push(childPid)
             }
           }
-          if (members.length > 0) windowsTreeWitnessByGeneration.set(witnessKey, members)
+          if (byPid.size > 0) {
+            windowsTreeWitnessByGeneration.set(witnessKey, [...byPid.values()])
+          }
         }
 
         const codexOwnedStillAlive = async (): Promise<'still_alive' | 'unknown' | null> => {
@@ -1872,15 +1894,18 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
               if (member.marker && entry.marker && member.marker !== entry.marker) continue
               return 'still_alive'
             }
+            // Captured members are gone, but children spawned after the last
+            // live snapshot are invisible here — never invent already_gone
+            // from an incomplete membership set (#2658).
             windowsTreeWitnessByGeneration.delete(witnessKey)
-            rememberVerifiedExit(sessionId);
-            return 'already_gone'
+          } else {
+            // Parent-link scan only proves still_alive; root-gone with no
+            // linked children is uncertain after reparent.
+            const table = await readWindowsProcessTable(10_000)
+            const tree = windowsProcessTreeMayBeAlive(table, pid, expected)
+            if (tree === true) return 'still_alive'
           }
-          // No witness captured while alive — parent-link scan is incomplete
-          // after reparent. Confirmed StopSession tombstones still clear.
-          const table = await readWindowsProcessTable(10_000)
-          const tree = windowsProcessTreeMayBeAlive(table, pid, expected)
-          if (tree === true) return 'still_alive'
+          // Lifecycle / StopSession tree confirmation only.
           if (hasVerifiedExit(sessionId)) return 'already_gone'
           return 'unknown'
         }

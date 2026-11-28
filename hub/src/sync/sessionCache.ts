@@ -158,21 +158,10 @@ export function mergeSessionMetadataForSessionMerge(
         changed = true
     }
 
-    // Carry durable live-work across resume/dedup merges (#2658). Project each
-    // side against its own row so legacy attribution survives, then union by
-    // owner — never drop the source map when the replacement omitted it.
-    const oldLive = projectLegacyLiveWork(oldObj as Session['metadata'])
-    const newLive = projectLegacyLiveWork(newObj as Session['metadata'])
-    if (Object.keys(oldLive).length > 0 || Object.keys(newLive).length > 0) {
-        const united = unionLiveWorkByGeneration(oldLive, newLive)
-        const prev = merged.liveWorkByGeneration
-        const prevJson = JSON.stringify(prev ?? null)
-        const nextJson = JSON.stringify(Object.keys(united).length > 0 ? united : null)
-        if (prevJson !== nextJson) {
-            merged.liveWorkByGeneration = Object.keys(united).length > 0 ? united : null
-            changed = true
-        }
-    }
+    // Live-work stays out of early / history-only metadata merges. A deleting
+    // merge transfers fresh snapshots immediately before source deletion
+    // (transferSourceLiveWorkOntoDest) so idle reports during I/O cannot
+    // leave a stale first-merge copy blocking Archive (#2658).
 
     return changed ? merged : newMetadata
 }
@@ -241,9 +230,18 @@ export function transferSourceLiveWorkOntoDest(
             const initial = initialSourceMap[key]
             if (initial && JSON.stringify(out[key]) === JSON.stringify(initial)) {
                 delete out[key]
-            } else if (initial?.unresolvedTurn && out[key]?.unresolvedTurn) {
+            } else if (initial) {
+                // Source settled away — drop bits the initial source contributed
+                // (turn and/or background tasks) while keeping dest-only work.
                 const stripped: LiveWorkGenerationEntry = { ...out[key] }
-                delete stripped.unresolvedTurn
+                if (initial.unresolvedTurn) delete stripped.unresolvedTurn
+                if (initial.backgroundTasks && initial.backgroundTasks.length > 0) {
+                    const initialIds = new Set(initial.backgroundTasks.map((task) => task.id))
+                    const remaining = (stripped.backgroundTasks ?? [])
+                        .filter((task) => !initialIds.has(task.id))
+                    if (remaining.length > 0) stripped.backgroundTasks = remaining
+                    else delete stripped.backgroundTasks
+                }
                 if (generationEntryHasWork(stripped)) out[key] = stripped
                 else delete out[key]
             }
@@ -333,6 +331,8 @@ export class SessionCache {
     private readonly unattributedThinkingBySessionId: Set<string> = new Set()
     /** Last time each owner reported thinking=true (stale terminal retirement). */
     private readonly thinkingReportedAtByOwner: Map<string, number> = new Map()
+    /** Last time each owner reported a nonempty background snapshot. */
+    private readonly backgroundReportedAtByOwner: Map<string, number> = new Map()
     private readonly runtimeConfigUpdatedAtBySessionId: Map<string, Partial<Record<RuntimeConfigKey, number>>> = new Map()
     /**
      * Last time the hub saw real agent progress per session (tiann/hapi#1820).
@@ -1128,15 +1128,37 @@ export class SessionCache {
         // Transient snapshots stay per-owner so a late nonempty report from A
         // cannot wipe B's still-running tasks (#2658).
         if (bgOwnerKey) {
+            const ownerMapKey = sessionId + '\0' + bgOwnerKey
+            const hubNow = Date.now()
+            const BACKGROUND_STALE_MS = 300_000
+            // Retire departed terminal reporters whose nonempty snapshot was
+            // never cleared — a replacement keeping the row active must not
+            // strand Archive on a dead owner's tasks (#2658).
             let byOwner = this.backgroundTasksByOwnerBySessionId.get(sessionId)
+            if (byOwner) {
+                for (const [owner, ownerTasks] of [...byOwner.entries()]) {
+                    if (owner === bgOwnerKey) continue
+                    if (ownerTasks.length === 0) continue
+                    const at = this.backgroundReportedAtByOwner.get(sessionId + '\0' + owner)
+                    if (at !== undefined && hubNow - at <= BACKGROUND_STALE_MS) continue
+                    byOwner.delete(owner)
+                    this.backgroundReportedAtByOwner.delete(sessionId + '\0' + owner)
+                }
+                if (byOwner.size === 0) {
+                    this.backgroundTasksByOwnerBySessionId.delete(sessionId)
+                    byOwner = undefined
+                }
+            }
             if (!byOwner) {
                 byOwner = new Map()
                 this.backgroundTasksByOwnerBySessionId.set(sessionId, byOwner)
             }
             if (tasks.length > 0) {
                 byOwner.set(bgOwnerKey, tasks)
+                this.backgroundReportedAtByOwner.set(ownerMapKey, hubNow)
             } else {
                 byOwner.delete(bgOwnerKey)
+                this.backgroundReportedAtByOwner.delete(ownerMapKey)
                 if (byOwner.size === 0) this.backgroundTasksByOwnerBySessionId.delete(sessionId)
             }
             this.backgroundOwnerBySessionId.set(sessionId, bgOwnerKey)
@@ -1310,6 +1332,7 @@ export class SessionCache {
     clearTransientBackgroundForOwner(sessionId: string, ownerKey: string): void {
         const session = this.sessions.get(sessionId)
         if (!session) return
+        this.backgroundReportedAtByOwner.delete(sessionId + '\0' + ownerKey)
         const byOwner = this.backgroundTasksByOwnerBySessionId.get(sessionId)
         if (byOwner?.has(ownerKey)) {
             byOwner.delete(ownerKey)
@@ -1474,6 +1497,27 @@ export class SessionCache {
         // the tracked generation. Prior-owner heartbeats are ignored here.
         if (currentKey && ownerKey !== currentKey) return
         if (previous && previous !== ownerKey) {
+            // Cutoff would hide prior-gen tool calls from derivedToolWork.
+            // Latch them onto the previous owner before advancing (#2658).
+            if (this.store.messages.getLiveToolWork(sessionId)) {
+                const parts = previous.split(':')
+                if (parts.length >= 3) {
+                    const hostPid = Number(parts[1])
+                    const hostStartMarker = parts.slice(2).join(':')
+                    if (parts[0] && Number.isFinite(hostPid) && hostPid > 0 && hostStartMarker) {
+                        this.upsertReportedGenerationLiveWork(
+                            sessionId,
+                            { unresolvedTurn: true },
+                            {
+                                machineId: parts[0],
+                                hostPid,
+                                processStartMarker: hostStartMarker,
+                                runnerOwned: isRunnerOwnedSession(session),
+                            },
+                        )
+                    }
+                }
+            }
             this.transcriptGenerationBoundarySeqBySessionId.set(
                 sessionId,
                 this.store.messages.getMaxSeq(sessionId),
