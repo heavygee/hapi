@@ -638,6 +638,22 @@ body:
         expect(template.kind === 'unsupported' && template.githubValid).toBe(false)
     })
 
+    // Regression (bot review, tiann/hapi#2147, follow-up): GitHub
+    // documents "Validations for upload" (required, accept) just like
+    // every other type, but the validations-map check used to live past
+    // the upload branch's own early `continue` — a well-formed upload
+    // field with a malformed `validations` still returned
+    // githubValid: true, letting a template GitHub's own chooser would
+    // reject still count as valid local .github inheritance coverage.
+    it('is genuinely invalid (githubValid: false) when an upload field has a non-map validations value', () => {
+        const template = parseIssueFormYaml(
+            'x.yml',
+            'name: Bug\ndescription: Bug\nbody:\n  - type: upload\n    id: screenshots\n    attributes:\n      label: Screenshots\n    validations: "yes"'
+        )
+        expect(template.kind).toBe('unsupported')
+        expect(template.kind === 'unsupported' && template.githubValid).toBe(false)
+    })
+
     // Regression (bot review, tiann/hapi#2147, follow-up): the upload
     // field used to return githubValid: true immediately, before the
     // parser ever reached a later field in the same body — so a
