@@ -215,6 +215,9 @@ export function transferSourceLiveWorkOntoDest(
                 : {}),
             since: Math.min(source.since, dest?.since ?? source.since),
             ...(source.unresolvedTurn ? { unresolvedTurn: true as const } : {}),
+            ...(source.transcriptOpenWork || dest?.transcriptOpenWork
+                ? { transcriptOpenWork: true as const }
+                : {}),
             ...(tasks.length > 0 ? { backgroundTasks: tasks } : {}),
         }
     }
@@ -230,21 +233,9 @@ export function transferSourceLiveWorkOntoDest(
             const initial = initialSourceMap[key]
             if (initial && JSON.stringify(out[key]) === JSON.stringify(initial)) {
                 delete out[key]
-            } else if (initial) {
-                // Source settled away — drop bits the initial source contributed
-                // (turn and/or background tasks) while keeping dest-only work.
-                const stripped: LiveWorkGenerationEntry = { ...out[key] }
-                if (initial.unresolvedTurn) delete stripped.unresolvedTurn
-                if (initial.backgroundTasks && initial.backgroundTasks.length > 0) {
-                    const initialIds = new Set(initial.backgroundTasks.map((task) => task.id))
-                    const remaining = (stripped.backgroundTasks ?? [])
-                        .filter((task) => !initialIds.has(task.id))
-                    if (remaining.length > 0) stripped.backgroundTasks = remaining
-                    else delete stripped.backgroundTasks
-                }
-                if (generationEntryHasWork(stripped)) out[key] = stripped
-                else delete out[key]
             }
+            // Else keep dest as-is: it may hold dest-reported work for the same
+            // owner that arrived while the source settled (#2658).
         }
     }
     for (const [key, entry] of Object.entries(sourceMap)) {
@@ -275,6 +266,9 @@ function unionLiveWorkEntries(
             : {}),
         since: Math.min(a.since, b.since),
         ...(a.unresolvedTurn || b.unresolvedTurn ? { unresolvedTurn: true as const } : {}),
+        ...(a.transcriptOpenWork || b.transcriptOpenWork
+            ? { transcriptOpenWork: true as const }
+            : {}),
         ...(tasks.length > 0 ? { backgroundTasks: tasks } : {}),
     }
 }
@@ -849,6 +843,24 @@ export class SessionCache {
                 this.thinkingOwnerBySessionId.delete(session.id)
             }
         }
+        // Same clock for departed terminal background snapshots — heartbeat
+        // path, not only when another reporter emits a bg snapshot (#2658).
+        const BACKGROUND_STALE_MS = 300_000
+        const byOwnerBg = this.backgroundTasksByOwnerBySessionId.get(session.id)
+        if (byOwnerBg) {
+            let bgChanged = false
+            for (const [owner, tasks] of [...byOwnerBg.entries()]) {
+                if (tasks.length === 0) continue
+                if (reportedOwnerKey && owner === reportedOwnerKey) continue
+                const at = this.backgroundReportedAtByOwner.get(session.id + '\0' + owner)
+                if (at !== undefined && hubNow - at <= BACKGROUND_STALE_MS) continue
+                byOwnerBg.delete(owner)
+                this.backgroundReportedAtByOwner.delete(session.id + '\0' + owner)
+                bgChanged = true
+            }
+            if (byOwnerBg.size === 0) this.backgroundTasksByOwnerBySessionId.delete(session.id)
+            if (bgChanged) this.recomputeRowWideBackgroundTasks(session.id)
+        }
         if (reportedOwnerKey) {
             this.noteRowGenerationOwner(session.id, reportedOwnerKey)
             this.thinkingByOwnerBySessionId.set(ownerMapKey(reportedOwnerKey), requestedThinking)
@@ -1397,7 +1409,11 @@ export class SessionCache {
      */
     private upsertReportedGenerationLiveWork(
         sessionId: string,
-        patch: { unresolvedTurn?: boolean; backgroundTasks?: BackgroundTask[] },
+        patch: {
+            unresolvedTurn?: boolean
+            transcriptOpenWork?: boolean
+            backgroundTasks?: BackgroundTask[]
+        },
         reported?: {
             machineId?: string
             hostPid?: number
@@ -1441,12 +1457,17 @@ export class SessionCache {
         const nextUnresolved = patch.unresolvedTurn !== undefined
             ? patch.unresolvedTurn
             : existing?.unresolvedTurn === true
+        // Idle thinking must not clear transcript-open work (#2658).
+        const nextTranscriptOpen = patch.transcriptOpenWork !== undefined
+            ? patch.transcriptOpenWork
+            : existing?.transcriptOpenWork === true
         const entry = {
             machineId,
             hostPid,
             hostStartMarker: marker,
             since: existing?.since ?? Date.now(),
             ...(nextUnresolved ? { unresolvedTurn: true as const } : {}),
+            ...(nextTranscriptOpen ? { transcriptOpenWork: true as const } : {}),
             ...(nextTasks && nextTasks.length > 0 ? { backgroundTasks: nextTasks } : {}),
         }
         const nextHasWork = generationEntryHasWork(entry)
@@ -1454,6 +1475,7 @@ export class SessionCache {
         // Skip metadata write when the owner latch is unchanged (heartbeat churn).
         if (nextHasWork && existingHasWork
             && existing?.unresolvedTurn === entry.unresolvedTurn
+            && existing?.transcriptOpenWork === entry.transcriptOpenWork
             && JSON.stringify(existing?.backgroundTasks ?? []) === JSON.stringify(entry.backgroundTasks ?? [])) {
             return
         }
@@ -1507,7 +1529,7 @@ export class SessionCache {
                     if (parts[0] && Number.isFinite(hostPid) && hostPid > 0 && hostStartMarker) {
                         this.upsertReportedGenerationLiveWork(
                             sessionId,
-                            { unresolvedTurn: true },
+                            { transcriptOpenWork: true },
                             {
                                 machineId: parts[0],
                                 hostPid,
@@ -1593,6 +1615,43 @@ export class SessionCache {
             sessionId,
             data: { derivedToolWork: open } satisfies SessionPatch
         })
+    }
+
+    /**
+     * Drop transcriptOpenWork bits once the transcript has no open tool calls
+     * (settlement). Idle thinking must not call this (#2658).
+     */
+    clearTranscriptOpenWorkWhenSettled(sessionId: string): void {
+        const session = this.sessions.get(sessionId)
+        if (!session?.metadata) return
+        const map = projectLegacyLiveWork(session.metadata)
+        let changed = false
+        for (const [key, entry] of Object.entries(map)) {
+            if (!entry.transcriptOpenWork) continue
+            const rest: LiveWorkGenerationEntry = { ...entry }
+            delete rest.transcriptOpenWork
+            if (generationEntryHasWork(rest)) map[key] = rest
+            else delete map[key]
+            changed = true
+        }
+        if (!changed) return
+        const metadata = {
+            ...session.metadata,
+            liveWorkByGeneration: Object.keys(map).length > 0 ? map : null,
+            unresolvedTurn: null,
+            backgroundWork: null,
+        }
+        const metaResult = this.store.sessions.updateSessionMetadata(
+            sessionId,
+            metadata,
+            session.metadataVersion,
+            session.namespace,
+            { touchUpdatedAt: false },
+        )
+        if (metaResult.result === 'success') {
+            session.metadata = metaResult.value as typeof session.metadata
+            session.metadataVersion = metaResult.version
+        }
     }
 
     clearDerivedWorkForOwner(sessionId: string, ownerKey: string): void {

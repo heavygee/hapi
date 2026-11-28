@@ -1948,6 +1948,11 @@ export class SyncEngine {
                 session.id,
                 this.store.messages.getLiveToolWork(session.id, boundarySeq),
             )
+            // Transcript-open latches clear on settlement (no open tools left),
+            // not on idle thinking (#2658).
+            if (!this.store.messages.getLiveToolWork(session.id)) {
+                this.sessionCache.clearTranscriptOpenWorkWhenSettled(session.id)
+            }
         }
     }
 
@@ -3911,9 +3916,17 @@ export class SyncEngine {
                     // handler-not-registered still leaves unknown (keep the ask).
                     status = 'unknown'
                 }
+            } else if (
+                !ownerMachine
+                && !session.active
+                && !this.rpcGateway.hasSessionRpcTarget(sessionId)
+            ) {
+                // Owner's machine is gone from the hub — not mere session-socket
+                // loss. Standalone terminals without a runner can recover here (#2658).
+                status = 'already_gone'
             }
-            // No probe / inactive / socket-gone alone is not exit proof — leave
-            // status unknown so pending asks survive prolonged disconnects (#2658).
+            // Socket-gone alone while the machine remains registered is not exit
+            // proof — leave unknown so reconnecting terminals can still answer.
             if (status === 'already_gone' || status === 'stopped') {
                 // Only this owner's requests — never wipe another generation.
                 this.sessionCache.clearPendingAgentRequestsForOwner(sessionId, owner)
@@ -3921,9 +3934,17 @@ export class SyncEngine {
                 this.sessionCache.clearTransientBackgroundForOwner(sessionId, ownerKey)
             }
         }
-        // Unstamped terminal asks: transport loss is not exit proof. Leave them
-        // so a reconnecting terminal can still answer; Archive stays blocked
-        // until the ask settles or an attributed owner probe clears it (#2658).
+        // Unstamped asks with no machine on the row: same machine-gone recovery.
+        if (
+            owners.size === 0
+            && !session.active
+            && !this.rpcGateway.hasSessionRpcTarget(sessionId)
+            && !(typeof session.metadata?.machineId === 'string' && session.metadata.machineId.length > 0
+                && (this.getMachineByNamespace(session.metadata.machineId, session.namespace)
+                    ?? this.getMachine(session.metadata.machineId)))
+        ) {
+            this.sessionCache.clearTerminalPendingRequests(sessionId)
+        }
     }
 
     private async archiveSessionUnlocked(sessionId: string): Promise<void> {

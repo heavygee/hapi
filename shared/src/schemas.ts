@@ -328,6 +328,9 @@ export const MetadataSchema = z.object({
         hostStartMarker: z.string().optional(),
         since: z.number(),
         unresolvedTurn: z.boolean().optional(),
+        // Open tool call seen in the transcript for this owner — independent of
+        // thinking heartbeats (idle must not clear it) (#2658).
+        transcriptOpenWork: z.boolean().optional(),
         backgroundTasks: z.array(z.object({
             id: z.string(),
             type: z.string(),

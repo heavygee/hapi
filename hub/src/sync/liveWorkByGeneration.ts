@@ -27,6 +27,8 @@ export type LiveWorkGenerationEntry = {
     hostStartMarker?: string
     since: number
     unresolvedTurn?: boolean
+    /** Unsettled transcript tool call for this owner — not cleared by idle. */
+    transcriptOpenWork?: boolean
     backgroundTasks?: BackgroundTask[]
 }
 
@@ -54,6 +56,7 @@ export function liveWorkOwnerKey(opts: {
 export function generationEntryHasWork(entry: LiveWorkGenerationEntry | null | undefined): boolean {
     if (!entry) return false
     if (entry.unresolvedTurn === true) return true
+    if (entry.transcriptOpenWork === true) return true
     return Array.isArray(entry.backgroundTasks) && entry.backgroundTasks.length > 0
 }
 

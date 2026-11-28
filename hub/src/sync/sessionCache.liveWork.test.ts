@@ -502,7 +502,20 @@ describe('SessionCache liveWorkByGeneration attribution (#2658)', () => {
             liveWorkOwnerKey({ machineId: 'm1', hostPid: 200, hostStartMarker: 'worker-B' }),
         )
         expect(
-            cache.getSession(session.id)?.metadata?.liveWorkByGeneration?.[keyA]?.unresolvedTurn,
+            cache.getSession(session.id)?.metadata?.liveWorkByGeneration?.[keyA]?.transcriptOpenWork,
+        ).toBe(true)
+        // Idle thinking must not clear the transcript bit.
+        cache.handleSessionAlive({
+            sid: session.id,
+            time: Date.now(),
+            thinking: false,
+            machineId: 'm1',
+            hostPid: 100,
+            processStartMarker: 'worker-A',
+            runnerOwned: true,
+        })
+        expect(
+            cache.getSession(session.id)?.metadata?.liveWorkByGeneration?.[keyA]?.transcriptOpenWork,
         ).toBe(true)
         store.close()
     })

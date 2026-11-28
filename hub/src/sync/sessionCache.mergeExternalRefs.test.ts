@@ -190,7 +190,7 @@ describe('mergeSessionMetadataForSessionMerge externalRefs', () => {
         expect(transferred[key]?.backgroundTasks).toHaveLength(1)
     })
 
-    it('strips settled source unresolvedTurn from a combined dest entry (#2658)', () => {
+    it('keeps dest-independent work when source settles away during I/O (#2658)', () => {
         const key = liveWorkOwnerKey({ machineId: 'm1', hostPid: 1, hostStartMarker: 'shared' })
         const initialSource = {
             [key]: {
@@ -201,7 +201,8 @@ describe('mergeSessionMetadataForSessionMerge externalRefs', () => {
                 unresolvedTurn: true as const,
             },
         }
-        // First merge already combined source turn + dest background.
+        // Dest independently reported a turn (+ bg) for the same owner while
+        // source settled — must not strip the dest turn as "source residue".
         const destAfterFirstMerge = {
             [key]: {
                 machineId: 'm1',
@@ -212,12 +213,39 @@ describe('mergeSessionMetadataForSessionMerge externalRefs', () => {
                 backgroundTasks: [{ id: 'bg', type: 'local_bash', description: 'dest' }],
             },
         }
-        // Source settled during I/O — owner key gone from the final snapshot.
         const transferred = transferSourceLiveWorkOntoDest(
             destAfterFirstMerge,
             {},
             new Set([key]),
             initialSource,
+        )
+        expect(transferred[key]?.unresolvedTurn).toBe(true)
+        expect(transferred[key]?.backgroundTasks).toHaveLength(1)
+    })
+
+    it('applies source settlement when the fresh source still has the owner key', () => {
+        const key = liveWorkOwnerKey({ machineId: 'm1', hostPid: 1, hostStartMarker: 'shared' })
+        const transferred = transferSourceLiveWorkOntoDest(
+            {
+                [key]: {
+                    machineId: 'm1',
+                    hostPid: 1,
+                    hostStartMarker: 'shared',
+                    since: 10,
+                    unresolvedTurn: true,
+                    backgroundTasks: [{ id: 'bg', type: 'local_bash', description: 'dest' }],
+                },
+            },
+            {
+                [key]: {
+                    machineId: 'm1',
+                    hostPid: 1,
+                    hostStartMarker: 'shared',
+                    since: 10,
+                    // Settled — no unresolvedTurn.
+                },
+            },
+            new Set([key]),
         )
         expect(transferred[key]?.unresolvedTurn).toBeUndefined()
         expect(transferred[key]?.backgroundTasks).toHaveLength(1)
