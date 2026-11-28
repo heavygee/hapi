@@ -46,7 +46,7 @@ import { buildMachineMetadata } from '@/agent/sessionFactory';
 import { resolveWorkspaceRoots } from '@/utils/workspaceRoot';
 import { hashRunnerCliApiToken, hashRunnerExtraHeaders } from './runnerIdentity';
 import { readRuntimes, runtimeMayBeAlive, runtimeAuthHash } from '@/codex/shared/registry';
-import { readWindowsProcessTable } from '@/utils/windowsProcessStop';
+import { readWindowsProcessTable, windowsProcessTreeMayBeAlive } from '@/utils/windowsProcessStop';
 import { coalesceStopRequests } from './stopSessionRequests';
 import { scheduleCursorModelsPrewarm } from '@/modules/common/cursorModelsPrewarm';
 import { isLinkedGitWorktree } from '@/utils/isLinkedGitWorktree';
@@ -1802,11 +1802,21 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           if (expected) {
             const current = getProcessStartMarker(pid);
             // Unreadable marker → unknown (keep latch). Readable mismatch means
-            // the PID was reused; confirm via registry then already_gone.
+            // the PID was reused; the live process tree is the replacement's.
             if (!current) return 'unknown';
             if (current !== expected) {
               const owned = await codexOwnedStillAlive()
               if (owned) return owned
+              if (hasVerifiedExit(sessionId)) return 'already_gone'
+              if (isWindows()) {
+                // Reused PID: current ParentProcessId children belong to the
+                // replacement. Without a tombstone, refuse already_gone (#2658).
+                return 'unknown'
+              }
+              // Unix: old descendants may still hold the prior PGID (== old pid).
+              const group = processGroupMayBeAlive(pid)
+              if (group === true) return 'still_alive'
+              if (group === 'unknown') return 'unknown'
               rememberVerifiedExit(sessionId);
               return 'already_gone';
             }
@@ -1817,6 +1827,17 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         // owned app-server for that wrapper generation remains live.
         const owned = await codexOwnedStillAlive()
         if (owned) return owned
+        if (hasVerifiedExit(sessionId)) return 'already_gone'
+        if (isWindows()) {
+          // Generation-scoped tree: live root/children with this parent, or
+          // empty containment → already_gone. Table failure → unknown (#2658).
+          const table = await readWindowsProcessTable(10_000)
+          const tree = windowsProcessTreeMayBeAlive(table, pid, expected)
+          if (tree === true) return 'still_alive'
+          if (tree === 'unknown') return 'unknown'
+          rememberVerifiedExit(sessionId);
+          return 'already_gone'
+        }
         // Descendants may keep the wrapper's process group after reparent (#2658).
         const group = processGroupMayBeAlive(pid)
         if (group === true) return 'still_alive'

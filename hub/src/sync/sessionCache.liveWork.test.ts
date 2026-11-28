@@ -158,7 +158,7 @@ describe('SessionCache liveWorkByGeneration attribution (#2658)', () => {
         store.close()
     })
 
-    it('preserves a replacement\'s row-wide tasks when a prior owner sends an empty snapshot', () => {
+    it('preserves a replacement\'s row-wide tasks across late prior-owner snapshots', () => {
         const store = new Store(':memory:')
         const cache = new SessionCache(store, createPublisher([]))
         const session = cache.getOrCreateSession(
@@ -188,12 +188,27 @@ describe('SessionCache liveWorkByGeneration attribution (#2658)', () => {
             [],
             { machineId: 'm1', hostPid: 100, processStartMarker: 'worker-A', runnerOwned: true },
         )
-        expect(cache.getSession(session.id)?.backgroundTaskCount).toBe(1)
-        expect(cache.getSession(session.id)?.backgroundTasks?.[0]?.id).toBe('bg-b')
+        expect(cache.getSession(session.id)?.backgroundTasks?.some((t) => t.id === 'bg-b')).toBe(true)
+
+        // Late nonempty from A must not wipe B.
+        cache.setBackgroundTasks(
+            session.id,
+            [{ id: 'bg-a', type: 'local_bash', description: 'stale-a' }],
+            { machineId: 'm1', hostPid: 100, processStartMarker: 'worker-A', runnerOwned: true },
+        )
+        const tasks = cache.getSession(session.id)?.backgroundTasks ?? []
+        expect(tasks.some((t) => t.id === 'bg-b')).toBe(true)
+        expect(tasks.some((t) => t.id === 'bg-a')).toBe(true)
+
+        cache.clearTransientBackgroundForOwner(
+            session.id,
+            liveWorkOwnerKey({ machineId: 'm1', hostPid: 100, hostStartMarker: 'worker-A' }),
+        )
+        expect(cache.getSession(session.id)?.backgroundTasks?.map((t) => t.id)).toEqual(['bg-b'])
         store.close()
     })
 
-    it('does not attribute queued-prompt thinking to an idle reporter', () => {
+    it('keeps the queued-prompt guard when clearing worker thinking without an idle heartbeat', () => {
         const store = new Store(':memory:')
         const cache = new SessionCache(store, createPublisher([]))
         const session = cache.getOrCreateSession(
@@ -221,24 +236,16 @@ describe('SessionCache liveWorkByGeneration attribution (#2658)', () => {
             hostPid: 100,
             processStartMarker: 'worker-A',
         })
+        // Prompt accepted while A is thinking — no intervening idle heartbeat.
         cache.markMessageQueued(session.id)
-
-        cache.handleSessionAlive({
-            sid: session.id,
-            time: Date.now() + 1,
-            thinking: false,
-            machineId: 'm1',
-            hostPid: 100,
-            processStartMarker: 'worker-A',
-        })
-        expect(cache.getSession(session.id)?.thinking).toBe(true)
+        expect(cache.hasQueuedPromptWork(session.id)).toBe(true)
 
         cache.clearTransientThinkingForOwner(session.id, keyA)
         expect(cache.getSession(session.id)?.thinking).toBe(true)
         store.close()
     })
 
-    it('bounds transcript-derived work after a generation change', () => {
+    it('bounds transcript work on current-row replacement, not late prior reports', () => {
         const store = new Store(':memory:')
         const cache = new SessionCache(store, createPublisher([]))
         const session = cache.getOrCreateSession(
@@ -261,13 +268,36 @@ describe('SessionCache liveWorkByGeneration attribution (#2658)', () => {
             session.id,
             liveWorkOwnerKey({ machineId: 'm1', hostPid: 100, hostStartMarker: 'worker-A' }),
         )
-        const before = Date.now()
+        expect(cache.getTranscriptGenerationBoundaryAt(session.id)).toBeUndefined()
+
+        // Advance row metadata to B (replacement), then note B.
+        const before = cache.getSession(session.id)!
+        expect(store.sessions.updateSessionMetadata(
+            session.id,
+            {
+                ...before.metadata!,
+                hostPid: 200,
+                hostStartMarker: 'worker-B',
+            },
+            before.metadataVersion,
+            'default',
+        ).result).toBe('success')
+        cache.refreshSession(session.id)
+
+        const at = Date.now()
         cache.noteRowGenerationOwner(
             session.id,
             liveWorkOwnerKey({ machineId: 'm1', hostPid: 200, hostStartMarker: 'worker-B' }),
         )
         const boundary = cache.getTranscriptGenerationBoundaryAt(session.id)
-        expect(boundary).toBeGreaterThanOrEqual(before)
+        expect(boundary).toBeGreaterThanOrEqual(at)
+
+        // Late A report must not move the cutoff.
+        cache.noteRowGenerationOwner(
+            session.id,
+            liveWorkOwnerKey({ machineId: 'm1', hostPid: 100, hostStartMarker: 'worker-A' }),
+        )
+        expect(cache.getTranscriptGenerationBoundaryAt(session.id)).toBe(boundary)
         store.close()
     })
 

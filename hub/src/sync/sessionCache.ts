@@ -278,12 +278,14 @@ export class SessionCache {
     private readonly thinkingOwnerBySessionId: Map<string, string> = new Map()
     /** Owner key that last set row-wide backgroundTasks via an attributed snapshot. */
     private readonly backgroundOwnerBySessionId: Map<string, string> = new Map()
+    /** Per-owner transient background snapshots (row-wide is derived from these). */
+    private readonly backgroundTasksByOwnerBySessionId: Map<string, Map<string, BackgroundTask[]>> = new Map()
     /** Current-generation owner credited for transcript-derived tool work. */
     private readonly derivedWorkOwnerBySessionId: Map<string, string> = new Map()
     /** Last attributed row generation (machine:pid:marker) for transcript bounds. */
     private readonly rowGenerationOwnerBySessionId: Map<string, string> = new Map()
     /**
-     * Wall clock when the row's attributed generation changed. Transcript
+     * Wall clock when the row's *current* generation changed. Transcript
      * tool-work before this instant belongs to a prior owner (#2658).
      */
     private readonly transcriptGenerationBoundaryAtBySessionId: Map<string, number> = new Map()
@@ -935,6 +937,8 @@ export class SessionCache {
         session.thinking = true
         session.thinkingAt = nextTime
         if (!wasThinking) session.activeTurnStartedAt = activeTurnStartedAt
+        // Hub owns the queue guard — a verified worker exit must not clear it.
+        this.thinkingOwnerBySessionId.delete(session.id)
         this.recordTurn(session, wasThinking, session.activeTurnStartedAt ?? nextTime, 'hub_prompt', 'idle')
         session.updatedAt = Math.max(session.updatedAt, nextTime)
         this.pendingThinkingUntilBySessionId.set(session.id, nextTime + QUEUED_MESSAGE_THINKING_GRACE_MS)
@@ -1028,30 +1032,34 @@ export class SessionCache {
             this.upsertReportedGenerationLiveWork(sessionId, { backgroundTasks: tasks }, reported)
         }
 
-        const priorRowOwner = this.backgroundOwnerBySessionId.get(sessionId)
-        // Empty snapshot from a prior owner must not wipe a replacement's
-        // row-wide tasks (terminal B has no durable entry to rebuild from).
-        if (tasks.length === 0 && priorRowOwner && bgOwnerKey && priorRowOwner !== bgOwnerKey) {
+        // Transient snapshots stay per-owner so a late nonempty report from A
+        // cannot wipe B's still-running tasks (#2658).
+        if (bgOwnerKey) {
+            let byOwner = this.backgroundTasksByOwnerBySessionId.get(sessionId)
+            if (!byOwner) {
+                byOwner = new Map()
+                this.backgroundTasksByOwnerBySessionId.set(sessionId, byOwner)
+            }
+            if (tasks.length > 0) {
+                byOwner.set(bgOwnerKey, tasks)
+            } else {
+                byOwner.delete(bgOwnerKey)
+                if (byOwner.size === 0) this.backgroundTasksByOwnerBySessionId.delete(sessionId)
+            }
+            this.backgroundOwnerBySessionId.set(sessionId, bgOwnerKey)
+            this.recomputeRowWideBackgroundTasks(sessionId)
             return
         }
 
-        if (tasks.length > 0) {
-            if (bgOwnerKey) {
-                this.backgroundOwnerBySessionId.set(sessionId, bgOwnerKey)
-            } else {
-                this.backgroundOwnerBySessionId.delete(sessionId)
-            }
-        } else if (!priorRowOwner || priorRowOwner === bgOwnerKey || !bgOwnerKey) {
-            this.backgroundOwnerBySessionId.delete(sessionId)
-        }
-
+        // Unattributed snapshot: legacy single-slot behaviour.
+        this.backgroundOwnerBySessionId.delete(sessionId)
+        this.backgroundTasksByOwnerBySessionId.delete(sessionId)
         const current = session.backgroundTasks ?? []
         if (tasks.length === current.length && tasks.every((task, index) =>
             task.id === current[index]?.id && task.description === current[index]?.description
         )) {
             return
         }
-
         session.backgroundTasks = tasks
         session.backgroundTaskCount = tasks.length
         this.recordAgentProgress(sessionId)
@@ -1059,6 +1067,32 @@ export class SessionCache {
             type: 'session-updated',
             sessionId,
             data: { backgroundTaskCount: tasks.length, backgroundTasks: tasks } satisfies SessionPatch
+        })
+    }
+
+    private recomputeRowWideBackgroundTasks(sessionId: string): void {
+        const session = this.sessions.get(sessionId)
+        if (!session) return
+        const byOwner = this.backgroundTasksByOwnerBySessionId.get(sessionId)
+        const merged: BackgroundTask[] = []
+        if (byOwner) {
+            for (const tasks of byOwner.values()) {
+                merged.push(...tasks)
+            }
+        }
+        const current = session.backgroundTasks ?? []
+        if (merged.length === current.length && merged.every((task, index) =>
+            task.id === current[index]?.id && task.description === current[index]?.description
+        )) {
+            return
+        }
+        session.backgroundTasks = merged
+        session.backgroundTaskCount = merged.length
+        this.recordAgentProgress(sessionId)
+        this.publisher.emit({
+            type: 'session-updated',
+            sessionId,
+            data: { backgroundTaskCount: merged.length, backgroundTasks: merged } satisfies SessionPatch
         })
     }
 
@@ -1142,6 +1176,12 @@ export class SessionCache {
         const session = this.sessions.get(sessionId)
         if (!session) return
         if (this.thinkingOwnerBySessionId.get(sessionId) !== ownerKey) return
+        // Queued-prompt grace is hub work — drop worker credit but keep the
+        // thinking flag so Archive cannot bypass the queue guard (#2658).
+        if (this.hasQueuedPromptWork(sessionId)) {
+            this.thinkingOwnerBySessionId.delete(sessionId)
+            return
+        }
         if (!session.thinking) {
             this.thinkingOwnerBySessionId.delete(sessionId)
             return
@@ -1157,9 +1197,30 @@ export class SessionCache {
         })
     }
 
+    /**
+     * Hub-side queued-prompt grace that must block Archive independently of
+     * worker thinking ownership (#2658). Intentional: only the grace window,
+     * not every uninvoked localId (those are delivery state, not live work).
+     */
+    hasQueuedPromptWork(sessionId: string): boolean {
+        return (this.pendingThinkingUntilBySessionId.get(sessionId) ?? 0) > Date.now()
+    }
+
     clearTransientBackgroundForOwner(sessionId: string, ownerKey: string): void {
         const session = this.sessions.get(sessionId)
         if (!session) return
+        const byOwner = this.backgroundTasksByOwnerBySessionId.get(sessionId)
+        if (byOwner?.has(ownerKey)) {
+            byOwner.delete(ownerKey)
+            if (byOwner.size === 0) this.backgroundTasksByOwnerBySessionId.delete(sessionId)
+            if (this.backgroundOwnerBySessionId.get(sessionId) === ownerKey) {
+                const remaining = byOwner.size > 0 ? [...byOwner.keys()].at(-1) : undefined
+                if (remaining) this.backgroundOwnerBySessionId.set(sessionId, remaining)
+                else this.backgroundOwnerBySessionId.delete(sessionId)
+            }
+            this.recomputeRowWideBackgroundTasks(sessionId)
+            return
+        }
         if (this.backgroundOwnerBySessionId.get(sessionId) !== ownerKey) return
         this.backgroundOwnerBySessionId.delete(sessionId)
         if ((session.backgroundTaskCount ?? 0) === 0 && !(session.backgroundTasks?.length)) return
@@ -1299,16 +1360,38 @@ export class SessionCache {
     }
 
     /**
-     * When the attributed worker generation changes, bound later transcript
-     * scans so prior-owner tool calls cannot credit the replacement (#2658).
+     * When the *current row* worker generation changes, bound later transcript
+     * scans so prior-owner tool calls cannot credit the replacement. Late
+     * reports from a prior owner must not move the cutoff (#2658).
      */
     noteRowGenerationOwner(sessionId: string, ownerKey: string): void {
         if (ownerKey.length === 0) return
+        const session = this.sessions.get(sessionId)
+        const currentKey = this.currentRowOwnerKey(session)
         const previous = this.rowGenerationOwnerBySessionId.get(sessionId)
+        // Only the row's current identity may advance the boundary / become
+        // the tracked generation. Prior-owner heartbeats are ignored here.
+        if (currentKey && ownerKey !== currentKey) return
         if (previous && previous !== ownerKey) {
             this.transcriptGenerationBoundaryAtBySessionId.set(sessionId, Date.now())
         }
         this.rowGenerationOwnerBySessionId.set(sessionId, ownerKey)
+    }
+
+    private currentRowOwnerKey(session: Session | undefined): string | undefined {
+        if (!session?.metadata) return undefined
+        const machineId = typeof session.metadata.machineId === 'string' && session.metadata.machineId.length > 0
+            ? session.metadata.machineId
+            : undefined
+        const hostPid = typeof session.metadata.hostPid === 'number' && session.metadata.hostPid > 0
+            ? session.metadata.hostPid
+            : undefined
+        const marker = typeof session.metadata.hostStartMarker === 'string'
+            && session.metadata.hostStartMarker.length > 0
+            ? session.metadata.hostStartMarker
+            : undefined
+        if (!machineId || !hostPid || !marker) return undefined
+        return liveWorkOwnerKey({ machineId, hostPid, hostStartMarker: marker })
     }
 
     /** Messages at/after this instant may credit the current generation. */

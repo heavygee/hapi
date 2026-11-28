@@ -3851,6 +3851,79 @@ export class SyncEngine {
         } finally { this.historyActionsInFlight.delete(sessionId) }
     }
 
+    /**
+     * Retire terminal (non-runnerOwned) pending asks only after a read-only
+     * PID+marker exit probe confirms the owner is gone. A missing session
+     * socket alone must not drop asks during reconnect (#2658).
+     */
+    private async reconcileTerminalPendingRequests(
+        sessionId: string,
+        session: Session,
+        deadline: number,
+    ): Promise<void> {
+        const requests = session.agentState?.requests
+        if (!requests) return
+        const owners = new Map<string, { machineId: string; hostPid: number; hostStartMarker: string }>()
+        for (const request of Object.values(requests)) {
+            if (request.runnerOwned === true) continue
+            const machineId = typeof request.machineId === 'string' && request.machineId.length > 0
+                ? request.machineId
+                : (typeof session.metadata?.machineId === 'string' ? session.metadata.machineId : '')
+            const hostPid = typeof request.hostPid === 'number' && request.hostPid > 0
+                ? request.hostPid
+                : (typeof session.metadata?.hostPid === 'number' ? session.metadata.hostPid : 0)
+            const hostStartMarker = typeof request.hostStartMarker === 'string' && request.hostStartMarker.length > 0
+                ? request.hostStartMarker
+                : (typeof session.metadata?.hostStartMarker === 'string' ? session.metadata.hostStartMarker : '')
+            if (!machineId || hostPid <= 0 || !hostStartMarker) continue
+            const ownerKey = liveWorkOwnerKey({ machineId, hostPid, hostStartMarker })
+            if (owners.has(ownerKey)) continue
+            owners.set(ownerKey, { machineId, hostPid, hostStartMarker })
+        }
+        for (const [ownerKey, owner] of owners) {
+            const ownerMachine = this.getMachineByNamespace(owner.machineId, session.namespace)
+                ?? this.getMachine(owner.machineId)
+            const ownerCaps = ownerMachine?.metadata?.capabilities
+            const probeSupported = !ownerCaps
+                || ownerCaps.includes(MACHINE_CAPABILITIES.ProbeSessionExit)
+            if (!probeSupported) continue
+            const timeoutMs = Math.ceil(deadline - performance.now())
+            if (timeoutMs <= 0) throw new ArchiveCleanupError('timeout')
+            let status: 'stopped' | 'already_gone' | 'still_alive' | 'unknown' = 'unknown'
+            try {
+                status = await this.rpcGateway.probeRunnerSessionExit(
+                    owner.machineId,
+                    `PID-${owner.hostPid}`,
+                    {
+                        namespace: session.namespace,
+                        hubSessionId: sessionId,
+                        timeoutMs,
+                        processStartMarker: owner.hostStartMarker,
+                    },
+                )
+            } catch (error) {
+                if (error instanceof RunnerStopRpcError && error.timedOut) {
+                    throw new ArchiveCleanupError('timeout', error)
+                }
+                status = 'unknown'
+            }
+            if (status === 'already_gone' || status === 'stopped') {
+                this.sessionCache.clearPendingAgentRequestsForOwner(sessionId, owner)
+                // Session-row generation exited: also retire unstamped terminal asks.
+                const meta = session.metadata
+                if (
+                    meta?.machineId === owner.machineId
+                    && meta?.hostPid === owner.hostPid
+                    && meta?.hostStartMarker === owner.hostStartMarker
+                ) {
+                    this.sessionCache.clearTerminalPendingRequests(sessionId)
+                }
+                this.sessionCache.clearTransientThinkingForOwner(sessionId, ownerKey)
+                this.sessionCache.clearTransientBackgroundForOwner(sessionId, ownerKey)
+            }
+        }
+    }
+
     private async archiveSessionUnlocked(sessionId: string): Promise<void> {
         // Windows may need longer than the ordinary 30s RPC timeout to prove a
         // complete tree exited. All PID fallbacks share this bounded operation
@@ -3953,14 +4026,14 @@ export class SyncEngine {
                 }
             }
             let afterProbe = this.sessionCache.getSession(sessionId) ?? liveBeforeStop
-            // Terminal asks are outside the runner probe path. Retire them once
-            // the CLI socket is gone so Archive is not stuck on 409 before
-            // KillSession's missing-target catch (#2658).
-            if (!isRunnerOwnedSession(afterProbe) && !this.rpcGateway.hasSessionRpcTarget(sessionId)) {
-                this.sessionCache.clearTerminalPendingRequests(sessionId)
+            // Terminal asks stay off the runner-owned probe loop above. Retire
+            // only those whose owner PID+marker is verified gone — a missing
+            // KillSession registration alone is not exit proof (reconnect) (#2658).
+            if (!isRunnerOwnedSession(afterProbe)) {
+                await this.reconcileTerminalPendingRequests(sessionId, afterProbe, deadline)
                 afterProbe = this.sessionCache.getSession(sessionId) ?? afterProbe
             }
-            if (blocksHardArchive(afterProbe)) {
+            if (blocksHardArchive(afterProbe) || this.sessionCache.hasQueuedPromptWork(sessionId)) {
                 throw new ArchiveCleanupError('working')
             }
         }
@@ -3980,9 +4053,12 @@ export class SyncEngine {
         } catch (error) {
             if (error instanceof RpcTargetMissingError) {
                 cliUnreachable = true
-                // Terminal (non-runner) rows: once the CLI socket is gone, stale
-                // permission asks cannot be answered and must not 409 forever.
-                this.sessionCache.clearTerminalPendingRequests(sessionId)
+                // Missing KillSession registration is not exit proof (reconnect).
+                // Retire terminal asks only after a PID+marker probe says gone.
+                const terminalSession = this.sessionCache.getSession(sessionId)
+                if (terminalSession && !isRunnerOwnedSession(terminalSession)) {
+                    await this.reconcileTerminalPendingRequests(sessionId, terminalSession, deadline)
+                }
             } else {
                 throw error
             }

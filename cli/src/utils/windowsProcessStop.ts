@@ -77,6 +77,35 @@ export function windowsGenerationMayBeAlive(table: WindowsProcessTable | null, p
     return Boolean(entry && (!entry.marker || !marker || entry.marker === marker))
 }
 
+/**
+ * Read-only: does this Windows generation still have a live root or a child
+ * still parented to it? Used by ProbeSessionExit after the wrapper PID is gone
+ * or reused (#2658). Returns `'unknown'` when the table cannot be trusted.
+ *
+ * Reparented orphans (ParentProcessId no longer the root) are invisible here —
+ * callers must keep fail-closed evidence (verified-exit tombstones) for those.
+ */
+export function windowsProcessTreeMayBeAlive(
+    table: WindowsProcessTable | null,
+    rootPid: number,
+    expectedMarker?: string,
+): boolean | 'unknown' {
+    if (table === null) return 'unknown'
+    if (!Number.isFinite(rootPid) || rootPid <= 0) return 'unknown'
+    const root = table.get(rootPid)
+    if (root) {
+        if (!expectedMarker || !root.marker || root.marker === expectedMarker) return true
+        // Root PID was reused by a different generation — its current children
+        // are not evidence about the recorded owner.
+    } else {
+        for (const [childPid, entry] of table) {
+            if (childPid === rootPid) continue
+            if (entry.parentPid === rootPid) return true
+        }
+    }
+    return false
+}
+
 export type WindowsStopReport = { confirmed: boolean; phase: string; elapsedMs: number; snapshots: number }
 export async function stopWindowsProcessTree(rootPid: number, force: boolean, report?: (result: WindowsStopReport) => void,
     callerDeadlineMs?: number): Promise<boolean> {
